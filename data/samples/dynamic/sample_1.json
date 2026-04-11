@@ -1,0 +1,25 @@
+{
+    "target": {
+        "md5": "d41d8cd98f00b204e9800998ecf8427e",
+        "name": "malicious.exe"
+    },
+    "behavior": {
+        "apistats": {
+            "2572": {
+                "CreateProcessInternalW": 2,
+                "RegSetValueExW": 1,
+                "HttpSendRequestW": 4
+            }
+        },
+        "generic": [
+            {
+                "category": "persistence",
+                "description": "Sets a Run key for future execution."
+            },
+            {
+                "category": "evasion",
+                "description": "Injects code into explorer.exe via CreateRemoteThread."
+            }
+        ]
+    }
+}

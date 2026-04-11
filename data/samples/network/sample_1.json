@@ -1,0 +1,23 @@
+[
+  {
+      "ts": "1614521400.0",
+      "id.orig_h": "192.168.1.100",
+      "id.resp_h": "9.9.9.9",
+      "id.resp_p": 53,
+      "proto": "udp",
+      "service": "dns",
+      "query": "malware-c2.example"
+  },
+  {
+      "ts": "1614521405.0",
+      "id.orig_h": "192.168.1.100",
+      "id.resp_h": "185.199.110.153",
+      "id.resp_p": 443,
+      "proto": "tcp",
+      "service": "ssl",
+      "duration": 0.5,
+      "orig_bytes": 1024,
+      "resp_bytes": 512,
+      "conn_state": "SF"
+  }
+]

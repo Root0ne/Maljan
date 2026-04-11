@@ -1,0 +1,14 @@
+[
+    {
+        "file": "calc.exe",
+        "decompiled_summary": "Interesting API calls: CryptAcquireContext, CreateRemoteThread.",
+        "strings": [
+            "http://malware-c2.example/beacon",
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+        ],
+        "pe_header": {
+            "entry_point": "0x401000",
+            "sections": [".text", ".rdata", ".data"]
+        }
+    }
+]
