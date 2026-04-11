@@ -1,8 +1,10 @@
 from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
+from maljan.parsers.registry import register_parser
 
 
+@register_parser("static")
 class StaticParser(BaseParser):
     """Static Code & PE Header Refinement Engine."""
 

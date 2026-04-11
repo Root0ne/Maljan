@@ -1,8 +1,10 @@
 from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
+from maljan.parsers.registry import register_parser
 
 
+@register_parser("dynamic")
 class DynamicParser(BaseParser):
     """Sandbox (CAPEv2/Cuckoo) JSON Refinement Engine."""
 

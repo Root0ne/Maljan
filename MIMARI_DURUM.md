@@ -1,61 +1,63 @@
-# Maljan: Proje Durum ve Mimari Yol Haritası (MIMARI_DURUM.md)
+# Maljan: Proje Durum ve Mimari Yol Haritasi (MIMARI_DURUM.md)
 
-Bu döküman, Maljan projesinin şu anki teknik olgunluk seviyesini, tamamlanan bileşenleri ve gelecekte eklenmesi planlanan özellikleri özetlemektedir.
-
----
-
-## ✅ Tamamlanan Mimari Katmanlar (100% Hazır)
-
-Şu anki mimari, bir malware'in ham verisini alıp saniyeler içinde siber istihbarat raporuna dönüştürebilen tam fonksiyonel bir pipeline'dır.
-
-### 1. Veri Ingestion ve Zenginleştirme (Layer 1 & 1.5)
-- [x] **DataLoader**: Ghidra, CAPEv2 ve Zeek çıktılarını okuyan evrensel yükleyici.
-- [x] **Advanced Parsers**: Ham JSON verisindeki gürültüyü %80-90 oranında temizleyen ve LLM'e sadece kritik veriyi Markdown tabloları halinde sunan akıllı parser katmanı.
-- [x] **Davranışsal İmza Eşleştirme**: Parser seviyesinde "Code Injection", "Persistence" gibi kritik siber güvenlik olaylarının tespiti ve skorlanması.
-
-### 2. Multi-Agent Zekası (Layer 2)
-- [x] **OOP Agent Structure**: Tüm ajanların miras aldığı `BaseAnalyst` altyapısı.
-- [x] **Expert Analysts**: Statik, Dinamik ve Ağ uzmanlığına sahip, her biri kendi MITRE ATT&CK TTP'sine odaklanmış bağımsız ajanlar.
-
-### 3. Müzakere ve Karar Mekanizması (Layer 3 & 4)
-- [x] **LangGraph Orchestration**: Ajanlar arası state yönetimi ve döngüsel tartışma (negotiation) akışı.
-- [x] **Conflict Detection**: Ajanların raporlarındaki çelişkileri bulan Hakem (Mediator) mantığı.
-- [x] **STIX 2.1 Verdict**: Nihai kararın Pydantic üzerinden katı kurallı STIX 2.1 Bundle formatında (Malware, Indicator, Relationship, AttackPattern) üretilmesi.
-
-### 4. Enterprise-Grade Altyapı
-- [x] **Modern Tooling**: `uv` paket yönetimi, `ruff` linting, `mypy` strict typing.
-- [x] **Gelişmiş Logging**: Ajanların "düşünme süreçlerini" takip eden merkezi log yapısı.
-- [x] **Mock Mode**: API anahtarı olmadan tüm pipeline'ı test edebilmemizi sağlayan simülasyon modu.
+Bu dokuman, Maljan projesinin su anki teknik olgunluk seviyesini, tamamlanan bilesenleri ve gelecekte eklenmesi planlanan ozellikleri ozetlemektedir.
 
 ---
 
-## 🚀 Şimdiye Kadar Neler Eklendi? (Özet)
+## Tamamlanan Mimari Katmanlar
 
-1.  **MITRE ATT&CK Mapping**: Analiz sonuçlarının T1027, T1055, T1071 gibi global tekniklerle eşleştirilmesi.
-2.  **State Reducer Mantığı**: `operator.add` ile tartışma geçmişinin silinmeden kümülatif olarak büyümesi.
-3.  **Markdown Table Optimization**: LLM'lerin veriyi daha iyi anlaması için optimize edilmiş yapılandırılmış veri sunumu.
-4.  **Custom Exception System**: Analist ve veri yükleme hatalarını izole eden hata hiyerarşisi.
-5.  **Quality Gates**: CI/CD uyumlu `Makefile` ve kapsamlı entegrasyon testleri.
+### 1. Veri Ingestion ve Zenginlestirme (Layer 1 & 1.5)
+- [x] **DataLoader**: Ghidra, CAPEv2 ve Zeek ciktilarini okuyan evrensel yukleyici.
+- [x] **Advanced Parsers**: Ham JSON verisindeki gurultuyu temizleyen ve LLM'e sadece kritik veriyi Markdown tablolari halinde sunan parser katmani.
+- [x] **Davranissal Imza Eslestirme**: Parser seviyesinde "Code Injection", "Persistence" gibi kritik guvenlik olaylarinin tespiti ve skorlanmasi.
+- [ ] **Otomatik Arac Entegrasyonu**: Ghidra/CAPEv2/Zeek araclariyla otomatik pipeline (su an elle hazirlanan JSON dosyalari okunmaktadir).
+
+### 2. Multi-Agent Zekasi (Layer 2)
+- [x] **OOP Agent Structure**: Tum ajanlarin miras aldigi `BaseAnalyst` altyapisi.
+- [x] **Expert Analysts**: Statik, Dinamik ve Ag uzmanlarina sahip bagimsiz ajanlar.
+- [x] **Revizyon Yetkinligi**: Ajanlarin muzakere sirasinda birbirlerinin raporlarini okuyup kendi analizlerini revize etme yetenegi (`revise()` metodu).
+- [x] **Token Overflow Korumasi**: `tiktoken` ile girdi truncation, buyuk veriler icin koruma.
+- [x] **Hata Yonetimi**: `safe_analyze()` / `safe_revise()` ile hata yakalama ve graceful fallback.
+- [x] **Multi-Provider LLM**: OpenAI, Anthropic ve Ollama (yerel) model destegi.
+
+### 3. Muzakere ve Karar Mekanizmasi (Layer 3 & 4)
+- [x] **LangGraph Orchestration**: Ajanlar arasi state yonetimi ve dongusal tartisma akisi.
+- [x] **Gercek Muzakere**: Ajanlar birbirlerinin raporlarini okuyup itiraz ediyor (revision node).
+- [x] **Consensus Detection**: Mediator'un confidence skoruna dayali gercek konsensus tespiti.
+- [x] **Early Exit**: Konsensus saglandiginda muzakere dongusunden erken cikis.
+- [x] **STIX 2.1 Verdict**: Nihai kararin Pydantic uzerinden kati kuralli STIX 2.1 Bundle formatinda uretilmesi.
+
+### 4. Altyapi
+- [x] **CLI Entrypoint**: `typer` tabanli komut satiri araci (`analyze`, `info` komutlari).
+- [x] **Modern Tooling**: `uv` paket yonetimi, `ruff` linting, `mypy` strict typing.
+- [x] **Gelismis Logging**: Ajanlarin "dusunme sureclerini" takip eden merkezi log yapisi.
+- [x] **Mock Mode**: API anahtari olmadan tum pipeline'i test edebilme.
+- [x] **Custom Exception System**: `MaljanError`, `AnalystError`, `DataLoadError`, `LLMError`, `WorkflowError`.
+- [x] **Test Suite**: Parser, agent, STIX model unit testleri + integration testleri.
 
 ---
 
-## 🛠 Neler Kaldı? (Gelecek Yol Haritası)
+## Neler Kaldi? (Gelecek Yol Haritasi)
 
-Projenin bir sonraki seviyeye taşınması için planlanan adımlar:
+### 1. Otomatik Veri Toplama
+- [ ] **Ghidra Headless Plugin**: `analyzeHeadless` ile otomatik decompilation pipeline.
+- [ ] **CAPEv2 REST API Connector**: Dosya submit + sonuc cekme otomasyonu.
+- [ ] **Zeek Log Pipeline**: PCAP dosyalarindan otomatik JSON cikti uretimi.
 
-### 1. Görselleştirme ve İzlenebilirlik (Web UI)
-- [ ] **LangGraph Dashboard**: Ajanların tartışmalarını gerçek zamanlı izleyebildiğimiz bir web arayüzü.
-- [ ] **STIX Visualizer**: Üretilen STIX bundle'ını grafiksel olarak gösteren bir viewer.
+### 2. Gorsellestirme ve Izlenebilirlik (Web UI)
+- [ ] **LangGraph Dashboard**: Ajanlarin tartismalarini gercek zamanli izleyebildigimiz web arayuzu.
+- [ ] **STIX Visualizer**: Uretilen STIX bundle'ini grafiksel olarak gosteren viewer.
 
-### 2. Derin Analiz Araçları
-- [ ] **YARA/Sigma Generator**: Analist uzmanlarının, analiz sonunda otomatik olarak YARA kuralları veya Sigma imzaları üretmesi.
-- [ ] **Additional Parsers**: Any.Run, IDA Pro, Procmon ve Sysmon logları için yeni parser destekleri.
-- [ ] **ML-based Pre-Scoring**: Binary entropisini veya PE başlık şüpheliliğini ölçen (LLM olmayan) bir makine öğrenmesi modelinin parser katmanına eklenmesi.
+### 3. Derin Analiz Araclari
+- [ ] **YARA/Sigma Generator**: Analist uzmanlarin otomatik olarak YARA kurallari uretmesi.
+- [ ] **Additional Parsers**: Any.Run, IDA Pro, Procmon ve Sysmon log destekleri.
+- [ ] **ML-based Pre-Scoring**: Binary entropi/PE header supheli skor modeli.
 
-### 3. Otomasyon ve Müdahale (Remediation)
-- [ ] **Responder Agent**: Analiz sonucuna göre firewall kuralı veya EDR block listesi öneren yeni bir ajan.
-- [ ] **Automated Report Export**: PDF veya HTML formatında profesyonel malware analiz raporu üreticisi.
+### 4. Otomasyon ve Mudahale
+- [ ] **Responder Agent**: Firewall kurali veya EDR block listesi oneren ajan.
+- [ ] **Automated Report Export**: PDF/HTML formatinda profesyonel rapor uretici.
+- [ ] **OpenCTI Entegrasyonu**: STIX bundle'in otomatik istihbarat aktarimi.
 
-### 4. Ölçeklenebilirlik
-- [ ] **Async Execution**: Ajanların paralel çalıştırılarak analiz süresinin kısaltılması (Şu an sıralı/sequential çalışmaktadır).
-- [ ] **Database Integration**: Daha önceki analizlerin sonuçlarını vektör veritabanında (RAG) tutarak yeni analizlerde "benzer vakaları" hatırlayan bir hafıza katmanı.
+### 5. Olceklenebilirlik
+- [ ] **Async Execution**: Ajanlarin paralel calistirilmasi.
+- [ ] **Database Integration**: Vektor veritabaninda (RAG) gecmis analiz hafizasi.

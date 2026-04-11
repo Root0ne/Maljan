@@ -1,0 +1,75 @@
+"""Agent registry with auto-discovery via decorator.
+
+Usage:
+    @register_agent("static")
+    class StaticAnalyst(BaseAnalyst):
+        ...
+
+The registry is module-level. When agent modules are imported (via
+`discover_agents()`), the decorator fires and registers each class.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from maljan.core.logger import logger
+
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
+    from maljan.agents.base_agent import BaseAnalyst
+
+# Module-level registry dict: agent_name -> class
+_AGENT_REGISTRY: dict[str, type[BaseAnalyst]] = {}
+
+
+def register_agent(name: str):  # type: ignore[no-untyped-def]
+    """Decorator that registers an analyst class under the given name.
+
+    Example:
+        @register_agent("memory")
+        class MemoryAnalyst(BaseAnalyst): ...
+    """
+
+    def decorator(cls: type[BaseAnalyst]) -> type[BaseAnalyst]:
+        if name in _AGENT_REGISTRY:
+            logger.warning(f"Agent '{name}' is being re-registered (overwriting).")
+        _AGENT_REGISTRY[name] = cls
+        return cls
+
+    return decorator
+
+
+def discover_agents() -> None:
+    """Import all built-in agent modules to trigger @register_agent decorators."""
+    import maljan.agents.dynamic_analyst  # noqa: F401
+    import maljan.agents.network_analyst  # noqa: F401
+    import maljan.agents.static_analyst  # noqa: F401
+
+
+class AgentRegistry:
+    """Provides access to registered analyst classes."""
+
+    def __init__(self) -> None:
+        discover_agents()
+
+    def list_agents(self) -> list[str]:
+        """Returns names of all registered expert agents (excludes judge)."""
+        return list(_AGENT_REGISTRY.keys())
+
+    def get_class(self, name: str) -> type[BaseAnalyst]:
+        """Returns the class registered under the given name."""
+        if name not in _AGENT_REGISTRY:
+            available = ", ".join(_AGENT_REGISTRY.keys()) or "(none)"
+            raise KeyError(f"No agent registered as '{name}'. Available: {available}")
+        return _AGENT_REGISTRY[name]
+
+    def create(self, name: str, llm: BaseChatModel) -> BaseAnalyst:
+        """Instantiate a registered agent with the given LLM."""
+        cls = self.get_class(name)
+        return cls(llm=llm, name=name)
+
+    def create_all(self, llm: BaseChatModel) -> dict[str, BaseAnalyst]:
+        """Instantiate all registered agents."""
+        return {name: self.create(name, llm) for name in self.list_agents()}

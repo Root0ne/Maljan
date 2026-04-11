@@ -1,17 +1,24 @@
 [project]
 name = "maljan"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "Multi-Agent Malware Analysis Pipeline powered by LangGraph"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "langchain-core>=1.2.25",
     "langchain-openai>=1.1.12",
+    "langchain-anthropic>=0.3.15",
+    "langchain-ollama>=0.3.3",
     "langgraph>=1.1.6",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
+    "tiktoken>=0.9.0",
+    "typer>=0.16.0",
 ]
+
+[project.scripts]
+maljan = "maljan.cli:main"
 
 [dependency-groups]
 dev = [
@@ -38,7 +45,7 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
-module = ["langgraph.*", "langchain_core.*"]
+module = ["langgraph.*", "langchain_core.*", "langchain_openai.*", "langchain_anthropic.*", "langchain_ollama.*", "tiktoken.*", "typer.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

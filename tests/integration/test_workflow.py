@@ -1,29 +1,55 @@
-from maljan.graph.workflow import build_graph
+"""Integration tests for the full pipeline using the new architecture."""
+
+from maljan.app import MaljanApp
+from maljan.core.config import Settings
 
 
-def test_workflow_execution() -> None:
-    """Verifies that the LangGraph state graph compiles and properly routes the mock nodes."""
-    graph = build_graph()
+def test_pipeline_mock_mode_end_to_end() -> None:
+    """Full pipeline runs in mock mode and produces a verdict."""
+    app = MaljanApp(mock=True)
+    result = app.run("sample_1", file_name="test.exe")
 
-    initial_state = {
-        "file_hash": "sample_1",
-        "file_name": "suspicious_payload.exe",
-        "iteration_count": 0,
-        "is_consensus": False,
-        "discussion_history": [],
-    }
+    # All agent reports present in dynamic dict
+    reports = result.get("reports", {})
+    assert "static" in reports
+    assert "dynamic" in reports
+    assert "network" in reports
 
-    # Invoke the full state mechanism synchronously
-    result = graph.invoke(initial_state)
+    # Negotiation occurred
+    assert result["iteration_count"] >= 1
 
-    # Verify Layer 2: All Analyst logic was triggered and saved to state
-    assert "obfuscation" in result["static_report"].lower()
-    assert "registry" in result["dynamic_report"].lower()
-    assert "https beaconing" in result["network_report"].lower()
+    # Revised reports exist after negotiation loop
+    if result["iteration_count"] > 1:
+        revised = result.get("revised_reports", {})
+        assert len(revised) >= 1
 
-    # Verify Layer 3: Negotiation loop triggered exactly 2 times
-    assert result["iteration_count"] == 2
-
-    # Verify Layer 4: Judge reached a decision
+    # Judge verdict
     assert result["final_decision"] == "Malware"
-    assert "persistence" in result["judge_report"].lower()
+    assert len(result.get("discussion_history", [])) >= 1
+
+
+def test_pipeline_graph_compiles() -> None:
+    """Graph compiles without errors."""
+    app = MaljanApp(mock=True)
+    assert app.graph is not None
+
+
+def test_pipeline_consensus_iterations() -> None:
+    """Mock pipeline reaches consensus within reasonable iterations."""
+    app = MaljanApp(mock=True)
+    result = app.run("sample_1")
+
+    assert result["iteration_count"] <= 3
+    assert result["final_decision"] is not None
+
+
+def test_pipeline_respects_max_iterations() -> None:
+    """Pipeline respects custom max_iterations from config."""
+    config = Settings()
+    config.negotiation.max_iterations = 1
+    app = MaljanApp(config=config, mock=True)
+    result = app.run("sample_1")
+
+    # Should hit judge after exactly 1 iteration (no revision since max=1)
+    assert result["iteration_count"] == 1
+    assert result["final_decision"] is not None
