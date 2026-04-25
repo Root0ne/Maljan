@@ -27,6 +27,13 @@ Phase 3 (Revision Grounding) additions:
     the silent data truncation that load_data() caused for large samples.
   - _build_revision_context() implements this selection with zero extra I/O
     (chunk count derived from cached load_chunked() call).
+
+Phase 5 (Long-Term Memory) additions:
+  - make_judge_node() retrieves the memory store from the container and passes
+    it to give_verdict() for few-shot context injection.
+  - After a successful verdict, the result is persisted to the memory store
+    via build_stored_case() so future analyses can retrieve it.
+  - Store/retrieve errors are caught and logged — never block verdict generation.
 """
 
 from __future__ import annotations
@@ -417,12 +424,21 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # Start timing for RunSummary
             _start_time = time.time()
 
+            # Phase 5: retrieve long-term memory context for few-shot priming.
+            # get_memory_store() is cached — no repeated construction cost.
+            memory_store = None
+            try:
+                memory_store = container.get_memory_store()
+            except Exception as e:
+                logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
+
             bundle = judge.give_verdict(
                 reports=reports,
                 history=state.get("discussion_history") or [],
                 isr_reports=isr_reports,
                 attck_validator=attck_validator,
                 cascade_summary=cascade_summary,
+                memory_store=memory_store,
             )
 
             stix_output = {}
@@ -467,6 +483,36 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 )
             except Exception as exc:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
+
+            # Phase 5: persist this result to long-term memory for future retrievals.
+            # Infer malware category from schema_pruner (already runs in judge.give_verdict;
+            # re-run here is cheap — keyword scoring only, no LLM call).
+            if memory_store is not None and isr_reports:
+                try:
+                    from maljan.analysis.schema_pruner import infer_malware_category
+                    from maljan.memory.long_term_memory import build_stored_case
+
+                    category = infer_malware_category(
+                        reports=state.get("reports") or {},
+                        isr_reports=isr_reports,
+                    ).value
+                    case = build_stored_case(
+                        sample_id=state.get("file_hash", "unknown"),
+                        isr_reports=isr_reports,
+                        stix_bundle_json=(
+                            bundle.model_dump_json()
+                            if isinstance(bundle, Bundle)
+                            else ""
+                        ),
+                        malware_category=category,
+                    )
+                    memory_store.store(case)
+                    logger.info(
+                        "LTM: stored case '%s' (category=%s, techniques=%d).",
+                        case.sample_id, case.malware_category, len(case.technique_ids),
+                    )
+                except Exception as e:
+                    logger.warning("LTM store failed (%s). Analysis result is unaffected.", e)
 
             return {
                 "final_decision": decision,

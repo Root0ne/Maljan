@@ -90,6 +90,8 @@ class ServiceContainer:
         self._agent_cache: dict[str, BaseAnalyst] = {}
         # Loaded and parsed data (keyed by (sample_id, data_type))
         self._data_cache: dict[tuple[str, str], str] = {}
+        # Phase 5: Long-term memory store (built lazily)
+        self._memory_store_cache: object | None = None
 
         logger.info(
             "ServiceContainer initialized "
@@ -147,6 +149,45 @@ class ServiceContainer:
                 self._llm_registry.build_model_for_agent(agent_name)
             )
         return self._agent_llm_cache[agent_name]
+
+    def get_memory_store(self) -> object:
+        """Return the long-term memory store instance (Phase 5).
+
+        Builds and caches a MemoryStore backend based on
+        Settings.memory.backend:
+          - "memory" (default): InMemoryStore — no external dependencies.
+          - "qdrant": QdrantStore — requires qdrant-client + running Qdrant.
+
+        The instance is cached so all components within a single analysis
+        session share the same store. This ensures that cases stored during
+        one pipeline run are immediately visible to subsequent retrievals in
+        the same process.
+
+        Returns:
+            A MemoryStore-protocol-compliant object (InMemoryStore or
+            QdrantStore). The return type is declared as object to avoid
+            importing the Protocol here; callers can isinstance()-check.
+        """
+        if self._memory_store_cache is None:
+            backend = self.config.memory.backend
+            if backend == "qdrant":
+                from maljan.memory.qdrant_store import QdrantStore
+
+                self._memory_store_cache = QdrantStore(
+                    url=self.config.memory.qdrant_url,
+                    collection=self.config.memory.qdrant_collection,
+                )
+                logger.info(
+                    "LTM backend: QdrantStore (url=%s, collection=%s)",
+                    self.config.memory.qdrant_url,
+                    self.config.memory.qdrant_collection,
+                )
+            else:
+                from maljan.memory.in_memory_store import InMemoryStore
+
+                self._memory_store_cache = InMemoryStore()
+                logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
+        return self._memory_store_cache
 
     def get_agent(self, name: str) -> BaseAnalyst:
         """Return a cached agent instance for the given name.

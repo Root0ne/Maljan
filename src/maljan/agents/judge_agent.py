@@ -175,6 +175,7 @@ class JudgeAgent:
         isr_reports: dict[str, AgentISR] | None = None,
         attck_validator: object | None = None,
         cascade_summary: object | None = None,
+        memory_store: object | None = None,
     ) -> Bundle:
         """Final judge decision returning a structured STIX 2.1 Bundle.
 
@@ -188,12 +189,17 @@ class JudgeAgent:
         the LLM prioritizes corroborated (multi-layer) TTPs over single-layer
         evidence.
 
+        Phase 5: When `memory_store` (MemoryStore protocol) is provided, the
+        top-k most similar past analysis cases are retrieved and injected as
+        few-shot context before the verdict LLM call.
+
         Args:
             reports: Final expert reports (revised where applicable).
             history: Full negotiation history.
             isr_reports: Optional structured ISR objects for richer context.
             attck_validator: Optional ATTCKValidator instance.
             cascade_summary: Optional CascadeSummary from TTPCascadeEngine.
+            memory_store: Optional MemoryStore for long-term case retrieval.
 
         Returns:
             A valid STIX 2.1 Bundle with MITRE ATT&CK TTP mappings.
@@ -231,6 +237,11 @@ class JudgeAgent:
         schema_hint = self._build_schema_hint(reports, isr_reports)
         if schema_hint:
             reports_text = f"{reports_text}\n\n{schema_hint}"
+
+        # Phase 5: Long-term memory few-shot context block
+        memory_block = self._build_memory_context(isr_reports, memory_store)
+        if memory_block:
+            reports_text = f"{reports_text}\n\n{memory_block}"
 
         has_grounding = bool(validation_block or cascade_block)
         verdict_system = (
@@ -486,3 +497,74 @@ class JudgeAgent:
                     except ValueError:
                         continue
         return 0.5
+
+    @staticmethod
+    def _build_memory_context(
+        isr_reports: dict | None,
+        memory_store: object | None,
+    ) -> str:
+        """Retrieve similar past cases and format them as a few-shot prompt block.
+
+        Phase 5 implementation. Queries the MemoryStore with a summary of the
+        current ISR claims. The retrieved cases are formatted as a structured
+        context block to help the judge leverage historical analysis patterns.
+
+        The judge is explicitly instructed to treat retrieved cases as weighted
+        priors — not to copy technique IDs blindly, but to corroborate them with
+        current evidence. This prevents retrieval hallucination (assuming a past
+        case's TTPs must apply to the current sample).
+
+        Args:
+            isr_reports: Current ISR reports (used to build the search query).
+            memory_store: MemoryStore-protocol object, or None to skip.
+
+        Returns:
+            Formatted prompt block string, or "" when store is None/empty or
+            no similar cases are found.
+        """
+        if memory_store is None or not isr_reports:
+            return ""
+
+        # Build search query from all current ISR claims
+        query_parts: list[str] = []
+        for isr in isr_reports.values():
+            for claim in isr.claims:
+                query_parts.append(claim.claim)
+                if claim.evidence_ref:
+                    query_parts.append(claim.evidence_ref)
+                if claim.technique_id:
+                    query_parts.append(claim.technique_id)
+        query = " ".join(query_parts)
+
+        if not query.strip():
+            return ""
+
+        try:
+            cases = memory_store.retrieve(query, top_k=3)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            # Never let retrieval failure block verdict generation
+            return ""
+
+        if not cases:
+            return ""
+
+        total = len(cases)
+        lines: list[str] = [
+            "=== LONG-TERM MEMORY: Similar Past Case(s) ===",
+            "Use these historical analyses as WEIGHTED PRIORS for TTP selection.",
+            "Do NOT copy technique IDs blindly — corroborate with current evidence.",
+            "",
+        ]
+
+        for idx, case in enumerate(cases, 1):
+            ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
+            summary = (case.summary_text[:200] + "...") if len(case.summary_text) > 200 else case.summary_text
+            lines.append(
+                f"[{idx}/{total}] sample_id: {case.sample_id} "
+                f"(category: {case.malware_category})"
+            )
+            lines.append(f"  Past techniques: {ttps}")
+            lines.append(f"  Behavioral summary: {summary}")
+
+        lines.append("=== END LONG-TERM MEMORY ===")
+        return "\n".join(lines)

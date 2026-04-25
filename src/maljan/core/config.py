@@ -139,6 +139,28 @@ class ChunkingConfig(BaseModel):
     skip_if_fits: bool = True
 
 
+class MemoryConfig(BaseModel):
+    """Phase 5 Long-Term Memory configuration.
+
+    Controls which backend is used to store and retrieve past analysis
+    cases for few-shot context injection in JudgeAgent.give_verdict().
+
+    backend:            "memory" (default) uses InMemoryStore — no external
+                        dependencies. "qdrant" uses QdrantStore which requires
+                        a running Qdrant instance and the qdrant-client package.
+    qdrant_url:         Qdrant server URL (only used when backend="qdrant").
+    qdrant_collection:  Qdrant collection name for Maljan cases.
+    top_k:              Maximum number of similar cases to inject into the
+                        judge prompt. Higher values provide more context but
+                        increase prompt length.
+    """
+
+    backend: str = "memory"  # "memory" | "qdrant"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "maljan_cases"
+    top_k: int = 3
+
+
 # ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
@@ -164,6 +186,7 @@ class Settings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     negotiation: NegotiationConfig = Field(default_factory=NegotiationConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
     # Token overflow protection
     max_token_limit: int = 8000
