@@ -50,6 +50,8 @@ Phase 7.1 additions (Dynamic Schema Pruning):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -59,6 +61,10 @@ from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
+
+if TYPE_CHECKING:
+    from maljan.analysis.ttp_cascade import CascadeSummary
+    from maljan.memory.long_term_memory import MemoryStore
 
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
@@ -172,8 +178,8 @@ class JudgeAgent:
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
         attck_validator: object | None = None,
-        cascade_summary: object | None = None,
-        memory_store: object | None = None,
+        cascade_summary: CascadeSummary | None = None,
+        memory_store: MemoryStore | None = None,
     ) -> Bundle:
         """Final judge decision returning a structured STIX 2.1 Bundle.
 
@@ -324,7 +330,7 @@ class JudgeAgent:
             summary = attck_validator.validate_isr_reports(isr_reports)  # type: ignore[union-attr]
             if summary.total_claims == 0:
                 return ""
-            block = summary.to_prompt_block()
+            block = str(summary.to_prompt_block())
             self.logger.info(
                 "ATT&CK validation: %d/%d valid, %d hallucinated, %d low-alignment.",
                 summary.valid_ids,
@@ -337,7 +343,7 @@ class JudgeAgent:
             self.logger.warning("ATT&CK TTP validation failed (%s). Proceeding without it.", exc)
             return ""
 
-    def _build_cascade_block(self, cascade_summary: object | None) -> str:
+    def _build_cascade_block(self, cascade_summary: CascadeSummary | None) -> str:
         """Return a prompt-ready three-layer TTP cascade block.
 
         Returns an empty string if no summary is provided or if it contains
@@ -365,7 +371,7 @@ class JudgeAgent:
             self.logger.warning("TTP cascade block failed (%s). Proceeding without it.", exc)
             return ""
 
-    def _build_confidence_instruction(self, cascade_summary: object | None) -> str:
+    def _build_confidence_instruction(self, cascade_summary: CascadeSummary | None) -> str:
         """Build cascade-derived x_maljan_confidence hint block for the verdict prompt.
 
         When a CascadeSummary is available, the top techniques' weighted
@@ -380,7 +386,7 @@ class JudgeAgent:
             return ""
 
         try:
-            top = cascade_summary.top_techniques(n=10)  # type: ignore[union-attr]
+            top = cascade_summary.top_techniques(n=10)
             if not top:
                 return ""
 
@@ -480,7 +486,7 @@ class JudgeAgent:
     @staticmethod
     def _build_memory_context(
         isr_reports: dict | None,
-        memory_store: object | None,
+        memory_store: MemoryStore | None,
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
@@ -519,7 +525,7 @@ class JudgeAgent:
             return ""
 
         try:
-            cases = memory_store.retrieve(query, top_k=3)  # type: ignore[union-attr]
+            cases = memory_store.retrieve(query, top_k=3)
         except Exception:  # noqa: BLE001
             # Never let retrieval failure block verdict generation
             return ""

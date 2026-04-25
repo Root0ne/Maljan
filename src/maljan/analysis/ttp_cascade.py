@@ -251,7 +251,7 @@ class TTPCascadeEngine:
                 if claim.technique_id is None:
                     continue
                 tid = claim.technique_id
-                dom = isr.domain
+                dom: str = isr.domain  # type: ignore[assignment]
                 agent = isr.agent_id
 
                 if tid not in tech_domain_claims:

@@ -176,7 +176,7 @@ class CAPEv2Client:
 
             if status in terminal:
                 logger.info("CAPEv2Client: task %s -> %s.", task_id, status)
-                return status
+                return str(status)
 
             time.sleep(poll_interval_seconds)
 

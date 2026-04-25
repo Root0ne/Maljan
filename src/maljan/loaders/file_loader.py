@@ -14,13 +14,16 @@ This means the pipeline nodes require zero changes to support live sandbox data.
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from maljan.core.config import ChunkingConfig
 from maljan.core.exceptions import DataLoadError
 from maljan.core.logger import logger
 from maljan.loaders.binary_chunker import BinaryChunker, TextChunk
 from maljan.parsers.registry import ParserRegistry
+
+if TYPE_CHECKING:
+    from maljan.loaders.sandbox_client import SandboxClient
 
 
 class FileDataLoader:
@@ -105,10 +108,10 @@ class FileDataLoader:
         self,
         sample_path: str,
         data_type: str,
-        sandbox_client: object,
+        sandbox_client: "SandboxClient",
         timeout_seconds: int = 300,
         poll_interval_seconds: int = 10,
-    ) -> list:
+    ) -> list[TextChunk]:
         """Submit a sample to a sandbox, wait for completion, and return parsed chunks.
 
         Phase 6: CAPEv2 integration entry point.
@@ -140,12 +143,12 @@ class FileDataLoader:
         from maljan.loaders.sandbox_client import SandboxError
 
         try:
-            task_id = sandbox_client.submit(sample_path)  # type: ignore[union-attr]
+            task_id = sandbox_client.submit(sample_path)
         except SandboxError as exc:
             raise DataLoadError(f"Sandbox submission failed: {exc}") from exc
 
         try:
-            status = sandbox_client.wait_for_completion(  # type: ignore[union-attr]
+            status = sandbox_client.wait_for_completion(
                 task_id,
                 timeout_seconds=timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
@@ -159,7 +162,7 @@ class FileDataLoader:
             )
 
         try:
-            result = sandbox_client.fetch_report(task_id)  # type: ignore[union-attr]
+            result = sandbox_client.fetch_report(task_id)
         except SandboxError as exc:
             raise DataLoadError(f"Report fetch failed: {exc}") from exc
 

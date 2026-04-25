@@ -145,7 +145,8 @@ class MockSandboxClient:
             if candidate.exists():
                 logger.info("MockSandboxClient: loading fixture '%s'.", candidate)
                 with open(candidate, encoding="utf-8") as f:
-                    return json.load(f)
+                    loaded: dict[str, Any] = json.load(f)
+                    return loaded
 
         logger.warning(
             "MockSandboxClient: no fixture found for sha256=%s name=%s. "

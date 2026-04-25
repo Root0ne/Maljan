@@ -469,4 +469,4 @@ def _rolling_std(values: list[float]) -> float:
         return float("inf")
     mean = sum(values) / len(values)
     variance = sum((v - mean) ** 2 for v in values) / len(values)
-    return variance**0.5
+    return float(variance**0.5)

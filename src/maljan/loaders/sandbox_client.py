@@ -65,15 +65,18 @@ class SubmissionResult:
 
     def behavior_section(self) -> dict[str, Any]:
         """Extract the 'behavior' key, returning {} if absent."""
-        return self.report.get("behavior", {})
+        result: dict[str, Any] = self.report.get("behavior", {})
+        return result
 
     def target_section(self) -> dict[str, Any]:
         """Extract the 'target' key, returning {} if absent."""
-        return self.report.get("target", {})
+        result: dict[str, Any] = self.report.get("target", {})
+        return result
 
     def signatures(self) -> list[dict[str, Any]]:
         """Extract behavioral signature matches, returning [] if absent."""
-        return self.report.get("signatures", [])
+        result: list[dict[str, Any]] = self.report.get("signatures", [])
+        return result
 
 
 # ---------------------------------------------------------------------------

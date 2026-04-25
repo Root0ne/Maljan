@@ -39,7 +39,7 @@ Phase 5 (Long-Term Memory) additions:
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from maljan.agents.judge_agent import JudgeAgent
 from maljan.core.container import ServiceContainer
@@ -49,6 +49,9 @@ from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
+
+if TYPE_CHECKING:
+    from maljan.memory.long_term_memory import MemoryStore
 
 
 def make_analyst_node(
@@ -130,7 +133,7 @@ def make_analyst_node(
 
 
 def _build_revision_context(
-    state: dict[str, Any],
+    state: AnalysisState,
     container: ServiceContainer,
     agent_name: str,
 ) -> str:
@@ -176,7 +179,7 @@ def _build_revision_context(
 
     if len(chunks) == 1:
         # Single-chunk: raw text is safe to use directly (fits in context).
-        return chunks[0].content
+        return str(chunks[0].content)
 
     # Multi-chunk: use the already-produced ISR summary as context.
     # Prefer the most recent revised report over the initial report.
@@ -427,9 +430,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             # Phase 5: retrieve long-term memory context for few-shot priming.
             # get_memory_store() is cached — no repeated construction cost.
-            memory_store = None
+            memory_store: MemoryStore | None = None
             try:
-                memory_store = container.get_memory_store()
+                memory_store = container.get_memory_store()  # type: ignore[assignment]
             except Exception as e:
                 logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
 

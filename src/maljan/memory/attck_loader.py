@@ -18,6 +18,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from maljan.core.logger import logger
 
@@ -103,7 +104,8 @@ def _fetch_bundle(url: str) -> dict:
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
             data = resp.read().decode("utf-8")
-        return json.loads(data)
+        raw: dict[str, Any] = json.loads(data)
+        return raw
     except Exception as exc:
         raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
 
