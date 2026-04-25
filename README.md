@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org/)
-[![Architecture](https://img.shields.io/badge/docs-architecture-informational)](ARCHITECTURE.md)
+[![Architecture](https://img.shields.io/badge/docs-architecture-informational)](docs/ARCHITECTURE.md)
 
 Maljan is an enterprise-grade cybersecurity analysis framework for automated, structured, and hallucination-resistant malware evaluation. It orchestrates a network of specialized LLM analyst agents that debate their findings through a structured negotiation protocol before a Chief Judge issues a validated, MITRE ATT&CK-grounded STIX 2.1 verdict.
 
