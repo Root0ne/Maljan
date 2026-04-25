@@ -24,6 +24,7 @@ maljan = "maljan.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=1.20.0",
+    "pre-commit>=4.2.0",
     "pytest>=9.0.2",
     "pytest-mock>=3.15.1",
     "ruff>=0.15.9",
@@ -48,9 +49,21 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["langgraph.*", "langchain_core.*", "langchain_openai.*", "langchain_anthropic.*", "langchain_ollama.*", "tiktoken.*", "typer.*"]
+module = [
+    "langgraph.*",
+    "langchain_core.*",
+    "langchain_openai.*",
+    "langchain_anthropic.*",
+    "langchain_ollama.*",
+    "tiktoken.*",
+    "typer.*",
+    "qdrant_client.*",
+    "httpx.*",
+    "langsmith.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

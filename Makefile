@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run
 
 test:
 	uv run pytest tests/ -q
@@ -37,3 +37,6 @@ ci-check: lint format-check test
 setup:
 	uv sync
 	uv run pre-commit install
+
+pre-commit-run:
+	uv run pre-commit run --all-files
