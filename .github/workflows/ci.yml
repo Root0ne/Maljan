@@ -78,15 +78,23 @@ jobs:
         image: qdrant/qdrant:latest
         ports:
           - 6333:6333
-        options: >-
-          --health-cmd "curl -sf http://localhost:6333/healthz || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Wait for Qdrant to be ready
+        run: |
+          echo "Waiting for Qdrant..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:6333/ > /dev/null 2>&1; then
+              echo "Qdrant is ready after ${i} attempts."
+              break
+            fi
+            echo "  attempt $i/30 — retrying in 2s"
+            sleep 2
+          done
+          curl -sf http://localhost:6333/ || (echo "Qdrant did not start in time" && exit 1)
 
       - name: Set up Python
         uses: actions/setup-python@v5
