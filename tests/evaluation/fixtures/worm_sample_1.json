@@ -1,0 +1,27 @@
+{
+  "sample_id": "worm_sample_1",
+  "notes": "WannaCry worm — SMB EternalBlue exploit, self-replication via network shares, ransom payload",
+  "technique_ids": [
+    "T1210",
+    "T1091",
+    "T1021",
+    "T1486",
+    "T1190"
+  ],
+  "attck_valid_ids": [
+    "T1210", "T1091", "T1021", "T1486", "T1190",
+    "T1105", "T1059", "T1055", "T1082", "T1083",
+    "T1489", "T1490", "T1071", "T1560", "T1095"
+  ],
+  "expected_stix_types": [
+    "malware",
+    "attack-pattern",
+    "vulnerability",
+    "relationship"
+  ],
+  "expected_rel_types": [
+    "uses",
+    "exploits",
+    "indicates"
+  ]
+}

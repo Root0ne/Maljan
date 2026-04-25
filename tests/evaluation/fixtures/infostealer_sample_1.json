@@ -1,0 +1,25 @@
+{
+  "sample_id": "infostealer_sample_1",
+  "notes": "RedLine Stealer — browser credential dump, keylogging, clipboard hijack, C2 exfiltration",
+  "technique_ids": [
+    "T1003",
+    "T1056",
+    "T1115",
+    "T1071",
+    "T1041"
+  ],
+  "attck_valid_ids": [
+    "T1003", "T1056", "T1115", "T1071", "T1041",
+    "T1105", "T1059", "T1055", "T1082", "T1083",
+    "T1095", "T1486", "T1490", "T1547", "T1021"
+  ],
+  "expected_stix_types": [
+    "malware",
+    "attack-pattern",
+    "relationship"
+  ],
+  "expected_rel_types": [
+    "uses",
+    "indicates"
+  ]
+}

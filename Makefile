@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark
 
 test:
 	uv run pytest tests/ -q
@@ -40,3 +40,6 @@ setup:
 
 pre-commit-run:
 	uv run pre-commit run --all-files
+
+benchmark:
+	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite
