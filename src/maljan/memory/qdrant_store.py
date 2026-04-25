@@ -168,6 +168,7 @@ class QdrantStore:
         self._client.upsert(
             collection_name=self._collection,
             points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+            wait=True,  # Ensure the point is committed before returning
         )
         logger.info(
             "QdrantStore.store: upserted sample_id=%s (point_id=%d).",
@@ -197,12 +198,15 @@ class QdrantStore:
             return []
 
         vector = _embed(query)
-        hits = self._client.search(
+        # query_points() is the current API (qdrant-client >= 1.9);
+        # search() is deprecated in newer versions.
+        response = self._client.query_points(
             collection_name=self._collection,
-            query_vector=vector,
+            query=vector,
             limit=top_k,
             with_payload=True,
         )
+        hits = response.points
 
         results: list[StoredCase] = []
         for hit in hits:
@@ -232,8 +236,12 @@ class QdrantStore:
         """Return the total number of points in the Qdrant collection."""
         if not self._collection_exists():
             return 0
-        info = self._client.get_collection(self._collection)
-        return info.points_count or 0
+        try:
+            info = self._client.get_collection(self._collection)
+            return int(info.points_count or 0)
+        except Exception as exc:
+            logger.warning("QdrantStore.count() error: %s", exc)
+            return 0
 
     def clear(self) -> None:
         """Delete and recreate the Qdrant collection (removes all points).
@@ -242,7 +250,7 @@ class QdrantStore:
         store() call will recreate the vector config if needed.
         """
         if self._collection_exists():
-            self._client.delete_collection(self._collection)
+            self._client.delete_collection(collection_name=self._collection)
             self._collection_ready = False
             logger.info("QdrantStore.clear: collection '%s' deleted.", self._collection)
 

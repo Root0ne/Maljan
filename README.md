@@ -264,7 +264,7 @@ Past analysis results are persisted as `StoredCase` objects and retrieved by cos
 
 **`InMemoryStore`** (`memory/in_memory_store.py`): Pure-Python TF cosine similarity. Zero external dependencies. Upsert semantics (same `sample_id` replaces old entry).
 
-**`QdrantStore`** (`memory/qdrant_store.py`): Stub with implementation outline for Qdrant vector database. Requires `uv add qdrant-client` and a running Qdrant instance.
+**`QdrantStore`** (`memory/qdrant_store.py`): Full Qdrant vector database backend. Uses a deterministic hash-trick embedding (512-dim, no external model) with `query_points()` for similarity search. Auto-creates collection on first `store()` call. Upsert semantics via stable SHA-256 point IDs. Requires `uv add qdrant-client` and a running Qdrant instance.
 
 **`build_stored_case(sample_id, isr_reports, stix_bundle_json, malware_category)`**: Factory that builds a `StoredCase` from pipeline artifacts — called automatically in `make_judge_node()` after every successful verdict.
 
