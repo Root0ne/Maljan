@@ -169,13 +169,14 @@ class FileDataLoader:
             parser = self._parser_registry.create(data_type)
             parsed_text = parser.parse(raw)
         except KeyError:
-            logger.warning(
-                "load_from_sandbox: no parser for '%s', using raw JSON.", data_type
-            )
+            logger.warning("load_from_sandbox: no parser for '%s', using raw JSON.", data_type)
             parsed_text = json.dumps(raw, indent=2)
 
         logger.info(
             "load_from_sandbox: task=%s status=%s data_type=%s sample=%s",
-            task_id, status, data_type, sample_path,
+            task_id,
+            status,
+            data_type,
+            sample_path,
         )
         return self._chunker.chunk(data_type, parsed_text)

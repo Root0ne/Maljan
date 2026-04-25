@@ -29,6 +29,7 @@ from maljan.schemas.stix_models import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_annotated(
     rel_type: str = "uses",
     source_ref: str = "malware--aaa",
@@ -64,6 +65,7 @@ def _make_plain(
 # ---------------------------------------------------------------------------
 # ConfidenceAnnotatedRelationship: field validation
 # ---------------------------------------------------------------------------
+
 
 class TestConfidenceAnnotatedRelationship:
     def test_type_is_relationship(self) -> None:
@@ -140,6 +142,7 @@ class TestConfidenceAnnotatedRelationship:
 # Property helpers
 # ---------------------------------------------------------------------------
 
+
 class TestConfidenceAnnotatedProperties:
     def test_is_high_confidence_true_at_080(self) -> None:
         assert _make_annotated(confidence=0.80).is_high_confidence is True
@@ -185,12 +188,21 @@ class TestConfidenceAnnotatedProperties:
 # EvidenceBasis controlled vocabulary
 # ---------------------------------------------------------------------------
 
+
 class TestEvidenceBasisVocab:
-    @pytest.mark.parametrize("basis", [
-        "static", "dynamic", "network",
-        "static+dynamic", "dynamic+network", "static+network",
-        "all", "unknown",
-    ])
+    @pytest.mark.parametrize(
+        "basis",
+        [
+            "static",
+            "dynamic",
+            "network",
+            "static+dynamic",
+            "dynamic+network",
+            "static+network",
+            "all",
+            "unknown",
+        ],
+    )
     def test_all_valid_basis_values_accepted(self, basis: str) -> None:
         r = ConfidenceAnnotatedRelationship(
             relationship_type="uses",
@@ -214,6 +226,7 @@ class TestEvidenceBasisVocab:
 # Bundle: union type resolution and helpers
 # ---------------------------------------------------------------------------
 
+
 class TestBundle:
     def test_bundle_accepts_annotated_relationship(self) -> None:
         bundle = Bundle(objects=[_make_annotated()])
@@ -234,28 +247,34 @@ class TestBundle:
         assert len(bundle.objects) == 5
 
     def test_confidence_annotated_relationships_filter(self) -> None:
-        bundle = Bundle(objects=[
-            _make_annotated(confidence=0.9),
-            _make_plain(),
-            Malware(name="TestMalware"),
-            _make_annotated(confidence=0.6),
-        ])
+        bundle = Bundle(
+            objects=[
+                _make_annotated(confidence=0.9),
+                _make_plain(),
+                Malware(name="TestMalware"),
+                _make_annotated(confidence=0.6),
+            ]
+        )
         annotated = bundle.confidence_annotated_relationships()
         assert len(annotated) == 2
 
     def test_mean_relationship_confidence_computed(self) -> None:
-        bundle = Bundle(objects=[
-            _make_annotated(confidence=0.8),
-            _make_annotated(confidence=0.6),
-        ])
+        bundle = Bundle(
+            objects=[
+                _make_annotated(confidence=0.8),
+                _make_annotated(confidence=0.6),
+            ]
+        )
         mean = bundle.mean_relationship_confidence()
         assert mean == pytest.approx(0.70)
 
     def test_mean_relationship_confidence_none_when_no_annotated(self) -> None:
-        bundle = Bundle(objects=[
-            _make_plain(),
-            Malware(name="TestMalware"),
-        ])
+        bundle = Bundle(
+            objects=[
+                _make_plain(),
+                Malware(name="TestMalware"),
+            ]
+        )
         assert bundle.mean_relationship_confidence() is None
 
     def test_mean_relationship_confidence_none_on_empty_bundle(self) -> None:
@@ -284,12 +303,14 @@ class TestBundle:
 # JudgeAgent._build_confidence_instruction()
 # ---------------------------------------------------------------------------
 
+
 class TestBuildConfidenceInstruction:
     """Tests for the cascade-derived confidence hint table in the verdict prompt."""
 
     def _make_judge(self) -> object:
         """Create a JudgeAgent with a mock LLM."""
         from maljan.agents.judge_agent import JudgeAgent
+
         return JudgeAgent(llm=MagicMock())
 
     def _make_cascade_result(

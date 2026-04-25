@@ -54,9 +54,7 @@ class GroundTruth:
     expected_stix_types: set[str] = field(
         default_factory=lambda: {"malware", "attack-pattern", "relationship"}
     )
-    expected_rel_types: set[str] = field(
-        default_factory=lambda: {"uses", "indicates"}
-    )
+    expected_rel_types: set[str] = field(default_factory=lambda: {"uses", "indicates"})
     attck_valid_ids: set[str] | None = None
     notes: str = ""
 
@@ -70,9 +68,7 @@ class GroundTruth:
                 data.get("expected_stix_types", ["malware", "attack-pattern", "relationship"])
             ),
             expected_rel_types=set(data.get("expected_rel_types", ["uses", "indicates"])),
-            attck_valid_ids=(
-                set(data["attck_valid_ids"]) if "attck_valid_ids" in data else None
-            ),
+            attck_valid_ids=(set(data["attck_valid_ids"]) if "attck_valid_ids" in data else None),
             notes=data.get("notes", ""),
         )
 

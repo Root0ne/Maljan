@@ -61,10 +61,12 @@ class DynamicAnalyst(BaseAnalyst):
         """Revise dynamic analysis based on peer findings and mediator feedback."""
         self.logger.info("Revising dynamic analysis based on peer feedback...")
 
-        peer_section = "\n\n".join(
-            f"{name.upper()} ANALYST REPORT:\n{report}"
-            for name, report in peer_reports.items()
-        ) or "No peer reports available."
+        peer_section = (
+            "\n\n".join(
+                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -152,9 +154,12 @@ class DynamicAnalyst(BaseAnalyst):
         """Return (revised_text, AgentISR) with dissent_items populated."""
         self.logger.info("Executing dynamic ISR revision (round %d)...", revision_round)
 
-        peer_isr_summaries = "\n\n".join(
-            f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
-        ) or "No peer reports available."
+        peer_isr_summaries = (
+            "\n\n".join(
+                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [

@@ -10,7 +10,6 @@ from maljan.schemas.stix_models import (
 
 
 class TestSTIXModels:
-
     def test_indicator_creation(self) -> None:
         indicator = Indicator(
             name="Suspicious beacon",
@@ -58,9 +57,7 @@ class TestSTIXModels:
 
     def test_bundle_creation_with_objects(self) -> None:
         malware = Malware(name="EvilBot", malware_types=["bot"])
-        indicator = Indicator(
-            name="C2 Beacon", pattern="[ipv4-addr:value = '1.2.3.4']"
-        )
+        indicator = Indicator(name="C2 Beacon", pattern="[ipv4-addr:value = '1.2.3.4']")
         bundle = Bundle(objects=[malware, indicator])
         assert bundle.type == "bundle"
         assert bundle.id.startswith("bundle--")

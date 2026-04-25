@@ -86,15 +86,11 @@ def _write_fixture(dir_path: Path, filename: str, report: dict) -> Path:
 
 class TestSubmissionResult:
     def test_succeeded_true_when_reported_with_report(self) -> None:
-        result = SubmissionResult(
-            task_id="1", status="reported", report={"behavior": {}}
-        )
+        result = SubmissionResult(task_id="1", status="reported", report={"behavior": {}})
         assert result.succeeded is True
 
     def test_succeeded_false_when_failed(self) -> None:
-        result = SubmissionResult(
-            task_id="1", status="failed", report={"behavior": {}}
-        )
+        result = SubmissionResult(task_id="1", status="failed", report={"behavior": {}})
         assert result.succeeded is False
 
     def test_succeeded_false_when_empty_report(self) -> None:
@@ -122,9 +118,7 @@ class TestSubmissionResult:
         assert result.target_section()["sha256"] == "deadbeef"
 
     def test_signatures_returns_list(self) -> None:
-        result = SubmissionResult(
-            task_id="1", status="reported", report=_make_report()
-        )
+        result = SubmissionResult(task_id="1", status="reported", report=_make_report())
         sigs = result.signatures()
         assert len(sigs) == 1
         assert sigs[0]["name"] == "ransomware_dropper"
@@ -182,6 +176,7 @@ class TestMockSandboxClient:
         # SHA-256 of a known byte sequence
         sample_bytes = b"ransomware payload"
         import hashlib
+
         sha256 = hashlib.sha256(sample_bytes).hexdigest()
         _write_fixture(tmp_path, f"{sha256}.json", report)
 
@@ -306,6 +301,7 @@ class TestFileDataLoaderLoadFromSandbox:
         client = MockSandboxClient(fixtures_dir=str(tmp_path))
         # Write fixture for sha256 lookup
         import hashlib
+
         sha256 = hashlib.sha256(b"payload").hexdigest()
         _write_fixture(tmp_path, f"{sha256}.json", report)
 

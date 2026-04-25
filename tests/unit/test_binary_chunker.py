@@ -20,6 +20,7 @@ from maljan.loaders.file_loader import FileDataLoader
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_chunker(max_tokens: int = 100, overlap_tokens: int = 10) -> BinaryChunker:
     config = ChunkingConfig(
         max_tokens_per_chunk=max_tokens,
@@ -37,6 +38,7 @@ def _long_text(tokens: int = 200) -> str:
 # ---------------------------------------------------------------------------
 # TextChunk model
 # ---------------------------------------------------------------------------
+
 
 class TestTextChunk:
     def _make(self, index: int, total: int) -> TextChunk:
@@ -70,8 +72,12 @@ class TestTextChunk:
 
     def test_token_estimate_value(self) -> None:
         chunk = TextChunk(
-            index=0, total=1, strategy=ChunkStrategy.SLIDING_WINDOW,
-            content="X" * 400, char_count=400, token_estimate=400 // _CHARS_PER_TOKEN,
+            index=0,
+            total=1,
+            strategy=ChunkStrategy.SLIDING_WINDOW,
+            content="X" * 400,
+            char_count=400,
+            token_estimate=400 // _CHARS_PER_TOKEN,
             domain="dynamic",
         )
         assert chunk.token_estimate == 100
@@ -80,6 +86,7 @@ class TestTextChunk:
 # ---------------------------------------------------------------------------
 # BinaryChunker — skip_if_fits
 # ---------------------------------------------------------------------------
+
 
 class TestBinaryChunkerSkipIfFits:
     def test_short_text_returns_single_chunk(self) -> None:
@@ -114,6 +121,7 @@ class TestBinaryChunkerSkipIfFits:
 # ---------------------------------------------------------------------------
 # BinaryChunker — Sliding Window
 # ---------------------------------------------------------------------------
+
 
 class TestSlidingWindow:
     def test_long_text_produces_multiple_chunks(self) -> None:
@@ -163,13 +171,14 @@ class TestSlidingWindow:
         chunks = chunker.chunk("unknown_domain", text)
         assert len(chunks) > 1
         # First chunk's tail should appear at the start of second chunk's content
-        tail = chunks[0].content[-(3 * _CHARS_PER_TOKEN):]
+        tail = chunks[0].content[-(3 * _CHARS_PER_TOKEN) :]
         assert chunks[1].content.startswith(tail)
 
 
 # ---------------------------------------------------------------------------
 # BinaryChunker — Domain-specific splitting
 # ---------------------------------------------------------------------------
+
 
 class TestDomainSpecificSplitting:
     def _static_text_with_functions(self, num_funcs: int = 5, tokens_each: int = 3) -> str:
@@ -233,6 +242,7 @@ class TestDomainSpecificSplitting:
 # BinaryChunker — merge_summaries
 # ---------------------------------------------------------------------------
 
+
 class TestMergeSummaries:
     def test_empty_summaries_returns_empty(self) -> None:
         chunker = _make_chunker()
@@ -266,6 +276,7 @@ class TestMergeSummaries:
 # ChunkingConfig
 # ---------------------------------------------------------------------------
 
+
 class TestChunkingConfig:
     def test_defaults(self) -> None:
         config = ChunkingConfig()
@@ -281,6 +292,7 @@ class TestChunkingConfig:
 # ---------------------------------------------------------------------------
 # FileDataLoader.load_chunked() — integration with mock file system
 # ---------------------------------------------------------------------------
+
 
 class TestFileDataLoaderChunked:
     def _make_loader(

@@ -70,6 +70,7 @@ _MAX_MULTIPLIER: float = max(CROSS_LAYER_MULTIPLIERS.values())
 # Result models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class LayerContribution:
     """Evidence contribution from a single analysis layer for one technique.
@@ -139,10 +140,7 @@ class CascadeResult:
             key=lambda x: x.mean_confidence,
             reverse=True,
         )
-        parts = [
-            f"{lc.domain}={lc.mean_confidence:.2f}({lc.claim_count})"
-            for lc in by_confidence
-        ]
+        parts = [f"{lc.domain}={lc.mean_confidence:.2f}({lc.claim_count})" for lc in by_confidence]
         return " | ".join(parts)
 
 
@@ -214,6 +212,7 @@ class CascadeSummary:
 # ---------------------------------------------------------------------------
 # Cascade Engine
 # ---------------------------------------------------------------------------
+
 
 class TTPCascadeEngine:
     """Computes cross-layer TTP evidence scores from a set of AgentISR objects.
@@ -296,10 +295,13 @@ class TTPCascadeEngine:
             if weight_sum == 0:
                 raw_weighted = 0.0
             else:
-                raw_weighted = sum(
-                    weights.get(d, DEFAULT_LAYER_WEIGHT) * layer_confidences[d]
-                    for d in contributing_domains
-                ) / weight_sum
+                raw_weighted = (
+                    sum(
+                        weights.get(d, DEFAULT_LAYER_WEIGHT) * layer_confidences[d]
+                        for d in contributing_domains
+                    )
+                    / weight_sum
+                )
 
             # Step 4: Cross-layer multiplier
             n_layers = len(contributing_domains)

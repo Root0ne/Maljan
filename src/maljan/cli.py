@@ -41,7 +41,9 @@ def analyze(
         None, "--output", "-o", help="Path to write STIX JSON output file."
     ),
     report: str | None = typer.Option(
-        None, "--report", "-r",
+        None,
+        "--report",
+        "-r",
         help="Path to write the Markdown analysis report (e.g. report.md).",
     ),
 ) -> None:

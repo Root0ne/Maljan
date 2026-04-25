@@ -54,9 +54,7 @@ class MockSandboxClient:
                                      When None, a minimal synthetic report is used.
         """
         self._fixtures_dir = Path(fixtures_dir)
-        self._default_fixture = (
-            Path(default_dynamic_fixture) if default_dynamic_fixture else None
-        )
+        self._default_fixture = Path(default_dynamic_fixture) if default_dynamic_fixture else None
         # task_id -> sample metadata
         self._tasks: dict[str, dict[str, str]] = {}
         self._next_task_id = 1
@@ -77,7 +75,9 @@ class MockSandboxClient:
         }
         logger.info(
             "MockSandboxClient: submitted '%s' -> task_id=%s (sha256=%s)",
-            path.name, task_id, sha256[:12],
+            path.name,
+            task_id,
+            sha256[:12],
         )
         return task_id
 

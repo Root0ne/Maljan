@@ -25,6 +25,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_technique(tid: str, name: str, desc: str, tactics: list[str]) -> ATTCKTechnique:
     return ATTCKTechnique(
         technique_id=tid,
@@ -85,6 +86,7 @@ def _make_isr(
 # TTPClaimValidation model
 # ---------------------------------------------------------------------------
 
+
 class TestTTPClaimValidation:
     def test_is_hallucinated_true_when_id_unknown(self) -> None:
         result = TTPClaimValidation(
@@ -130,6 +132,7 @@ class TestTTPClaimValidation:
 # TTPValidationSummary
 # ---------------------------------------------------------------------------
 
+
 class TestTTPValidationSummary:
     def _make_summary(
         self,
@@ -169,8 +172,13 @@ class TestTTPValidationSummary:
             low_alignment=0,
             results=[
                 TTPClaimValidation(
-                    agent_id="static", technique_id="T1055", claim_text="x",
-                    evidence_ref="y", is_valid_id=True, alignment_score=0.5, is_plausible=True,
+                    agent_id="static",
+                    technique_id="T1055",
+                    claim_text="x",
+                    evidence_ref="y",
+                    is_valid_id=True,
+                    alignment_score=0.5,
+                    is_plausible=True,
                 )
             ],
         )
@@ -185,9 +193,14 @@ class TestTTPValidationSummary:
             low_alignment=0,
             results=[
                 TTPClaimValidation(
-                    agent_id="static", technique_id="T9999", claim_text="x",
-                    evidence_ref="y", is_valid_id=False, alignment_score=0.0,
-                    is_plausible=False, suggested_ids=["T1055"],
+                    agent_id="static",
+                    technique_id="T9999",
+                    claim_text="x",
+                    evidence_ref="y",
+                    is_valid_id=False,
+                    alignment_score=0.0,
+                    is_plausible=False,
+                    suggested_ids=["T1055"],
                 )
             ],
         )
@@ -204,9 +217,13 @@ class TestTTPValidationSummary:
             low_alignment=1,
             results=[
                 TTPClaimValidation(
-                    agent_id="network", technique_id="T1071", claim_text="x",
-                    evidence_ref="registry key modification", is_valid_id=True,
-                    alignment_score=0.01, is_plausible=False,
+                    agent_id="network",
+                    technique_id="T1071",
+                    claim_text="x",
+                    evidence_ref="registry key modification",
+                    is_valid_id=True,
+                    alignment_score=0.01,
+                    is_plausible=False,
                 )
             ],
         )
@@ -219,6 +236,7 @@ class TestTTPValidationSummary:
 # ATTCKValidator.validate_isr_reports()
 # ---------------------------------------------------------------------------
 
+
 class TestValidateISRReports:
     def test_empty_isr_reports(self, validator: ATTCKValidator) -> None:
         summary = validator.validate_isr_reports({})
@@ -226,71 +244,95 @@ class TestValidateISRReports:
         assert summary.hallucination_rate == 0.0
 
     def test_no_technique_ids_in_claims(self, validator: ATTCKValidator) -> None:
-        isr = _make_isr("static", [
-            ClaimEvidence(claim="something", evidence_ref="ref", confidence=0.8, technique_id=None)
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="something", evidence_ref="ref", confidence=0.8, technique_id=None
+                )
+            ],
+        )
         summary = validator.validate_isr_reports({"static": isr})
         assert summary.total_claims == 0
 
     def test_valid_technique_id_counted(self, validator: ATTCKValidator) -> None:
-        isr = _make_isr("static", [
-            ClaimEvidence(
-                claim="process injection via WriteProcessMemory",
-                evidence_ref="API: WriteProcessMemory PID=1234",
-                confidence=0.9,
-                technique_id="T1055",
-            )
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="process injection via WriteProcessMemory",
+                    evidence_ref="API: WriteProcessMemory PID=1234",
+                    confidence=0.9,
+                    technique_id="T1055",
+                )
+            ],
+        )
         summary = validator.validate_isr_reports({"static": isr})
         assert summary.total_claims == 1
         assert summary.valid_ids == 1
         assert summary.invalid_ids == 0
 
     def test_hallucinated_technique_id_flagged(self, validator: ATTCKValidator) -> None:
-        isr = _make_isr("static", [
-            ClaimEvidence(
-                claim="some claim",
-                evidence_ref="some ref",
-                confidence=0.5,
-                technique_id="T9999",
-            )
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="some claim",
+                    evidence_ref="some ref",
+                    confidence=0.5,
+                    technique_id="T9999",
+                )
+            ],
+        )
         summary = validator.validate_isr_reports({"static": isr})
         assert summary.invalid_ids == 1
         assert summary.results[0].is_hallucinated is True
 
     def test_suggestions_provided_for_invalid_id(self, validator: ATTCKValidator) -> None:
-        isr = _make_isr("static", [
-            ClaimEvidence(
-                claim="process injection code",
-                evidence_ref="WriteProcessMemory VirtualAllocEx",
-                confidence=0.5,
-                technique_id="T9999",
-            )
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="process injection code",
+                    evidence_ref="WriteProcessMemory VirtualAllocEx",
+                    confidence=0.5,
+                    technique_id="T9999",
+                )
+            ],
+        )
         summary = validator.validate_isr_reports({"static": isr})
         assert len(summary.results[0].suggested_ids) > 0
 
     def test_multiple_agents_multiple_claims(self, validator: ATTCKValidator) -> None:
-        isr_static = _make_isr("static", [
-            ClaimEvidence(
-                claim="injection", evidence_ref="WriteProcessMemory",
-                confidence=0.9, technique_id="T1055",
-            ),
-            ClaimEvidence(
-                claim="fake", evidence_ref="nothing",
-                confidence=0.3, technique_id="T9999",
-            ),
-        ])
-        isr_network = _make_isr("network", [
-            ClaimEvidence(
-                claim="C2 beaconing", evidence_ref="HTTPS DNS C2 beacon",
-                confidence=0.8, technique_id="T1071",
-            ),
-        ])
-        summary = validator.validate_isr_reports(
-            {"static": isr_static, "network": isr_network}
+        isr_static = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="injection",
+                    evidence_ref="WriteProcessMemory",
+                    confidence=0.9,
+                    technique_id="T1055",
+                ),
+                ClaimEvidence(
+                    claim="fake",
+                    evidence_ref="nothing",
+                    confidence=0.3,
+                    technique_id="T9999",
+                ),
+            ],
         )
+        isr_network = _make_isr(
+            "network",
+            [
+                ClaimEvidence(
+                    claim="C2 beaconing",
+                    evidence_ref="HTTPS DNS C2 beacon",
+                    confidence=0.8,
+                    technique_id="T1071",
+                ),
+            ],
+        )
+        summary = validator.validate_isr_reports({"static": isr_static, "network": isr_network})
         assert summary.total_claims == 3
         assert summary.valid_ids == 2
         assert summary.invalid_ids == 1
@@ -299,6 +341,7 @@ class TestValidateISRReports:
 # ---------------------------------------------------------------------------
 # JudgeAgent._build_validation_block()
 # ---------------------------------------------------------------------------
+
 
 class TestJudgeBuildValidationBlock:
     @pytest.fixture
@@ -326,12 +369,17 @@ class TestJudgeBuildValidationBlock:
     def test_returns_block_when_claims_present(
         self, judge: JudgeAgent, validator: ATTCKValidator
     ) -> None:
-        isr = _make_isr("static", [
-            ClaimEvidence(
-                claim="injection", evidence_ref="WriteProcessMemory",
-                confidence=0.9, technique_id="T1055",
-            )
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="injection",
+                    evidence_ref="WriteProcessMemory",
+                    confidence=0.9,
+                    technique_id="T1055",
+                )
+            ],
+        )
         result = judge._build_validation_block(
             isr_reports={"static": isr}, attck_validator=validator
         )
@@ -340,11 +388,17 @@ class TestJudgeBuildValidationBlock:
     def test_graceful_degradation_on_validator_error(self, judge: JudgeAgent) -> None:
         broken_validator = MagicMock()
         broken_validator.validate_isr_reports.side_effect = RuntimeError("db offline")
-        isr = _make_isr("static", [
-            ClaimEvidence(
-                claim="x", evidence_ref="y", confidence=0.5, technique_id="T1055",
-            )
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="x",
+                    evidence_ref="y",
+                    confidence=0.5,
+                    technique_id="T1055",
+                )
+            ],
+        )
         # Must NOT raise — returns empty string silently
         result = judge._build_validation_block(
             isr_reports={"static": isr}, attck_validator=broken_validator
@@ -353,11 +407,17 @@ class TestJudgeBuildValidationBlock:
 
     def test_skips_validator_without_method(self, judge: JudgeAgent) -> None:
         bad_validator = object()  # no validate_isr_reports
-        isr = _make_isr("static", [
-            ClaimEvidence(
-                claim="x", evidence_ref="y", confidence=0.5, technique_id="T1055",
-            )
-        ])
+        isr = _make_isr(
+            "static",
+            [
+                ClaimEvidence(
+                    claim="x",
+                    evidence_ref="y",
+                    confidence=0.5,
+                    technique_id="T1055",
+                )
+            ],
+        )
         result = judge._build_validation_block(
             isr_reports={"static": isr}, attck_validator=bad_validator
         )

@@ -61,10 +61,12 @@ class NetworkAnalyst(BaseAnalyst):
         """Revise network analysis based on peer findings and mediator feedback."""
         self.logger.info("Revising network analysis based on peer feedback...")
 
-        peer_section = "\n\n".join(
-            f"{name.upper()} ANALYST REPORT:\n{report}"
-            for name, report in peer_reports.items()
-        ) or "No peer reports available."
+        peer_section = (
+            "\n\n".join(
+                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -152,9 +154,12 @@ class NetworkAnalyst(BaseAnalyst):
         """Return (revised_text, AgentISR) with dissent_items populated."""
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
-        peer_isr_summaries = "\n\n".join(
-            f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
-        ) or "No peer reports available."
+        peer_isr_summaries = (
+            "\n\n".join(
+                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [

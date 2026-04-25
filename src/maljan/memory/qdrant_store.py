@@ -218,9 +218,7 @@ class QdrantStore:
                     )
                 )
             except (KeyError, TypeError) as exc:
-                logger.warning(
-                    "QdrantStore.retrieve: skipping malformed payload: %s", exc
-                )
+                logger.warning("QdrantStore.retrieve: skipping malformed payload: %s", exc)
 
         logger.debug(
             "QdrantStore.retrieve: query='%s...' top_k=%d returned %d results.",
@@ -246,15 +244,11 @@ class QdrantStore:
         if self._collection_exists():
             self._client.delete_collection(self._collection)
             self._collection_ready = False
-            logger.info(
-                "QdrantStore.clear: collection '%s' deleted.", self._collection
-            )
+            logger.info("QdrantStore.clear: collection '%s' deleted.", self._collection)
 
     def __repr__(self) -> str:
         return (
-            f"QdrantStore(url={self._url!r}, "
-            f"collection={self._collection!r}, "
-            f"count={self.count()})"
+            f"QdrantStore(url={self._url!r}, collection={self._collection!r}, count={self.count()})"
         )
 
     # ------------------------------------------------------------------

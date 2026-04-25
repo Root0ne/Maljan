@@ -23,9 +23,7 @@ class AgentArgument(BaseModel):
 
     agent_name: str = Field(..., description="Name of the agent submitting the argument")
     finding: str = Field(..., description="The main finding or rebuttal")
-    confidence_score: float = Field(
-        0.0, description="Confidence of this specific argument (0-1)"
-    )
+    confidence_score: float = Field(0.0, description="Confidence of this specific argument (0-1)")
 
 
 def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
@@ -35,9 +33,7 @@ def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def _merge_isr_dicts(
-    left: dict[str, AgentISR], right: dict[str, AgentISR]
-) -> dict[str, AgentISR]:
+def _merge_isr_dicts(left: dict[str, AgentISR], right: dict[str, AgentISR]) -> dict[str, AgentISR]:
     """LangGraph reducer for ISR dicts (right overwrites left keys)."""
     merged = {**left}
     merged.update(right)

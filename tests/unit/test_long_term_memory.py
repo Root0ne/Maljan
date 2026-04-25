@@ -121,10 +121,12 @@ class TestStoredCase:
 
 class TestBuildStoredCase:
     def test_extracts_technique_ids(self) -> None:
-        isr = _make_isr([
-            {"claim": "Encrypts files", "technique_id": "T1486"},
-            {"claim": "Deletes shadow copies", "technique_id": "T1490"},
-        ])
+        isr = _make_isr(
+            [
+                {"claim": "Encrypts files", "technique_id": "T1486"},
+                {"claim": "Deletes shadow copies", "technique_id": "T1490"},
+            ]
+        )
         case = build_stored_case("test_1", {"static": isr})
         assert "T1486" in case.technique_ids
         assert "T1490" in case.technique_ids
@@ -141,10 +143,12 @@ class TestBuildStoredCase:
         assert case.technique_ids == []
 
     def test_deduplicates_technique_ids(self) -> None:
-        isr = _make_isr([
-            {"claim": "Claim A", "technique_id": "T1486"},
-            {"claim": "Claim B", "technique_id": "T1486"},
-        ])
+        isr = _make_isr(
+            [
+                {"claim": "Claim A", "technique_id": "T1486"},
+                {"claim": "Claim B", "technique_id": "T1486"},
+            ]
+        )
         case = build_stored_case("test_1", {"static": isr})
         assert case.technique_ids.count("T1486") == 1
 
@@ -258,9 +262,11 @@ class TestBuildMemoryContext:
     from maljan.agents.judge_agent import JudgeAgent
 
     def _make_isr_reports(self) -> dict:
-        isr = _make_isr([
-            {"claim": "Encrypts user files", "technique_id": "T1486"},
-        ])
+        isr = _make_isr(
+            [
+                {"claim": "Encrypts user files", "technique_id": "T1486"},
+            ]
+        )
         return {"static": isr}
 
     def test_none_memory_store_returns_empty(self) -> None:

@@ -27,6 +27,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_isr(
     agent_id: str,
     domain: str,
@@ -60,6 +61,7 @@ def engine() -> TTPCascadeEngine:
 # TTPCascadeEngine — basic grouping
 # ---------------------------------------------------------------------------
 
+
 class TestCascadeEngineGrouping:
     def test_empty_isr_reports(self, engine: TTPCascadeEngine) -> None:
         summary = engine.compute({})
@@ -81,10 +83,14 @@ class TestCascadeEngineGrouping:
         assert result.total_evidence_count == 1
 
     def test_multiple_techniques_same_layer(self, engine: TTPCascadeEngine) -> None:
-        isr = _make_isr("static", "static", [
-            _claim("T1055", 0.8),
-            _claim("T1547", 0.7),
-        ])
+        isr = _make_isr(
+            "static",
+            "static",
+            [
+                _claim("T1055", 0.8),
+                _claim("T1547", 0.7),
+            ],
+        )
         summary = engine.compute({"static": isr})
         assert summary.total_techniques == 2
         tids = {r.technique_id for r in summary.results}
@@ -115,6 +121,7 @@ class TestCascadeEngineGrouping:
 # TTPCascadeEngine — confidence calculation
 # ---------------------------------------------------------------------------
 
+
 class TestCascadeConfidenceCalculation:
     def test_single_layer_confidence_equals_claim(self, engine: TTPCascadeEngine) -> None:
         """Single claim → mean == claim confidence; no multiplier bonus."""
@@ -128,10 +135,14 @@ class TestCascadeConfidenceCalculation:
 
     def test_mean_confidence_per_layer_multiple_claims(self, engine: TTPCascadeEngine) -> None:
         """Multiple claims in same layer → layer confidence = mean."""
-        isr = _make_isr("dynamic", "dynamic", [
-            _claim("T1055", 0.60),
-            _claim("T1055", 0.80),
-        ])
+        isr = _make_isr(
+            "dynamic",
+            "dynamic",
+            [
+                _claim("T1055", 0.60),
+                _claim("T1055", 0.80),
+            ],
+        )
         result = engine.compute({"dynamic": isr}).results[0]
         # mean = (0.60 + 0.80) / 2 = 0.70
         assert result.layer_confidences["dynamic"] == pytest.approx(0.70, abs=1e-6)
@@ -184,12 +195,12 @@ class TestCascadeConfidenceCalculation:
 # CascadeResult model
 # ---------------------------------------------------------------------------
 
+
 class TestCascadeResultModel:
     def _make_result(self, layers: list[str]) -> CascadeResult:
         contribs = [
             LayerContribution(
-                domain=d, agent_id=d, claim_count=1,
-                mean_confidence=0.8, evidence_refs=["ref"]
+                domain=d, agent_id=d, claim_count=1, mean_confidence=0.8, evidence_refs=["ref"]
             )
             for d in layers
         ]
@@ -223,9 +234,9 @@ class TestCascadeResultModel:
         assert self._make_result(["static", "dynamic"]).corroboration_label() == "CORROBORATED"
 
     def test_corroboration_label_three(self) -> None:
-        assert self._make_result(
-            ["static", "dynamic", "network"]
-        ).corroboration_label() == "CONSENSUS"
+        assert (
+            self._make_result(["static", "dynamic", "network"]).corroboration_label() == "CONSENSUS"
+        )
 
     def test_layer_summary_contains_domains(self) -> None:
         result = self._make_result(["static", "dynamic"])
@@ -238,6 +249,7 @@ class TestCascadeResultModel:
 # CascadeSummary
 # ---------------------------------------------------------------------------
 
+
 class TestCascadeSummary:
     def _make_summary(self, corroborated: int, consensus: int, total: int) -> CascadeSummary:
         return CascadeSummary(
@@ -248,24 +260,26 @@ class TestCascadeSummary:
         )
 
     def test_top_techniques_empty(self) -> None:
-        s = CascadeSummary(results=[], total_techniques=0,
-                           corroborated_count=0, consensus_count=0)
+        s = CascadeSummary(results=[], total_techniques=0, corroborated_count=0, consensus_count=0)
         assert s.top_techniques(n=5) == []
 
     def test_top_techniques_sorted_by_confidence(self, engine: TTPCascadeEngine) -> None:
         isrs = {
-            "s": _make_isr("s", "static", [
-                _claim("T1055", 0.90),   # high
-                _claim("T1071", 0.40),   # low
-            ]),
+            "s": _make_isr(
+                "s",
+                "static",
+                [
+                    _claim("T1055", 0.90),  # high
+                    _claim("T1071", 0.40),  # low
+                ],
+            ),
         }
         summary = engine.compute(isrs)
         top = summary.top_techniques(n=2)
         assert top[0].weighted_confidence >= top[1].weighted_confidence
 
     def test_to_prompt_block_empty(self) -> None:
-        s = CascadeSummary(results=[], total_techniques=0,
-                           corroborated_count=0, consensus_count=0)
+        s = CascadeSummary(results=[], total_techniques=0, corroborated_count=0, consensus_count=0)
         block = s.to_prompt_block()
         assert "No structured TTP claims" in block
 
@@ -308,6 +322,7 @@ class TestCascadeSummary:
 # ---------------------------------------------------------------------------
 # JudgeAgent._build_cascade_block() — graceful degradation
 # ---------------------------------------------------------------------------
+
 
 class TestJudgeCascadeBlock:
     @pytest.fixture

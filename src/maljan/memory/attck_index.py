@@ -30,15 +30,78 @@ from maljan.core.logger import logger
 from maljan.memory.attck_loader import ATTCKTechnique, load_attck_bundle
 
 # Stopwords to exclude from TF-IDF tokens (minimal set for security domain)
-_STOPWORDS = frozenset({
-    "a", "an", "the", "and", "or", "of", "to", "in", "is", "are", "was", "were",
-    "be", "been", "being", "have", "has", "had", "do", "does", "did", "will",
-    "would", "could", "should", "may", "might", "shall", "can", "this", "that",
-    "these", "those", "it", "its", "with", "for", "on", "at", "by", "from",
-    "as", "into", "through", "during", "including", "until", "against", "between",
-    "about", "which", "when", "where", "how", "all", "also", "such", "other",
-    "than", "then", "so", "but", "not", "no", "if", "use", "used", "using",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "with",
+        "for",
+        "on",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "including",
+        "until",
+        "against",
+        "between",
+        "about",
+        "which",
+        "when",
+        "where",
+        "how",
+        "all",
+        "also",
+        "such",
+        "other",
+        "than",
+        "then",
+        "so",
+        "but",
+        "not",
+        "no",
+        "if",
+        "use",
+        "used",
+        "using",
+    }
+)
 
 
 @dataclass
@@ -46,8 +109,8 @@ class SearchResult:
     """A single ATT&CK technique returned by a similarity search."""
 
     technique: ATTCKTechnique
-    score: float   # TF-IDF cosine similarity (0.0–1.0)
-    rank: int      # 1-based rank in the result set
+    score: float  # TF-IDF cosine similarity (0.0–1.0)
+    rank: int  # 1-based rank in the result set
 
 
 class ATTCKIndex:
@@ -163,18 +226,14 @@ class ATTCKIndex:
         """
         tech = self.get_by_id(technique_id)
         if tech is None:
-            logger.warning(
-                "ATT&CK validation: technique '%s' not found in index.", technique_id
-            )
+            logger.warning("ATT&CK validation: technique '%s' not found in index.", technique_id)
             return 0.0
 
         tech_vec = self._tf_vecs.get(technique_id.upper(), {})
         evidence_vec = self._tf_idf_vector(self._tokenize(evidence_text))
         score = _cosine_similarity(evidence_vec, tech_vec)
 
-        logger.debug(
-            "ATT&CK validation: %s vs evidence → score=%.3f", technique_id, score
-        )
+        logger.debug("ATT&CK validation: %s vs evidence → score=%.3f", technique_id, score)
         return score
 
     @property
@@ -192,8 +251,7 @@ class ATTCKIndex:
 
         # Step 1: tokenize every document
         tokenized_docs: dict[str, list[str]] = {
-            tid: self._tokenize(tech.searchable_text)
-            for tid, tech in self.techniques.items()
+            tid: self._tokenize(tech.searchable_text) for tid, tech in self.techniques.items()
         }
 
         # Step 2: compute IDF over the corpus
@@ -212,8 +270,7 @@ class ATTCKIndex:
             tf = Counter(tokens)
             doc_len = len(tokens) or 1
             self._tf_vecs[tid] = {
-                term: (count / doc_len) * self._idf.get(term, 0.0)
-                for term, count in tf.items()
+                term: (count / doc_len) * self._idf.get(term, 0.0) for term, count in tf.items()
             }
 
         self._built = True
@@ -239,6 +296,7 @@ class ATTCKIndex:
 # ------------------------------------------------------------------
 # Pure-Python cosine similarity (no external deps)
 # ------------------------------------------------------------------
+
 
 def _cosine_similarity(a: dict[str, float], b: dict[str, float]) -> float:
     """Sparse cosine similarity between two TF-IDF vectors."""

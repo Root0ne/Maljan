@@ -153,9 +153,7 @@ class BaseAnalyst(ABC):
         if len(chunks) == 1:
             return self.safe_analyze_isr(chunks[0].content)
 
-        self.logger.info(
-            "Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name
-        )
+        self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
@@ -166,7 +164,10 @@ class BaseAnalyst(ABC):
                 isr = self.analyze_isr(prompt_text)
                 chunk_isrs.append(isr)
                 self.logger.debug(
-                    "Chunk %d/%d analyzed: %d claims.", chunk.index + 1, chunk.total, len(isr.claims)
+                    "Chunk %d/%d analyzed: %d claims.",
+                    chunk.index + 1,
+                    chunk.total,
+                    len(isr.claims),
                 )
             except Exception as exc:
                 errors.append(f"chunk {chunk.index + 1}: {exc}")
@@ -180,7 +181,10 @@ class BaseAnalyst(ABC):
         if errors:
             self.logger.warning(
                 "%d/%d chunks failed for '%s'. Merging %d successful results.",
-                len(errors), len(chunks), self.name, len(chunk_isrs),
+                len(errors),
+                len(chunks),
+                self.name,
+                len(chunk_isrs),
             )
 
         return merge_chunk_isrs(chunk_isrs)
@@ -274,9 +278,7 @@ class BaseAnalyst(ABC):
             enc = tiktoken.get_encoding("cl100k_base")
             tokens = enc.encode(text)
             if len(tokens) > limit:
-                self.logger.warning(
-                    f"Input truncated from {len(tokens)} to {limit} tokens"
-                )
+                self.logger.warning(f"Input truncated from {len(tokens)} to {limit} tokens")
                 return enc.decode(tokens[:limit])
         except Exception:
             # Fallback: rough character-based truncation (4 chars ~ 1 token)

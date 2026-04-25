@@ -27,6 +27,7 @@ from maljan.schemas.isr_models import AgentISR
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_app() -> MaljanApp:
     """Reusable mock-mode MaljanApp with default settings."""
@@ -42,6 +43,7 @@ def mock_result(mock_app: MaljanApp) -> dict:
 # ---------------------------------------------------------------------------
 # Group 1: Core pipeline (backward-compatible, pre-existing tests)
 # ---------------------------------------------------------------------------
+
 
 def test_pipeline_mock_mode_end_to_end() -> None:
     """Full pipeline runs in mock mode and produces a verdict."""
@@ -92,6 +94,7 @@ def test_pipeline_respects_max_iterations() -> None:
 # Group 2: New state fields — ISR, confidence history, sycophancy
 # ---------------------------------------------------------------------------
 
+
 class TestNewStateFields:
     def test_isr_reports_present_for_all_agents(self, mock_result: dict) -> None:
         """ISR reports should be populated for all three analyst agents."""
@@ -119,7 +122,7 @@ class TestNewStateFields:
 
     def test_confidence_history_values_in_range(self, mock_result: dict) -> None:
         """All confidence values must be in [0.0, 1.0]."""
-        for val in (mock_result.get("confidence_history") or []):
+        for val in mock_result.get("confidence_history") or []:
             assert 0.0 <= val <= 1.0, f"Confidence {val} out of range"
 
     def test_sycophancy_detected_field_exists(self, mock_result: dict) -> None:
@@ -164,6 +167,7 @@ class TestNewStateFields:
 # Group 3: Analyst node wiring — load_chunked integration
 # ---------------------------------------------------------------------------
 
+
 class TestAnalystNodeChunkedWiring:
     """Tests that make_analyst_node() correctly uses load_chunked().
 
@@ -184,10 +188,12 @@ class TestAnalystNodeChunkedWiring:
         if chunks is None:
             chunks = [
                 TextChunk(
-                    index=0, total=1,
+                    index=0,
+                    total=1,
                     strategy=ChunkStrategy.SLIDING_WINDOW,
                     content="sample analysis data",
-                    char_count=20, token_estimate=5,
+                    char_count=20,
+                    token_estimate=5,
                     domain="static",
                 )
             ]
@@ -234,10 +240,12 @@ class TestAnalystNodeChunkedWiring:
 
         chunks = [
             TextChunk(
-                index=i, total=3,
+                index=i,
+                total=3,
                 strategy=ChunkStrategy.SLIDING_WINDOW,
                 content=f"chunk {i} content",
-                char_count=15, token_estimate=4,
+                char_count=15,
+                token_estimate=4,
                 domain="static",
             )
             for i in range(3)
@@ -290,13 +298,14 @@ class TestAnalystNodeChunkedWiring:
 # Group 4: Chunked path end-to-end via config
 # ---------------------------------------------------------------------------
 
+
 class TestChunkedConfigPath:
     def test_very_small_chunk_limit_still_produces_verdict(self) -> None:
         """Pipeline completes even with a tiny chunk limit (forces multi-chunk path)."""
         config = Settings(
             negotiation=NegotiationConfig(max_iterations=1),
             chunking=ChunkingConfig(
-                max_tokens_per_chunk=1,   # force splitting
+                max_tokens_per_chunk=1,  # force splitting
                 overlap_tokens=0,
                 skip_if_fits=False,
             ),
@@ -309,9 +318,7 @@ class TestChunkedConfigPath:
 
     def test_chunking_config_respected_by_container(self) -> None:
         """ChunkingConfig passed to Settings is accessible via ServiceContainer."""
-        config = Settings(
-            chunking=ChunkingConfig(max_tokens_per_chunk=500, overlap_tokens=50)
-        )
+        config = Settings(chunking=ChunkingConfig(max_tokens_per_chunk=500, overlap_tokens=50))
         app = MaljanApp(config=config, mock=True)
         assert app.container.config.chunking.max_tokens_per_chunk == 500
         assert app.container.config.chunking.overlap_tokens == 50
@@ -320,6 +327,7 @@ class TestChunkedConfigPath:
 # ---------------------------------------------------------------------------
 # Group 5: Pipeline configuration variants
 # ---------------------------------------------------------------------------
+
 
 class TestPipelineConfigVariants:
     def test_pipeline_with_file_name_none(self) -> None:
@@ -342,10 +350,20 @@ class TestPipelineConfigVariants:
         app = MaljanApp(mock=True)
         result = app.run("sample_1")
         required_keys = [
-            "file_hash", "file_name", "reports", "revised_reports",
-            "isr_reports", "discussion_history", "sycophancy_detected",
-            "confidence_history", "iteration_count", "is_consensus",
-            "final_decision", "judge_report", "stix_output", "run_summary",
+            "file_hash",
+            "file_name",
+            "reports",
+            "revised_reports",
+            "isr_reports",
+            "discussion_history",
+            "sycophancy_detected",
+            "confidence_history",
+            "iteration_count",
+            "is_consensus",
+            "final_decision",
+            "judge_report",
+            "stix_output",
+            "run_summary",
         ]
         for key in required_keys:
             assert key in result, f"Missing key in final state: '{key}'"

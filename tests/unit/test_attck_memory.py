@@ -15,6 +15,7 @@ from maljan.memory.attck_validator import ATTCKValidator
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_technique(
     technique_id: str,
     name: str,
@@ -90,6 +91,7 @@ def validator(index: ATTCKIndex) -> ATTCKValidator:
 # ---------------------------------------------------------------------------
 # _parse_bundle()
 # ---------------------------------------------------------------------------
+
 
 class TestParseBundle:
     def _make_stix_obj(
@@ -171,6 +173,7 @@ class TestParseBundle:
 # ATTCKIndex
 # ---------------------------------------------------------------------------
 
+
 class TestATTCKIndex:
     def test_size(self, index: ATTCKIndex) -> None:
         assert index.size == len(FIXTURE_TECHNIQUES)
@@ -211,9 +214,7 @@ class TestATTCKIndex:
         assert [r.rank for r in results] == list(range(1, len(results) + 1))
 
     def test_search_tactic_filter(self, index: ATTCKIndex) -> None:
-        results = index.search(
-            "command control beaconing", filter_tactics=["command-and-control"]
-        )
+        results = index.search("command control beaconing", filter_tactics=["command-and-control"])
         assert all("command-and-control" in r.technique.tactic_phases for r in results)
 
     def test_search_no_results_for_gibberish(self, index: ATTCKIndex) -> None:
@@ -240,6 +241,7 @@ class TestATTCKIndex:
 # ---------------------------------------------------------------------------
 # ATTCKValidator
 # ---------------------------------------------------------------------------
+
 
 class TestATTCKValidator:
     def test_validate_ttp_id_existing(self, validator: ATTCKValidator) -> None:
@@ -298,6 +300,7 @@ class TestATTCKValidator:
 # _cosine_similarity
 # ---------------------------------------------------------------------------
 
+
 class TestCosineSimilarity:
     def test_identical_vectors(self) -> None:
         a = {"x": 1.0, "y": 2.0}
@@ -323,6 +326,7 @@ class TestCosineSimilarity:
 # ---------------------------------------------------------------------------
 # ATTCKTechnique.searchable_text
 # ---------------------------------------------------------------------------
+
 
 class TestATTCKTechniqueSearchableText:
     def test_searchable_text_contains_id(self) -> None:

@@ -53,10 +53,10 @@ _CHARS_PER_TOKEN: int = 4
 class ChunkStrategy(Enum):
     """Chunking strategy applied to produce a particular chunk set."""
 
-    FUNCTION_BOUNDARY = auto()   # Static: splits at decompiler function headers
-    API_SEQUENCE = auto()        # Dynamic: splits at PID/process boundaries
-    FLOW_SESSION = auto()        # Network: splits at flow delimiters
-    SLIDING_WINDOW = auto()      # Fallback: fixed-size overlapping windows
+    FUNCTION_BOUNDARY = auto()  # Static: splits at decompiler function headers
+    API_SEQUENCE = auto()  # Dynamic: splits at PID/process boundaries
+    FLOW_SESSION = auto()  # Network: splits at flow delimiters
+    SLIDING_WINDOW = auto()  # Fallback: fixed-size overlapping windows
 
 
 @dataclass
@@ -313,9 +313,7 @@ class BinaryChunker:
         )
         return chunks
 
-    def _make_single_chunk(
-        self, domain: str, content: str, strategy: ChunkStrategy
-    ) -> TextChunk:
+    def _make_single_chunk(self, domain: str, content: str, strategy: ChunkStrategy) -> TextChunk:
         return TextChunk(
             index=0,
             total=1,

@@ -105,8 +105,7 @@ class ServiceContainer:
         self._samples_dir = samples_dir
 
         logger.info(
-            "ServiceContainer initialized "
-            "(mock=%s, agents=%s, parsers=%s)",
+            "ServiceContainer initialized (mock=%s, agents=%s, parsers=%s)",
             mock,
             self.agent_registry.list_agents(),
             self.parser_registry.list_parsers(),
@@ -156,9 +155,7 @@ class ServiceContainer:
         if self._llm_registry is None:
             raise RuntimeError("Cannot build LLM in mock mode.")
         if agent_name not in self._agent_llm_cache:
-            self._agent_llm_cache[agent_name] = (
-                self._llm_registry.build_model_for_agent(agent_name)
-            )
+            self._agent_llm_cache[agent_name] = self._llm_registry.build_model_for_agent(agent_name)
         return self._agent_llm_cache[agent_name]
 
     def get_memory_store(self) -> object:
@@ -253,9 +250,7 @@ class ServiceContainer:
         instance when a per-agent config override is defined.
         """
         if name not in self._agent_cache:
-            self._agent_cache[name] = self.agent_registry.create(
-                name, self.get_agent_llm(name)
-            )
+            self._agent_cache[name] = self.agent_registry.create(name, self.get_agent_llm(name))
         return self._agent_cache[name]
 
     def load_data(self, sample_id: str, data_type: str) -> str:

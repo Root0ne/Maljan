@@ -268,8 +268,10 @@ class STIXQualityMetrics:
     def total_relationships(self) -> int:
         """Total relationship objects (annotated + plain) in the bundle."""
         from maljan.schemas.stix_models import ConfidenceAnnotatedRelationship, Relationship
+
         return sum(
-            1 for obj in self.bundle.objects
+            1
+            for obj in self.bundle.objects
             if isinstance(obj, (Relationship, ConfidenceAnnotatedRelationship))
         )
 
@@ -302,6 +304,7 @@ class STIXQualityMetrics:
     def present_relationship_types(self) -> set[str]:
         """Relationship type verbs present in the bundle."""
         from maljan.schemas.stix_models import ConfidenceAnnotatedRelationship, Relationship
+
         return {
             obj.relationship_type
             for obj in self.bundle.objects
@@ -339,9 +342,7 @@ class STIXQualityMetrics:
             "annotated_relationships": self.annotated_relationships,
             "confidence_coverage": round(self.confidence_coverage, 4),
             "mean_confidence": (
-                round(self.mean_confidence, 4)
-                if self.mean_confidence is not None
-                else None
+                round(self.mean_confidence, 4) if self.mean_confidence is not None else None
             ),
             "relationship_type_f1": round(self.relationship_type_f1, 4),
             "present_relationship_types": sorted(self.present_relationship_types),

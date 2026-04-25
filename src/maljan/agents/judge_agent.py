@@ -102,8 +102,7 @@ class JudgeAgent:
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
-            f"--- {name.upper()} ANALYST ---\n{report}"
-            for name, report in reports.items()
+            f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
         )
 
         # Append ISR summaries when available — gives judge access to per-claim
@@ -132,8 +131,7 @@ class JudgeAgent:
                 ),
                 (
                     "human",
-                    "Expert Reports:\n{reports}\n\n"
-                    "Previous Discussion:\n{history}",
+                    "Expert Reports:\n{reports}\n\nPrevious Discussion:\n{history}",
                 ),
             ]
         )
@@ -207,21 +205,16 @@ class JudgeAgent:
         self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
 
         reports_text = "\n\n".join(
-            f"--- {name.upper()} ANALYST ---\n{report}"
-            for name, report in reports.items()
+            f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
         )
 
         # Include ISR summaries for richer claim-level context
         if isr_reports:
             isr_block = "\n\n".join(
-                f"[ISR] {isr.to_text_summary()}"
-                for isr in isr_reports.values()
-                if isr.claims
+                f"[ISR] {isr.to_text_summary()}" for isr in isr_reports.values() if isr.claims
             )
             if isr_block:
-                reports_text = (
-                    f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
-                )
+                reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
         # Phase 4.2: ATT&CK TTP validation grounding block
         validation_block = self._build_validation_block(isr_reports, attck_validator)
@@ -295,9 +288,7 @@ class JudgeAgent:
         )
 
         llm_stix = self.llm.with_structured_output(Bundle)
-        result = (prompt | llm_stix).invoke(
-            {"reports": reports_text, "history": str(history)}
-        )
+        result = (prompt | llm_stix).invoke({"reports": reports_text, "history": str(history)})
 
         if isinstance(result, Bundle):
             return result
@@ -356,9 +347,7 @@ class JudgeAgent:
             return ""
 
         if not hasattr(cascade_summary, "to_prompt_block"):
-            self.logger.warning(
-                "cascade_summary does not implement to_prompt_block(). Skipping."
-            )
+            self.logger.warning("cascade_summary does not implement to_prompt_block(). Skipping.")
             return ""
 
         try:
@@ -419,9 +408,7 @@ class JudgeAgent:
 
             return "\n".join(lines)
         except Exception as exc:
-            self.logger.warning(
-                "_build_confidence_instruction failed (%s). Skipping.", exc
-            )
+            self.logger.warning("_build_confidence_instruction failed (%s). Skipping.", exc)
             return ""
 
     def _build_schema_hint(
@@ -453,18 +440,12 @@ class JudgeAgent:
             category = infer_malware_category(reports, isr_reports)
             hint = get_pruned_schema_hint(category)
             if hint:
-                self.logger.info(
-                    "Schema pruning: inferred category '%s'.", category.value
-                )
+                self.logger.info("Schema pruning: inferred category '%s'.", category.value)
             else:
-                self.logger.debug(
-                    "Schema pruning: category UNKNOWN, no pruning applied."
-                )
+                self.logger.debug("Schema pruning: category UNKNOWN, no pruning applied.")
             return hint
         except Exception as exc:
-            self.logger.warning(
-                "_build_schema_hint failed (%s). Skipping schema pruning.", exc
-            )
+            self.logger.warning("_build_schema_hint failed (%s). Skipping schema pruning.", exc)
             return ""
 
     def _fallback_mediate(
@@ -474,9 +455,7 @@ class JudgeAgent:
         history: list[AgentArgument],
     ) -> MediatorVerdict:
         """Plain-text fallback when structured output is unavailable (e.g., Ollama)."""
-        response = (prompt | self.llm).invoke(
-            {"reports": reports_text, "history": str(history)}
-        )
+        response = (prompt | self.llm).invoke({"reports": reports_text, "history": str(history)})
         content = str(response.content)
         confidence = self._extract_confidence_from_text(content)
         return MediatorVerdict(
@@ -558,10 +537,13 @@ class JudgeAgent:
 
         for idx, case in enumerate(cases, 1):
             ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
-            summary = (case.summary_text[:200] + "...") if len(case.summary_text) > 200 else case.summary_text
+            summary = (
+                (case.summary_text[:200] + "...")
+                if len(case.summary_text) > 200
+                else case.summary_text
+            )
             lines.append(
-                f"[{idx}/{total}] sample_id: {case.sample_id} "
-                f"(category: {case.malware_category})"
+                f"[{idx}/{total}] sample_id: {case.sample_id} (category: {case.malware_category})"
             )
             lines.append(f"  Past techniques: {ttps}")
             lines.append(f"  Behavioral summary: {summary}")

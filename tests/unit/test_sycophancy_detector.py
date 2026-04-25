@@ -42,12 +42,14 @@ class TestDetectSycophancy:
     def test_distinct_summaries_not_detected(self) -> None:
         """ISRs from completely different analysis domains should not be flagged."""
         isr_static = _make_isr(
-            "static", "static",
-            "Imports VirtualAllocEx WriteProcessMemory CreateRemoteThread for injection"
+            "static",
+            "static",
+            "Imports VirtualAllocEx WriteProcessMemory CreateRemoteThread for injection",
         )
         isr_network = _make_isr(
-            "network", "network",
-            "Outbound DNS queries to randomised subdomains port 53 exfiltration pattern"
+            "network",
+            "network",
+            "Outbound DNS queries to randomised subdomains port 53 exfiltration pattern",
         )
         assert detect_sycophancy([isr_static, isr_network]) is False
 

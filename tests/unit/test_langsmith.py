@@ -26,6 +26,7 @@ from maljan.core.config import Settings
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_container_with(
     tracing: bool = False,
     api_key: str | None = None,
@@ -45,6 +46,7 @@ def _make_container_with(
 # ---------------------------------------------------------------------------
 # Settings.langchain_project
 # ---------------------------------------------------------------------------
+
 
 class TestLangChainProjectConfig:
     def test_default_project_is_maljan(self) -> None:
@@ -67,6 +69,7 @@ class TestLangChainProjectConfig:
 # ---------------------------------------------------------------------------
 # _configure_langsmith() — disabled path
 # ---------------------------------------------------------------------------
+
 
 class TestConfigureLangSmithDisabled:
     def test_disabled_does_not_set_tracing_env_var(self) -> None:
@@ -98,6 +101,7 @@ class TestConfigureLangSmithDisabled:
 # _configure_langsmith() — enabled with api key
 # ---------------------------------------------------------------------------
 
+
 class TestConfigureLangSmithEnabled:
     def test_sets_tracing_env_var_to_true(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
@@ -124,6 +128,7 @@ class TestConfigureLangSmithEnabled:
 # _configure_langsmith() — enabled without api key
 # ---------------------------------------------------------------------------
 
+
 class TestConfigureLangSmithNoKey:
     def test_sets_tracing_env_var_without_key(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
@@ -143,6 +148,7 @@ class TestConfigureLangSmithNoKey:
 
     def test_emits_warning_when_no_key(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
+
         with caplog.at_level(logging.WARNING, logger="maljan"):
             with patch.dict(os.environ, {}, clear=False):
                 _make_container_with(tracing=True, api_key=None)
@@ -153,13 +159,16 @@ class TestConfigureLangSmithNoKey:
 # _configure_langsmith() — direct method tests on container
 # ---------------------------------------------------------------------------
 
+
 class TestConfigureLangSmithMethod:
     def _make_container_raw(self) -> object:
         from maljan.core.container import ServiceContainer
+
         return ServiceContainer.__new__(ServiceContainer)
 
     def test_method_is_no_op_when_disabled(self) -> None:
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(langchain_tracing_v2=False)
 
@@ -170,6 +179,7 @@ class TestConfigureLangSmithMethod:
     def test_idempotent_when_called_twice(self) -> None:
         """Calling _configure_langsmith twice must not raise or corrupt state."""
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(
             langchain_tracing_v2=True,
@@ -187,6 +197,7 @@ class TestConfigureLangSmithMethod:
         import logging
 
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(
             langchain_tracing_v2=True,
@@ -197,9 +208,7 @@ class TestConfigureLangSmithMethod:
             with patch.dict(os.environ, {}, clear=False):
                 container._configure_langsmith()  # type: ignore[union-attr]
 
-        full_key_logged = any(
-            "ls_secretkey9999" in r.message for r in caplog.records
-        )
+        full_key_logged = any("ls_secretkey9999" in r.message for r in caplog.records)
         last4_logged = any("9999" in r.message for r in caplog.records)
         assert not full_key_logged, "Full API key must never appear in logs"
         assert last4_logged, "Last 4 chars of API key should appear in log"
@@ -209,13 +218,12 @@ class TestConfigureLangSmithMethod:
 # ServiceContainer.__init__ auto-wiring
 # ---------------------------------------------------------------------------
 
+
 class TestContainerAutoWiring:
     def test_init_calls_configure_langsmith(self) -> None:
         """__init__ must call _configure_langsmith automatically."""
         from maljan.core.container import ServiceContainer
 
-        with patch.object(
-            ServiceContainer, "_configure_langsmith"
-        ) as mock_configure:
+        with patch.object(ServiceContainer, "_configure_langsmith") as mock_configure:
             ServiceContainer(config=Settings(), mock=True)
             mock_configure.assert_called_once()

@@ -26,6 +26,7 @@ from maljan.analysis.schema_pruner import (
 # MalwareCategory enum
 # ---------------------------------------------------------------------------
 
+
 class TestMalwareCategory:
     def test_all_categories_defined(self) -> None:
         expected = {"ransomware", "rat", "dropper", "worm", "infostealer", "unknown"}
@@ -39,6 +40,7 @@ class TestMalwareCategory:
 # ---------------------------------------------------------------------------
 # infer_malware_category() — empty / trivial inputs
 # ---------------------------------------------------------------------------
+
 
 class TestInferCategoryEdgeCases:
     def test_empty_reports_returns_unknown(self) -> None:
@@ -59,6 +61,7 @@ class TestInferCategoryEdgeCases:
 # ---------------------------------------------------------------------------
 # infer_malware_category() — ransomware detection
 # ---------------------------------------------------------------------------
+
 
 class TestInferRansomware:
     def test_ransom_keyword_detected(self) -> None:
@@ -90,6 +93,7 @@ class TestInferRansomware:
 # infer_malware_category() — RAT detection
 # ---------------------------------------------------------------------------
 
+
 class TestInferRAT:
     def test_backdoor_keyword(self) -> None:
         result = infer_malware_category({"static": "installs a backdoor for persistent access"})
@@ -114,6 +118,7 @@ class TestInferRAT:
 # infer_malware_category() — Dropper detection
 # ---------------------------------------------------------------------------
 
+
 class TestInferDropper:
     def test_dropper_keyword(self) -> None:
         result = infer_malware_category({"static": "acts as a dropper for the final payload"})
@@ -124,21 +129,18 @@ class TestInferDropper:
         assert result is MalwareCategory.DROPPER
 
     def test_urldownloadtofile_keyword(self) -> None:
-        result = infer_malware_category(
-            {"dynamic": "calls URLDownloadToFile to retrieve payload"}
-        )
+        result = infer_malware_category({"dynamic": "calls URLDownloadToFile to retrieve payload"})
         assert result is MalwareCategory.DROPPER
 
     def test_certutil_keyword(self) -> None:
-        result = infer_malware_category(
-            {"dynamic": "uses certutil -decode to unpack payload"}
-        )
+        result = infer_malware_category({"dynamic": "uses certutil -decode to unpack payload"})
         assert result is MalwareCategory.DROPPER
 
 
 # ---------------------------------------------------------------------------
 # infer_malware_category() — Worm detection
 # ---------------------------------------------------------------------------
+
 
 class TestInferWorm:
     def test_worm_keyword(self) -> None:
@@ -150,9 +152,7 @@ class TestInferWorm:
         assert result is MalwareCategory.WORM
 
     def test_attck_t1091_detected(self) -> None:
-        result = infer_malware_category(
-            {"dynamic": "t1091 replication through removable media"}
-        )
+        result = infer_malware_category({"dynamic": "t1091 replication through removable media"})
         assert result is MalwareCategory.WORM
 
     def test_network_share_keyword(self) -> None:
@@ -166,15 +166,14 @@ class TestInferWorm:
 # infer_malware_category() — Infostealer detection
 # ---------------------------------------------------------------------------
 
+
 class TestInferInfostealer:
     def test_keylog_keyword(self) -> None:
         result = infer_malware_category({"static": "keylogger captures all keystrokes"})
         assert result is MalwareCategory.INFOSTEALER
 
     def test_mimikatz_keyword(self) -> None:
-        result = infer_malware_category(
-            {"dynamic": "loads mimikatz to dump lsass credentials"}
-        )
+        result = infer_malware_category({"dynamic": "loads mimikatz to dump lsass credentials"})
         assert result is MalwareCategory.INFOSTEALER
 
     def test_attck_t1003_detected(self) -> None:
@@ -191,6 +190,7 @@ class TestInferInfostealer:
 # ---------------------------------------------------------------------------
 # infer_malware_category() — tie-breaking
 # ---------------------------------------------------------------------------
+
 
 class TestInferTieBreaking:
     def test_neutral_text_returns_unknown(self) -> None:
@@ -213,17 +213,21 @@ class TestInferTieBreaking:
 # get_pruned_schema_hint()
 # ---------------------------------------------------------------------------
 
+
 class TestGetPrunedSchemaHint:
     def test_unknown_returns_empty(self) -> None:
         assert get_pruned_schema_hint(MalwareCategory.UNKNOWN) == ""
 
-    @pytest.mark.parametrize("category", [
-        MalwareCategory.RANSOMWARE,
-        MalwareCategory.RAT,
-        MalwareCategory.DROPPER,
-        MalwareCategory.WORM,
-        MalwareCategory.INFOSTEALER,
-    ])
+    @pytest.mark.parametrize(
+        "category",
+        [
+            MalwareCategory.RANSOMWARE,
+            MalwareCategory.RAT,
+            MalwareCategory.DROPPER,
+            MalwareCategory.WORM,
+            MalwareCategory.INFOSTEALER,
+        ],
+    )
     def test_all_categories_return_non_empty(self, category: MalwareCategory) -> None:
         hint = get_pruned_schema_hint(category)
         assert hint != "", f"Expected non-empty hint for {category}"
@@ -261,9 +265,11 @@ class TestGetPrunedSchemaHint:
 # JudgeAgent._build_schema_hint()
 # ---------------------------------------------------------------------------
 
+
 class TestJudgeAgentBuildSchemaHint:
     def _make_judge(self) -> object:
         from maljan.agents.judge_agent import JudgeAgent
+
         return JudgeAgent(llm=MagicMock())
 
     def test_ransomware_reports_return_hint(self) -> None:

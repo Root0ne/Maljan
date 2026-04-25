@@ -78,9 +78,7 @@ class LLMProviderRegistry:
 
         if provider_cls is None:
             available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
-            raise LLMError(
-                f"Unknown LLM provider: '{provider_name}'. Available: {available}"
-            )
+            raise LLMError(f"Unknown LLM provider: '{provider_name}'. Available: {available}")
 
         # Select model name based on role
         if role == "judge":
@@ -123,9 +121,7 @@ class LLMProviderRegistry:
 
         if agent_cfg is None:
             # No per-agent override — fall back to global expert LLM
-            logger.debug(
-                "No per-agent LLM config for '%s', using global expert LLM.", agent_name
-            )
+            logger.debug("No per-agent LLM config for '%s', using global expert LLM.", agent_name)
             return self.build_model(role="expert", **kwargs)
 
         # Per-agent override found

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 # Sub-components
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class NegotiationMetrics:
     """Statistics from the negotiation loop.
@@ -99,6 +100,7 @@ class CascadeMetrics:
 # ---------------------------------------------------------------------------
 # RunSummary
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RunSummary:
@@ -205,8 +207,7 @@ class RunSummary:
                 for t in c.top_techniques:
                     layers = ", ".join(t.get("layers", []))
                     lines.append(
-                        f"| {t['technique_id']} | {t['label']} | "
-                        f"{t['confidence']:.3f} | {layers} |"
+                        f"| {t['technique_id']} | {t['label']} | {t['confidence']:.3f} | {layers} |"
                     )
                 lines.append("")
         else:
@@ -291,6 +292,7 @@ class RunSummary:
 # Builder
 # ---------------------------------------------------------------------------
 
+
 class RunSummaryBuilder:
     """Constructs a RunSummary from pipeline state and phase-specific results.
 
@@ -340,7 +342,8 @@ class RunSummaryBuilder:
         # Count sycophancy events from discussion history metadata
         # (sycophancy_detected only reflects the last round)
         sycophancy_events = sum(
-            1 for arg in discussion_history
+            1
+            for arg in discussion_history
             if getattr(arg, "agent_name", "") == "Mediator"
             and "sycophancy" in getattr(arg, "finding", "").lower()
         )
@@ -374,11 +377,7 @@ class RunSummaryBuilder:
         """Extract per-agent ISR statistics."""
         stats: list[ISRAgentStats] = []
         for isr in isr_reports.values():
-            technique_ids = [
-                c.technique_id
-                for c in isr.claims
-                if c.technique_id is not None
-            ]
+            technique_ids = [c.technique_id for c in isr.claims if c.technique_id is not None]
             stats.append(
                 ISRAgentStats(
                     agent_id=isr.agent_id,
@@ -463,10 +462,11 @@ class RunSummaryBuilder:
 # Pure-Python helper (avoids importing from routing to prevent circular deps)
 # ---------------------------------------------------------------------------
 
+
 def _rolling_std(values: list[float]) -> float:
     """Population standard deviation of the provided values."""
     if len(values) < 2:
         return float("inf")
     mean = sum(values) / len(values)
     variance = sum((v - mean) ** 2 for v in values) / len(values)
-    return variance ** 0.5
+    return variance**0.5

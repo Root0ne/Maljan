@@ -119,6 +119,7 @@ def _make_ground_truth(
 # NegotiationMetrics
 # ---------------------------------------------------------------------------
 
+
 class TestNegotiationMetrics:
     def test_efficiency_ratio_partial(self) -> None:
         m = NegotiationMetrics(
@@ -223,6 +224,7 @@ class TestNegotiationMetrics:
 # TTPAccuracyMetrics
 # ---------------------------------------------------------------------------
 
+
 class TestTTPAccuracyMetrics:
     def test_perfect_match(self) -> None:
         m = TTPAccuracyMetrics(
@@ -313,6 +315,7 @@ class TestTTPAccuracyMetrics:
 # STIXQualityMetrics
 # ---------------------------------------------------------------------------
 
+
 class TestSTIXQualityMetrics:
     def test_full_entity_coverage(self) -> None:
         bundle = _make_bundle(has_malware=True, has_attack_pattern=True, has_annotated_rel=True)
@@ -396,12 +399,15 @@ class TestSTIXQualityMetrics:
 # GroundTruth
 # ---------------------------------------------------------------------------
 
+
 class TestGroundTruth:
     def test_from_dict_basic(self) -> None:
-        gt = GroundTruth.from_dict({
-            "sample_id": "test_1",
-            "technique_ids": ["T1486", "T1490"],
-        })
+        gt = GroundTruth.from_dict(
+            {
+                "sample_id": "test_1",
+                "technique_ids": ["T1486", "T1490"],
+            }
+        )
         assert gt.sample_id == "test_1"
         assert "T1486" in gt.technique_ids
         assert "T1490" in gt.technique_ids
@@ -412,11 +418,13 @@ class TestGroundTruth:
         assert gt.attck_valid_ids is None
 
     def test_from_dict_with_attck_valid_ids(self) -> None:
-        gt = GroundTruth.from_dict({
-            "sample_id": "test_1",
-            "technique_ids": ["T1486"],
-            "attck_valid_ids": ["T1486", "T1055"],
-        })
+        gt = GroundTruth.from_dict(
+            {
+                "sample_id": "test_1",
+                "technique_ids": ["T1486"],
+                "attck_valid_ids": ["T1486", "T1055"],
+            }
+        )
         assert gt.attck_valid_ids == {"T1486", "T1055"}
 
     def test_from_json_ransomware_fixture(self) -> None:
@@ -436,6 +444,7 @@ class TestGroundTruth:
 # ---------------------------------------------------------------------------
 # BenchmarkReport
 # ---------------------------------------------------------------------------
+
 
 class TestBenchmarkReport:
     def _make_report(self) -> BenchmarkReport:
@@ -493,6 +502,7 @@ class TestBenchmarkReport:
 # ---------------------------------------------------------------------------
 # BenchmarkRunner
 # ---------------------------------------------------------------------------
+
 
 class TestBenchmarkRunner:
     def test_run_returns_report(self) -> None:

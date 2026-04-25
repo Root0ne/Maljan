@@ -29,9 +29,7 @@ class TestClaimEvidence:
 
     def test_confidence_bounds(self) -> None:
         with pytest.raises(ValidationError):
-            ClaimEvidence(
-                claim="x", evidence_ref="y", confidence=1.5
-            )
+            ClaimEvidence(claim="x", evidence_ref="y", confidence=1.5)
 
     def test_invalid_technique_id_pattern(self) -> None:
         with pytest.raises(ValidationError):

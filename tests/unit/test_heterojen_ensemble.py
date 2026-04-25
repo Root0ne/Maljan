@@ -30,6 +30,7 @@ from maljan.core.config import AgentLLMConfig, LLMConfig, Settings
 # AgentLLMConfig
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLLMConfig:
     def test_required_fields(self) -> None:
         cfg = AgentLLMConfig(provider="openai", model="gpt-4o")
@@ -46,11 +47,13 @@ class TestAgentLLMConfig:
 
     def test_missing_provider_rejected(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             AgentLLMConfig(model="gpt-4o")  # type: ignore[call-arg]
 
     def test_missing_model_rejected(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             AgentLLMConfig(provider="openai")  # type: ignore[call-arg]
 
@@ -58,6 +61,7 @@ class TestAgentLLMConfig:
 # ---------------------------------------------------------------------------
 # LLMConfig.agents
 # ---------------------------------------------------------------------------
+
 
 class TestLLMConfigAgents:
     def test_default_agents_empty(self) -> None:
@@ -87,6 +91,7 @@ class TestLLMConfigAgents:
 # LLMProviderRegistry.build_model_for_agent()
 # ---------------------------------------------------------------------------
 
+
 def _make_registry(agents: dict | None = None) -> object:
     """Create a registry with mocked provider registry."""
     from maljan.llm.registry import LLMProviderRegistry
@@ -102,9 +107,9 @@ def _make_registry(agents: dict | None = None) -> object:
 
     # Mock the built-in model to avoid real LLM calls
     mock_model = MagicMock()
-    mock_provider_cls = MagicMock(return_value=MagicMock(
-        build_model=MagicMock(return_value=mock_model)
-    ))
+    mock_provider_cls = MagicMock(
+        return_value=MagicMock(build_model=MagicMock(return_value=mock_model))
+    )
     registry._provider_registry_patch = {
         "openai": mock_provider_cls,
         "anthropic": mock_provider_cls,
@@ -208,9 +213,11 @@ class TestBuildModelForAgent:
 # ServiceContainer.get_agent_llm()
 # ---------------------------------------------------------------------------
 
+
 class TestContainerGetAgentLLM:
     def _make_container(self, agents: dict | None = None) -> object:
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(llm=LLMConfig(agents=agents or {}))
         container.mock = False
@@ -256,6 +263,7 @@ class TestContainerGetAgentLLM:
 
     def test_mock_mode_raises(self) -> None:
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
         container._llm_registry = None
         container._agent_llm_cache = {}
@@ -268,9 +276,11 @@ class TestContainerGetAgentLLM:
 # ServiceContainer.get_agent() uses get_agent_llm()
 # ---------------------------------------------------------------------------
 
+
 class TestContainerGetAgentUsesAgentLLM:
     def test_get_agent_calls_get_agent_llm_not_expert(self) -> None:
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
         container._agent_cache = {}
 
@@ -291,6 +301,7 @@ class TestContainerGetAgentUsesAgentLLM:
 
     def test_get_agent_cache_hit_does_not_rebuild_llm(self) -> None:
         from maljan.core.container import ServiceContainer
+
         container = ServiceContainer.__new__(ServiceContainer)
 
         cached_agent = MagicMock()

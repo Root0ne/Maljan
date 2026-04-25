@@ -163,10 +163,9 @@ class TestStableId:
 
 
 class TestQdrantStoreInstantiation:
-    def test_raises_when_qdrant_client_missing(
-        self, monkeypatch: Any
-    ) -> None:
+    def test_raises_when_qdrant_client_missing(self, monkeypatch: Any) -> None:
         import sys
+
         original = sys.modules.get("qdrant_client")
         sys.modules["qdrant_client"] = None  # type: ignore[assignment]
         try:

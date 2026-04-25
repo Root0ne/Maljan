@@ -23,8 +23,7 @@ from maljan.core.logger import logger
 
 # Official MITRE CTI GitHub raw URL for Enterprise ATT&CK
 ATTCK_BUNDLE_URL = (
-    "https://raw.githubusercontent.com/mitre/cti/master/"
-    "enterprise-attack/enterprise-attack.json"
+    "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 )
 
 # Local cache directory — respects MALJAN_ATTCK_CACHE env var
@@ -43,14 +42,14 @@ class ATTCKTechnique:
     Fields map directly to STIX 2.1 AttackPattern object properties.
     """
 
-    technique_id: str           # e.g., "T1055"
-    name: str                   # e.g., "Process Injection"
-    description: str            # Full technique description text
-    tactic_phases: list[str]    # e.g., ["defense-evasion", "privilege-escalation"]
-    is_subtechnique: bool       # True for T1055.001
-    url: str = ""               # ATT&CK website URL
+    technique_id: str  # e.g., "T1055"
+    name: str  # e.g., "Process Injection"
+    description: str  # Full technique description text
+    tactic_phases: list[str]  # e.g., ["defense-evasion", "privilege-escalation"]
+    is_subtechnique: bool  # True for T1055.001
+    url: str = ""  # ATT&CK website URL
     data_sources: list[str] = field(default_factory=list)
-    detection: str = ""         # Detection guidance text
+    detection: str = ""  # Detection guidance text
     platforms: list[str] = field(default_factory=list)
 
     @property

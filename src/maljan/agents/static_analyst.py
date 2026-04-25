@@ -62,10 +62,12 @@ class StaticAnalyst(BaseAnalyst):
         """Revise static analysis based on peer findings and mediator feedback."""
         self.logger.info("Revising static analysis based on peer feedback...")
 
-        peer_section = "\n\n".join(
-            f"{name.upper()} ANALYST REPORT:\n{report}"
-            for name, report in peer_reports.items()
-        ) or "No peer reports available."
+        peer_section = (
+            "\n\n".join(
+                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -154,9 +156,12 @@ class StaticAnalyst(BaseAnalyst):
         """Return (revised_text, AgentISR) with dissent_items populated."""
         self.logger.info("Executing static ISR revision (round %d)...", revision_round)
 
-        peer_isr_summaries = "\n\n".join(
-            f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
-        ) or "No peer reports available."
+        peer_isr_summaries = (
+            "\n\n".join(
+                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -212,6 +217,7 @@ class StaticAnalyst(BaseAnalyst):
 # ------------------------------------------------------------------
 # Shared parsing helpers (module-level, reused by other analysts)
 # ------------------------------------------------------------------
+
 
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
     """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output."""

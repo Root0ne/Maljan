@@ -146,7 +146,7 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
         agent_id,
         len(all_claims),
         len(keyed_sorted[:MAX_MERGED_CLAIMS]),
-        len(unkeyed_sorted[:max(0, MAX_MERGED_CLAIMS - len(keyed_sorted))]),
+        len(unkeyed_sorted[: max(0, MAX_MERGED_CLAIMS - len(keyed_sorted))]),
         len(merged_dissent),
     )
 

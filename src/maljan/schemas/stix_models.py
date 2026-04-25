@@ -75,6 +75,7 @@ EvidenceBasis = Literal[
 # STIX Domain Objects (unchanged from original)
 # ---------------------------------------------------------------------------
 
+
 class STIXObject(BaseModel):
     """Base generic properties for all STIX Domain Objects (SDOs)."""
 
@@ -189,13 +190,7 @@ class AttackPattern(STIXObject):
 
 # Discriminated union: Pydantic resolves ambiguity between Relationship and
 # ConfidenceAnnotatedRelationship via the presence of x_maljan_confidence.
-_BundleObject = (
-    Indicator
-    | Malware
-    | ConfidenceAnnotatedRelationship
-    | Relationship
-    | AttackPattern
-)
+_BundleObject = Indicator | Malware | ConfidenceAnnotatedRelationship | Relationship | AttackPattern
 
 
 class Bundle(BaseModel):
@@ -212,10 +207,7 @@ class Bundle(BaseModel):
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""
-        return [
-            obj for obj in self.objects
-            if isinstance(obj, ConfidenceAnnotatedRelationship)
-        ]
+        return [obj for obj in self.objects if isinstance(obj, ConfidenceAnnotatedRelationship)]
 
     def mean_relationship_confidence(self) -> float | None:
         """Compute mean confidence across all annotated relationships.

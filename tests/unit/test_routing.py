@@ -15,6 +15,7 @@ from maljan.pipeline.state import AnalysisState
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_state(
     iteration: int,
     consensus: bool,
@@ -47,6 +48,7 @@ def _make_router(max_iterations: int = 5) -> ConsensusRouter:
 # ---------------------------------------------------------------------------
 # is_confidence_stable()
 # ---------------------------------------------------------------------------
+
 
 class TestIsConfidenceStable:
     def test_too_few_values_returns_false(self) -> None:
@@ -95,8 +97,8 @@ class TestIsConfidenceStable:
 # ConsensusRouter.should_continue()
 # ---------------------------------------------------------------------------
 
-class TestConsensusRouter:
 
+class TestConsensusRouter:
     # --- Existing tests (Phase 1 behavior preserved) ---
 
     def test_proceeds_to_judge_on_consensus_no_syco(self) -> None:

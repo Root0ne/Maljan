@@ -94,13 +94,13 @@ def make_analyst_node(
                 # Chunked path: per-chunk analysis + hierarchical merge.
                 logger.info(
                     "Agent '%s': processing %d chunks for sample '%s'.",
-                    agent_name, len(chunks), state["file_hash"],
+                    agent_name,
+                    len(chunks),
+                    state["file_hash"],
                 )
                 isr = agent.safe_analyze_isr_chunked(chunks)
 
-            report = isr.to_text_summary() if isr.claims else agent.safe_analyze(
-                chunks[0].content
-            )
+            report = isr.to_text_summary() if isr.claims else agent.safe_analyze(chunks[0].content)
             return {
                 "reports": {agent_name: report},
                 "isr_reports": {agent_name: isr},
@@ -127,6 +127,7 @@ def make_analyst_node(
 # ---------------------------------------------------------------------------
 # Revision context builder (Phase 3: Chunked Grounding)
 # ---------------------------------------------------------------------------
+
 
 def _build_revision_context(
     state: dict[str, Any],
@@ -167,7 +168,9 @@ def _build_revision_context(
         logger.warning(
             "_build_revision_context: load_chunked failed for '%s/%s' (%s). "
             "Falling back to load_data().",
-            file_hash, agent_name, exc,
+            file_hash,
+            agent_name,
+            exc,
         )
         return container.load_data(file_hash, agent_name)
 
@@ -184,8 +187,7 @@ def _build_revision_context(
     if not summary_text:
         # Fallback: no summary available yet (first revision, error path).
         logger.warning(
-            "_build_revision_context: no summary for '%s' in state. "
-            "Falling back to load_data().",
+            "_build_revision_context: no summary for '%s' in state. Falling back to load_data().",
             agent_name,
         )
         return container.load_data(file_hash, agent_name)
@@ -220,9 +222,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
         # Use revised reports if available, otherwise originals
         revised = state.get("revised_reports") or {}
         original = state.get("reports") or {}
-        active_reports = {
-            name: revised.get(name) or original.get(name, "") for name in agent_names
-        }
+        active_reports = {name: revised.get(name) or original.get(name, "") for name in agent_names}
 
         # Collect current ISR reports for sycophancy detection
         current_isrs = list((state.get("isr_reports") or {}).values())
@@ -334,8 +334,7 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 )
             return {
                 "revised_reports": {
-                    name: f"MOCK REVISED: {name} analysis updated."
-                    for name in agent_names
+                    name: f"MOCK REVISED: {name} analysis updated." for name in agent_names
                 },
                 "isr_reports": mock_isrs,
             }
@@ -407,6 +406,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             attck_validator = None
             try:
                 from maljan.memory.attck_validator import ATTCKValidator
+
                 attck_validator = ATTCKValidator.get_instance()
             except Exception as e:
                 logger.warning("ATTCKValidator unavailable: %s. Skipping TTP validation.", e)
@@ -417,6 +417,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             isr_reports = state.get("isr_reports") or {}
             try:
                 from maljan.analysis.ttp_cascade import TTPCascadeEngine
+
                 cascade_summary = TTPCascadeEngine().compute(isr_reports)
             except Exception as e:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)
@@ -463,6 +464,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             run_summary_dict = None
             try:
                 from maljan.analysis.run_summary import RunSummaryBuilder
+
                 _max_iters = container.config.negotiation.max_iterations
                 summary = (
                     RunSummaryBuilder(start_time=_start_time)
@@ -500,16 +502,16 @@ def make_judge_node(container: ServiceContainer) -> Any:
                         sample_id=state.get("file_hash", "unknown"),
                         isr_reports=isr_reports,
                         stix_bundle_json=(
-                            bundle.model_dump_json()
-                            if isinstance(bundle, Bundle)
-                            else ""
+                            bundle.model_dump_json() if isinstance(bundle, Bundle) else ""
                         ),
                         malware_category=category,
                     )
                     memory_store.store(case)
                     logger.info(
                         "LTM: stored case '%s' (category=%s, techniques=%d).",
-                        case.sample_id, case.malware_category, len(case.technique_ids),
+                        case.sample_id,
+                        case.malware_category,
+                        len(case.technique_ids),
                     )
                 except Exception as e:
                     logger.warning("LTM store failed (%s). Analysis result is unaffected.", e)

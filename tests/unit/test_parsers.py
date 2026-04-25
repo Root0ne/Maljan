@@ -74,9 +74,7 @@ class TestDynamicParser:
     def test_severity_high_on_injection(self) -> None:
         data = {
             "behavior": {
-                "generic": [
-                    {"category": "injection", "description": "Code injection detected."}
-                ],
+                "generic": [{"category": "injection", "description": "Code injection detected."}],
                 "apistats": {},
             }
         }

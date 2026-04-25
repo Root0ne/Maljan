@@ -29,6 +29,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_isr(
     agent_id: str,
     domain: str,
@@ -81,6 +82,7 @@ def _make_builder(start_time: float | None = None) -> RunSummaryBuilder:
 # _rolling_std
 # ---------------------------------------------------------------------------
 
+
 class TestRollingStd:
     def test_single_value_returns_inf(self) -> None:
         assert _rolling_std([0.5]) == float("inf")
@@ -100,6 +102,7 @@ class TestRollingStd:
 # ---------------------------------------------------------------------------
 # NegotiationMetrics
 # ---------------------------------------------------------------------------
+
 
 class TestNegotiationMetrics:
     def _make(self, termination_reason: str) -> NegotiationMetrics:
@@ -126,6 +129,7 @@ class TestNegotiationMetrics:
 # RunSummaryBuilder — set_negotiation
 # ---------------------------------------------------------------------------
 
+
 class TestBuilderSetNegotiation:
     def test_consensus_termination_reason(self) -> None:
         builder = _make_builder()
@@ -135,20 +139,24 @@ class TestBuilderSetNegotiation:
 
     def test_hard_limit_when_not_consensus(self) -> None:
         builder = _make_builder()
-        builder.set_negotiation(_make_state(
-            is_consensus=False,
-            confidence_history=[0.6, 0.8],  # only 2 rounds, no std check
-        ))
+        builder.set_negotiation(
+            _make_state(
+                is_consensus=False,
+                confidence_history=[0.6, 0.8],  # only 2 rounds, no std check
+            )
+        )
         summary = builder.build()
         assert summary.negotiation.termination_reason == "hard_limit"
 
     def test_convergence_when_stable_confidence(self) -> None:
         builder = _make_builder()
         # std of [0.85, 0.85, 0.85] = 0.0 < 0.02
-        builder.set_negotiation(_make_state(
-            is_consensus=False,
-            confidence_history=[0.85, 0.85, 0.85],
-        ))
+        builder.set_negotiation(
+            _make_state(
+                is_consensus=False,
+                confidence_history=[0.85, 0.85, 0.85],
+            )
+        )
         summary = builder.build()
         assert summary.negotiation.termination_reason == "convergence"
 
@@ -168,6 +176,7 @@ class TestBuilderSetNegotiation:
 # RunSummaryBuilder — set_isr_stats
 # ---------------------------------------------------------------------------
 
+
 class TestBuilderSetISRStats:
     def test_empty_isr_reports(self) -> None:
         builder = _make_builder()
@@ -177,7 +186,8 @@ class TestBuilderSetISRStats:
 
     def test_agent_stats_extracted(self) -> None:
         isr = _make_isr(
-            "static", "static",
+            "static",
+            "static",
             [_claim("T1055", 0.8), _claim("T1547", 0.7)],
         )
         builder = _make_builder()
@@ -191,7 +201,8 @@ class TestBuilderSetISRStats:
 
     def test_technique_ids_deduplicated(self) -> None:
         isr = _make_isr(
-            "dynamic", "dynamic",
+            "dynamic",
+            "dynamic",
             [_claim("T1055", 0.9), _claim("T1055", 0.8)],  # duplicate T1055
         )
         builder = _make_builder()
@@ -222,6 +233,7 @@ class TestBuilderSetISRStats:
 # RunSummaryBuilder — set_validation_summary / set_cascade_summary
 # ---------------------------------------------------------------------------
 
+
 class TestBuilderOptionalSummaries:
     def test_validation_none_if_not_set(self) -> None:
         summary = _make_builder().build()
@@ -233,6 +245,7 @@ class TestBuilderOptionalSummaries:
 
     def test_validation_extracted_from_duck_type(self) -> None:
         from unittest.mock import MagicMock
+
         mock_val = MagicMock()
         mock_val.total_claims = 5
         mock_val.valid_ids = 4
@@ -249,6 +262,7 @@ class TestBuilderOptionalSummaries:
 
     def test_cascade_extracted_from_real_cascade_summary(self) -> None:
         from maljan.analysis.ttp_cascade import TTPCascadeEngine
+
         isr_s = _make_isr("s", "static", [_claim("T1055", 0.8)])
         isr_d = _make_isr("d", "dynamic", [_claim("T1055", 0.9)])
         cascade_summary = TTPCascadeEngine().compute({"s": isr_s, "d": isr_d})
@@ -277,15 +291,18 @@ class TestBuilderOptionalSummaries:
 # RunSummary.to_markdown()
 # ---------------------------------------------------------------------------
 
+
 class TestRunSummaryToMarkdown:
     def _make_summary(self) -> RunSummary:
         builder = _make_builder()
         builder.set_sample("abc123", "evil.exe")
         builder.set_verdict("Malware", 12)
         builder.set_negotiation(_make_state(is_consensus=True))
-        builder.set_isr_stats({
-            "s": _make_isr("static", "static", [_claim("T1055", 0.8)]),
-        })
+        builder.set_isr_stats(
+            {
+                "s": _make_isr("static", "static", [_claim("T1055", 0.8)]),
+            }
+        )
         return builder.build()
 
     def test_contains_verdict(self) -> None:
@@ -321,6 +338,7 @@ class TestRunSummaryToMarkdown:
 # ---------------------------------------------------------------------------
 # RunSummary.to_dict() — JSON serializability
 # ---------------------------------------------------------------------------
+
 
 class TestRunSummaryToDict:
     def _make_summary(self) -> RunSummary:

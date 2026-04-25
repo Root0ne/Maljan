@@ -72,8 +72,7 @@ class CAPEv2Client:
             import httpx  # noqa: F401
         except ImportError as exc:
             raise SandboxNotAvailableError(
-                "httpx is required for CAPEv2Client. "
-                "Install with: uv add httpx"
+                "httpx is required for CAPEv2Client. Install with: uv add httpx"
             ) from exc
 
         import httpx
@@ -123,10 +122,7 @@ class CAPEv2Client:
         data = response.json()
 
         # CAPEv2 returns {"task_id": 42} or {"task_ids": [42]}
-        task_id = (
-            data.get("task_id")
-            or (data.get("task_ids") or [None])[0]
-        )
+        task_id = data.get("task_id") or (data.get("task_ids") or [None])[0]
         if task_id is None:
             raise SandboxError(f"Unexpected submit response: {data}")
 
@@ -161,7 +157,9 @@ class CAPEv2Client:
 
         logger.info(
             "CAPEv2Client: polling task %s (timeout=%ds, interval=%ds).",
-            task_id, timeout_seconds, poll_interval_seconds,
+            task_id,
+            timeout_seconds,
+            poll_interval_seconds,
         )
 
         while time.monotonic() < deadline:
@@ -182,9 +180,7 @@ class CAPEv2Client:
 
             time.sleep(poll_interval_seconds)
 
-        raise SandboxTimeoutError(
-            f"Task {task_id} did not complete within {timeout_seconds}s."
-        )
+        raise SandboxTimeoutError(f"Task {task_id} did not complete within {timeout_seconds}s.")
 
     def fetch_report(self, task_id: str) -> SubmissionResult:
         """Fetch the full JSON report for a completed task.
@@ -237,6 +233,5 @@ class CAPEv2Client:
         """Raise SandboxError for non-2xx responses."""
         if response.status_code >= 400:
             raise SandboxError(
-                f"CAPEv2 {operation} failed "
-                f"(HTTP {response.status_code}): {response.text[:200]}"
+                f"CAPEv2 {operation} failed (HTTP {response.status_code}): {response.text[:200]}"
             )

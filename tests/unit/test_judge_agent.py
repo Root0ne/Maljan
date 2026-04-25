@@ -129,9 +129,7 @@ class TestJudgeAgentMediate:
 
     def test_mediate_generic_any_agent_count(self, mock_llm: MagicMock) -> None:
         """mediate() accepts any number of reports without modification."""
-        verdict = MediatorVerdict(
-            contradictions=[], resolution_summary="Ok.", confidence=0.9
-        )
+        verdict = MediatorVerdict(contradictions=[], resolution_summary="Ok.", confidence=0.9)
         # 5 agents instead of 3 — method should not care
         reports = {f"agent_{i}": f"Report from agent {i}" for i in range(5)}
         judge = JudgeAgent(llm=mock_llm)

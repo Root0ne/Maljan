@@ -136,9 +136,7 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(
-            config=Settings(), mock=True, samples_dir=str(tmp_path)
-        )
+        container = ServiceContainer(config=Settings(), mock=True, samples_dir=str(tmp_path))
         client = container.get_sandbox_client()
         assert isinstance(client, MockSandboxClient)
         # Verify the client uses the correct fixtures directory
@@ -211,17 +209,14 @@ class TestMaljanAppSandboxClient:
         sample.write_bytes(b"malware payload bytes")
 
         import hashlib
+
         sha256 = hashlib.sha256(b"malware payload bytes").hexdigest()
-        (dynamic_dir / f"{sha256}.json").write_text(
-            json.dumps(report), encoding="utf-8"
-        )
+        (dynamic_dir / f"{sha256}.json").write_text(json.dumps(report), encoding="utf-8")
 
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(
-            config=Settings(), mock=True, samples_dir=str(tmp_path)
-        )
+        container = ServiceContainer(config=Settings(), mock=True, samples_dir=str(tmp_path))
         sandbox_client = container.get_sandbox_client()
 
         chunks = container.loader.load_from_sandbox(

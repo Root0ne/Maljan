@@ -42,13 +42,14 @@ if TYPE_CHECKING:
 # Category enum
 # ---------------------------------------------------------------------------
 
+
 class MalwareCategory(StrEnum):
     """Supported malware behavioral categories for schema pruning."""
 
     RANSOMWARE = "ransomware"
-    RAT = "rat"          # Remote Access Trojan / Backdoor
+    RAT = "rat"  # Remote Access Trojan / Backdoor
     DROPPER = "dropper"  # Loader / Downloader / Stager
-    WORM = "worm"        # Self-propagating
+    WORM = "worm"  # Self-propagating
     INFOSTEALER = "infostealer"
     UNKNOWN = "unknown"  # Fallback — no pruning applied
 
@@ -62,10 +63,10 @@ class MalwareCategory(StrEnum):
 _CATEGORY_KEYWORDS: dict[MalwareCategory, list[tuple[str, float]]] = {
     MalwareCategory.RANSOMWARE: [
         # ATT&CK technique IDs — most specific signal
-        ("t1486", 3.0),   # Data Encrypted for Impact
-        ("t1490", 3.0),   # Inhibit System Recovery
-        ("t1489", 2.5),   # Service Stop
-        ("t1485", 2.5),   # Data Destruction
+        ("t1486", 3.0),  # Data Encrypted for Impact
+        ("t1490", 3.0),  # Inhibit System Recovery
+        ("t1489", 2.5),  # Service Stop
+        ("t1485", 2.5),  # Data Destruction
         # Domain terms
         ("encrypt", 2.0),
         ("ransom", 3.0),
@@ -89,11 +90,11 @@ _CATEGORY_KEYWORDS: dict[MalwareCategory, list[tuple[str, float]]] = {
     ],
     MalwareCategory.RAT: [
         # ATT&CK technique IDs
-        ("t1095", 3.0),   # Non-Application Layer Protocol (C2)
-        ("t1071", 2.5),   # Application Layer Protocol (C2)
-        ("t1571", 2.5),   # Non-Standard Port
-        ("t1105", 2.0),   # Ingress Tool Transfer
-        ("t1059", 2.0),   # Command and Scripting Interpreter
+        ("t1095", 3.0),  # Non-Application Layer Protocol (C2)
+        ("t1071", 2.5),  # Application Layer Protocol (C2)
+        ("t1571", 2.5),  # Non-Standard Port
+        ("t1105", 2.0),  # Ingress Tool Transfer
+        ("t1059", 2.0),  # Command and Scripting Interpreter
         # Domain terms
         ("remote access", 2.5),
         ("backdoor", 3.0),
@@ -112,11 +113,11 @@ _CATEGORY_KEYWORDS: dict[MalwareCategory, list[tuple[str, float]]] = {
     ],
     MalwareCategory.DROPPER: [
         # ATT&CK technique IDs
-        ("t1105", 3.0),   # Ingress Tool Transfer
-        ("t1218", 2.5),   # System Binary Proxy Execution
-        ("t1059", 2.0),   # Command and Scripting Interpreter
-        ("t1027", 2.0),   # Obfuscated Files
-        ("t1140", 2.0),   # Deobfuscate/Decode Files
+        ("t1105", 3.0),  # Ingress Tool Transfer
+        ("t1218", 2.5),  # System Binary Proxy Execution
+        ("t1059", 2.0),  # Command and Scripting Interpreter
+        ("t1027", 2.0),  # Obfuscated Files
+        ("t1140", 2.0),  # Deobfuscate/Decode Files
         # Domain terms
         ("dropper", 3.0),
         ("loader", 3.0),
@@ -136,10 +137,10 @@ _CATEGORY_KEYWORDS: dict[MalwareCategory, list[tuple[str, float]]] = {
     ],
     MalwareCategory.WORM: [
         # ATT&CK technique IDs
-        ("t1021", 3.0),   # Remote Services (lateral movement)
-        ("t1091", 3.0),   # Replication Through Removable Media
-        ("t1570", 2.5),   # Lateral Tool Transfer
-        ("t1080", 2.5),   # Taint Shared Content
+        ("t1021", 3.0),  # Remote Services (lateral movement)
+        ("t1091", 3.0),  # Replication Through Removable Media
+        ("t1570", 2.5),  # Lateral Tool Transfer
+        ("t1080", 2.5),  # Taint Shared Content
         # Domain terms
         ("worm", 3.0),
         ("propagat", 3.0),
@@ -157,11 +158,11 @@ _CATEGORY_KEYWORDS: dict[MalwareCategory, list[tuple[str, float]]] = {
     ],
     MalwareCategory.INFOSTEALER: [
         # ATT&CK technique IDs
-        ("t1003", 3.0),   # OS Credential Dumping
-        ("t1056", 3.0),   # Input Capture
-        ("t1555", 3.0),   # Credentials from Password Stores
-        ("t1041", 2.5),   # Exfiltration Over C2 Channel
-        ("t1567", 2.5),   # Exfiltration Over Web Service
+        ("t1003", 3.0),  # OS Credential Dumping
+        ("t1056", 3.0),  # Input Capture
+        ("t1555", 3.0),  # Credentials from Password Stores
+        ("t1041", 2.5),  # Exfiltration Over C2 Channel
+        ("t1567", 2.5),  # Exfiltration Over Web Service
         # Domain terms
         ("steal", 2.5),
         ("credential", 2.5),
@@ -195,9 +196,9 @@ _CATEGORY_HINTS: dict[MalwareCategory, dict] = {
         ],
         "deprioritize": "Network infrastructure (ransomware typically has minimal C2)",
         "technique_focus": "T1486 (Data Encrypted for Impact), T1490 (Inhibit System Recovery), "
-                           "T1489 (Service Stop), T1485 (Data Destruction)",
+        "T1489 (Service Stop), T1485 (Data Destruction)",
         "narrative": "Focus on encryption mechanism, key management, file targeting scope, "
-                     "recovery prevention methods, and ransom payment infrastructure.",
+        "recovery prevention methods, and ransom payment infrastructure.",
     },
     MalwareCategory.RAT: {
         "focus_types": [
@@ -209,9 +210,9 @@ _CATEGORY_HINTS: dict[MalwareCategory, dict] = {
         ],
         "deprioritize": "File encryption or mass file operations",
         "technique_focus": "T1095 (Non-Application Layer Protocol), T1071 (App Layer Protocol), "
-                           "T1059 (Command and Scripting Interpreter), T1547 (Persistence)",
+        "T1059 (Command and Scripting Interpreter), T1547 (Persistence)",
         "narrative": "Focus on C2 channel, authentication, supported commands, "
-                     "persistence mechanism, and anti-analysis techniques.",
+        "persistence mechanism, and anti-analysis techniques.",
     },
     MalwareCategory.DROPPER: {
         "focus_types": [
@@ -222,9 +223,9 @@ _CATEGORY_HINTS: dict[MalwareCategory, dict] = {
         ],
         "deprioritize": "Encryption-related objects (dropper does not encrypt user data)",
         "technique_focus": "T1105 (Ingress Tool Transfer), T1218 (Signed Binary Proxy Execution), "
-                           "T1027 (Obfuscated Files), T1140 (Deobfuscate/Decode)",
+        "T1027 (Obfuscated Files), T1140 (Deobfuscate/Decode)",
         "narrative": "Focus on download mechanism, payload staging, obfuscation technique, "
-                     "and execution chain from dropper to final payload.",
+        "and execution chain from dropper to final payload.",
     },
     MalwareCategory.WORM: {
         "focus_types": [
@@ -235,9 +236,9 @@ _CATEGORY_HINTS: dict[MalwareCategory, dict] = {
         ],
         "deprioritize": "Credential-specific objects unless credential-stealing worm",
         "technique_focus": "T1021 (Remote Services), T1091 (Removable Media Replication), "
-                           "T1080 (Taint Shared Content), T1570 (Lateral Tool Transfer)",
+        "T1080 (Taint Shared Content), T1570 (Lateral Tool Transfer)",
         "narrative": "Focus on propagation mechanism, target selection, "
-                     "self-copy logic, and network/removable media spread vectors.",
+        "self-copy logic, and network/removable media spread vectors.",
     },
     MalwareCategory.INFOSTEALER: {
         "focus_types": [
@@ -248,12 +249,12 @@ _CATEGORY_HINTS: dict[MalwareCategory, dict] = {
         ],
         "deprioritize": "Ransomware-specific objects (encryption, ransom demands)",
         "technique_focus": "T1003 (OS Credential Dumping), T1056 (Input Capture), "
-                           "T1555 (Credentials from Password Stores), T1041 (Exfiltration over C2)",
+        "T1555 (Credentials from Password Stores), T1041 (Exfiltration over C2)",
         "narrative": "Focus on targeted data types (credentials, PII, crypto wallets), "
-                     "collection method, staging location, and exfiltration channel.",
+        "collection method, staging location, and exfiltration channel.",
     },
     MalwareCategory.UNKNOWN: {
-        "focus_types": [],      # Empty → no pruning
+        "focus_types": [],  # Empty → no pruning
         "deprioritize": "",
         "technique_focus": "",
         "narrative": "",
@@ -264,6 +265,7 @@ _CATEGORY_HINTS: dict[MalwareCategory, dict] = {
 # ---------------------------------------------------------------------------
 # Inference engine
 # ---------------------------------------------------------------------------
+
 
 def _collect_text(
     reports: dict[str, str],

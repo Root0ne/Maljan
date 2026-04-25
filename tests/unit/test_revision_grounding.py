@@ -20,6 +20,7 @@ from maljan.pipeline.nodes import _build_revision_context
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_chunk(
     index: int,
     total: int,
@@ -61,6 +62,7 @@ def _make_state(
 # Single-chunk path (backward-compatible)
 # ---------------------------------------------------------------------------
 
+
 class TestSingleChunkPath:
     def test_returns_chunk_content(self) -> None:
         """Single chunk → returns raw chunk text, not load_data fallback."""
@@ -94,6 +96,7 @@ class TestSingleChunkPath:
 # ---------------------------------------------------------------------------
 # Multi-chunk path
 # ---------------------------------------------------------------------------
+
 
 class TestMultiChunkPath:
     def test_returns_isr_summary_not_raw_data(self) -> None:
@@ -129,10 +132,7 @@ class TestMultiChunkPath:
         assert "chunks=4" in result
 
     def test_context_header_includes_strategy(self) -> None:
-        chunks = [
-            _make_chunk(i, 2, strategy=ChunkStrategy.FUNCTION_BOUNDARY)
-            for i in range(2)
-        ]
+        chunks = [_make_chunk(i, 2, strategy=ChunkStrategy.FUNCTION_BOUNDARY) for i in range(2)]
         container = _make_container(chunks)
         state = _make_state(reports={"static": "summary"})
 
@@ -204,6 +204,7 @@ class TestMultiChunkPath:
 # ---------------------------------------------------------------------------
 # Graceful degradation
 # ---------------------------------------------------------------------------
+
 
 class TestGracefulDegradation:
     def test_load_chunked_exception_falls_back_to_load_data(self) -> None:

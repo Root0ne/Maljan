@@ -22,6 +22,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_isr(
     agent_id: str = "static",
     domain: str = "static",
@@ -73,6 +74,7 @@ def _make_chunk(
 # merge_chunk_isrs — basic cases
 # ---------------------------------------------------------------------------
 
+
 class TestMergeChunkISRsBasic:
     def test_empty_list_raises(self) -> None:
         with pytest.raises(ValueError, match="at least one"):
@@ -109,6 +111,7 @@ class TestMergeChunkISRsBasic:
 # merge_chunk_isrs — TTP deduplication (keyed claims)
 # ---------------------------------------------------------------------------
 
+
 class TestMergeChunkISRsTTPDedup:
     def test_same_ttp_keeps_highest_confidence(self) -> None:
         isrs = [
@@ -142,6 +145,7 @@ class TestMergeChunkISRsTTPDedup:
 # ---------------------------------------------------------------------------
 # merge_chunk_isrs — unkeyed claim deduplication
 # ---------------------------------------------------------------------------
+
 
 class TestMergeChunkISRsUnkeyedDedup:
     def test_duplicate_unkeyed_claims_removed(self) -> None:
@@ -177,6 +181,7 @@ class TestMergeChunkISRsUnkeyedDedup:
 # merge_chunk_isrs — MAX_MERGED_CLAIMS cap
 # ---------------------------------------------------------------------------
 
+
 class TestMergeChunkISRsCap:
     def test_excess_claims_capped(self) -> None:
         # Create MAX_MERGED_CLAIMS + 5 unique claims
@@ -185,8 +190,8 @@ class TestMergeChunkISRsCap:
         merge_chunk_isrs(isrs)  # single ISR returns unchanged — no cap triggered
         # Wrap in two ISRs to trigger merge path
         isrs2 = [
-            _make_isr(claims=claims[:MAX_MERGED_CLAIMS + 3]),
-            _make_isr(claims=claims[MAX_MERGED_CLAIMS + 3:]),
+            _make_isr(claims=claims[: MAX_MERGED_CLAIMS + 3]),
+            _make_isr(claims=claims[MAX_MERGED_CLAIMS + 3 :]),
         ]
         result2 = merge_chunk_isrs(isrs2)
         assert len(result2.claims) <= MAX_MERGED_CLAIMS
@@ -209,6 +214,7 @@ class TestMergeChunkISRsCap:
 # ---------------------------------------------------------------------------
 # merge_chunk_isrs — dissent reconciliation
 # ---------------------------------------------------------------------------
+
 
 class TestMergeChunkISRsDissent:
     def test_dissent_items_merged(self) -> None:
@@ -237,6 +243,7 @@ class TestMergeChunkISRsDissent:
 # BaseAnalyst.safe_analyze_isr_chunked()
 # ---------------------------------------------------------------------------
 
+
 class TestSafeAnalyzeISRChunked:
     """Test safe_analyze_isr_chunked() on a concrete minimal BaseAnalyst subclass."""
 
@@ -262,6 +269,7 @@ class TestSafeAnalyzeISRChunked:
 
         # Attach the real method from BaseAnalyst
         from maljan.agents.base_agent import BaseAnalyst
+
         safe_analyze_isr_chunked = BaseAnalyst.safe_analyze_isr_chunked
 
     @pytest.fixture
@@ -295,6 +303,7 @@ class TestSafeAnalyzeISRChunked:
 # ServiceContainer.load_chunked()
 # ---------------------------------------------------------------------------
 
+
 class TestServiceContainerLoadChunked:
     def _make_container(self, text: str = "sample data") -> MagicMock:
         """Build a mock container with loader._chunker and _data_cache."""
@@ -305,6 +314,7 @@ class TestServiceContainerLoadChunked:
         container._data_cache = {}
         # Bind the real method
         from maljan.core.container import ServiceContainer
+
         container.load_chunked = ServiceContainer.load_chunked.__get__(container)
         return container
 
