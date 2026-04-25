@@ -19,6 +19,8 @@ Maljan is an enterprise-grade cybersecurity analysis framework for automated, st
 | STIX 2.1 + confidence intervals | Structured, Pydantic-validated Bundle with per-relationship `x_maljan_confidence` and `x_maljan_evidence_basis` annotations |
 | Heterogeneous model ensemble | Each agent can use a different LLM provider/model via config, reducing echo chamber risk across model families |
 | LangSmith observability | Full trace visibility for all LLM calls, negotiation rounds, ISR construction, and TTP validation via `.env` opt-in |
+| Long-term memory (RAG) | Past analysis cases are persisted and retrieved by cosine similarity; injected as few-shot context into every verdict call |
+| Sandbox integration | `MockSandboxClient` for offline/CI use; `CAPEv2Client` for live sample submission, polling, and report ingestion via REST API |
 
 ---
 
@@ -58,17 +60,23 @@ Raw Artifacts (JSON/Logs)
                    [ SchemaPruner ]  <------ malware category inference
                              |
                              v
-                   [ JudgeAgent.give_verdict() ]
-                    - ATT&CK TTP validation block
-                    - Three-layer cascade grounding block
-                    - Dynamic schema pruning hint
-                    - Per-claim confidence interval instructions
-                             |
-                             v
-                   [ STIX 2.1 Bundle ]
-                    - ConfidenceAnnotatedRelationship
-                    - x_maljan_confidence per relationship
-                    - x_maljan_evidence_basis annotation
+                    [ JudgeAgent.give_verdict() ]
+                     - ATT&CK TTP validation block
+                     - Three-layer cascade grounding block
+                     - Dynamic schema pruning hint
+                     - Per-claim confidence interval instructions
+                     - Long-term memory few-shot context block  <-- Phase 5
+                              |
+                              v
+                    [ STIX 2.1 Bundle ]
+                     - ConfidenceAnnotatedRelationship
+                     - x_maljan_confidence per relationship
+                     - x_maljan_evidence_basis annotation
+                              |
+                              v
+                    [ InMemoryStore / QdrantStore ]  <-- Phase 5
+                     - build_stored_case() persists result
+                     - retrieved by next analysis run
 ```
 
 ---
@@ -78,6 +86,8 @@ Raw Artifacts (JSON/Logs)
 ### Data Ingestion — `src/maljan/loaders/`
 
 `FileDataLoader` loads JSON artifacts from `data/samples/{domain}/{sample_id}.json` and routes them through the registered parser. For samples exceeding the LLM token limit, `load_chunked()` splits the parsed text into overlapping windows using `BinaryChunker`.
+
+**`load_from_sandbox(sample_path, data_type, sandbox_client)`** (Phase 6): Submits a sample to a sandbox backend, polls for completion, fetches the JSON report, and returns the same `list[TextChunk]` shape as `load_chunked()`. Pipeline nodes require zero changes to consume live sandbox data.
 
 **`BinaryChunker`** (`loaders/binary_chunker.py`):
 - `FUNCTION_BOUNDARY` — splits static data at Ghidra/Radare2 function headers
@@ -229,14 +239,75 @@ class ConfidenceAnnotatedRelationship(Relationship):
 
 **`mediate(reports, history, isr_reports)`**: Finds contradictions between expert reports using `with_structured_output(MediatorVerdict)`. Falls back to text-based confidence extraction for providers that do not support structured output (e.g., some Ollama models).
 
-**`give_verdict(reports, history, isr_reports, attck_validator, cascade_summary)`**:
-Before calling the LLM, injects four grounding blocks into the system prompt:
+**`give_verdict(reports, history, isr_reports, attck_validator, cascade_summary, memory_store)`**:
+Before calling the LLM, injects five grounding blocks into the system prompt:
 1. ATT&CK TTP validation block — flags hallucinated IDs, suggests alternatives
 2. Three-layer cascade block — ranks TTPs by cross-domain weighted confidence
 3. Dynamic schema pruning hint — focuses STIX object types on detected category
 4. Confidence interval instructions — guides per-relationship `x_maljan_confidence` values
+5. Long-term memory context block (Phase 5) — top-k similar past cases as few-shot priors
 
 All blocks are optional and degrade gracefully — if the ATT&CK cache has not been built (offline environment), verdict generation continues without validation.
+
+---
+
+## Long-Term Memory / RAG (Phase 5)
+
+Past analysis results are persisted as `StoredCase` objects and retrieved by cosine similarity over ISR claim text. Retrieved cases are injected into the Judge prompt as few-shot context before every verdict LLM call.
+
+**`StoredCase`** (`memory/long_term_memory.py`): Captures `sample_id`, `summary_text` (built from all ISR claims and evidence references), `technique_ids`, `malware_category`, and `stix_bundle_json`.
+
+**`MemoryStore` Protocol** (`memory/long_term_memory.py`): `store()`, `retrieve(query, top_k)`, `count()`, `clear()`. `@runtime_checkable` — swap backends without changing caller code.
+
+**`InMemoryStore`** (`memory/in_memory_store.py`): Pure-Python TF cosine similarity. Zero external dependencies. Upsert semantics (same `sample_id` replaces old entry).
+
+**`QdrantStore`** (`memory/qdrant_store.py`): Stub with implementation outline for Qdrant vector database. Requires `uv add qdrant-client` and a running Qdrant instance.
+
+**`build_stored_case(sample_id, isr_reports, stix_bundle_json, malware_category)`**: Factory that builds a `StoredCase` from pipeline artifacts — called automatically in `make_judge_node()` after every successful verdict.
+
+Configuration:
+```bash
+MEMORY__BACKEND=memory          # in-process (default)
+# or:
+MEMORY__BACKEND=qdrant
+MEMORY__QDRANT_URL=http://localhost:6333
+MEMORY__QDRANT_COLLECTION=maljan_cases
+MEMORY__TOP_K=3
+```
+
+---
+
+## Sandbox Integration (Phase 6)
+
+`SandboxClient` is a `@runtime_checkable` Protocol with three methods: `submit()`, `wait_for_completion()`, `fetch_report()`. Two backends are provided:
+
+**`MockSandboxClient`** (`loaders/mock_sandbox_client.py`): Fixture-backed backend for tests and offline use. Looks up fixture files by SHA-256 hash, then sample name, then an optional default fixture, then returns a minimal synthetic report. No network access required.
+
+**`CAPEv2Client`** (`loaders/cape2_client.py`): Full REST API client using `httpx`. Submits samples via `POST /apiv2/tasks/create/file/`, polls status via `GET /apiv2/tasks/view/{id}/`, and fetches reports via `GET /apiv2/tasks/report/{id}/`. Supports API token authentication, configurable timeout, and persistent connection pooling.
+
+**`SubmissionResult`**: Carries `task_id`, `sample_sha256`, `status`, and `report` dict — same structure as existing fixture JSON files, so `DynamicParser` and `NetworkParser` require zero changes.
+
+The container exposes `get_sandbox_client()` which builds the configured backend once and caches it:
+
+```bash
+SANDBOX__BACKEND=mock           # fixture files (default)
+# or:
+SANDBOX__BACKEND=cape2
+SANDBOX__CAPE2_BASE_URL=http://cape2-host:8000
+SANDBOX__CAPE2_API_TOKEN=your_token
+SANDBOX__CAPE2_TIMEOUT_SECONDS=300
+```
+
+Usage:
+```python
+client = app.container.get_sandbox_client()
+chunks = app.container.loader.load_from_sandbox(
+    sample_path="malware.exe",
+    data_type="dynamic",
+    sandbox_client=client,
+)
+# chunks: list[TextChunk] — identical to load_chunked() output
+```
 
 ---
 
@@ -333,6 +404,25 @@ All settings are Pydantic `BaseSettings` with `__` as the nesting delimiter. Val
 | `LANGCHAIN_API_KEY` | — | LangSmith authentication key |
 | `LANGCHAIN_PROJECT` | `maljan` | LangSmith project name |
 
+### Long-Term Memory (Phase 5)
+
+| Variable | Default | Description |
+|---|---|---|
+| `MEMORY__BACKEND` | `memory` | `memory` (in-process) or `qdrant` (persistent) |
+| `MEMORY__QDRANT_URL` | `http://localhost:6333` | Qdrant server URL |
+| `MEMORY__QDRANT_COLLECTION` | `maljan_cases` | Qdrant collection name |
+| `MEMORY__TOP_K` | `3` | Max similar past cases injected into judge prompt |
+
+### Sandbox Integration (Phase 6)
+
+| Variable | Default | Description |
+|---|---|---|
+| `SANDBOX__BACKEND` | `mock` | `mock` (fixtures) or `cape2` (live REST API) |
+| `SANDBOX__CAPE2_BASE_URL` | `http://localhost:8000` | CAPEv2 server URL |
+| `SANDBOX__CAPE2_API_TOKEN` | — | CAPEv2 API token (empty for unauthenticated instances) |
+| `SANDBOX__CAPE2_TIMEOUT_SECONDS` | `300` | Max wait time for task completion |
+| `SANDBOX__CAPE2_POLL_INTERVAL_SECONDS` | `10` | Seconds between status poll requests |
+
 ### Miscellaneous
 
 | Variable | Default | Description |
@@ -374,13 +464,19 @@ Maljan/
 │   │   ├── anthropic_provider.py
 │   │   └── ollama_provider.py
 │   ├── loaders/
-│   │   ├── file_loader.py          # FileDataLoader — load() + load_chunked()
-│   │   └── binary_chunker.py       # Domain-aware chunker + merge_summaries
+│   │   ├── file_loader.py          # FileDataLoader — load() + load_chunked() + load_from_sandbox()
+│   │   ├── binary_chunker.py       # Domain-aware chunker + merge_summaries
+│   │   ├── sandbox_client.py       # SandboxClient Protocol + SubmissionResult + exceptions
+│   │   ├── mock_sandbox_client.py  # Fixture-backed backend (tests + offline)
+│   │   └── cape2_client.py         # CAPEv2 REST API client (httpx)
 │   ├── memory/
 │   │   ├── attck_loader.py         # ATT&CK STIX bundle downloader + cache
 │   │   ├── attck_index.py          # Pure-Python TF-IDF semantic index
 │   │   ├── attck_validator.py      # Thread-safe singleton validator
-│   │   └── ttp_validation.py       # TTPClaimValidation + TTPValidationSummary
+│   │   ├── ttp_validation.py       # TTPClaimValidation + TTPValidationSummary
+│   │   ├── long_term_memory.py     # StoredCase + MemoryStore Protocol + build_stored_case()
+│   │   ├── in_memory_store.py      # InMemoryStore — TF cosine similarity, zero dependencies
+│   │   └── qdrant_store.py         # QdrantStore stub (requires qdrant-client)
 │   ├── parsers/
 │   │   ├── base_parser.py
 │   │   ├── registry.py             # @register_parser + ParserRegistry
@@ -401,8 +497,9 @@ Maljan/
 │   ├── app.py                      # MaljanApp facade (composition root)
 │   └── cli.py                      # Typer CLI
 ├── tests/
-│   ├── unit/                       # 477 unit tests (no network, no LLM)
-│   └── integration/                # Full pipeline tests (mock mode)
+│   ├── unit/                       # 570+ unit tests (no network, no LLM)
+│   ├── integration/                # Full pipeline tests (mock mode)
+│   └── evaluation/                 # Benchmark runner + ground truth fixtures
 ├── .env.example
 └── Makefile
 ```
@@ -479,5 +576,7 @@ make check
 - **Grounded revision rounds**: Multi-chunk revision passes use ISR summaries as context, not raw binary data — preventing hallucinations caused by partially-decoded content.
 - **Category-aware STIX generation**: Dynamic schema pruning focuses the judge on malware-specific STIX object types, reducing signal noise in the output bundle.
 - **Per-claim uncertainty quantification**: Every relationship in the STIX output carries a cascade-informed confidence score and evidence basis, enabling downstream SIEM/SOAR platforms to filter by evidential strength.
-- **Graceful degradation**: ATT&CK cache, TTP validation, cascade scoring, schema pruning, and LangSmith tracing are all optional at runtime. The pipeline always produces a verdict, even in offline or restricted environments.
-- **Dependency minimization**: All statistical computation (rolling std, TF-IDF cosine similarity, cascade weighting, keyword scoring) is implemented in pure Python to avoid runtime dependency overhead.
+- **Graceful degradation**: ATT&CK cache, TTP validation, cascade scoring, schema pruning, LangSmith tracing, long-term memory retrieval, and sandbox integration are all optional at runtime. The pipeline always produces a verdict, even in offline or restricted environments.
+- **Dependency minimization**: All statistical computation (rolling std, TF-IDF cosine similarity, cascade weighting, keyword scoring, term-frequency retrieval) is implemented in pure Python to avoid runtime dependency overhead.
+- **Few-shot learning from history**: Each completed analysis is persisted to the long-term memory store. Subsequent analyses retrieve the most similar past cases and inject them as weighted priors into the judge prompt, improving TTP selection consistency over time.
+- **Protocol-based extensibility**: `MemoryStore`, `SandboxClient`, and `DataLoaderProtocol` are all `@runtime_checkable` Protocols. New backends (e.g., Pinecone, DragonFly sandbox) can be swapped in by implementing the Protocol — no changes to pipeline nodes or agent code required.
