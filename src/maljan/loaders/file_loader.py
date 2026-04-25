@@ -5,6 +5,11 @@ parser for each data type.
 
 Phase 3 addition: load_chunked() returns a list of TextChunk objects
 so agents can process large inputs incrementally without context overflow.
+
+Phase 6 addition: load_from_sandbox() accepts a SandboxClient and a sample
+file path, submits to the sandbox, waits for completion, fetches the JSON
+report, and returns parsed + chunked text — same output shape as load_chunked().
+This means the pipeline nodes require zero changes to support live sandbox data.
 """
 
 import json
@@ -95,3 +100,82 @@ class FileDataLoader:
         except Exception as e:
             logger.error(f"Unexpected error loading {path}: {e}")
             raise DataLoadError(str(e)) from e
+
+    def load_from_sandbox(
+        self,
+        sample_path: str,
+        data_type: str,
+        sandbox_client: object,
+        timeout_seconds: int = 300,
+        poll_interval_seconds: int = 10,
+    ) -> list:
+        """Submit a sample to a sandbox, wait for completion, and return parsed chunks.
+
+        Phase 6: CAPEv2 integration entry point.
+
+        The returned list of TextChunk objects is identical in shape to the
+        output of load_chunked(), so pipeline nodes require no changes to
+        consume live sandbox data.
+
+        Flow:
+          1. sandbox_client.submit(sample_path)         -> task_id
+          2. sandbox_client.wait_for_completion(task_id) -> status
+          3. sandbox_client.fetch_report(task_id)        -> SubmissionResult
+          4. result.report is parsed via the registered parser for data_type
+          5. Parsed text is chunked via BinaryChunker
+
+        Args:
+            sample_path:            Path to the sample file to submit.
+            data_type:              Parser domain ("dynamic", "network", etc.).
+            sandbox_client:         Any SandboxClient-protocol object.
+            timeout_seconds:        Forwarded to wait_for_completion().
+            poll_interval_seconds:  Forwarded to wait_for_completion().
+
+        Returns:
+            List of TextChunk objects (same as load_chunked()).
+
+        Raises:
+            DataLoadError: When submission, polling, or report fetch fails.
+        """
+        from maljan.loaders.sandbox_client import SandboxError
+
+        try:
+            task_id = sandbox_client.submit(sample_path)  # type: ignore[union-attr]
+        except SandboxError as exc:
+            raise DataLoadError(f"Sandbox submission failed: {exc}") from exc
+
+        try:
+            status = sandbox_client.wait_for_completion(  # type: ignore[union-attr]
+                task_id,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+        except SandboxError as exc:
+            raise DataLoadError(f"Sandbox polling failed: {exc}") from exc
+
+        if status not in {"reported"}:
+            raise DataLoadError(
+                f"Sandbox task {task_id} ended with status '{status}' (not 'reported')."
+            )
+
+        try:
+            result = sandbox_client.fetch_report(task_id)  # type: ignore[union-attr]
+        except SandboxError as exc:
+            raise DataLoadError(f"Report fetch failed: {exc}") from exc
+
+        # Pass the raw report dict through the existing parser path
+        raw = result.report
+        try:
+            parser = self._parser_registry.create(data_type)
+            parsed_text = parser.parse(raw)
+        except KeyError:
+            logger.warning(
+                "load_from_sandbox: no parser for '%s', using raw JSON.", data_type
+            )
+            parsed_text = json.dumps(raw, indent=2)
+
+        logger.info(
+            "load_from_sandbox: task=%s status=%s data_type=%s sample=%s",
+            task_id, status, data_type, sample_path,
+        )
+        return self._chunker.chunk(data_type, parsed_text)
