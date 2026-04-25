@@ -161,6 +161,38 @@ class MemoryConfig(BaseModel):
     top_k: int = 3
 
 
+class SandboxConfig(BaseModel):
+    """Phase 6 CAPEv2 Sandbox configuration.
+
+    Controls which backend is used for dynamic sample analysis. The sandbox
+    client is exposed via ServiceContainer.get_sandbox_client() and can be
+    passed to FileDataLoader.load_from_sandbox().
+
+    backend:
+        "mock"  (default) — MockSandboxClient loads fixture JSON files from
+                the samples directory. Requires no network access or external
+                services. Safe for CI, tests, and local development.
+        "cape2" — CAPEv2Client submits samples to a live CAPEv2 instance
+                via its REST API. Requires httpx and a running CAPEv2 server.
+
+    cape2_base_url:
+        Base URL of the CAPEv2 REST API (only used when backend="cape2").
+    cape2_api_token:
+        CAPEv2 authentication token. Leave empty for unauthenticated
+        local instances.
+    cape2_timeout_seconds:
+        Maximum seconds to wait for a task to reach 'reported' status.
+    cape2_poll_interval_seconds:
+        Seconds between status poll requests during task completion wait.
+    """
+
+    backend: str = "mock"  # "mock" | "cape2"
+    cape2_base_url: str = "http://localhost:8000"
+    cape2_api_token: str = ""
+    cape2_timeout_seconds: int = 300
+    cape2_poll_interval_seconds: int = 10
+
+
 # ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
@@ -187,6 +219,7 @@ class Settings(BaseSettings):
     negotiation: NegotiationConfig = Field(default_factory=NegotiationConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
     # Token overflow protection
     max_token_limit: int = 8000

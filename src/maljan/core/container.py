@@ -25,6 +25,14 @@ LangSmith Observability (Phase 8.1):
   All LLM calls, negotiation rounds, ISR constructions, and TTP mappings
   become visible in the LangSmith dashboard with full trace trees.
   Enable via .env: LANGCHAIN_TRACING_V2=true LANGCHAIN_API_KEY=ls_xxx
+
+Phase 6 (CAPEv2 Sandbox):
+  get_sandbox_client() returns a SandboxClient-protocol object based on
+  Settings.sandbox.backend:
+    "mock"  -> MockSandboxClient(fixtures_dir=samples_dir)  [default]
+    "cape2" -> CAPEv2Client(url, token)                     [requires httpx + CAPEv2]
+  The client is cached so all pipeline components share the same instance.
+  Pass it to FileDataLoader.load_from_sandbox() to analyse live samples.
 """
 
 from __future__ import annotations
@@ -92,6 +100,9 @@ class ServiceContainer:
         self._data_cache: dict[tuple[str, str], str] = {}
         # Phase 5: Long-term memory store (built lazily)
         self._memory_store_cache: object | None = None
+        # Phase 6: Sandbox client (built lazily)
+        self._sandbox_client_cache: object | None = None
+        self._samples_dir = samples_dir
 
         logger.info(
             "ServiceContainer initialized "
@@ -188,6 +199,49 @@ class ServiceContainer:
                 self._memory_store_cache = InMemoryStore()
                 logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
         return self._memory_store_cache
+
+    def get_sandbox_client(self) -> object:
+        """Return the sandbox client instance (Phase 6).
+
+        Builds and caches a SandboxClient backend based on
+        Settings.sandbox.backend:
+          - "mock"  (default): MockSandboxClient — no external dependencies,
+            loads fixture JSON files from the samples directory.
+          - "cape2": CAPEv2Client — submits samples to a live CAPEv2 instance
+            via REST API. Requires uv add httpx and a running CAPEv2 server.
+
+        The instance is cached so all pipeline components share the same client
+        within a single analysis session.
+
+        Returns:
+            A SandboxClient-protocol-compliant object (MockSandboxClient or
+            CAPEv2Client). The return type is declared as object to avoid
+            importing the Protocol here; callers can isinstance()-check.
+        """
+        if self._sandbox_client_cache is None:
+            backend = self.config.sandbox.backend
+            if backend == "cape2":
+                from maljan.loaders.cape2_client import CAPEv2Client
+
+                self._sandbox_client_cache = CAPEv2Client(
+                    base_url=self.config.sandbox.cape2_base_url,
+                    api_token=self.config.sandbox.cape2_api_token,
+                )
+                logger.info(
+                    "Sandbox backend: CAPEv2Client (url=%s).",
+                    self.config.sandbox.cape2_base_url,
+                )
+            else:
+                from maljan.loaders.mock_sandbox_client import MockSandboxClient
+
+                self._sandbox_client_cache = MockSandboxClient(
+                    fixtures_dir=self._samples_dir,
+                )
+                logger.info(
+                    "Sandbox backend: MockSandboxClient (fixtures_dir=%s).",
+                    self._samples_dir,
+                )
+        return self._sandbox_client_cache
 
     def get_agent(self, name: str) -> BaseAnalyst:
         """Return a cached agent instance for the given name.
