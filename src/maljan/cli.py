@@ -252,6 +252,46 @@ def info() -> None:
     typer.echo(f"Registered Parsers: {parser_reg.list_parsers()}")
 
 
+@app.command()
+def benchmark(
+    fixtures_dir: str | None = typer.Option(
+        None,
+        "--fixtures-dir",
+        "-f",
+        help="Path to ground truth fixtures directory (default: tests/evaluation/fixtures/).",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Optional path to write the report (e.g., benchmark_report.md).",
+    ),
+    fmt: str = typer.Option(
+        "markdown",
+        "--format",
+        help="Output format: markdown (default) or json.",
+    ),
+) -> None:
+    """Run the Phase 8.2 evaluation benchmark suite against all ground truth fixtures.
+
+    Loads every *.json ground truth file from the fixtures directory, synthesizes
+    pipeline outputs from the known technique IDs (perfect-precision baseline), and
+    evaluates TTP accuracy, STIX quality, and negotiation efficiency metrics.
+
+    This command is safe to run without an LLM: no API keys or network access required.
+    """
+    from tests.evaluation.benchmark_suite import run_fixture_benchmark
+
+    result = run_fixture_benchmark(
+        fixtures_dir=fixtures_dir,
+        output_path=output,
+        output_format=fmt,
+    )
+    typer.echo(result.to_markdown())
+    if output:
+        typer.echo(f"\nReport written to: {output}", err=True)
+
+
 def main() -> None:
     """Application entrypoint."""
     app()

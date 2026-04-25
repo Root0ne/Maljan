@@ -578,6 +578,7 @@ name = "maljan"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "langchain-anthropic" },
     { name = "langchain-core" },
     { name = "langchain-ollama" },
@@ -602,6 +603,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-anthropic", specifier = ">=0.3.15" },
     { name = "langchain-core", specifier = ">=1.2.25" },
     { name = "langchain-ollama", specifier = ">=0.3.3" },
