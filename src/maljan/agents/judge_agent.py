@@ -1,124 +1,488 @@
+"""Chief Judge and Mediator agent.
+
+JudgeAgent is NOT an expert analyst — it does not inherit from BaseAnalyst.
+It has two distinct responsibilities:
+  1. mediate(): Find contradictions between expert reports during the
+     negotiation loop, using structured output for reliable confidence scoring.
+  2. give_verdict(): Produce the final STIX 2.1 Bundle after negotiation ends.
+
+Phase 1b additions:
+  - mediate() and give_verdict() optionally accept isr_reports to include
+    structured ISR summaries alongside the plain-text reports. This gives
+    the judge access to per-claim confidence scores and dissent signals.
+
+Phase 4.2 additions:
+  - give_verdict() optionally accepts an ATTCKValidator instance.
+  - Before generating the STIX Bundle, all TTP IDs in isr_reports are
+    validated against the authoritative ATT&CK dataset. A TTPValidationSummary
+    is injected into the prompt so the LLM can self-correct hallucinated TTPs.
+  - Graceful degradation: if no validator is provided (e.g., cache not built),
+    verdict generation continues without validation — no crash.
+
+Phase 4.3 additions:
+  - give_verdict() optionally accepts a CascadeSummary from TTPCascadeEngine.
+  - A three-layer cascade block is injected into the prompt, ranking TTPs by
+    cross-layer weighted confidence so the LLM prioritizes corroborated findings.
+
+Phase 7.2 additions (STIX Confidence Intervals):
+  - System prompt now instructs the LLM to produce ConfidenceAnnotatedRelationship
+    objects instead of plain Relationship objects for all TTP mappings.
+  - Each relationship must be populated with:
+      x_maljan_confidence: float [0.0, 1.0] — derived from cascade score or
+          agent mean_confidence when cascade is unavailable.
+      x_maljan_evidence_basis: controlled vocab — "static", "dynamic",
+          "network", "static+dynamic", "all", etc.
+      x_maljan_contributing_agents: list of agent_ids that found the evidence.
+      x_maljan_technique_id: MITRE ATT&CK technique ID if applicable.
+  - _build_confidence_instruction() builds cascade-aware evidence basis hints
+    from the CascadeSummary so the LLM can ground confidence values rather
+    than infer them.
+Phase 7.1 additions (Dynamic Schema Pruning):
+  - give_verdict() infers malware category (ransomware/RAT/dropper/worm/
+    infostealer/unknown) from ISR reports using keyword-weighted scoring.
+  - A schema pruning hint block is injected into the system prompt, guiding
+    the LLM to produce only STIX object types relevant to the detected
+    category. This implements the CTI-GEN (IEEE CSR 2025) methodology.
+  - _build_schema_hint() handles inference + block generation.
+  - Graceful degradation: UNKNOWN category returns empty string (no pruning);
+    any inference error silently skips pruning.
+"""
+
+from __future__ import annotations
+
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import BaseAnalyst
+from maljan.analysis.schema_pruner import get_pruned_schema_hint, infer_malware_category
+from maljan.core.logger import logger
+from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
+from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
+# Consensus threshold: mediator confidence must reach this to stop negotiation early
+CONSENSUS_THRESHOLD = 0.85
 
-class JudgeAgent(BaseAnalyst):
-    """The chief controller responsible for mediation, consensus detection, and final verdict."""
 
-    # Threshold: if average confidence across agents exceeds this, declare consensus
-    CONSENSUS_THRESHOLD = 0.85
+class JudgeAgent:
+    """Chief controller responsible for mediation, consensus detection, and final verdict.
 
-    def analyze(self, data: str) -> str:
-        """Generic analysis implementation for Judge."""
-        self.logger.info("Executing generic judge analysis...")
-        return f"Judge analysis of data: {data[:50]}..."
+    Usage:
+        judge = JudgeAgent(llm=some_llm)
+        argument, is_consensus = judge.mediate(reports, history)
+        bundle = judge.give_verdict(reports, history, attck_validator=validator)
+    """
 
-    def revise(
-        self,
-        original_data: str,
-        own_report: str,
-        peer_reports: dict[str, str],
-        mediator_feedback: str,
-    ) -> str:
-        """Judge does not revise - delegates to mediate/verdict instead."""
-        return own_report
+    def __init__(self, llm: BaseChatModel) -> None:
+        self.llm = llm
+        self.logger = logger.getChild("judge")
 
     def mediate(
-        self, static: str, dynamic: str, network: str, history: list[AgentArgument]
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
     ) -> tuple[AgentArgument, bool]:
-        """Finds contradictions between reports and determines if consensus is reached.
+        """Find contradictions between expert reports and determine consensus.
+
+        Accepts a generic dict of agent reports so any number of agents can
+        participate without requiring changes to this method's signature.
+
+        Args:
+            reports: Mapping of agent name to their latest report text.
+            history: Accumulated negotiation arguments from prior rounds.
+            isr_reports: Optional structured ISR objects. When provided, their
+                summaries are appended to give the judge per-claim confidence
+                scores and explicit dissent signals.
 
         Returns:
-            A tuple of (AgentArgument with findings, bool indicating consensus).
+            Tuple of (AgentArgument with mediator findings, bool indicating consensus).
         """
-        self.logger.info("Mediating expert reports for contradictions...")
+        self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+
+        # Build a human-readable summary of all reports
+        reports_text = "\n\n".join(
+            f"--- {name.upper()} ANALYST ---\n{report}"
+            for name, report in reports.items()
+        )
+
+        # Append ISR summaries when available — gives judge access to per-claim
+        # confidence scores and explicit dissent signals from each agent.
+        if isr_reports:
+            isr_block = "\n\n".join(
+                f"[ISR] {isr.to_text_summary()}"
+                for isr in isr_reports.values()
+                if isr.claims  # skip empty ISRs
+            )
+            if isr_block:
+                reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
                     "You are the Lead Cyber Security Mediator. Your task is to compare "
-                    "Static, Dynamic, and Network reports. Look for contradictions. "
-                    "Example: Static says 'no network code', "
-                    "but Network says 'HTTPS traffic found'. "
-                    "Challenge the agents to resolve these gaps.\n\n"
-                    "At the end of your analysis, rate your confidence that the agents "
-                    "are in agreement on a scale from 0.0 to 1.0. If there are no "
-                    "remaining contradictions, give a high score (0.9+). "
-                    "End your response with exactly: CONFIDENCE: <score>",
+                    "all expert analyst reports and identify explicit contradictions. "
+                    "Example: one analyst says 'no network code' while another finds "
+                    "'active HTTPS beacons'. Challenge the agents to resolve these gaps.\n\n"
+                    "You MUST produce a structured response with:\n"
+                    "- contradictions: list of specific contradictions found\n"
+                    "- resolution_summary: what was resolved and what remains\n"
+                    "- confidence: float 0.0-1.0 (0.9+ means experts agree, no contradictions)",
                 ),
                 (
                     "human",
-                    "Static Analysis: {static}\n\n"
-                    "Dynamic Analysis: {dynamic}\n\n"
-                    "Network Analysis: {network}\n\n"
-                    "Previous Discussion: {history}",
+                    "Expert Reports:\n{reports}\n\n"
+                    "Previous Discussion:\n{history}",
                 ),
             ]
         )
 
-        response = (prompt | self.llm).invoke(
-            {"static": static, "dynamic": dynamic, "network": network, "history": str(history)}
+        # Attempt structured output; fall back to text-based extraction on failure
+        try:
+            llm_structured = self.llm.with_structured_output(MediatorVerdict)
+            verdict: MediatorVerdict = (prompt | llm_structured).invoke(  # type: ignore[assignment]
+                {"reports": reports_text, "history": str(history)}
+            )
+            if not isinstance(verdict, MediatorVerdict):
+                raise ValueError("Unexpected output type from structured LLM")
+        except Exception as exc:
+            self.logger.warning(
+                "Structured output failed (%s), falling back to text extraction.", exc
+            )
+            verdict = self._fallback_mediate(prompt, reports_text, history)
+
+        is_consensus = verdict.confidence >= CONSENSUS_THRESHOLD
+        log_msg = "Consensus reached" if is_consensus else "No consensus yet"
+        self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
+
+        finding = (
+            f"{verdict.resolution_summary}\n\n"
+            f"Contradictions: {'; '.join(verdict.contradictions) or 'None'}\n"
+            f"Confidence: {verdict.confidence:.2f}"
         )
-
-        content = str(response.content)
-        confidence = self._extract_confidence(content)
-        is_consensus = confidence >= self.CONSENSUS_THRESHOLD
-
-        if is_consensus:
-            self.logger.info(f"Consensus reached with confidence {confidence:.2f}")
-        else:
-            self.logger.info(f"No consensus yet (confidence: {confidence:.2f})")
-
         argument = AgentArgument(
-            agent_name="Mediator", finding=content, confidence_score=confidence
+            agent_name="Mediator",
+            finding=finding,
+            confidence_score=verdict.confidence,
         )
-
         return argument, is_consensus
 
-    def give_verdict(self, reports: dict[str, str], history: list[AgentArgument]) -> Bundle:
-        """Final judge decision returning a structured STIX 2.1 Bundle with MITRE mapping."""
+    def give_verdict(
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
+        attck_validator: object | None = None,
+        cascade_summary: object | None = None,
+    ) -> Bundle:
+        """Final judge decision returning a structured STIX 2.1 Bundle.
+
+        Phase 4.2: When `attck_validator` is provided, all TTP IDs in
+        `isr_reports` are validated against the ATT&CK dataset BEFORE the
+        LLM call. The validation summary is injected into the prompt as a
+        grounding block so the LLM can self-correct hallucinated IDs.
+
+        Phase 4.3: When `cascade_summary` (CascadeSummary) is provided, a
+        three-layer confidence ranking block is injected into the prompt so
+        the LLM prioritizes corroborated (multi-layer) TTPs over single-layer
+        evidence.
+
+        Args:
+            reports: Final expert reports (revised where applicable).
+            history: Full negotiation history.
+            isr_reports: Optional structured ISR objects for richer context.
+            attck_validator: Optional ATTCKValidator instance.
+            cascade_summary: Optional CascadeSummary from TTPCascadeEngine.
+
+        Returns:
+            A valid STIX 2.1 Bundle with MITRE ATT&CK TTP mappings.
+        """
         self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
+
+        reports_text = "\n\n".join(
+            f"--- {name.upper()} ANALYST ---\n{report}"
+            for name, report in reports.items()
+        )
+
+        # Include ISR summaries for richer claim-level context
+        if isr_reports:
+            isr_block = "\n\n".join(
+                f"[ISR] {isr.to_text_summary()}"
+                for isr in isr_reports.values()
+                if isr.claims
+            )
+            if isr_block:
+                reports_text = (
+                    f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+                )
+
+        # Phase 4.2: ATT&CK TTP validation grounding block
+        validation_block = self._build_validation_block(isr_reports, attck_validator)
+        if validation_block:
+            reports_text = f"{reports_text}\n\n{validation_block}"
+
+        # Phase 4.3: Three-layer TTP cascade block
+        cascade_block = self._build_cascade_block(cascade_summary)
+        if cascade_block:
+            reports_text = f"{reports_text}\n\n{cascade_block}"
+
+        # Phase 7.1: Dynamic schema pruning block
+        schema_hint = self._build_schema_hint(reports, isr_reports)
+        if schema_hint:
+            reports_text = f"{reports_text}\n\n{schema_hint}"
+
+        has_grounding = bool(validation_block or cascade_block)
+        verdict_system = (
+            "You are the Chief Malware Judge. Based on expert reports and "
+            "negotiation history, provide a final verdict. "
+            "You MUST map findings to MITRE ATT&CK techniques in the STIX Bundle "
+            "using AttackPattern objects.\n\n"
+            "STIX CONFIDENCE INTERVALS (Phase 7.2 requirement):\n"
+            "For every Relationship object in the Bundle, you MUST populate the "
+            "following custom fields to provide per-claim uncertainty quantification:\n"
+            "  x_maljan_confidence: float 0.0-1.0\n"
+            "    - 0.90-1.0  = HIGH   (3-layer consensus, strong direct evidence)\n"
+            "    - 0.70-0.89 = MEDIUM (2-layer corroboration, reliable evidence)\n"
+            "    - 0.50-0.69 = LOW    (single-layer, indirect evidence)\n"
+            "    - 0.00-0.49 = SPECULATIVE (inference only, no direct evidence)\n"
+            "  x_maljan_evidence_basis: one of 'static', 'dynamic', 'network', "
+            "'static+dynamic', 'dynamic+network', 'static+network', 'all', 'unknown'\n"
+            "  x_maljan_contributing_agents: list of agent IDs that observed "
+            "supporting evidence (e.g. ['static', 'dynamic'])\n"
+            "  x_maljan_technique_id: MITRE ATT&CK technique ID if applicable "
+            "(e.g. 'T1055.001'), otherwise null\n"
+            "Use 'unknown' for x_maljan_evidence_basis only when evidence source "
+            "cannot be determined from the reports."
+        )
+        if has_grounding or schema_hint:
+            verdict_system += (
+                "\n\nIMPORTANT: Grounding data is included below. "
+                "You MUST NOT use any technique IDs marked as [HALLUCINATED]. "
+                "Use the suggested alternatives instead. "
+                "Prioritize [CONSENSUS] and [CORROBORATED] techniques from the cascade. "
+                "Review [SUSPICIOUS] mappings carefully before including them."
+            )
+
+        # Phase 7.2: Append cascade-derived confidence hints so LLM has
+        # pre-computed values to ground x_maljan_confidence fields.
+        confidence_hint_block = self._build_confidence_instruction(cascade_summary)
+        if confidence_hint_block:
+            verdict_system = f"{verdict_system}\n\n{confidence_hint_block}"
 
         prompt = ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    "You are the Chief Malware Judge. Based on expert reports and "
-                    "discussion history, provide a final verdict. "
-                    "You MUST map findings to MITRE ATT&CK techniques in the STIX Bundle "
-                    "using AttackPattern objects.",
-                ),
+                ("system", verdict_system),
                 (
                     "human",
-                    "Expert Reports: {reports}\n\n"
-                    "Negotiation History: {history}\n\n"
-                    "Generate a comprehensive STIX 2.1 Bundle.",
+                    "Expert Reports:\n{reports}\n\n"
+                    "Negotiation History:\n{history}\n\n"
+                    "Generate a comprehensive STIX 2.1 Bundle with per-claim "
+                    "confidence intervals on all Relationship objects.",
                 ),
             ]
         )
 
-        # Structured output binding for STIX
         llm_stix = self.llm.with_structured_output(Bundle)
-        result = (prompt | llm_stix).invoke({"reports": str(reports), "history": str(history)})
+        result = (prompt | llm_stix).invoke(
+            {"reports": reports_text, "history": str(history)}
+        )
 
         if isinstance(result, Bundle):
             return result
 
-        # Fallback to empty bundle if LLM fails
         self.logger.warning("LLM did not return a valid Bundle, falling back to empty.")
         return Bundle(objects=[])
 
-    def _extract_confidence(self, text: str) -> float:
-        """Extracts the CONFIDENCE: <score> value from the mediator's response."""
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _build_validation_block(
+        self,
+        isr_reports: dict[str, AgentISR] | None,
+        attck_validator: object | None,
+    ) -> str:
+        """Run ATT&CK TTP validation and return a prompt-ready block.
+
+        Returns an empty string if validation cannot be run (no validator,
+        no isr_reports, or any runtime error — always degrades gracefully).
+        """
+        if not attck_validator or not isr_reports:
+            return ""
+
+        # Runtime duck-type check — avoids circular import at module level
+        if not hasattr(attck_validator, "validate_isr_reports"):
+            self.logger.warning(
+                "attck_validator does not implement validate_isr_reports(). Skipping."
+            )
+            return ""
+
         try:
-            for line in reversed(text.strip().splitlines()):
-                if "CONFIDENCE:" in line.upper():
-                    score_str = line.upper().split("CONFIDENCE:")[-1].strip()
-                    return max(0.0, min(1.0, float(score_str)))
-        except (ValueError, IndexError):
-            self.logger.warning("Could not extract confidence score, defaulting to 0.5")
+            summary = attck_validator.validate_isr_reports(isr_reports)  # type: ignore[union-attr]
+            if summary.total_claims == 0:
+                return ""
+            block = summary.to_prompt_block()
+            self.logger.info(
+                "ATT&CK validation: %d/%d valid, %d hallucinated, %d low-alignment.",
+                summary.valid_ids,
+                summary.total_claims,
+                summary.invalid_ids,
+                summary.low_alignment,
+            )
+            return block
+        except Exception as exc:
+            self.logger.warning("ATT&CK TTP validation failed (%s). Proceeding without it.", exc)
+            return ""
+
+    def _build_cascade_block(self, cascade_summary: object | None) -> str:
+        """Return a prompt-ready three-layer TTP cascade block.
+
+        Returns an empty string if no summary is provided or if it contains
+        no results. Always degrades gracefully on any error.
+        """
+        if cascade_summary is None:
+            return ""
+
+        if not hasattr(cascade_summary, "to_prompt_block"):
+            self.logger.warning(
+                "cascade_summary does not implement to_prompt_block(). Skipping."
+            )
+            return ""
+
+        try:
+            if not getattr(cascade_summary, "total_techniques", 0):
+                return ""
+            block = cascade_summary.to_prompt_block()  # type: ignore[union-attr]
+            self.logger.info(
+                "TTP cascade: %d techniques, %d corroborated, %d consensus.",
+                getattr(cascade_summary, "total_techniques", 0),
+                getattr(cascade_summary, "corroborated_count", 0),
+                getattr(cascade_summary, "consensus_count", 0),
+            )
+            return block
+        except Exception as exc:
+            self.logger.warning("TTP cascade block failed (%s). Proceeding without it.", exc)
+            return ""
+
+    def _build_confidence_instruction(self, cascade_summary: object | None) -> str:
+        """Build cascade-derived x_maljan_confidence hint block for the verdict prompt.
+
+        When a CascadeSummary is available, the top techniques' weighted
+        confidence scores and contributing layers are extracted and rendered as
+        a reference table. The LLM uses this to populate x_maljan_confidence
+        and x_maljan_evidence_basis fields accurately rather than guessing.
+
+        Returns an empty string when cascade is unavailable or has no results.
+        Always degrades gracefully.
+        """
+        if cascade_summary is None:
+            return ""
+
+        try:
+            top = cascade_summary.top_techniques(n=10)  # type: ignore[union-attr]
+            if not top:
+                return ""
+
+            lines = [
+                "CONFIDENCE REFERENCE TABLE (use these values for x_maljan_confidence):",
+                "Technique ID | Weighted Confidence | Layers | Evidence Basis",
+                "-" * 70,
+            ]
+            for r in top:
+                layers = r.contributing_layers
+                # Map layer set → evidence_basis controlled vocab
+                if set(layers) == {"static", "dynamic", "network"}:
+                    basis = "all"
+                elif len(layers) == 2:  # noqa: PLR2004
+                    basis = "+".join(sorted(layers))
+                elif len(layers) == 1:
+                    basis = layers[0]
+                else:
+                    basis = "unknown"
+
+                lines.append(
+                    f"{r.technique_id:<14} | {r.weighted_confidence:.3f}              "
+                    f"| {', '.join(layers):<22} | {basis}"
+                )
+
+            return "\n".join(lines)
+        except Exception as exc:
+            self.logger.warning(
+                "_build_confidence_instruction failed (%s). Skipping.", exc
+            )
+            return ""
+
+    def _build_schema_hint(
+        self,
+        reports: dict[str, str],
+        isr_reports: dict[str, AgentISR] | None,
+    ) -> str:
+        """Infer malware category and return a STIX schema pruning hint block.
+
+        Phase 7.1 (Dynamic Schema Pruning): Runs keyword-weighted inference
+        over the combined analyst reports and ISR claims to detect the malware
+        behavioral category (ransomware, RAT, dropper, worm, infostealer).
+
+        When a specific category is detected, returns a prompt block guiding
+        the LLM to focus on the STIX object types most relevant to that
+        category, implementing the CTI-GEN schema-pruning methodology.
+
+        Returns an empty string when category is UNKNOWN (no pruning) or on
+        any inference error. Always degrades gracefully.
+
+        Args:
+            reports:     Final expert reports.
+            isr_reports: Structured ISR objects (optional but improves signal).
+
+        Returns:
+            Prompt-ready schema pruning block, or empty string.
+        """
+        try:
+            category = infer_malware_category(reports, isr_reports)
+            hint = get_pruned_schema_hint(category)
+            if hint:
+                self.logger.info(
+                    "Schema pruning: inferred category '%s'.", category.value
+                )
+            else:
+                self.logger.debug(
+                    "Schema pruning: category UNKNOWN, no pruning applied."
+                )
+            return hint
+        except Exception as exc:
+            self.logger.warning(
+                "_build_schema_hint failed (%s). Skipping schema pruning.", exc
+            )
+            return ""
+
+    def _fallback_mediate(
+        self,
+        prompt: ChatPromptTemplate,
+        reports_text: str,
+        history: list[AgentArgument],
+    ) -> MediatorVerdict:
+        """Plain-text fallback when structured output is unavailable (e.g., Ollama)."""
+        response = (prompt | self.llm).invoke(
+            {"reports": reports_text, "history": str(history)}
+        )
+        content = str(response.content)
+        confidence = self._extract_confidence_from_text(content)
+        return MediatorVerdict(
+            contradictions=[],
+            resolution_summary=content[:500],
+            confidence=confidence,
+        )
+
+    @staticmethod
+    def _extract_confidence_from_text(text: str) -> float:
+        """Last-resort regex extraction for providers that ignore structured output."""
+        for line in reversed(text.strip().splitlines()):
+            if "confidence" in line.lower():
+                parts = line.replace(":", " ").split()
+                for part in reversed(parts):
+                    try:
+                        return max(0.0, min(1.0, float(part)))
+                    except ValueError:
+                        continue
         return 0.5

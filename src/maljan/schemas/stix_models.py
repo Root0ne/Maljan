@@ -1,6 +1,46 @@
+"""STIX 2.1 Domain Object schemas with per-claim confidence intervals.
+
+Phase 7.2 addition: ConfidenceAnnotatedRelationship
+
+Literature gap: No existing system adds per-claim uncertainty scores and
+multi-agent attribution metadata to STIX 2.1 Relationship objects. Standard
+STIX 2.1 defines a top-level 'confidence' property (0-100 integer) on SDOs
+but it is rarely populated and carries no evidence provenance.
+
+Maljan extends Relationship with three novel fields:
+  - confidence:            Weighted float 0.0-1.0 (from TTP cascade scoring
+                           or agent mean_confidence when cascade unavailable).
+  - evidence_basis:        Which data domain(s) support this relationship
+                           (e.g. "static+dynamic", "network", "all").
+  - contributing_agents:   Which analysis agents observed supporting evidence.
+
+These fields are STIX custom properties (prefixed with 'x_maljan_') to comply
+with the STIX 2.1 custom property specification and avoid namespace collisions.
+
+EvidenceBasis: controlled vocabulary of evidence provenance categories.
+  - "static"              PE/ELF binary + decompiled code evidence
+  - "dynamic"             Sandbox behavior trace evidence
+  - "network"             Network capture evidence
+  - "static+dynamic"      Corroborated by two layers
+  - "dynamic+network"     Corroborated by two layers
+  - "static+network"      Corroborated by two layers
+  - "all"                 Consensus across all three layers
+
+Usage in judge prompt: The LLM is instructed to populate these fields per
+relationship object. When cascade_summary is available, the judge is given
+pre-computed confidence scores and contributing layers for each TTP, reducing
+LLM uncertainty and hallucination.
+
+Backward compatibility: All new fields are Optional with safe defaults so
+existing code producing plain Relationship objects still works. The Bundle
+union type is updated to include ConfidenceAnnotatedRelationship.
+"""
+
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +54,26 @@ def get_utcnow() -> datetime:
     """Helper to return aware UTC datetime for STIX timestamp defaults."""
     return datetime.now(UTC)
 
+
+# ---------------------------------------------------------------------------
+# Evidence basis controlled vocabulary
+# ---------------------------------------------------------------------------
+
+EvidenceBasis = Literal[
+    "static",
+    "dynamic",
+    "network",
+    "static+dynamic",
+    "dynamic+network",
+    "static+network",
+    "all",
+    "unknown",
+]
+
+
+# ---------------------------------------------------------------------------
+# STIX Domain Objects (unchanged from original)
+# ---------------------------------------------------------------------------
 
 class STIXObject(BaseModel):
     """Base generic properties for all STIX Domain Objects (SDOs)."""
@@ -49,13 +109,68 @@ class Malware(STIXObject):
 
 
 class Relationship(STIXObject):
-    """STIX 2.1 Relationship structure to connect SDOs."""
+    """STIX 2.1 Relationship structure to connect SDOs (plain, no annotation)."""
 
     type: Literal["relationship"] = "relationship"
     id: str = Field(default_factory=lambda: f"relationship--{_generate_uuid()}")
     relationship_type: str
     source_ref: str
     target_ref: str
+
+
+class ConfidenceAnnotatedRelationship(STIXObject):
+    """STIX 2.1 Relationship with per-claim confidence interval and provenance.
+
+    This extends the plain Relationship with three custom properties that
+    represent a novel contribution: evidence-grounded uncertainty quantification
+    in STIX intelligence bundles.
+
+    Attributes:
+        relationship_type:      Standard STIX relationship type verb
+                                (e.g., "uses", "indicates", "attributed-to").
+        source_ref:             STIX ID of the source object.
+        target_ref:             STIX ID of the target object.
+        x_maljan_confidence:    Weighted confidence score [0.0, 1.0] for this
+                                relationship claim. Derived from TTP cascade
+                                weighted confidence or agent mean_confidence.
+        x_maljan_evidence_basis: Which analysis domain(s) produced supporting
+                                evidence. Uses EvidenceBasis controlled vocab.
+        x_maljan_contributing_agents: List of agent IDs that observed evidence
+                                supporting this relationship. Empty = LLM-inferred.
+        x_maljan_technique_id:  MITRE ATT&CK technique ID if applicable.
+    """
+
+    type: Literal["relationship"] = "relationship"
+    id: str = Field(default_factory=lambda: f"relationship--{_generate_uuid()}")
+    relationship_type: str
+    source_ref: str
+    target_ref: str
+
+    # Custom extension fields (STIX 2.1 custom property convention: x_ prefix)
+    x_maljan_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+    x_maljan_evidence_basis: EvidenceBasis = "unknown"
+    x_maljan_contributing_agents: list[str] = Field(default_factory=list)
+    x_maljan_technique_id: str | None = None
+
+    @property
+    def is_high_confidence(self) -> bool:
+        """True if confidence >= 0.80 (two-sigma threshold)."""
+        return self.x_maljan_confidence >= 0.80
+
+    @property
+    def is_multi_domain(self) -> bool:
+        """True if evidence spans more than one analysis domain."""
+        return "+" in self.x_maljan_evidence_basis or self.x_maljan_evidence_basis == "all"
+
+    def confidence_label(self) -> str:
+        """Human-readable confidence tier label."""
+        if self.x_maljan_confidence >= 0.90:
+            return "HIGH"
+        if self.x_maljan_confidence >= 0.70:
+            return "MEDIUM"
+        if self.x_maljan_confidence >= 0.50:
+            return "LOW"
+        return "SPECULATIVE"
 
 
 class AttackPattern(STIXObject):
@@ -68,9 +183,46 @@ class AttackPattern(STIXObject):
     external_references: list[dict] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Bundle — updated to include ConfidenceAnnotatedRelationship
+# ---------------------------------------------------------------------------
+
+# Discriminated union: Pydantic resolves ambiguity between Relationship and
+# ConfidenceAnnotatedRelationship via the presence of x_maljan_confidence.
+_BundleObject = (
+    Indicator
+    | Malware
+    | ConfidenceAnnotatedRelationship
+    | Relationship
+    | AttackPattern
+)
+
+
 class Bundle(BaseModel):
-    """STIX 2.1 Bundle container for transferring multiple objects."""
+    """STIX 2.1 Bundle container for transferring multiple objects.
+
+    The objects list accepts both plain Relationship and
+    ConfidenceAnnotatedRelationship. Pydantic resolves the union left-to-right
+    so ConfidenceAnnotatedRelationship (with extra fields) is tried first.
+    """
 
     type: Literal["bundle"] = "bundle"
     id: str = Field(default_factory=lambda: f"bundle--{_generate_uuid()}")
-    objects: list[Indicator | Malware | Relationship | AttackPattern] = Field(default_factory=list)
+    objects: list[_BundleObject] = Field(default_factory=list)
+
+    def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
+        """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""
+        return [
+            obj for obj in self.objects
+            if isinstance(obj, ConfidenceAnnotatedRelationship)
+        ]
+
+    def mean_relationship_confidence(self) -> float | None:
+        """Compute mean confidence across all annotated relationships.
+
+        Returns None if no annotated relationships exist.
+        """
+        annotated = self.confidence_annotated_relationships()
+        if not annotated:
+            return None
+        return sum(r.x_maljan_confidence for r in annotated) / len(annotated)

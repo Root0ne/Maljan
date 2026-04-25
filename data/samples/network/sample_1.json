@@ -1,23 +1,51 @@
 [
   {
-      "ts": "1614521400.0",
-      "id.orig_h": "192.168.1.100",
-      "id.resp_h": "9.9.9.9",
-      "id.resp_p": 53,
-      "proto": "udp",
-      "service": "dns",
-      "query": "malware-c2.example"
+    "ts": "1614521400.000000",
+    "id.orig_h": "192.168.1.100",
+    "id.orig_p": 49152,
+    "id.resp_h": "185.220.101.45",
+    "id.resp_p": 53,
+    "proto": "udp",
+    "service": "dns",
+    "query": "xkf73mab92c.duckdns.org"
   },
   {
-      "ts": "1614521405.0",
-      "id.orig_h": "192.168.1.100",
-      "id.resp_h": "185.199.110.153",
-      "id.resp_p": 443,
-      "proto": "tcp",
-      "service": "ssl",
-      "duration": 0.5,
-      "orig_bytes": 1024,
-      "resp_bytes": 512,
-      "conn_state": "SF"
+    "ts": "1614521402.000000",
+    "id.orig_h": "192.168.1.100",
+    "id.orig_p": 49153,
+    "id.resp_h": "185.220.101.45",
+    "id.resp_p": 443,
+    "proto": "tcp",
+    "service": "ssl",
+    "duration": 45.2,
+    "orig_bytes": 4096,
+    "resp_bytes": 8192,
+    "conn_state": "SF"
+  },
+  {
+    "ts": "1614521450.000000",
+    "id.orig_h": "192.168.1.100",
+    "id.orig_p": 49154,
+    "id.resp_h": "185.220.101.45",
+    "id.resp_p": 443,
+    "proto": "tcp",
+    "service": "ssl",
+    "duration": 44.8,
+    "orig_bytes": 256,
+    "resp_bytes": 1024,
+    "conn_state": "SF"
+  },
+  {
+    "ts": "1614521500.000000",
+    "id.orig_h": "192.168.1.100",
+    "id.orig_p": 49155,
+    "id.resp_h": "185.220.101.45",
+    "id.resp_p": 443,
+    "proto": "tcp",
+    "service": "ssl",
+    "duration": 45.1,
+    "orig_bytes": 256,
+    "resp_bytes": 1024,
+    "conn_state": "SF"
   }
 ]

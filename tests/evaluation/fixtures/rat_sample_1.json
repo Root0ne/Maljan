@@ -1,0 +1,26 @@
+{
+  "sample_id": "rat_sample_1",
+  "notes": "AsyncRAT variant — C2 beacon, process injection, credential dumping",
+  "technique_ids": [
+    "T1095",
+    "T1055",
+    "T1003",
+    "T1082",
+    "T1057"
+  ],
+  "attck_valid_ids": [
+    "T1095", "T1055", "T1003", "T1082", "T1057",
+    "T1486", "T1490", "T1071", "T1560", "T1059",
+    "T1021", "T1105", "T1091", "T1489", "T1083"
+  ],
+  "expected_stix_types": [
+    "malware",
+    "attack-pattern",
+    "indicator",
+    "relationship"
+  ],
+  "expected_rel_types": [
+    "uses",
+    "indicates"
+  ]
+}

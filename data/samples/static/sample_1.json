@@ -1,14 +1,27 @@
 [
-    {
-        "file": "calc.exe",
-        "decompiled_summary": "Interesting API calls: CryptAcquireContext, CreateRemoteThread.",
-        "strings": [
-            "http://malware-c2.example/beacon",
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-        ],
-        "pe_header": {
-            "entry_point": "0x401000",
-            "sections": [".text", ".rdata", ".data"]
-        }
+  {
+    "file": "sample_1.exe",
+    "decompiled_summary": "Binary contains CryptAcquireContext, VirtualAllocEx, WriteProcessMemory and CreateRemoteThread calls, suggesting classic process injection via shellcode pattern. High entropy in .text section indicates possible packing.",
+    "strings": [
+      "http://185.220.101.45/beacon",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater",
+      "cmd.exe /c whoami",
+      "powershell -enc JABzAD0ATgBlAHcA",
+      "Mozilla/5.0 (compatible; bot)"
+    ],
+    "pe_header": {
+      "entry_point": "0x00401000",
+      "sections": [".text", ".rdata", ".data", ".rsrc"],
+      "imports": [
+        "kernel32.dll",
+        "advapi32.dll",
+        "ws2_32.dll",
+        "crypt32.dll"
+      ],
+      "suspicious_section_entropy": {
+        ".text": 7.82,
+        ".rdata": 6.14
+      }
     }
+  }
 ]

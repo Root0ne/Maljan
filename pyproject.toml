@@ -37,6 +37,10 @@ src = ["src"]
 select = ["E", "F", "I", "W", "UP", "B"]
 ignore = []
 
+[tool.ruff.lint.per-file-ignores]
+# Agent files contain LLM prompt strings that are intentionally long
+"src/maljan/agents/*.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.13"
 warn_return_any = true

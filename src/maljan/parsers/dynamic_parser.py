@@ -17,7 +17,7 @@ class DynamicParser(BaseParser):
         generic_events = behavior.get("generic", [])
         apistats = behavior.get("apistats", {})
 
-        # 1. Behavioral Signatures (Enjeksiyon, Kalıcılık vb.)
+        # 1. Behavioral Signatures (Injection, Persistence, Evasion, etc.)
         threat_rows: list[list[str]] = []
         for event in generic_events:
             category = event.get("category", "N/A")
@@ -41,7 +41,7 @@ class DynamicParser(BaseParser):
         )
 
         return (
-            "### 🛡️ Managed Sandbox Behavioral Summary\n\n"
+            "### Sandbox Behavioral Summary\n\n"
             "#### Detected High-Value Behaviors:\n"
             f"{threat_table}\n\n"
             "#### Re-grouped API Metrics (Noise Filtered):\n"
@@ -54,8 +54,8 @@ class DynamicParser(BaseParser):
         if any(
             threat in category.lower() or threat in description.lower() for threat in high_threats
         ):
-            return "🔴 HIGH"
-        return "🟡 MEDIUM"
+            return "[HIGH]"
+        return "[MEDIUM]"
 
     def _is_notable_api(self, api_name: str) -> bool:
         """Filters out noise and keeps sensitive WinAPI calls."""

@@ -2,8 +2,15 @@
 
 This is the Composition Root: it wires together the ServiceContainer,
 builds the graph, and provides a clean API for the CLI and tests.
+
+The run() method returns a result dict containing:
+  - final_decision: Malware / Benign / Suspicious
+  - stix_output: STIX 2.1 bundle dict
+  - run_summary: Serialized RunSummary dict (observability report)
+  - discussion_history, reports, isr_reports, etc.
 """
 
+import time
 from typing import Any
 
 from maljan.core.config import Settings
@@ -19,6 +26,8 @@ class MaljanApp:
     Usage:
         app = MaljanApp(mock=True)
         result = app.run("sample_hash", file_name="evil.exe")
+        print(result["run_summary"])   # observability dict
+        print(result["stix_output"])   # STIX 2.1 bundle
     """
 
     def __init__(
@@ -47,8 +56,11 @@ class MaljanApp:
             file_name: Optional human-readable name.
 
         Returns:
-            The final state dict with verdict, reports, and STIX output.
+            The final state dict including:
+              - final_decision, stix_output, run_summary
+              - reports, isr_reports, discussion_history, etc.
         """
+        start = time.time()
         logger.info("=" * 60)
         logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
@@ -63,18 +75,24 @@ class MaljanApp:
             "file_name": file_name,
             "reports": {},
             "revised_reports": {},
+            "isr_reports": {},
             "discussion_history": [],
+            "sycophancy_detected": False,
+            "confidence_history": [],
             "iteration_count": 0,
             "is_consensus": False,
             "final_decision": None,
             "judge_report": None,
             "stix_output": None,
+            "run_summary": None,
+            "_max_iterations": self.config.negotiation.max_iterations,
         }
 
         result = self.graph.invoke(initial_state)
 
+        elapsed = time.time() - start
         logger.info("=" * 60)
-        logger.info("ANALYSIS COMPLETE")
+        logger.info("ANALYSIS COMPLETE (%.1fs)", elapsed)
         logger.info("=" * 60)
 
         return result

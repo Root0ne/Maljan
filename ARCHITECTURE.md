@@ -1,12 +1,12 @@
-# Maljan: Mimari Tasarim ve Proje Durumu
+# Maljan: Architecture Design & Project Status
 
-Bu dokuman, Maljan Multi-Agent Malware Analysis Framework'unun mimari tasarimini, tamamlanan bilesenleri ve gelecek yol haritasini icermektedir.
+This document describes the architectural design, completed components, and future roadmap of the Maljan Multi-Agent Malware Analysis Framework.
 
 ---
 
-## Mimari Genel Bakis
+## Architecture Overview
 
-Maljan, zararli yazilim orneklerini uc farkli perspektiften analiz eden, uzmanlarin birbirleriyle muzakere ettigi ve bir hakemm nihai karari verdigi cok katmanli bir LLM tabanli analiz framework'udur.
+Maljan is a multi-layered LLM-based analysis framework where specialized expert agents analyze malware from three different perspectives, negotiate with each other, and a chief judge delivers the final verdict.
 
 ```
                     +------------------+
@@ -18,25 +18,25 @@ Maljan, zararli yazilim orneklerini uc farkli perspektiften analiz eden, uzmanla
                     | (ServiceContainer)|
                     +--------+---------+
                              |
-              +--------------+--------------+
-              |              |              |
-     +--------v---+  +-------v----+  +------v-------+
-     |   Static   |  |  Dynamic   |  |   Network    |  <-- Expert Agents
-     |  Analyst   |  |  Analyst   |  |   Analyst    |      (@register_agent)
-     +------+-----+  +-----+------+  +------+-------+
-              |              |              |
-              +--------------+--------------+
-                             |
+          +------------------+------------------+
+          |                  |                  |
+ +--------v---+     +--------v---+     +--------v---+
+ |   Static   |     |  Dynamic   |     |   Network  |  <-- Parallel Fan-Out
+ |  Analyst   |     |  Analyst   |     |   Analyst  |      (@register_agent)
+ +------+-----+     +-----+------+     +------+-----+
+          |                  |                  |
+          +------------------+------------------+
+                             |         Fan-In (LangGraph waits for all)
                     +--------v---------+
-                    |   Negotiation    |  <-- Muzakere Dongusu
-                    |   (Mediator)     |
+                    |   Negotiation    |  <-- Negotiation Loop
+                    |   (Mediator)     |      MediatorVerdict (structured output)
                     +--------+---------+
                              |
                      consensus? -------+
                      |  no             | yes
               +------v-------+  +-----v------+
-              |   Revision   |  |   Judge    |  <-- Nihai Karar
-              |   (Loop)     |  |  (Verdict) |
+              |   Revision   |  |   Judge    |  <-- Final Decision
+              |   (Loop)     |  |  (Verdict) |      (Standalone class)
               +--------------+  +-----+------+
                                       |
                               +-------v-------+
@@ -47,161 +47,172 @@ Maljan, zararli yazilim orneklerini uc farkli perspektiften analiz eden, uzmanla
 
 ---
 
-## Katman 1: Veri Zenginlestirme ve On Isleme
+## Layer 1: Data Enrichment & Pre-processing
 
-LLM'lere ham dosyalari (ornegin bir `.exe` dosyasini) dogrudan veremeyiz. Bu nedenle sistemin ilk adimi, zararli yazilimi uc farkli boyutta ayristiran bir otomasyon boru hatti (pipeline) olmalidir.
+LLM agents cannot process raw binary files (e.g., a `.exe`) directly. The first step of the system is an automation pipeline that decomposes malware across three distinct dimensions.
 
-- **Statik Veri Cikarimi:** Zararli yazilim `Ghidra` veya `Radare2` komut satiri araclarindan gecirilerek decompiled kod parcaciklari, string ifadeler ve PE baslik (header) bilgileri elde edilir.
+- **Static Data Extraction:** The binary is passed through `Ghidra` or `Radare2` command-line tools to obtain decompiled code snippets, string values, and PE header information.
 
-- **Dinamik Davranis Cikarimi:** Dosya, izole bir `CAPEv2` veya `Cuckoo Sandbox` ortaminda calistirilir. Sistem cagrilari (API calls), dosya sistemi hareketleri ve kayit defteri (registry) degisiklikleri JSON formatinda alinir.
+- **Dynamic Behavior Extraction:** The file is executed in an isolated `CAPEv2` or `Cuckoo Sandbox` environment. System calls (API calls), filesystem activity, and registry changes are captured in JSON format.
 
-- **Ag Trafigi Cikarimi:** Sandbox calisirken yakalanan PCAP dosyasi `Zeek` (eski adiyla Bro) uzerinden gecirilerek DNS istekleri, HTTP/HTTPS baglantilari ve beacon benzeri periyodik iletisimler ayristirilir.
+- **Network Traffic Extraction:** The PCAP file captured during sandbox execution is processed through `Zeek` (formerly Bro) to extract DNS requests, HTTP/HTTPS connections, and beacon-like periodic communications.
 
-### Uygulama Durumu
+### Implementation Status
 
-| Bilesen | Durum | Aciklama |
-|---------|-------|----------|
-| DataLoader | Tamamlandi | `FileDataLoader` + `ParserRegistry` ile dinamik parser kesfi |
-| Advanced Parsers | Tamamlandi | Static, Dynamic, Network parserlari `@register_parser` ile kayitli |
-| Davranissal Imza Eslestirme | Tamamlandi | Parser seviyesinde "Code Injection", "Persistence" gibi olaylarin tespiti |
-| Otomatik Arac Entegrasyonu | Planlanmis | Ghidra/CAPEv2/Zeek otomatik pipeline (su an elle hazirlanan JSON dosyalari) |
-
----
-
-## Katman 2: Uzman Ajan Katmani
-
-Bu katmanda calisan modellerin her biri sadece kendi uzmanlik alanindaki veriyi gorecek ve kendi perspektifinden bir analiz uretecektir.
-
-- **Ajan 1 (Statik Kod Analisti):**
-    - **Girdi:** Decompile edilmis kodlar ve stringler.
-    - **Odak:** Kodda obfuscation (gizleme) var mi? Zararli kutuphaneler (ornegin kriptografi veya enjeksiyon apileri) kullanilmis mi?
-
-- **Ajan 2 (Dinamik Analist):**
-    - **Girdi:** JSON formatindaki sandbox davranis loglari.
-    - **Odak:** Hangi kalicilik (persistence) yontemleri kullaniliyor? Sisteme zararli bir payload dusurulmus mu (dropper davranisi)?
-
-- **Ajan 3 (Ag ve C2 Analisti):**
-    - **Girdi:** Zeek baglanti loglari ve PCAP ozetleri.
-    - **Odak:** Disariya veri sizdiriliyormu? Hangi IP veya domainler ile haberlesiliyor? Bir C2 altyapisiyla baglanti kuruldu mu?
-
-### Uygulama Durumu
-
-| Bilesen | Durum | Aciklama |
-|---------|-------|----------|
-| OOP Agent Structure | Tamamlandi | `BaseAnalyst` + `@register_agent` dekoratoru ile plugin mimarisi |
-| Expert Analysts (3x) | Tamamlandi | Static, Dynamic, Network uzmanlari |
-| Revizyon Yetkinligi | Tamamlandi | `revise()` metodu ile muzakere sirasinda rapor guncelleme |
-| Token Overflow Korumasi | Tamamlandi | `tiktoken` ile girdi truncation |
-| Hata Yonetimi | Tamamlandi | `safe_analyze()` / `safe_revise()` ile graceful fallback |
-| Multi-Provider LLM | Tamamlandi | OpenAI, Anthropic, Ollama - `@register_provider` ile genisletilebilir |
+| Component | Status | Description |
+|-----------|--------|-------------|
+| DataLoader | Complete | `FileDataLoader` + `ParserRegistry` with dynamic parser discovery |
+| Advanced Parsers | Complete | Static, Dynamic, Network parsers registered via `@register_parser` |
+| Behavioral Signature Matching | Complete | Detection of events like "Code Injection", "Persistence" at the parser level |
+| Data Cache | Complete | `ServiceContainer.load_data()` prevents repeated disk I/O |
+| Automated Tool Integration | Planned | Ghidra/CAPEv2/Zeek automatic pipeline (currently hand-crafted JSON files) |
 
 ---
 
-## Katman 3: Tartisma ve Muzakere Motoru
+## Layer 2: Expert Agent Layer
 
-Sistemin en can alici noktasi ajanlarin statik bir rapor uretip birakmamasi, birbirlerinin bulgularini inceleyerek tartisabilmesidir.
+Each model in this layer sees only the data from its own domain and produces an analysis from its own perspective. All agents run **in parallel** (LangGraph fan-out), making total analysis time independent of agent count.
 
-- **Altyapi:** Bu iletisimi yonetmek icin **LangGraph** (Python) framework'u kullanilmaktadir. Durum yonetimi (State Management) sayesinde ajanlarin konusma sirasi graf tabanli olarak kontrol edilmektedir.
+- **Agent 1 (Static Code Analyst):**
+    - **Input:** Decompiled code and strings.
+    - **Focus:** Is there obfuscation in the code? Are malicious libraries being used (e.g., cryptography or injection APIs)?
 
-- **Surec:**
-    1. Her ajan ilk raporunu yazar ve `reports` dict'ine yazar.
-    2. Ajanlar birbirlerinin raporlarini okur. Ornegin Statik Ajan, "Kodda ag baglantisi fonksiyonu bulamadim" derken Ag Ajani, "Fakat PCAP'te disariya giden sifreli bir trafik var" diyebilir.
-    3. Ajanlar celisen noktalarda argumanlarini revize eder (genellikle 2 veya 3 tur tartisma - _iteration_ - doner).
+- **Agent 2 (Dynamic Analyst):**
+    - **Input:** Sandbox behavioral logs in JSON format.
+    - **Focus:** What persistence mechanisms are being used? Was a malicious payload dropped (dropper behavior)?
 
-### Uygulama Durumu
+- **Agent 3 (Network & C2 Analyst):**
+    - **Input:** Zeek connection logs and PCAP summaries.
+    - **Focus:** Is data being exfiltrated? Which IPs or domains are being communicated with? Was a C2 infrastructure connection established?
 
-| Bilesen | Durum | Aciklama |
-|---------|-------|----------|
-| LangGraph Orchestration | Tamamlandi | Dinamik graf builder, `AgentRegistry`'den otomatik node olusturma |
-| Gercek Muzakere | Tamamlandi | `revision_node` ile ajanlar birbirlerinin raporlarini okuyup itiraz ediyor |
-| Consensus Detection | Tamamlandi | Mediator'un confidence skoruna dayali konsensus tespiti |
-| Early Exit | Tamamlandi | Konsensus saglandiginda dongudan erken cikis |
+### Implementation Status
 
----
-
-## Katman 4: Hakem ve Cikti Uretimi
-
-Tartisma dongusu bittiginde, konusma gecmisi ve ajanlarin son argumanlari Hakem modele iletilir. Hakem model, celiskileri cozer, nihai karari ("Malware" veya "Benign") verir ve detayli bir rapor yazar.
-
-- **Hakem Model:** `Llama-3.1-70B` (Yerel) veya donanim yetersizse `GPT / Claude` (API).
-- **Istihbarat Entegrasyonu:** Hakem model, analiz sonucunu ham metin yerine **STIX 2.1** formatinda yapilandirilmis bir JSON nesnesi olarak cikti verecek sekilde (Structured Output) yonlendirilir.
-- **Operasyonel Akis:** Tespit edilen tehdit aktoru taktikleri (MITRE ATT&CK TTP'leri), IP'ler, domainler ve hash degerleri STIX bundle olarak uretilir.
-
-### Uygulama Durumu
-
-| Bilesen | Durum | Aciklama |
-|---------|-------|----------|
-| STIX 2.1 Verdict | Tamamlandi | Pydantic uzerinden kati kuralli STIX 2.1 Bundle formati |
-| MITRE ATT&CK Mapping | Tamamlandi | AttackPattern nesneleri ile TTP eslestirme |
-| OpenCTI Entegrasyonu | Planlanmis | STIX bundle'in otomatik istihbarat aktarimi |
+| Component | Status | Description |
+|-----------|--------|-------------|
+| OOP Agent Structure | Complete | `BaseAnalyst` + `@register_agent` decorator for plugin architecture |
+| Expert Analysts (3x) | Complete | Static, Dynamic, Network specialists |
+| Parallel Execution | Complete | LangGraph fan-out: START -> [static \|\| dynamic \|\| network] |
+| Revision Capability | Complete | `revise()` method for updating reports during negotiation |
+| Token Overflow Protection | Complete | Input truncation via `tiktoken` |
+| Error Handling | Complete | Graceful fallback via `safe_analyze()` / `safe_revise()` |
+| Multi-Provider LLM | Complete | OpenAI, Anthropic, Ollama — extensible via `@register_provider` |
+| Agent Cache | Complete | `ServiceContainer.get_agent()` eliminates repeated agent instantiation |
 
 ---
 
-## v1.0.0 Enterprise Mimari Desenleri
+## Layer 3: Debate & Negotiation Engine
 
-### Registry Pattern (Plugin Mimarisi)
+The most critical aspect of the system is that agents do not simply produce a static report and stop — they can inspect each other's findings and debate.
 
-Yeni bir agent/parser/LLM provider eklemek icin sadece **1 dosya** olusturup dekorator eklemek yeterli:
+- **Infrastructure:** **LangGraph** (Python) framework is used to manage this communication. State Management enables agent turn order to be controlled through a graph-based structure.
+
+- **Process:**
+    1. Each agent writes its initial report and saves it to the `reports` dict.
+    2. The Mediator accepts all reports as a generic `dict[str, str]` — no hardcoded agent names.
+    3. The Mediator uses `with_structured_output(MediatorVerdict)` to produce a structured output: `contradictions`, `resolution_summary`, `confidence`. Regex parsing is eliminated.
+    4. Agents revise their arguments on conflicting points (typically 2 or 3 negotiation rounds — iterations).
+
+### Implementation Status
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| LangGraph Orchestration | Complete | Dynamic graph builder with automatic node creation from `AgentRegistry` |
+| Genuine Negotiation | Complete | Agents read and challenge each other's reports via `revision_node` |
+| Generic Mediator API | Complete | `mediate(reports: dict[str, str])` — no hardcoded agent names |
+| Structured Consensus Detection | Complete | Reliable confidence scoring via `MediatorVerdict` Pydantic model |
+| Ollama Fallback | Complete | Text-based fallback for providers that do not support structured output |
+| Early Exit | Complete | Early loop exit when consensus is reached |
+
+---
+
+## Layer 4: Judge & Output Generation
+
+When the negotiation loop ends, the conversation history and the agents' final arguments are passed to the Judge model. The Judge model resolves contradictions, delivers the final decision ("Malware" or "Benign"), and produces a detailed report.
+
+- **Judge Model:** `Llama-3.1` (Local/Ollama) or `GPT / Claude` (API).
+- **Standalone Class:** `JudgeAgent` does not inherit from `BaseAnalyst`. It only has `mediate()` and `give_verdict()` methods.
+- **Intelligence Integration:** The Judge model is instructed to output the analysis result not as raw text but as a **STIX 2.1** formatted structured JSON object (Structured Output).
+- **Operational Flow:** Detected threat actor tactics (MITRE ATT&CK TTPs), IPs, domains, and hash values are produced as a STIX bundle.
+
+### Implementation Status
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| JudgeAgent Standalone Class | Complete | Separated from BaseAnalyst; responsibilities are clearly defined |
+| STIX 2.1 Verdict | Complete | Strict STIX 2.1 Bundle format validated via Pydantic |
+| MITRE ATT&CK Mapping | Complete | TTP mapping via AttackPattern objects |
+| OpenCTI Integration | Planned | Automated intelligence transfer from STIX bundle |
+
+---
+
+## v1.0.0 Enterprise Architecture Patterns
+
+### Registry Pattern (Plugin Architecture)
+
+Adding a new agent/parser/LLM provider requires only **1 file** with a decorator:
 
 ```python
-# Yeni ajan ekleme ornegi
+# Adding a new agent
 @register_agent("memory")
 class MemoryAnalyst(BaseAnalyst):
     def analyze(self, data: str) -> str: ...
     def revise(self, ...) -> str: ...
 
-# Yeni parser ekleme ornegi
+# Adding a new parser
 @register_parser("memory")
 class MemoryParser(BaseParser):
     def parse(self, raw_data) -> str: ...
 
-# Yeni LLM provider ekleme ornegi
+# Adding a new LLM provider
 @register_provider("groq")
 class GroqProvider:
     def build_model(self, model, temperature, **kwargs) -> BaseChatModel: ...
 ```
 
-**Baska hicbir dosya degistirmeye gerek yok.** Pipeline builder, registry'den yeni bileseni otomatik kesfeder.
+**No other file needs to be changed.** The pipeline builder auto-discovers new components from the registry. The Mediator also accepts a generic `dict[str, str]`, so adding a new agent does not require changing the `mediate()` signature.
 
 ### Dependency Injection (ServiceContainer)
 
-`ServiceContainer` tum bagimliliklari wire eder. Mock/real mod merkezi kontrol altinda:
+`ServiceContainer` wires together all dependencies. Mock/real mode switching is centrally controlled. LLM, agent, and data caches eliminate redundant object creation between revision rounds:
 
 ```python
 container = ServiceContainer(config=settings, mock=True)
-agents = container.agent_registry.list_agents()  # ["static", "dynamic", "network"]
-llm = container.get_expert_llm()  # RuntimeError in mock mode
+agents = container.agent_registry.list_agents()   # ["static", "dynamic", "network"]
+agent = container.get_agent("static")             # cached — no new object on second call
+data = container.load_data("abc123", "static")    # cached — no disk read on second call
+llm = container.get_expert_llm()                  # raises RuntimeError in mock mode
 ```
 
 ### Protocol-Based Contracts
 
-Tum alt-sistemler `typing.Protocol` ile tanimli kontratlar uzerinden calisir:
-- `AnalystProtocol` - Agent arayuzu
-- `ParserProtocol` - Parser arayuzu
-- `LLMProviderProtocol` - LLM provider arayuzu
-- `DataLoaderProtocol` - Data loader arayuzu
+All subsystems operate through contracts defined with `typing.Protocol`:
+
+- `AnalystProtocol` — Agent interface
+- `ParserProtocol` — Parser interface
+- `LLMProviderProtocol` — LLM provider interface
+- `DataLoaderProtocol` — Data loader interface
 
 ---
 
-## Proje Yapisi
+## Project Structure
 
 ```
 src/maljan/
     app.py                  # Composition Root (MaljanApp)
     cli.py                  # Thin CLI wrapper (typer)
     core/
-        config.py           # Hiyerarsik nested config (Pydantic Settings)
-        container.py        # ServiceContainer (Dependency Injection)
+        config.py           # Hierarchical nested config (Pydantic Settings)
+        container.py        # ServiceContainer (Dependency Injection + Cache)
         protocols.py        # Interface contracts (typing.Protocol)
         exceptions.py       # MaljanError, AnalystError, LLMError, ...
-        logger.py           # Merkezi loglama
+        logger.py           # Centralized logging
     agents/
         registry.py         # @register_agent + AgentRegistry
         base_agent.py       # BaseAnalyst (ABC)
         static_analyst.py   # @register_agent("static")
         dynamic_analyst.py  # @register_agent("dynamic")
         network_analyst.py  # @register_agent("network")
-        judge_agent.py      # Hakem ajan
+        judge_agent.py      # JudgeAgent (standalone class, not BaseAnalyst)
     parsers/
         registry.py         # @register_parser + ParserRegistry
         base_parser.py      # BaseParser (ABC)
@@ -214,64 +225,72 @@ src/maljan/
         anthropic_provider.py  # @register_provider("anthropic")
         ollama_provider.py  # @register_provider("ollama")
     loaders/
-        file_loader.py      # FileDataLoader (ParserRegistry ile)
+        file_loader.py      # FileDataLoader (with ParserRegistry)
     pipeline/
-        state.py            # AnalysisState (dinamik reports dict)
-        nodes.py            # Generic node factory
-        builder.py          # Dinamik graf builder
+        state.py            # AnalysisState (generic reports dict + reducers)
+        nodes.py            # Generic node factories (no hardcoded agent names)
+        builder.py          # Dynamic graph builder (parallel fan-out)
         routing.py          # ConsensusRouter
     schemas/
-        stix_models.py      # STIX 2.1 Pydantic modelleri
+        stix_models.py      # STIX 2.1 Pydantic models
+        mediation_models.py # MediatorVerdict (structured confidence output)
 ```
 
 ---
 
-## Altyapi Durumu
+## Infrastructure Status
 
-| Bilesen | Durum | Aciklama |
-|---------|-------|----------|
-| CLI Entrypoint | Tamamlandi | `typer` tabanli thin wrapper (`analyze`, `info` komutlari) |
-| Modern Tooling | Tamamlandi | `uv` paket yonetimi, `ruff` linting, `mypy` strict typing |
-| Gelismis Logging | Tamamlandi | Ajanlarin "dusunme sureclerini" takip eden merkezi log yapisi |
-| Mock Mode | Tamamlandi | API anahtari olmadan tum pipeline'i test edebilme |
-| Custom Exception System | Tamamlandi | `MaljanError`, `AnalystError`, `DataLoadError`, `LLMError`, `WorkflowError` |
-| Test Suite | Tamamlandi | 46 test: parser, agent, STIX model, registry, container, integration |
-
----
-
-## Tavsiye Edilen Yazilim Yigini
-
-| Bilesen | Onerilen Arac / Framework |
-|---------|---------------------------|
-| Model Sunucusu | vLLM (Yuksek hiz) veya Ollama (Kolay kurulum) |
-| Orkestrasyon | LangGraph (Python) |
-| Ozel Istem (Prompt) Yonetimi | LangChain |
-| Sandbox | CAPEv2 (API uzerinden otomatik tetiklenebilir) |
-| Cikti Formati | STIX 2.1 (Pydantic ile LLM ciktisi formatlanarak dogrulanir) |
+| Component | Status | Description |
+|-----------|--------|-------------|
+| CLI Entrypoint | Complete | `typer`-based thin wrapper (`analyze`, `info` commands) |
+| Modern Tooling | Complete | `uv` package management, `ruff` linting, `mypy` strict typing |
+| Advanced Logging | Complete | Centralized log structure tracking agent reasoning processes |
+| Mock Mode | Complete | Full pipeline testing without API keys |
+| Custom Exception System | Complete | `MaljanError`, `AnalystError`, `DataLoadError`, `LLMError`, `WorkflowError` |
+| Test Suite | Complete | 46 tests: parser, agent, STIX model, registry, container, integration |
+| Sample Data Files | Complete | Static/dynamic/network JSON samples under `data/samples/` |
 
 ---
 
-## Gelecek Yol Haritasi
+## Recommended Technology Stack
 
-### 1. Otomatik Veri Toplama
-- [ ] **Ghidra Headless Plugin**: `analyzeHeadless` ile otomatik decompilation pipeline.
-- [ ] **CAPEv2 REST API Connector**: Dosya submit + sonuc cekme otomasyonu.
-- [ ] **Zeek Log Pipeline**: PCAP dosyalarindan otomatik JSON cikti uretimi.
+| Component | Recommended Tool / Framework |
+|-----------|------------------------------|
+| Model Server | vLLM (High throughput) or Ollama (Easy setup) |
+| Orchestration | LangGraph (Python) |
+| Prompt Management | LangChain |
+| Sandbox | CAPEv2 (auto-triggerable via REST API) |
+| Output Format | STIX 2.1 (LLM output formatted and validated via Pydantic) |
 
-### 2. Gorsellestirme ve Izlenebilirlik (Web UI)
-- [ ] **LangGraph Dashboard**: Ajanlarin tartismalarini gercek zamanli izleyebildigimiz web arayuzu.
-- [ ] **STIX Visualizer**: Uretilen STIX bundle'ini grafiksel olarak gosteren viewer.
+---
 
-### 3. Derin Analiz Araclari
-- [ ] **YARA/Sigma Generator**: Analist uzmanlarin otomatik olarak YARA kurallari uretmesi.
-- [ ] **Additional Parsers**: Any.Run, IDA Pro, Procmon ve Sysmon log destekleri.
-- [ ] **ML-based Pre-Scoring**: Binary entropi/PE header supheli skor modeli.
+## Future Roadmap
 
-### 4. Otomasyon ve Mudahale
-- [ ] **Responder Agent**: Firewall kurali veya EDR block listesi oneren ajan.
-- [ ] **Automated Report Export**: PDF/HTML formatinda profesyonel rapor uretici.
-- [ ] **OpenCTI Entegrasyonu**: STIX bundle'in otomatik istihbarat aktarimi.
+### 1. Automated Data Collection
 
-### 5. Olceklenebilirlik
-- [ ] **Async Execution**: Ajanlarin paralel calistirilmasi.
-- [ ] **Database Integration**: Vektor veritabaninda (RAG) gecmis analiz hafizasi.
+- [ ] **Ghidra Headless Plugin**: Automated decompilation pipeline via `analyzeHeadless`.
+- [ ] **CAPEv2 REST API Connector**: File submission + result retrieval automation.
+- [ ] **Zeek Log Pipeline**: Automated JSON output generation from PCAP files.
+
+### 2. Visualization & Observability (Web UI)
+
+- [ ] **LangGraph Dashboard**: Web interface for real-time monitoring of agent debates.
+- [ ] **STIX Visualizer**: Graphical viewer for produced STIX bundles.
+
+### 3. Deep Analysis Tools
+
+- [ ] **YARA/Sigma Generator**: Automatic YARA rule generation by analyst agents.
+- [ ] **Additional Parsers**: Any.Run, IDA Pro, Procmon and Sysmon log support.
+- [ ] **ML-based Pre-Scoring**: Binary entropy / PE header suspicion scoring model.
+
+### 4. Automation & Response
+
+- [ ] **Responder Agent**: Agent that proposes firewall rules or EDR block list entries.
+- [ ] **Automated Report Export**: Professional report generator in PDF/HTML format.
+- [ ] **OpenCTI Integration**: Automated intelligence transfer from STIX bundle.
+
+### 5. Scalability
+
+- [ ] **Async Execution**: Fully asynchronous agent execution (asyncio + LangGraph async).
+- [ ] **Database Integration**: Past analysis memory in a vector database (RAG).
+- [ ] **Genuine Multi-Turn Dialog**: Per-agent response sequencing in each revision round.

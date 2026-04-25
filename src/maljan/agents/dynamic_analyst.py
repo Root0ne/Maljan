@@ -1,12 +1,37 @@
+"""Dynamic Analyst agent — evaluates sandbox behavioral logs (CAPEv2/Cuckoo).
+
+Phase 1b: Overrides analyze_isr() and revise_isr() to extract structured
+ClaimEvidence objects. Focuses on API call sequences, process injection
+chains, and persistence mechanisms observable from sandbox JSON output.
+"""
+
+from __future__ import annotations
+
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.registry import register_agent
+from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
+from maljan.schemas.isr_models import AgentISR
+
+_ISR_SYSTEM = (
+    "You are an expert Dynamic Malware Analyst with deep knowledge of sandbox behavior. "
+    "Analyze API call sequences, registry operations, process injection chains, "
+    "and persistence mechanisms from CAPEv2/Cuckoo JSON reports. "
+    "For EVERY claim, cite a concrete artifact: 'API call: X at address Y', "
+    "'Registry key: HKLM\\...\\Run', 'Process spawned: cmd.exe PID 1234'. "
+    "Focus on MITRE ATT&CK: T1547 (Autostart), T1055 (Process Injection), "
+    "T1059 (Command Execution), T1112 (Registry Modification)."
+)
 
 
 @register_agent("dynamic")
 class DynamicAnalyst(BaseAnalyst):
     """Specialized agent for evaluating Sandbox behavioral logs."""
+
+    # ------------------------------------------------------------------
+    # Text interface (backward compatible)
+    # ------------------------------------------------------------------
 
     def analyze(self, data: str) -> str:
         """Translates sandbox JSON logs into a behavioral malware profile."""
@@ -14,12 +39,7 @@ class DynamicAnalyst(BaseAnalyst):
 
         prompt = ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    "You are an expert Dynamic Analyst. Focus on MITRE ATT&CK "
-                    "techniques such as T1547 (Boot or Logon Autostart Execution) "
-                    "and T1055 (Process Injection).",
-                ),
+                ("system", _ISR_SYSTEM),
                 (
                     "human",
                     "Analyze registry persistence, process injection, and file/folder drops "
@@ -38,8 +58,13 @@ class DynamicAnalyst(BaseAnalyst):
         peer_reports: dict[str, str],
         mediator_feedback: str,
     ) -> str:
-        """Revise dynamic analysis based on static/network findings and mediator feedback."""
+        """Revise dynamic analysis based on peer findings and mediator feedback."""
         self.logger.info("Revising dynamic analysis based on peer feedback...")
+
+        peer_section = "\n\n".join(
+            f"{name.upper()} ANALYST REPORT:\n{report}"
+            for name, report in peer_reports.items()
+        ) or "No peer reports available."
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -48,16 +73,14 @@ class DynamicAnalyst(BaseAnalyst):
                     "You are an expert Dynamic Analyst participating in a collaborative "
                     "multi-agent malware analysis. The mediator has identified contradictions "
                     "between your report and other experts. Review the peer reports and mediator "
-                    "feedback, then revise your analysis. If the Static Analyst found suspicious "
-                    "API imports or the Network Analyst found C2 beacons that correlate with "
-                    "behaviors in the sandbox, update your findings accordingly. "
+                    "feedback, then revise your analysis. Correlate sandbox behaviors with "
+                    "any API imports or network indicators raised by peers. "
                     "Focus on MITRE ATT&CK: T1547, T1055.",
                 ),
                 (
                     "human",
                     "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "STATIC ANALYST REPORT:\n{static_report}\n\n"
-                    "NETWORK ANALYST REPORT:\n{network_report}\n\n"
+                    "PEER ANALYST REPORTS:\n{peer_section}\n\n"
                     "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
                     "ORIGINAL RAW DATA:\n{data}\n\n"
                     "Revise your analysis addressing the contradictions above.",
@@ -68,10 +91,117 @@ class DynamicAnalyst(BaseAnalyst):
         response = (prompt | self.llm).invoke(
             {
                 "own_report": own_report,
-                "static_report": peer_reports.get("static", "N/A"),
-                "network_report": peer_reports.get("network", "N/A"),
+                "peer_section": peer_section,
                 "mediator_feedback": mediator_feedback,
                 "data": original_data,
             }
         )
         return str(response.content)
+
+    # ------------------------------------------------------------------
+    # ISR interface (Phase 1b)
+    # ------------------------------------------------------------------
+
+    def analyze_isr(self, data: str) -> AgentISR:
+        """Return a structured AgentISR with evidence-backed behavioral claims."""
+        self.logger.info("Executing dynamic ISR analysis...")
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", _ISR_SYSTEM),
+                (
+                    "human",
+                    "Analyze the sandbox behavioral data and return a structured list of findings.\n"
+                    "For each finding state: the claim, the exact artifact reference "
+                    "(e.g. 'API call: WriteProcessMemory PID=832', 'RegSetValue: HKLM\\Run\\malware'), "
+                    "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
+                    "Format each finding as:\n"
+                    "CLAIM: <claim text>\n"
+                    "EVIDENCE: <artifact reference>\n"
+                    "CONFIDENCE: <float>\n"
+                    "TECHNIQUE: <T-ID or NONE>\n"
+                    "---\n\n"
+                    "Sandbox data:\n{data}",
+                ),
+            ]
+        )
+
+        response = (prompt | self.llm).invoke({"data": data})
+        content = str(response.content)
+        claims = _parse_claim_blocks(content)
+
+        if not claims:
+            return self._text_to_isr(content, revision_round=0)
+
+        return AgentISR(
+            agent_id=self.name,
+            domain="dynamic",
+            claims=claims,
+            dissent_items=[],
+            revision_round=0,
+        )
+
+    def revise_isr(
+        self,
+        original_data: str,
+        own_report: str,
+        peer_reports: dict[str, str],
+        mediator_feedback: str,
+        revision_round: int = 1,
+    ) -> tuple[str, AgentISR]:
+        """Return (revised_text, AgentISR) with dissent_items populated."""
+        self.logger.info("Executing dynamic ISR revision (round %d)...", revision_round)
+
+        peer_isr_summaries = "\n\n".join(
+            f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+        ) or "No peer reports available."
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    _ISR_SYSTEM + "\n\n"
+                    "You are in a negotiation round. You MUST:\n"
+                    "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
+                    "2. Revise your own claims based on new evidence.\n"
+                    "3. If you have NO disputes, write 'DISPUTES: NONE' to signal convergence.",
+                ),
+                (
+                    "human",
+                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+                    "PEER REPORTS:\n{peer_section}\n\n"
+                    "MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
+                    "RAW DATA:\n{data}\n\n"
+                    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+                    "followed by a DISPUTES section listing peer claims you reject.\n"
+                    "Example:\n"
+                    "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1055\n---\n"
+                    "DISPUTES:\n- Static analyst claims no API injection but I see WriteProcessMemory.\n",
+                ),
+            ]
+        )
+
+        response = (prompt | self.llm).invoke(
+            {
+                "own_report": own_report,
+                "peer_section": peer_isr_summaries,
+                "mediator_feedback": mediator_feedback,
+                "data": original_data,
+            }
+        )
+        content = str(response.content)
+
+        claims = _parse_claim_blocks(content)
+        dissent = _parse_disputes(content)
+
+        if not claims:
+            return content, self._text_to_isr(content, revision_round=revision_round)
+
+        isr = AgentISR(
+            agent_id=self.name,
+            domain="dynamic",
+            claims=claims,
+            dissent_items=dissent,
+            revision_round=revision_round,
+        )
+        return content, isr

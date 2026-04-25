@@ -25,7 +25,7 @@ class NetworkParser(BaseParser):
             if service == "dns":
                 query = entry.get("query", "N/A")
                 is_dga = self._is_suspicious_dns(query)
-                dns_rows.append([query, ip, "🚩 Suspicious" if is_dga else "Normal"])
+                dns_rows.append([query, ip, "[Suspicious]" if is_dga else "Normal"])
 
             elif service in ["ssl", "http"]:
                 # Connectivity Beacon Check
@@ -39,10 +39,10 @@ class NetworkParser(BaseParser):
         )
 
         return (
-            "### 🌐 Network Traffic Intelligence (Zeek Summarized)\n\n"
+            "### Network Traffic Intelligence (Zeek Summarized)\n\n"
             "#### DNS Exfiltration & DGA Analysis:\n"
             f"{dns_table}\n\n"
-            "#### C2 Connectivity beaconing:\n"
+            "#### C2 Connectivity Beaconing:\n"
             f"{conn_table}"
         )
 

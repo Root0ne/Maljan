@@ -32,14 +32,14 @@ class StaticParser(BaseParser):
         # 2. Suspicious Strings (IOCs)
         ioc_rows: list[list[str]] = []
         for string in entry.get("strings", []):
-            ioc_rows.append([string, "🚩 IOC/Hardcoded"])
+            ioc_rows.append([string, "[IOC/Hardcoded]"])
 
         ioc_table = self._format_as_table(
             headers=["String Value", "Potential Impact"], rows=ioc_rows
         )
 
         return (
-            f"### 🔍 Static Analysis Summary for {entry.get('file', 'Unknown')}\n\n"
+            f"### Static Analysis Summary for {entry.get('file', 'Unknown')}\n\n"
             f"**Code Overview:** {summary}\n\n"
             "#### PE Structure:\n"
             f"{section_table}\n\n"

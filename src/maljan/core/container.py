@@ -3,9 +3,34 @@
 Wires together all registries, loaders, and provides factory methods
 for creating agents and LLM instances. Replaces scattered global state
 and `_is_mock_mode()` checks with a single, testable container.
+
+Caching: LLM instances, agent instances, and loaded sample data are all
+cached so that repeated calls during the negotiation loop do not incur
+redundant object creation or I/O.
+
+Heterogeneous Model Ensemble:
+  get_agent_llm(agent_name) returns a per-agent LLM instance using
+  LLMConfig.agents overrides. When an agent has a dedicated config entry,
+  a distinct model/provider is used for that agent. This ensures that
+  different expert agents use different model families, reducing echo chamber
+  risk per the unanimous research finding (ReConcile + Wu et al.).
+  Agents without overrides fall back to the global expert LLM.
+
+LangSmith Observability (Phase 8.1):
+  When Settings.langchain_tracing_v2 is True, _configure_langsmith() sets
+  the OS environment variables that LangChain reads automatically:
+    LANGCHAIN_TRACING_V2  = "true"
+    LANGCHAIN_API_KEY     = Settings.langchain_api_key
+    LANGCHAIN_PROJECT     = Settings.langchain_project
+  All LLM calls, negotiation rounds, ISR constructions, and TTP mappings
+  become visible in the LangSmith dashboard with full trace trees.
+  Enable via .env: LANGCHAIN_TRACING_V2=true LANGCHAIN_API_KEY=ls_xxx
 """
 
 from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -16,6 +41,9 @@ from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
 
+if TYPE_CHECKING:
+    from maljan.agents.base_agent import BaseAnalyst
+
 
 class ServiceContainer:
     """Central service locator that manages all subsystem lifecycles.
@@ -24,6 +52,8 @@ class ServiceContainer:
         container = ServiceContainer(config=settings, mock=True)
         agents = container.agent_registry.list_agents()
         llm = container.get_expert_llm()
+        agent = container.get_agent("static")
+        data = container.load_data("abc123", "static")
     """
 
     def __init__(
@@ -50,11 +80,27 @@ class ServiceContainer:
             parser_registry=self.parser_registry,
         )
 
+        # --- Caches ---
+        # Global LLM instances (one per role, built lazily)
+        self._expert_llm_cache: BaseChatModel | None = None
+        self._judge_llm_cache: BaseChatModel | None = None
+        # Per-agent LLM instances (built lazily, keyed by agent_name)
+        self._agent_llm_cache: dict[str, BaseChatModel] = {}
+        # Agent instances (one per registered name, built lazily)
+        self._agent_cache: dict[str, BaseAnalyst] = {}
+        # Loaded and parsed data (keyed by (sample_id, data_type))
+        self._data_cache: dict[tuple[str, str], str] = {}
+
         logger.info(
-            f"ServiceContainer initialized "
-            f"(mock={mock}, agents={self.agent_registry.list_agents()}, "
-            f"parsers={self.parser_registry.list_parsers()})"
+            "ServiceContainer initialized "
+            "(mock=%s, agents=%s, parsers=%s)",
+            mock,
+            self.agent_registry.list_agents(),
+            self.parser_registry.list_parsers(),
         )
+
+        # Phase 8.1: Configure LangSmith tracing if enabled
+        self._configure_langsmith()
 
     @property
     def is_mock(self) -> bool:
@@ -62,13 +108,145 @@ class ServiceContainer:
         return self.mock
 
     def get_expert_llm(self) -> BaseChatModel:
-        """Build and return an expert-role LLM instance."""
+        """Build and return a cached expert-role LLM instance."""
         if self._llm_registry is None:
             raise RuntimeError("Cannot build LLM in mock mode.")
-        return self._llm_registry.build_model(role="expert")
+        if self._expert_llm_cache is None:
+            self._expert_llm_cache = self._llm_registry.build_model(role="expert")
+        return self._expert_llm_cache
 
     def get_judge_llm(self) -> BaseChatModel:
-        """Build and return a judge-role LLM instance."""
+        """Build and return a cached judge-role LLM instance."""
         if self._llm_registry is None:
             raise RuntimeError("Cannot build LLM in mock mode.")
-        return self._llm_registry.build_model(role="judge")
+        if self._judge_llm_cache is None:
+            self._judge_llm_cache = self._llm_registry.build_model(role="judge")
+        return self._judge_llm_cache
+
+    def get_agent_llm(self, agent_name: str) -> BaseChatModel:
+        """Build and return a cached per-agent LLM instance.
+
+        Delegates to LLMProviderRegistry.build_model_for_agent() which checks
+        LLMConfig.agents for a named override. When an override exists, a
+        dedicated LLM (potentially different provider/model) is built for that
+        agent. When no override exists, falls back to the global expert LLM.
+
+        The result is cached per agent_name so repeated calls (e.g. across
+        revision rounds) never rebuild the client unnecessarily.
+
+        Args:
+            agent_name: Agent registry key (e.g. "static", "dynamic", "network").
+
+        Returns:
+            Cached BaseChatModel for the given agent.
+        """
+        if self._llm_registry is None:
+            raise RuntimeError("Cannot build LLM in mock mode.")
+        if agent_name not in self._agent_llm_cache:
+            self._agent_llm_cache[agent_name] = (
+                self._llm_registry.build_model_for_agent(agent_name)
+            )
+        return self._agent_llm_cache[agent_name]
+
+    def get_agent(self, name: str) -> BaseAnalyst:
+        """Return a cached agent instance for the given name.
+
+        Agents are instantiated once and reused across all negotiation rounds,
+        avoiding repeated object creation and LLM client initialization.
+
+        Uses get_agent_llm() so each agent receives its own dedicated LLM
+        instance when a per-agent config override is defined.
+        """
+        if name not in self._agent_cache:
+            self._agent_cache[name] = self.agent_registry.create(
+                name, self.get_agent_llm(name)
+            )
+        return self._agent_cache[name]
+
+    def load_data(self, sample_id: str, data_type: str) -> str:
+        """Return cached parsed data for a sample and data type.
+
+        The first call reads and parses the file; subsequent calls return
+        the cached result, eliminating repeated disk I/O during revision rounds.
+        """
+        key = (sample_id, data_type)
+        if key not in self._data_cache:
+            self._data_cache[key] = self.loader.load(sample_id, data_type)
+        return self._data_cache[key]
+
+    def load_chunked(self, sample_id: str, data_type: str) -> list:
+        """Return a list of TextChunk objects for a sample and data type.
+
+        Delegates to FileDataLoader.load_chunked() which uses the BinaryChunker
+        configured from Settings.chunking. When the parsed text fits within the
+        token limit (skip_if_fits=True), returns a single-element list so the
+        analyst node takes the fast single-text path with zero overhead.
+
+        The chunk list is NOT cached — each call re-evaluates the chunker. This
+        is intentional: the chunker is stateless and cheap (no I/O), and caching
+        chunk objects would complicate memory management.
+
+        Args:
+            sample_id: Hash or identifier for the sample.
+            data_type: Domain type (e.g. \"static\", \"dynamic\", \"network\").
+
+        Returns:
+            Ordered list of TextChunk objects (at least one element).
+        """
+        from maljan.loaders.binary_chunker import TextChunk  # noqa: F401 (type hint only)
+
+        # Re-use cached parsed text if available, then chunk.
+        # This avoids double file I/O: load_data fills the cache, chunker re-splits.
+        key = (sample_id, data_type)
+        if key in self._data_cache:
+            text = self._data_cache[key]
+            return self.loader._chunker.chunk(data_type, text)
+
+        # First access — load, cache, then chunk.
+        return self.loader.load_chunked(sample_id, data_type)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _configure_langsmith(self) -> None:
+        """Configure LangSmith tracing by setting OS environment variables.
+
+        Phase 8.1 implementation. LangChain reads tracing configuration from
+        OS environment variables at import time and on each chain invocation.
+        This method propagates the Settings values into the OS environment so
+        that all subsequent LLM calls, chain invocations, and agent runs are
+        automatically traced to the LangSmith project.
+
+        Called once during ServiceContainer.__init__(). Idempotent: calling
+        it again with the same config has no observable side-effect.
+
+        When langchain_tracing_v2 is False (default), this method is a no-op
+        and no environment variables are modified — preserving full isolation
+        in test environments that do not set the tracing flag.
+
+        Environment variables set:
+            LANGCHAIN_TRACING_V2: "true" when tracing is enabled.
+            LANGCHAIN_API_KEY:    LangSmith API key (only when provided).
+            LANGCHAIN_PROJECT:    LangSmith project name (default: "maljan").
+        """
+        if not self.config.langchain_tracing_v2:
+            logger.debug("LangSmith tracing disabled (langchain_tracing_v2=False).")
+            return
+
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = self.config.langchain_project
+
+        if self.config.langchain_api_key:
+            os.environ["LANGCHAIN_API_KEY"] = self.config.langchain_api_key
+            logger.info(
+                "LangSmith tracing enabled (project=%s, api_key=***%s).",
+                self.config.langchain_project,
+                self.config.langchain_api_key[-4:],  # log only last 4 chars
+            )
+        else:
+            logger.warning(
+                "LangSmith tracing enabled (project=%s) but no API key provided. "
+                "Set LANGCHAIN_API_KEY in .env to authenticate with LangSmith.",
+                self.config.langchain_project,
+            )
