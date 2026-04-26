@@ -120,7 +120,7 @@ class FunctionSummarizer:
 
         try:
             response = self._llm.invoke(messages)
-            summary: str = str(response.content)
+            summary: str = response.content  # type: ignore[union-attr]
             word_count = len(summary.split())
             logger.debug(
                 "FunctionSummarizer: chunk summarized — %d chars -> %d words.",
@@ -205,7 +205,7 @@ class FunctionSummarizer:
 
         try:
             response = self._llm.invoke(messages)
-            result: str = str(response.content)
+            result: str = response.content  # type: ignore[union-attr]
             return result.strip()
         except Exception as exc:
             logger.warning(

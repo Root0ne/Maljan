@@ -1,0 +1,1 @@
+MOCK: Evaluated all indicators.

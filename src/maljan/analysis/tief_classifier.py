@@ -11,7 +11,7 @@ from typing import Any
 try:
     from transformers import pipeline
 except ImportError:
-    pipeline = None  # type: ignore[assignment]
+    pipeline = None
 
 from maljan.core.logger import logger
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -30,7 +30,7 @@ class TIEFClassifier:
         """
         self.model_name = model_name
         self.threshold = threshold
-        self.classifier: Any = None
+        self.classifier = None
 
         # Lazy initialization to save memory if not used
         self._initialized = False
@@ -115,6 +115,6 @@ class TIEFClassifier:
         return AgentISR(
             agent_id="tief_classifier",
             domain="tief",
+            summary=f"TIEF classifier detected {len(techniques)} techniques.",
             claims=claims,
-            revision_round=0,
         )

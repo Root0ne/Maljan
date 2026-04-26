@@ -13,9 +13,9 @@ Geliştirme süreci, ajanların "gerçek dünya araçlarını" (MCP, Ghidra, CAP
 | **B** | Sigma Layer 0 (log tabanlı deterministik TTP tespiti) | `[x] TAMAMLANDI` | Yüksek |
 | **C** | Hatching Triage sandbox client | `[x] TAMAMLANDI` | Orta |
 | **D** | FunctionSummarizer (iki aşamalı chunk pipeline) | `[x] TAMAMLANDI` | Düşük |
-| **E** | **CAPEv2 MCP Araç (Tool) Genişletmesi & Optimizasyonu** | `[x] TAMAMLANDI` | Yüksek |
-| **F** | **Ghidra MCP Prompt Tuning (Agent Eğitimi)** | `[x] TAMAMLANDI` | Yüksek |
-| **G** | **Uçtan Uca (E2E) ReAct Pipeline & Orkestrasyon** | `[x] TAMAMLANDI` | Kritik |
+| **E** | **CAPEv2 MCP Araç (Tool) Genişletmesi & Optimizasyonu** | `[ ] BEKLİYOR` | Yüksek |
+| **F** | **Ghidra MCP Prompt Tuning (Agent Eğitimi)** | `[ ] BEKLİYOR` | Yüksek |
+| **G** | **Uçtan Uca (E2E) ReAct Pipeline & Orkestrasyon** | `[ ] BEKLİYOR` | Kritik |
 | **H** | **Phase 1: Anti-Echo-Chamber Engine (Sycophancy Detector)**| `[ ] BEKLİYOR` | Kritik |
 | **I** | **Phase 2: Adaptive Termination (K-S Test)** | `[ ] BEKLİYOR` | Yüksek |
 | **J** | **Phase 5: Long-Term Memory / RAG (Qdrant & STIX Store)** | `[ ] BEKLİYOR` | Yüksek |
@@ -26,27 +26,27 @@ Geliştirme süreci, ajanların "gerçek dünya araçlarını" (MCP, Ghidra, CAP
 
 Bu aşamadaki görevler, projeye sonradan eklenen ve ajanların yeteneklerini büyük ölçüde artıran **Model Context Protocol (MCP)** altyapısının meyvelerini toplamak için sıraya konmuştur.
 
-### [x] TODO-E: CAPEv2 MCP Araç (Tool) Genişletmesi & Optimizasyonu
-**Durum:** TAMAMLANDI
+### [ ] TODO-E: CAPEv2 MCP Araç (Tool) Genişletmesi & Optimizasyonu
+**Durum:** BEKLİYOR
 **Etki:** Yüksek — CAPEv2 entegrasyonu sağlandı ancak LLM'e tüm araçlar (tools) başarılı şekilde aktarılamadı.
 
-- [x] **Tool Discovery Çözümü:** `CAPEv2/mcp/server.py` içerisinde tanımlı olan `submit_file`, `cuckoo_status`, `task_report` gibi araçların LangChain `mcp_client` tarafından neden tam olarak yüklenmediği (FastMCP kaynaklı sorunlar vb.) tespit edilip çözülecek.
-- [x] **Prompt Güncellemesi:** Ajanın `submit_file` aracını çağırıp, ardından dosyanın analiz edilmesini beklemek için `cuckoo_status` ve `task_report` araçlarını bir döngüde çağırmasını sağlayacak spesifik ReAct (Reasoning and Acting) talimatları `dynamic_analyst.py` içindeki sistem promptlarına eklenecek.
+- [ ] **Tool Discovery Çözümü:** `CAPEv2/mcp/server.py` içerisinde tanımlı olan `submit_file`, `cuckoo_status`, `task_report` gibi araçların LangChain `mcp_client` tarafından neden tam olarak yüklenmediği (FastMCP kaynaklı sorunlar vb.) tespit edilip çözülecek.
+- [ ] **Prompt Güncellemesi:** Ajanın `submit_file` aracını çağırıp, ardından dosyanın analiz edilmesini beklemek için `cuckoo_status` ve `task_report` araçlarını bir döngüde çağırmasını sağlayacak spesifik ReAct (Reasoning and Acting) talimatları `dynamic_analyst.py` içindeki sistem promptlarına eklenecek.
 
-### [x] TODO-F: Ghidra MCP Prompt Tuning (Agent Eğitimi)
-**Durum:** TAMAMLANDI
+### [ ] TODO-F: Ghidra MCP Prompt Tuning (Agent Eğitimi)
+**Durum:** BEKLİYOR
 **Etki:** Yüksek — `test_static_analyst.py` ile Ghidra'dan başarıyla 29 adet tool çekildi ancak ajan bu araçları hangi sırayla ve mantıkla kullanacağını bilmiyor.
 
-- [x] **Few-Shot Örneklerinin Eklenmesi:** `static_analyst.py` içerisindeki `_ISR_SYSTEM` promptuna standart bir tersine mühendislik (reverse engineering) iş akışı eklenecek. (Örn: Önce `import_file` kullan, sonra `debugger_modules` ile bellek adreslerini çek, ardından `debugger_read_memory` kullan).
-- [x] **Veri Optimizasyonu:** Ghidra'dan dönen devasa Assembly dökümleri LLM'in bağlam limitini (context window) aşmaması için, `FunctionSummarizer` ile özetlenecek şekilde bir kısıtlama (guardrail) mekanizması kurulacak.
+- [ ] **Few-Shot Örneklerinin Eklenmesi:** `static_analyst.py` içerisindeki `_ISR_SYSTEM` promptuna standart bir tersine mühendislik (reverse engineering) iş akışı eklenecek. (Örn: Önce `import_file` kullan, sonra `debugger_modules` ile bellek adreslerini çek, ardından `debugger_read_memory` kullan).
+- [ ] **Veri Optimizasyonu:** Ghidra'dan dönen devasa Assembly dökümleri LLM'in bağlam limitini (context window) aşmaması için, `FunctionSummarizer` ile özetlenecek şekilde bir kısıtlama (guardrail) mekanizması kurulacak.
 
-### [x] TODO-G: Uçtan Uca (E2E) ReAct Pipeline & Orkestrasyon
-**Durum:** TAMAMLANDI
+### [ ] TODO-G: Uçtan Uca (E2E) ReAct Pipeline & Orkestrasyon
+**Durum:** BEKLİYOR
 **Etki:** Kritik — Araçlar (Ghidra, CAPE) artık ajanlara yüklenebiliyor, ancak bu araçların canlı bir malware örneği üzerinde *LangGraph* aracılığıyla uçtan uca, tüm pipeline boyunca kullanılması gerekiyor.
 
-- [x] **`scripts/run_analysis.py` Oluşturulması:** Sistemin giriş noktası olacak komut satırı arayüzü yazılacak. Kullanıcıdan alınan dosya (`.exe`, `.dll`) veya hash üzerinden LangGraph akışı (Negotiation -> Revision -> Judge) başlatılacak.
-- [x] **Araç Kullanım Döngüsü (Tool Loop) Testi:** Canlı veri akışında `create_react_agent` tabanlı döngünün, dış araçlara istekleri doğru yönlendirdiği test edilecek.
-- [x] **Rapor Çıktısı:** Judge ajanının nihai STIX 2.1 kararının ve ISR (Intelligence Summary Report) çıktılarının disk üzerinde (`reports/`) JSON olarak kaydedilmesi sağlanacak.
+- [ ] **`scripts/run_analysis.py` Oluşturulması:** Sistemin giriş noktası olacak komut satırı arayüzü yazılacak. Kullanıcıdan alınan dosya (`.exe`, `.dll`) veya hash üzerinden LangGraph akışı (Negotiation -> Revision -> Judge) başlatılacak.
+- [ ] **Araç Kullanım Döngüsü (Tool Loop) Testi:** Canlı veri akışında `create_react_agent` tabanlı döngünün, dış araçlara istekleri doğru yönlendirdiği test edilecek.
+- [ ] **Rapor Çıktısı:** Judge ajanının nihai STIX 2.1 kararının ve ISR (Intelligence Summary Report) çıktılarının disk üzerinde (`reports/`) JSON olarak kaydedilmesi sağlanacak.
 
 ---
 
