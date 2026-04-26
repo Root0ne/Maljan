@@ -414,10 +414,39 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("ATTCKValidator unavailable: %s. Skipping TTP validation.", e)
 
-            # Phase 4.3: compute three-layer TTP cascade from ISR reports.
+            # Collect ISR reports from state — shared by YARA scan + cascade.
+            isr_reports: dict = state.get("isr_reports") or {}
+
+            # TODO-1: YARA Layer 0 — deterministic signature scan (pre-LLM grounding).
+            # Scans all analyst report text + ISR evidence refs for known ATT&CK patterns.
+            # Results are merged into isr_reports as domain="yara" before cascade scoring.
+            # Graceful degradation: any error is logged and scan is silently skipped.
+            try:
+                from maljan.analysis.yara_layer import YaraLayer
+
+                yara_layer: YaraLayer = container.get_yara_layer()  # type: ignore[assignment]
+                if yara_layer.rule_count > 0:
+                    # Build combined scan text from all available analyst signals
+                    scan_parts: list[str] = list((state.get("reports") or {}).values())
+                    for isr_obj in isr_reports.values():
+                        scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
+                    scan_text = " ".join(scan_parts)
+                    yara_matches = yara_layer.scan(scan_text)
+                    if yara_matches:
+                        yara_isr = yara_layer.to_isr(yara_matches)
+                        isr_reports = {**isr_reports, "yara_layer": yara_isr}
+                        logger.info(
+                            "YARA Layer 0: %d match(es) → injected into cascade as domain='yara'.",
+                            len(yara_matches),
+                        )
+            except Exception as e:
+                logger.warning("YARA Layer 0 scan failed: %s. Cascade proceeds without it.", e)
+
+            # Phase 4.3: compute multi-layer TTP cascade from ISR reports.
+            # (isr_reports already collected above; enriched by YARA if matches found)
+
             # Stateless — runs in microseconds; degrades gracefully on error.
             cascade_summary = None
-            isr_reports = state.get("isr_reports") or {}
             try:
                 from maljan.analysis.ttp_cascade import TTPCascadeEngine
 

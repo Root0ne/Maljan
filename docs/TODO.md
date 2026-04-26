@@ -28,6 +28,13 @@ ve işlevsel olarak başka bir şey tarafından karşılanmamaktadır.
 
 ## TODO-1: Phase 4 — TTP Cascade'e Deterministik Layer 1 (YARA/Sigma) Eklenmesi
 
+### YARA Katmanı: TAMAMLANDI
+
+YARA kısmı implemente edildi (`src/maljan/analysis/yara_layer.py`, `data/yara_ttp_rules.yaml`).
+Bakınız: aşağıdaki "Tamamlanan Maddeler" listesi.
+
+### Sigma Katmanı: YAPILACAK
+
 ### Sorun
 
 Master plan Phase 4'te şu üç katmanlı yapıyı tarif eder:
@@ -339,12 +346,128 @@ Model: "CTI-BERT" (arXiv:2312.00957) veya "SecureBERT-NER" (HuggingFace)
 
 ---
 
+## TODO-6: ATT&CK Enterprise Catalog Entegrasyonu
+
+**Durum: YAPILACAK**
+
+### Sorun
+
+Mevcut ground truth pipeline iki kritik zayıflık barındırıyor:
+
+1. **`attck_valid_ids` evreni çok küçük.** TRAM2 dataset'inde rastlanan 50 ID
+   kullanılıyor. ATT&CK Enterprise gerçekte ~700 aktif teknik içeriyor (teknikler +
+   alt-teknikler, revoke edilmemişler). Hallucination rate hesabı bu yüzden yanıltıcı:
+   LLM'nin ürettiği bilinmeyen bir ID, 50-elemanlı evrende "hallucination" sayılırken
+   700-elemanlı gerçek evrende "geçerli ama yanlış attribution" sayılmalıydı.
+
+2. **Malware ailesi bazında MITRE-otoriter ground truth eksik.** TRAM2 "tehdit raporu →
+   teknik" eşlemesi sağlıyor; ancak ATT&CK'in "WannaCry → {T1486, T1210, T1027, ...}"
+   gibi MITRE'nin bizzat doğruladığı malware→TTP ilişkileri kullanılmıyor.
+
+### Çözüm
+
+`mitre-attack/attack-stix-data` reposunun `enterprise-attack.json` (~60MB STIX 2.1
+bundle) indirilir ve işlenir.
+
+#### 6.1 — `data/attck_valid_ids.json` (tam ATT&CK teknik evreni)
+
+- **Script:** `scripts/prepare_attck_malware_fixtures.py` (aşağıda)
+- **Çıktı:** `data/attck_valid_ids.json` — sıralı, aktif (revoke edilmemiş,
+  deprecated olmayan) ATT&CK teknik ID listesi (~700 ID)
+- **Kapsam:** Hem ana teknikler (T1055) hem alt-teknikler (T1055.001) dahil
+- **Kullanım:** `prepare_tram_dataset.py` bu dosyayı okuyarak tüm TRAM2 fixture
+  `attck_valid_ids` alanlarını 50'den 700+'e güncelleyecek
+- **Commit:** Evet (küçük JSON dosyası, ~15KB)
+
+#### 6.2 — `tests/evaluation/ground_truth/attck_malware/*.json` (per-malware fixtures)
+
+- **Script:** `scripts/prepare_attck_malware_fixtures.py`
+- **Çıktı:** `tests/evaluation/ground_truth/attck_malware/` dizini
+- **İçerik:** ATT&CK'te kayıtlı her malware/tool ailesi için bir `GroundTruth`
+  uyumlu fixture dosyası. Her fixture:
+  ```json
+  {
+    "sample_id": "cobalt_strike",
+    "notes": "ATT&CK ground truth — software: 'Cobalt Strike'. Source: mitre-attack/attack-stix-data (ATT&CK Terms of Use).",
+    "technique_ids": ["T1055", "T1059.001", "T1071.001", ...],
+    "attck_valid_ids": ["T1001", "T1001.001", ...],  // 700+ ID
+    "expected_stix_types": ["malware", "attack-pattern", "relationship"],
+    "expected_rel_types": ["uses"]
+  }
+  ```
+- **Eşik:** Min. 3 teknik (düşük eşik — TRAM2'nin 3 ile aynı)
+- **Beklenen:** ~250-350 fixture (ATT&CK'te ~700 malware/tool, çoğunun ≥3 tekniği var)
+- **Örnekler:** `cobalt_strike.json`, `wannacry.json`, `emotet.json`, `mimikatz.json`,
+  `lazarus_group.json`, `fin7.json` ...
+- **Commit:** Evet
+- **Test:** `tests/evaluation/test_attck_malware_fixtures.py`
+
+**Not:** Bu fixture'lar TRAM2 fixture'larından farklı bir değerlendirme boyutu sağlar:
+TRAM2 "bu CTI raporu hangi teknikleri anlatıyor?" sorusunu yanıtlar; ATT&CK malware
+fixture'ları "bu malware ailesi hangi teknikleri kullanır?" sorusunu yanıtlar.
+Maljan'ın bir binary'i doğru aileye atfedip atfetmediğini ölçmek için idealdir.
+
+#### 6.3 — `data/attck_labeled_sentences.jsonl` (TRAM2-benzeri etiketli dataset)
+
+- **Script:** `scripts/prepare_attck_malware_fixtures.py` (ek çıktı)
+- **Commit:** **Hayır** (`.gitignore`'a eklenir, `make prepare-attck` ile üretilir)
+- **Format:** JSONL, her satır bir örnek:
+  ```json
+  {"text": "...", "label": "T1055", "source": "Cobalt Strike", "source_type": "malware", "layer": "relationship_description"}
+  ```
+
+**Üç katman:**
+
+| Katman | Kaynak | Nasıl | Miktar | Kalite |
+|---|---|---|---|---|
+| `relationship_description` | `relationship.description` | Malware/group/campaign'in bir tekniği NASIL kullandığının açıklaması → tek teknik etiketi | ~1,500 | En yüksek: MITRE attribution |
+| `technique_description` | `attack-pattern.description` | Tekniğin kendi tanımı → kendi ID'si ile etiketli | ~700 | Yüksek: otoriter tanım |
+| `technique_detection` | `attack-pattern.x_mitre_detection` | Tekniğin tespit metni → kendi ID'si | ~600 | Orta: detection odaklı |
+
+- **Toplam:** ~2,800 örnek (TRAM2: 25,000+, ama bu MITRE-otoriter)
+- **Kullanım:** TODO-5 DistilBERT/CTI-BERT classifier fine-tuning için training data
+- **TRAM2 ile fark:** TRAM2 = dış kaynaktan okunmuş tehdit raporu dili;
+  bu dataset = MITRE'nin kendi teknik terminolojisi. İkisi birlikte kullanılırsa
+  classifier daha güçlü olur.
+
+#### 6.4 — TRAM2 Fixture Güncellemesi
+
+`prepare_tram_dataset.py` güncellenir:
+- `--attck-valid-ids PATH` argümanı eklenir
+- `data/attck_valid_ids.json` varsa otomatik okunur (fallback: mevcut davranış)
+- 140 fixture yeniden üretilir: `attck_valid_ids` 50 → 700+ ID
+
+#### 6.5 — Makefile Hedefleri
+
+```makefile
+prepare-attck:  ## ATT&CK bundle indir → malware fixture + valid IDs + labeled sentences
+    uv run python scripts/prepare_attck_malware_fixtures.py
+
+benchmark-attck:  ## ATT&CK malware ground truth'a karşı benchmark çalıştır
+    uv run python -m pytest tests/evaluation/ -k "attck_malware" -v
+```
+
+### Yapılacaklar (Adım Sırası)
+
+1. `scripts/prepare_attck_malware_fixtures.py` oluştur
+2. `.gitignore`'a `data/attck_labeled_sentences.jsonl` ekle
+3. `prepare_tram_dataset.py`'ı `--attck-valid-ids` argümanı ile güncelle
+4. `make prepare-attck` çalıştır → `data/attck_valid_ids.json` + malware fixtures
+5. `make prepare-tram` çalıştır → TRAM2 fixture'larını 700+ ID ile yeniden üret
+6. `tests/evaluation/test_attck_malware_fixtures.py` oluştur
+7. Makefile güncelle
+8. Testleri çalıştır, commit
+
+---
+
 ## Öncelik Sırası
 
 | # | Madde | Öncelik | Tahmini Efor |
 |---|---|---|---|
-| TODO-4 | aCTIon dataset entegrasyonu | **Kritik** | 1-2 gün |
-| TODO-1 | YARA/Sigma Layer 1 | **Yüksek** | 3-5 gün |
+| TODO-4 | TRAM2 dataset entegrasyonu | **Tamamlandı** | — |
+| TODO-6 | ATT&CK Enterprise katalog entegrasyonu | **Tamamlandı** | — |
+| TODO-1 (YARA) | YARA Layer 0 deterministik imza tarama | **Tamamlandı** | — |
+| TODO-1 (Sigma) | Sigma Layer 0 log-tabanlı kural eşleşmesi | **Yüksek** | 1-2 gün |
 | TODO-3 | Hatching Triage client | **Orta** | 1 gün |
 | TODO-2 | FunctionSummarizer | **Düşük** | 1 gün |
 | TODO-5 | DistilBERT Layer 2 | **Araştırma** | 1-2 hafta |
@@ -379,3 +502,11 @@ Model: "CTI-BERT" (arXiv:2312.00957) veya "SecureBERT-NER" (HuggingFace)
 - [x] CI/CD — mypy strict, ruff, pre-commit, pytest (661 test)
 - [x] ARCHITECTURE.md — tam teknik referans (17 bölüm)
 - [x] .gitignore — .env eklendi, httpx pyproject.toml'a eklendi
+- [x] TODO-6 — ATT&CK Enterprise katalog entegrasyonu (691 ID, 724 malware fixture, 16k labeled sentences)
+- [x] TODO-1 (YARA) — `YaraLayer` + `data/yara_ttp_rules.yaml` (40+ kural, 27 test)
+  - domain="yara", weight=0.90, 4-layer multiplier=1.75
+  - `isr_models.py` domain Literal genişletildi: "yara" eklendi
+  - `ttp_cascade.py` LAYER_WEIGHTS + CROSS_LAYER_MULTIPLIERS güncellendi
+  - `container.py` get_yara_layer() fabrika metodu eklendi
+  - `nodes.py` judge node'a YARA Layer 0 entegrasyonu (pre-cascade)
+  - Toplam test: 714 passed (önceki: 687)

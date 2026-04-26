@@ -1,0 +1,313 @@
+version: "1.0"
+description: "Maljan YARA-TTP baseline rule set — deterministic ATT&CK technique detection."
+
+rules:
+  # -----------------------------------------------------------------------
+  # Process Injection (T1055)
+  # -----------------------------------------------------------------------
+  - id: proc_injection_classic
+    technique_id: "T1055"
+    confidence: 0.88
+    description: "Classic process injection via VirtualAllocEx + WriteProcessMemory + CreateRemoteThread"
+    patterns: ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"]
+
+  - id: proc_injection_nt
+    technique_id: "T1055"
+    confidence: 0.85
+    description: "NT API-level process injection (NtWriteVirtualMemory / RtlCreateUserThread)"
+    patterns: ["NtWriteVirtualMemory", "RtlCreateUserThread", "ZwCreateThread"]
+
+  - id: dll_injection
+    technique_id: "T1055.001"
+    confidence: 0.85
+    description: "DLL injection via LoadLibrary + CreateRemoteThread"
+    patterns: ["LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW"]
+
+  - id: pe_injection_unmap
+    technique_id: "T1055.002"
+    confidence: 0.85
+    description: "PE injection via NtUnmapViewOfSection (process hollowing pattern)"
+    patterns: ["NtUnmapViewOfSection", "ZwUnmapViewOfSection"]
+
+  - id: process_hollowing
+    technique_id: "T1055.012"
+    confidence: 0.90
+    description: "Process hollowing via NtUnmapViewOfSection + SetThreadContext + ResumeThread"
+    patterns: ["SetThreadContext", "NtUnmapViewOfSection", "ResumeThread"]
+
+  # -----------------------------------------------------------------------
+  # Command & Scripting Interpreter (T1059)
+  # -----------------------------------------------------------------------
+  - id: cmd_shell
+    technique_id: "T1059.003"
+    confidence: 0.80
+    description: "Windows Command Shell execution via cmd.exe"
+    patterns: ["cmd.exe", "cmd /c", "cmd /k", "CommandLine"]
+
+  - id: powershell_exec
+    technique_id: "T1059.001"
+    confidence: 0.85
+    description: "PowerShell execution indicators"
+    patterns: ["powershell.exe", "powershell -", "IEX(", "Invoke-Expression", "EncodedCommand", "-enc "]
+
+  - id: wscript_cscript
+    technique_id: "T1059.005"
+    confidence: 0.82
+    description: "VBScript / JScript execution via wscript/cscript"
+    patterns: ["wscript.exe", "cscript.exe", "WScript.Shell", "CreateObject("]
+
+  - id: mshta_exec
+    technique_id: "T1218.005"
+    confidence: 0.85
+    description: "Signed binary proxy execution via mshta.exe"
+    patterns: ["mshta.exe", "mshta http"]
+
+  - id: regsvr32_proxy
+    technique_id: "T1218.010"
+    confidence: 0.85
+    description: "Signed binary proxy execution via regsvr32"
+    patterns: ["regsvr32.exe", "regsvr32 /s", "regsvr32 /u"]
+
+  - id: rundll32_proxy
+    technique_id: "T1218.011"
+    confidence: 0.85
+    description: "Signed binary proxy execution via rundll32"
+    patterns: ["rundll32.exe", "rundll32 "]
+
+  # -----------------------------------------------------------------------
+  # Persistence (T1547, T1053, T1543)
+  # -----------------------------------------------------------------------
+  - id: registry_run_keys
+    technique_id: "T1547.001"
+    confidence: 0.88
+    description: "Registry Run key persistence"
+    patterns:
+      - "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "CurrentVersion\\Run"
+      - "RegSetValueEx"
+
+  - id: scheduled_task
+    technique_id: "T1053.005"
+    confidence: 0.85
+    description: "Scheduled task creation for persistence"
+    patterns: ["schtasks", "ITaskScheduler", "ITaskService", "TaskScheduler", "at.exe /create"]
+
+  - id: windows_service
+    technique_id: "T1543.003"
+    confidence: 0.85
+    description: "Windows service creation for persistence"
+    patterns: ["CreateService", "OpenSCManager", "StartService", "sc create", "sc config"]
+
+  - id: startup_folder
+    technique_id: "T1547.001"
+    confidence: 0.78
+    description: "Startup folder persistence"
+    patterns: ["\\Startup\\", "\\Start Menu\\Programs\\Startup", "shell:startup"]
+
+  # -----------------------------------------------------------------------
+  # Defense Evasion (T1027, T1140, T1562, T1218, T1070)
+  # -----------------------------------------------------------------------
+  - id: obfuscated_base64
+    technique_id: "T1027"
+    confidence: 0.75
+    description: "Base64-based obfuscation"
+    patterns: ["base64", "Base64", "FromBase64String", "b64decode", "AAAA"]
+
+  - id: xor_encryption
+    technique_id: "T1027"
+    confidence: 0.75
+    description: "XOR-based obfuscation"
+    patterns: ["xor_key", "xor_decode", "XorEncrypt", "XorDecrypt", "0x41^"]
+
+  - id: antidebug_isdebuggerpresent
+    technique_id: "T1622"
+    confidence: 0.88
+    description: "Debugger detection via IsDebuggerPresent"
+    patterns: ["IsDebuggerPresent", "CheckRemoteDebuggerPresent", "NtQueryInformationProcess", "OutputDebugString"]
+
+  - id: disable_security_tools
+    technique_id: "T1562.001"
+    confidence: 0.85
+    description: "Security tool disabling via taskkill / net stop / sc stop"
+    patterns: ["taskkill", "net stop", "sc stop", "sc delete", "AV", "Defender"]
+
+  - id: clear_event_logs
+    technique_id: "T1070.001"
+    confidence: 0.90
+    description: "Event log clearing via wevtutil or ClearEventLog"
+    patterns: ["wevtutil cl", "ClearEventLog", "OpenEventLog", "System.Diagnostics.EventLog"]
+
+  - id: delete_volume_shadow
+    technique_id: "T1490"
+    confidence: 0.92
+    description: "Volume shadow copy deletion — ransomware indicator"
+    patterns: ["vssadmin delete shadows", "vssadmin.exe Delete", "wbadmin delete", "bcdedit /set", "shadowcopy delete"]
+
+  - id: file_deletion_indicator_removal
+    technique_id: "T1070.004"
+    confidence: 0.80
+    description: "File deletion for indicator removal"
+    patterns: ["DeleteFile", "DeleteFileW", "DeleteFileA", "del /f /q", "Remove-Item -Force"]
+
+  # -----------------------------------------------------------------------
+  # Credential Access (T1003, T1056, T1555)
+  # -----------------------------------------------------------------------
+  - id: lsass_memory_dump
+    technique_id: "T1003.001"
+    confidence: 0.92
+    description: "LSASS memory dump for credential extraction"
+    patterns: ["lsass.exe", "MiniDumpWriteDump", "sekurlsa", "procdump", "comsvcs.dll MiniDump"]
+
+  - id: mimikatz_indicators
+    technique_id: "T1003"
+    confidence: 0.95
+    description: "Mimikatz credential dumping tool indicators"
+    patterns: ["mimikatz", "sekurlsa::logonpasswords", "kerberos::list", "lsadump::sam", "privilege::debug"]
+
+  - id: keylogger_hook
+    technique_id: "T1056.001"
+    confidence: 0.88
+    description: "Keylogging via Windows hook (SetWindowsHookEx)"
+    patterns: ["SetWindowsHookEx", "WH_KEYBOARD_LL", "GetAsyncKeyState", "GetKeyState"]
+
+  - id: credential_vault
+    technique_id: "T1555"
+    confidence: 0.85
+    description: "Credential extraction from Windows Credential Manager / DPAPI"
+    patterns: ["CryptUnprotectData", "CredRead", "CredEnumerate", "DPAPI", "vault"]
+
+  # -----------------------------------------------------------------------
+  # Discovery (T1082, T1057, T1083, T1016)
+  # -----------------------------------------------------------------------
+  - id: system_info_discovery
+    technique_id: "T1082"
+    confidence: 0.78
+    description: "System information discovery"
+    patterns: ["GetSystemInfo", "GetComputerName", "GetUserName", "systeminfo", "ExpandEnvironmentStrings"]
+
+  - id: process_discovery
+    technique_id: "T1057"
+    confidence: 0.82
+    description: "Process enumeration via Toolhelp32 / WMI"
+    patterns: ["CreateToolhelp32Snapshot", "Process32First", "Process32Next", "EnumProcesses"]
+
+  - id: file_directory_discovery
+    technique_id: "T1083"
+    confidence: 0.75
+    description: "File/directory enumeration"
+    patterns: ["FindFirstFile", "FindNextFile", "GetFileAttributes", "PathFileExists"]
+
+  - id: network_config_discovery
+    technique_id: "T1016"
+    confidence: 0.80
+    description: "Network configuration discovery"
+    patterns: ["GetAdaptersInfo", "GetAdaptersAddresses", "ipconfig", "GetTcpTable", "GetUdpTable"]
+
+  - id: network_connections_discovery
+    technique_id: "T1049"
+    confidence: 0.80
+    description: "Active network connection enumeration"
+    patterns: ["GetTcpTable", "GetExtendedTcpTable", "netstat", "GetIpNetTable"]
+
+  # -----------------------------------------------------------------------
+  # Lateral Movement (T1021)
+  # -----------------------------------------------------------------------
+  - id: smb_lateral_movement
+    technique_id: "T1021.002"
+    confidence: 0.85
+    description: "SMB lateral movement via admin shares"
+    patterns: ["\\\\ADMIN$", "\\\\IPC$", "net use", "WNetAddConnection", "NetShareAdd"]
+
+  - id: rdp_lateral_movement
+    technique_id: "T1021.001"
+    confidence: 0.82
+    description: "Remote Desktop Protocol lateral movement"
+    patterns: ["mstsc.exe", "WTSOpenServer", "WTSQuerySessionInformation", "TerminalServices"]
+
+  # -----------------------------------------------------------------------
+  # C2 Communication (T1071, T1095)
+  # -----------------------------------------------------------------------
+  - id: http_c2
+    technique_id: "T1071.001"
+    confidence: 0.75
+    description: "HTTP/HTTPS-based C2 communication"
+    patterns: ["WinHttpOpen", "InternetOpenUrl", "HttpSendRequest", "curl_easy_perform", "URLDownloadToFile"]
+
+  - id: raw_socket_c2
+    technique_id: "T1095"
+    confidence: 0.82
+    description: "Raw TCP socket for non-standard C2 channel"
+    patterns: ["socket(", "connect(", "recv(", "send(", "WSAConnect", "WSAStartup"]
+
+  - id: dns_c2
+    technique_id: "T1071.004"
+    confidence: 0.80
+    description: "DNS-based C2 communication"
+    patterns: ["DnsQuery", "DnsQueryEx", "nslookup", "Dns.GetHostEntry", "dns_query"]
+
+  # -----------------------------------------------------------------------
+  # Exfiltration (T1041, T1048)
+  # -----------------------------------------------------------------------
+  - id: exfil_http_post
+    technique_id: "T1041"
+    confidence: 0.78
+    description: "Data exfiltration over C2 channel via HTTP POST"
+    patterns: ["HttpSendRequestEx", "WinHttpSendRequest", "POST /", "multipart/form-data"]
+
+  - id: exfil_ftp
+    technique_id: "T1048.003"
+    confidence: 0.85
+    description: "Data exfiltration via FTP"
+    patterns: ["FtpPutFile", "FtpOpenFile", "ftp.exe", "InternetConnect.*FTP"]
+
+  # -----------------------------------------------------------------------
+  # Impact (T1486, T1489)
+  # -----------------------------------------------------------------------
+  - id: ransomware_crypto_api
+    technique_id: "T1486"
+    confidence: 0.88
+    description: "Ransomware data encryption via CryptoAPI / BCrypt"
+    patterns: ["CryptEncrypt", "BCryptEncrypt", "CryptAcquireContext", "CryptGenKey", "AES", "RSA"]
+
+  - id: ransomware_extension_change
+    technique_id: "T1486"
+    confidence: 0.85
+    description: "Ransomware file extension modification"
+    patterns: [".locked", ".encrypted", ".enc", ".crypt", ".ransom", "YOUR_FILES"]
+
+  - id: service_stop
+    technique_id: "T1489"
+    confidence: 0.85
+    description: "Service stopping for impact"
+    patterns: ["net stop", "sc stop", "ControlService", "SERVICE_CONTROL_STOP"]
+
+  # -----------------------------------------------------------------------
+  # Privilege Escalation (T1134, T1548)
+  # -----------------------------------------------------------------------
+  - id: token_impersonation
+    technique_id: "T1134.001"
+    confidence: 0.88
+    description: "Token impersonation / theft for privilege escalation"
+    patterns: ["ImpersonateLoggedOnUser", "DuplicateToken", "DuplicateTokenEx", "OpenProcessToken"]
+
+  - id: uac_bypass
+    technique_id: "T1548.002"
+    confidence: 0.88
+    description: "UAC bypass indicators"
+    patterns: ["fodhelper.exe", "eventvwr.exe", "ComputerDefaults.exe", "sdclt.exe", "RequestedExecutionLevel"]
+
+  # -----------------------------------------------------------------------
+  # Collection (T1005, T1115)
+  # -----------------------------------------------------------------------
+  - id: clipboard_capture
+    technique_id: "T1115"
+    confidence: 0.85
+    description: "Clipboard data capture"
+    patterns: ["GetClipboardData", "OpenClipboard", "CloseClipboard", "EmptyClipboard"]
+
+  - id: screenshot_capture
+    technique_id: "T1113"
+    confidence: 0.85
+    description: "Screen capture for collection"
+    patterns: ["BitBlt", "GetDC", "CreateCompatibleBitmap", "PrintWindow", "screenshot"]

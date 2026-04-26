@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck
 
 test:
 	uv run pytest tests/ -q
@@ -49,3 +49,9 @@ prepare-tram:
 
 benchmark-tram:
 	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
+
+prepare-attck:
+	uv run python scripts/prepare_attck_malware_fixtures.py
+
+benchmark-attck:
+	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware

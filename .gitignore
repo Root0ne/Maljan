@@ -11,3 +11,7 @@ wheels/
 
 # Environment variables (never commit real secrets)
 .env
+
+# Generated datasets (large, produced by prepare-* scripts)
+# attck_valid_ids.json IS committed (small); labeled sentences is not.
+data/attck_labeled_sentences.jsonl

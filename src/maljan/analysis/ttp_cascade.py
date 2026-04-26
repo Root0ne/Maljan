@@ -1,4 +1,4 @@
-"""Three-Layer TTP Mapping Cascade Engine.
+"""Multi-Layer TTP Mapping Cascade Engine.
 
 Problem: A single analyst (static, dynamic, or network) can hallucinate or
 misattribute a TTP ID. A claim corroborated by multiple independent analysis
@@ -7,14 +7,14 @@ layers is far more reliable than one seen in a single layer.
 Solution — Cascade Scoring:
   For each unique technique_id present in the ISR reports, the engine:
     1. Collects all contributing layers (agents) and their per-claim confidences.
-    2. Computes a weighted confidence per layer using domain-specific weights
-       (dynamic behavioral evidence is the strongest signal; network alone is weakest).
-    3. Applies a cross-layer corroboration multiplier (1x → 1.25x → 1.5x) when
-       the same technique appears in 2 or 3 independent domains.
+    2. Computes a weighted confidence per layer using domain-specific weights.
+    3. Applies a cross-layer corroboration multiplier when the same technique
+       appears in 2, 3, or 4 independent domains.
     4. Produces a CascadeResult with a final weighted_confidence in [0.0, 1.0].
 
-Layer weights (empirically motivated by malware analysis literature):
-  - dynamic: 0.45  (API calls / sandbox behaviours are hardest to spoof)
+Layer weights:
+  - yara:    0.90  (deterministic signature — highest trust, Layer 0)
+  - dynamic: 0.45  (API calls / sandbox behaviours — hardest to spoof)
   - static:  0.35  (PE headers / strings / decompiled code)
   - network: 0.20  (weakest alone; strong corroborator)
 
@@ -22,6 +22,7 @@ Cross-layer multipliers:
   - 1 layer : 1.00 (no bonus — single point of evidence)
   - 2 layers: 1.25 (corroborated — moderate confidence boost)
   - 3 layers: 1.50 (consensus — strong confidence boost)
+  - 4 layers: 1.75 (full consensus — YARA + all 3 LLM domains)
 
 Usage:
     from maljan.analysis.ttp_cascade import TTPCascadeEngine
@@ -47,9 +48,10 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 LAYER_WEIGHTS: dict[str, float] = {
-    "dynamic": 0.45,
-    "static": 0.35,
-    "network": 0.20,
+    "yara": 0.90,  # deterministic signature matching (Layer 0)
+    "dynamic": 0.45,  # sandbox behavioral evidence
+    "static": 0.35,  # PE/decompiled code analysis
+    "network": 0.20,  # network traffic analysis
 }
 
 # Unknown domains fall back to this weight
@@ -60,6 +62,7 @@ CROSS_LAYER_MULTIPLIERS: dict[int, float] = {
     1: 1.00,
     2: 1.25,
     3: 1.50,
+    4: 1.75,  # YARA + all 3 LLM domains
 }
 
 # If more layers somehow contribute, cap at the 3-layer multiplier

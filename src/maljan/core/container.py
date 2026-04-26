@@ -102,6 +102,8 @@ class ServiceContainer:
         self._memory_store_cache: object | None = None
         # Phase 6: Sandbox client (built lazily)
         self._sandbox_client_cache: object | None = None
+        # TODO-1: YARA Layer 0 (built lazily)
+        self._yara_layer_cache: object | None = None
         self._samples_dir = samples_dir
 
         logger.info(
@@ -294,6 +296,24 @@ class ServiceContainer:
 
         # First access — load, cache, then chunk.
         return self.loader.load_chunked(sample_id, data_type)
+
+    def get_yara_layer(self) -> object:
+        """Return the cached YaraLayer instance (TODO-1 / Layer 0).
+
+        Loads rules from data/yara_ttp_rules.yaml on first call; subsequent
+        calls return the cached instance. Rule loading is fast (YAML parse +
+        regex compile) and the cache persists for the container lifetime.
+
+        Returns:
+            YaraLayer instance. Returns an empty-rules layer (no-op) if the
+            rules file is not found, ensuring graceful degradation in minimal
+            environments.
+        """
+        if self._yara_layer_cache is None:
+            from maljan.analysis.yara_layer import YaraLayer
+
+            self._yara_layer_cache = YaraLayer.from_default_rules()
+        return self._yara_layer_cache
 
     # ------------------------------------------------------------------
     # Private helpers

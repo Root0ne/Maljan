@@ -13,18 +13,20 @@ Maljan is an enterprise-grade cybersecurity analysis framework for automated, st
 | Feature | Description |
 |---|---|
 | Multi-agent negotiation | Three parallel domain analysts (static, dynamic, network) exchange structured ISR reports and resolve contradictions before verdict |
+| YARA Layer 0 (deterministic) | Pure-Python signature scanner runs before LLM agents — maps known patterns (VirtualAllocEx, mimikatz, vssadmin, etc.) directly to ATT&CK IDs at 0.85-0.95 confidence |
 | Anti-echo-chamber engine | Sycophancy detection via cosine similarity; forced devil's advocate dissent when agents converge too fast |
 | Adaptive termination | Rolling standard deviation convergence detection — exits negotiation early when confidence stabilizes |
 | Binary chunker | Domain-aware input splitting for large samples; prevents LLM context overflow without truncation |
 | Revision grounding | Multi-chunk revision rounds use consolidated ISR summaries, not raw binary data — eliminates hallucination in high-load scenarios |
 | MITRE ATT&CK validation | In-memory TF-IDF index of the full ATT&CK Enterprise dataset; validates every TTP claim before STIX generation |
-| Three-layer TTP cascade | Cross-domain confidence scoring with corroboration multipliers (single-layer / corroborated / consensus) |
+| Multi-layer TTP cascade | Cross-domain confidence scoring: YARA (0.90) > dynamic (0.45) > static (0.35) > network (0.20); corroboration multipliers up to 1.75x |
 | Dynamic schema pruning | Keyword-weighted malware category inference (ransomware/RAT/dropper/worm/infostealer) narrows STIX object type guidance per sample |
 | STIX 2.1 + confidence intervals | Structured, Pydantic-validated Bundle with per-relationship `x_maljan_confidence` and `x_maljan_evidence_basis` annotations |
 | Heterogeneous model ensemble | Each agent can use a different LLM provider/model via config, reducing echo chamber risk across model families |
 | LangSmith observability | Full trace visibility for all LLM calls, negotiation rounds, ISR construction, and TTP validation via `.env` opt-in |
 | Long-term memory (RAG) | Past analysis cases are persisted and retrieved by cosine similarity; injected as few-shot context into every verdict call |
 | Sandbox integration | `MockSandboxClient` for offline/CI use; `CAPEv2Client` for live sample submission, polling, and report ingestion via REST API |
+| Empirical benchmark suite | 864 MITRE-authoritative ground truth fixtures (724 malware families + 140 TRAM2 CTI reports) for F1, hallucination rate, and cascade quality measurement |
 
 ---
 
@@ -59,8 +61,15 @@ Raw Artifacts (JSON/Logs)
                    (consensus OR max_iterations OR confidence stable)
                              |
                              v
+                   [ YaraLayer ]  <---------- Layer 0 (deterministic, pre-LLM)
+                    - 40+ pattern rules -> ATT&CK IDs
+                    - Confidence 0.85-0.95 (floor 0.70)
+                    - Produces AgentISR(domain="yara")
+                             |
+                             v
                    [ ATTCKValidator ]  <--- MITRE ATT&CK STIX bundle (cached)
-                   [ TTPCascadeEngine ]  <-- three-layer weighted scoring
+                   [ TTPCascadeEngine ]  <-- multi-layer weighted scoring
+                     yara=0.90 | dynamic=0.45 | static=0.35 | network=0.20
                    [ SchemaPruner ]  <------ malware category inference
                              |
                              v
@@ -194,10 +203,11 @@ Carries per-claim validation results. `to_prompt_block()` renders a prompt-ready
 
 **`TTPCascadeEngine`** (`analysis/ttp_cascade.py`):
 
-For each unique `technique_id` across all ISR reports:
-1. Groups evidence by domain (static / dynamic / network)
+For each unique `technique_id` across all ISR reports (including YARA):
+1. Groups evidence by domain (yara / static / dynamic / network)
 2. Computes per-layer mean confidence
 3. Calculates domain-weighted average:
+   - `yara`: weight 0.90 (deterministic signatures — Layer 0)
    - `dynamic`: weight 0.45 (behavioral evidence is hardest to spoof)
    - `static`: weight 0.35 (code-level artifacts)
    - `network`: weight 0.20 (weakest alone, strongest corroborator)
@@ -205,6 +215,7 @@ For each unique `technique_id` across all ISR reports:
    - 1 layer → x1.00 (`SINGLE-LAYER`)
    - 2 layers → x1.25 (`CORROBORATED`)
    - 3 layers → x1.50 (`CONSENSUS`)
+   - 4 layers → x1.75 (`FULL-CONSENSUS` — YARA + all 3 LLM domains)
 5. Clips final confidence to [0.0, 1.0]
 
 The resulting `CascadeSummary.to_prompt_block()` is injected into the Judge prompt to prioritize high-confidence, multi-corroborated TTPs.
@@ -281,7 +292,72 @@ MEMORY__TOP_K=3
 
 ---
 
-## Sandbox Integration (Phase 6)
+## YARA Layer 0 — Deterministic ATT&CK Grounding
+
+**`YaraLayer`** (`analysis/yara_layer.py`):
+
+The deterministic pre-LLM grounding step. Runs before the cascade engine and produces a synthetic `AgentISR` with `domain="yara"`. No external dependencies — pure Python regex matching.
+
+**Rule format** (`data/yara_ttp_rules.yaml`):
+```yaml
+rules:
+  - id: proc_injection_classic
+    technique_id: "T1055"
+    confidence: 0.88
+    description: "Classic process injection via VirtualAllocEx + WriteProcessMemory"
+    patterns: ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"]
+```
+
+The baseline rule set ships with 40+ rules covering:
+
+| Category | Example Techniques |
+|---|---|
+| Process Injection | T1055, T1055.001, T1055.002, T1055.012 |
+| Command Execution | T1059.001 (PowerShell), T1059.003 (cmd), T1218.005 (mshta) |
+| Persistence | T1547.001 (Registry Run), T1053.005 (Scheduled Task), T1543.003 (Service) |
+| Defense Evasion | T1027 (Obfuscation), T1562.001 (Disable AV), T1070.001 (Event Log) |
+| Credential Access | T1003 (LSASS/Mimikatz), T1056.001 (Keylogger), T1555 (Vault) |
+| C2 | T1071.001 (HTTP), T1071.004 (DNS), T1095 (Raw Socket) |
+| Impact | T1486 (Ransomware), T1489 (Service Stop), T1490 (Shadow Delete) |
+
+**Integration in the pipeline**:
+- Input: `state["reports"]` (LLM summaries) + ISR `evidence_ref` fields
+- YARA domain weight in cascade: **0.90** (highest — deterministic)
+- 4-layer full-consensus multiplier: **x1.75**
+
+**Extensibility**: Add new rules to `data/yara_ttp_rules.yaml` — zero code changes required.
+
+---
+
+## Evaluation Benchmark Framework
+
+**Ground truth sources** (2 complementary datasets, 864 total fixtures):
+
+| Source | Fixtures | Coverage | Question Answered |
+|---|---|---|---|
+| MITRE ATT&CK malware relationships | 724 | 724 malware/tool families | "Does Maljan correctly attribute known malware to its TTPs?" |
+| TRAM2 CTI threat reports | 140 | Real-world threat intelligence reports | "Can the LLM layer extract TTPs from unstructured text?" |
+
+**Validation universe**: `data/attck_valid_ids.json` — **691** active ATT&CK Enterprise technique IDs. Used to compute hallucination rate: any predicted TTP ID not in this set (or in the TRAM2-observed set) is classified as a hallucination.
+
+**Generate ground truth fixtures**:
+```bash
+make prepare-attck   # Downloads ATT&CK bundle, generates 724 malware fixtures
+make prepare-tram    # Downloads TRAM2 dataset, generates 140 CTI report fixtures
+```
+
+**Run the benchmark suite**:
+```bash
+make benchmark-attck   # Synthetic perfect-match baseline for ATT&CK fixtures
+```
+
+**Metrics computed**:
+- `ttp_accuracy.f1` — precision/recall F1 over predicted vs. ground-truth technique IDs
+- `ttp_accuracy.hallucination_rate` — fraction of predictions not in the valid universe
+- `negotiation.efficiency_ratio` — rounds_used / max_rounds
+- `stix_quality.confidence_coverage` — fraction of STIX relationships with confidence annotations
+
+---
 
 `SandboxClient` is a `@runtime_checkable` Protocol with three methods: `submit()`, `wait_for_completion()`, `fetch_report()`. Two backends are provided:
 
@@ -440,14 +516,20 @@ All settings are Pydantic `BaseSettings` with `__` as the nesting delimiter. Val
 
 ```text
 Maljan/
-├── data/samples/
-│   ├── static/                     # Ghidra / Radare2 JSON output
-│   ├── dynamic/                    # CAPEv2 / Cuckoo behavioral JSON
-│   └── network/                    # Zeek connection log JSON
+├── data/
+│   ├── samples/
+│   │   ├── static/                     # Ghidra / Radare2 JSON output
+│   │   ├── dynamic/                    # CAPEv2 / Cuckoo behavioral JSON
+│   │   └── network/                    # Zeek connection log JSON
+│   ├── attck_valid_ids.json            # 691 active ATT&CK Enterprise IDs
+│   └── yara_ttp_rules.yaml            # Layer 0 pattern rule set (40+ rules)
 ├── src/maljan/
 │   ├── analysis/
-│   │   ├── schema_pruner.py        # Malware category inference + STIX schema hints
-│   │   └── ttp_cascade.py          # Three-layer TTP confidence cascade engine
+│   │   ├── yara_layer.py               # Layer 0: deterministic signature scanner
+│   │   ├── schema_pruner.py            # Malware category inference + STIX schema hints
+│   │   ├── ttp_cascade.py              # Multi-layer TTP confidence cascade engine
+│   │   ├── run_summary.py              # Pipeline run observability summary
+│   │   └── chunk_merger.py             # ISR merging across binary chunks
 │   ├── agents/
 │   │   ├── base_agent.py           # BaseAnalyst ABC — analyze_isr / revise_isr
 │   │   ├── judge_agent.py          # Mediator + verdict; ATT&CK/cascade/schema grounding
@@ -463,7 +545,6 @@ Maljan/
 │   │   └── protocols.py            # typing.Protocol contracts
 │   ├── llm/
 │   │   ├── registry.py             # @register_provider + LLMProviderRegistry
-│   │   │                           #   build_model() + build_model_for_agent()
 │   │   ├── openai_provider.py
 │   │   ├── anthropic_provider.py
 │   │   └── ollama_provider.py
@@ -489,21 +570,37 @@ Maljan/
 │   │   └── network_parser.py
 │   ├── pipeline/
 │   │   ├── state.py                # GraphState TypedDict + LangGraph reducers
-│   │   ├── nodes.py                # Node factories + _build_revision_context()
+│   │   ├── nodes.py                # Node factories + YARA + _build_revision_context()
 │   │   ├── builder.py              # Dynamic graph builder (parallel fan-out)
 │   │   ├── routing.py              # Adaptive termination router
 │   │   ├── sycophancy_detector.py  # Cosine similarity sycophancy guard
 │   │   └── mediation_models.py     # MediatorVerdict structured output schema
 │   ├── schemas/
 │   │   ├── stix_models.py          # STIX 2.1 Bundle + ConfidenceAnnotatedRelationship
-│   │   ├── isr_models.py           # AgentISR + ClaimEvidence
+│   │   ├── isr_models.py           # AgentISR (domain: static/dynamic/network/yara) + ClaimEvidence
 │   │   └── mediation_models.py     # MediatorVerdict
 │   ├── app.py                      # MaljanApp facade (composition root)
 │   └── cli.py                      # Typer CLI
+├── scripts/
+│   ├── prepare_attck_malware_fixtures.py  # Generates 724 malware ground truth fixtures
+│   └── prepare_tram_dataset.py            # Generates 140 TRAM2 CTI report fixtures
 ├── tests/
 │   ├── unit/                       # 570+ unit tests (no network, no LLM)
+│   │   └── analysis/
+│   │       ├── test_yara_layer.py  # 27 YaraLayer unit tests
+│   │       └── test_ttp_cascade.py
 │   ├── integration/                # Full pipeline tests (mock mode)
 │   └── evaluation/                 # Benchmark runner + ground truth fixtures
+│       ├── ground_truth/
+│       │   ├── attck_malware/      # 724 MITRE-authoritative malware fixtures
+│       │   └── tram/               # 140 TRAM2 CTI report fixtures
+│       ├── benchmark_runner.py
+│       ├── benchmark_suite.py
+│       ├── test_attck_malware_fixtures.py
+│       └── test_tram_ground_truth.py
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── TODO.md
 ├── .env.example
 └── Makefile
 ```
