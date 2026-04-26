@@ -63,4 +63,4 @@ class CFGOrderer:
 
     def get_function_data(self, func_name: str) -> dict[str, Any]:
         """Get the attributes of a specific function."""
-        return self.cfg_data.get("functions", {}).get(func_name, {})
+        return dict(self.cfg_data.get("functions", {}).get(func_name, {}))
