@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 
 LAYER_WEIGHTS: dict[str, float] = {
     "yara": 0.90,  # deterministic signature matching (Layer 0)
+    "tief": 0.80,  # deterministic NLP classification (Layer 2)
     "sigma": 0.55,  # deterministic log-based rules (Sigma Layer 0)
     "dynamic": 0.45,  # sandbox behavioral evidence
     "static": 0.35,  # PE/decompiled code analysis

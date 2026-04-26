@@ -38,10 +38,58 @@ def _extract_technique_ids(text: str) -> list[str]:
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
-    def __init__(self, llm: BaseChatModel, name: str) -> None:
+    def __init__(self, llm: BaseChatModel, name: str, tools: list | None = None) -> None:
         self.llm = llm
         self.name = name
+        self.tools = tools or []
         self.logger = logger.getChild(self.name.lower())
+
+    def execute_tool_loop(self, prompt_messages: list) -> str:
+        """Executes a tool-calling ReAct loop if tools are available."""
+        from langchain_core.prompts import ChatPromptTemplate
+
+        if not self.tools:
+            # Fallback to simple invocation
+            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            response = (prompt | self.llm).invoke({})
+            return str(response.content)
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langgraph.prebuilt import create_react_agent
+
+        self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
+
+        # We need to ensure the LLM has tool calling enabled.
+        # create_react_agent handles binding tools to the LLM.
+        agent_executor = create_react_agent(self.llm, self.tools)
+
+        messages = []
+        for role, content in prompt_messages:
+            if role == "system":
+                messages.append(SystemMessage(content=content))
+            elif role == "human":
+                messages.append(HumanMessage(content=content))
+
+        # Because we might be calling async tools, we should use ainvoke if possible.
+        # But BaseAnalyst runs synchronously. We use an event loop.
+        import asyncio
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import nest_asyncio
+
+            nest_asyncio.apply()
+            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+        else:
+            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+
+        final_message = result["messages"][-1]
+        return str(final_message.content)
 
     # ------------------------------------------------------------------
     # Abstract text interface (must be implemented by subclasses)

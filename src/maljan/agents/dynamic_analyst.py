@@ -30,6 +30,58 @@ class DynamicAnalyst(BaseAnalyst):
     """Specialized agent for evaluating Sandbox behavioral logs."""
 
     # ------------------------------------------------------------------
+    # MCP Tool Interface
+    # ------------------------------------------------------------------
+
+    def _initialize_mcp_client(self) -> None:
+        if getattr(self, "tools", None):
+            return
+
+        import asyncio
+        import os
+
+        from mcp import StdioServerParameters
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.config import settings
+
+        if not settings.mcp.cape.enabled:
+            self.logger.info("CAPEv2 MCP is disabled in config.")
+            return
+
+        command = settings.mcp.cape.command
+        args = settings.mcp.cape.args
+
+        env = os.environ.copy()
+        if settings.mcp.cape.env:
+            env.update(settings.mcp.cape.env)
+
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        server_params = StdioServerParameters(
+            command=command, args=args, env=env, cwd=os.path.join(project_root, "CAPEv2")
+        )
+
+        toolkit = MCPLangChainToolkit(server_params)
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import nest_asyncio
+
+            nest_asyncio.apply()
+            loop.run_until_complete(toolkit.initialize())
+        else:
+            loop.run_until_complete(toolkit.initialize())
+
+        self.toolkit = toolkit
+        self.tools = toolkit.get_tools()
+        self.logger.info("Initialized CAPEv2 MCP tools: %s", [t.name for t in self.tools])
+
+    # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
 
@@ -37,19 +89,22 @@ class DynamicAnalyst(BaseAnalyst):
         """Translates sandbox JSON logs into a behavioral malware profile."""
         self.logger.info("Executing dynamic behavior analysis...")
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", _ISR_SYSTEM),
-                (
-                    "human",
-                    "Analyze registry persistence, process injection, and file/folder drops "
-                    "in this sandbox behavior data:\n{data}",
-                ),
-            ]
-        )
+        self._initialize_mcp_client()
 
-        response = (prompt | self.llm).invoke({"data": data})
-        return str(response.content)
+        # Treat `data` as task_id if it's numeric/short
+        task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
+
+        prompt_messages = [
+            ("system", _ISR_SYSTEM),
+            (
+                "human",
+                "Analyze registry persistence, process injection, and file/folder drops "
+                "in this sandbox behavior data. You may use tools to gather more information.\n"
+                f"{task_info}",
+            ),
+        ]
+
+        return self.execute_tool_loop(prompt_messages)
 
     def revise(
         self,
@@ -108,28 +163,31 @@ class DynamicAnalyst(BaseAnalyst):
         """Return a structured AgentISR with evidence-backed behavioral claims."""
         self.logger.info("Executing dynamic ISR analysis...")
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", _ISR_SYSTEM),
-                (
-                    "human",
-                    "Analyze the sandbox behavioral data and return a structured list of findings.\n"
-                    "For each finding state: the claim, the exact artifact reference "
-                    "(e.g. 'API call: WriteProcessMemory PID=832', 'RegSetValue: HKLM\\Run\\malware'), "
-                    "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
-                    "Format each finding as:\n"
-                    "CLAIM: <claim text>\n"
-                    "EVIDENCE: <artifact reference>\n"
-                    "CONFIDENCE: <float>\n"
-                    "TECHNIQUE: <T-ID or NONE>\n"
-                    "---\n\n"
-                    "Sandbox data:\n{data}",
-                ),
-            ]
-        )
+        self._initialize_mcp_client()
 
-        response = (prompt | self.llm).invoke({"data": data})
-        content = str(response.content)
+        # Treat `data` as task_id if it's numeric/short
+        task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
+
+        prompt_messages = [
+            ("system", _ISR_SYSTEM),
+            (
+                "human",
+                "Analyze the sandbox behavioral data and return a structured list of findings.\n"
+                "You may use tools to gather more information about the task.\n"
+                "For each finding state: the claim, the exact artifact reference "
+                "(e.g. 'API call: WriteProcessMemory PID=832', 'RegSetValue: HKLM\\Run\\malware'), "
+                "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
+                "Format each finding as:\n"
+                "CLAIM: <claim text>\n"
+                "EVIDENCE: <artifact reference>\n"
+                "CONFIDENCE: <float>\n"
+                "TECHNIQUE: <T-ID or NONE>\n"
+                "---\n\n"
+                f"{task_info}",
+            ),
+        ]
+
+        content = self.execute_tool_loop(prompt_messages)
         claims = _parse_claim_blocks(content)
 
         if not claims:

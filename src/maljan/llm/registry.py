@@ -42,6 +42,7 @@ def register_provider(name: str):  # type: ignore[no-untyped-def]
 def discover_providers() -> None:
     """Import all built-in provider modules to trigger @register_provider decorators."""
     import maljan.llm.anthropic_provider  # noqa: F401
+    import maljan.llm.gemini_provider  # noqa: F401
     import maljan.llm.ollama_provider  # noqa: F401
     import maljan.llm.openai_provider  # noqa: F401
 

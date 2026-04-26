@@ -42,6 +42,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from maljan.preprocessors.cfg_orderer import CFGOrderer
 
 from maljan.core.config import ChunkingConfig
 from maljan.core.logger import logger
@@ -142,6 +146,36 @@ class BinaryChunker:
         self._config = config
         self._max_chars = config.max_tokens_per_chunk * _CHARS_PER_TOKEN
         self._overlap_chars = config.overlap_tokens * _CHARS_PER_TOKEN
+
+    def chunk_functions_topologically(
+        self, domain: str, orderer: CFGOrderer, func_texts: dict[str, str]
+    ) -> list[TextChunk]:
+        """Split text topologically using Ghidra CFG ordering.
+
+        Args:
+            domain: The domain (usually 'static').
+            orderer: CFGOrderer instance parsed from Ghidra JSON.
+            func_texts: Mapping of function names to their decompiled source code.
+
+        Returns:
+            Ordered list of TextChunk objects.
+        """
+        ordered_func_names = orderer.get_topological_order()
+        segments = []
+        for name in ordered_func_names:
+            if name in func_texts and func_texts[name].strip():
+                # Add a marker so the LLM knows which function it is reading
+                segments.append(f"/// Function: {name}\n{func_texts[name]}")
+
+        if not segments:
+            return [self._make_single_chunk(domain, "", ChunkStrategy.FUNCTION_BOUNDARY)]
+
+        logger.info(
+            "Chunking domain='%s' using TOPOLOGICAL_SORT: %d functions ordered.",
+            domain,
+            len(segments),
+        )
+        return self._pack_segments(domain, segments, ChunkStrategy.FUNCTION_BOUNDARY)
 
     def chunk(self, domain: str, text: str) -> list[TextChunk]:
         """Split `text` into LLM-safe chunks for the given domain.

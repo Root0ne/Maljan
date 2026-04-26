@@ -30,26 +30,77 @@ class NetworkAnalyst(BaseAnalyst):
     """Specialized agent for evaluating network connectivity logs (Zeek/PCAP)."""
 
     # ------------------------------------------------------------------
+    # MCP Tool Interface
+    # ------------------------------------------------------------------
+
+    def _initialize_mcp_client(self) -> None:
+        if getattr(self, "tools", None):
+            return
+
+        import asyncio
+        import os
+        import sys
+
+        from mcp import StdioServerParameters
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        server_script = os.path.join(project_root, "network-mcp", "server.py")
+
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[server_script],
+            env=os.environ.copy(),
+            cwd=os.path.join(project_root, "network-mcp"),
+        )
+
+        toolkit = MCPLangChainToolkit(server_params)
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import nest_asyncio
+
+            nest_asyncio.apply()
+            loop.run_until_complete(toolkit.initialize())
+        else:
+            loop.run_until_complete(toolkit.initialize())
+
+        self.toolkit = toolkit
+        self.tools = toolkit.get_tools()
+        self.logger.info("Initialized Network MCP toolkit with %d tools", len(self.tools))
+
+    # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
 
     def analyze(self, data: str) -> str:
         """Translates network flows into a C2 connectivity profile."""
         self.logger.info("Executing network flow analysis...")
+        self._initialize_mcp_client()
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", _ISR_SYSTEM),
-                (
-                    "human",
-                    "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
-                    "in this Zeek/pcap network data:\n{data}",
-                ),
-            ]
+        target_info = (
+            f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
         )
 
-        response = (prompt | self.llm).invoke({"data": data})
-        return str(response.content)
+        prompt_messages = [
+            ("system", _ISR_SYSTEM),
+            (
+                "human",
+                "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
+                "in this Zeek/pcap network data:\n"
+                f"{target_info}\n\n"
+                "You may use tools to extract more information from the PCAP.",
+            ),
+        ]
+
+        content = self.execute_tool_loop(prompt_messages)
+        return str(content)
 
     def revise(
         self,
@@ -60,6 +111,7 @@ class NetworkAnalyst(BaseAnalyst):
     ) -> str:
         """Revise network analysis based on peer findings and mediator feedback."""
         self.logger.info("Revising network analysis based on peer feedback...")
+        self._initialize_mcp_client()
 
         peer_section = (
             "\n\n".join(
@@ -68,28 +120,29 @@ class NetworkAnalyst(BaseAnalyst):
             or "No peer reports available."
         )
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are an expert Network Analyst participating in a collaborative "
-                    "multi-agent malware analysis. The mediator has identified contradictions "
-                    "between your report and other experts. Review the peer reports and mediator "
-                    "feedback, then revise your analysis. Correlate network traffic with any "
-                    "hardcoded C2 URLs or HTTP API calls raised by peers. "
-                    "Focus on MITRE ATT&CK: T1071, T1571.",
-                ),
-                (
-                    "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER ANALYST REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
-                    "ORIGINAL RAW DATA:\n{data}\n\n"
-                    "Revise your analysis addressing the contradictions above.",
-                ),
-            ]
-        )
+        prompt_messages = [
+            (
+                "system",
+                "You are an expert Network Analyst participating in a collaborative "
+                "multi-agent malware analysis. The mediator has identified contradictions "
+                "between your report and other experts. Review the peer reports and mediator "
+                "feedback, then revise your analysis. Correlate network traffic with any "
+                "hardcoded C2 URLs or HTTP API calls raised by peers. "
+                "Focus on MITRE ATT&CK: T1071, T1571.",
+            ),
+            (
+                "human",
+                "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+                "PEER ANALYST REPORTS:\n{peer_section}\n\n"
+                "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
+                "ORIGINAL RAW DATA:\n{data}\n\n"
+                "Revise your analysis addressing the contradictions above. Use tools if necessary.",
+            ),
+        ]
 
+        # Use invoke since revision might not need tools unless they want to re-query
+        # but to be safe, we allow tool usage
+        prompt = ChatPromptTemplate.from_messages(prompt_messages)
         response = (prompt | self.llm).invoke(
             {
                 "own_report": own_report,
@@ -107,29 +160,32 @@ class NetworkAnalyst(BaseAnalyst):
     def analyze_isr(self, data: str) -> AgentISR:
         """Return a structured AgentISR with evidence-backed network claims."""
         self.logger.info("Executing network ISR analysis...")
+        self._initialize_mcp_client()
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", _ISR_SYSTEM),
-                (
-                    "human",
-                    "Analyze the network data and return a structured list of findings.\n"
-                    "For each finding state: the claim, the exact artifact reference "
-                    "(e.g. 'PCAP frame 10: dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
-                    "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
-                    "Format each finding as:\n"
-                    "CLAIM: <claim text>\n"
-                    "EVIDENCE: <artifact reference>\n"
-                    "CONFIDENCE: <float>\n"
-                    "TECHNIQUE: <T-ID or NONE>\n"
-                    "---\n\n"
-                    "Network data:\n{data}",
-                ),
-            ]
+        target_info = (
+            f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
         )
 
-        response = (prompt | self.llm).invoke({"data": data})
-        content = str(response.content)
+        prompt_messages = [
+            ("system", _ISR_SYSTEM),
+            (
+                "human",
+                "Analyze the network data and return a structured list of findings.\n"
+                "You may use tools to gather more information (extract DNS, HTTP, summaries, etc.).\n"
+                "For each finding state: the claim, the exact artifact reference "
+                "(e.g. 'PCAP frame 10: dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
+                "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
+                "Format each finding as:\n"
+                "CLAIM: <claim text>\n"
+                "EVIDENCE: <artifact reference>\n"
+                "CONFIDENCE: <float>\n"
+                "TECHNIQUE: <T-ID or NONE>\n"
+                "---\n\n"
+                f"{target_info}",
+            ),
+        ]
+
+        content = self.execute_tool_loop(prompt_messages)
         claims = _parse_claim_blocks(content)
 
         if not claims:

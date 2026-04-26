@@ -19,7 +19,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
@@ -49,6 +49,12 @@ class OllamaConfig(BaseModel):
     base_url: str = "http://localhost:11434"
     expert_model: str = "qwen2.5-coder:7b"
     judge_model: str = "llama3.1:70b"
+
+
+class GeminiConfig(BaseModel):
+    api_key: SecretStr | None = None
+    expert_model: str = "gemini-2.5-pro"
+    judge_model: str = "gemini-2.5-pro"
 
 
 class AgentLLMConfig(BaseModel):
@@ -83,6 +89,7 @@ class LLMConfig(BaseModel):
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
 
@@ -93,6 +100,7 @@ class LLMConfig(BaseModel):
             "openai": self.openai,
             "anthropic": self.anthropic,
             "ollama": self.ollama,
+            "gemini": self.gemini,
         }
         cfg = provider_cfg.get(self.provider, self.openai)
         return cfg.expert_model  # type: ignore[attr-defined, no-any-return]
@@ -104,6 +112,7 @@ class LLMConfig(BaseModel):
             "openai": self.openai,
             "anthropic": self.anthropic,
             "ollama": self.ollama,
+            "gemini": self.gemini,
         }
         cfg = provider_cfg.get(self.provider, self.openai)
         return cfg.judge_model  # type: ignore[attr-defined, no-any-return]
@@ -234,6 +243,27 @@ class PreprocessingConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# MCP (Model Context Protocol) Integration
+# ---------------------------------------------------------------------------
+
+
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server connection."""
+
+    enabled: bool = False
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class MCPConfig(BaseModel):
+    """MCP integration configurations for external tools."""
+
+    ghidra: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    cape: MCPServerConfig = Field(default_factory=MCPServerConfig)
+
+
+# ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
 
@@ -262,6 +292,7 @@ class Settings(BaseSettings):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
 
     # Token overflow protection
     max_token_limit: int = 8000
@@ -276,6 +307,7 @@ class Settings(BaseSettings):
     # Flat shortcut env vars (backward compatibility with existing .env files)
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    google_api_key: SecretStr | None = None
 
     def model_post_init(self, __context: object) -> None:
         """Merge flat env vars into nested config for backward compatibility."""
@@ -283,6 +315,8 @@ class Settings(BaseSettings):
             self.llm.openai.api_key = self.openai_api_key
         if self.anthropic_api_key and not self.llm.anthropic.api_key:
             self.llm.anthropic.api_key = self.anthropic_api_key
+        if self.google_api_key and not self.llm.gemini.api_key:
+            self.llm.gemini.api_key = self.google_api_key
 
 
 settings = Settings()

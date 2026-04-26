@@ -83,6 +83,90 @@ class JudgeAgent:
         self.llm = llm
         self.logger = logger.getChild("judge")
 
+    def _initialize_mcp_client(self) -> None:
+        if getattr(self, "tools", None):
+            return
+
+        import asyncio
+        import os
+        import sys
+
+        from mcp import StdioServerParameters
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        server_script = os.path.join(project_root, "threatintel-mcp", "server.py")
+
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[server_script],
+            env=os.environ.copy(),
+            cwd=os.path.join(project_root, "threatintel-mcp"),
+        )
+
+        toolkit = MCPLangChainToolkit(server_params)
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import nest_asyncio
+
+            nest_asyncio.apply()
+            loop.run_until_complete(toolkit.initialize())
+        else:
+            loop.run_until_complete(toolkit.initialize())
+
+        self.toolkit = toolkit
+        self.tools = toolkit.get_tools()
+        self.logger.info("Initialized ThreatIntel MCP tools: %s", [t.name for t in self.tools])
+
+    def execute_tool_loop(self, prompt_messages: list) -> str:
+        """Execute a tool-calling ReAct loop for the agent."""
+        from langchain_core.prompts import ChatPromptTemplate
+
+        if not getattr(self, "tools", None):
+            self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
+            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            response = (prompt | self.llm).invoke({})
+            return str(response.content)
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langgraph.prebuilt import create_react_agent
+
+        self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
+
+        agent_executor = create_react_agent(self.llm, self.tools)
+
+        messages = []
+        for role, content in prompt_messages:
+            if role == "system":
+                messages.append(SystemMessage(content=content))
+            elif role == "human":
+                messages.append(HumanMessage(content=content))
+
+        import asyncio
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import nest_asyncio
+
+            nest_asyncio.apply()
+            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+        else:
+            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+
+        return str(result["messages"][-1].content)
+
     def mediate(
         self,
         reports: dict[str, str],
@@ -105,6 +189,7 @@ class JudgeAgent:
             Tuple of (AgentArgument with mediator findings, bool indicating consensus).
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        self._initialize_mcp_client()
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
@@ -122,14 +207,31 @@ class JudgeAgent:
             if isr_block:
                 reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
-        prompt = ChatPromptTemplate.from_messages(
+        prompt_messages = [
+            (
+                "system",
+                "You are the Lead Cyber Security Mediator. Your task is to compare "
+                "all expert analyst reports and identify explicit contradictions. "
+                "You have access to Threat Intelligence tools to verify disputed IPs, domains, or hashes. "
+                "Use these tools if agents disagree on whether an indicator is malicious.\n\n"
+                "Write a detailed summary of your findings, including specific contradictions, "
+                "resolved issues, and your overall confidence.",
+            ),
+            (
+                "human",
+                f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
+                "Analyze the reports, use threat intel tools if needed, and summarize your verdict.",
+            ),
+        ]
+
+        tool_result_text = self.execute_tool_loop(prompt_messages)
+
+        # Now extract the final structured output from the detailed reasoning
+        extract_prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    "You are the Lead Cyber Security Mediator. Your task is to compare "
-                    "all expert analyst reports and identify explicit contradictions. "
-                    "Example: one analyst says 'no network code' while another finds "
-                    "'active HTTPS beacons'. Challenge the agents to resolve these gaps.\n\n"
+                    "Extract the final structured verdict from the mediator's reasoning log.\n"
                     "You MUST produce a structured response with:\n"
                     "- contradictions: list of specific contradictions found\n"
                     "- resolution_summary: what was resolved and what remains\n"
@@ -137,7 +239,7 @@ class JudgeAgent:
                 ),
                 (
                     "human",
-                    "Expert Reports:\n{reports}\n\nPrevious Discussion:\n{history}",
+                    f"{tool_result_text}",
                 ),
             ]
         )
@@ -145,16 +247,14 @@ class JudgeAgent:
         # Attempt structured output; fall back to text-based extraction on failure
         try:
             llm_structured = self.llm.with_structured_output(MediatorVerdict)
-            verdict: MediatorVerdict = (prompt | llm_structured).invoke(  # type: ignore[assignment]
-                {"reports": reports_text, "history": str(history)}
-            )
+            verdict: MediatorVerdict = (extract_prompt | llm_structured).invoke({})  # type: ignore[assignment]
             if not isinstance(verdict, MediatorVerdict):
                 raise ValueError("Unexpected output type from structured LLM")
         except Exception as exc:
             self.logger.warning(
                 "Structured output failed (%s), falling back to text extraction.", exc
             )
-            verdict = self._fallback_mediate(prompt, reports_text, history)
+            verdict = self._fallback_mediate(extract_prompt, tool_result_text, history)
 
         is_consensus = verdict.confidence >= CONSENSUS_THRESHOLD
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"

@@ -23,6 +23,8 @@ Maljan is an enterprise-grade cybersecurity analysis framework for automated, st
 | Multi-layer TTP cascade | Cross-domain confidence scoring: YARA (0.90) > Sigma (0.55) > dynamic (0.45) > static (0.35) > network (0.20); corroboration multipliers up to 1.75x |
 | Dynamic schema pruning | Keyword-weighted malware category inference (ransomware/RAT/dropper/worm/infostealer) narrows STIX object type guidance per sample |
 | STIX 2.1 + confidence intervals | Structured, Pydantic-validated Bundle with per-relationship `x_maljan_confidence` and `x_maljan_evidence_basis` annotations |
+| TIEF Classifier (Phase 4.2) | Local NLP-based MITRE ATT&CK technique extraction using HuggingFace models for high-speed, deterministic classification |
+| Ghidra CFG Ordering (Phase 3) | NetworkX-powered topological sorting of function Call Graphs to ensure LLMs receive code in logical execution sequence |
 | Heterogeneous model ensemble | Each agent can use a different LLM provider/model via config, reducing echo chamber risk across model families |
 | LangSmith observability | Full trace visibility for all LLM calls, negotiation rounds, ISR construction, and TTP validation via `.env` opt-in |
 | Long-term memory (RAG) | Past analysis cases are persisted and retrieved by cosine similarity; injected as few-shot context into every verdict call |
@@ -77,7 +79,7 @@ Raw Artifacts (JSON/Logs)
                              v
                    [ ATTCKValidator ]  <--- MITRE ATT&CK STIX bundle (cached)
                    [ TTPCascadeEngine ]  <-- multi-layer weighted scoring
-                     yara=0.90 | sigma=0.55 | dynamic=0.45
+                     yara=0.90 | tief=0.80 | sigma=0.55 | dynamic=0.45
                      static=0.35 | network=0.20
                    [ SchemaPruner ]  <------ malware category inference
                              |
@@ -208,15 +210,16 @@ Carries per-claim validation results. `to_prompt_block()` renders a prompt-ready
 [SUSPICIOUS]   network: 'T1071' alignment=0.03. Evidence: registry_key_write...
 ```
 
-### Three-Layer TTP Cascade — `src/maljan/analysis/`
+### Multi-Layer TTP Cascade — `src/maljan/analysis/`
 
 **`TTPCascadeEngine`** (`analysis/ttp_cascade.py`):
 
-For each unique `technique_id` across all ISR reports (including YARA and Sigma):
+For each unique `technique_id` across all ISR reports (including YARA, TIEF, and Sigma):
 1. Groups evidence by domain (yara / sigma / static / dynamic / network)
 2. Computes per-layer mean confidence
 3. Calculates domain-weighted average:
    - `yara`: weight 0.90 (deterministic signatures — Layer 0)
+   - `tief`: weight 0.80 (NLP-based technique extraction — Layer 2)
    - `sigma`: weight 0.55 (pySigma rule-based detection — Layer 0)
    - `dynamic`: weight 0.45 (behavioral evidence is hardest to spoof)
    - `static`: weight 0.35 (code-level artifacts)

@@ -18,7 +18,8 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 # Structured ISR system prompt shared by analyze and revise
 _ISR_SYSTEM = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
-    "Analyze decompiled C code and binary strings for malicious behavior. "
+    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
+    "You can decompile functions, find cross-references, extract strings, and more. "
     "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
     "string offset (.data+0xNN), API import, or hex pattern. "
     "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
@@ -28,29 +29,85 @@ _ISR_SYSTEM = (
 
 @register_agent("static")
 class StaticAnalyst(BaseAnalyst):
-    """Specialized agent for evaluating decompiled code and strings."""
+    """Specialized agent for evaluating decompiled code and strings via Ghidra MCP."""
+
+    # ------------------------------------------------------------------
+    # MCP Tool Interface
+    # ------------------------------------------------------------------
+
+    def _initialize_mcp_client(self) -> None:
+        if getattr(self, "tools", None):
+            return
+
+        import asyncio
+        import os
+
+        from mcp import StdioServerParameters
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.config import settings
+
+        if not settings.mcp.ghidra.enabled:
+            self.logger.info("Ghidra MCP is disabled in config.")
+            return
+
+        command = settings.mcp.ghidra.command
+        args = settings.mcp.ghidra.args
+
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        if settings.mcp.ghidra.env:
+            env.update(settings.mcp.ghidra.env)
+
+        server_params = StdioServerParameters(command=command, args=args, env=env)
+
+        toolkit = MCPLangChainToolkit(server_params)
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import nest_asyncio
+
+            nest_asyncio.apply()
+            loop.run_until_complete(toolkit.initialize())
+        else:
+            loop.run_until_complete(toolkit.initialize())
+
+        self.toolkit = toolkit
+        self.tools = toolkit.get_tools()
+        self.logger.info("Initialized Ghidra MCP tools: %s", [t.name for t in self.tools])
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
 
     def analyze(self, data: str) -> str:
-        """Translates disassembler output into a focused malware analysis report."""
+        """Translates binary file paths or raw disassembly into a focused malware analysis report."""
         self.logger.info("Executing static evaluation...")
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", _ISR_SYSTEM),
-                (
-                    "human",
-                    "Analyze the following Ghidra/Radare2 static output for obfuscation, "
-                    "suspicious API imports, and hardcoded C2 patterns:\n{data}",
-                ),
-            ]
+        self._initialize_mcp_client()
+
+        # Treat `data` as a file path or hash if it's short, else raw disassembly
+        target_info = (
+            f"Target File: {data}" if len(data.strip()) < 512 else f"Static output:\n{data}"
         )
 
-        response = (prompt | self.llm).invoke({"data": data})
-        return str(response.content)
+        prompt_messages = [
+            ("system", _ISR_SYSTEM),
+            (
+                "human",
+                "Analyze the following target for obfuscation, "
+                "suspicious API imports, and hardcoded C2 patterns. "
+                "Use your tools to deeply analyze the binary if it's a file path.\n"
+                f"{target_info}",
+            ),
+        ]
+
+        return self.execute_tool_loop(prompt_messages)
 
     def revise(
         self,
@@ -109,28 +166,32 @@ class StaticAnalyst(BaseAnalyst):
         """Return a structured AgentISR with evidence-backed claims."""
         self.logger.info("Executing static ISR analysis...")
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", _ISR_SYSTEM),
-                (
-                    "human",
-                    "Analyze the following static artifact and return a structured list "
-                    "of findings. For each finding state: the claim, the exact artifact "
-                    "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
-                    "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
-                    "Format each finding as:\n"
-                    "CLAIM: <claim text>\n"
-                    "EVIDENCE: <artifact reference>\n"
-                    "CONFIDENCE: <float>\n"
-                    "TECHNIQUE: <T-ID or NONE>\n"
-                    "---\n\n"
-                    "Static artifact:\n{data}",
-                ),
-            ]
+        self._initialize_mcp_client()
+
+        target_info = (
+            f"Target File: {data}" if len(data.strip()) < 512 else f"Static output:\n{data}"
         )
 
-        response = (prompt | self.llm).invoke({"data": data})
-        content = str(response.content)
+        prompt_messages = [
+            ("system", _ISR_SYSTEM),
+            (
+                "human",
+                "Analyze the target binary and return a structured list of findings.\n"
+                "You may use tools to gather more information (decompile, xrefs, etc.).\n"
+                "For each finding state: the claim, the exact artifact "
+                "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
+                "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
+                "Format each finding as:\n"
+                "CLAIM: <claim text>\n"
+                "EVIDENCE: <artifact reference>\n"
+                "CONFIDENCE: <float>\n"
+                "TECHNIQUE: <T-ID or NONE>\n"
+                "---\n\n"
+                f"{target_info}",
+            ),
+        ]
+
+        content = self.execute_tool_loop(prompt_messages)
         claims = _parse_claim_blocks(content)
 
         if not claims:
