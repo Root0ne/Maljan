@@ -75,6 +75,43 @@ def main():
     sys.path.insert(0, cape_root)
     os.chdir(cape_root)
 
+    # ----------------------------------------------------------------
+    # Phase 2.5: Auto-enable ALL MCP tools
+    # ----------------------------------------------------------------
+    # CAPEv2 defaults every tool to mcp=no in conf/default/api.conf.default.
+    # Rather than maintaining a static api.conf listing each section, we
+    # pre-load the Config("api") singleton and flip mcp=True on every
+    # section.  Because Config uses a metaclass singleton, when server.py
+    # later calls Config("api") it receives this same patched instance.
+    # This ensures that any new tools added in future CAPEv2 versions are
+    # automatically exposed without touching any config file.
+    try:
+        from lib.cuckoo.common.config import Config
+
+        api_cfg = Config("api")
+        _patched = 0
+        for section_name in api_cfg.get_config():
+            if section_name == "api":
+                continue
+            try:
+                section = api_cfg.get(section_name)
+                section.mcp = True
+                _patched += 1
+            except Exception:
+                continue
+        print(
+            f"[cape_mcp_wrapper] Auto-enabled MCP for {_patched} tool sections.",
+            file=sys.stderr,
+        )
+    except Exception as exc:
+        print(
+            f"[cape_mcp_wrapper] WARNING: Could not auto-enable MCP tools: {exc}",
+            file=sys.stderr,
+        )
+
+    # ----------------------------------------------------------------
+    # Phase 2.6: Import server.py (decorators read patched Config)
+    # ----------------------------------------------------------------
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("cape_mcp_server", cape_mcp_server)
