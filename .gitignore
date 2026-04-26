@@ -11,9 +11,7 @@ wheels/
 .venv-wsl
 
 # External MCP tool installations (not part of Maljan — install separately)
-CAPEv2/
-ghidra-mcp/
-network-mcp/
+external/
 
 # Environment variables (never commit real secrets)
 .env
