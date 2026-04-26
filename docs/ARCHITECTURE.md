@@ -47,11 +47,11 @@ structured negotiation protocol before a Chief Judge issues a MITRE ATT&CK-groun
                     Negotiation Loop
                    (JudgeAgent.mediate)
                           |
-              +-----------+-----------+
-              |           |           |
-         ATTCKValidator  TTPCascade  SchemaPruner
-              |           |           |
-              +-----------+-----------+
+              +-----------+------+-----------+
+              |           |      |           |
+         ATTCKValidator  TTPCascade  YaraLayer  SigmaLayer
+              |           |      |           |
+              +-----------+------+-----------+
                           |
                  JudgeAgent.give_verdict
                           |
@@ -76,6 +76,8 @@ src/maljan/
 
     analysis/        -- Post-ISR analytics engines
         ttp_cascade.py       Three-layer cross-domain confidence scoring
+        yara_layer.py        YARA Layer 0: deterministic signature scanner
+        sigma_layer.py       Sigma Layer 0: pySigma engine (2,946 SigmaHQ rules)
         schema_pruner.py     Malware category inference + STIX schema hints
         run_summary.py       RunSummary observability report builder
 
@@ -247,6 +249,14 @@ make_judge_node():
     ATTCKValidator.get_instance()          -- singleton, lazy-loaded
     TTPCascadeEngine().compute(isr_reports) -- stateless
     container.get_memory_store()           -- cached singleton
+
+    -- YARA Layer 0 --
+    YaraLayer.scan(reports + evidence)     -- deterministic pattern match
+    -> AgentISR(domain="yara") injected into isr_reports
+
+    -- Sigma Layer 0 --
+    SigmaLayer.scan_log_lines(reports + evidence)  -- pySigma engine
+    -> AgentISR(domain="sigma") injected into isr_reports
 
     judge.give_verdict(
         reports, history, isr_reports,
@@ -465,12 +475,13 @@ For each unique `technique_id` across all ISR reports:
 ```
 raw_confidence = sum(domain_weight * layer_mean_confidence) / sum(domain_weights)
 
-domain_weights:  dynamic=0.45  static=0.35  network=0.20
+domain_weights:  yara=0.90  sigma=0.55  dynamic=0.45  static=0.35  network=0.20
 
 multiplier:
     1 layer  -> x1.00  [SINGLE-LAYER]
     2 layers -> x1.25  [CORROBORATED]
     3 layers -> x1.50  [CONSENSUS]
+    4+ layers -> x1.75 [FULL-CONSENSUS]
 
 final_confidence = min(raw_confidence * multiplier, 1.0)
 ```

@@ -442,6 +442,32 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("YARA Layer 0 scan failed: %s. Cascade proceeds without it.", e)
 
+            # TODO-B: Sigma Layer 0 — deterministic log-based rule scanning.
+            # Scans all analyst report text + ISR evidence refs for Sigma
+            # rule patterns (LSASS access, encoded PowerShell, LOLBins, etc.).
+            # Results are merged into isr_reports as domain="sigma" before cascade.
+            # Graceful degradation: any error is logged and scan is silently skipped.
+            try:
+                from maljan.analysis.sigma_layer import SigmaLayer
+
+                sigma_layer: SigmaLayer = container.get_sigma_layer()  # type: ignore[assignment]
+                if sigma_layer.rule_count > 0:
+                    # Build combined scan text from all analyst signals
+                    sigma_scan_parts: list[str] = list((state.get("reports") or {}).values())
+                    for isr_obj in isr_reports.values():
+                        sigma_scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
+                    sigma_scan_text = "\n".join(sigma_scan_parts)
+                    sigma_matches = sigma_layer.scan_report_text(sigma_scan_text)
+                    if sigma_matches:
+                        sigma_isr = sigma_layer.to_isr(sigma_matches)
+                        isr_reports = {**isr_reports, "sigma_layer": sigma_isr}
+                        logger.info(
+                            "Sigma Layer 0: %d match(es) -> cascade domain='sigma'.",
+                            len(sigma_matches),
+                        )
+            except Exception as e:
+                logger.warning("Sigma Layer 0 scan failed: %s. Cascade proceeds without it.", e)
+
             # Phase 4.3: compute multi-layer TTP cascade from ISR reports.
             # (isr_reports already collected above; enriched by YARA if matches found)
 

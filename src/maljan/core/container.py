@@ -104,6 +104,10 @@ class ServiceContainer:
         self._sandbox_client_cache: object | None = None
         # TODO-1: YARA Layer 0 (built lazily)
         self._yara_layer_cache: object | None = None
+        # TODO-B: Sigma Layer 0 (built lazily)
+        self._sigma_layer_cache: object | None = None
+        # TODO-D: FunctionSummarizer (built lazily)
+        self._function_summarizer_cache: object | None = None
         self._samples_dir = samples_dir
 
         logger.info(
@@ -230,6 +234,18 @@ class ServiceContainer:
                     "Sandbox backend: CAPEv2Client (url=%s).",
                     self.config.sandbox.cape2_base_url,
                 )
+            elif backend == "triage":
+                from maljan.loaders.triage_client import TriageClient
+
+                self._sandbox_client_cache = TriageClient(
+                    api_token=self.config.sandbox.triage_api_token,
+                    base_url=self.config.sandbox.triage_base_url,
+                    timeout=self.config.sandbox.triage_timeout_seconds,
+                )
+                logger.info(
+                    "Sandbox backend: TriageClient (url=%s).",
+                    self.config.sandbox.triage_base_url,
+                )
             else:
                 from maljan.loaders.mock_sandbox_client import MockSandboxClient
 
@@ -298,22 +314,78 @@ class ServiceContainer:
         return self.loader.load_chunked(sample_id, data_type)
 
     def get_yara_layer(self) -> object:
-        """Return the cached YaraLayer instance (TODO-1 / Layer 0).
+        """Return the cached YaraLayer instance (Layer 0).
 
         Loads rules from data/yara_ttp_rules.yaml on first call; subsequent
-        calls return the cached instance. Rule loading is fast (YAML parse +
-        regex compile) and the cache persists for the container lifetime.
+        calls return the cached instance.
 
         Returns:
             YaraLayer instance. Returns an empty-rules layer (no-op) if the
-            rules file is not found, ensuring graceful degradation in minimal
-            environments.
+            rules file is not found, ensuring graceful degradation.
         """
         if self._yara_layer_cache is None:
             from maljan.analysis.yara_layer import YaraLayer
 
             self._yara_layer_cache = YaraLayer.from_default_rules()
         return self._yara_layer_cache
+
+    def get_sigma_layer(self) -> object:
+        """Return the cached SigmaLayer instance (TODO-B / Sigma Layer 0).
+
+        Loads Sigma rules from Settings.analysis.sigma_rules_dir on first call.
+        Subsequent calls return the cached singleton.
+
+        Returns:
+            SigmaLayer instance. Returns an empty-rules layer (no-op) if the
+            rules directory is not found, ensuring graceful degradation.
+        """
+        if self._sigma_layer_cache is None:
+            from pathlib import Path
+
+            from maljan.analysis.sigma_layer import SigmaLayer
+
+            rules_dir = Path(self.config.analysis.sigma_rules_dir)
+            self._sigma_layer_cache = SigmaLayer.from_rules_dir(rules_dir)
+            logger.info(
+                "SigmaLayer initialized: %d rules loaded from %s.",
+                self._sigma_layer_cache.rule_count,  # type: ignore[union-attr]
+                rules_dir,
+            )
+        return self._sigma_layer_cache
+
+    def get_function_summarizer(self) -> object | None:
+        """Return the FunctionSummarizer instance or None if disabled.
+
+        Builds and caches the summarizer based on
+        Settings.preprocessing.use_function_summarizer.
+        When disabled (default), returns None and the pipeline is unaffected.
+
+        Returns:
+            FunctionSummarizer instance when enabled, None when disabled.
+        """
+        if not self.config.preprocessing.use_function_summarizer:
+            return None
+        if self._function_summarizer_cache is None:
+            from maljan.analysis.function_summarizer import FunctionSummarizer
+
+            if self._llm_registry is None:
+                raise RuntimeError("Cannot build FunctionSummarizer LLM in mock mode.")
+            summarizer_llm = self._llm_registry.build_model(
+                role="expert",
+                provider_override=self.config.preprocessing.summarizer_provider,
+                model_override=self.config.preprocessing.summarizer_model,
+            )
+            self._function_summarizer_cache = FunctionSummarizer(
+                llm=summarizer_llm,
+                max_summary_words=self.config.preprocessing.summarizer_max_words,
+            )
+            logger.info(
+                "FunctionSummarizer initialized (%s / %s, max_words=%d).",
+                self.config.preprocessing.summarizer_provider,
+                self.config.preprocessing.summarizer_model,
+                self.config.preprocessing.summarizer_max_words,
+            )
+        return self._function_summarizer_cache
 
     # ------------------------------------------------------------------
     # Private helpers

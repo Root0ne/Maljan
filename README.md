@@ -14,12 +14,13 @@ Maljan is an enterprise-grade cybersecurity analysis framework for automated, st
 |---|---|
 | Multi-agent negotiation | Three parallel domain analysts (static, dynamic, network) exchange structured ISR reports and resolve contradictions before verdict |
 | YARA Layer 0 (deterministic) | Pure-Python signature scanner runs before LLM agents — maps known patterns (VirtualAllocEx, mimikatz, vssadmin, etc.) directly to ATT&CK IDs at 0.85-0.95 confidence |
+| Sigma Layer 0 (pySigma engine) | 2,946 SigmaHQ community rules across Windows, Linux, macOS, Cloud, and Network — 373 unique ATT&CK techniques via production-grade pySigma detection engine |
 | Anti-echo-chamber engine | Sycophancy detection via cosine similarity; forced devil's advocate dissent when agents converge too fast |
 | Adaptive termination | Rolling standard deviation convergence detection — exits negotiation early when confidence stabilizes |
 | Binary chunker | Domain-aware input splitting for large samples; prevents LLM context overflow without truncation |
 | Revision grounding | Multi-chunk revision rounds use consolidated ISR summaries, not raw binary data — eliminates hallucination in high-load scenarios |
 | MITRE ATT&CK validation | In-memory TF-IDF index of the full ATT&CK Enterprise dataset; validates every TTP claim before STIX generation |
-| Multi-layer TTP cascade | Cross-domain confidence scoring: YARA (0.90) > dynamic (0.45) > static (0.35) > network (0.20); corroboration multipliers up to 1.75x |
+| Multi-layer TTP cascade | Cross-domain confidence scoring: YARA (0.90) > Sigma (0.55) > dynamic (0.45) > static (0.35) > network (0.20); corroboration multipliers up to 1.75x |
 | Dynamic schema pruning | Keyword-weighted malware category inference (ransomware/RAT/dropper/worm/infostealer) narrows STIX object type guidance per sample |
 | STIX 2.1 + confidence intervals | Structured, Pydantic-validated Bundle with per-relationship `x_maljan_confidence` and `x_maljan_evidence_basis` annotations |
 | Heterogeneous model ensemble | Each agent can use a different LLM provider/model via config, reducing echo chamber risk across model families |
@@ -67,9 +68,17 @@ Raw Artifacts (JSON/Logs)
                     - Produces AgentISR(domain="yara")
                              |
                              v
+                   [ SigmaLayer ]  <--------- Layer 0 (pySigma engine)
+                    - 2,946 SigmaHQ community rules
+                    - 373 unique ATT&CK techniques
+                    - Windows / Linux / macOS / Cloud / Network
+                    - Produces AgentISR(domain="sigma")
+                             |
+                             v
                    [ ATTCKValidator ]  <--- MITRE ATT&CK STIX bundle (cached)
                    [ TTPCascadeEngine ]  <-- multi-layer weighted scoring
-                     yara=0.90 | dynamic=0.45 | static=0.35 | network=0.20
+                     yara=0.90 | sigma=0.55 | dynamic=0.45
+                     static=0.35 | network=0.20
                    [ SchemaPruner ]  <------ malware category inference
                              |
                              v
@@ -203,11 +212,12 @@ Carries per-claim validation results. `to_prompt_block()` renders a prompt-ready
 
 **`TTPCascadeEngine`** (`analysis/ttp_cascade.py`):
 
-For each unique `technique_id` across all ISR reports (including YARA):
-1. Groups evidence by domain (yara / static / dynamic / network)
+For each unique `technique_id` across all ISR reports (including YARA and Sigma):
+1. Groups evidence by domain (yara / sigma / static / dynamic / network)
 2. Computes per-layer mean confidence
 3. Calculates domain-weighted average:
    - `yara`: weight 0.90 (deterministic signatures — Layer 0)
+   - `sigma`: weight 0.55 (pySigma rule-based detection — Layer 0)
    - `dynamic`: weight 0.45 (behavioral evidence is hardest to spoof)
    - `static`: weight 0.35 (code-level artifacts)
    - `network`: weight 0.20 (weakest alone, strongest corroborator)
@@ -215,7 +225,8 @@ For each unique `technique_id` across all ISR reports (including YARA):
    - 1 layer → x1.00 (`SINGLE-LAYER`)
    - 2 layers → x1.25 (`CORROBORATED`)
    - 3 layers → x1.50 (`CONSENSUS`)
-   - 4 layers → x1.75 (`FULL-CONSENSUS` — YARA + all 3 LLM domains)
+   - 4 layers → x1.75 (`FULL-CONSENSUS`)
+   - 5 layers → x1.75 (`FULL-CONSENSUS` — YARA + Sigma + all 3 LLM domains)
 5. Clips final confidence to [0.0, 1.0]
 
 The resulting `CascadeSummary.to_prompt_block()` is injected into the Judge prompt to prioritize high-confidence, multi-corroborated TTPs.
@@ -323,9 +334,52 @@ The baseline rule set ships with 40+ rules covering:
 **Integration in the pipeline**:
 - Input: `state["reports"]` (LLM summaries) + ISR `evidence_ref` fields
 - YARA domain weight in cascade: **0.90** (highest — deterministic)
-- 4-layer full-consensus multiplier: **x1.75**
+- 5-layer full-consensus multiplier: **x1.75**
 
 **Extensibility**: Add new rules to `data/yara_ttp_rules.yaml` — zero code changes required.
+
+---
+
+## Sigma Layer 0 — pySigma Detection Engine
+
+**`SigmaLayer`** (`analysis/sigma_layer.py`):
+
+Production-grade detection layer powered by the [pySigma](https://github.com/SigmaHQ/pySigma) engine. Loads and evaluates Sigma detection rules from the [SigmaHQ](https://github.com/SigmaHQ/sigma) community repository — the industry-standard rule source used by SOC Prime, Elastic, Splunk, QRadar, and 20+ security platforms.
+
+**Rule source**: 2,946 peer-reviewed rules from [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) under the [Detection Rule License (DRL) 1.1](https://github.com/SigmaHQ/Detection-Rule-License).
+
+| Platform | Rules |
+|---|---|
+| Windows | 2,390 |
+| Cloud (AWS, Azure, GCP, Google Workspace, Microsoft 365) | 226 |
+| Linux | 209 |
+| macOS | 69 |
+| Network | 52 |
+| **Total** | **2,946** |
+
+**ATT&CK coverage**: **373 unique technique IDs** extracted from rule tags (e.g., `attack.t1003.001`).
+
+**Two scan modes**:
+- `scan_events(events, log_source)` — structured event matching (JSON/dict)
+- `scan_log_lines(lines, log_source)` — unstructured text matching with heuristic field extraction
+
+**Confidence scoring**: Based on rule `status` field:
+- `stable` → 0.88
+- `test` → 0.80
+- `experimental` → 0.70
+- Fallback → 0.65
+
+**Integration in the pipeline**:
+- Runs inside `make_judge_node()` immediately after YARA Layer
+- Input: analyst report text + ISR evidence references
+- Output: `AgentISR(domain="sigma")` injected into TTP Cascade
+- Sigma domain weight in cascade: **0.55**
+
+**Performance**:
+- Rule loading: ~4s (one-time; cached via `ServiceContainer` singleton)
+- Scan time: ~2.4s per 5-line batch
+
+**Extensibility**: Drop new `.yml` rule files into `data/sigma_rules/` subdirectories — zero code changes required. SigmaHQ rules can be updated via `git pull` or CI/CD sync script.
 
 ---
 
@@ -522,10 +576,17 @@ Maljan/
 │   │   ├── dynamic/                    # CAPEv2 / Cuckoo behavioral JSON
 │   │   └── network/                    # Zeek connection log JSON
 │   ├── attck_valid_ids.json            # 691 active ATT&CK Enterprise IDs
-│   └── yara_ttp_rules.yaml            # Layer 0 pattern rule set (40+ rules)
+│   ├── yara_ttp_rules.yaml            # YARA Layer 0 pattern rule set (40+ rules)
+│   └── sigma_rules/                   # Sigma Layer 0 (SigmaHQ community rules)
+│       ├── windows/                   # 2,390 rules (process creation, registry, etc.)
+│       ├── linux/                     # 209 rules
+│       ├── cloud/                     # 226 rules (AWS, Azure, GCP, M365)
+│       ├── macos/                     # 69 rules
+│       └── network/                   # 52 rules
 ├── src/maljan/
 │   ├── analysis/
-│   │   ├── yara_layer.py               # Layer 0: deterministic signature scanner
+│   │   ├── yara_layer.py               # YARA Layer 0: deterministic signature scanner
+│   │   ├── sigma_layer.py              # Sigma Layer 0: pySigma engine (2,946 SigmaHQ rules)
 │   │   ├── schema_pruner.py            # Malware category inference + STIX schema hints
 │   │   ├── ttp_cascade.py              # Multi-layer TTP confidence cascade engine
 │   │   ├── run_summary.py              # Pipeline run observability summary
@@ -577,7 +638,7 @@ Maljan/
 │   │   └── mediation_models.py     # MediatorVerdict structured output schema
 │   ├── schemas/
 │   │   ├── stix_models.py          # STIX 2.1 Bundle + ConfidenceAnnotatedRelationship
-│   │   ├── isr_models.py           # AgentISR (domain: static/dynamic/network/yara) + ClaimEvidence
+│   │   ├── isr_models.py           # AgentISR (domain: static/dynamic/network/yara/sigma) + ClaimEvidence
 │   │   └── mediation_models.py     # MediatorVerdict
 │   ├── app.py                      # MaljanApp facade (composition root)
 │   └── cli.py                      # Typer CLI
@@ -585,9 +646,10 @@ Maljan/
 │   ├── prepare_attck_malware_fixtures.py  # Generates 724 malware ground truth fixtures
 │   └── prepare_tram_dataset.py            # Generates 140 TRAM2 CTI report fixtures
 ├── tests/
-│   ├── unit/                       # 570+ unit tests (no network, no LLM)
+│   ├── unit/                       # 767+ unit tests (no network, no LLM)
 │   │   └── analysis/
 │   │       ├── test_yara_layer.py  # 27 YaraLayer unit tests
+│   │       ├── test_sigma_layer.py # 14 SigmaLayer unit tests
 │   │       └── test_ttp_cascade.py
 │   ├── integration/                # Full pipeline tests (mock mode)
 │   └── evaluation/                 # Benchmark runner + ground truth fixtures

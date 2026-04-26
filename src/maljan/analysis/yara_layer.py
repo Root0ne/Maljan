@@ -183,7 +183,7 @@ class YaraLayer:
             raise ValueError(f"Invalid YARA rules YAML: expected top-level 'rules' key in {path}")
 
         rules: list[YaraTTPRule] = []
-        for entry in data["rules"]:
+        for entry in data["rules"] or []:
             try:
                 rules.append(YaraTTPRule.from_dict(entry))
             except (KeyError, TypeError, ValueError) as exc:

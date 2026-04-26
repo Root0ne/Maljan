@@ -51,7 +51,7 @@ class AgentISR(BaseModel):
     """
 
     agent_id: str = Field(..., description="Registry name of the agent, e.g. 'static'.")
-    domain: Literal["static", "dynamic", "network", "yara"] = Field(
+    domain: Literal["static", "dynamic", "network", "yara", "sigma"] = Field(
         ..., description="Analysis domain this agent covers."
     )
     claims: list[ClaimEvidence] = Field(

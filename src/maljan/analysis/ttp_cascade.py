@@ -14,6 +14,7 @@ Solution — Cascade Scoring:
 
 Layer weights:
   - yara:    0.90  (deterministic signature — highest trust, Layer 0)
+  - sigma:   0.55  (deterministic log-based rules — Sigma Layer 0)
   - dynamic: 0.45  (API calls / sandbox behaviours — hardest to spoof)
   - static:  0.35  (PE headers / strings / decompiled code)
   - network: 0.20  (weakest alone; strong corroborator)
@@ -23,6 +24,7 @@ Cross-layer multipliers:
   - 2 layers: 1.25 (corroborated — moderate confidence boost)
   - 3 layers: 1.50 (consensus — strong confidence boost)
   - 4 layers: 1.75 (full consensus — YARA + all 3 LLM domains)
+  - 5 layers: 1.90 (maximum — YARA + Sigma + all 3 LLM domains)
 
 Usage:
     from maljan.analysis.ttp_cascade import TTPCascadeEngine
@@ -49,6 +51,7 @@ if TYPE_CHECKING:
 
 LAYER_WEIGHTS: dict[str, float] = {
     "yara": 0.90,  # deterministic signature matching (Layer 0)
+    "sigma": 0.55,  # deterministic log-based rules (Sigma Layer 0)
     "dynamic": 0.45,  # sandbox behavioral evidence
     "static": 0.35,  # PE/decompiled code analysis
     "network": 0.20,  # network traffic analysis
@@ -63,9 +66,10 @@ CROSS_LAYER_MULTIPLIERS: dict[int, float] = {
     2: 1.25,
     3: 1.50,
     4: 1.75,  # YARA + all 3 LLM domains
+    5: 1.90,  # YARA + Sigma + all 3 LLM domains
 }
 
-# If more layers somehow contribute, cap at the 3-layer multiplier
+# If more layers somehow contribute, cap at the 5-layer multiplier
 _MAX_MULTIPLIER: float = max(CROSS_LAYER_MULTIPLIERS.values())
 
 

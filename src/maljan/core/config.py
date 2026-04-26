@@ -186,11 +186,51 @@ class SandboxConfig(BaseModel):
         Seconds between status poll requests during task completion wait.
     """
 
-    backend: str = "mock"  # "mock" | "cape2"
+    backend: str = "mock"  # "mock" | "cape2" | "triage"
     cape2_base_url: str = "http://localhost:8000"
     cape2_api_token: str = ""
     cape2_timeout_seconds: int = 300
     cape2_poll_interval_seconds: int = 10
+    # Hatching Triage sandbox (SaaS, free tier)
+    triage_api_token: str = ""
+    triage_base_url: str = "https://api.tria.ge"
+    triage_timeout_seconds: int = 300
+    triage_poll_interval_seconds: int = 15
+
+
+class AnalysisConfig(BaseModel):
+    """Analysis layer configuration.
+
+    Controls deterministic analysis layer settings (YARA, Sigma).
+
+    sigma_rules_dir:
+        Directory containing Sigma rule YAML files. Loaded recursively.
+        Set to a non-existent path to disable Sigma layer (graceful degradation).
+    """
+
+    sigma_rules_dir: str = "data/sigma_rules"
+
+
+class PreprocessingConfig(BaseModel):
+    """Optional preprocessing pipeline configuration.
+
+    Controls the FunctionSummarizer — a lightweight pre-summarization
+    step that reduces token cost for large binary analysis inputs.
+
+    use_function_summarizer:
+        Set to True to enable chunk pre-summarization. Off by default.
+    summarizer_provider:
+        LLM provider for the summarizer (prefer a small local model).
+    summarizer_model:
+        Model identifier for the summarizer LLM.
+    summarizer_max_words:
+        Maximum words in each chunk summary.
+    """
+
+    use_function_summarizer: bool = False
+    summarizer_provider: str = "ollama"
+    summarizer_model: str = "llama3.2:3b"
+    summarizer_max_words: int = 150
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +260,8 @@ class Settings(BaseSettings):
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
 
     # Token overflow protection
     max_token_limit: int = 8000
