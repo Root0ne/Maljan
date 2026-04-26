@@ -57,9 +57,7 @@ class DynamicAnalyst(BaseAnalyst):
             env.update(settings.mcp.cape.env)
 
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        server_params = StdioServerParameters(
-            command=command, args=args, env=env, cwd=os.path.join(project_root, "CAPEv2")
-        )
+        server_params = StdioServerParameters(command=command, args=args, env=env, cwd=project_root)
 
         toolkit = MCPLangChainToolkit(server_params)
 

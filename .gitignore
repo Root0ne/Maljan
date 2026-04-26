@@ -8,6 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-wsl
+
+# External MCP tool installations (not part of Maljan — install separately)
+CAPEv2/
+ghidra-mcp/
+network-mcp/
 
 # Environment variables (never commit real secrets)
 .env
