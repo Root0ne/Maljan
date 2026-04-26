@@ -1,8 +1,8 @@
 # Maljan: Comprehensive Research Report
 ## Multi-Agent LLM Framework for Malware Analysis
 
-**Prepared for:** Maljan Development Team  
-**Date:** April 25, 2026  
+**Prepared for:** Maljan Development Team
+**Date:** April 25, 2026
 **Scope:** Academic literature review, technology evaluation, known limitations, and recommended improvements for the Maljan Multi-Agent Malware Analysis Framework.
 
 ---
