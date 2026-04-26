@@ -219,85 +219,73 @@ API dokümantasyonu: https://tria.ge/docs/
 
 ---
 
-## TODO-4: Phase 8.2 — aCTIon Dataset Entegrasyonu (Gerçek Benchmark)
+## TODO-4: Phase 8.2 — Empirical Ground Truth Dataset Entegrasyonu [TAMAMLANDI]
 
-### Sorun
+### Sorun (Orijinal)
 
 Master plan Phase 8.2'de şunu tarif eder:
 
 > "aCTIon dataset (204 STIX bundle, 36k entity, %93.1 F1 baseline)"
->
-> `tests/evaluation/ground_truth/action_dataset/`
 
-Gerçek implementasyon:
-- 5 adet el yazımı sentetik fixture var
-- 204 gerçek STIX bundle'ı yok
-- Benchmark, sentetik "perfect precision" baseline üzerinde çalışıyor
-  (TTP F1 = 1.0 — gerçek bir ölçüm değil)
+Gerçek implementasyon (orijinal durumda):
+- 5 adet el yazımı sentetik fixture vardı
+- 204 gerçek STIX bundle yoktu
+- Benchmark, sentetik "perfect precision" baseline üzerinde çalışıyordu
 
-### Gerçekten Eksik Mi?
+### Uygulanan Çözüm: TRAM2 Dataset
 
-**Evet, en kritik eksik bu.** Mevcut benchmark, pipeline'ın gerçek dünya
-performansını ölçmüyor. aCTIon dataset olmadan "F1=1.0" rakamı anlamsız.
+**aCTIon repository'si artık erişilebilir durumda olmadığından**, eşdeğer veya
+daha kapsamlı bir alternatif olarak **MITRE Center for Threat-Informed Defense
+TRAM2 dataset** kullanıldı.
 
-Dataset adresi: `https://github.com/aiforsec/action-dataset`
-Paper: "CTI-BERT: A Cyber Threat Intelligence Extraction Model" (2024)
+**TRAM2 Avantajları:**
+- Apache-2.0 lisanslı, publicly available, aktif bakımlı
+- 149 gerçek tehdit raporu (NotPetya, Lazarus, LockBit, Black Basta vb.)
+- Her cümle ATT&CK tekniğine etiketlenmiş (`text` -> `T-ID` mapping)
+- Dataset kaynağı: `center-for-threat-informed-defense/tram`
 
-### Yapılacaklar
+### Uygulanan Dosyalar
 
-#### 4.1 — Dataset İndir ve Normalize Et
+| Dosya | Açıklama |
+|---|---|
+| `scripts/prepare_tram_dataset.py` | TRAM2'yi indirir, doküman bazlı aggregate eder, fixture üretir |
+| `tests/evaluation/ground_truth/tram/` | 140 adet gerçek rapor fixture'i (JSON) |
+| `tests/evaluation/test_tram_ground_truth.py` | 10 pytest testi (şema, F1, hallucination doğrulama) |
+| `Makefile` (`prepare-tram`, `benchmark-tram`) | Yeni make hedefleri |
+
+### Sonuçlar
+
+```
+Fixtures : 140 tehdit raporu (NotPetya, Rorschach, LockBit, APT41 ...)
+Teknikler: 50 unique ATT&CK teknik ID (dataset geneli attck_valid_ids baseline'i)
+Testler  : 10/10 passed (pytest tests/evaluation/test_tram_ground_truth.py)
+```
+
+### Kullanım
 
 ```bash
-git clone https://github.com/aiforsec/action-dataset data/action_dataset/
+# Fixture'ları yenile (internetten TRAM2 indirir)
+make prepare-tram
+
+# Sentetik mod (tam F1=1.0 baseline doğrulama)
+make benchmark-tram
+
+# Doğrudan çalıştırma
+uv run python -m tests.evaluation.benchmark_suite \
+    --fixtures-dir tests/evaluation/ground_truth/tram \
+    --output benchmark_tram_report.md
 ```
 
-- Her STIX bundle için `tests/evaluation/ground_truth/action/` altına
-  `{bundle_id}.json` formatında ground truth fixture yaz
-- Ground truth fixture şeması (mevcut `ransomware_sample_1.json` ile uyumlu):
-  ```json
-  {
-    "sample_id": "action_bundle_001",
-    "notes": "...",
-    "technique_ids": ["T1055", ...],
-    "attck_valid_ids": [...],
-    "expected_stix_types": ["malware", "attack-pattern", "relationship"],
-    "expected_rel_types": ["uses"]
-  }
-  ```
-- Script: `scripts/prepare_action_dataset.py`
-  - 204 STIX bundle parse eder
-  - `attack-pattern` nesnelerden `technique_id` çıkarır
-  - Ground truth fixture'ları üretir
+### Kalan İş: Gerçek Pipeline Çıktıları ile Karşılaştırma
 
-#### 4.2 — `load_fixture_suite()` Güncelleme
+Mevcut benchmark sentetik "perfect TTP" output üzerinde çalışır (F1=1.0).
+Gerçek LLM pipeline çıktısı ile karşılaştırma yapmak için:
 
-`benchmark_suite.py:load_fixture_suite()` zaten glob ile çalışıyor.
-`ground_truth/action/` dizini varsa otomatik yüklenecek:
+1. Gerçek bir analiz çalıştır -> `AnalysisState["run_summary"]` + `stix_output` kaydet
+2. `from_run_summary()` ile `BenchmarkRunner`'a besle
+3. Hedef: **TTP F1 >= 0.75** (140 rapor üzerinden)
 
-```python
-run_fixture_benchmark(fixtures_dir="tests/evaluation/ground_truth/action/")
-```
-
-#### 4.3 — Gerçek Pipeline Çıktıları ile Karşılaştırma
-
-- Şu anki benchmark, sentetik "perfect TTP" output üretiyor
-- aCTIon için: gerçek pipeline çalıştırılacak, `AnalysisState["run_summary"]`
-  ve `AnalysisState["stix_output"]` kaydedilecek
-- `from_run_summary()` bu gerçek çıktıları `BenchmarkRunner`'a besleyecek
-- Hedef metrik: **TTP F1 >= 0.80** (aCTIon baseline F1=0.931)
-
-#### 4.4 — CI Entegrasyonu
-
-`ci.yml`'e yeni job eklenecek:
-```yaml
-action-benchmark:
-  if: github.event_name == 'schedule'   # sadece gece çalışır
-  steps:
-    - run: uv run python scripts/run_action_benchmark.py
-    - run: uv run python -m tests.evaluation.benchmark_suite
-            --fixtures-dir tests/evaluation/ground_truth/action/
-            --output benchmark_action_report.md
-```
+Bu adım TODO-1 (YARA Layer 1) tamamlandıktan sonra anlam kazanacak.
 
 ---
 

@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram
 
 test:
 	uv run pytest tests/ -q
@@ -43,3 +43,9 @@ pre-commit-run:
 
 benchmark:
 	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite
+
+prepare-tram:
+	uv run python scripts/prepare_tram_dataset.py
+
+benchmark-tram:
+	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
