@@ -7,18 +7,18 @@ Her madde tam teknik tasarım, mimari kararlar ve test gereksinimleriyle birlikt
 
 ## Öncelik Sırası
 
-| # | Görev | Öncelik | Tahmini Efor |
+| # | Görev | Durum | Tamamlanma |
 |---|---|---|---|
-| TODO-A | YARA kural seti genişletmesi (MITRE verisi uyarlaması) | **Kritik** | 1 gün |
-| TODO-B | Sigma Layer 0 (log tabanlı deterministik TTP tespiti) | **Yüksek** | 2-3 gün |
-| TODO-C | Hatching Triage sandbox client | **Orta** | 1-2 gün |
-| TODO-D | FunctionSummarizer (iki aşamalı chunk pipeline) | **Düşük** | 1 gün |
+| TODO-A | YARA kural seti genişletmesi (MITRE verisi uyarlaması) | **TAMAMLANDI** | 300+ kural, 200+ teknik |
+| TODO-B | Sigma Layer 0 (pySigma + SigmaHQ entegrasyonu) | **TAMAMLANDI** | 2,946 kural, 373 teknik |
+| TODO-C | Hatching Triage sandbox client | **TAMAMLANDI** | SandboxClient Protocol uyumlu |
+| TODO-D | FunctionSummarizer (iki aşamalı chunk pipeline) | **TAMAMLANDI** | Opsiyonel, Settings ile yapılandırılır |
 
 ---
 
 ## TODO-A: YARA Kural Seti Genişletmesi
 
-**Durum:** YAPILACAK
+**Durum:** TAMAMLANDI (2026-04-26)
 **Etki:** Kritik — mevcut 40 kural, 691 aktif ATT&CK tekniğinin yalnızca ~%4'ünü kapsıyor.
 
 ### Sorun
@@ -107,8 +107,8 @@ expand-yara:  ## Expand YARA rule set from local MITRE ATT&CK data
 
 ## TODO-B: Sigma Layer 0
 
-**Durum:** YAPILACAK
-**Etki:** Yüksek — log tabanlı saldırı kalıpları şu anda LLM'e havale ediliyor.
+**Durum:** TAMAMLANDI (2026-04-26)
+**Sonuç:** 2,946 SigmaHQ community kuralı pySigma engine ile entegre edildi. 373 benzersiz ATT&CK tekniği, 5 platform (Windows/Cloud/Linux/macOS/Network). TTP Cascade'e `sigma` domain'i (weight=0.55) eklendi.
 
 ### Sorun
 
@@ -251,8 +251,9 @@ download-sigma-rules:  ## Download baseline Sigma rules from SigmaHQ (ATT&CK tag
 
 ## TODO-C: Hatching Triage Sandbox Client
 
-**Durum:** YAPILACAK
-**Etki:** Orta — CAPEv2 self-hosted infrastructure gerektiriyor; Triage free tier API ile herhangi
+**Durum:** TAMAMLANDI (2026-04-26)
+**Sonuç:** `TriageClient` SandboxClient Protocol'ünü tam olarak uyguluyor. CAPEv2 uyumlu rapor normalizasyonu, graceful degradation, async pipeline. **Not:** Pipeline entegrasyonu (ServiceContainer backend seçimi) henüz yapılmadı — Phase 6'da tamamlanacak.
+**Eski Etki:** Orta — CAPEv2 self-hosted infrastructure gerektiriyor; Triage free tier API ile herhangi
 bir makineden kullanılabilir.
 
 ### Teknik Tasarım
@@ -373,8 +374,9 @@ def get_sandbox_client(self) -> SandboxClient:
 
 ## TODO-D: FunctionSummarizer
 
-**Durum:** YAPILACAK
-**Etki:** Düşük (işlevsel doğruluk değil, token maliyet optimizasyonu).
+**Durum:** TAMAMLANDI (2026-04-26)
+**Sonuç:** `FunctionSummarizer` opsiyonel pre-summarizer olarak implement edildi. `Settings.preprocessing.use_function_summarizer` ile etkinleştirilir. Varsayılan: devre dışı.
+**Eski Etki:** Düşük (işlevsel doğruluk değil, token maliyet optimizasyonu).
 
 ### Sorun
 
