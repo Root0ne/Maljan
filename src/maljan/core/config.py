@@ -279,6 +279,23 @@ class MCPConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _find_env_file() -> str:
+    """Walk up from this file to find the project root .env.
+
+    Supports launching from any subdirectory (apps/api, apps/web, etc.)
+    without requiring the caller to set CWD to the project root.
+    """
+    from pathlib import Path
+
+    current = Path(__file__).resolve().parent
+    for _ in range(6):  # max 6 levels up
+        candidate = current / ".env"
+        if candidate.exists():
+            return str(candidate)
+        current = current.parent
+    return ".env"  # fallback: let pydantic-settings handle the miss gracefully
+
+
 class Settings(BaseSettings):
     """Root configuration - reads from .env and environment variables.
 
@@ -289,7 +306,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_find_env_file(),
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         extra="ignore",

@@ -91,19 +91,19 @@ const MOCK_STATS: DisplayStats = {
 };
 
 const MOCK_JOBS: JobDTO[] = [
-  { id: "j-001", sample_id: "s-001", status: "completed", config: null, created_at: new Date(Date.now() - 3600000).toISOString(), started_at: null, completed_at: new Date(Date.now() - 3200000).toISOString(), duration_seconds: 400, error_message: null },
-  { id: "j-002", sample_id: "s-002", status: "running", config: null, created_at: new Date(Date.now() - 1800000).toISOString(), started_at: null, completed_at: null, duration_seconds: null, error_message: null },
-  { id: "j-003", sample_id: "s-003", status: "completed", config: null, created_at: new Date(Date.now() - 7200000).toISOString(), started_at: null, completed_at: new Date(Date.now() - 6800000).toISOString(), duration_seconds: 400, error_message: null },
-  { id: "j-004", sample_id: "s-004", status: "failed", config: null, created_at: new Date(Date.now() - 10800000).toISOString(), started_at: null, completed_at: null, duration_seconds: null, error_message: "Sandbox timeout" },
-  { id: "j-005", sample_id: "s-005", status: "completed", config: null, created_at: new Date(Date.now() - 14400000).toISOString(), started_at: null, completed_at: new Date(Date.now() - 14000000).toISOString(), duration_seconds: 400, error_message: null },
+  { id: "11111111-1111-1111-1111-111111111111", sample_id: "s-11111111-1111-1111-1111-111111111111", status: "completed", config: null, created_at: new Date(Date.now() - 3600000).toISOString(), started_at: null, completed_at: new Date(Date.now() - 3200000).toISOString(), duration_seconds: 400, error_message: null },
+  { id: "22222222-2222-2222-2222-222222222222", sample_id: "s-22222222-2222-2222-2222-222222222222", status: "running", config: null, created_at: new Date(Date.now() - 1800000).toISOString(), started_at: null, completed_at: null, duration_seconds: null, error_message: null },
+  { id: "33333333-3333-3333-3333-333333333333", sample_id: "s-33333333-3333-3333-3333-333333333333", status: "completed", config: null, created_at: new Date(Date.now() - 7200000).toISOString(), started_at: null, completed_at: new Date(Date.now() - 6800000).toISOString(), duration_seconds: 400, error_message: null },
+  { id: "44444444-4444-4444-4444-444444444444", sample_id: "s-44444444-4444-4444-4444-444444444444", status: "failed", config: null, created_at: new Date(Date.now() - 10800000).toISOString(), started_at: null, completed_at: null, duration_seconds: null, error_message: "Sandbox timeout" },
+  { id: "55555555-5555-5555-5555-555555555555", sample_id: "s-55555555-5555-5555-5555-555555555555", status: "completed", config: null, created_at: new Date(Date.now() - 14400000).toISOString(), started_at: null, completed_at: new Date(Date.now() - 14000000).toISOString(), duration_seconds: 400, error_message: null },
 ];
 
 const MOCK_NAMES: Record<string, string> = {
-  "s-001": "emotet_dropper.exe",
-  "s-002": "lockbit3_ransom.dll",
-  "s-003": "cobalt_beacon.bin",
-  "s-004": "legit_installer.msi",
-  "s-005": "qakbot_loader.js",
+  "s-11111111-1111-1111-1111-111111111111": "emotet_dropper.exe",
+  "s-22222222-2222-2222-2222-222222222222": "lockbit3_ransom.dll",
+  "s-33333333-3333-3333-3333-333333333333": "cobalt_beacon.bin",
+  "s-44444444-4444-4444-4444-444444444444": "legit_installer.msi",
+  "s-55555555-5555-5555-5555-555555555555": "qakbot_loader.js",
 };
 
 function mapApiStats(s: DashboardStatsDTO): DisplayStats {

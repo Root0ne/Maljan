@@ -35,5 +35,9 @@ class Sample(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     uploaded_by_user = relationship("User", back_populates="samples")
     jobs = relationship("AnalysisJob", back_populates="sample", lazy="selectin")
 
+    @property
+    def uploaded_at(self):
+        return self.created_at
+
     def __repr__(self) -> str:
         return f"<Sample {self.sha256[:12]}... ({self.original_filename})>"

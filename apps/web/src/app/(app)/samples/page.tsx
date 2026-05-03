@@ -24,10 +24,10 @@ function mapSample(s: SampleDTO): SampleRow {
 }
 
 const MOCK_SAMPLES: SampleRow[] = [
-  { id: "s-001", filename: "emotet_dropper.exe", sha256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", file_size: 245760, created_at: new Date(Date.now() - 86400000).toISOString() },
-  { id: "s-002", filename: "lockbit3_ransom.dll", sha256: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", file_size: 512000, created_at: new Date(Date.now() - 172800000).toISOString() },
-  { id: "s-003", filename: "cobalt_beacon.bin", sha256: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", file_size: 102400, created_at: new Date(Date.now() - 259200000).toISOString() },
-  { id: "s-004", filename: "qakbot_loader.js", sha256: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5", file_size: 8192, created_at: new Date(Date.now() - 345600000).toISOString() },
+  { id: "11111111-1111-1111-1111-111111111111", filename: "emotet_dropper.exe", sha256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", file_size: 245760, created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: "22222222-2222-2222-2222-222222222222", filename: "lockbit3_ransom.dll", sha256: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", file_size: 512000, created_at: new Date(Date.now() - 172800000).toISOString() },
+  { id: "33333333-3333-3333-3333-333333333333", filename: "cobalt_beacon.bin", sha256: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", file_size: 102400, created_at: new Date(Date.now() - 259200000).toISOString() },
+  { id: "44444444-4444-4444-4444-444444444444", filename: "qakbot_loader.js", sha256: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5", file_size: 8192, created_at: new Date(Date.now() - 345600000).toISOString() },
 ];
 
 function formatSize(bytes: number): string {
@@ -73,8 +73,8 @@ export default function SamplesPage() {
       const res = await api.getSamples();
       setSamples(res.items.map(mapSample));
       setApiAvailable(true);
-    } catch {
-      /* silently fail for demo */
+    } catch (error: any) {
+      alert(`Upload failed: ${error.message || "Unknown error"}`);
     } finally {
       setUploading(false);
     }

@@ -218,7 +218,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
       - The devil's advocate directive is built here; the revision node uses it.
     """
 
-    def node_fn(state: AnalysisState) -> dict[str, Any]:
+    async def node_fn(state: AnalysisState) -> dict[str, Any]:
         iteration = state.get("iteration_count", 0)
         agent_names = container.agent_registry.list_agents()
 
@@ -257,7 +257,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
 
         try:
             judge = JudgeAgent(llm=container.get_expert_llm())
-            argument, is_consensus = judge.mediate(
+            argument, is_consensus = await judge.mediate(
                 reports=active_reports,
                 history=state.get("discussion_history") or [],
                 isr_reports=state.get("isr_reports") or {},
@@ -384,7 +384,7 @@ def make_revision_node(container: ServiceContainer) -> Any:
 def make_judge_node(container: ServiceContainer) -> Any:
     """Factory: creates the final judge verdict node."""
 
-    def node_fn(state: AnalysisState) -> dict[str, Any]:
+    async def node_fn(state: AnalysisState) -> dict[str, Any]:
         if container.is_mock:
             return {
                 "final_decision": "Malware",
@@ -487,7 +487,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
 
-            bundle = judge.give_verdict(
+            bundle = await judge.give_verdict(
                 reports=reports,
                 history=state.get("discussion_history") or [],
                 isr_reports=isr_reports,

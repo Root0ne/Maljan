@@ -17,6 +17,8 @@ COPY src/ src/
 COPY apps/ apps/
 COPY external/ external/
 COPY data/ data/
+COPY threatintel-mcp/ threatintel-mcp/
+COPY network-mcp/ network-mcp/
 
 # Install dependencies
 RUN uv sync --frozen --no-dev

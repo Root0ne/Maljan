@@ -96,3 +96,51 @@ class MaljanApp:
         logger.info("=" * 60)
 
         return result
+
+    async def arun(
+        self,
+        file_hash: str,
+        file_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute the full analysis pipeline asynchronously.
+
+        This prevents the need for spinning up separate threads and manually
+        managing event loops in async contexts (like ARQ workers), which
+        solves the 'Event loop is closed' issue with google-genai.
+        """
+        start = time.time()
+        logger.info("=" * 60)
+        logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline (ASYNC)")
+        logger.info("=" * 60)
+        logger.info(f"Sample: {file_hash} ({file_name or 'unnamed'})")
+        logger.info(f"Mode: {'MOCK' if self.container.is_mock else self.config.llm.provider}")
+        logger.info(f"Registered agents: {self.container.agent_registry.list_agents()}")
+        logger.info(f"Max iterations: {self.config.negotiation.max_iterations}")
+        logger.info("-" * 60)
+
+        initial_state: AnalysisState = {
+            "file_hash": file_hash,
+            "file_name": file_name,
+            "reports": {},
+            "revised_reports": {},
+            "isr_reports": {},
+            "discussion_history": [],
+            "sycophancy_detected": False,
+            "confidence_history": [],
+            "iteration_count": 0,
+            "is_consensus": False,
+            "final_decision": None,
+            "judge_report": None,
+            "stix_output": None,
+            "run_summary": None,
+            "_max_iterations": self.config.negotiation.max_iterations,
+        }
+
+        result = await self.graph.ainvoke(initial_state)
+
+        elapsed = time.time() - start
+        logger.info("=" * 60)
+        logger.info("ANALYSIS COMPLETE (%.1fs)", elapsed)
+        logger.info("=" * 60)
+
+        return result

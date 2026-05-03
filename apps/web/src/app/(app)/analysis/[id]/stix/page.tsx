@@ -2,43 +2,7 @@
 
 import { useState } from "react";
 
-const MOCK_STIX = {
-  type: "bundle",
-  id: "bundle--a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  objects: [
-    {
-      type: "malware",
-      id: "malware--1234-5678-9abc-def012345678",
-      name: "Emotet",
-      description: "Banking trojan turned modular botnet loader",
-      malware_types: ["trojan", "bot"],
-      is_family: true,
-    },
-    {
-      type: "indicator",
-      id: "indicator--abcd-1234-5678-9abcdef01234",
-      name: "Emotet C2 IP",
-      pattern: "[ipv4-addr:value = '185.x.x.x']",
-      pattern_type: "stix",
-      valid_from: "2026-04-28T00:00:00Z",
-    },
-    {
-      type: "attack-pattern",
-      id: "attack-pattern--t1055",
-      name: "Process Injection",
-      external_references: [
-        { source_name: "mitre-attack", external_id: "T1055" },
-      ],
-    },
-    {
-      type: "relationship",
-      id: "relationship--r1",
-      relationship_type: "uses",
-      source_ref: "malware--1234-5678-9abc-def012345678",
-      target_ref: "attack-pattern--t1055",
-    },
-  ],
-};
+import { useReport } from "../layout";
 
 function JsonNode({
   data,
@@ -138,7 +102,14 @@ function JsonNode({
 }
 
 export default function StixTab() {
-  const raw = JSON.stringify(MOCK_STIX, null, 2);
+  const { report, job, loading } = useReport();
+
+  if (loading || (!report && job?.status !== "completed")) {
+    return <div className="p-4 text-sm text-text-secondary animate-pulse">Waiting for STIX bundle generation...</div>;
+  }
+
+  const stixData = report?.stix_bundle || {};
+  const raw = JSON.stringify(stixData, null, 2);
 
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -170,7 +141,7 @@ export default function StixTab() {
         </div>
       </div>
       <div className="p-4 font-mono text-xs leading-relaxed overflow-x-auto">
-        <JsonNode data={MOCK_STIX} />
+        <JsonNode data={stixData} />
       </div>
     </div>
   );

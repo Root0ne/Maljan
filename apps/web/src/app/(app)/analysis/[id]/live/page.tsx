@@ -1,187 +1,239 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
+import { useWebSocket } from "@/lib/useWebSocket";
+import { api } from "@/lib/api";
+
+type AgentPhase = "waiting" | "analyzing" | "done";
+type PipelinePhase = "waiting" | "analyzing" | "negotiation" | "completed" | "failed";
 
 interface AgentState {
   name: string;
-  status: "idle" | "analyzing" | "done";
-  verdict?: string;
-  confidence?: number;
-  lastMessage?: string;
+  phase: AgentPhase;
 }
 
-interface EventLog {
-  time: string;
+interface EventEntry {
+  ts: string;
   type: string;
   message: string;
 }
 
-const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
-  idle: { dot: "bg-text-muted", text: "text-text-muted" },
-  analyzing: { dot: "bg-status-blue", text: "text-status-blue" },
-  done: { dot: "bg-status-green", text: "text-status-green" },
+function buildMessage(type: string, data: Record<string, unknown>): string {
+  switch (type) {
+    case "status_change":
+      return `Job status changed to: ${data.status}`;
+    case "pipeline_started": {
+      const agents = data.agents as string[] | undefined;
+      return `Pipeline started — ${agents?.length ?? 0} analysts queued`;
+    }
+    case "agent_progress":
+      return `Agent [${data.agent}]: ${data.phase}`;
+    case "phase_change":
+      return `Pipeline phase: ${data.phase}`;
+    case "completed":
+      return `Analysis complete — verdict: ${data.verdict} (confidence: ${data.confidence})`;
+    case "error":
+      return `Error: ${String(data.error ?? "unknown error")}`;
+    case "cancelled":
+      return "Job was cancelled.";
+    default:
+      return type;
+  }
+}
+
+const PHASE_CONFIG: Record<PipelinePhase, { banner: string; label: string }> = {
+  waiting: {
+    banner: "bg-text-muted/10 border-text-muted/20 text-text-muted",
+    label: "Waiting for worker to pick up job...",
+  },
+  analyzing: {
+    banner: "bg-status-blue/10 border-status-blue/20 text-status-blue",
+    label: "Analyst agents running in parallel...",
+  },
+  negotiation: {
+    banner: "bg-status-orange/10 border-status-orange/20 text-status-orange",
+    label: "Negotiation phase: agents building consensus...",
+  },
+  completed: {
+    banner: "bg-status-green/10 border-status-green/20 text-status-green",
+    label: "Analysis complete. View full results in the Summary tab.",
+  },
+  failed: {
+    banner: "bg-status-red/10 border-status-red/20 text-status-red",
+    label: "Analysis failed. See event log for details.",
+  },
 };
 
-const INITIAL_AGENTS: AgentState[] = [
-  { name: "Static Analyst", status: "idle" },
-  { name: "Dynamic Analyst", status: "idle" },
-  { name: "Network Analyst", status: "idle" },
-  { name: "Code Analyst", status: "idle" },
-  { name: "Threat Intel Analyst", status: "idle" },
-];
-
-/* Simulate live analysis progression for demo */
-function useSimulatedAnalysis() {
-  const [agents, setAgents] = useState<AgentState[]>(INITIAL_AGENTS);
-  const [events, setEvents] = useState<EventLog[]>([]);
-  const [complete, setComplete] = useState(false);
-
-  useEffect(() => {
-    const steps = [
-      { delay: 1000, agent: 0, status: "analyzing" as const, msg: "Static analysis started" },
-      { delay: 2500, agent: 1, status: "analyzing" as const, msg: "Dynamic sandbox initialized" },
-      { delay: 3500, agent: 4, status: "analyzing" as const, msg: "Querying threat intelligence databases" },
-      { delay: 5000, agent: 0, status: "done" as const, verdict: "malicious", confidence: 85, msg: "Static analysis complete: packed PE with high entropy" },
-      { delay: 6500, agent: 2, status: "analyzing" as const, msg: "Capturing network traffic" },
-      { delay: 7000, agent: 3, status: "analyzing" as const, msg: "Decompiling binary for code analysis" },
-      { delay: 8000, agent: 4, status: "done" as const, verdict: "malicious", confidence: 88, msg: "Threat Intel: matches known Emotet campaign" },
-      { delay: 10000, agent: 1, status: "done" as const, verdict: "malicious", confidence: 80, msg: "Dynamic analysis: process injection detected" },
-      { delay: 12000, agent: 2, status: "done" as const, verdict: "malicious", confidence: 82, msg: "Network: C2 beaconing to known infrastructure" },
-      { delay: 14000, agent: 3, status: "done" as const, verdict: "suspicious", confidence: 72, msg: "Code analysis: obfuscated API resolution chains" },
-      { delay: 15000, agent: -1, status: "done" as const, msg: "Analysis complete. Final verdict: Malicious (87/100)" },
-    ];
-
-    const timers = steps.map((step) =>
-      setTimeout(() => {
-        const now = new Date().toLocaleTimeString();
-        setEvents((prev) => [
-          { time: now, type: step.status, message: step.msg },
-          ...prev,
-        ]);
-
-        if (step.agent >= 0) {
-          setAgents((prev) =>
-            prev.map((a, i) =>
-              i === step.agent
-                ? {
-                    ...a,
-                    status: step.status,
-                    verdict: step.verdict || a.verdict,
-                    confidence: step.confidence || a.confidence,
-                    lastMessage: step.msg,
-                  }
-                : a
-            )
-          );
-        } else {
-          setComplete(true);
-        }
-      }, step.delay)
-    );
-
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  return { agents, events, complete };
-}
+const AGENT_PHASE_STYLES: Record<AgentPhase, { dot: string; text: string; label: string }> = {
+  waiting: { dot: "bg-text-muted", text: "text-text-muted", label: "Waiting" },
+  analyzing: { dot: "bg-status-blue animate-pulse", text: "text-status-blue", label: "Analyzing" },
+  done: { dot: "bg-status-green", text: "text-status-green", label: "Done" },
+};
 
 export default function LiveAnalysisPage() {
   const params = useParams();
-  const { agents, events, complete } = useSimulatedAnalysis();
+  const jobId = params.id as string;
 
-  const VERDICT_COLORS: Record<string, string> = {
-    malicious: "text-status-red",
-    suspicious: "text-status-orange",
-    benign: "text-status-green",
-  };
+  const { events: wsEvents, connected } = useWebSocket(jobId);
+
+  const [agents, setAgents] = useState<AgentState[]>([]);
+  const [eventLog, setEventLog] = useState<EventEntry[]>([]);
+  const [phase, setPhase] = useState<PipelinePhase>("waiting");
+
+  const processedCount = useRef(0);
+
+  // Process new WebSocket events as they arrive
+  useEffect(() => {
+    const newEvents = wsEvents.slice(processedCount.current);
+    processedCount.current = wsEvents.length;
+
+    for (const ev of newEvents) {
+      const data = ev.data ?? {};
+      const ts = ev.ts ? new Date(ev.ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+      // Skip heartbeats — don't clutter the log
+      if (ev.type === "heartbeat" || ev.type === "pong") continue;
+
+      // Update pipeline state machine
+      if (ev.type === "status_change" && data.status === "running") {
+        setPhase("analyzing");
+      }
+
+      if (ev.type === "pipeline_started") {
+        const agentNames = (data.agents as string[] | undefined) ?? [];
+        setAgents(agentNames.map((name) => ({ name, phase: "waiting" })));
+        setPhase("analyzing");
+      }
+
+      if (ev.type === "agent_progress") {
+        const agentName = String(data.agent ?? "");
+        const agentPhase = (data.phase as AgentPhase | undefined) ?? "analyzing";
+        setAgents((prev) => {
+          const exists = prev.some((a) => a.name === agentName);
+          if (!exists) {
+            return [...prev, { name: agentName, phase: agentPhase }];
+          }
+          return prev.map((a) => (a.name === agentName ? { ...a, phase: agentPhase } : a));
+        });
+      }
+
+      if (ev.type === "phase_change") {
+        const p = data.phase as string | undefined;
+        if (p === "negotiation") setPhase("negotiation");
+      }
+
+      if (ev.type === "completed") {
+        setPhase("completed");
+        setAgents((prev) => prev.map((a) => ({ ...a, phase: "done" })));
+      }
+
+      if (ev.type === "error" || ev.type === "cancelled") {
+        setPhase("failed");
+      }
+
+      // Append to event log
+      setEventLog((prev) => [
+        { ts, type: ev.type, message: buildMessage(ev.type, data) },
+        ...prev,
+      ]);
+    }
+  }, [wsEvents]);
+
+  // Polling fallback: catches completed/failed even if WS was disconnected
+  useEffect(() => {
+    if (phase === "completed" || phase === "failed") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const job = await api.getJob(jobId);
+        if (job.status === "completed") {
+          setPhase("completed");
+          setAgents((prev) => prev.map((a) => ({ ...a, phase: "done" })));
+        } else if (job.status === "failed") {
+          setPhase("failed");
+        }
+      } catch {
+        /* API unreachable — WS still works */
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [jobId, phase]);
+
+  const phaseConfig = PHASE_CONFIG[phase];
 
   return (
     <div className="space-y-4">
       {/* Status Banner */}
       <div
-        className={`p-3 rounded border text-xs font-medium ${
-          complete
-            ? "bg-status-green/10 border-status-green/20 text-status-green"
-            : "bg-status-blue/10 border-status-blue/20 text-status-blue"
-        }`}
+        className={`p-3 rounded border text-xs font-medium flex items-center justify-between ${phaseConfig.banner}`}
       >
-        {complete
-          ? "Analysis complete. View full results in the Summary tab."
-          : `Live analysis in progress for job ${params.id}...`}
+        <span>{phaseConfig.label}</span>
+        <span className="flex items-center gap-1.5 text-text-muted text-xs">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-status-green animate-pulse" : "bg-text-muted"}`}
+          />
+          {connected ? "Live" : "Reconnecting..."}
+        </span>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        {/* Agent Cards */}
+        {/* Agent Status Grid */}
         <div className="col-span-2 space-y-2">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-2">
             Agent Status
           </h2>
-          <div className="grid grid-cols-2 gap-2">
-            {agents.map((agent) => {
-              const style = STATUS_STYLES[agent.status];
-              return (
-                <div
-                  key={agent.name}
-                  className="bg-bg-surface border border-border rounded p-3"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-text-primary">
-                      {agent.name}
-                    </span>
-                    <div className={`flex items-center gap-1.5 ${style.text}`}>
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${style.dot} ${
-                          agent.status === "analyzing" ? "animate-pulse" : ""
-                        }`}
-                      />
-                      <span className="text-xs capitalize">{agent.status}</span>
+
+          {agents.length === 0 ? (
+            <div className="bg-bg-surface border border-border rounded p-8 text-center text-xs text-text-muted animate-pulse">
+              Waiting for pipeline to initialize...
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {agents.map((agent) => {
+                const style = AGENT_PHASE_STYLES[agent.phase];
+                const displayName = agent.name
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (c) => c.toUpperCase());
+                return (
+                  <div
+                    key={agent.name}
+                    className="bg-bg-surface border border-border rounded p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-text-primary">{displayName}</span>
+                      <div className={`flex items-center gap-1.5 ${style.text}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                        <span className="text-xs">{style.label}</span>
+                      </div>
                     </div>
                   </div>
-                  {agent.verdict && (
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`text-xs capitalize ${VERDICT_COLORS[agent.verdict] || "text-text-muted"}`}
-                      >
-                        {agent.verdict}
-                      </span>
-                      <span className="text-xs text-text-muted font-mono">
-                        {agent.confidence}%
-                      </span>
-                    </div>
-                  )}
-                  {agent.lastMessage && (
-                    <p className="text-xs text-text-muted mt-1 truncate">
-                      {agent.lastMessage}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Event Log */}
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-3 py-2.5 border-b border-border">
+        <div className="bg-bg-surface border border-border rounded flex flex-col">
+          <div className="px-3 py-2.5 border-b border-border shrink-0">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Event Log
             </h2>
           </div>
-          <div className="h-80 overflow-y-auto">
-            {events.map((evt, i) => (
+          <div className="flex-1 overflow-y-auto h-72">
+            {eventLog.map((evt, i) => (
               <div
                 key={i}
                 className="px-3 py-2 border-b border-border-light text-xs hover:bg-bg-hover"
               >
-                <span className="text-text-muted font-mono mr-2">
-                  {evt.time}
-                </span>
+                <span className="text-text-muted font-mono mr-2 shrink-0">{evt.ts}</span>
                 <span className="text-text-secondary">{evt.message}</span>
               </div>
             ))}
-            {events.length === 0 && (
-              <div className="p-4 text-xs text-text-muted text-center">
+            {eventLog.length === 0 && (
+              <div className="p-4 text-xs text-text-muted text-center animate-pulse">
                 Waiting for events...
               </div>
             )}

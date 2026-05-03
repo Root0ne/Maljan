@@ -49,5 +49,11 @@ class GeminiProvider:
             model=model,
             temperature=temperature,
             google_api_key=SecretStr(api_key.get_secret_value()),
+            # Auto-retry on 429 RESOURCE_EXHAUSTED with exponential backoff.
+            # Free tier limit is 5 RPM; Gemini instructs "retry in ~12s".
+            # 6 retries covers ~120s of rate-limit windows before giving up.
+            max_retries=6,
+            # Per-request HTTP timeout (seconds). Prevents silent hangs on slow responses.
+            request_timeout=90,
             **kwargs,
         )

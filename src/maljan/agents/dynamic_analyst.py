@@ -89,8 +89,31 @@ class DynamicAnalyst(BaseAnalyst):
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit
-        self.tools = toolkit.get_tools()
-        self.logger.info("Initialized CAPEv2 MCP tools: %s", [t.name for t in self.tools])
+        # Keep only essential analysis tools — exclude bulk download and admin tools.
+        # Reduces tool count from ~36 to ~12, preventing LLM timeouts on large tool schemas.
+        _ESSENTIAL_CAPE_TOOLS = {
+            "get_cuckoo_status",
+            "search_task",
+            "extended_search",
+            "submit_file",
+            "submit_static",
+            "get_task_status",
+            "get_task_report",
+            "get_task_iocs",
+            "get_task_config",
+            "list_tasks",
+            "view_task",
+            "get_latest_tasks",
+            "verify_auth",
+        }
+        all_tools = toolkit.get_tools()
+        self.tools = [t for t in all_tools if t.name in _ESSENTIAL_CAPE_TOOLS]
+        self.logger.info(
+            "Initialized CAPEv2 MCP tools: %d/%d (essential only): %s",
+            len(self.tools),
+            len(all_tools),
+            [t.name for t in self.tools],
+        )
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

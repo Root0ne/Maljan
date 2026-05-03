@@ -83,11 +83,10 @@ class JudgeAgent:
         self.llm = llm
         self.logger = logger.getChild("judge")
 
-    def _initialize_mcp_client(self) -> None:
+    async def _initialize_mcp_client(self) -> None:
         if getattr(self, "tools", None):
             return
 
-        import asyncio
         import os
         import sys
 
@@ -106,35 +105,23 @@ class JudgeAgent:
         )
 
         toolkit = MCPLangChainToolkit(server_params)
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            loop.run_until_complete(toolkit.initialize())
-        else:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(toolkit.initialize())
+        await toolkit.initialize()
 
         self.toolkit = toolkit
         self.tools = toolkit.get_tools()
         self.logger.info("Initialized ThreatIntel MCP tools: %s", [t.name for t in self.tools])
 
-    def execute_tool_loop(self, prompt_messages: list) -> str:
+    async def execute_tool_loop(self, prompt_messages: list) -> str:
         """Execute a tool-calling ReAct loop for the agent."""
         from langchain_core.prompts import ChatPromptTemplate
 
         if not getattr(self, "tools", None):
             self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
             prompt = ChatPromptTemplate.from_messages(prompt_messages)
-            response = (prompt | self.llm).invoke({})
+            response = await (prompt | self.llm).ainvoke({})
             return str(response.content)
+
+        import asyncio
 
         from langchain_core.messages import HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
@@ -152,51 +139,28 @@ class JudgeAgent:
             elif role == "human":
                 messages.append(HumanMessage(content=content))
 
-        import asyncio
-
-        async def _run_with_timeout() -> dict:
-            timeout = settings.react_agent_timeout
-            self.logger.info(
-                "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
-                timeout,
-                len(self.tools),
-            )
-            try:
-                result = await asyncio.wait_for(
-                    agent_executor.ainvoke(
-                        {"messages": messages},
-                        {"recursion_limit": settings.react_agent_max_steps},
-                    ),
-                    timeout=timeout,
-                )
-                msg_count = len(result.get("messages", []))
-                self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
-                return result
-            except TimeoutError:
-                self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
-                raise
-
+        timeout = settings.react_agent_timeout
+        self.logger.info(
+            "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
+            timeout,
+            len(self.tools),
+        )
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+            result = await asyncio.wait_for(
+                agent_executor.ainvoke(
+                    {"messages": messages},
+                    {"recursion_limit": settings.react_agent_max_steps},
+                ),
+                timeout=timeout,
+            )
+            msg_count = len(result.get("messages", []))
+            self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
+            return str(result["messages"][-1].content)
+        except TimeoutError:
+            self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
+            raise
 
-        if loop is not None and loop.is_running():
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            result = loop.run_until_complete(_run_with_timeout())
-        else:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(_run_with_timeout())
-            finally:
-                loop.close()
-
-        return str(result["messages"][-1].content)
-
-    def mediate(
+    async def mediate(
         self,
         reports: dict[str, str],
         history: list[AgentArgument],
@@ -218,7 +182,7 @@ class JudgeAgent:
             Tuple of (AgentArgument with mediator findings, bool indicating consensus).
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
-        self._initialize_mcp_client()
+        await self._initialize_mcp_client()
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
@@ -253,7 +217,7 @@ class JudgeAgent:
             ),
         ]
 
-        tool_result_text = self.execute_tool_loop(prompt_messages)
+        tool_result_text = await self.execute_tool_loop(prompt_messages)
 
         # Now extract the final structured output from the detailed reasoning.
         # IMPORTANT: tool_result_text may contain curly braces from LLM output
@@ -278,7 +242,7 @@ class JudgeAgent:
         # Attempt structured output; fall back to text-based extraction on failure
         try:
             llm_structured = self.llm.with_structured_output(MediatorVerdict)
-            verdict: MediatorVerdict = (extract_prompt | llm_structured).invoke(  # type: ignore[assignment]
+            verdict: MediatorVerdict = await (extract_prompt | llm_structured).ainvoke(  # type: ignore[assignment]
                 {"reasoning_log": tool_result_text}
             )
             if not isinstance(verdict, MediatorVerdict):
@@ -305,7 +269,7 @@ class JudgeAgent:
         )
         return argument, is_consensus
 
-    def give_verdict(
+    async def give_verdict(
         self,
         reports: dict[str, str],
         history: list[AgentArgument],
@@ -427,7 +391,9 @@ class JudgeAgent:
         )
 
         llm_stix = self.llm.with_structured_output(Bundle)
-        result = (prompt | llm_stix).invoke({"reports": reports_text, "history": str(history)})
+        result = await (prompt | llm_stix).ainvoke(
+            {"reports": reports_text, "history": str(history)}
+        )
 
         if isinstance(result, Bundle):
             return result

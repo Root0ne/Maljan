@@ -45,7 +45,13 @@ class BaseAnalyst(ABC):
         self.logger = logger.getChild(self.name.lower())
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
-        """Executes a tool-calling ReAct loop if tools are available."""
+        """Executes a tool-calling ReAct loop if tools are available.
+
+        Runs the async ReAct agent in a dedicated thread with its own event loop.
+        This avoids the nest_asyncio + anyio cancel scope incompatibility that caused
+        'Attempted to exit cancel scope in a different task' RuntimeErrors when
+        the agent was invoked from within an already-running asyncio loop (e.g. ARQ worker).
+        """
         from langchain_core.prompts import ChatPromptTemplate
 
         if not self.tools:
@@ -54,12 +60,14 @@ class BaseAnalyst(ABC):
             response = (prompt | self.llm).invoke({})
             return str(response.content)
 
+        import asyncio
+        import concurrent.futures
+
         from langchain_core.messages import HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
-        # Limit recursion to prevent infinite tool-calling loops with many tools.
         agent_executor = create_react_agent(self.llm, self.tools)
 
         messages = []
@@ -69,49 +77,63 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 messages.append(HumanMessage(content=content))
 
-        import asyncio
+        timeout = settings.react_agent_timeout
+        max_steps = settings.react_agent_max_steps
 
-        async def _run_with_timeout() -> dict:
-            timeout = settings.react_agent_timeout
-            self.logger.info(
-                "Invoking ReAct agent (timeout=%ds, tools=%d)...",
-                timeout,
-                len(self.tools),
-            )
+        def _run_in_thread() -> dict:
+            """Run agent in a thread-local event loop — avoids nest_asyncio/anyio issues."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                result = await asyncio.wait_for(
-                    agent_executor.ainvoke(
-                        {"messages": messages},
-                        {"recursion_limit": settings.react_agent_max_steps},
-                    ),
-                    timeout=timeout,
-                )
-                msg_count = len(result.get("messages", []))
-                self.logger.info("ReAct loop completed: %d messages in conversation.", msg_count)
-                return result
+
+                async def _invoke() -> dict:
+                    self.logger.info(
+                        "Invoking ReAct agent (timeout=%ds, tools=%d)...",
+                        timeout,
+                        len(self.tools),
+                    )
+                    result = await asyncio.wait_for(
+                        agent_executor.ainvoke(
+                            {"messages": messages},
+                            {"recursion_limit": max_steps},
+                        ),
+                        timeout=float(timeout),
+                    )
+                    msg_count = len(result.get("messages", []))
+                    self.logger.info(
+                        "ReAct loop completed: %d messages in conversation.", msg_count
+                    )
+                    return result
+
+                return loop.run_until_complete(_invoke())
             except TimeoutError:
                 self.logger.error(
                     "ReAct agent timed out after %ds. Returning partial result.", timeout
                 )
                 raise
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            result = loop.run_until_complete(_run_with_timeout())
-        else:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(_run_with_timeout())
             finally:
-                loop.close()
+                try:
+                    # Cancel any pending tasks before closing the loop.
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                finally:
+                    loop.close()
+
+        # Run in a thread to give the agent a clean, isolated event loop.
+        # The outer thread_timeout adds a safety margin beyond the inner asyncio timeout.
+        thread_timeout = timeout + 30
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_in_thread)
+            try:
+                result = future.result(timeout=thread_timeout)
+            except concurrent.futures.TimeoutError as err:
+                self.logger.error(
+                    "Thread-level timeout (%ds) exceeded for ReAct agent.", thread_timeout
+                )
+                raise TimeoutError(f"ReAct agent thread timed out after {thread_timeout}s") from err
 
         final_message = result["messages"][-1]
         return str(final_message.content)

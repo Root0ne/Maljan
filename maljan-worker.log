@@ -1,0 +1,1156 @@
+﻿{"timestamp": "2026-05-03T16:25:00.886267+00:00", "level": "INFO", "logger": "maljan.startup", "message": "Logging initialized", "correlation_id": "-", "module": "logging_config", "function": "setup_logging", "line": 159, "component": "logging"}
+{"timestamp": "2026-05-03T16:25:00.983190+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Worker started: connected to DB and Redis", "correlation_id": "-", "module": "analysis_worker", "function": "startup", "line": 391, "component": "worker.lifecycle"}
+{"timestamp": "2026-05-03T16:37:03.567772+00:00", "level": "INFO", "logger": "arq.worker", "message": "  0.02s \u2192 c4f79f2eba6b448f8c383d0d1bdbf887:run_analysis('423b8a9c-a0d9-4ee1-acd9-86b967bbca15')", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 594}
+{"timestamp": "2026-05-03T16:37:03.567834+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Analysis task started: job=423b8a9c-a0d9-4ee1-acd9-86b967bbca15", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 80, "job_id": "423b8a9c-a0d9-4ee1-acd9-86b967bbca15"}
+{"timestamp": "2026-05-03T16:37:03.627168+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Processing sample: sha256=4a50b7a2c4b44e81... filename=dummy_malware.exe", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 110, "job_id": "423b8a9c-a0d9-4ee1-acd9-86b967bbca15", "sample_id": "42ccc354-cc69-4242-a949-29b5a096d558"}
+{"timestamp": "2026-05-03T16:37:03.633163+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Job status -> running: 423b8a9c-a0d9-4ee1-acd9-86b967bbca15", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 121, "job_id": "423b8a9c-a0d9-4ee1-acd9-86b967bbca15"}
+{"timestamp": "2026-05-03T16:37:03.633248+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Starting pipeline execution in thread...", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 128, "job_id": "423b8a9c-a0d9-4ee1-acd9-86b967bbca15", "component": "pipeline"}
+{"timestamp": "2026-05-03T16:37:03.633447+00:00", "level": "INFO", "logger": "maljan.worker.pipeline.423b8a9c", "message": "Loading MaljanApp core from: /app/src", "correlation_id": "-", "module": "analysis_worker", "function": "_run_pipeline_sync", "line": 301}
+2026-05-03 16:37:09 - maljan.worker.pipeline.423b8a9c - INFO - Running pipeline: hash=4a50b7a2c4b44e81... name=dummy_malware.exe
+{"timestamp": "2026-05-03T16:37:09.515630+00:00", "level": "INFO", "logger": "maljan.worker.pipeline.423b8a9c", "message": "Running pipeline: hash=4a50b7a2c4b44e81... name=dummy_malware.exe", "correlation_id": "-", "module": "analysis_worker", "function": "_run_pipeline_sync", "line": 317}
+2026-05-03 16:37:10 - maljan - INFO - ServiceContainer initialized (mock=False, agents=['static', 'dynamic', 'network'], parsers=['dynamic', 'network', 'static'])
+{"timestamp": "2026-05-03T16:37:10.740933+00:00", "level": "INFO", "logger": "maljan", "message": "ServiceContainer initialized (mock=False, agents=['static', 'dynamic', 'network'], parsers=['dynamic', 'network', 'static'])", "correlation_id": "-", "module": "container", "function": "__init__", "line": 119}
+2026-05-03 16:37:10 - maljan - INFO - ============================================================
+{"timestamp": "2026-05-03T16:37:10.753783+00:00", "level": "INFO", "logger": "maljan", "message": "============================================================", "correlation_id": "-", "module": "app", "function": "run", "line": 64}
+2026-05-03 16:37:10 - maljan - INFO - MALJAN - Multi-Agent Malware Analysis Pipeline
+{"timestamp": "2026-05-03T16:37:10.753831+00:00", "level": "INFO", "logger": "maljan", "message": "MALJAN - Multi-Agent Malware Analysis Pipeline", "correlation_id": "-", "module": "app", "function": "run", "line": 65}
+2026-05-03 16:37:10 - maljan - INFO - ============================================================
+{"timestamp": "2026-05-03T16:37:10.753875+00:00", "level": "INFO", "logger": "maljan", "message": "============================================================", "correlation_id": "-", "module": "app", "function": "run", "line": 66}
+2026-05-03 16:37:10 - maljan - INFO - Sample: 4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7 (dummy_malware.exe)
+{"timestamp": "2026-05-03T16:37:10.753912+00:00", "level": "INFO", "logger": "maljan", "message": "Sample: 4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7 (dummy_malware.exe)", "correlation_id": "-", "module": "app", "function": "run", "line": 67}
+2026-05-03 16:37:10 - maljan - INFO - Mode: gemini
+{"timestamp": "2026-05-03T16:37:10.753965+00:00", "level": "INFO", "logger": "maljan", "message": "Mode: gemini", "correlation_id": "-", "module": "app", "function": "run", "line": 68}
+2026-05-03 16:37:10 - maljan - INFO - Registered agents: ['static', 'dynamic', 'network']
+{"timestamp": "2026-05-03T16:37:10.753996+00:00", "level": "INFO", "logger": "maljan", "message": "Registered agents: ['static', 'dynamic', 'network']", "correlation_id": "-", "module": "app", "function": "run", "line": 69}
+2026-05-03 16:37:10 - maljan - INFO - Max iterations: 20
+{"timestamp": "2026-05-03T16:37:10.754034+00:00", "level": "INFO", "logger": "maljan", "message": "Max iterations: 20", "correlation_id": "-", "module": "app", "function": "run", "line": 70}
+2026-05-03 16:37:10 - maljan - INFO - ------------------------------------------------------------
+{"timestamp": "2026-05-03T16:37:10.754095+00:00", "level": "INFO", "logger": "maljan", "message": "------------------------------------------------------------", "correlation_id": "-", "module": "app", "function": "run", "line": 71}
+2026-05-03 16:37:10 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T16:37:10.758721+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 16:37:10 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T16:37:10.759762+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 16:37:10 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T16:37:10.760160+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 16:37:10 - maljan - WARNING - File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T16:37:10.785760+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 16:37:10 - maljan - WARNING - File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T16:37:10.786495+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 16:37:10 - maljan - WARNING - File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T16:37:10.786860+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+{"timestamp": "2026-05-03T16:37:21.012173+00:00", "level": "INFO", "logger": "arq.worker", "message": "recording health: May-03 16:37:21 j_complete=0 j_failed=0 j_retried=0 j_ongoing=1 queued=1", "correlation_id": "-", "module": "worker", "function": "record_health", "line": 789}
+2026-05-03 16:37:31 - maljan.static - INFO - Executing static ISR analysis...
+{"timestamp": "2026-05-03T16:37:31.271856+00:00", "level": "INFO", "logger": "maljan.static", "message": "Executing static ISR analysis...", "correlation_id": "-", "module": "static_analyst", "function": "analyze_isr", "line": 208}
+2026-05-03 16:37:31 - maljan.dynamic - INFO - Executing dynamic ISR analysis...
+{"timestamp": "2026-05-03T16:37:31.272212+00:00", "level": "INFO", "logger": "maljan.dynamic", "message": "Executing dynamic ISR analysis...", "correlation_id": "-", "module": "dynamic_analyst", "function": "analyze_isr", "line": 175}
+2026-05-03 16:37:31 - maljan.network - INFO - Executing network ISR analysis...
+{"timestamp": "2026-05-03T16:37:31.272536+00:00", "level": "INFO", "logger": "maljan.network", "message": "Executing network ISR analysis...", "correlation_id": "-", "module": "network_analyst", "function": "analyze_isr", "line": 244}
+2026-05-03 16:37:31 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/network-mcp/server.py']
+{"timestamp": "2026-05-03T16:37:31.274832+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/network-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 16:37:31 - maljan - INFO - Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/external/ghidra-mcp/bridge_mcp_ghidra.py', '--transport', 'stdio']
+{"timestamp": "2026-05-03T16:37:31.275389+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/external/ghidra-mcp/bridge_mcp_ghidra.py', '--transport', 'stdio']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 16:37:31 - maljan - INFO - Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/scripts/cape_mcp_wrapper.py', '--cape-root', '/mnt/d/MyCodes/Maljan/external/CAPEv2']
+{"timestamp": "2026-05-03T16:37:31.275749+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/scripts/cape_mcp_wrapper.py', '--cape-root', '/mnt/d/MyCodes/Maljan/external/CAPEv2']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 16:37:31 - maljan - ERROR - Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T16:37:31.348836+00:00", "level": "ERROR", "logger": "maljan", "message": "Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 60}
+2026-05-03 16:37:31 - maljan.static - ERROR - ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T16:37:31.349099+00:00", "level": "ERROR", "logger": "maljan.static", "message": "ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "base_agent", "function": "safe_analyze_isr", "line": 192}
+2026-05-03 16:37:31 - maljan - ERROR - Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T16:37:31.349291+00:00", "level": "ERROR", "logger": "maljan", "message": "Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 60}
+2026-05-03 16:37:31 - maljan - ERROR - static analysis failed: static ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T16:37:31.349502+00:00", "level": "ERROR", "logger": "maljan", "message": "static analysis failed: static ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 112}
+2026-05-03 16:37:31 - maljan.dynamic - ERROR - ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T16:37:31.349869+00:00", "level": "ERROR", "logger": "maljan.dynamic", "message": "ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "base_agent", "function": "safe_analyze_isr", "line": 192}
+2026-05-03 16:37:31 - maljan - ERROR - dynamic analysis failed: dynamic ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T16:37:31.349944+00:00", "level": "ERROR", "logger": "maljan", "message": "dynamic analysis failed: dynamic ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 112}
+2026-05-03 16:37:32 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T16:37:32.619740+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 16:37:32 - maljan.network - INFO - Initialized Network MCP toolkit with 3 tools
+{"timestamp": "2026-05-03T16:37:32.619910+00:00", "level": "INFO", "logger": "maljan.network", "message": "Initialized Network MCP toolkit with 3 tools", "correlation_id": "-", "module": "network_analyst", "function": "_initialize_mcp_client", "line": 110}
+2026-05-03 16:37:32 - maljan.network - INFO - Starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T16:37:32.632627+00:00", "level": "INFO", "logger": "maljan.network", "message": "Starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "base_agent", "function": "execute_tool_loop", "line": 60}
+2026-05-03 16:37:32 - maljan.network - INFO - Invoking ReAct agent (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T16:37:32.638292+00:00", "level": "INFO", "logger": "maljan.network", "message": "Invoking ReAct agent (timeout=600s, tools=3)...", "correlation_id": "-", "module": "base_agent", "function": "_run_with_timeout", "line": 76}
+2026-05-03 16:37:34 - maljan.network - INFO - ReAct loop completed: 3 messages in conversation.
+{"timestamp": "2026-05-03T16:37:34.115306+00:00", "level": "INFO", "logger": "maljan.network", "message": "ReAct loop completed: 3 messages in conversation.", "correlation_id": "-", "module": "base_agent", "function": "_run_with_timeout", "line": 90}
+2026-05-03 16:37:34 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T16:37:34.116090+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 16:37:34 - maljan.judge - INFO - Mediating 3 expert reports for contradictions...
+{"timestamp": "2026-05-03T16:37:34.123534+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Mediating 3 expert reports for contradictions...", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 220}
+2026-05-03 16:37:34 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']
+{"timestamp": "2026-05-03T16:37:34.123714+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 16:37:34 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T16:37:34.444111+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 16:37:34 - maljan.judge - INFO - Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']
+{"timestamp": "2026-05-03T16:37:34.444224+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']", "correlation_id": "-", "module": "judge_agent", "function": "_initialize_mcp_client", "line": 127}
+2026-05-03 16:37:34 - maljan.judge - INFO - JudgeAgent starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T16:37:34.444322+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "judge_agent", "function": "execute_tool_loop", "line": 144}
+2026-05-03 16:37:34 - maljan.judge - INFO - JudgeAgent invoking ReAct (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T16:37:34.448693+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent invoking ReAct (timeout=600s, tools=3)...", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 159}
+2026-05-03 16:37:39 - maljan.judge - INFO - JudgeAgent ReAct loop completed: 3 messages.
+{"timestamp": "2026-05-03T16:37:39.728682+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent ReAct loop completed: 3 messages.", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 173}
+{"timestamp": "2026-05-03T16:37:39.730040+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 16:37:42 - maljan.judge - INFO - No consensus yet (confidence=0.20)
+{"timestamp": "2026-05-03T16:37:42.544097+00:00", "level": "INFO", "logger": "maljan.judge", "message": "No consensus yet (confidence=0.20)", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 294}
+2026-05-03 16:37:42 - maljan - WARNING - File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T16:37:42.544952+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 16:37:42 - maljan.static - INFO - Executing static ISR revision (round 1)...
+{"timestamp": "2026-05-03T16:37:42.545227+00:00", "level": "INFO", "logger": "maljan.static", "message": "Executing static ISR revision (round 1)...", "correlation_id": "-", "module": "static_analyst", "function": "revise_isr", "line": 259}
+{"timestamp": "2026-05-03T16:37:42.546297+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 16:37:55 - maljan - WARNING - File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T16:37:55.295408+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 16:37:55 - maljan.dynamic - INFO - Executing dynamic ISR revision (round 1)...
+{"timestamp": "2026-05-03T16:37:55.295580+00:00", "level": "INFO", "logger": "maljan.dynamic", "message": "Executing dynamic ISR revision (round 1)...", "correlation_id": "-", "module": "dynamic_analyst", "function": "revise_isr", "line": 224}
+{"timestamp": "2026-05-03T16:37:55.296343+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 16:37:58 - maljan - WARNING - File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T16:37:58.922399+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 16:37:58 - maljan.network - INFO - Executing network ISR revision (round 1)...
+{"timestamp": "2026-05-03T16:37:58.922558+00:00", "level": "INFO", "logger": "maljan.network", "message": "Executing network ISR revision (round 1)...", "correlation_id": "-", "module": "network_analyst", "function": "revise_isr", "line": 340}
+{"timestamp": "2026-05-03T16:37:58.923297+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 16:38:02 - maljan.judge - INFO - Mediating 3 expert reports for contradictions...
+{"timestamp": "2026-05-03T16:38:02.939707+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Mediating 3 expert reports for contradictions...", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 220}
+2026-05-03 16:38:02 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']
+{"timestamp": "2026-05-03T16:38:02.939915+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 16:38:03 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T16:38:03.441745+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 16:38:03 - maljan.judge - INFO - Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']
+{"timestamp": "2026-05-03T16:38:03.441865+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']", "correlation_id": "-", "module": "judge_agent", "function": "_initialize_mcp_client", "line": 127}
+2026-05-03 16:38:03 - maljan.judge - INFO - JudgeAgent starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T16:38:03.442011+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "judge_agent", "function": "execute_tool_loop", "line": 144}
+2026-05-03 16:38:03 - maljan.judge - INFO - JudgeAgent invoking ReAct (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T16:38:03.446386+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent invoking ReAct (timeout=600s, tools=3)...", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 159}
+2026-05-03 16:38:03 - maljan.worker - ERROR - Analysis failed: job=423b8a9c-a0d9-4ee1-acd9-86b967bbca15 error=RuntimeError: Event loop is closed
+Traceback (most recent call last):
+  File "/app/apps/api/app/worker/analysis_worker.py", line 132, in run_analysis
+    pipeline_result = await asyncio.to_thread(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/app/apps/api/app/worker/analysis_worker.py", line 319, in _run_pipeline_sync
+    result = app.run(file_hash=file_hash, file_name=file_name)
+  File "/app/src/maljan/app.py", line 91, in run
+    result = self.graph.invoke(initial_state)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3309, in invoke
+    for chunk in self.stream(
+                 ~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<10 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    ):
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 2736, in stream
+    for _ in runner.tick(
+             ~~~~~~~~~~~^
+        [t for t in loop.tasks.values() if not t.writes],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        schedule_task=loop.accept_push,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+    ~~~~~~~~~~~~~~^
+        t,
+        ^^
+    ...<10 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py", line 126, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/app/src/maljan/pipeline/nodes.py", line 260, in node_fn
+    argument, is_consensus = judge.mediate(
+                             ~~~~~~~~~~~~~^
+        reports=active_reports,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+        history=state.get("discussion_history") or [],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        isr_reports=state.get("isr_reports") or {},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/src/maljan/agents/judge_agent.py", line 256, in mediate
+    tool_result_text = self.execute_tool_loop(prompt_messages)
+  File "/app/src/maljan/agents/judge_agent.py", line 193, in execute_tool_loop
+    result = loop.run_until_complete(_run_with_timeout())
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/app/src/maljan/agents/judge_agent.py", line 165, in _run_with_timeout
+    result = await asyncio.wait_for(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3479, in ainvoke
+    async for chunk in self.astream(
+    ...<29 lines>...
+            chunks.append(chunk)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3128, in astream
+    async for _ in runner.atick(
+    ...<16 lines>...
+            yield o
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py", line 304, in atick
+    await arun_with_retry(
+    ...<15 lines>...
+    )
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py", line 242, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 705, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        step.ainvoke(input, config, **kwargs), context=context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 464, in ainvoke
+    ret = await asyncio.create_task(coro, context=context)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/prebuilt/chat_agent_executor.py", line 707, in acall_model
+    response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 3197, in ainvoke
+    input_ = await coro_with_context(part(), context, create_task=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 5708, in ainvoke
+    return await self.bound.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 477, in ainvoke
+    llm_result = await self.agenerate_prompt(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1196, in agenerate_prompt
+    return await self.agenerate(
+           ^^^^^^^^^^^^^^^^^^^^^
+        prompt_messages, stop=stop, callbacks=callbacks, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1154, in agenerate
+    raise exceptions[0]
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1423, in _agenerate_with_cache
+    result = await self._agenerate(
+             ^^^^^^^^^^^^^^^^^^^^^^
+        messages, stop=stop, run_manager=run_manager, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 3088, in _agenerate
+    await self.client.aio.models.generate_content(
+        **request,
+    )
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/models.py", line 8337, in generate_content
+    return await self._generate_content(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        model=model, contents=contents, config=parsed_config
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/models.py", line 6897, in _generate_content
+    response = await self._api_client.async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        'post', path, request_dict, http_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1583, in async_request
+    result = await self._async_request(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        http_request=http_request, http_options=http_options, stream=False
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1515, in _async_request
+    return await retry(self._async_request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 393, in <lambda>
+    self._add_action_func(lambda rs: rs.outcome.result())
+                                     ~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py", line 443, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py", line 395, in __get_result
+    raise self._exception
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1489, in _async_request_once
+    client_response = await self._async_httpx_client.request(  # type: ignore[union-attr]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 229, in handle_async_request
+    await self._close_connections(closing)
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_backends/anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/anyio/streams/tls.py", line 236, in aclose
+    await self.transport_stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py", line 1344, in aclose
+    self._transport.close()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py", line 1216, in close
+    super().close()
+    ~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py", line 869, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 827, in call_soon
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 550, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+During task with name 'agent' and id '0ea65147-d81a-4b9a-1fb5-e03bc23ebff0'
+During task with name 'negotiation' and id 'f12c95a4-fc2a-383a-f281-aa70f2821fb8'
+{"timestamp": "2026-05-03T16:38:03.466544+00:00", "level": "ERROR", "logger": "maljan.worker", "message": "Analysis failed: job=423b8a9c-a0d9-4ee1-acd9-86b967bbca15 error=RuntimeError: Event loop is closed", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 243, "exception": {"type": "RuntimeError", "message": "Event loop is closed", "traceback": ["Traceback (most recent call last):\n", "  File \"/app/apps/api/app/worker/analysis_worker.py\", line 132, in run_analysis\n    pipeline_result = await asyncio.to_thread(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<6 lines>...\n    )\n    ^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py\", line 25, in to_thread\n    return await loop.run_in_executor(None, func_call)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py\", line 86, in run\n    result = ctx.run(self.task)\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py\", line 73, in run\n    return fn(*args, **kwargs)\n", "  File \"/app/apps/api/app/worker/analysis_worker.py\", line 319, in _run_pipeline_sync\n    result = app.run(file_hash=file_hash, file_name=file_name)\n", "  File \"/app/src/maljan/app.py\", line 91, in run\n    result = self.graph.invoke(initial_state)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3309, in invoke\n    for chunk in self.stream(\n                 ~~~~~~~~~~~^\n        input,\n        ^^^^^^\n    ...<10 lines>...\n        **kwargs,\n        ^^^^^^^^^\n    ):\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 2736, in stream\n    for _ in runner.tick(\n             ~~~~~~~~~~~^\n        [t for t in loop.tasks.values() if not t.writes],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<2 lines>...\n        schedule_task=loop.accept_push,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ):\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py\", line 167, in tick\n    run_with_retry(\n    ~~~~~~~~~~~~~~^\n        t,\n        ^^\n    ...<10 lines>...\n        },\n        ^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py\", line 126, in run_with_retry\n    return task.proc.invoke(task.input, config)\n           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 656, in invoke\n    input = context.run(step.invoke, input, config, **kwargs)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 400, in invoke\n    ret = self.func(*args, **kwargs)\n", "  File \"/app/src/maljan/pipeline/nodes.py\", line 260, in node_fn\n    argument, is_consensus = judge.mediate(\n                             ~~~~~~~~~~~~~^\n        reports=active_reports,\n        ^^^^^^^^^^^^^^^^^^^^^^^\n        history=state.get(\"discussion_history\") or [],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        isr_reports=state.get(\"isr_reports\") or {},\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 256, in mediate\n    tool_result_text = self.execute_tool_loop(prompt_messages)\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 193, in execute_tool_loop\n    result = loop.run_until_complete(_run_with_timeout())\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 719, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 165, in _run_with_timeout\n    result = await asyncio.wait_for(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py\", line 488, in wait_for\n    return await fut\n           ^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3479, in ainvoke\n    async for chunk in self.astream(\n    ...<29 lines>...\n            chunks.append(chunk)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3128, in astream\n    async for _ in runner.atick(\n    ...<16 lines>...\n            yield o\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py\", line 304, in atick\n    await arun_with_retry(\n    ...<15 lines>...\n    )\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py\", line 242, in arun_with_retry\n    return await task.proc.ainvoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 705, in ainvoke\n    input = await asyncio.create_task(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        step.ainvoke(input, config, **kwargs), context=context\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 464, in ainvoke\n    ret = await asyncio.create_task(coro, context=context)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/prebuilt/chat_agent_executor.py\", line 707, in acall_model\n    response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]\n                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py\", line 3197, in ainvoke\n    input_ = await coro_with_context(part(), context, create_task=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py\", line 5708, in ainvoke\n    return await self.bound.ainvoke(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 477, in ainvoke\n    llm_result = await self.agenerate_prompt(\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<8 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1196, in agenerate_prompt\n    return await self.agenerate(\n           ^^^^^^^^^^^^^^^^^^^^^\n        prompt_messages, stop=stop, callbacks=callbacks, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1154, in agenerate\n    raise exceptions[0]\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1423, in _agenerate_with_cache\n    result = await self._agenerate(\n             ^^^^^^^^^^^^^^^^^^^^^^\n        messages, stop=stop, run_manager=run_manager, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py\", line 3088, in _agenerate\n    await self.client.aio.models.generate_content(\n        **request,\n    )\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/models.py\", line 8337, in generate_content\n    return await self._generate_content(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        model=model, contents=contents, config=parsed_config\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/models.py\", line 6897, in _generate_content\n    response = await self._api_client.async_request(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        'post', path, request_dict, http_options\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1583, in async_request\n    result = await self._async_request(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        http_request=http_request, http_options=http_options, stream=False\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1515, in _async_request\n    return await retry(self._async_request_once, http_request, stream)  # type: ignore[no-any-return]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 112, in __call__\n    do = await self.iter(retry_state=retry_state)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 157, in iter\n    result = await action(retry_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/_utils.py\", line 111, in inner\n    return call(*args, **kwargs)\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/__init__.py\", line 393, in <lambda>\n    self._add_action_func(lambda rs: rs.outcome.result())\n                                     ~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py\", line 443, in result\n    return self.__get_result()\n           ~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py\", line 395, in __get_result\n    raise self._exception\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 116, in __call__\n    result = await fn(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1489, in _async_request_once\n    client_response = await self._async_httpx_client.request(  # type: ignore[union-attr]\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1540, in request\n    return await self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1629, in send\n    response = await self._send_handling_auth(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<4 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1657, in _send_handling_auth\n    response = await self._send_handling_redirects(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1694, in _send_handling_redirects\n    response = await self._send_single_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1730, in _send_single_request\n    response = await transport.handle_async_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py\", line 394, in handle_async_request\n    resp = await self._pool.handle_async_request(req)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 256, in handle_async_request\n    raise exc from None\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 229, in handle_async_request\n    await self._close_connections(closing)\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 345, in _close_connections\n    await connection.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection.py\", line 173, in aclose\n    await self._connection.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/http11.py\", line 258, in aclose\n    await self._network_stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_backends/anyio.py\", line 53, in aclose\n    await self._stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/anyio/streams/tls.py\", line 236, in aclose\n    await self.transport_stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py\", line 1344, in aclose\n    self._transport.close()\n    ~~~~~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py\", line 1216, in close\n    super().close()\n    ~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py\", line 869, in close\n    self._loop.call_soon(self._call_connection_lost, None)\n    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 827, in call_soon\n    self._check_closed()\n    ~~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 550, in _check_closed\n    raise RuntimeError('Event loop is closed')\n", "RuntimeError: Event loop is closed\n", "During task with name 'agent' and id '0ea65147-d81a-4b9a-1fb5-e03bc23ebff0'\n", "During task with name 'negotiation' and id 'f12c95a4-fc2a-383a-f281-aa70f2821fb8'\n"]}, "job_id": "423b8a9c-a0d9-4ee1-acd9-86b967bbca15", "component": "pipeline"}
+{"timestamp": "2026-05-03T16:38:03.473776+00:00", "level": "INFO", "logger": "arq.worker", "message": " 59.91s \u2190 c4f79f2eba6b448f8c383d0d1bdbf887:run_analysis \u25cf {'status': 'failed', 'error': 'RuntimeError: Event loop is closed'}", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 638}
+{"timestamp": "2026-05-03T16:38:26.551599+00:00", "level": "INFO", "logger": "arq.worker", "message": "recording health: May-03 16:38:26 j_complete=1 j_failed=0 j_retried=0 j_ongoing=0 queued=0", "correlation_id": "-", "module": "worker", "function": "record_health", "line": 789}
+{"timestamp": "2026-05-03T17:02:18.114154+00:00", "level": "INFO", "logger": "arq.worker", "message": "  0.51s \u2192 915135f06f844ff9a09c7394f3fe58b0:run_analysis('94e1a290-9af5-44b4-8e4d-3d547fb1dd45')", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 594}
+2026-05-03 17:02:18 - maljan.worker - INFO - Analysis task started: job=94e1a290-9af5-44b4-8e4d-3d547fb1dd45
+{"timestamp": "2026-05-03T17:02:18.141280+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Analysis task started: job=94e1a290-9af5-44b4-8e4d-3d547fb1dd45", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 80, "job_id": "94e1a290-9af5-44b4-8e4d-3d547fb1dd45"}
+{"timestamp": "2026-05-03T17:02:18.608877+00:00", "level": "INFO", "logger": "arq.worker", "message": "  0.59s \u2192 c9b0b18111e5434ba9741a2dc2b51453:run_analysis('21aa28da-15e7-4441-a17d-c2874729be86')", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 594}
+2026-05-03 17:02:18 - maljan.worker - INFO - Analysis task started: job=21aa28da-15e7-4441-a17d-c2874729be86
+{"timestamp": "2026-05-03T17:02:18.609516+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Analysis task started: job=21aa28da-15e7-4441-a17d-c2874729be86", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 80, "job_id": "21aa28da-15e7-4441-a17d-c2874729be86"}
+2026-05-03 17:02:18 - maljan.worker - INFO - Processing sample: sha256=4a50b7a2c4b44e81... filename=dummy_malware.exe
+{"timestamp": "2026-05-03T17:02:18.747980+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Processing sample: sha256=4a50b7a2c4b44e81... filename=dummy_malware.exe", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 110, "job_id": "94e1a290-9af5-44b4-8e4d-3d547fb1dd45", "sample_id": "42ccc354-cc69-4242-a949-29b5a096d558"}
+2026-05-03 17:02:18 - maljan.worker - INFO - Job status -> running: 94e1a290-9af5-44b4-8e4d-3d547fb1dd45
+{"timestamp": "2026-05-03T17:02:18.822985+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Job status -> running: 94e1a290-9af5-44b4-8e4d-3d547fb1dd45", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 121, "job_id": "94e1a290-9af5-44b4-8e4d-3d547fb1dd45"}
+2026-05-03 17:02:18 - maljan.worker - INFO - Starting pipeline execution in thread...
+{"timestamp": "2026-05-03T17:02:18.823329+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Starting pipeline execution in thread...", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 128, "job_id": "94e1a290-9af5-44b4-8e4d-3d547fb1dd45", "component": "pipeline"}
+2026-05-03 17:02:18 - maljan.worker.pipeline.94e1a290 - INFO - Loading MaljanApp core from: /app/src
+{"timestamp": "2026-05-03T17:02:18.832099+00:00", "level": "INFO", "logger": "maljan.worker.pipeline.94e1a290", "message": "Loading MaljanApp core from: /app/src", "correlation_id": "-", "module": "analysis_worker", "function": "_run_pipeline_sync", "line": 301}
+2026-05-03 17:02:18 - maljan.worker.pipeline.94e1a290 - INFO - Running pipeline: hash=4a50b7a2c4b44e81... name=dummy_malware.exe
+{"timestamp": "2026-05-03T17:02:18.987110+00:00", "level": "INFO", "logger": "maljan.worker.pipeline.94e1a290", "message": "Running pipeline: hash=4a50b7a2c4b44e81... name=dummy_malware.exe", "correlation_id": "-", "module": "analysis_worker", "function": "_run_pipeline_sync", "line": 317}
+2026-05-03 17:02:19 - maljan - INFO - ServiceContainer initialized (mock=False, agents=['static', 'dynamic', 'network'], parsers=['dynamic', 'network', 'static'])
+{"timestamp": "2026-05-03T17:02:19.003139+00:00", "level": "INFO", "logger": "maljan", "message": "ServiceContainer initialized (mock=False, agents=['static', 'dynamic', 'network'], parsers=['dynamic', 'network', 'static'])", "correlation_id": "-", "module": "container", "function": "__init__", "line": 119}
+2026-05-03 17:02:19 - maljan.worker - INFO - Processing sample: sha256=4a50b7a2c4b44e81... filename=dummy_malware.exe
+{"timestamp": "2026-05-03T17:02:19.032116+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Processing sample: sha256=4a50b7a2c4b44e81... filename=dummy_malware.exe", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 110, "job_id": "21aa28da-15e7-4441-a17d-c2874729be86", "sample_id": "42ccc354-cc69-4242-a949-29b5a096d558"}
+2026-05-03 17:02:19 - maljan.worker - INFO - Job status -> running: 21aa28da-15e7-4441-a17d-c2874729be86
+{"timestamp": "2026-05-03T17:02:19.343482+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Job status -> running: 21aa28da-15e7-4441-a17d-c2874729be86", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 121, "job_id": "21aa28da-15e7-4441-a17d-c2874729be86"}
+2026-05-03 17:02:19 - maljan.worker - INFO - Starting pipeline execution in thread...
+{"timestamp": "2026-05-03T17:02:19.354293+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Starting pipeline execution in thread...", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 128, "job_id": "21aa28da-15e7-4441-a17d-c2874729be86", "component": "pipeline"}
+2026-05-03 17:02:19 - maljan.worker.pipeline.21aa28da - INFO - Loading MaljanApp core from: /app/src
+{"timestamp": "2026-05-03T17:02:19.401707+00:00", "level": "INFO", "logger": "maljan.worker.pipeline.21aa28da", "message": "Loading MaljanApp core from: /app/src", "correlation_id": "-", "module": "analysis_worker", "function": "_run_pipeline_sync", "line": 301}
+2026-05-03 17:02:19 - maljan.worker.pipeline.21aa28da - INFO - Running pipeline: hash=4a50b7a2c4b44e81... name=dummy_malware.exe
+{"timestamp": "2026-05-03T17:02:19.418203+00:00", "level": "INFO", "logger": "maljan.worker.pipeline.21aa28da", "message": "Running pipeline: hash=4a50b7a2c4b44e81... name=dummy_malware.exe", "correlation_id": "-", "module": "analysis_worker", "function": "_run_pipeline_sync", "line": 317}
+2026-05-03 17:02:19 - maljan - INFO - ServiceContainer initialized (mock=False, agents=['static', 'dynamic', 'network'], parsers=['dynamic', 'network', 'static'])
+{"timestamp": "2026-05-03T17:02:19.440645+00:00", "level": "INFO", "logger": "maljan", "message": "ServiceContainer initialized (mock=False, agents=['static', 'dynamic', 'network'], parsers=['dynamic', 'network', 'static'])", "correlation_id": "-", "module": "container", "function": "__init__", "line": 119}
+2026-05-03 17:02:19 - maljan - INFO - ============================================================
+{"timestamp": "2026-05-03T17:02:19.465833+00:00", "level": "INFO", "logger": "maljan", "message": "============================================================", "correlation_id": "-", "module": "app", "function": "run", "line": 64}
+2026-05-03 17:02:19 - maljan - INFO - ============================================================
+{"timestamp": "2026-05-03T17:02:19.466481+00:00", "level": "INFO", "logger": "maljan", "message": "============================================================", "correlation_id": "-", "module": "app", "function": "run", "line": 64}
+2026-05-03 17:02:19 - maljan - INFO - MALJAN - Multi-Agent Malware Analysis Pipeline
+{"timestamp": "2026-05-03T17:02:19.466584+00:00", "level": "INFO", "logger": "maljan", "message": "MALJAN - Multi-Agent Malware Analysis Pipeline", "correlation_id": "-", "module": "app", "function": "run", "line": 65}
+2026-05-03 17:02:19 - maljan - INFO - MALJAN - Multi-Agent Malware Analysis Pipeline
+{"timestamp": "2026-05-03T17:02:19.466727+00:00", "level": "INFO", "logger": "maljan", "message": "MALJAN - Multi-Agent Malware Analysis Pipeline", "correlation_id": "-", "module": "app", "function": "run", "line": 65}
+2026-05-03 17:02:19 - maljan - INFO - ============================================================
+{"timestamp": "2026-05-03T17:02:19.466818+00:00", "level": "INFO", "logger": "maljan", "message": "============================================================", "correlation_id": "-", "module": "app", "function": "run", "line": 66}
+2026-05-03 17:02:19 - maljan - INFO - Sample: 4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7 (dummy_malware.exe)
+{"timestamp": "2026-05-03T17:02:19.466920+00:00", "level": "INFO", "logger": "maljan", "message": "Sample: 4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7 (dummy_malware.exe)", "correlation_id": "-", "module": "app", "function": "run", "line": 67}
+2026-05-03 17:02:19 - maljan - INFO - Mode: gemini
+{"timestamp": "2026-05-03T17:02:19.467014+00:00", "level": "INFO", "logger": "maljan", "message": "Mode: gemini", "correlation_id": "-", "module": "app", "function": "run", "line": 68}
+2026-05-03 17:02:19 - maljan - INFO - ============================================================
+{"timestamp": "2026-05-03T17:02:19.467194+00:00", "level": "INFO", "logger": "maljan", "message": "============================================================", "correlation_id": "-", "module": "app", "function": "run", "line": 66}
+2026-05-03 17:02:19 - maljan - INFO - Sample: 4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7 (dummy_malware.exe)
+{"timestamp": "2026-05-03T17:02:19.467282+00:00", "level": "INFO", "logger": "maljan", "message": "Sample: 4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7 (dummy_malware.exe)", "correlation_id": "-", "module": "app", "function": "run", "line": 67}
+2026-05-03 17:02:19 - maljan - INFO - Registered agents: ['static', 'dynamic', 'network']
+{"timestamp": "2026-05-03T17:02:19.467432+00:00", "level": "INFO", "logger": "maljan", "message": "Registered agents: ['static', 'dynamic', 'network']", "correlation_id": "-", "module": "app", "function": "run", "line": 69}
+2026-05-03 17:02:19 - maljan - INFO - Mode: gemini
+{"timestamp": "2026-05-03T17:02:19.467591+00:00", "level": "INFO", "logger": "maljan", "message": "Mode: gemini", "correlation_id": "-", "module": "app", "function": "run", "line": 68}
+2026-05-03 17:02:19 - maljan - INFO - Registered agents: ['static', 'dynamic', 'network']
+{"timestamp": "2026-05-03T17:02:19.467686+00:00", "level": "INFO", "logger": "maljan", "message": "Registered agents: ['static', 'dynamic', 'network']", "correlation_id": "-", "module": "app", "function": "run", "line": 69}
+2026-05-03 17:02:19 - maljan - INFO - Max iterations: 20
+{"timestamp": "2026-05-03T17:02:19.467767+00:00", "level": "INFO", "logger": "maljan", "message": "Max iterations: 20", "correlation_id": "-", "module": "app", "function": "run", "line": 70}
+2026-05-03 17:02:19 - maljan - INFO - ------------------------------------------------------------
+{"timestamp": "2026-05-03T17:02:19.467845+00:00", "level": "INFO", "logger": "maljan", "message": "------------------------------------------------------------", "correlation_id": "-", "module": "app", "function": "run", "line": 71}
+2026-05-03 17:02:19 - maljan - INFO - Max iterations: 20
+{"timestamp": "2026-05-03T17:02:19.479374+00:00", "level": "INFO", "logger": "maljan", "message": "Max iterations: 20", "correlation_id": "-", "module": "app", "function": "run", "line": 70}
+2026-05-03 17:02:19 - maljan - INFO - ------------------------------------------------------------
+{"timestamp": "2026-05-03T17:02:19.489929+00:00", "level": "INFO", "logger": "maljan", "message": "------------------------------------------------------------", "correlation_id": "-", "module": "app", "function": "run", "line": 71}
+2026-05-03 17:02:19 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:19.517446+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:19 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:19.534188+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:19 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:19.550853+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:19 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:19.553705+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:19 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:19.556613+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:19 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:19.557507+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:19 - maljan - WARNING - File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:19.619879+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:19 - maljan - WARNING - File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:19.623438+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:19 - maljan - WARNING - File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:19.623683+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:19 - maljan - WARNING - File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:19.623832+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:19 - maljan - WARNING - File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:19.624161+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:19 - maljan - WARNING - File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:19.624292+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:19 - maljan.static - INFO - Executing static ISR analysis...
+{"timestamp": "2026-05-03T17:02:19.643422+00:00", "level": "INFO", "logger": "maljan.static", "message": "Executing static ISR analysis...", "correlation_id": "-", "module": "static_analyst", "function": "analyze_isr", "line": 208}
+2026-05-03 17:02:19 - maljan.dynamic - INFO - Executing dynamic ISR analysis...
+{"timestamp": "2026-05-03T17:02:19.649014+00:00", "level": "INFO", "logger": "maljan.dynamic", "message": "Executing dynamic ISR analysis...", "correlation_id": "-", "module": "dynamic_analyst", "function": "analyze_isr", "line": 175}
+2026-05-03 17:02:19 - maljan.network - INFO - Executing network ISR analysis...
+{"timestamp": "2026-05-03T17:02:19.652921+00:00", "level": "INFO", "logger": "maljan.network", "message": "Executing network ISR analysis...", "correlation_id": "-", "module": "network_analyst", "function": "analyze_isr", "line": 244}
+2026-05-03 17:02:19 - maljan.dynamic - INFO - Executing dynamic ISR analysis...
+{"timestamp": "2026-05-03T17:02:19.653777+00:00", "level": "INFO", "logger": "maljan.dynamic", "message": "Executing dynamic ISR analysis...", "correlation_id": "-", "module": "dynamic_analyst", "function": "analyze_isr", "line": 175}
+2026-05-03 17:02:19 - maljan.network - INFO - Executing network ISR analysis...
+{"timestamp": "2026-05-03T17:02:19.653953+00:00", "level": "INFO", "logger": "maljan.network", "message": "Executing network ISR analysis...", "correlation_id": "-", "module": "network_analyst", "function": "analyze_isr", "line": 244}
+2026-05-03 17:02:19 - maljan.static - INFO - Executing static ISR analysis...
+{"timestamp": "2026-05-03T17:02:19.654483+00:00", "level": "INFO", "logger": "maljan.static", "message": "Executing static ISR analysis...", "correlation_id": "-", "module": "static_analyst", "function": "analyze_isr", "line": 208}
+2026-05-03 17:02:19 - maljan - INFO - Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/external/ghidra-mcp/bridge_mcp_ghidra.py', '--transport', 'stdio']
+{"timestamp": "2026-05-03T17:02:19.654732+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/external/ghidra-mcp/bridge_mcp_ghidra.py', '--transport', 'stdio']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:19 - maljan - INFO - Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/scripts/cape_mcp_wrapper.py', '--cape-root', '/mnt/d/MyCodes/Maljan/external/CAPEv2']
+{"timestamp": "2026-05-03T17:02:19.665418+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/scripts/cape_mcp_wrapper.py', '--cape-root', '/mnt/d/MyCodes/Maljan/external/CAPEv2']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:19 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/network-mcp/server.py']
+{"timestamp": "2026-05-03T17:02:19.666116+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/network-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:19 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/network-mcp/server.py']
+{"timestamp": "2026-05-03T17:02:19.666393+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/network-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:19 - maljan - INFO - Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/scripts/cape_mcp_wrapper.py', '--cape-root', '/mnt/d/MyCodes/Maljan/external/CAPEv2']
+{"timestamp": "2026-05-03T17:02:19.666626+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/scripts/cape_mcp_wrapper.py', '--cape-root', '/mnt/d/MyCodes/Maljan/external/CAPEv2']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:19 - maljan - INFO - Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/external/ghidra-mcp/bridge_mcp_ghidra.py', '--transport', 'stdio']
+{"timestamp": "2026-05-03T17:02:19.667143+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: wsl.exe ['-d', 'Ubuntu', '-u', 'root', '-e', '/mnt/d/MyCodes/Maljan/.venv-wsl/bin/python', '/mnt/d/MyCodes/Maljan/external/ghidra-mcp/bridge_mcp_ghidra.py', '--transport', 'stdio']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:19 - maljan - ERROR - Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.716767+00:00", "level": "ERROR", "logger": "maljan", "message": "Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 60}
+2026-05-03 17:02:19 - maljan - ERROR - Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.740457+00:00", "level": "ERROR", "logger": "maljan", "message": "Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 60}
+2026-05-03 17:02:19 - maljan - ERROR - Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.741265+00:00", "level": "ERROR", "logger": "maljan", "message": "Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 60}
+2026-05-03 17:02:19 - maljan.dynamic - ERROR - ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.741451+00:00", "level": "ERROR", "logger": "maljan.dynamic", "message": "ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "base_agent", "function": "safe_analyze_isr", "line": 192}
+2026-05-03 17:02:19 - maljan - ERROR - Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.741662+00:00", "level": "ERROR", "logger": "maljan", "message": "Failed to initialize MCP client: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 60}
+2026-05-03 17:02:19 - maljan.static - ERROR - ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.741809+00:00", "level": "ERROR", "logger": "maljan.static", "message": "ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "base_agent", "function": "safe_analyze_isr", "line": 192}
+2026-05-03 17:02:19 - maljan - ERROR - static analysis failed: static ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.741927+00:00", "level": "ERROR", "logger": "maljan", "message": "static analysis failed: static ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 112}
+2026-05-03 17:02:19 - maljan.dynamic - ERROR - ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.744431+00:00", "level": "ERROR", "logger": "maljan.dynamic", "message": "ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "base_agent", "function": "safe_analyze_isr", "line": 192}
+2026-05-03 17:02:19 - maljan.static - ERROR - ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.744745+00:00", "level": "ERROR", "logger": "maljan.static", "message": "ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "base_agent", "function": "safe_analyze_isr", "line": 192}
+2026-05-03 17:02:19 - maljan - ERROR - dynamic analysis failed: dynamic ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.744975+00:00", "level": "ERROR", "logger": "maljan", "message": "dynamic analysis failed: dynamic ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 112}
+2026-05-03 17:02:19 - maljan - ERROR - dynamic analysis failed: dynamic ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.745655+00:00", "level": "ERROR", "logger": "maljan", "message": "dynamic analysis failed: dynamic ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 112}
+2026-05-03 17:02:19 - maljan - ERROR - static analysis failed: static ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'
+{"timestamp": "2026-05-03T17:02:19.746028+00:00", "level": "ERROR", "logger": "maljan", "message": "static analysis failed: static ISR analysis failed: [Errno 2] No such file or directory: 'wsl.exe'", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 112}
+2026-05-03 17:02:22 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T17:02:22.424049+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 17:02:22 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T17:02:22.424420+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 17:02:22 - maljan.network - INFO - Initialized Network MCP toolkit with 3 tools
+{"timestamp": "2026-05-03T17:02:22.424683+00:00", "level": "INFO", "logger": "maljan.network", "message": "Initialized Network MCP toolkit with 3 tools", "correlation_id": "-", "module": "network_analyst", "function": "_initialize_mcp_client", "line": 110}
+2026-05-03 17:02:22 - maljan.network - INFO - Initialized Network MCP toolkit with 3 tools
+{"timestamp": "2026-05-03T17:02:22.426756+00:00", "level": "INFO", "logger": "maljan.network", "message": "Initialized Network MCP toolkit with 3 tools", "correlation_id": "-", "module": "network_analyst", "function": "_initialize_mcp_client", "line": 110}
+2026-05-03 17:02:22 - maljan.network - INFO - Starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T17:02:22.426873+00:00", "level": "INFO", "logger": "maljan.network", "message": "Starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "base_agent", "function": "execute_tool_loop", "line": 60}
+2026-05-03 17:02:22 - maljan.network - INFO - Starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T17:02:22.437827+00:00", "level": "INFO", "logger": "maljan.network", "message": "Starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "base_agent", "function": "execute_tool_loop", "line": 60}
+2026-05-03 17:02:22 - maljan.network - INFO - Invoking ReAct agent (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T17:02:22.484873+00:00", "level": "INFO", "logger": "maljan.network", "message": "Invoking ReAct agent (timeout=600s, tools=3)...", "correlation_id": "-", "module": "base_agent", "function": "_run_with_timeout", "line": 76}
+2026-05-03 17:02:22 - maljan.network - INFO - Invoking ReAct agent (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T17:02:22.505644+00:00", "level": "INFO", "logger": "maljan.network", "message": "Invoking ReAct agent (timeout=600s, tools=3)...", "correlation_id": "-", "module": "base_agent", "function": "_run_with_timeout", "line": 76}
+2026-05-03 17:02:23 - maljan.network - INFO - ReAct loop completed: 3 messages in conversation.
+{"timestamp": "2026-05-03T17:02:23.965783+00:00", "level": "INFO", "logger": "maljan.network", "message": "ReAct loop completed: 3 messages in conversation.", "correlation_id": "-", "module": "base_agent", "function": "_run_with_timeout", "line": 90}
+2026-05-03 17:02:23 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:23.968654+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:23 - maljan.judge - INFO - Mediating 3 expert reports for contradictions...
+{"timestamp": "2026-05-03T17:02:23.992575+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Mediating 3 expert reports for contradictions...", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 220}
+2026-05-03 17:02:23 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']
+{"timestamp": "2026-05-03T17:02:23.993006+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:24 - maljan.network - INFO - ReAct loop completed: 3 messages in conversation.
+{"timestamp": "2026-05-03T17:02:24.290909+00:00", "level": "INFO", "logger": "maljan.network", "message": "ReAct loop completed: 3 messages in conversation.", "correlation_id": "-", "module": "base_agent", "function": "_run_with_timeout", "line": 90}
+2026-05-03 17:02:24 - maljan - INFO - Building gemini/gemini-2.5-flash (role=expert, temp=0.1)
+{"timestamp": "2026-05-03T17:02:24.291675+00:00", "level": "INFO", "logger": "maljan", "message": "Building gemini/gemini-2.5-flash (role=expert, temp=0.1)", "correlation_id": "-", "module": "registry", "function": "build_model", "line": 94}
+2026-05-03 17:02:24 - maljan.judge - INFO - Mediating 3 expert reports for contradictions...
+{"timestamp": "2026-05-03T17:02:24.308019+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Mediating 3 expert reports for contradictions...", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 220}
+2026-05-03 17:02:24 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']
+{"timestamp": "2026-05-03T17:02:24.308523+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:02:24 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T17:02:24.733054+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 17:02:24 - maljan.judge - INFO - Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']
+{"timestamp": "2026-05-03T17:02:24.733206+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']", "correlation_id": "-", "module": "judge_agent", "function": "_initialize_mcp_client", "line": 127}
+2026-05-03 17:02:24 - maljan.judge - INFO - JudgeAgent starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T17:02:24.733435+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "judge_agent", "function": "execute_tool_loop", "line": 144}
+2026-05-03 17:02:24 - maljan.judge - INFO - JudgeAgent invoking ReAct (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T17:02:24.740235+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent invoking ReAct (timeout=600s, tools=3)...", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 159}
+2026-05-03 17:02:25 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T17:02:25.092515+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 17:02:25 - maljan.judge - INFO - Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']
+{"timestamp": "2026-05-03T17:02:25.092640+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']", "correlation_id": "-", "module": "judge_agent", "function": "_initialize_mcp_client", "line": 127}
+2026-05-03 17:02:25 - maljan.judge - INFO - JudgeAgent starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T17:02:25.092790+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "judge_agent", "function": "execute_tool_loop", "line": 144}
+2026-05-03 17:02:25 - maljan.judge - INFO - JudgeAgent invoking ReAct (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T17:02:25.100863+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent invoking ReAct (timeout=600s, tools=3)...", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 159}
+2026-05-03 17:02:28 - maljan.judge - INFO - JudgeAgent ReAct loop completed: 3 messages.
+{"timestamp": "2026-05-03T17:02:28.694633+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent ReAct loop completed: 3 messages.", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 173}
+{"timestamp": "2026-05-03T17:02:28.705485+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 17:02:31 - maljan.judge - INFO - No consensus yet (confidence=0.10)
+{"timestamp": "2026-05-03T17:02:31.152395+00:00", "level": "INFO", "logger": "maljan.judge", "message": "No consensus yet (confidence=0.10)", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 294}
+2026-05-03 17:02:31 - maljan - WARNING - File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:31.153227+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:31 - maljan.static - INFO - Executing static ISR revision (round 1)...
+{"timestamp": "2026-05-03T17:02:31.154420+00:00", "level": "INFO", "logger": "maljan.static", "message": "Executing static ISR revision (round 1)...", "correlation_id": "-", "module": "static_analyst", "function": "revise_isr", "line": 259}
+{"timestamp": "2026-05-03T17:02:31.156264+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 17:02:31 - maljan.judge - INFO - JudgeAgent ReAct loop completed: 3 messages.
+{"timestamp": "2026-05-03T17:02:31.692313+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent ReAct loop completed: 3 messages.", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 173}
+{"timestamp": "2026-05-03T17:02:31.693558+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+{"timestamp": "2026-05-03T17:02:31.919862+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 1.49 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 26.142240037s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-2.5-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '26s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:33.527503+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 2.9 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 24.377729067s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-2.5-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '24s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:36.558521+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 4.49 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 21.080751627s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '21s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+2026-05-03 17:02:40 - maljan - WARNING - File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:02:40.304584+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:02:40 - maljan.dynamic - INFO - Executing dynamic ISR revision (round 1)...
+{"timestamp": "2026-05-03T17:02:40.304802+00:00", "level": "INFO", "logger": "maljan.dynamic", "message": "Executing dynamic ISR revision (round 1)...", "correlation_id": "-", "module": "dynamic_analyst", "function": "revise_isr", "line": 224}
+{"timestamp": "2026-05-03T17:02:40.305756+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+{"timestamp": "2026-05-03T17:02:43.317594+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 1.06 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 16.705616619s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '16s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:43.933830+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 8.84 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 16.036708885s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '16s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:44.098291+00:00", "level": "INFO", "logger": "arq.worker", "message": "recording health: May-03 17:02:44 j_complete=1 j_failed=0 j_retried=0 j_ongoing=2 queued=2", "correlation_id": "-", "module": "worker", "function": "record_health", "line": 789}
+{"timestamp": "2026-05-03T17:02:44.519223+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 2.82 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 15.414970797s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-2.5-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '15s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:47.462503+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 4.8 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 12.202523352s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '12s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:52.410401+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 8.97 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 6.809232064s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-2.5-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '6s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:02:53.025091+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 16.3 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 6.118906276s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '6s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:03:01.602244+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 16.4 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 56.762549861s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '56s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+2026-05-03 17:03:09 - maljan.judge - WARNING - Structured output failed (Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\nPlease retry in 48.059517597s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '48s'}]}}), falling back to text extraction.
+{"timestamp": "2026-05-03T17:03:09.576959+00:00", "level": "WARNING", "logger": "maljan.judge", "message": "Structured output failed (Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 48.059517597s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '48s'}]}}), falling back to text extraction.", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 287}
+2026-05-03 17:03:09 - maljan.judge - INFO - No consensus yet (confidence=0.50)
+{"timestamp": "2026-05-03T17:03:09.577534+00:00", "level": "INFO", "logger": "maljan.judge", "message": "No consensus yet (confidence=0.50)", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 294}
+2026-05-03 17:03:09 - maljan - WARNING - File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:03:09.578157+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/static/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:03:09 - maljan.static - INFO - Executing static ISR revision (round 1)...
+{"timestamp": "2026-05-03T17:03:09.579256+00:00", "level": "INFO", "logger": "maljan.static", "message": "Executing static ISR revision (round 1)...", "correlation_id": "-", "module": "static_analyst", "function": "revise_isr", "line": 259}
+{"timestamp": "2026-05-03T17:03:09.580066+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+{"timestamp": "2026-05-03T17:03:09.800762+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 1.44 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 47.814615765s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '47s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:03:11.363139+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 2.04 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 46.11710324s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '46s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:03:16.300778+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 4.56 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 43.737487362s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '43s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:03:20.995886+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 8.73 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 38.619138771s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '38s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+2026-05-03 17:03:21 - maljan.dynamic - ERROR - ISR revision failed: Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\nPlease retry in 38.583443314s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '38s'}]}}
+{"timestamp": "2026-05-03T17:03:21.022949+00:00", "level": "ERROR", "logger": "maljan.dynamic", "message": "ISR revision failed: Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 38.583443314s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '38s'}]}}", "correlation_id": "-", "module": "base_agent", "function": "safe_revise_isr", "line": 299}
+2026-05-03 17:03:21 - maljan - ERROR - dynamic revision failed: dynamic ISR revision failed: Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\nPlease retry in 38.583443314s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '38s'}]}}
+{"timestamp": "2026-05-03T17:03:21.022997+00:00", "level": "ERROR", "logger": "maljan", "message": "dynamic revision failed: dynamic ISR revision failed: Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 38.583443314s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.5-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '38s'}]}}", "correlation_id": "-", "module": "nodes", "function": "node_fn", "line": 368}
+2026-05-03 17:03:21 - maljan - WARNING - File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:03:21.023094+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:03:21 - maljan.network - INFO - Executing network ISR revision (round 1)...
+{"timestamp": "2026-05-03T17:03:21.023308+00:00", "level": "INFO", "logger": "maljan.network", "message": "Executing network ISR revision (round 1)...", "correlation_id": "-", "module": "network_analyst", "function": "revise_isr", "line": 340}
+{"timestamp": "2026-05-03T17:03:21.024171+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+{"timestamp": "2026-05-03T17:03:21.410036+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 1.46 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 38.170903958s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-2.5-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '38s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+{"timestamp": "2026-05-03T17:03:22.998659+00:00", "level": "INFO", "logger": "google_genai._api_client", "message": "Retrying google.genai._api_client.BaseApiClient._request_once in 2.53 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\\nPlease retry in 36.428808159s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-2.5-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '36s'}]}}.", "correlation_id": "-", "module": "before_sleep", "function": "log_it", "line": 64}
+2026-05-03 17:03:31 - maljan.judge - INFO - Mediating 3 expert reports for contradictions...
+{"timestamp": "2026-05-03T17:03:31.029140+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Mediating 3 expert reports for contradictions...", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 220}
+2026-05-03 17:03:31 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']
+{"timestamp": "2026-05-03T17:03:31.029355+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:03:31 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T17:03:31.537651+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 17:03:31 - maljan.judge - INFO - Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']
+{"timestamp": "2026-05-03T17:03:31.537779+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']", "correlation_id": "-", "module": "judge_agent", "function": "_initialize_mcp_client", "line": 127}
+2026-05-03 17:03:31 - maljan.judge - INFO - JudgeAgent starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T17:03:31.538052+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "judge_agent", "function": "execute_tool_loop", "line": 144}
+2026-05-03 17:03:31 - maljan.judge - INFO - JudgeAgent invoking ReAct (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T17:03:31.543213+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent invoking ReAct (timeout=600s, tools=3)...", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 159}
+2026-05-03 17:03:31 - maljan.worker - ERROR - Analysis failed: job=94e1a290-9af5-44b4-8e4d-3d547fb1dd45 error=RuntimeError: Event loop is closed
+Traceback (most recent call last):
+  File "/app/apps/api/app/worker/analysis_worker.py", line 132, in run_analysis
+    pipeline_result = await asyncio.to_thread(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/app/apps/api/app/worker/analysis_worker.py", line 319, in _run_pipeline_sync
+    result = app.run(file_hash=file_hash, file_name=file_name)
+  File "/app/src/maljan/app.py", line 91, in run
+    result = self.graph.invoke(initial_state)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3309, in invoke
+    for chunk in self.stream(
+                 ~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<10 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    ):
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 2736, in stream
+    for _ in runner.tick(
+             ~~~~~~~~~~~^
+        [t for t in loop.tasks.values() if not t.writes],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        schedule_task=loop.accept_push,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+    ~~~~~~~~~~~~~~^
+        t,
+        ^^
+    ...<10 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py", line 126, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/app/src/maljan/pipeline/nodes.py", line 260, in node_fn
+    argument, is_consensus = judge.mediate(
+                             ~~~~~~~~~~~~~^
+        reports=active_reports,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+        history=state.get("discussion_history") or [],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        isr_reports=state.get("isr_reports") or {},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/src/maljan/agents/judge_agent.py", line 256, in mediate
+    tool_result_text = self.execute_tool_loop(prompt_messages)
+  File "/app/src/maljan/agents/judge_agent.py", line 193, in execute_tool_loop
+    result = loop.run_until_complete(_run_with_timeout())
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/app/src/maljan/agents/judge_agent.py", line 165, in _run_with_timeout
+    result = await asyncio.wait_for(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3479, in ainvoke
+    async for chunk in self.astream(
+    ...<29 lines>...
+            chunks.append(chunk)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3128, in astream
+    async for _ in runner.atick(
+    ...<16 lines>...
+            yield o
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py", line 304, in atick
+    await arun_with_retry(
+    ...<15 lines>...
+    )
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py", line 242, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 705, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        step.ainvoke(input, config, **kwargs), context=context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 464, in ainvoke
+    ret = await asyncio.create_task(coro, context=context)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/prebuilt/chat_agent_executor.py", line 707, in acall_model
+    response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 3197, in ainvoke
+    input_ = await coro_with_context(part(), context, create_task=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 5708, in ainvoke
+    return await self.bound.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 477, in ainvoke
+    llm_result = await self.agenerate_prompt(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1196, in agenerate_prompt
+    return await self.agenerate(
+           ^^^^^^^^^^^^^^^^^^^^^
+        prompt_messages, stop=stop, callbacks=callbacks, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1154, in agenerate
+    raise exceptions[0]
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1423, in _agenerate_with_cache
+    result = await self._agenerate(
+             ^^^^^^^^^^^^^^^^^^^^^^
+        messages, stop=stop, run_manager=run_manager, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 3088, in _agenerate
+    await self.client.aio.models.generate_content(
+        **request,
+    )
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/models.py", line 8337, in generate_content
+    return await self._generate_content(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        model=model, contents=contents, config=parsed_config
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/models.py", line 6897, in _generate_content
+    response = await self._api_client.async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        'post', path, request_dict, http_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1583, in async_request
+    result = await self._async_request(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        http_request=http_request, http_options=http_options, stream=False
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1515, in _async_request
+    return await retry(self._async_request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 393, in <lambda>
+    self._add_action_func(lambda rs: rs.outcome.result())
+                                     ~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py", line 443, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py", line 395, in __get_result
+    raise self._exception
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1489, in _async_request_once
+    client_response = await self._async_httpx_client.request(  # type: ignore[union-attr]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 229, in handle_async_request
+    await self._close_connections(closing)
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_backends/anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/anyio/streams/tls.py", line 236, in aclose
+    await self.transport_stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py", line 1344, in aclose
+    self._transport.close()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py", line 1216, in close
+    super().close()
+    ~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py", line 869, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 827, in call_soon
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 550, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+During task with name 'agent' and id '9511b646-71f4-d003-00e4-a5559fb7eb83'
+During task with name 'negotiation' and id 'c7b20952-b572-aa73-702f-3d2ca8bcad6c'
+{"timestamp": "2026-05-03T17:03:31.588096+00:00", "level": "ERROR", "logger": "maljan.worker", "message": "Analysis failed: job=94e1a290-9af5-44b4-8e4d-3d547fb1dd45 error=RuntimeError: Event loop is closed", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 243, "exception": {"type": "RuntimeError", "message": "Event loop is closed", "traceback": ["Traceback (most recent call last):\n", "  File \"/app/apps/api/app/worker/analysis_worker.py\", line 132, in run_analysis\n    pipeline_result = await asyncio.to_thread(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<6 lines>...\n    )\n    ^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py\", line 25, in to_thread\n    return await loop.run_in_executor(None, func_call)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py\", line 86, in run\n    result = ctx.run(self.task)\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py\", line 73, in run\n    return fn(*args, **kwargs)\n", "  File \"/app/apps/api/app/worker/analysis_worker.py\", line 319, in _run_pipeline_sync\n    result = app.run(file_hash=file_hash, file_name=file_name)\n", "  File \"/app/src/maljan/app.py\", line 91, in run\n    result = self.graph.invoke(initial_state)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3309, in invoke\n    for chunk in self.stream(\n                 ~~~~~~~~~~~^\n        input,\n        ^^^^^^\n    ...<10 lines>...\n        **kwargs,\n        ^^^^^^^^^\n    ):\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 2736, in stream\n    for _ in runner.tick(\n             ~~~~~~~~~~~^\n        [t for t in loop.tasks.values() if not t.writes],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<2 lines>...\n        schedule_task=loop.accept_push,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ):\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py\", line 167, in tick\n    run_with_retry(\n    ~~~~~~~~~~~~~~^\n        t,\n        ^^\n    ...<10 lines>...\n        },\n        ^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py\", line 126, in run_with_retry\n    return task.proc.invoke(task.input, config)\n           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 656, in invoke\n    input = context.run(step.invoke, input, config, **kwargs)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 400, in invoke\n    ret = self.func(*args, **kwargs)\n", "  File \"/app/src/maljan/pipeline/nodes.py\", line 260, in node_fn\n    argument, is_consensus = judge.mediate(\n                             ~~~~~~~~~~~~~^\n        reports=active_reports,\n        ^^^^^^^^^^^^^^^^^^^^^^^\n        history=state.get(\"discussion_history\") or [],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        isr_reports=state.get(\"isr_reports\") or {},\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 256, in mediate\n    tool_result_text = self.execute_tool_loop(prompt_messages)\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 193, in execute_tool_loop\n    result = loop.run_until_complete(_run_with_timeout())\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 719, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 165, in _run_with_timeout\n    result = await asyncio.wait_for(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py\", line 488, in wait_for\n    return await fut\n           ^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3479, in ainvoke\n    async for chunk in self.astream(\n    ...<29 lines>...\n            chunks.append(chunk)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3128, in astream\n    async for _ in runner.atick(\n    ...<16 lines>...\n            yield o\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py\", line 304, in atick\n    await arun_with_retry(\n    ...<15 lines>...\n    )\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py\", line 242, in arun_with_retry\n    return await task.proc.ainvoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 705, in ainvoke\n    input = await asyncio.create_task(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        step.ainvoke(input, config, **kwargs), context=context\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 464, in ainvoke\n    ret = await asyncio.create_task(coro, context=context)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/prebuilt/chat_agent_executor.py\", line 707, in acall_model\n    response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]\n                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py\", line 3197, in ainvoke\n    input_ = await coro_with_context(part(), context, create_task=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py\", line 5708, in ainvoke\n    return await self.bound.ainvoke(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 477, in ainvoke\n    llm_result = await self.agenerate_prompt(\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<8 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1196, in agenerate_prompt\n    return await self.agenerate(\n           ^^^^^^^^^^^^^^^^^^^^^\n        prompt_messages, stop=stop, callbacks=callbacks, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1154, in agenerate\n    raise exceptions[0]\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1423, in _agenerate_with_cache\n    result = await self._agenerate(\n             ^^^^^^^^^^^^^^^^^^^^^^\n        messages, stop=stop, run_manager=run_manager, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py\", line 3088, in _agenerate\n    await self.client.aio.models.generate_content(\n        **request,\n    )\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/models.py\", line 8337, in generate_content\n    return await self._generate_content(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        model=model, contents=contents, config=parsed_config\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/models.py\", line 6897, in _generate_content\n    response = await self._api_client.async_request(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        'post', path, request_dict, http_options\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1583, in async_request\n    result = await self._async_request(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        http_request=http_request, http_options=http_options, stream=False\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1515, in _async_request\n    return await retry(self._async_request_once, http_request, stream)  # type: ignore[no-any-return]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 112, in __call__\n    do = await self.iter(retry_state=retry_state)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 157, in iter\n    result = await action(retry_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/_utils.py\", line 111, in inner\n    return call(*args, **kwargs)\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/__init__.py\", line 393, in <lambda>\n    self._add_action_func(lambda rs: rs.outcome.result())\n                                     ~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py\", line 443, in result\n    return self.__get_result()\n           ~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py\", line 395, in __get_result\n    raise self._exception\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 116, in __call__\n    result = await fn(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1489, in _async_request_once\n    client_response = await self._async_httpx_client.request(  # type: ignore[union-attr]\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1540, in request\n    return await self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1629, in send\n    response = await self._send_handling_auth(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<4 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1657, in _send_handling_auth\n    response = await self._send_handling_redirects(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1694, in _send_handling_redirects\n    response = await self._send_single_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1730, in _send_single_request\n    response = await transport.handle_async_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py\", line 394, in handle_async_request\n    resp = await self._pool.handle_async_request(req)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 256, in handle_async_request\n    raise exc from None\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 229, in handle_async_request\n    await self._close_connections(closing)\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 345, in _close_connections\n    await connection.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection.py\", line 173, in aclose\n    await self._connection.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/http11.py\", line 258, in aclose\n    await self._network_stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_backends/anyio.py\", line 53, in aclose\n    await self._stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/anyio/streams/tls.py\", line 236, in aclose\n    await self.transport_stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py\", line 1344, in aclose\n    self._transport.close()\n    ~~~~~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py\", line 1216, in close\n    super().close()\n    ~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py\", line 869, in close\n    self._loop.call_soon(self._call_connection_lost, None)\n    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 827, in call_soon\n    self._check_closed()\n    ~~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 550, in _check_closed\n    raise RuntimeError('Event loop is closed')\n", "RuntimeError: Event loop is closed\n", "During task with name 'agent' and id '9511b646-71f4-d003-00e4-a5559fb7eb83'\n", "During task with name 'negotiation' and id 'c7b20952-b572-aa73-702f-3d2ca8bcad6c'\n"]}, "job_id": "94e1a290-9af5-44b4-8e4d-3d547fb1dd45", "component": "pipeline"}
+{"timestamp": "2026-05-03T17:03:31.598257+00:00", "level": "INFO", "logger": "arq.worker", "message": " 73.53s \u2190 915135f06f844ff9a09c7394f3fe58b0:run_analysis \u25cf {'status': 'failed', 'error': 'RuntimeError: Event loop is closed'}", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 638}
+2026-05-03 17:03:33 - maljan - WARNING - File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:03:33.181125+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/dynamic/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:03:33 - maljan.dynamic - INFO - Executing dynamic ISR revision (round 1)...
+{"timestamp": "2026-05-03T17:03:33.181277+00:00", "level": "INFO", "logger": "maljan.dynamic", "message": "Executing dynamic ISR revision (round 1)...", "correlation_id": "-", "module": "dynamic_analyst", "function": "revise_isr", "line": 224}
+{"timestamp": "2026-05-03T17:03:33.182118+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 17:03:36 - maljan - WARNING - File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json
+{"timestamp": "2026-05-03T17:03:36.315847+00:00", "level": "WARNING", "logger": "maljan", "message": "File not found: data/samples/network/4a50b7a2c4b44e8160c48debe54d36a702811e0e0366203354989e2fae6c14f7.json", "correlation_id": "-", "module": "file_loader", "function": "_load_json", "line": 96}
+2026-05-03 17:03:36 - maljan.network - INFO - Executing network ISR revision (round 1)...
+{"timestamp": "2026-05-03T17:03:36.316000+00:00", "level": "INFO", "logger": "maljan.network", "message": "Executing network ISR revision (round 1)...", "correlation_id": "-", "module": "network_analyst", "function": "revise_isr", "line": 340}
+{"timestamp": "2026-05-03T17:03:36.316750+00:00", "level": "INFO", "logger": "google_genai.models", "message": "AFC is enabled with max remote calls: 10.", "correlation_id": "-", "module": "models", "function": "generate_content", "line": 6268}
+2026-05-03 17:03:40 - maljan.judge - INFO - Mediating 3 expert reports for contradictions...
+{"timestamp": "2026-05-03T17:03:40.136419+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Mediating 3 expert reports for contradictions...", "correlation_id": "-", "module": "judge_agent", "function": "mediate", "line": 220}
+2026-05-03 17:03:40 - maljan - INFO - Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']
+{"timestamp": "2026-05-03T17:03:40.136623+00:00", "level": "INFO", "logger": "maljan", "message": "Connecting to MCP server: /app/.venv/bin/python ['/app/threatintel-mcp/server.py']", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 40}
+2026-05-03 17:03:40 - maljan - INFO - Successfully loaded 3 tools from MCP server.
+{"timestamp": "2026-05-03T17:03:40.601566+00:00", "level": "INFO", "logger": "maljan", "message": "Successfully loaded 3 tools from MCP server.", "correlation_id": "-", "module": "mcp_client", "function": "initialize", "line": 58}
+2026-05-03 17:03:40 - maljan.judge - INFO - Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']
+{"timestamp": "2026-05-03T17:03:40.601695+00:00", "level": "INFO", "logger": "maljan.judge", "message": "Initialized ThreatIntel MCP tools: ['check_ip_reputation', 'check_domain_reputation', 'check_hash']", "correlation_id": "-", "module": "judge_agent", "function": "_initialize_mcp_client", "line": 127}
+2026-05-03 17:03:40 - maljan.judge - INFO - JudgeAgent starting ReAct agent loop with 3 tools...
+{"timestamp": "2026-05-03T17:03:40.601810+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent starting ReAct agent loop with 3 tools...", "correlation_id": "-", "module": "judge_agent", "function": "execute_tool_loop", "line": 144}
+2026-05-03 17:03:40 - maljan.judge - INFO - JudgeAgent invoking ReAct (timeout=600s, tools=3)...
+{"timestamp": "2026-05-03T17:03:40.607076+00:00", "level": "INFO", "logger": "maljan.judge", "message": "JudgeAgent invoking ReAct (timeout=600s, tools=3)...", "correlation_id": "-", "module": "judge_agent", "function": "_run_with_timeout", "line": 159}
+2026-05-03 17:03:40 - maljan.worker - ERROR - Analysis failed: job=21aa28da-15e7-4441-a17d-c2874729be86 error=RuntimeError: Event loop is closed
+Traceback (most recent call last):
+  File "/app/apps/api/app/worker/analysis_worker.py", line 132, in run_analysis
+    pipeline_result = await asyncio.to_thread(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/app/apps/api/app/worker/analysis_worker.py", line 319, in _run_pipeline_sync
+    result = app.run(file_hash=file_hash, file_name=file_name)
+  File "/app/src/maljan/app.py", line 91, in run
+    result = self.graph.invoke(initial_state)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3309, in invoke
+    for chunk in self.stream(
+                 ~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<10 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    ):
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 2736, in stream
+    for _ in runner.tick(
+             ~~~~~~~~~~~^
+        [t for t in loop.tasks.values() if not t.writes],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        schedule_task=loop.accept_push,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+    ~~~~~~~~~~~~~~^
+        t,
+        ^^
+    ...<10 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py", line 126, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/app/src/maljan/pipeline/nodes.py", line 260, in node_fn
+    argument, is_consensus = judge.mediate(
+                             ~~~~~~~~~~~~~^
+        reports=active_reports,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+        history=state.get("discussion_history") or [],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        isr_reports=state.get("isr_reports") or {},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/src/maljan/agents/judge_agent.py", line 256, in mediate
+    tool_result_text = self.execute_tool_loop(prompt_messages)
+  File "/app/src/maljan/agents/judge_agent.py", line 193, in execute_tool_loop
+    result = loop.run_until_complete(_run_with_timeout())
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/app/src/maljan/agents/judge_agent.py", line 165, in _run_with_timeout
+    result = await asyncio.wait_for(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3479, in ainvoke
+    async for chunk in self.astream(
+    ...<29 lines>...
+            chunks.append(chunk)
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py", line 3128, in astream
+    async for _ in runner.atick(
+    ...<16 lines>...
+            yield o
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py", line 304, in atick
+    await arun_with_retry(
+    ...<15 lines>...
+    )
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py", line 242, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 705, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        step.ainvoke(input, config, **kwargs), context=context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py", line 464, in ainvoke
+    ret = await asyncio.create_task(coro, context=context)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langgraph/prebuilt/chat_agent_executor.py", line 707, in acall_model
+    response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 3197, in ainvoke
+    input_ = await coro_with_context(part(), context, create_task=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py", line 5708, in ainvoke
+    return await self.bound.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 477, in ainvoke
+    llm_result = await self.agenerate_prompt(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1196, in agenerate_prompt
+    return await self.agenerate(
+           ^^^^^^^^^^^^^^^^^^^^^
+        prompt_messages, stop=stop, callbacks=callbacks, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1154, in agenerate
+    raise exceptions[0]
+  File "/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py", line 1423, in _agenerate_with_cache
+    result = await self._agenerate(
+             ^^^^^^^^^^^^^^^^^^^^^^
+        messages, stop=stop, run_manager=run_manager, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py", line 3088, in _agenerate
+    await self.client.aio.models.generate_content(
+        **request,
+    )
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/models.py", line 8337, in generate_content
+    return await self._generate_content(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        model=model, contents=contents, config=parsed_config
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/models.py", line 6897, in _generate_content
+    response = await self._api_client.async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        'post', path, request_dict, http_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1583, in async_request
+    result = await self._async_request(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        http_request=http_request, http_options=http_options, stream=False
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1515, in _async_request
+    return await retry(self._async_request_once, http_request, stream)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 112, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 157, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/_utils.py", line 111, in inner
+    return call(*args, **kwargs)
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/__init__.py", line 393, in <lambda>
+    self._add_action_func(lambda rs: rs.outcome.result())
+                                     ~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py", line 443, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py", line 395, in __get_result
+    raise self._exception
+  File "/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py", line 116, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py", line 1489, in _async_request_once
+    client_response = await self._async_httpx_client.request(  # type: ignore[union-attr]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 229, in handle_async_request
+    await self._close_connections(closing)
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_async/http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/httpcore/_backends/anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/anyio/streams/tls.py", line 236, in aclose
+    await self.transport_stream.aclose()
+  File "/app/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py", line 1344, in aclose
+    self._transport.close()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py", line 1216, in close
+    super().close()
+    ~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py", line 869, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 827, in call_soon
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py", line 550, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+During task with name 'agent' and id '240e32b7-33e4-569b-2c15-e900ac551c40'
+During task with name 'negotiation' and id '0977b094-0ac7-ac63-c3ce-c0d461f9fcd5'
+{"timestamp": "2026-05-03T17:03:40.617949+00:00", "level": "ERROR", "logger": "maljan.worker", "message": "Analysis failed: job=21aa28da-15e7-4441-a17d-c2874729be86 error=RuntimeError: Event loop is closed", "correlation_id": "-", "module": "analysis_worker", "function": "run_analysis", "line": 243, "exception": {"type": "RuntimeError", "message": "Event loop is closed", "traceback": ["Traceback (most recent call last):\n", "  File \"/app/apps/api/app/worker/analysis_worker.py\", line 132, in run_analysis\n    pipeline_result = await asyncio.to_thread(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<6 lines>...\n    )\n    ^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/threads.py\", line 25, in to_thread\n    return await loop.run_in_executor(None, func_call)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py\", line 86, in run\n    result = ctx.run(self.task)\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/thread.py\", line 73, in run\n    return fn(*args, **kwargs)\n", "  File \"/app/apps/api/app/worker/analysis_worker.py\", line 319, in _run_pipeline_sync\n    result = app.run(file_hash=file_hash, file_name=file_name)\n", "  File \"/app/src/maljan/app.py\", line 91, in run\n    result = self.graph.invoke(initial_state)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3309, in invoke\n    for chunk in self.stream(\n                 ~~~~~~~~~~~^\n        input,\n        ^^^^^^\n    ...<10 lines>...\n        **kwargs,\n        ^^^^^^^^^\n    ):\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 2736, in stream\n    for _ in runner.tick(\n             ~~~~~~~~~~~^\n        [t for t in loop.tasks.values() if not t.writes],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<2 lines>...\n        schedule_task=loop.accept_push,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ):\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py\", line 167, in tick\n    run_with_retry(\n    ~~~~~~~~~~~~~~^\n        t,\n        ^^\n    ...<10 lines>...\n        },\n        ^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py\", line 126, in run_with_retry\n    return task.proc.invoke(task.input, config)\n           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 656, in invoke\n    input = context.run(step.invoke, input, config, **kwargs)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 400, in invoke\n    ret = self.func(*args, **kwargs)\n", "  File \"/app/src/maljan/pipeline/nodes.py\", line 260, in node_fn\n    argument, is_consensus = judge.mediate(\n                             ~~~~~~~~~~~~~^\n        reports=active_reports,\n        ^^^^^^^^^^^^^^^^^^^^^^^\n        history=state.get(\"discussion_history\") or [],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        isr_reports=state.get(\"isr_reports\") or {},\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 256, in mediate\n    tool_result_text = self.execute_tool_loop(prompt_messages)\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 193, in execute_tool_loop\n    result = loop.run_until_complete(_run_with_timeout())\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 719, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n", "  File \"/app/src/maljan/agents/judge_agent.py\", line 165, in _run_with_timeout\n    result = await asyncio.wait_for(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/tasks.py\", line 488, in wait_for\n    return await fut\n           ^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3479, in ainvoke\n    async for chunk in self.astream(\n    ...<29 lines>...\n            chunks.append(chunk)\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/main.py\", line 3128, in astream\n    async for _ in runner.atick(\n    ...<16 lines>...\n            yield o\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_runner.py\", line 304, in atick\n    await arun_with_retry(\n    ...<15 lines>...\n    )\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/pregel/_retry.py\", line 242, in arun_with_retry\n    return await task.proc.ainvoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 705, in ainvoke\n    input = await asyncio.create_task(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        step.ainvoke(input, config, **kwargs), context=context\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/_internal/_runnable.py\", line 464, in ainvoke\n    ret = await asyncio.create_task(coro, context=context)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langgraph/prebuilt/chat_agent_executor.py\", line 707, in acall_model\n    response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]\n                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py\", line 3197, in ainvoke\n    input_ = await coro_with_context(part(), context, create_task=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/runnables/base.py\", line 5708, in ainvoke\n    return await self.bound.ainvoke(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 477, in ainvoke\n    llm_result = await self.agenerate_prompt(\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<8 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1196, in agenerate_prompt\n    return await self.agenerate(\n           ^^^^^^^^^^^^^^^^^^^^^\n        prompt_messages, stop=stop, callbacks=callbacks, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1154, in agenerate\n    raise exceptions[0]\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_core/language_models/chat_models.py\", line 1423, in _agenerate_with_cache\n    result = await self._agenerate(\n             ^^^^^^^^^^^^^^^^^^^^^^\n        messages, stop=stop, run_manager=run_manager, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/langchain_google_genai/chat_models.py\", line 3088, in _agenerate\n    await self.client.aio.models.generate_content(\n        **request,\n    )\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/models.py\", line 8337, in generate_content\n    return await self._generate_content(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        model=model, contents=contents, config=parsed_config\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/models.py\", line 6897, in _generate_content\n    response = await self._api_client.async_request(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        'post', path, request_dict, http_options\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1583, in async_request\n    result = await self._async_request(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        http_request=http_request, http_options=http_options, stream=False\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1515, in _async_request\n    return await retry(self._async_request_once, http_request, stream)  # type: ignore[no-any-return]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 112, in __call__\n    do = await self.iter(retry_state=retry_state)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 157, in iter\n    result = await action(retry_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/_utils.py\", line 111, in inner\n    return call(*args, **kwargs)\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/__init__.py\", line 393, in <lambda>\n    self._add_action_func(lambda rs: rs.outcome.result())\n                                     ~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py\", line 443, in result\n    return self.__get_result()\n           ~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/concurrent/futures/_base.py\", line 395, in __get_result\n    raise self._exception\n", "  File \"/app/.venv/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 116, in __call__\n    result = await fn(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/google/genai/_api_client.py\", line 1489, in _async_request_once\n    client_response = await self._async_httpx_client.request(  # type: ignore[union-attr]\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1540, in request\n    return await self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1629, in send\n    response = await self._send_handling_auth(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<4 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1657, in _send_handling_auth\n    response = await self._send_handling_redirects(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1694, in _send_handling_redirects\n    response = await self._send_single_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_client.py\", line 1730, in _send_single_request\n    response = await transport.handle_async_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py\", line 394, in handle_async_request\n    resp = await self._pool.handle_async_request(req)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 256, in handle_async_request\n    raise exc from None\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 229, in handle_async_request\n    await self._close_connections(closing)\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection_pool.py\", line 345, in _close_connections\n    await connection.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/connection.py\", line 173, in aclose\n    await self._connection.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_async/http11.py\", line 258, in aclose\n    await self._network_stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/httpcore/_backends/anyio.py\", line 53, in aclose\n    await self._stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/anyio/streams/tls.py\", line 236, in aclose\n    await self.transport_stream.aclose()\n", "  File \"/app/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py\", line 1344, in aclose\n    self._transport.close()\n    ~~~~~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py\", line 1216, in close\n    super().close()\n    ~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/selector_events.py\", line 869, in close\n    self._loop.call_soon(self._call_connection_lost, None)\n    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 827, in call_soon\n    self._check_closed()\n    ~~~~~~~~~~~~~~~~~~^^\n", "  File \"/root/.local/share/uv/python/cpython-3.14.4-linux-x86_64-gnu/lib/python3.14/asyncio/base_events.py\", line 550, in _check_closed\n    raise RuntimeError('Event loop is closed')\n", "RuntimeError: Event loop is closed\n", "During task with name 'agent' and id '240e32b7-33e4-569b-2c15-e900ac551c40'\n", "During task with name 'negotiation' and id '0977b094-0ac7-ac63-c3ce-c0d461f9fcd5'\n"]}, "job_id": "21aa28da-15e7-4441-a17d-c2874729be86", "component": "pipeline"}
+{"timestamp": "2026-05-03T17:03:40.626017+00:00", "level": "INFO", "logger": "arq.worker", "message": " 82.02s \u2190 c9b0b18111e5434ba9741a2dc2b51453:run_analysis \u25cf {'status': 'failed', 'error': 'RuntimeError: Event loop is closed'}", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 638}
+{"timestamp": "2026-05-03T17:03:49.141584+00:00", "level": "INFO", "logger": "arq.worker", "message": "recording health: May-03 17:03:49 j_complete=3 j_failed=0 j_retried=0 j_ongoing=0 queued=0", "correlation_id": "-", "module": "worker", "function": "record_health", "line": 789}
+{"timestamp": "2026-05-03T17:06:25.591061+00:00", "level": "INFO", "logger": "arq.worker", "message": "shutdown on SIGTERM \u25c6 3 jobs complete \u25c6 0 failed \u25c6 0 retries \u25c6 0 ongoing to cancel", "correlation_id": "-", "module": "worker", "function": "handle_sig", "line": 854}
+2026-05-03 17:06:25 - maljan.worker - INFO - Worker shutdown complete
+{"timestamp": "2026-05-03T17:06:25.612567+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Worker shutdown complete", "correlation_id": "-", "module": "analysis_worker", "function": "shutdown", "line": 410, "component": "worker.lifecycle"}
+{"timestamp": "2026-05-03T17:06:31.742059+00:00", "level": "INFO", "logger": "maljan.startup", "message": "Logging initialized", "correlation_id": "-", "module": "logging_config", "function": "setup_logging", "line": 159, "component": "logging"}
+{"timestamp": "2026-05-03T17:06:31.798947+00:00", "level": "INFO", "logger": "maljan.worker", "message": "Worker started: connected to DB and Redis", "correlation_id": "-", "module": "analysis_worker", "function": "startup", "line": 391, "component": "worker.lifecycle"}
+{"timestamp": "2026-05-03T17:06:50.839593+00:00", "level": "INFO", "logger": "arq.worker", "message": "  0.28s \u2192 6441175db9e24f5ab269df36372f3d0b:run_analysis('mock_hash', 'mock_file.exe', {'llm_provider': 'mock'})", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 594}
+{"timestamp": "2026-05-03T17:06:50.844869+00:00", "level": "ERROR", "logger": "arq.worker", "message": "  0.00s ! 6441175db9e24f5ab269df36372f3d0b:run_analysis failed, TypeError: run_analysis() takes 2 positional arguments but 4 were given", "correlation_id": "-", "module": "worker", "function": "run_job", "line": 629, "exception": {"type": "TypeError", "message": "run_analysis() takes 2 positional arguments but 4 were given", "traceback": ["Traceback (most recent call last):\n", "  File \"/app/.venv/lib/python3.14/site-packages/arq/worker.py\", line 595, in run_job\n    self.job_tasks[job_id] = task = self.loop.create_task(function.coroutine(ctx, *args, **kwargs))\n                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^\n", "TypeError: run_analysis() takes 2 positional arguments but 4 were given\n"]}}
+{"timestamp": "2026-05-03T17:07:03.543931+00:00", "level": "INFO", "logger": "arq.worker", "message": "recording health: May-03 17:07:03 j_complete=0 j_failed=1 j_retried=0 j_ongoing=0 queued=0", "correlation_id": "-", "module": "worker", "function": "record_health", "line": 789}

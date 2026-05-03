@@ -8,8 +8,6 @@ It picks up jobs from Redis and runs the full multi-agent analysis
 pipeline, streaming progress events via Redis PubSub.
 """
 
-import asyncio
-import sys
 import time
 import traceback
 import uuid
@@ -107,7 +105,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             sample = sample_result.scalar_one()
 
             logger.info(
-                f"Processing sample: sha256={sample.sha256[:16]}... filename={sample.original_filename}",
+                "Processing sample: sha256=%s... filename=%s",
+                sample.sha256[:16],
+                sample.original_filename,
                 extra={"job_id": job_id, "sample_id": str(sample.id)},
             )
 
@@ -122,20 +122,75 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # ── 3. Run the pipeline ──────────────────────────────
             start_time = time.time()
 
-            # Run MaljanApp synchronously in a thread to avoid blocking
-            # the async event loop (LangGraph's invoke is sync).
+            # Make sure core package is in sys.path
+            import os
+            import sys
+
+            core_path = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
+            )
+            if core_path not in sys.path:
+                sys.path.insert(0, core_path)
+
+            from maljan.app import MaljanApp
+            from maljan.core.config import Settings
+
             logger.info(
-                "Starting pipeline execution in thread...",
+                "Starting pipeline execution...",
                 extra={"job_id": job_id, "component": "pipeline"},
             )
-            pipeline_result = await asyncio.to_thread(
-                _run_pipeline_sync,
+
+            # Build settings with optional overrides
+            core_settings = Settings()
+            if job.config:
+                if "max_iterations" in job.config:
+                    core_settings.negotiation.max_iterations = job.config["max_iterations"]
+                if "llm_provider" in job.config:
+                    core_settings.llm.provider = job.config["llm_provider"]
+
+            app = MaljanApp(
+                config=core_settings,
+                # MALJAN_MOCK_MODE=true skips all LLM calls and returns fixture responses.
+                # Useful when the LLM provider's daily/minute quota is exhausted.
+                mock=os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true",
+            )
+
+            # Announce which agents are about to run so the frontend can show them
+            registered_agents = app.container.agent_registry.list_agents()
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "pipeline_started",
+                {
+                    "agents": registered_agents,
+                    "sample_filename": sample.original_filename,
+                    "sha256": sample.sha256[:16] + "...",
+                },
+            )
+            for agent_name in registered_agents:
+                await _publish_event(
+                    redis_conn,
+                    job_id,
+                    "agent_progress",
+                    {"agent": agent_name, "phase": "analyzing"},
+                )
+
+            # Execute the asynchronous pipeline natively to
+            # avoid "Event loop is closed" errors caused by threading mismatches.
+            pipeline_result = await app.arun(
                 file_hash=sample.sha256,
                 file_name=sample.original_filename,
-                config_overrides=job.config,
-                job_id=job_id,
-                redis_url=settings.redis_url,
             )
+
+            # Announce that all analysts have finished (pipeline -> negotiation phase)
+            for agent_name in registered_agents:
+                await _publish_event(
+                    redis_conn,
+                    job_id,
+                    "agent_progress",
+                    {"agent": agent_name, "phase": "done"},
+                )
+            await _publish_event(redis_conn, job_id, "phase_change", {"phase": "negotiation"})
 
             elapsed = time.time() - start_time
             logger.info(
@@ -157,11 +212,23 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 negotiation_log={
                     "discussion_history": [
                         {
-                            "agent_name": arg.get("agent_name", ""),
-                            "finding": arg.get("finding", ""),
-                            "confidence_score": arg.get("confidence_score", 0),
+                            "round": i + 1,
+                            "agent": (
+                                arg.agent_name
+                                if hasattr(arg, "agent_name")
+                                else arg.get("agent_name", "")
+                            ),
+                            "position": "",  # derived by confidence on frontend
+                            "confidence": (
+                                arg.confidence_score * 100
+                                if hasattr(arg, "confidence_score")
+                                else arg.get("confidence_score", 0) * 100
+                            ),
+                            "argument": (
+                                arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
+                            ),
                         }
-                        for arg in (pipeline_result.get("discussion_history") or [])
+                        for i, arg in enumerate(pipeline_result.get("discussion_history") or [])
                     ],
                     "confidence_history": pipeline_result.get("confidence_history", []),
                     "iteration_count": pipeline_result.get("iteration_count", 0),
@@ -173,7 +240,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             await db.flush()
 
             logger.info(
-                f"Report saved: id={report.id} verdict={report.verdict} confidence={report.overall_confidence}",
+                "Report saved: id=%s verdict=%s confidence=%s",
+                report.id,
+                report.verdict,
+                report.overall_confidence,
                 extra={"job_id": job_id, "component": "report"},
             )
 
@@ -266,59 +336,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
 
             return {"status": "failed", "error": error_msg}
-
-
-# ── Sync pipeline runner (runs in thread) ────────────────────────
-
-
-def _run_pipeline_sync(
-    file_hash: str,
-    file_name: str | None,
-    config_overrides: dict | None,
-    job_id: str,
-    redis_url: str,
-) -> dict[str, Any]:
-    """Run the MaljanApp pipeline synchronously.
-
-    This function runs inside ``asyncio.to_thread()`` so it does NOT
-    block the async event loop.  It also publishes real-time agent
-    progress events via a synchronous Redis connection.
-    """
-    import logging
-
-    pipe_logger = logging.getLogger(f"maljan.worker.pipeline.{job_id[:8]}")
-
-    # Add the maljan core package to sys.path if not already there
-    import os
-
-    core_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
-    )
-    if core_path not in sys.path:
-        sys.path.insert(0, core_path)
-
-    pipe_logger.info(f"Loading MaljanApp core from: {core_path}")
-
-    from maljan.app import MaljanApp
-    from maljan.core.config import Settings
-
-    # Build settings with optional overrides
-    core_settings = Settings()
-    if config_overrides:
-        if "max_iterations" in config_overrides:
-            core_settings.negotiation.max_iterations = config_overrides["max_iterations"]
-            pipe_logger.info(f"Override: max_iterations={config_overrides['max_iterations']}")
-        if "llm_provider" in config_overrides:
-            core_settings.llm.provider = config_overrides["llm_provider"]
-            pipe_logger.info(f"Override: llm_provider={config_overrides['llm_provider']}")
-
-    # Instantiate and run
-    pipe_logger.info(f"Running pipeline: hash={file_hash[:16]}... name={file_name}")
-    app = MaljanApp(config=core_settings, mock=False)
-    result = app.run(file_hash=file_hash, file_name=file_name)
-    pipe_logger.info(f"Pipeline returned: verdict={result.get('final_decision', 'N/A')}")
-
-    return result
 
 
 # ── Helpers ──────────────────────────────────────────────────────

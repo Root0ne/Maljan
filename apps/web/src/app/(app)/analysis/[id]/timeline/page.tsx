@@ -10,27 +10,15 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { useReport } from "../layout";
 
-interface Round {
+interface DebateEntry {
   round: number;
   agent: string;
   position: string;
   confidence: number;
   argument: string;
 }
-
-const MOCK_ROUNDS: Round[] = [
-  { round: 1, agent: "Static Analyst", position: "malicious", confidence: 85, argument: "High-entropy packed PE executable with UPX-modified headers and anti-debugging checks. Import table is minimal suggesting dynamic API resolution." },
-  { round: 1, agent: "Dynamic Analyst", position: "malicious", confidence: 80, argument: "Sample creates a child process and injects code into explorer.exe via NtCreateSection. Modifies registry run keys for persistence." },
-  { round: 1, agent: "Network Analyst", position: "suspicious", confidence: 65, argument: "Outbound HTTPS connections to 185.x.x.x:443 detected. JA3 fingerprint matches known Emotet patterns but could be coincidental." },
-  { round: 1, agent: "Code Analyst", position: "suspicious", confidence: 60, argument: "Obfuscated string decryption routines found. Dynamic API resolution via GetProcAddress chains but this pattern is also used in legitimate packers." },
-  { round: 1, agent: "Threat Intel Analyst", position: "malicious", confidence: 88, argument: "SHA256 hash matches known Emotet dropper first seen 2026-04-28. Associated C2 IPs are active in current Emotet campaign." },
-  { round: 2, agent: "Network Analyst", position: "malicious", confidence: 82, argument: "After reviewing Threat Intel data, the C2 IP matches active Emotet infrastructure. JA3 fingerprint match is not coincidental given the full context." },
-  { round: 2, agent: "Code Analyst", position: "malicious", confidence: 72, argument: "Correlating with dynamic analysis findings, the API resolution patterns are consistent with Emotet's loader. String decryption yields C2 URLs." },
-  { round: 2, agent: "Static Analyst", position: "malicious", confidence: 92, argument: "Cross-referencing with YARA matches confirms Emotet_Dropper_Gen signature. Entropy profile matches known Emotet packing methodology." },
-  { round: 2, agent: "Dynamic Analyst", position: "malicious", confidence: 88, argument: "Process injection target and technique match documented Emotet behavior. Registry persistence key format is identical to previous campaigns." },
-  { round: 2, agent: "Threat Intel Analyst", position: "malicious", confidence: 91, argument: "All behavioral indicators align with Epoch 4 Emotet activity. High confidence classification as Emotet banking trojan dropper." },
-];
 
 const AGENT_COLORS: Record<string, string> = {
   "Static Analyst": "#4493f8",
@@ -40,24 +28,123 @@ const AGENT_COLORS: Record<string, string> = {
   "Threat Intel Analyst": "#bc8cff",
 };
 
+const FALLBACK_COLOR = "#888888";
+
 const POSITION_STYLES: Record<string, string> = {
   malicious: "text-status-red",
   suspicious: "text-status-orange",
   benign: "text-status-green",
 };
 
+function confidenceToPosition(confidence: number): string {
+  if (confidence >= 75) return "malicious";
+  if (confidence >= 45) return "suspicious";
+  return "benign";
+}
+
+function parseNegotiationLog(negotiationLog: Record<string, unknown> | null | undefined): DebateEntry[] {
+  if (!negotiationLog) return [];
+
+  const entries: DebateEntry[] = [];
+
+  // Try discussion_history array
+  const discussion = negotiationLog.discussion_history as unknown[] | undefined;
+  if (Array.isArray(discussion)) {
+    discussion.forEach((item, i) => {
+      if (!item || typeof item !== "object") return;
+      const d = item as Record<string, unknown>;
+      // confidence may be 0-1 (pipeline) or 0-100 (already scaled)
+      let confidence = Number(d.confidence ?? d.final_confidence ?? 50);
+      if (confidence <= 1 && confidence > 0) confidence = confidence * 100;
+      entries.push({
+        round: Number(d.round ?? Math.floor(i / 3) + 1),
+        agent: String(d.agent ?? d.agent_name ?? "Unknown Agent"),
+        position: String(d.position ?? d.verdict ?? confidenceToPosition(confidence)),
+        confidence: Math.round(confidence),
+        argument: String(d.argument ?? d.content ?? d.message ?? ""),
+      });
+    });
+  }
+
+  // Fallback: try negotiation_rounds
+  const rounds = negotiationLog.negotiation_rounds as unknown[] | undefined;
+  if (entries.length === 0 && Array.isArray(rounds)) {
+    rounds.forEach((round, roundIdx) => {
+      if (!round || typeof round !== "object") return;
+      const r = round as Record<string, unknown>;
+      const agentArgs = (r.arguments ?? r.agent_arguments ?? []) as unknown[];
+      if (Array.isArray(agentArgs)) {
+        agentArgs.forEach((arg) => {
+          if (!arg || typeof arg !== "object") return;
+          const a = arg as Record<string, unknown>;
+          const confidence = Number(a.confidence ?? 50);
+          entries.push({
+            round: roundIdx + 1,
+            agent: String(a.agent ?? a.agent_name ?? "Unknown Agent"),
+            position: String(a.position ?? confidenceToPosition(confidence)),
+            confidence,
+            argument: String(a.argument ?? a.content ?? ""),
+          });
+        });
+      }
+    });
+  }
+
+  return entries;
+}
+
 export default function TimelineTab() {
-  /* Build chart data: per round, each agent's confidence */
-  const rounds = [...new Set(MOCK_ROUNDS.map((r) => r.round))];
-  const agents = [...new Set(MOCK_ROUNDS.map((r) => r.agent))];
+  const { report, job, loading } = useReport();
+
+  if (loading) {
+    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
+  }
+
+  if (!report && (!job || job.status !== "completed")) {
+    return (
+      <div className="p-4 text-sm text-text-secondary animate-pulse">
+        Analysis in progress...
+      </div>
+    );
+  }
+
+  const negotiationLog = report?.negotiation_log as Record<string, unknown> | null | undefined;
+  const debateEntries = parseNegotiationLog(negotiationLog);
+
+  // Also use agent_findings as a fallback for the timeline (one entry per agent)
+  const agentFallbackEntries: DebateEntry[] = debateEntries.length === 0
+    ? (report?.agent_findings ?? []).map((f, i) => ({
+        round: 1,
+        agent: f.agent_name,
+        position: confidenceToPosition(f.final_confidence),
+        confidence: Math.round(f.final_confidence),
+        argument: `Agent completed analysis with ${f.revision_rounds} revision round(s). ${f.claims?.length ?? 0} claims recorded.`,
+      }))
+    : [];
+
+  const allEntries = debateEntries.length > 0 ? debateEntries : agentFallbackEntries;
+
+  // Build chart data
+  const rounds = [...new Set(allEntries.map((r) => r.round))].sort((a, b) => a - b);
+  const agents = [...new Set(allEntries.map((r) => r.agent))];
   const chartData = rounds.map((round) => {
     const entry: Record<string, number> = { round };
     for (const a of agents) {
-      const r = MOCK_ROUNDS.find((x) => x.round === round && x.agent === a);
+      const r = allEntries.find((x) => x.round === round && x.agent === a);
       if (r) entry[a] = r.confidence;
     }
     return entry;
   });
+
+  if (allEntries.length === 0) {
+    return (
+      <div className="p-8 text-center text-sm text-text-secondary">
+        {report
+          ? "No negotiation timeline data was recorded for this analysis."
+          : "Analysis has not completed yet."}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -118,9 +205,9 @@ export default function TimelineTab() {
                   key={agent}
                   type="monotone"
                   dataKey={agent}
-                  stroke={AGENT_COLORS[agent]}
+                  stroke={AGENT_COLORS[agent] ?? FALLBACK_COLOR}
                   strokeWidth={1.5}
-                  dot={{ fill: AGENT_COLORS[agent], r: 3 }}
+                  dot={{ fill: AGENT_COLORS[agent] ?? FALLBACK_COLOR, r: 3 }}
                 />
               ))}
             </LineChart>
@@ -130,26 +217,29 @@ export default function TimelineTab() {
 
       {/* Debate Timeline */}
       <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             Negotiation Debate
           </h2>
+          <span className="text-xs text-text-muted">
+            {allEntries.length} entries across {rounds.length} round(s)
+          </span>
         </div>
         <div className="divide-y divide-border-light">
-          {MOCK_ROUNDS.map((entry, i) => (
+          {allEntries.map((entry, i) => (
             <div key={i} className="flex gap-4 px-4 py-3 hover:bg-bg-hover transition-colors">
               <div className="flex flex-col items-center shrink-0 w-12">
                 <span className="text-xs text-text-muted">R{entry.round}</span>
                 <div
                   className="w-2 h-2 rounded-full mt-1"
-                  style={{ backgroundColor: AGENT_COLORS[entry.agent] }}
+                  style={{ backgroundColor: AGENT_COLORS[entry.agent] ?? FALLBACK_COLOR }}
                 />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span
                     className="text-xs font-medium"
-                    style={{ color: AGENT_COLORS[entry.agent] }}
+                    style={{ color: AGENT_COLORS[entry.agent] ?? FALLBACK_COLOR }}
                   >
                     {entry.agent}
                   </span>
@@ -160,9 +250,11 @@ export default function TimelineTab() {
                     {entry.confidence}%
                   </span>
                 </div>
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  {entry.argument}
-                </p>
+                {entry.argument && (
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    {entry.argument}
+                  </p>
+                )}
               </div>
             </div>
           ))}

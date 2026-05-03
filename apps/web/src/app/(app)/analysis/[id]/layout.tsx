@@ -62,22 +62,6 @@ const TABS = [
   { key: "/stix", label: "STIX" },
 ];
 
-/* ── Mock fallback data ─────────────────────────────── */
-const MOCK_REPORT: Partial<ReportDetailDTO> = {
-  verdict: "malicious",
-  overall_confidence: 87,
-  malware_category: "Trojan.Emotet",
-  created_at: new Date().toISOString(),
-};
-
-const MOCK_JOB: Partial<JobDTO> = {
-  id: "mock-job",
-  sample_id: "mock-sample",
-  status: "completed",
-  duration_seconds: 252,
-  created_at: new Date().toISOString(),
-};
-
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return "N/A";
   const m = Math.floor(seconds / 60);
@@ -101,39 +85,50 @@ export default function AnalysisLayout({
   const [apiAvailable, setApiAvailable] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        // First fetch the job
-        const j = await api.getJob(id);
-        setJob(j);
+    let cancelled = false;
+    const TERMINAL = new Set(["completed", "failed"]);
+    const POLL_INTERVAL = 3000;
 
-        // Then try to fetch the report for this job
-        // The report endpoint uses report ID, but we may need to get it from the job
-        // For now we try report by job ID
-        try {
-          const r = await api.getReport(id);
-          setReport(r);
-        } catch {
-          /* report may not exist yet if job is still running */
-        }
+    async function fetchAll() {
+      try {
+        const j = await api.getJob(id);
+        if (cancelled) return;
+        setJob(j);
         setApiAvailable(true);
+
+        if (TERMINAL.has(j.status)) {
+          try {
+            const r = await api.getReportByJobId(id);
+            if (!cancelled) setReport(r);
+          } catch {
+            /* report may not exist for failed jobs */
+          }
+          if (!cancelled) setLoading(false);
+          return; // stop polling
+        }
+
+        // Job still running — schedule next poll
+        if (!cancelled) setLoading(false);
+        setTimeout(() => { if (!cancelled) fetchAll(); }, POLL_INTERVAL);
       } catch {
-        /* use mock fallback */
-      } finally {
-        setLoading(false);
+        /* API not reachable */
+        if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    fetchAll();
+    return () => { cancelled = true; };
   }, [id]);
 
-  /* Derive header data from real report or mock */
-  const verdict = report?.verdict || (MOCK_REPORT.verdict as string);
-  const confidence = report?.overall_confidence ?? MOCK_REPORT.overall_confidence ?? 0;
-  const category = report?.malware_category || MOCK_REPORT.malware_category || "";
-  const sampleId = job?.sample_id || MOCK_JOB.sample_id || "";
-  const duration = formatDuration(job?.duration_seconds ?? MOCK_JOB.duration_seconds);
+  /* Derive header data strictly from real API data — no mock fallback */
+  const verdict = report?.verdict?.toLowerCase() ?? "unknown";
+  const confidence = report?.overall_confidence ?? 0;
+  const category = report?.malware_category ?? "";
+  const sampleId = job?.sample_id ?? "";
+  const duration = formatDuration(job?.duration_seconds);
   const analyzedAt = report?.created_at
     ? new Date(report.created_at).toLocaleString()
-    : new Date().toLocaleString();
+    : job?.created_at ? new Date(job.created_at).toLocaleString() : "";
 
   const v = VERDICT_CONFIG[verdict] || VERDICT_CONFIG.unknown;
 
@@ -142,7 +137,7 @@ export default function AnalysisLayout({
       <div>
         {!apiAvailable && !loading && (
           <div className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
-            API not available. Showing demo data.
+            Could not connect to the API. Please ensure the backend is running.
           </div>
         )}
 

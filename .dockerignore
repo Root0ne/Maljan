@@ -28,8 +28,6 @@ docker/
 # Build artifacts & logs
 *.log
 reports/
-network-mcp/
-threatintel-mcp/
 
 # Test artifacts
 dummy_malware.exe

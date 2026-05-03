@@ -119,8 +119,17 @@ class StaticAnalyst(BaseAnalyst):
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit
-        self.tools = toolkit.get_tools()
-        self.logger.info("Initialized Ghidra MCP tools: %s", [t.name for t in self.tools])
+        # Filter out debugger_* tools — not needed for static analysis.
+        # Reduces tool count from ~29 to ~7 (management + import tools only),
+        # which prevents large tool schema from causing LLM timeouts.
+        all_tools = toolkit.get_tools()
+        self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
+        self.logger.info(
+            "Initialized Ghidra MCP tools: %d/%d (debugger_* excluded): %s",
+            len(self.tools),
+            len(all_tools),
+            [t.name for t in self.tools],
+        )
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

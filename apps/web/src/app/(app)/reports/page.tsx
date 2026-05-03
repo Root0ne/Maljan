@@ -23,12 +23,12 @@ const VERDICT_STYLES: Record<string, { dot: string; text: string }> = {
 };
 
 const MOCK_REPORTS: ReportRow[] = [
-  { id: "rpt-001", job_id: "job-001", sample_filename: "emotet_dropper.exe", final_verdict: "malicious", confidence_score: 87, created_at: "2026-05-02T14:30:00Z", techniques_count: 18, yara_count: 5, sigma_count: 5 },
-  { id: "rpt-002", job_id: "job-002", sample_filename: "invoice_macro.docm", final_verdict: "malicious", confidence_score: 92, created_at: "2026-05-02T12:15:00Z", techniques_count: 12, yara_count: 3, sigma_count: 4 },
-  { id: "rpt-003", job_id: "job-003", sample_filename: "setup_tool.msi", final_verdict: "suspicious", confidence_score: 58, created_at: "2026-05-01T09:45:00Z", techniques_count: 6, yara_count: 1, sigma_count: 2 },
-  { id: "rpt-004", job_id: "job-004", sample_filename: "readme.pdf", final_verdict: "benign", confidence_score: 12, created_at: "2026-04-30T16:20:00Z", techniques_count: 0, yara_count: 0, sigma_count: 0 },
-  { id: "rpt-005", job_id: "job-005", sample_filename: "lockbit3_payload.dll", final_verdict: "malicious", confidence_score: 96, created_at: "2026-04-30T11:00:00Z", techniques_count: 24, yara_count: 8, sigma_count: 7 },
-  { id: "rpt-006", job_id: "job-006", sample_filename: "chrome_update.exe", final_verdict: "malicious", confidence_score: 81, created_at: "2026-04-29T08:30:00Z", techniques_count: 14, yara_count: 4, sigma_count: 3 },
+  { id: "11111111-1111-1111-1111-111111111111", job_id: "11111111-1111-1111-1111-111111111111", sample_filename: "emotet_dropper.exe", final_verdict: "malicious", confidence_score: 87, created_at: "2026-05-02T14:30:00Z", techniques_count: 18, yara_count: 5, sigma_count: 5 },
+  { id: "22222222-2222-2222-2222-222222222222", job_id: "22222222-2222-2222-2222-222222222222", sample_filename: "invoice_macro.docm", final_verdict: "malicious", confidence_score: 92, created_at: "2026-05-02T12:15:00Z", techniques_count: 12, yara_count: 3, sigma_count: 4 },
+  { id: "33333333-3333-3333-3333-333333333333", job_id: "33333333-3333-3333-3333-333333333333", sample_filename: "setup_tool.msi", final_verdict: "suspicious", confidence_score: 58, created_at: "2026-05-01T09:45:00Z", techniques_count: 6, yara_count: 1, sigma_count: 2 },
+  { id: "44444444-4444-4444-4444-444444444444", job_id: "44444444-4444-4444-4444-444444444444", sample_filename: "readme.pdf", final_verdict: "benign", confidence_score: 12, created_at: "2026-04-30T16:20:00Z", techniques_count: 0, yara_count: 0, sigma_count: 0 },
+  { id: "55555555-5555-5555-5555-555555555555", job_id: "55555555-5555-5555-5555-555555555555", sample_filename: "lockbit3_payload.dll", final_verdict: "malicious", confidence_score: 96, created_at: "2026-04-30T11:00:00Z", techniques_count: 24, yara_count: 8, sigma_count: 7 },
+  { id: "66666666-6666-6666-6666-666666666666", job_id: "66666666-6666-6666-6666-666666666666", sample_filename: "chrome_update.exe", final_verdict: "malicious", confidence_score: 81, created_at: "2026-04-29T08:30:00Z", techniques_count: 14, yara_count: 4, sigma_count: 3 },
 ];
 
 function formatDate(iso: string) {

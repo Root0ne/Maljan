@@ -1,35 +1,78 @@
 "use client";
 
-const AGENTS_SUMMARY = [
-  { name: "Static Analyst", verdict: "malicious", confidence: 92 },
-  { name: "Dynamic Analyst", verdict: "malicious", confidence: 88 },
-  { name: "Network Analyst", verdict: "malicious", confidence: 85 },
-  { name: "Code Analyst", verdict: "suspicious", confidence: 72 },
-  { name: "Threat Intel Analyst", verdict: "malicious", confidence: 91 },
-];
-
-const KEY_FINDINGS = [
-  "High-entropy packed PE executable with anti-analysis techniques",
-  "Dynamic API resolution using GetProcAddress chains",
-  "C2 communication with known Emotet infrastructure (185.x.x.x)",
-  "Registry persistence via HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-  "Process injection into explorer.exe using NtCreateSection",
-  "Matches YARA rule: Emotet_Dropper_Gen (Florian Roth)",
-];
+import { useReport } from "./layout";
 
 const VERDICT_COLORS: Record<string, string> = {
   malicious: "bg-status-red",
   suspicious: "bg-status-orange",
   benign: "bg-status-green",
+  unknown: "bg-text-muted",
 };
 
 const VERDICT_TEXT: Record<string, string> = {
   malicious: "text-status-red",
   suspicious: "text-status-orange",
   benign: "text-status-green",
+  unknown: "text-text-muted",
 };
 
 export default function SummaryTab() {
+  const { report, job, loading } = useReport();
+
+  if (loading) {
+    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
+  }
+
+  // If there's no report yet and job is still running/queued, show a loading or waiting state
+  if (!report && (!job || job.status !== "completed")) {
+    return (
+      <div className="p-4 text-sm text-text-secondary animate-pulse">
+        Analysis in progress... Gathering intelligence.
+      </div>
+    );
+  }
+
+  const agentSummary = report?.agent_findings?.map(f => {
+    let verdict = "unknown";
+    if (f.final_confidence >= 80) verdict = "malicious";
+    else if (f.final_confidence >= 50) verdict = "suspicious";
+    else verdict = "benign";
+
+    return {
+      name: f.agent_name,
+      verdict: verdict,
+      confidence: Math.round(f.final_confidence),
+    };
+  }) || [];
+
+  let keyFindings: string[] = [];
+  if (report?.agent_findings) {
+    for (const finding of report.agent_findings) {
+      if (finding.claims && Array.isArray(finding.claims)) {
+        for (const claim of finding.claims) {
+          if (claim && typeof claim === 'object' && 'description' in claim) {
+             keyFindings.push(String((claim as any).description));
+          } else if (typeof claim === 'string') {
+             keyFindings.push(claim);
+          }
+        }
+      }
+    }
+  }
+
+  if (keyFindings.length === 0 && report?.mitre_techniques) {
+    keyFindings = report.mitre_techniques.map((t: any) => t.name || t.technique_id || "Unknown technique");
+  }
+
+  keyFindings = Array.from(new Set(keyFindings)).slice(0, 6);
+  if (keyFindings.length === 0) {
+    keyFindings = ["No specific findings were extracted."];
+  }
+
+  const verdictLabel = report?.verdict ? report.verdict.charAt(0).toUpperCase() + report.verdict.slice(1) : "Unknown";
+  const confidence = report?.overall_confidence ? Math.round(report.overall_confidence) : 0;
+  const verdictColorClass = VERDICT_TEXT[report?.verdict?.toLowerCase() || 'unknown'] || VERDICT_TEXT.unknown;
+
   return (
     <div className="grid grid-cols-2 gap-4">
       {/* Agent Confidence Overview */}
@@ -40,22 +83,24 @@ export default function SummaryTab() {
           </h2>
         </div>
         <div className="p-4 space-y-3">
-          {AGENTS_SUMMARY.map((a) => (
+          {agentSummary.length > 0 ? agentSummary.map((a) => (
             <div key={a.name} className="flex items-center gap-3">
               <span className="text-xs text-text-secondary w-32 shrink-0 truncate">
                 {a.name}
               </span>
               <div className="flex-1 h-2 bg-bg-deep rounded-sm overflow-hidden">
                 <div
-                  className={`h-full rounded-sm ${VERDICT_COLORS[a.verdict]}`}
+                  className={`h-full rounded-sm ${VERDICT_COLORS[a.verdict] || VERDICT_COLORS.unknown}`}
                   style={{ width: `${a.confidence}%`, opacity: 0.7 }}
                 />
               </div>
-              <span className={`text-xs font-mono w-8 text-right ${VERDICT_TEXT[a.verdict]}`}>
+              <span className={`text-xs font-mono w-8 text-right ${VERDICT_TEXT[a.verdict] || VERDICT_TEXT.unknown}`}>
                 {a.confidence}
               </span>
             </div>
-          ))}
+          )) : (
+            <div className="text-sm text-text-secondary">No agent data available.</div>
+          )}
         </div>
       </div>
 
@@ -68,10 +113,10 @@ export default function SummaryTab() {
         </div>
         <div className="p-4">
           <ul className="space-y-2">
-            {KEY_FINDINGS.map((f, i) => (
+            {keyFindings.map((f, i) => (
               <li key={i} className="flex gap-2 text-xs text-text-secondary">
                 <span className="text-status-red mt-0.5 shrink-0">-</span>
-                <span>{f}</span>
+                <span className="truncate" title={f}>{f}</span>
               </li>
             ))}
           </ul>
@@ -87,15 +132,12 @@ export default function SummaryTab() {
         </div>
         <div className="p-4">
           <p className="text-sm text-text-secondary leading-relaxed">
-            The submitted sample (emotet_dropper.exe) has been classified as{" "}
-            <strong className="text-status-red">Malicious</strong> with a consensus
-            confidence score of 87/100. All five agents concur on the malicious
-            nature of this executable. Static analysis reveals a packed PE binary
-            employing anti-analysis evasion. Dynamic analysis confirms process
-            injection into explorer.exe and persistent C2 communication with known
-            Emotet botnet infrastructure. The sample matches established YARA
-            signatures and exhibits MITRE ATT&CK techniques spanning Initial Access,
-            Execution, Persistence, Defense Evasion, and Command and Control tactics.
+            The analyzed sample has been classified as{" "}
+            <strong className={verdictColorClass}>{verdictLabel}</strong> with a consensus
+            confidence score of <strong>{confidence}/100</strong>.
+            {report?.malware_category ? ` Detected malware category: ${report.malware_category}.` : ""}
+            {agentSummary.length > 0 ? ` The analysis involved ${agentSummary.length} agent(s).` : ""}
+            {!report ? " Analysis is currently incomplete or data is missing." : ""}
           </p>
         </div>
       </div>

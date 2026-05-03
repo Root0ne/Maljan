@@ -45,6 +45,21 @@ async def get_report(
     return report
 
 
+@router.get("/job/{job_id}", response_model=ReportDetailResponse)
+async def get_report_by_job_id(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> dict:
+    """Get a full analysis report by its associated job ID."""
+    report = await svc.get_report_by_job(job_id, user)
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found for this job"
+        )
+    return report
+
+
 @router.get("/{report_id}/stix")
 async def get_stix_bundle(
     report_id: uuid.UUID,

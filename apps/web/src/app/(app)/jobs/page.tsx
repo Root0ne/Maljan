@@ -40,12 +40,12 @@ const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
 const FILTERS = ["all", "completed", "running", "pending", "failed", "cancelled"];
 
 const MOCK_JOBS: DisplayJob[] = [
-  { id: "j-001", sample_id: "s-001", status: "completed", created_at: new Date(Date.now() - 3600000).toISOString(), duration: "4m 12s" },
-  { id: "j-002", sample_id: "s-002", status: "running", created_at: new Date(Date.now() - 600000).toISOString(), duration: null },
-  { id: "j-003", sample_id: "s-003", status: "completed", created_at: new Date(Date.now() - 7200000).toISOString(), duration: "3m 48s" },
-  { id: "j-004", sample_id: "s-004", status: "failed", created_at: new Date(Date.now() - 10800000).toISOString(), duration: "0m 15s" },
-  { id: "j-005", sample_id: "s-005", status: "completed", created_at: new Date(Date.now() - 14400000).toISOString(), duration: "5m 02s" },
-  { id: "j-006", sample_id: "s-006", status: "pending", created_at: new Date(Date.now() - 300000).toISOString(), duration: null },
+  { id: "11111111-1111-1111-1111-111111111111", sample_id: "s-11111111-1111-1111-1111-111111111111", status: "completed", created_at: new Date(Date.now() - 3600000).toISOString(), duration: "4m 12s" },
+  { id: "22222222-2222-2222-2222-222222222222", sample_id: "s-22222222-2222-2222-2222-222222222222", status: "running", created_at: new Date(Date.now() - 600000).toISOString(), duration: null },
+  { id: "33333333-3333-3333-3333-333333333333", sample_id: "s-33333333-3333-3333-3333-333333333333", status: "completed", created_at: new Date(Date.now() - 7200000).toISOString(), duration: "3m 48s" },
+  { id: "44444444-4444-4444-4444-444444444444", sample_id: "s-44444444-4444-4444-4444-444444444444", status: "failed", created_at: new Date(Date.now() - 10800000).toISOString(), duration: "0m 15s" },
+  { id: "55555555-5555-5555-5555-555555555555", sample_id: "s-55555555-5555-5555-5555-555555555555", status: "completed", created_at: new Date(Date.now() - 14400000).toISOString(), duration: "5m 02s" },
+  { id: "66666666-6666-6666-6666-666666666666", sample_id: "s-66666666-6666-6666-6666-666666666666", status: "pending", created_at: new Date(Date.now() - 300000).toISOString(), duration: null },
 ];
 
 function timeAgo(dateStr: string): string {

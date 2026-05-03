@@ -111,8 +111,19 @@ export interface DashboardStats {
 }
 
 /* ── WebSocket Events ────────────────────────────────── */
+export type WSEventType =
+  | "status_change"
+  | "pipeline_started"
+  | "agent_progress"
+  | "phase_change"
+  | "completed"
+  | "error"
+  | "cancelled"
+  | "heartbeat"
+  | "pong";
+
 export interface WSEvent {
-  type: "agent_started" | "agent_completed" | "round_update" | "confidence_update" | "analysis_complete" | "error" | "heartbeat";
+  type: WSEventType;
   data: Record<string, unknown>;
-  timestamp: string;
+  ts: string;
 }

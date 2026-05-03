@@ -21,7 +21,7 @@ export function useWebSocket(jobId: string | null) {
     ws.onmessage = (evt) => {
       try {
         const event: WSEvent = JSON.parse(evt.data);
-        if (event.type !== "heartbeat") {
+        if (event.type !== "heartbeat" && event.type !== "pong") {
           setEvents((prev) => [...prev, event]);
         }
       } catch {

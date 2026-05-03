@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
+    "maljan",
 ]
 
 [dependency-groups]
@@ -53,3 +54,6 @@ select = ["E", "F", "I", "W", "UP", "B"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+
+[tool.uv.sources]
+maljan = { path = "../../", editable = true }

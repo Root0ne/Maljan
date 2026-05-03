@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 /* ── Shared response types ────────────────────────────── */
 
@@ -104,7 +104,7 @@ class ApiClient {
       headers,
     });
 
-    if (res.status === 401) {
+    if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
@@ -137,6 +137,15 @@ class ApiClient {
       headers,
       body: formData,
     });
+
+    if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        window.location.href = "/login";
+      }
+      throw new Error("Unauthorized");
+    }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -226,6 +235,10 @@ class ApiClient {
   /* ── Reports ───────────────────────────────────────── */
   getReport(reportId: string) {
     return this.request<ReportDetailDTO>(`/api/v1/reports/${reportId}`);
+  }
+
+  getReportByJobId(jobId: string) {
+    return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
   }
 
   getReportTimeline(reportId: string) {
