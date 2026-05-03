@@ -67,10 +67,15 @@ class TestJudgeAgentMediate:
             resolution_summary="Partial agreement found.",
             confidence=0.5,
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = verdict
-
         judge = JudgeAgent(llm=mock_llm)
-        result = judge.mediate(sample_reports, sample_history)
+
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Mediation result text."),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
+            mock_llm.with_structured_output.side_effect = Exception("force fallback")
+            result = judge.mediate(sample_reports, sample_history)
 
         assert isinstance(result, tuple)
         assert len(result) == 2
@@ -83,10 +88,15 @@ class TestJudgeAgentMediate:
             resolution_summary="All experts agree.",
             confidence=0.95,
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = verdict
-
         judge = JudgeAgent(llm=mock_llm)
-        argument, is_consensus = judge.mediate(sample_reports, sample_history)
+
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Mediation result text."),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
+            mock_llm.with_structured_output.side_effect = Exception("force fallback")
+            argument, is_consensus = judge.mediate(sample_reports, sample_history)
 
         assert isinstance(argument, AgentArgument)
         assert argument.agent_name == "Mediator"
@@ -103,10 +113,11 @@ class TestJudgeAgentMediate:
         )
         judge = JudgeAgent(llm=mock_llm)
 
-        # Patch the private _fallback_mediate to directly return our verdict,
-        # bypassing LangChain chain construction which is hard to mock end-to-end.
-        with patch.object(judge, "_fallback_mediate", return_value=verdict):
-            # Also make structured path raise so fallback is always triggered
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Full agreement."),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
             _, is_consensus = judge.mediate(sample_reports, sample_history)
 
@@ -121,10 +132,16 @@ class TestJudgeAgentMediate:
             resolution_summary="Unresolved.",
             confidence=CONSENSUS_THRESHOLD - 0.01,
         )
-        mock_llm.with_structured_output.return_value.invoke.return_value = verdict
-
         judge = JudgeAgent(llm=mock_llm)
-        _, is_consensus = judge.mediate(sample_reports, sample_history)
+
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Unresolved."),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
+            mock_llm.with_structured_output.side_effect = Exception("force fallback")
+            _, is_consensus = judge.mediate(sample_reports, sample_history)
+
         assert is_consensus is False
 
     def test_mediate_generic_any_agent_count(self, mock_llm: MagicMock) -> None:
@@ -134,7 +151,11 @@ class TestJudgeAgentMediate:
         reports = {f"agent_{i}": f"Report from agent {i}" for i in range(5)}
         judge = JudgeAgent(llm=mock_llm)
 
-        with patch.object(judge, "_fallback_mediate", return_value=verdict):
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Ok."),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
             argument, is_consensus = judge.mediate(reports, [])
 
@@ -150,7 +171,11 @@ class TestJudgeAgentMediate:
         )
         judge = JudgeAgent(llm=mock_llm)
 
-        with patch.object(judge, "_fallback_mediate", return_value=verdict):
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Partial."),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
             argument, _ = judge.mediate(sample_reports, sample_history)
 
@@ -161,14 +186,23 @@ class TestJudgeAgentMediate:
     ) -> None:
         """When structured output raises, fallback should produce a MediatorVerdict."""
         llm = MagicMock()
-        # Structured path raises
-        llm.with_structured_output.side_effect = Exception("Provider not supported")
-        # Plain text path
-        llm.invoke.return_value = MagicMock(content="Confidence: 0.6")
-
         judge = JudgeAgent(llm=llm)
-        # Should not raise — fallback activates
-        argument, _ = judge.mediate(sample_reports, sample_history)
+
+        verdict = MediatorVerdict(
+            contradictions=[],
+            resolution_summary="Confidence: 0.6",
+            confidence=0.6,
+        )
+
+        with (
+            patch.object(judge, "_initialize_mcp_client"),
+            patch.object(judge, "execute_tool_loop", return_value="Confidence: 0.6"),
+            patch.object(judge, "_fallback_mediate", return_value=verdict),
+        ):
+            llm.with_structured_output.side_effect = Exception("Provider not supported")
+            # Should not raise — fallback activates
+            argument, _ = judge.mediate(sample_reports, sample_history)
+
         assert argument.agent_name == "Mediator"
 
 

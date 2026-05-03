@@ -3,9 +3,25 @@
 Phase 1b: Overrides analyze_isr() and revise_isr() to extract structured
 ClaimEvidence objects. Focuses on C2 beaconing patterns, DGA domains,
 TLS certificate anomalies, and protocol tunneling.
+
+Data Flow:
+  - Fixture mode: Receives pre-parsed Zeek JSON text from NetworkParser.
+    Analysis is LLM-only (text-based reasoning on parsed tables).
+  - Sandbox mode: Receives PCAP file path from CAPE/Triage sandbox.
+    Analysis uses Network MCP tools (read_pcap_summary, extract_dns,
+    extract_http) for deep traffic inspection, falling back to text
+    analysis if MCP initialization fails.
+
+PCAP detection heuristic:
+  If the input data looks like a file path ending in .pcap/.pcapng,
+  the agent treats it as a PCAP reference and uses MCP tools.
+  Otherwise, it falls back to LLM-only text analysis.
 """
 
 from __future__ import annotations
+
+import os
+import re
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -24,6 +40,24 @@ _ISR_SYSTEM = (
     "T1048 (Exfiltration), T1568 (Dynamic Resolution)."
 )
 
+# Regex to detect PCAP file paths in the input data
+_PCAP_PATH_RE = re.compile(r"[\w/\\:.-]+\.pcapn?g?\b", re.IGNORECASE)
+
+
+def _detect_pcap_path(data: str) -> str | None:
+    """Extract a PCAP file path from the input data if present.
+
+    Returns the first path-like string ending in .pcap or .pcapng,
+    or None if no PCAP reference is found.
+    """
+    match = _PCAP_PATH_RE.search(data)
+    if match:
+        candidate = match.group(0)
+        # Basic sanity: must look like a real path (has directory separator or drive letter)
+        if os.sep in candidate or "/" in candidate or "\\" in candidate or ":" in candidate:
+            return candidate
+    return None
+
 
 @register_agent("network")
 class NetworkAnalyst(BaseAnalyst):
@@ -38,7 +72,6 @@ class NetworkAnalyst(BaseAnalyst):
             return
 
         import asyncio
-        import os
         import sys
 
         from mcp import StdioServerParameters
@@ -58,22 +91,37 @@ class NetworkAnalyst(BaseAnalyst):
         toolkit = MCPLangChainToolkit(server_params)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
 
-        if loop.is_running():
+        if loop is not None and loop.is_running():
             import nest_asyncio
 
             nest_asyncio.apply()
             loop.run_until_complete(toolkit.initialize())
         else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit
         self.tools = toolkit.get_tools()
         self.logger.info("Initialized Network MCP toolkit with %d tools", len(self.tools))
+
+    def _try_initialize_mcp(self) -> bool:
+        """Attempt MCP initialization, returning True on success.
+
+        Unlike _initialize_mcp_client(), this method catches all errors
+        and returns False instead of crashing. Used for graceful degradation
+        when scapy or other dependencies are unavailable.
+        """
+        try:
+            self._initialize_mcp_client()
+            return bool(self.tools)
+        except Exception as exc:
+            self.logger.warning("Network MCP initialization failed (graceful degradation): %s", exc)
+            return False
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
@@ -82,8 +130,35 @@ class NetworkAnalyst(BaseAnalyst):
     def analyze(self, data: str) -> str:
         """Translates network flows into a C2 connectivity profile."""
         self.logger.info("Executing network flow analysis...")
-        self._initialize_mcp_client()
 
+        pcap_path = _detect_pcap_path(data)
+
+        if pcap_path:
+            # PCAP mode: use MCP tools for deep analysis
+            self.logger.info("PCAP path detected: %s — using MCP tools.", pcap_path)
+            mcp_ready = self._try_initialize_mcp()
+
+            if mcp_ready:
+                prompt_messages = [
+                    ("system", _ISR_SYSTEM),
+                    (
+                        "human",
+                        "A PCAP capture file is available for analysis.\n\n"
+                        f"PCAP file path: {pcap_path}\n\n"
+                        "Use the available tools to:\n"
+                        "1. read_pcap_summary — get packet overview\n"
+                        "2. extract_dns — extract all DNS queries\n"
+                        "3. extract_http — extract HTTP request headers\n\n"
+                        "Then analyze the results for C2 beaconing, DGA domains, "
+                        "data exfiltration, and protocol tunneling.",
+                    ),
+                ]
+                content = self.execute_tool_loop(prompt_messages)
+                return str(content)
+            else:
+                self.logger.warning("MCP unavailable, falling back to text analysis of PCAP ref.")
+
+        # Text mode: LLM-only analysis on pre-parsed data
         target_info = (
             f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
         )
@@ -95,11 +170,21 @@ class NetworkAnalyst(BaseAnalyst):
                 "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
                 "in this Zeek/pcap network data:\n"
                 f"{target_info}\n\n"
-                "You may use tools to extract more information from the PCAP.",
+                "Identify beaconing patterns, suspicious domains, and exfiltration channels.",
             ),
         ]
 
-        content = self.execute_tool_loop(prompt_messages)
+        # Try MCP for text mode too (agent might extract useful patterns)
+        mcp_ready = self._try_initialize_mcp()
+        if mcp_ready:
+            content = self.execute_tool_loop(prompt_messages)
+        else:
+            from langchain_core.prompts import ChatPromptTemplate as CPT
+
+            prompt = CPT.from_messages(prompt_messages)
+            response = (prompt | self.llm).invoke({})
+            content = str(response.content)
+
         return str(content)
 
     def revise(
@@ -111,7 +196,6 @@ class NetworkAnalyst(BaseAnalyst):
     ) -> str:
         """Revise network analysis based on peer findings and mediator feedback."""
         self.logger.info("Revising network analysis based on peer feedback...")
-        self._initialize_mcp_client()
 
         peer_section = (
             "\n\n".join(
@@ -136,12 +220,10 @@ class NetworkAnalyst(BaseAnalyst):
                 "PEER ANALYST REPORTS:\n{peer_section}\n\n"
                 "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
                 "ORIGINAL RAW DATA:\n{data}\n\n"
-                "Revise your analysis addressing the contradictions above. Use tools if necessary.",
+                "Revise your analysis addressing the contradictions above.",
             ),
         ]
 
-        # Use invoke since revision might not need tools unless they want to re-query
-        # but to be safe, we allow tool usage
         prompt = ChatPromptTemplate.from_messages(prompt_messages)
         response = (prompt | self.llm).invoke(
             {
@@ -160,8 +242,48 @@ class NetworkAnalyst(BaseAnalyst):
     def analyze_isr(self, data: str) -> AgentISR:
         """Return a structured AgentISR with evidence-backed network claims."""
         self.logger.info("Executing network ISR analysis...")
-        self._initialize_mcp_client()
 
+        pcap_path = _detect_pcap_path(data)
+
+        if pcap_path:
+            self.logger.info("PCAP path detected for ISR: %s", pcap_path)
+            mcp_ready = self._try_initialize_mcp()
+
+            if mcp_ready:
+                prompt_messages = [
+                    ("system", _ISR_SYSTEM),
+                    (
+                        "human",
+                        "A PCAP capture file is available for analysis.\n\n"
+                        f"PCAP file path: {pcap_path}\n\n"
+                        "Use the available tools to inspect the PCAP, then return "
+                        "a structured list of findings.\n\n"
+                        "For each finding state: the claim, the exact artifact reference "
+                        "(e.g. 'PCAP frame 10: dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
+                        "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
+                        "Format each finding as:\n"
+                        "CLAIM: <claim text>\n"
+                        "EVIDENCE: <artifact reference>\n"
+                        "CONFIDENCE: <float>\n"
+                        "TECHNIQUE: <T-ID or NONE>\n"
+                        "---\n",
+                    ),
+                ]
+                content = self.execute_tool_loop(prompt_messages)
+                claims = _parse_claim_blocks(content)
+
+                if not claims:
+                    return self._text_to_isr(content, revision_round=0)
+
+                return AgentISR(
+                    agent_id=self.name,
+                    domain="network",
+                    claims=claims,
+                    dissent_items=[],
+                    revision_round=0,
+                )
+
+        # Fallback: text-based ISR analysis
         target_info = (
             f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
         )
@@ -171,7 +293,6 @@ class NetworkAnalyst(BaseAnalyst):
             (
                 "human",
                 "Analyze the network data and return a structured list of findings.\n"
-                "You may use tools to gather more information (extract DNS, HTTP, summaries, etc.).\n"
                 "For each finding state: the claim, the exact artifact reference "
                 "(e.g. 'PCAP frame 10: dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
@@ -185,7 +306,15 @@ class NetworkAnalyst(BaseAnalyst):
             ),
         ]
 
-        content = self.execute_tool_loop(prompt_messages)
+        # Try MCP for text mode
+        mcp_ready = self._try_initialize_mcp()
+        if mcp_ready:
+            content = self.execute_tool_loop(prompt_messages)
+        else:
+            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            response = (prompt | self.llm).invoke({})
+            content = str(response.content)
+
         claims = _parse_claim_blocks(content)
 
         if not claims:

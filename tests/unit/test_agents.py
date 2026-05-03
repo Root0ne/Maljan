@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,16 +17,14 @@ class TestStaticAnalystAnalyze:
 
     def test_analyze_returns_llm_content(self, mock_llm: MagicMock) -> None:
         """analyze() returns the LLM response content as a string."""
-        mock_llm.invoke.return_value = MagicMock(content="Found T1027 obfuscation")
         agent = StaticAnalyst(llm=mock_llm, name="StaticAnalyst")
-
-        # Create a mock chain that returns expected content
-        chain_mock = MagicMock()
-        chain_mock.invoke.return_value = MagicMock(content="Found T1027 obfuscation")
-        mock_llm.__or__ = MagicMock(return_value=chain_mock)
-
-        result = agent.analyze("test data")
+        with (
+            patch.object(agent, "_initialize_mcp_client"),
+            patch.object(agent, "execute_tool_loop", return_value="Found T1027 obfuscation"),
+        ):
+            result = agent.analyze("test data")
         assert isinstance(result, str)
+        assert "T1027" in result
 
     def test_safe_analyze_catches_errors(self, mock_llm: MagicMock) -> None:
         """safe_analyze() wraps errors in AnalystError."""
@@ -42,13 +40,14 @@ class TestDynamicAnalystAnalyze:
 
     def test_analyze_returns_llm_content(self, mock_llm: MagicMock) -> None:
         """analyze() returns the LLM response content."""
-        chain_mock = MagicMock()
-        chain_mock.invoke.return_value = MagicMock(content="Found T1055 injection")
-        mock_llm.__or__ = MagicMock(return_value=chain_mock)
-
         agent = DynamicAnalyst(llm=mock_llm, name="DynamicAnalyst")
-        result = agent.analyze("test data")
+        with (
+            patch.object(agent, "_initialize_mcp_client"),
+            patch.object(agent, "execute_tool_loop", return_value="Found T1055 injection"),
+        ):
+            result = agent.analyze("test data")
         assert isinstance(result, str)
+        assert "T1055" in result
 
 
 class TestNetworkAnalystAnalyze:
@@ -56,13 +55,14 @@ class TestNetworkAnalystAnalyze:
 
     def test_analyze_returns_llm_content(self, mock_llm: MagicMock) -> None:
         """analyze() returns the LLM response content."""
-        chain_mock = MagicMock()
-        chain_mock.invoke.return_value = MagicMock(content="Found T1071 C2 beacon")
-        mock_llm.__or__ = MagicMock(return_value=chain_mock)
-
         agent = NetworkAnalyst(llm=mock_llm, name="NetworkAnalyst")
-        result = agent.analyze("test data")
+        with (
+            patch.object(agent, "_try_initialize_mcp", return_value=True),
+            patch.object(agent, "execute_tool_loop", return_value="Found T1071 C2 beacon"),
+        ):
+            result = agent.analyze("test data")
         assert isinstance(result, str)
+        assert "T1071" in result
 
 
 # ---------------------------------------------------------------------------

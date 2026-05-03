@@ -6,6 +6,7 @@ tools into LangChain BaseTool objects for use with create_react_agent.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -19,11 +20,18 @@ from maljan.core.logger import logger
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
-    def __init__(self, server_params: StdioServerParameters):
+    def __init__(
+        self,
+        server_params: StdioServerParameters,
+        output_guardrail: Callable[[str], str] | None = None,
+        max_output_chars: int = 8000,
+    ):
         self.server_params = server_params
         self.session: ClientSession | None = None
         self._exit_stack = None
         self._tools: list[BaseTool] = []
+        self._output_guardrail = output_guardrail
+        self._max_output_chars = max_output_chars
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -69,10 +77,12 @@ class MCPLangChainToolkit:
 
         # Build Pydantic model from JSON schema dynamically
         properties = {}
-        required = getattr(mcp_tool.inputSchema, "required", [])
-        schema_props = getattr(mcp_tool.inputSchema, "properties", {})
+        required = mcp_tool.inputSchema.get("required", [])
+        schema_props = mcp_tool.inputSchema.get("properties", {})
 
         for prop_name, prop_schema in schema_props.items():
+            if not isinstance(prop_schema, dict):
+                prop_schema = {"type": "string"}
             prop_type_str = prop_schema.get("type", "string")
             prop_desc = prop_schema.get("description", "")
 
@@ -105,7 +115,8 @@ class MCPLangChainToolkit:
                 if result.isError:
                     return f"Error from tool: {result.content}"
                 # Join content parts (usually TextContent)
-                return "\n".join([c.text for c in result.content if hasattr(c, "text")])
+                output = "\n".join([c.text for c in result.content if hasattr(c, "text")])
+                return self._apply_output_guardrail(output)
             except Exception as e:
                 return f"Tool execution failed: {str(e)}"
 
@@ -116,3 +127,34 @@ class MCPLangChainToolkit:
             description=mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server.",
             args_schema=args_schema,
         )
+
+    def _apply_output_guardrail(self, output: str) -> str:
+        """Limit tool output size to prevent LLM context overflow.
+
+        If the output exceeds ``_max_output_chars``:
+          1. Call ``_output_guardrail`` (e.g. FunctionSummarizer) when available.
+          2. Fall back to simple character truncation otherwise.
+
+        Args:
+            output: Raw tool output text.
+
+        Returns:
+            Potentially shortened output.
+        """
+        if len(output) <= self._max_output_chars:
+            return output
+
+        logger.warning(
+            "Tool output exceeds limit (%d > %d chars). Applying guardrail.",
+            len(output),
+            self._max_output_chars,
+        )
+
+        if self._output_guardrail is not None:
+            try:
+                return self._output_guardrail(output)
+            except Exception as exc:
+                logger.warning("Output guardrail failed: %s — falling back to truncation.", exc)
+
+        # Fallback: simple truncation with a marker
+        return output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"

@@ -233,7 +233,7 @@ class ATTCKIndex:
         evidence_vec = self._tf_idf_vector(self._tokenize(evidence_text))
         score = _cosine_similarity(evidence_vec, tech_vec)
 
-        logger.debug("ATT&CK validation: %s vs evidence → score=%.3f", technique_id, score)
+        logger.debug("ATT&CK validation: %s vs evidence -> score=%.3f", technique_id, score)
         return score
 
     @property

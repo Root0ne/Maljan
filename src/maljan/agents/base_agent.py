@@ -59,8 +59,7 @@ class BaseAnalyst(ABC):
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
-        # We need to ensure the LLM has tool calling enabled.
-        # create_react_agent handles binding tools to the LLM.
+        # Limit recursion to prevent infinite tool-calling loops with many tools.
         agent_executor = create_react_agent(self.llm, self.tools)
 
         messages = []
@@ -70,23 +69,49 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 messages.append(HumanMessage(content=content))
 
-        # Because we might be calling async tools, we should use ainvoke if possible.
-        # But BaseAnalyst runs synchronously. We use an event loop.
         import asyncio
 
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        async def _run_with_timeout() -> dict:
+            timeout = settings.react_agent_timeout
+            self.logger.info(
+                "Invoking ReAct agent (timeout=%ds, tools=%d)...",
+                timeout,
+                len(self.tools),
+            )
+            try:
+                result = await asyncio.wait_for(
+                    agent_executor.ainvoke(
+                        {"messages": messages},
+                        {"recursion_limit": settings.react_agent_max_steps},
+                    ),
+                    timeout=timeout,
+                )
+                msg_count = len(result.get("messages", []))
+                self.logger.info("ReAct loop completed: %d messages in conversation.", msg_count)
+                return result
+            except TimeoutError:
+                self.logger.error(
+                    "ReAct agent timed out after %ds. Returning partial result.", timeout
+                )
+                raise
 
-        if loop.is_running():
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
             import nest_asyncio
 
             nest_asyncio.apply()
-            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+            result = loop.run_until_complete(_run_with_timeout())
         else:
-            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(_run_with_timeout())
+            finally:
+                loop.close()
 
         final_message = result["messages"][-1]
         return str(final_message.content)
@@ -153,7 +178,7 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error(f"Analysis failed: {e}")
+            self.logger.error("Analysis failed: %s", e)
             raise AnalystError(f"{self.name} analysis failed: {e}") from e
 
     def safe_analyze_isr(self, data: str) -> AgentISR:
@@ -164,7 +189,7 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error(f"ISR analysis failed: {e}")
+            self.logger.error("ISR analysis failed: %s", e)
             raise AnalystError(f"{self.name} ISR analysis failed: {e}") from e
 
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
@@ -251,7 +276,7 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error(f"Revision failed: {e}")
+            self.logger.error("Revision failed: %s", e)
             raise AnalystError(f"{self.name} revision failed: {e}") from e
 
     def safe_revise_isr(
@@ -271,7 +296,7 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error(f"ISR revision failed: {e}")
+            self.logger.error("ISR revision failed: %s", e)
             raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
 
     # ------------------------------------------------------------------
@@ -326,12 +351,12 @@ class BaseAnalyst(ABC):
             enc = tiktoken.get_encoding("cl100k_base")
             tokens = enc.encode(text)
             if len(tokens) > limit:
-                self.logger.warning(f"Input truncated from {len(tokens)} to {limit} tokens")
+                self.logger.warning("Input truncated from %d to %d tokens", len(tokens), limit)
                 return enc.decode(tokens[:limit])
         except Exception:
             # Fallback: rough character-based truncation (4 chars ~ 1 token)
             char_limit = limit * 4
             if len(text) > char_limit:
-                self.logger.warning(f"Input truncated (fallback) to ~{limit} tokens")
+                self.logger.warning("Input truncated (fallback) to ~%d tokens", limit)
                 return text[:char_limit]
         return text

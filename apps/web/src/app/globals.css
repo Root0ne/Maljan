@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* ── GTI-Inspired Design Tokens ─────────────────────── */
+:root {
+  --bg-deep: #0d1117;
+  --bg-surface: #161b22;
+  --bg-elevated: #1c2333;
+  --bg-active: #21262d;
+  --bg-hover: #1c2333;
+
+  --border: #30363d;
+  --border-light: #21262d;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+
+  --status-red: #f85149;
+  --status-orange: #d29922;
+  --status-green: #3fb950;
+  --status-blue: #4493f8;
+  --status-purple: #bc8cff;
+
+  --accent: #4493f8;
+  --accent-hover: #388bfd;
+
+  --sidebar-width: 48px;
+  --sidebar-expanded: 220px;
+  --header-height: 48px;
+}
+
+/* ── Tailwind v4 Theme Extension ────────────────────── */
+@theme inline {
+  --color-bg-deep: var(--bg-deep);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-active: var(--bg-active);
+  --color-bg-hover: var(--bg-hover);
+
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --color-status-red: var(--status-red);
+  --color-status-orange: var(--status-orange);
+  --color-status-green: var(--status-green);
+  --color-status-blue: var(--status-blue);
+  --color-status-purple: var(--status-purple);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+}
+
+/* ── Base Styles ────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* ── Scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Focus ──────────────────────────────────────────── */
+*:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Selection ──────────────────────────────────────── */
+::selection {
+  background: rgba(68, 147, 248, 0.3);
+}
+
+/* ── Table ──────────────────────────────────────────── */
+table {
+  border-collapse: collapse;
+}

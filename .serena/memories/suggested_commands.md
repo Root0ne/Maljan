@@ -1,9 +1,9 @@
 # Maljan — Suggested Commands
 
-All commands run from the project root: `d:\MyCodes\Maljan`
+All commands run from the project root: `/media/user/Kingston1/MyCodes/Maljan`
 
 ## Package Management (uv)
-```powershell
+```bash
 uv sync                          # Install all dependencies
 uv add <package>                 # Add a runtime dependency
 uv add --dev <package>           # Add a dev dependency
@@ -11,7 +11,7 @@ uv run <command>                 # Run any command in the venv
 ```
 
 ## Quality Gates (MUST run after every code change)
-```powershell
+```bash
 # Full gate (lint + format-check + typecheck + test) — mirrors CI
 make check
 
@@ -29,7 +29,7 @@ make test-integration # pytest tests/integration/ -q
 ```
 
 ## Testing
-```powershell
+```bash
 uv run pytest tests/ -q                          # All tests
 uv run pytest tests/unit/ -v                     # Unit only, verbose
 uv run pytest tests/unit/test_foo.py -v          # Single file
@@ -41,25 +41,34 @@ make test-qdrant
 ```
 
 ## Benchmark
-```powershell
+```bash
 make benchmark
 # OR
-set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite
-# OR (after pip install)
+PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite
+# OR (after install)
 maljan benchmark
 maljan benchmark --fixtures-dir tests/evaluation/fixtures/ --format json
 ```
 
 ## CLI
-```powershell
+```bash
 uv run maljan analyze <sample_file>
 uv run maljan analyze <sample_file> --provider openai --model gpt-4o
 uv run maljan info
 uv run maljan benchmark
 ```
 
+## MCP Servers (local dev)
+```bash
+# NetworkMCP server
+uv run python network-mcp/server.py
+
+# ThreatIntelMCP server
+uv run python threatintel-mcp/server.py
+```
+
 ## Git
-```powershell
+```bash
 git status
 git add -A
 git commit -m "type(scope): message"
@@ -68,14 +77,12 @@ git log --oneline -10
 ```
 
 ## Pre-commit
-```powershell
+```bash
 make setup               # Install pre-commit hooks
 make pre-commit-run      # Run all hooks manually
 ```
 
-## Windows-specific Notes
-- Use `Get-ChildItem` instead of `ls`
-- Use `Move-Item` instead of `mv`
-- Use `Test-Path` to check file existence
-- PowerShell uses `;` not `&&` for chaining commands
-- `set PYTHONPATH=src` for Makefile benchmark target
+## OS Notes (Linux)
+- Project runs on Linux (WSL path `.venv-wsl` exists alongside `.venv`)
+- Use `ls`, `mv`, `test -f` etc. (not PowerShell equivalents)
+- `PYTHONPATH=src` prefix for direct module runs

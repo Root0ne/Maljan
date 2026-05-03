@@ -422,9 +422,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # Results are merged into isr_reports as domain="yara" before cascade scoring.
             # Graceful degradation: any error is logged and scan is silently skipped.
             try:
-                from maljan.analysis.yara_layer import YaraLayer
-
-                yara_layer: YaraLayer = container.get_yara_layer()  # type: ignore[assignment]
+                yara_layer = container.get_yara_layer()
                 if yara_layer.rule_count > 0:
                     # Build combined scan text from all available analyst signals
                     scan_parts: list[str] = list((state.get("reports") or {}).values())
@@ -448,9 +446,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # Results are merged into isr_reports as domain="sigma" before cascade.
             # Graceful degradation: any error is logged and scan is silently skipped.
             try:
-                from maljan.analysis.sigma_layer import SigmaLayer
-
-                sigma_layer: SigmaLayer = container.get_sigma_layer()  # type: ignore[assignment]
+                sigma_layer = container.get_sigma_layer()
                 if sigma_layer.rule_count > 0:
                     # Build combined scan text from all analyst signals
                     sigma_scan_parts: list[str] = list((state.get("reports") or {}).values())
@@ -487,7 +483,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # get_memory_store() is cached — no repeated construction cost.
             memory_store: MemoryStore | None = None
             try:
-                memory_store = container.get_memory_store()  # type: ignore[assignment]
+                memory_store = container.get_memory_store()
             except Exception as e:
                 logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
 

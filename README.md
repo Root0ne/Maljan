@@ -1,8 +1,9 @@
 # Maljan: Adaptive Multi-Agent Malware Analysis Framework
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 [![Architecture](https://img.shields.io/badge/docs-architecture-informational)](docs/ARCHITECTURE.md)
+[![Tests](https://img.shields.io/badge/tests-801%20passed-brightgreen)](tests/)
 
 Maljan is an enterprise-grade cybersecurity analysis framework for automated, structured, and hallucination-resistant malware evaluation. It orchestrates a network of specialized LLM analyst agents that debate their findings through a structured negotiation protocol before a Chief Judge issues a validated, MITRE ATT&CK-grounded STIX 2.1 verdict.
 
@@ -522,7 +523,7 @@ All settings are Pydantic `BaseSettings` with `__` as the nesting delimiter. Val
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEGOTIATION__MAX_ITERATIONS` | `2` | Hard iteration cap |
+| `NEGOTIATION__MAX_ITERATIONS` | `20` | Safety ceiling; adaptive termination exits earlier |
 | `NEGOTIATION__CONSENSUS_THRESHOLD` | `0.85` | Confidence level for early consensus exit |
 
 ### Binary Chunker
@@ -564,7 +565,7 @@ All settings are Pydantic `BaseSettings` with `__` as the nesting delimiter. Val
 
 | Variable | Default | Description |
 |---|---|---|
-| `MAX_TOKEN_LIMIT` | `8000` | Global token safety cap |
+| `MAX_TOKEN_LIMIT` | `128000` | Global token safety cap (Gemini 1M+ compatible) |
 | `MALJAN_ATTCK_CACHE` | `~/.cache/maljan/attck/` | ATT&CK bundle cache directory |
 
 ---
@@ -649,7 +650,7 @@ Maljan/
 │   ├── prepare_attck_malware_fixtures.py  # Generates 724 malware ground truth fixtures
 │   └── prepare_tram_dataset.py            # Generates 140 TRAM2 CTI report fixtures
 ├── tests/
-│   ├── unit/                       # 767+ unit tests (no network, no LLM)
+│   ├── unit/                       # 801 unit tests (no network, no LLM)
 │   │   └── analysis/
 │   │       ├── test_yara_layer.py  # 27 YaraLayer unit tests
 │   │       ├── test_sigma_layer.py # 14 SigmaLayer unit tests
@@ -672,9 +673,28 @@ Maljan/
 
 ---
 
+## Security
+
+### Dependency Audit (April 2026)
+
+| Package | Change | Reason |
+|---|---|---|
+| `mcp` | `1.0.0` → `1.27.0` | CVE-2025-53365 / CVE-2025-53366 (CVSS 8.7) |
+| `django` | Removed | GPL-1.0+ license risk; not used in codebase |
+| `pymongo` | Removed | No MongoDB integration; unused dependency |
+| `pillow` | Removed | GPL-2.0 license risk; not used in codebase |
+| `python-magic-bin` | Removed | Windows-only binary; incompatible on Linux |
+
+To verify no high/critical CVEs are present in current dependencies:
+```bash
+uv run pip-audit
+```
+
+---
+
 ## Installation
 
-**Requirements**: Python 3.11+, [uv](https://astral.sh/uv/)
+**Requirements**: Python 3.13+, [uv](https://astral.sh/uv/)
 
 ```bash
 # 1. Clone the repository
@@ -746,3 +766,71 @@ make check
 - **Dependency minimization**: All statistical computation (rolling std, TF-IDF cosine similarity, cascade weighting, keyword scoring, term-frequency retrieval) is implemented in pure Python to avoid runtime dependency overhead.
 - **Few-shot learning from history**: Each completed analysis is persisted to the long-term memory store. Subsequent analyses retrieve the most similar past cases and inject them as weighted priors into the judge prompt, improving TTP selection consistency over time.
 - **Protocol-based extensibility**: `MemoryStore`, `SandboxClient`, and `DataLoaderProtocol` are all `@runtime_checkable` Protocols. New backends (e.g., Pinecone, DragonFly sandbox) can be swapped in by implementing the Protocol — no changes to pipeline nodes or agent code required.
+
+---
+
+## Web UI (GTI-Inspired Dashboard)
+
+Maljan includes a professional web interface built with **Next.js 16** and inspired by **Google Threat Intelligence**.
+
+### Features
+
+| Page | Description |
+|---|---|
+| Dashboard | Overview metrics, recent analyses, verdict distribution charts |
+| Samples | Upload, manage, and trigger analysis of malware samples |
+| Jobs | Monitor running and completed analysis jobs with status tracking |
+| Analysis Detail | 6-tab detailed view: Summary, Agents, Rules, TTPs, Timeline, STIX |
+| Live Analysis | Real-time WebSocket-powered analysis event stream |
+| Reports | Filterable report list with PDF/JSON/STIX export capability |
+| Settings | API key management, analysis configuration, application info |
+
+### Design Language
+
+- **Dark-first, flat design** — no gradients, no glassmorphism
+- **Color palette**: `#0d1117` deep background, `#161b22` surface, `#4493f8` accent
+- **Typography**: Inter (UI) + JetBrains Mono (code)
+- **Verdict badges**: Red (malicious), Orange (suspicious), Green (benign), Gray (unknown)
+
+### Running the Frontend
+
+```bash
+cd apps/web
+npm install
+npm run dev          # Development server on http://localhost:3000
+npm run build        # Production build verification
+```
+
+---
+
+## Full-Stack Docker Deployment
+
+```bash
+# Copy environment template and configure
+cp .env.example .env
+# Edit .env with your API keys (GOOGLE_API_KEY, etc.)
+
+# Start all services (PostgreSQL, Redis, Qdrant, MinIO, Backend API, Worker, Frontend)
+cd docker
+docker compose up -d --build
+
+# Verify all services are healthy
+docker compose ps
+
+# Access the application
+# Frontend:   http://localhost:3000
+# Backend API: http://localhost:8000/docs
+# MinIO Console: http://localhost:9001
+```
+
+### Service Architecture
+
+| Service | Container | Port | Purpose |
+|---|---|---|---|
+| PostgreSQL 16 | maljan-postgres | 5432 | Relational data store |
+| Redis 7 | maljan-redis | 6379 | Task queue, PubSub, cache |
+| Qdrant | maljan-qdrant | 6333 | Vector database (LTM / RAG) |
+| MinIO | maljan-minio | 9000/9001 | S3-compatible object storage |
+| Backend API | maljan-api | 8000 | FastAPI application server |
+| Worker | maljan-worker | — | ARQ background task runner |
+| Frontend | maljan-frontend | 3000 | Next.js web interface |

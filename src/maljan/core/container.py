@@ -51,6 +51,12 @@ from maljan.parsers.registry import ParserRegistry
 
 if TYPE_CHECKING:
     from maljan.agents.base_agent import BaseAnalyst
+    from maljan.analysis.function_summarizer import FunctionSummarizer
+    from maljan.analysis.sigma_layer import SigmaLayer
+    from maljan.analysis.yara_layer import YaraLayer
+    from maljan.loaders.binary_chunker import TextChunk
+    from maljan.loaders.sandbox_client import SandboxClient
+    from maljan.memory.long_term_memory import MemoryStore
 
 
 class ServiceContainer:
@@ -99,15 +105,15 @@ class ServiceContainer:
         # Loaded and parsed data (keyed by (sample_id, data_type))
         self._data_cache: dict[tuple[str, str], str] = {}
         # Phase 5: Long-term memory store (built lazily)
-        self._memory_store_cache: object | None = None
+        self._memory_store_cache: MemoryStore | None = None
         # Phase 6: Sandbox client (built lazily)
-        self._sandbox_client_cache: object | None = None
+        self._sandbox_client_cache: SandboxClient | None = None
         # TODO-1: YARA Layer 0 (built lazily)
-        self._yara_layer_cache: object | None = None
+        self._yara_layer_cache: YaraLayer | None = None
         # TODO-B: Sigma Layer 0 (built lazily)
-        self._sigma_layer_cache: object | None = None
+        self._sigma_layer_cache: SigmaLayer | None = None
         # TODO-D: FunctionSummarizer (built lazily)
-        self._function_summarizer_cache: object | None = None
+        self._function_summarizer_cache: FunctionSummarizer | None = None
         self._samples_dir = samples_dir
 
         logger.info(
@@ -164,7 +170,7 @@ class ServiceContainer:
             self._agent_llm_cache[agent_name] = self._llm_registry.build_model_for_agent(agent_name)
         return self._agent_llm_cache[agent_name]
 
-    def get_memory_store(self) -> object:
+    def get_memory_store(self) -> MemoryStore:
         """Return the long-term memory store instance (Phase 5).
 
         Builds and caches a MemoryStore backend based on
@@ -179,8 +185,7 @@ class ServiceContainer:
 
         Returns:
             A MemoryStore-protocol-compliant object (InMemoryStore or
-            QdrantStore). The return type is declared as object to avoid
-            importing the Protocol here; callers can isinstance()-check.
+            QdrantStore).
         """
         if self._memory_store_cache is None:
             backend = self.config.memory.backend
@@ -203,7 +208,7 @@ class ServiceContainer:
                 logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
         return self._memory_store_cache
 
-    def get_sandbox_client(self) -> object:
+    def get_sandbox_client(self) -> SandboxClient:
         """Return the sandbox client instance (Phase 6).
 
         Builds and caches a SandboxClient backend based on
@@ -218,8 +223,7 @@ class ServiceContainer:
 
         Returns:
             A SandboxClient-protocol-compliant object (MockSandboxClient or
-            CAPEv2Client). The return type is declared as object to avoid
-            importing the Protocol here; callers can isinstance()-check.
+            CAPEv2Client).
         """
         if self._sandbox_client_cache is None:
             backend = self.config.sandbox.backend
@@ -282,7 +286,7 @@ class ServiceContainer:
             self._data_cache[key] = self.loader.load(sample_id, data_type)
         return self._data_cache[key]
 
-    def load_chunked(self, sample_id: str, data_type: str) -> list:
+    def load_chunked(self, sample_id: str, data_type: str) -> list[TextChunk]:
         """Return a list of TextChunk objects for a sample and data type.
 
         Delegates to FileDataLoader.load_chunked() which uses the BinaryChunker
@@ -301,7 +305,6 @@ class ServiceContainer:
         Returns:
             Ordered list of TextChunk objects (at least one element).
         """
-        from maljan.loaders.binary_chunker import TextChunk  # noqa: F401 (type hint only)
 
         # Re-use cached parsed text if available, then chunk.
         # This avoids double file I/O: load_data fills the cache, chunker re-splits.
@@ -313,7 +316,7 @@ class ServiceContainer:
         # First access — load, cache, then chunk.
         return self.loader.load_chunked(sample_id, data_type)
 
-    def get_yara_layer(self) -> object:
+    def get_yara_layer(self) -> YaraLayer:
         """Return the cached YaraLayer instance (Layer 0).
 
         Loads rules from data/yara_ttp_rules.yaml on first call; subsequent
@@ -329,7 +332,7 @@ class ServiceContainer:
             self._yara_layer_cache = YaraLayer.from_default_rules()
         return self._yara_layer_cache
 
-    def get_sigma_layer(self) -> object:
+    def get_sigma_layer(self) -> SigmaLayer:
         """Return the cached SigmaLayer instance (TODO-B / Sigma Layer 0).
 
         Loads Sigma rules from Settings.analysis.sigma_rules_dir on first call.
@@ -348,12 +351,12 @@ class ServiceContainer:
             self._sigma_layer_cache = SigmaLayer.from_rules_dir(rules_dir)
             logger.info(
                 "SigmaLayer initialized: %d rules loaded from %s.",
-                self._sigma_layer_cache.rule_count,  # type: ignore[union-attr]
+                self._sigma_layer_cache.rule_count,
                 rules_dir,
             )
         return self._sigma_layer_cache
 
-    def get_function_summarizer(self) -> object | None:
+    def get_function_summarizer(self) -> FunctionSummarizer | None:
         """Return the FunctionSummarizer instance or None if disabled.
 
         Builds and caches the summarizer based on

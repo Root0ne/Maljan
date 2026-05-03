@@ -66,7 +66,7 @@ class TestContainerMemoryLifecycle:
 
         container = ServiceContainer(config=Settings(), mock=True)
         store = container.get_memory_store()
-        assert store.count() == 0  # type: ignore[union-attr]
+        assert store.count() == 0
 
     def test_stored_case_is_retrievable_within_same_container(self) -> None:
         from maljan.core.config import Settings
@@ -75,9 +75,9 @@ class TestContainerMemoryLifecycle:
         container = ServiceContainer(config=Settings(), mock=True)
         store = container.get_memory_store()
         case = _make_case("s1", "ransomware encryption T1486 shadow copy", ["T1486"])
-        store.store(case)  # type: ignore[union-attr]
+        store.store(case)
 
-        results = store.retrieve("ransomware encryption")  # type: ignore[union-attr]
+        results = store.retrieve("ransomware encryption")
         assert len(results) == 1
         assert results[0].sample_id == "s1"
 
@@ -108,14 +108,14 @@ class TestMaljanAppMemoryStore:
             "ransomware file encryption shadow copy deletion C2 beacon T1486 T1490",
             ["T1486", "T1490"],
         )
-        store.store(past_case)  # type: ignore[union-attr]
-        assert store.count() == 1  # type: ignore[union-attr]
+        store.store(past_case)
+        assert store.count() == 1
 
         # Run analysis (mock — no LLM calls)
         app.run("sample_1", file_name="test.exe")
 
         # Store still contains the pre-populated case after the run
-        assert store.count() >= 1  # type: ignore[union-attr]
+        assert store.count() >= 1
 
     def test_multiple_runs_accumulate_cases(self) -> None:
         """Each successful verdict stores a case; count grows across runs."""
@@ -126,13 +126,13 @@ class TestMaljanAppMemoryStore:
         app = MaljanApp(mock=True)
         store = app.container.get_memory_store()
 
-        initial_count = store.count()  # type: ignore[union-attr]
+        initial_count = store.count()
         app.run("sample_1")
         app.run("sample_1")  # Same ID — upsert semantics keep count stable
 
         # Mock mode does not call LTM store(), so count stays at initial.
         # This test verifies app.run() is idempotent with respect to LTM in mock mode.
-        assert store.count() == initial_count  # type: ignore[union-attr]
+        assert store.count() == initial_count
 
 
 # ---------------------------------------------------------------------------

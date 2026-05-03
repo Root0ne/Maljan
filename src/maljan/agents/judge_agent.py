@@ -108,17 +108,18 @@ class JudgeAgent:
         toolkit = MCPLangChainToolkit(server_params)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
 
-        if loop.is_running():
+        if loop is not None and loop.is_running():
             import nest_asyncio
 
             nest_asyncio.apply()
             loop.run_until_complete(toolkit.initialize())
         else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit
@@ -138,6 +139,8 @@ class JudgeAgent:
         from langchain_core.messages import HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
+        from maljan.core.config import settings
+
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
 
         agent_executor = create_react_agent(self.llm, self.tools)
@@ -151,19 +154,45 @@ class JudgeAgent:
 
         import asyncio
 
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        async def _run_with_timeout() -> dict:
+            timeout = settings.react_agent_timeout
+            self.logger.info(
+                "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
+                timeout,
+                len(self.tools),
+            )
+            try:
+                result = await asyncio.wait_for(
+                    agent_executor.ainvoke(
+                        {"messages": messages},
+                        {"recursion_limit": settings.react_agent_max_steps},
+                    ),
+                    timeout=timeout,
+                )
+                msg_count = len(result.get("messages", []))
+                self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
+                return result
+            except TimeoutError:
+                self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
+                raise
 
-        if loop.is_running():
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
             import nest_asyncio
 
             nest_asyncio.apply()
-            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+            result = loop.run_until_complete(_run_with_timeout())
         else:
-            result = loop.run_until_complete(agent_executor.ainvoke({"messages": messages}))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(_run_with_timeout())
+            finally:
+                loop.close()
 
         return str(result["messages"][-1].content)
 
@@ -226,7 +255,9 @@ class JudgeAgent:
 
         tool_result_text = self.execute_tool_loop(prompt_messages)
 
-        # Now extract the final structured output from the detailed reasoning
+        # Now extract the final structured output from the detailed reasoning.
+        # IMPORTANT: tool_result_text may contain curly braces from LLM output
+        # (e.g. JSON, {type}), so we use a template variable instead of f-string.
         extract_prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -239,7 +270,7 @@ class JudgeAgent:
                 ),
                 (
                     "human",
-                    f"{tool_result_text}",
+                    "{reasoning_log}",
                 ),
             ]
         )
@@ -247,14 +278,16 @@ class JudgeAgent:
         # Attempt structured output; fall back to text-based extraction on failure
         try:
             llm_structured = self.llm.with_structured_output(MediatorVerdict)
-            verdict: MediatorVerdict = (extract_prompt | llm_structured).invoke({})  # type: ignore[assignment]
+            verdict: MediatorVerdict = (extract_prompt | llm_structured).invoke(  # type: ignore[assignment]
+                {"reasoning_log": tool_result_text}
+            )
             if not isinstance(verdict, MediatorVerdict):
                 raise ValueError("Unexpected output type from structured LLM")
         except Exception as exc:
             self.logger.warning(
                 "Structured output failed (%s), falling back to text extraction.", exc
             )
-            verdict = self._fallback_mediate(extract_prompt, tool_result_text, history)
+            verdict = self._fallback_mediate(tool_result_text)
 
         is_consensus = verdict.confidence >= CONSENSUS_THRESHOLD
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
@@ -556,17 +589,17 @@ class JudgeAgent:
 
     def _fallback_mediate(
         self,
-        prompt: ChatPromptTemplate,
-        reports_text: str,
-        history: list[AgentArgument],
+        reasoning_text: str,
     ) -> MediatorVerdict:
-        """Plain-text fallback when structured output is unavailable (e.g., Ollama)."""
-        response = (prompt | self.llm).invoke({"reports": reports_text, "history": str(history)})
-        content = str(response.content)
-        confidence = self._extract_confidence_from_text(content)
+        """Plain-text fallback when structured output is unavailable.
+
+        Extracts confidence from the reasoning text using regex and returns
+        a minimal MediatorVerdict.
+        """
+        confidence = self._extract_confidence_from_text(reasoning_text)
         return MediatorVerdict(
             contradictions=[],
-            resolution_summary=content[:500],
+            resolution_summary=reasoning_text[:500],
             confidence=confidence,
         )
 

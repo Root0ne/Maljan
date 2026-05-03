@@ -74,17 +74,18 @@ class DynamicAnalyst(BaseAnalyst):
         toolkit = MCPLangChainToolkit(server_params)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
 
-        if loop.is_running():
+        if loop is not None and loop.is_running():
             import nest_asyncio
 
             nest_asyncio.apply()
             loop.run_until_complete(toolkit.initialize())
         else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit

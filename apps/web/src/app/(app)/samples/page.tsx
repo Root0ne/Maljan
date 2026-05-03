@@ -1,0 +1,198 @@
+"use client";
+
+import { useState, useRef, useCallback, useEffect } from "react";
+import { api } from "@/lib/api";
+import type { SampleDTO } from "@/lib/api";
+
+/* ── Display interface (maps from SampleDTO) ───────── */
+interface SampleRow {
+  id: string;
+  filename: string;
+  sha256: string;
+  file_size: number;
+  created_at: string;
+}
+
+function mapSample(s: SampleDTO): SampleRow {
+  return {
+    id: s.id,
+    filename: s.original_filename,
+    sha256: s.sha256,
+    file_size: s.file_size_bytes,
+    created_at: s.uploaded_at,
+  };
+}
+
+const MOCK_SAMPLES: SampleRow[] = [
+  { id: "s-001", filename: "emotet_dropper.exe", sha256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", file_size: 245760, created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: "s-002", filename: "lockbit3_ransom.dll", sha256: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", file_size: 512000, created_at: new Date(Date.now() - 172800000).toISOString() },
+  { id: "s-003", filename: "cobalt_beacon.bin", sha256: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", file_size: 102400, created_at: new Date(Date.now() - 259200000).toISOString() },
+  { id: "s-004", filename: "qakbot_loader.js", sha256: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5", file_size: 8192, created_at: new Date(Date.now() - 345600000).toISOString() },
+];
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function SamplesPage() {
+  const [samples, setSamples] = useState<SampleRow[]>(MOCK_SAMPLES);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [apiAvailable, setApiAvailable] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /* Fetch real samples on mount */
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.getSamples();
+        setSamples(res.items.map(mapSample));
+        setApiAvailable(true);
+      } catch {
+        /* use mock data */
+      }
+    })();
+  }, []);
+
+  const handleUpload = useCallback(async (file: File) => {
+    setUploading(true);
+    try {
+      await api.uploadSample(file);
+      const res = await api.getSamples();
+      setSamples(res.items.map(mapSample));
+      setApiAvailable(true);
+    } catch {
+      /* silently fail for demo */
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleUpload(file);
+  };
+
+  return (
+    <div>
+      {!apiAvailable && (
+        <div className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
+          API not available. Showing demo data.
+        </div>
+      )}
+
+      {/* Upload Area */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        onClick={() => fileRef.current?.click()}
+        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer transition-colors ${
+          dragOver
+            ? "border-accent bg-accent/5"
+            : "border-border hover:border-text-muted"
+        }`}
+      >
+        <svg
+          className="mx-auto mb-2 text-text-muted"
+          width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <p className="text-sm text-text-secondary">
+          {uploading
+            ? "Uploading..."
+            : "Drop a file here or click to upload"}
+        </p>
+        <p className="text-xs text-text-muted mt-1">
+          PE, ELF, Mach-O, scripts, documents
+        </p>
+        <input
+          ref={fileRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUpload(file);
+          }}
+        />
+      </div>
+
+      {/* Samples Table */}
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            Samples &mdash; {samples.length} files
+          </h2>
+        </div>
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-20">Size</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-light">
+            {samples.map((s) => (
+              <tr key={s.id} className="hover:bg-bg-hover transition-colors">
+                <td className="px-4 py-2.5">
+                  <span className="text-sm text-text-primary">{s.filename}</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  <code className="text-xs text-text-secondary font-mono">
+                    {s.sha256.slice(0, 16)}...
+                  </code>
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className="text-xs text-text-secondary">{formatDate(s.created_at)}</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const job = await api.createJob(s.id);
+                          window.location.href = `/analysis/${job.id}/live`;
+                        } catch {
+                          /* demo mode */
+                        }
+                      }}
+                      className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+                    >
+                      Analyze
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

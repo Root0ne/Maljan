@@ -124,9 +124,15 @@ class LLMConfig(BaseModel):
 
 
 class NegotiationConfig(BaseModel):
-    """Controls the multi-agent negotiation loop."""
+    """Controls the multi-agent negotiation loop.
 
-    max_iterations: int = 2
+    max_iterations is a safety ceiling, NOT the expected round count.
+    The primary exit condition is Adaptive Termination (rolling std on
+    confidence_history). The hard limit exists only to prevent runaway
+    loops when adaptive convergence fails.
+    """
+
+    max_iterations: int = 20
     consensus_threshold: float = 0.85
 
 
@@ -234,12 +240,17 @@ class PreprocessingConfig(BaseModel):
         Model identifier for the summarizer LLM.
     summarizer_max_words:
         Maximum words in each chunk summary.
+    max_tool_output_chars:
+        Maximum character length for MCP tool outputs. When a tool
+        returns text exceeding this limit, the output is either
+        summarized (if FunctionSummarizer is enabled) or truncated.
     """
 
     use_function_summarizer: bool = False
     summarizer_provider: str = "ollama"
     summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: int = 150
+    max_tool_output_chars: int = 8000
 
 
 # ---------------------------------------------------------------------------
@@ -294,8 +305,12 @@ class Settings(BaseSettings):
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
 
-    # Token overflow protection
-    max_token_limit: int = 8000
+    # Token overflow protection (128K is conservative for Gemini 1M+ context)
+    max_token_limit: int = 128_000
+
+    # ReAct agent execution limits
+    react_agent_timeout: int = 600  # seconds before agent loop times out
+    react_agent_max_steps: int = 50  # max LangGraph recursion steps
 
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx

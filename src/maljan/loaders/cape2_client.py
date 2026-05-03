@@ -53,7 +53,7 @@ class CAPEv2Client:
         task_id = client.submit("/path/to/malware.exe")
         status = client.wait_for_completion(task_id, timeout_seconds=600)
         result = client.fetch_report(task_id)
-        print(result.report["behavior"])
+        logger.debug("Behavior data: %s", result.report.get("behavior"))
 
     Args:
         base_url:    CAPEv2 server URL (e.g. "http://localhost:8000").

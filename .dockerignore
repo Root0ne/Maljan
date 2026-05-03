@@ -1,0 +1,36 @@
+# Python
+.venv/
+.venv-wsl/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+apps/web/node_modules/
+apps/web/.next/
+
+# Git & IDE
+.git/
+.github/
+.gitattributes
+.serena/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (prevent recursive context)
+docker/
+
+# Build artifacts & logs
+*.log
+reports/
+network-mcp/
+threatintel-mcp/
+
+# Test artifacts
+dummy_malware.exe
+analysis_output.log

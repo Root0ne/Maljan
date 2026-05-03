@@ -83,20 +83,39 @@ class StaticAnalyst(BaseAnalyst):
 
         server_params = StdioServerParameters(command=command, args=args, env=env)
 
-        toolkit = MCPLangChainToolkit(server_params)
+        # Build output guardrail: use FunctionSummarizer if available,
+        # otherwise MCPLangChainToolkit falls back to simple truncation.
+        output_guardrail = None
+        if settings.preprocessing.use_function_summarizer:
+            from maljan.core.container import ServiceContainer
+
+            container = ServiceContainer(config=settings)
+            summarizer = container.get_function_summarizer()
+            if summarizer is not None:
+                output_guardrail = summarizer.summarize_chunk
+                self.logger.info("Ghidra output guardrail: FunctionSummarizer enabled.")
+
+        max_chars = settings.preprocessing.max_tool_output_chars
+
+        toolkit = MCPLangChainToolkit(
+            server_params,
+            output_guardrail=output_guardrail,
+            max_output_chars=max_chars,
+        )
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
 
-        if loop.is_running():
+        if loop is not None and loop.is_running():
             import nest_asyncio
 
             nest_asyncio.apply()
             loop.run_until_complete(toolkit.initialize())
         else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit
