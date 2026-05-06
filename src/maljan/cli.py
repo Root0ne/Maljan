@@ -52,11 +52,10 @@ def analyze(
     # Build config at construction time — no post-init mutation
     from maljan.core.config import LLMConfig, NegotiationConfig
 
-    llm_cfg = LLMConfig(provider=provider) if not mock else LLMConfig()
-    config = Settings(
-        llm=llm_cfg,
-        negotiation=NegotiationConfig(max_iterations=max_iterations),
-    )
+    config = Settings()
+    if not mock:
+        config.llm.provider = provider
+    config.negotiation.max_iterations = max_iterations
 
     # Create and run
     try:

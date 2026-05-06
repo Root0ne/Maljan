@@ -93,8 +93,9 @@ class JudgeAgent:
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.paths import get_project_root
 
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        project_root = str(get_project_root())
         server_script = os.path.join(project_root, "threatintel-mcp", "server.py")
 
         server_params = StdioServerParameters(
@@ -132,7 +133,9 @@ class JudgeAgent:
 
         agent_executor = create_react_agent(self.llm, self.tools)
 
-        messages = []
+        from langchain_core.messages import BaseMessage
+
+        messages: list[BaseMessage] = []
         for role, content in prompt_messages:
             if role == "system":
                 messages.append(SystemMessage(content=content))
@@ -390,16 +393,30 @@ class JudgeAgent:
             ]
         )
 
-        llm_stix = self.llm.with_structured_output(Bundle)
-        result = await (prompt | llm_stix).ainvoke(
+        result_text = await (prompt | self.llm).ainvoke(
             {"reports": reports_text, "history": str(history)}
         )
 
-        if isinstance(result, Bundle):
-            return result
+        # Extract JSON from markdown code blocks or raw text
+        raw = result_text.content if hasattr(result_text, "content") else str(result_text)
+        import json, re
 
-        self.logger.warning("LLM did not return a valid Bundle, falling back to empty.")
-        return Bundle(objects=[])
+        # Try to find JSON in markdown code blocks
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        if json_match:
+            raw = json_match.group(1)
+        else:
+            # Try to find the first JSON object
+            json_match = re.search(r"(\{.*\})", raw, re.DOTALL)
+            if json_match:
+                raw = json_match.group(1)
+
+        try:
+            data = json.loads(raw)
+            return Bundle.model_validate(data)
+        except Exception as e:
+            self.logger.warning("LLM did not return a valid Bundle: %s. Falling back to empty.", e)
+            return Bundle(objects=[])
 
     # ------------------------------------------------------------------
     # Private helpers

@@ -28,9 +28,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class OpenAIConfig(BaseModel):
-    """OpenAI-specific model selection."""
+    """OpenAI-specific model selection.
+
+    base_url can be overridden to use OpenAI-compatible APIs such as
+    Kimi AI (Moonshot), DeepSeek, or Azure OpenAI.
+    """
 
     api_key: str | None = None
+    base_url: str | None = None
     expert_model: str = "gpt-4o-mini"
     judge_model: str = "gpt-4o"
 

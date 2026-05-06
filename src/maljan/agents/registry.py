@@ -43,9 +43,9 @@ def register_agent(name: str):  # type: ignore[no-untyped-def]
 
 def discover_agents() -> None:
     """Import all built-in agent modules to trigger @register_agent decorators."""
+    import maljan.agents.static_analyst  # noqa: F401
     import maljan.agents.dynamic_analyst  # noqa: F401
     import maljan.agents.network_analyst  # noqa: F401
-    import maljan.agents.static_analyst  # noqa: F401
 
 
 class AgentRegistry:
