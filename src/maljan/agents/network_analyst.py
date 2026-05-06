@@ -77,15 +77,16 @@ class NetworkAnalyst(BaseAnalyst):
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.paths import get_project_root
 
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        server_script = os.path.join(project_root, "network-mcp", "server.py")
+        project_root = get_project_root()
+        server_script = str(project_root / "network-mcp" / "server.py")
 
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[server_script],
             env=os.environ.copy(),
-            cwd=os.path.join(project_root, "network-mcp"),
+            cwd=str(project_root / "network-mcp"),
         )
 
         toolkit = MCPLangChainToolkit(server_params)

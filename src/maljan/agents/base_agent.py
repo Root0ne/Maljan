@@ -70,7 +70,9 @@ class BaseAnalyst(ABC):
 
         agent_executor = create_react_agent(self.llm, self.tools)
 
-        messages = []
+        from langchain_core.messages import BaseMessage
+
+        messages: list[BaseMessage] = []
         for role, content in prompt_messages:
             if role == "system":
                 messages.append(SystemMessage(content=content))

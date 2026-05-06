@@ -133,7 +133,8 @@ class TestOutputGuardrailWithFunctionSummarizer:
         large_decompile = (
             "void FUN_00401000(void) {\n"
             "  HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, 0, dwPid);\n"
-            "  LPVOID pRemote = VirtualAllocEx(hProcess, NULL, 0x1000, MEM_COMMIT, PAGE_EXECUTE_READWRITE);\n"
+            "  LPVOID pRemote = VirtualAllocEx(hProcess, NULL, 0x1000, "
+            "MEM_COMMIT, PAGE_EXECUTE_READWRITE);\n"
             "  WriteProcessMemory(hProcess, pRemote, shellcode, sizeof(shellcode), NULL);\n"
             "  CreateRemoteThread(hProcess, NULL, 0, pRemote, NULL, 0, NULL);\n"
             "}\n" * 20  # Repeat to make it large

@@ -63,4 +63,7 @@ class CFGOrderer:
 
     def get_function_data(self, func_name: str) -> dict[str, Any]:
         """Get the attributes of a specific function."""
-        return self.cfg_data.get("functions", {}).get(func_name, {})
+        result = self.cfg_data.get("functions", {}).get(func_name, {})
+        if not isinstance(result, dict):
+            return {}
+        return result  # type: ignore[no-any-return]

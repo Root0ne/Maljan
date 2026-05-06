@@ -28,7 +28,7 @@ class MCPLangChainToolkit:
     ):
         self.server_params = server_params
         self.session: ClientSession | None = None
-        self._exit_stack = None
+        self._exit_stack: Any = None
         self._tools: list[BaseTool] = []
         self._output_guardrail = output_guardrail
         self._max_output_chars = max_output_chars
@@ -72,7 +72,7 @@ class MCPLangChainToolkit:
             self._exit_stack = None
             self.session = None
 
-    def _create_langchain_tool(self, mcp_tool) -> BaseTool:
+    def _create_langchain_tool(self, mcp_tool: Any) -> BaseTool:
         """Convert an MCP Tool definition into a LangChain StructuredTool."""
 
         # Build Pydantic model from JSON schema dynamically
@@ -84,7 +84,6 @@ class MCPLangChainToolkit:
             if not isinstance(prop_schema, dict):
                 prop_schema = {"type": "string"}
             prop_type_str = prop_schema.get("type", "string")
-            prop_desc = prop_schema.get("description", "")
 
             # Map simple types
             type_mapping = {
@@ -100,14 +99,12 @@ class MCPLangChainToolkit:
             # Default value logic
             default_val = ... if prop_name in required else None
 
-            from pydantic import Field
+            properties[prop_name] = (py_type, default_val)
 
-            properties[prop_name] = (py_type, Field(default=default_val, description=prop_desc))
-
-        args_schema = create_model(f"{mcp_tool.name}Schema", **properties)
+        args_schema = create_model(f"{mcp_tool.name}Schema", **properties)  # type: ignore[call-overload]
 
         # The actual function that will be executed
-        async def arun_tool(**kwargs) -> str:
+        async def arun_tool(**kwargs: Any) -> str:
             if not self.session:
                 return "Error: MCP session is not active."
             try:

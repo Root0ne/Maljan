@@ -30,9 +30,14 @@ class OpenAIProvider:
         if not api_key:
             raise LLMError("OPENAI_API_KEY is not set but provider is 'openai'.")
 
-        return ChatOpenAI(
-            model=model,
-            api_key=api_key,  # type: ignore[arg-type]
-            temperature=temperature,
+        build_kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,  # type: ignore[dict-item]
+            "temperature": temperature,
             **kwargs,
-        )
+        }
+        base_url = self._config.llm.openai.base_url
+        if base_url:
+            build_kwargs["base_url"] = base_url
+
+        return ChatOpenAI(**build_kwargs)

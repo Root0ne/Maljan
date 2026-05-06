@@ -68,7 +68,10 @@ class DynamicAnalyst(BaseAnalyst):
         if settings.mcp.cape.env:
             env.update(settings.mcp.cape.env)
 
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        from maljan.core.paths import get_project_root, resolve_mcp_args
+
+        project_root = str(get_project_root())
+        args = resolve_mcp_args(args)
         server_params = StdioServerParameters(command=command, args=args, env=env, cwd=project_root)
 
         toolkit = MCPLangChainToolkit(server_params)

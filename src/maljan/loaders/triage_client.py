@@ -241,7 +241,7 @@ class TriageClient:
     # SandboxClient Protocol implementation
     # ------------------------------------------------------------------
 
-    def submit(self, sample_path: Path) -> str:
+    def submit(self, sample_path: str | Path) -> str:
         """Numune dosyasini Triage'e gonderir ve task ID dondurur.
 
         Args:
@@ -254,11 +254,18 @@ class TriageClient:
             FileNotFoundError: sample_path bulunamazsa.
             RuntimeError: httpx kurulu degilse veya API hatasi.
         """
+        if not isinstance(sample_path, Path):
+            sample_path = Path(sample_path)
         if not sample_path.exists():
             raise FileNotFoundError(f"Sample not found: {sample_path}")
         return asyncio.run(self._async_submit(sample_path))
 
-    def wait_for_completion(self, task_id: str) -> str:
+    def wait_for_completion(
+        self,
+        task_id: str,
+        timeout_seconds: int = 300,
+        poll_interval_seconds: int = 10,
+    ) -> str:
         """Triage gorevi tamamlanana kadar polling yapar.
 
         Args:

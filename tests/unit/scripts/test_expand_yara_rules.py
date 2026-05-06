@@ -109,9 +109,9 @@ class TestParseExistingRules:
         yaml_file = tmp_path / "rules.yaml"
         content = (
             'version: "1.0"\nrules:\n'
-            '  - id: test\n'
+            "  - id: test\n"
             '    technique_id: "T1055"\n'
-            '    confidence: 0.88\n'
+            "    confidence: 0.88\n"
             '    description: "test"\n'
             '    patterns: ["VirtualAllocEx"]\n'
         )
@@ -171,8 +171,7 @@ class TestExpand:
             json.dumps(
                 {
                     "text": (
-                        "Malware uses VirtualAllocEx and"
-                        " WriteProcessMemory to inject shellcode"
+                        "Malware uses VirtualAllocEx and WriteProcessMemory to inject shellcode"
                     ),
                     "label": "T1055",
                     "layer": "relationship_description",

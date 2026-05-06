@@ -81,6 +81,9 @@ class StaticAnalyst(BaseAnalyst):
         if settings.mcp.ghidra.env:
             env.update(settings.mcp.ghidra.env)
 
+        from maljan.core.paths import resolve_mcp_args
+
+        args = resolve_mcp_args(args)
         server_params = StdioServerParameters(command=command, args=args, env=env)
 
         # Build output guardrail: use FunctionSummarizer if available,

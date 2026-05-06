@@ -108,7 +108,6 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
-        window.location.href = "/login";
       }
       throw new Error("Unauthorized");
     }
@@ -142,7 +141,6 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
-        window.location.href = "/login";
       }
       throw new Error("Unauthorized");
     }

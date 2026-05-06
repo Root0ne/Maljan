@@ -7,6 +7,7 @@ JudgeAgent is NOT a BaseAnalyst subclass — it has two distinct responsibilitie
 All tests use a mocked LLM to avoid real API calls.
 """
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -75,7 +76,7 @@ class TestJudgeAgentMediate:
             patch.object(judge, "_fallback_mediate", return_value=verdict),
         ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
-            result = judge.mediate(sample_reports, sample_history)
+            result = asyncio.run(judge.mediate(sample_reports, sample_history))
 
         assert isinstance(result, tuple)
         assert len(result) == 2
@@ -96,7 +97,7 @@ class TestJudgeAgentMediate:
             patch.object(judge, "_fallback_mediate", return_value=verdict),
         ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
-            argument, is_consensus = judge.mediate(sample_reports, sample_history)
+            argument, is_consensus = asyncio.run(judge.mediate(sample_reports, sample_history))
 
         assert isinstance(argument, AgentArgument)
         assert argument.agent_name == "Mediator"
@@ -119,7 +120,7 @@ class TestJudgeAgentMediate:
             patch.object(judge, "_fallback_mediate", return_value=verdict),
         ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
-            _, is_consensus = judge.mediate(sample_reports, sample_history)
+            _, is_consensus = asyncio.run(judge.mediate(sample_reports, sample_history))
 
         assert is_consensus is True
 
@@ -140,7 +141,7 @@ class TestJudgeAgentMediate:
             patch.object(judge, "_fallback_mediate", return_value=verdict),
         ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
-            _, is_consensus = judge.mediate(sample_reports, sample_history)
+            _, is_consensus = asyncio.run(judge.mediate(sample_reports, sample_history))
 
         assert is_consensus is False
 
@@ -157,7 +158,7 @@ class TestJudgeAgentMediate:
             patch.object(judge, "_fallback_mediate", return_value=verdict),
         ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
-            argument, is_consensus = judge.mediate(reports, [])
+            argument, is_consensus = asyncio.run(judge.mediate(reports, []))
 
         assert argument.agent_name == "Mediator"
         assert is_consensus is True
@@ -177,7 +178,7 @@ class TestJudgeAgentMediate:
             patch.object(judge, "_fallback_mediate", return_value=verdict),
         ):
             mock_llm.with_structured_output.side_effect = Exception("force fallback")
-            argument, _ = judge.mediate(sample_reports, sample_history)
+            argument, _ = asyncio.run(judge.mediate(sample_reports, sample_history))
 
         assert argument.confidence_score == pytest.approx(expected_confidence)
 
@@ -201,7 +202,7 @@ class TestJudgeAgentMediate:
         ):
             llm.with_structured_output.side_effect = Exception("Provider not supported")
             # Should not raise — fallback activates
-            argument, _ = judge.mediate(sample_reports, sample_history)
+            argument, _ = asyncio.run(judge.mediate(sample_reports, sample_history))
 
         assert argument.agent_name == "Mediator"
 

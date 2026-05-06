@@ -10,6 +10,7 @@ The run() method returns a result dict containing:
   - discussion_history, reports, isr_reports, etc.
 """
 
+import asyncio
 import time
 from typing import Any
 
@@ -88,7 +89,7 @@ class MaljanApp:
             "_max_iterations": self.config.negotiation.max_iterations,
         }
 
-        result = self.graph.invoke(initial_state)
+        result = asyncio.run(self.graph.ainvoke(initial_state))
 
         elapsed = time.time() - start
         logger.info("=" * 60)
@@ -110,7 +111,7 @@ class MaljanApp:
         """
         start = time.time()
         logger.info("=" * 60)
-        logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline (ASYNC)")
+        logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
         logger.info(f"Sample: {file_hash} ({file_name or 'unnamed'})")
         logger.info(f"Mode: {'MOCK' if self.container.is_mock else self.config.llm.provider}")
