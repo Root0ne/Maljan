@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck docker-build docker-up docker-down docker-logs rebuild-ghidra
 
 test:
 	uv run pytest tests/ -q
@@ -55,3 +55,34 @@ prepare-attck:
 
 benchmark-attck:
 	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
+
+# ── Docker Orchestration ───────────────────────────────────────────
+
+docker-build:
+	cd docker && set POSTGRES_PORT=5433 && docker compose build
+
+docker-up:
+	cd docker && set POSTGRES_PORT=5433 && docker compose up -d
+
+docker-down:
+	cd docker && docker compose down
+
+docker-logs:
+	cd docker && docker compose logs -f
+
+# ── Ghidra MCP Manager ─────────────────────────────────────────────
+
+ghidra-status:
+	uv run python scripts/ghidra_manager.py status
+
+ghidra-sync:
+	uv run python scripts/ghidra_manager.py sync
+
+ghidra-build:
+	uv run python scripts/ghidra_manager.py build
+
+ghidra-watch:
+	uv run python scripts/ghidra_manager.py watch
+
+# Legacy alias
+rebuild-ghidra: ghidra-build
