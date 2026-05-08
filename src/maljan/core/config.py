@@ -264,12 +264,22 @@ class PreprocessingConfig(BaseModel):
 
 
 class MCPServerConfig(BaseModel):
-    """Configuration for a single MCP server connection."""
+    """Configuration for a single MCP server connection.
+
+    Supports two transports:
+      - "stdio": local subprocess (default). Uses command + args.
+      - "http": remote HTTP REST API. Uses url + auth_token.
+    """
 
     enabled: bool = False
+    transport: str = "stdio"  # "stdio" | "http"
+    # stdio transport settings
     command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    # http transport settings
+    url: str = ""
+    auth_token: str = ""
 
 
 class MCPConfig(BaseModel):

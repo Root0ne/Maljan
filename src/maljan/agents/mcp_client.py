@@ -68,9 +68,18 @@ class MCPLangChainToolkit:
     async def cleanup(self) -> None:
         """Close the MCP server connection."""
         if self._exit_stack:
-            await self._exit_stack.aclose()
-            self._exit_stack = None
-            self.session = None
+            try:
+                await self._exit_stack.aclose()
+            except RuntimeError as exc:
+                # stdio_client may raise cancel-scope errors when closed
+                # from a different task; this is non-fatal.
+                if "cancel scope" in str(exc).lower():
+                    logger.warning("MCP cleanup cancel-scope warning (non-fatal): %s", exc)
+                else:
+                    raise
+            finally:
+                self._exit_stack = None
+                self.session = None
 
     def _create_langchain_tool(self, mcp_tool: Any) -> BaseTool:
         """Convert an MCP Tool definition into a LangChain StructuredTool."""

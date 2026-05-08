@@ -71,6 +71,33 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # -────────────────────────────────────────────
+  # Ghidra MCP Headless — Static analysis engine
+  # -────────────────────────────────────────────
+  ghidra-mcp:
+    build:
+      context: ../external/ghidra-mcp
+      dockerfile: docker/Dockerfile
+    image: ghidra-mcp-headless:latest
+    container_name: maljan-ghidra-mcp
+    restart: unless-stopped
+    environment:
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:-maljan_ghidra_secret_2026}
+      GHIDRA_MCP_BIND_ADDRESS: 0.0.0.0
+      GHIDRA_MCP_PORT: 8089
+    ports:
+      - "${GHIDRA_MCP_PORT:-8089}:8089"
+    volumes:
+      - ../data/samples:/data/samples:ro
+      - ghidra_projects:/projects
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8089/check_connection || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
   # -────────────────────────────────────────────
   # Backend API — FastAPI application server
   # -────────────────────────────────────────────
@@ -87,6 +114,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
+      MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # Ollama on Windows host is reachable via host.docker.internal
+      LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
     volumes:
       - ../src:/app/src
       - ../apps:/app/apps
@@ -101,6 +131,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      ghidra-mcp:
+        condition: service_healthy
     command: >
       uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -120,6 +152,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
+      MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
     volumes:
       - ../src:/app/src
       - ../apps:/app/apps
@@ -129,6 +163,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ghidra-mcp:
         condition: service_healthy
     command: >
       uv run arq app.worker.analysis_worker.WorkerSettings
@@ -140,11 +176,11 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_WS_URL: ws://localhost:8000
     container_name: maljan-frontend
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: http://backend-api:8000
-      NEXT_PUBLIC_WS_URL: ws://backend-api:8000
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
@@ -158,4 +194,6 @@ volumes:
   qdrant_data:
     driver: local
   minio_data:
+    driver: local
+  ghidra_projects:
     driver: local

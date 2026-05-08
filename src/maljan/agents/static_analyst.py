@@ -7,6 +7,7 @@ concrete artifact reference (function name, string offset, API call).
 
 from __future__ import annotations
 
+import os
 import re
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -26,21 +27,18 @@ _ISR_SYSTEM = (
     "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
     "=== TOOL USAGE WORKFLOW ===\n"
     "Follow this reverse engineering sequence:\n"
-    "0. Call `list_instances` to discover running Ghidra instances. Then call\n"
-    "   `connect_instance(project=<name>)` to attach to one. This step is CRITICAL:\n"
-    "   without it only management tools are available, NOT analysis tools.\n"
-    "   After connecting, call `load_tool_group(group='all')` to ensure all 225\n"
-    "   analysis tools (decompile, xrefs, strings, etc.) are loaded.\n"
-    "1. Call `import_file(file_path=<path>)` to load the binary into Ghidra.\n"
-    "2. Call `list_functions` to get an overview of all functions.\n"
-    "3. Call `list_imports` to identify suspicious API imports (VirtualAlloc, CreateRemoteThread, etc.).\n"
-    "4. Call `list_exports` to check exported symbols.\n"
-    "5. Call `list_strings` to find hardcoded C2 URLs, registry paths, or encoded data.\n"
-    "6. For suspicious functions: call `decompile_function(name=<func>)` to read the C pseudocode.\n"
-    "7. Call `get_xrefs_to(address=<addr>)` to trace how a suspicious API is called.\n"
-    "8. Call `list_segments` or `list_namespaces` if you need memory layout context.\n\n"
-    "IMPORTANT:\n"
-    "- Step 0 (connect + load_tool_group) MUST happen before any analysis tool call.\n"
+    "1. Call `load_program(file=<path>)` to load the binary into Ghidra.\n"
+        "   The file path is the absolute path on the server filesystem.\n"
+        "2. Call `get_current_program_info` to verify the program loaded correctly.\n"
+        "3. Call `list_functions` to get an overview of all functions.\n"
+        "4. Call `list_imports` to identify suspicious API imports (VirtualAlloc, CreateRemoteThread, etc.).\n"
+        "5. Call `list_exports` to check exported symbols.\n"
+        "6. Call `list_strings` to find hardcoded C2 URLs, registry paths, or encoded data.\n"
+        "7. For suspicious functions: call `decompile_function(address=<addr>)` to read the C pseudocode.\n"
+        "8. Call `get_xrefs_to(address=<addr>)` to trace how a suspicious API is called.\n"
+        "9. Call `list_segments` or `list_namespaces` if you need memory layout context.\n\n"
+        "IMPORTANT:\n"
+        "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
     "- Focus decompilation on 5-10 most suspicious functions, not every function.\n"
     "- Large binaries may have 1000+ functions. Prioritize entry point, main, "
     "and functions referencing crypto/network/process APIs.\n"
@@ -61,17 +59,60 @@ class StaticAnalyst(BaseAnalyst):
         if getattr(self, "tools", None):
             return
 
-        import asyncio
         import os
 
-        from mcp import StdioServerParameters
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
         from maljan.core.config import settings
 
         if not settings.mcp.ghidra.enabled:
             self.logger.info("Ghidra MCP is disabled in config.")
             return
+
+        # Build output guardrail: use FunctionSummarizer if available
+        output_guardrail = None
+        if settings.preprocessing.use_function_summarizer:
+            from maljan.core.container import ServiceContainer
+
+            container = ServiceContainer(config=settings)
+            summarizer = container.get_function_summarizer()
+            if summarizer is not None:
+                output_guardrail = summarizer.summarize_chunk
+                self.logger.info("Ghidra output guardrail: FunctionSummarizer enabled.")
+
+        max_chars = settings.preprocessing.max_tool_output_chars
+
+        # ------------------------------------------------------------------
+        # HTTP transport (headless Docker server)
+        # ------------------------------------------------------------------
+        if settings.mcp.ghidra.transport == "http":
+            from maljan.agents.ghidra_http_client import GhidraHTTPClient
+
+            client = GhidraHTTPClient(
+                base_url=settings.mcp.ghidra.url,
+                auth_token=settings.mcp.ghidra.auth_token,
+                output_guardrail=output_guardrail,
+                max_output_chars=max_chars,
+            )
+
+            self._run_async(client.initialize())
+            self.toolkit = client
+            all_tools = client.get_tools()
+            self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
+            self.logger.info(
+                "Initialized Ghidra HTTP tools: %d/%d (debugger_* excluded): %s",
+                len(self.tools),
+                len(all_tools),
+                [t.name for t in self.tools],
+            )
+            return
+
+        # ------------------------------------------------------------------
+        # stdio transport (legacy local subprocess)
+        # ------------------------------------------------------------------
+        import asyncio
+
+        from mcp import StdioServerParameters
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
 
         command = settings.mcp.ghidra.command
         args = settings.mcp.ghidra.args
@@ -86,25 +127,26 @@ class StaticAnalyst(BaseAnalyst):
         args = resolve_mcp_args(args)
         server_params = StdioServerParameters(command=command, args=args, env=env)
 
-        # Build output guardrail: use FunctionSummarizer if available,
-        # otherwise MCPLangChainToolkit falls back to simple truncation.
-        output_guardrail = None
-        if settings.preprocessing.use_function_summarizer:
-            from maljan.core.container import ServiceContainer
-
-            container = ServiceContainer(config=settings)
-            summarizer = container.get_function_summarizer()
-            if summarizer is not None:
-                output_guardrail = summarizer.summarize_chunk
-                self.logger.info("Ghidra output guardrail: FunctionSummarizer enabled.")
-
-        max_chars = settings.preprocessing.max_tool_output_chars
-
         toolkit = MCPLangChainToolkit(
             server_params,
             output_guardrail=output_guardrail,
             max_output_chars=max_chars,
         )
+
+        self._run_async(toolkit.initialize())
+        self.toolkit = toolkit
+        all_tools = toolkit.get_tools()
+        self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
+        self.logger.info(
+            "Initialized Ghidra MCP tools: %d/%d (debugger_* excluded): %s",
+            len(self.tools),
+            len(all_tools),
+            [t.name for t in self.tools],
+        )
+
+    def _run_async(self, coro) -> None:
+        """Run an async coroutine from a sync context, handling nested loops."""
+        import asyncio
 
         try:
             loop = asyncio.get_running_loop()
@@ -115,25 +157,11 @@ class StaticAnalyst(BaseAnalyst):
             import nest_asyncio
 
             nest_asyncio.apply()
-            loop.run_until_complete(toolkit.initialize())
+            loop.run_until_complete(coro)
         else:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(toolkit.initialize())
-
-        self.toolkit = toolkit
-        # Filter out debugger_* tools — not needed for static analysis.
-        # Reduces tool count from ~29 to ~7 (management + import tools only),
-        # which prevents large tool schema from causing LLM timeouts.
-        all_tools = toolkit.get_tools()
-        self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
-        self.logger.info(
-            "Initialized Ghidra MCP tools: %d/%d (debugger_* excluded): %s",
-            len(self.tools),
-            len(all_tools),
-            [t.name for t in self.tools],
-        )
-
+            loop.run_until_complete(coro)
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
