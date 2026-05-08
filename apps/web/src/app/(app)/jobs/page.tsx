@@ -83,6 +83,18 @@ export default function JobsPage() {
     })();
   }, []);
 
+  const handleCancel = async (jobId: string) => {
+    if (!confirm("Cancel this job?")) return;
+    try {
+      await api.cancelJob(jobId);
+      setJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, status: "cancelled" } : j))
+      );
+    } catch (err: any) {
+      alert(err.message || "Failed to cancel job");
+    }
+  };
+
   const counts = countByStatus(jobs);
   const filtered = filter === "all" ? jobs : jobs.filter((j) => j.status === filter);
 
@@ -150,13 +162,16 @@ export default function JobsPage() {
           <div className="divide-y divide-border-light">
             {filtered.map((job) => {
               const badge = STATUS_BADGE[job.status] || STATUS_BADGE.pending;
+              const canCancel = job.status === "pending" || job.status === "running";
               return (
-                <Link
+                <div
                   key={job.id}
-                  href={`/analysis/${job.id}`}
                   className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors"
                 >
-                  <div className="flex items-center gap-3">
+                  <Link
+                    href={`/analysis/${job.id}`}
+                    className="flex items-center gap-3 flex-1 min-w-0"
+                  >
                     <svg
                       width="14" height="14" viewBox="0 0 24 24" fill="none"
                       stroke="var(--text-secondary)" strokeWidth="1.5"
@@ -164,18 +179,31 @@ export default function JobsPage() {
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
                       <path d="M14 2v6h6" />
                     </svg>
-                    <div>
-                      <p className="text-sm text-text-primary">{job.sample_id.slice(0, 12)}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm text-text-primary truncate">{job.sample_id.slice(0, 12)}</p>
                       <p className="text-xs text-text-muted">{timeAgo(job.created_at)}{job.duration ? ` / ${job.duration}` : ""}</p>
                     </div>
+                  </Link>
+                  <div className="flex items-center gap-3 ml-3">
+                    {canCancel && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCancel(job.id);
+                        }}
+                        className="px-2 py-0.5 text-xs border border-status-red/30 text-status-red rounded hover:bg-status-red/10 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <div className={`flex items-center gap-1.5 ${badge.class}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                      <span className="text-xs font-medium uppercase tracking-wider">
+                        {job.status}
+                      </span>
+                    </div>
                   </div>
-                  <div className={`flex items-center gap-1.5 ${badge.class}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-                    <span className="text-xs font-medium uppercase tracking-wider">
-                      {job.status}
-                    </span>
-                  </div>
-                </Link>
+                </div>
               );
             })}
           </div>

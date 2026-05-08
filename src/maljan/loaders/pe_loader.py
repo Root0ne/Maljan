@@ -15,7 +15,6 @@ Graceful degradation:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -94,7 +93,11 @@ class PELoader:
         exports: list[str] = []
         if hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
             for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
-                name = exp.name.decode("utf-8", errors="ignore") if exp.name else f"ord_{exp.ordinal}"
+                name = (
+                    exp.name.decode("utf-8", errors="ignore")
+                    if exp.name
+                    else f"ord_{exp.ordinal}"
+                )
                 exports.append(name)
         return exports
 

@@ -172,7 +172,7 @@ class GhidraHTTPClient:
 
         if self._output_guardrail is not None:
             try:
-                return self._output_guardrail(output)
+                return self._output_guardrail(output)  # type: ignore[no-any-return]
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s - falling back to truncation.", exc)
 

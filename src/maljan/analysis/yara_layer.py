@@ -247,7 +247,7 @@ class YaraLayer:
         the combined source. Returns None if compilation fails.
         """
         if yara is None:
-            return None
+            return None, {}
 
         def _escape_yara_string(s: str) -> str:
             return s.replace("\\", "\\\\").replace('"', '\\"')
@@ -289,7 +289,11 @@ class YaraLayer:
             compiled = yara.compile(source=combined)
             return compiled, _id_map
         except Exception as exc:
-            logger.warning("YaraLayer: yara-python compilation failed: %s. Falling back to regex.", exc)
+            logger.warning(
+                "YaraLayer: yara-python compilation failed: %s. "
+                "Falling back to regex.",
+                exc,
+            )
             return None, {}
 
     def _yara_scan(self, text: str) -> list[YaraMatch]:
@@ -389,18 +393,20 @@ class YaraLayer:
             return matches
 
         # Fallback: regex-based string matching
-        matches: list[YaraMatch] = []
+        regex_matches: list[YaraMatch] = []
 
         for rule in self._rules:
             triggered_patterns: list[str] = []
             compiled_patterns = self._compiled[rule.id]
 
-            for pattern_re, pattern_str in zip(compiled_patterns, rule.patterns, strict=False):
+            for pattern_re, pattern_str in zip(
+                compiled_patterns, rule.patterns, strict=False
+            ):
                 if pattern_re.search(text):
                     triggered_patterns.append(pattern_str)
 
             if triggered_patterns:
-                matches.append(
+                regex_matches.append(
                     YaraMatch(
                         rule_id=rule.id,
                         technique_id=rule.technique_id,
@@ -410,14 +416,14 @@ class YaraLayer:
                     )
                 )
 
-        if matches:
+        if regex_matches:
             logger.info(
                 "YaraLayer: %d rule(s) triggered (regex) — techniques: %s",
-                len(matches),
-                sorted({m.technique_id for m in matches}),
+                len(regex_matches),
+                sorted({m.technique_id for m in regex_matches}),
             )
 
-        return matches
+        return regex_matches
 
     # ------------------------------------------------------------------
     # ISR conversion

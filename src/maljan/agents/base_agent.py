@@ -286,23 +286,6 @@ class BaseAnalyst(ABC):
 
         return merge_chunk_isrs(chunk_isrs)
 
-    def safe_revise(
-        self,
-        original_data: str,
-        own_report: str,
-        peer_reports: dict[str, str],
-        mediator_feedback: str,
-    ) -> str:
-        """Wrapper around revise() with error handling."""
-        try:
-            truncated = self._truncate_input(original_data)
-            return self.revise(truncated, own_report, peer_reports, mediator_feedback)
-        except AnalystError:
-            raise
-        except Exception as e:
-            self.logger.error("Revision failed: %s", e)
-            raise AnalystError(f"{self.name} revision failed: {e}") from e
-
     def safe_revise_isr(
         self,
         original_data: str,

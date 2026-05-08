@@ -1,9 +1,6 @@
 """Tests for PELoader static analysis."""
 
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from maljan.loaders.pe_loader import PELoader, _detect_file_type
 

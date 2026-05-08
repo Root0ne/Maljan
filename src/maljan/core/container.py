@@ -38,7 +38,7 @@ Phase 6 (CAPEv2 Sandbox):
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 

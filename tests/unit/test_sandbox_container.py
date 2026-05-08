@@ -136,7 +136,9 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path))
+        container = ServiceContainer(
+            config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path)
+        )
         client = container.get_sandbox_client()
         assert isinstance(client, MockSandboxClient)
         # Verify the client uses the correct fixtures directory
@@ -216,7 +218,9 @@ class TestMaljanAppSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path))
+        container = ServiceContainer(
+            config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path)
+        )
         sandbox_client = container.get_sandbox_client()
 
         chunks = container.loader.load_from_sandbox(

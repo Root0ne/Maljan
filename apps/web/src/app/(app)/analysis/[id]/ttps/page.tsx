@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "@/lib/api";
 import { useReport } from "../layout";
 
 interface Technique {
@@ -66,6 +67,15 @@ function parseTechniques(raw: unknown[]): Tactic[] {
 export default function TTpsTab() {
   const { report, job, loading } = useReport();
   const [search, setSearch] = useState("");
+  const [mitreData, setMitreData] = useState<unknown[] | null>(null);
+
+  useEffect(() => {
+    if (report?.id) {
+      api.getReportMitre(report.id)
+        .then((data) => setMitreData(data.techniques))
+        .catch(() => {});
+    }
+  }, [report?.id]);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -79,9 +89,9 @@ export default function TTpsTab() {
     );
   }
 
-  const rawTechniques = Array.isArray(report?.mitre_techniques)
+  const rawTechniques = mitreData ?? (Array.isArray(report?.mitre_techniques)
     ? report.mitre_techniques
-    : [];
+    : []);
 
   const tactics = parseTechniques(rawTechniques);
 

@@ -50,7 +50,9 @@ Phase 7.1 additions (Dynamic Schema Pruning):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import re
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
@@ -398,8 +400,8 @@ class JudgeAgent:
         )
 
         # Extract JSON from markdown code blocks or raw text
-        raw = result_text.content if hasattr(result_text, "content") else str(result_text)
-        import json, re
+        raw = str(getattr(result_text, "content", result_text))
+
 
         # Try to find JSON in markdown code blocks
         json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)

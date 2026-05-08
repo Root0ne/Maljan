@@ -207,7 +207,7 @@ class TestYaraLayerScan:
             regex_matches = regex_layer.scan(text)
 
         assert len(yara_matches) == len(regex_matches)
-        for ym, rm in zip(yara_matches, regex_matches):
+        for ym, rm in zip(yara_matches, regex_matches, strict=False):
             assert ym.rule_id == rm.rule_id
             assert ym.technique_id == rm.technique_id
             assert ym.confidence == rm.confidence

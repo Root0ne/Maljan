@@ -111,7 +111,7 @@ class MaljanApp:
                     len(result.report.get("signatures", [])),
                     len(result.report.get("ttp_tags", [])),
                 )
-                return result.report
+                return result.report  # type: ignore[no-any-return]
             logger.warning("Sandbox task ended with status=%s: %s", result.status, result.error)
             return None
         except Exception as exc:

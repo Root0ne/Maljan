@@ -103,15 +103,3 @@ class TestAgentRevise:
         )
         assert isinstance(result, str)
 
-    def test_safe_revise_catches_errors(self, mock_llm: MagicMock) -> None:
-        """safe_revise() wraps errors in AnalystError."""
-        agent = StaticAnalyst(llm=mock_llm, name="StaticAnalyst")
-        # Patch the agent's own revise to simulate a failure
-        agent.revise = MagicMock(side_effect=RuntimeError("API timeout"))  # type: ignore[method-assign]
-        with pytest.raises(AnalystError):
-            agent.safe_revise(
-                original_data="data",
-                own_report="report",
-                peer_reports={},
-                mediator_feedback="feedback",
-            )

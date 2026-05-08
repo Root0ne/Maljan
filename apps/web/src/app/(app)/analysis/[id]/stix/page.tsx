@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
+import { api } from "@/lib/api";
 import { useReport } from "../layout";
 
 function JsonNode({
@@ -103,13 +104,22 @@ function JsonNode({
 
 export default function StixTab() {
   const { report, job, loading } = useReport();
+  const [stixData, setStixData] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    if (report?.id) {
+      api.getReportStix(report.id)
+        .then((data) => setStixData(data))
+        .catch(() => {});
+    }
+  }, [report?.id]);
 
   if (loading || (!report && job?.status !== "completed")) {
     return <div className="p-4 text-sm text-text-secondary animate-pulse">Waiting for STIX bundle generation...</div>;
   }
 
-  const stixData = report?.stix_bundle || {};
-  const raw = JSON.stringify(stixData, null, 2);
+  const bundle = stixData ?? report?.stix_bundle ?? {};
+  const raw = JSON.stringify(bundle, null, 2);
 
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -141,7 +151,7 @@ export default function StixTab() {
         </div>
       </div>
       <div className="p-4 font-mono text-xs leading-relaxed overflow-x-auto">
-        <JsonNode data={stixData} />
+        <JsonNode data={bundle} />
       </div>
     </div>
   );

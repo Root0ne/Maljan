@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -108,8 +109,6 @@ class StaticAnalyst(BaseAnalyst):
         # ------------------------------------------------------------------
         # stdio transport (legacy local subprocess)
         # ------------------------------------------------------------------
-        import asyncio
-
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
@@ -134,7 +133,7 @@ class StaticAnalyst(BaseAnalyst):
         )
 
         self._run_async(toolkit.initialize())
-        self.toolkit = toolkit
+        self.toolkit = toolkit  # type: ignore[assignment]
         all_tools = toolkit.get_tools()
         self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
         self.logger.info(
@@ -144,7 +143,7 @@ class StaticAnalyst(BaseAnalyst):
             [t.name for t in self.tools],
         )
 
-    def _run_async(self, coro) -> None:
+    def _run_async(self, coro: Any) -> None:
         """Run an async coroutine from a sync context, handling nested loops."""
         import asyncio
 

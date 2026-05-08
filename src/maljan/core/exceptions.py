@@ -22,7 +22,3 @@ class LLMError(MaljanError):
     pass
 
 
-class WorkflowError(MaljanError):
-    """Raised when the LangGraph orchestration fails."""
-
-    pass

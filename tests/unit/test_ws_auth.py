@@ -14,9 +14,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from app.api.ws import ws_analysis  # noqa: I001
 from fastapi import WebSocket, WebSocketDisconnect
-
-from app.api.ws import ws_analysis
 
 
 @pytest.fixture

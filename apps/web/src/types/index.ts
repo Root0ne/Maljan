@@ -68,21 +68,6 @@ export interface AgentFinding {
   final_confidence: number;
 }
 
-export interface YaraMatch {
-  rule_name: string;
-  ruleset: string;
-  source: string;
-  match_count: number;
-  severity: Severity;
-}
-
-export interface SigmaMatch {
-  rule_name: string;
-  description: string;
-  severity: Severity;
-  source: string;
-}
-
 export interface MitreTechnique {
   technique_id: string;
   technique_name: string;
@@ -90,24 +75,6 @@ export interface MitreTechnique {
   tactic_id: string;
   match_count: number;
   sources: string[];
-}
-
-export interface NegotiationRound {
-  round: number;
-  agent: string;
-  position: Verdict;
-  confidence: number;
-  argument: string;
-  timestamp?: string;
-}
-
-/* ── Dashboard Stats ─────────────────────────────────── */
-export interface DashboardStats {
-  total_jobs: number;
-  total_samples: number;
-  jobs_by_status: Record<string, number>;
-  verdict_distribution: Record<string, number>;
-  avg_duration_seconds: number | null;
 }
 
 /* ── WebSocket Events ────────────────────────────────── */

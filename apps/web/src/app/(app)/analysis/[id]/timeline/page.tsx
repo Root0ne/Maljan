@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import {
   LineChart,
   Line,
@@ -10,6 +11,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { api } from "@/lib/api";
 import { useReport } from "../layout";
 
 interface DebateEntry {
@@ -95,6 +97,15 @@ function parseNegotiationLog(negotiationLog: Record<string, unknown> | null | un
 
 export default function TimelineTab() {
   const { report, job, loading } = useReport();
+  const [timelineData, setTimelineData] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    if (report?.id) {
+      api.getReportTimeline(report.id)
+        .then((data) => setTimelineData(data))
+        .catch(() => {});
+    }
+  }, [report?.id]);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -108,7 +119,7 @@ export default function TimelineTab() {
     );
   }
 
-  const negotiationLog = report?.negotiation_log as Record<string, unknown> | null | undefined;
+  const negotiationLog = timelineData ?? (report?.negotiation_log as Record<string, unknown> | null | undefined);
   const debateEntries = parseNegotiationLog(negotiationLog);
 
   // Also use agent_findings as a fallback for the timeline (one entry per agent)

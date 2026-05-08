@@ -72,19 +72,6 @@ class SampleListResponse(BaseModel):
 # ── Report Schemas ───────────────────────────────────────────────
 
 
-class ReportSummaryResponse(BaseModel):
-    """Condensed report for list views."""
-
-    id: uuid.UUID
-    job_id: uuid.UUID
-    verdict: str
-    overall_confidence: float
-    malware_category: str | None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class AgentFindingResponse(BaseModel):
     """Per-agent finding detail."""
 

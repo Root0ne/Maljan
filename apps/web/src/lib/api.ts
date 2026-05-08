@@ -202,7 +202,15 @@ class ApiClient {
       id: string;
       email: string;
       full_name: string;
+      role: string;
     }>("/api/v1/auth/me");
+  }
+
+  refresh(refreshToken: string) {
+    return this.request<{ access_token: string; refresh_token: string }>(
+      "/api/v1/auth/refresh",
+      { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) }
+    );
   }
 
   /* ── Dashboard ─────────────────────────────────────── */

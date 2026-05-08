@@ -53,8 +53,6 @@ def analyze(
     """Run the full malware analysis pipeline on a sample."""
 
     # Build config at construction time — no post-init mutation
-    from maljan.core.config import LLMConfig, NegotiationConfig
-
     config = Settings()
     if not mock:
         config.llm.provider = provider

@@ -51,6 +51,7 @@ export default function SamplesPage() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [apiAvailable, setApiAvailable] = useState(false);
+  const [detailSample, setDetailSample] = useState<SampleDTO | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   /* Fetch real samples on mount */
@@ -176,6 +177,19 @@ export default function SamplesPage() {
                     <button
                       onClick={async () => {
                         try {
+                          const detail = await api.getSample(s.id);
+                          setDetailSample(detail);
+                        } catch {
+                          /* demo mode */
+                        }
+                      }}
+                      className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                    >
+                      Details
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
                           const job = await api.createJob(s.id);
                           window.location.href = `/analysis/${job.id}/live`;
                         } catch {
@@ -193,6 +207,64 @@ export default function SamplesPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Sample Detail Modal */}
+      {detailSample && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDetailSample(null)}
+        >
+          <div
+            className="bg-bg-surface border border-border rounded w-full max-w-lg p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-text-primary">Sample Details</h3>
+              <button
+                onClick={() => setDetailSample(null)}
+                className="text-text-muted hover:text-text-primary"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="text-text-muted uppercase tracking-wider">Filename</span>
+                <p className="text-text-primary mt-0.5">{detailSample.original_filename}</p>
+              </div>
+              <div>
+                <span className="text-text-muted uppercase tracking-wider">SHA-256</span>
+                <code className="block text-text-secondary font-mono mt-0.5 break-all">{detailSample.sha256}</code>
+              </div>
+              {detailSample.md5 && (
+                <div>
+                  <span className="text-text-muted uppercase tracking-wider">MD5</span>
+                  <code className="block text-text-secondary font-mono mt-0.5 break-all">{detailSample.md5}</code>
+                </div>
+              )}
+              <div className="flex gap-6">
+                <div>
+                  <span className="text-text-muted uppercase tracking-wider">Size</span>
+                  <p className="text-text-primary mt-0.5">{formatSize(detailSample.file_size_bytes)}</p>
+                </div>
+                {detailSample.mime_type && (
+                  <div>
+                    <span className="text-text-muted uppercase tracking-wider">MIME Type</span>
+                    <p className="text-text-primary mt-0.5">{detailSample.mime_type}</p>
+                  </div>
+                )}
+              </div>
+              <div>
+                <span className="text-text-muted uppercase tracking-wider">Uploaded</span>
+                <p className="text-text-primary mt-0.5">{formatDate(detailSample.uploaded_at)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

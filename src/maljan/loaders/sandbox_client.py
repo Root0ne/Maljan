@@ -63,20 +63,6 @@ class SubmissionResult:
         """True when the sandbox task completed with a usable report."""
         return self.status == "reported" and bool(self.report)
 
-    def behavior_section(self) -> dict[str, Any]:
-        """Extract the 'behavior' key, returning {} if absent."""
-        result: dict[str, Any] = self.report.get("behavior", {})
-        return result
-
-    def target_section(self) -> dict[str, Any]:
-        """Extract the 'target' key, returning {} if absent."""
-        result: dict[str, Any] = self.report.get("target", {})
-        return result
-
-    def signatures(self) -> list[dict[str, Any]]:
-        """Extract behavioral signature matches, returning [] if absent."""
-        result: list[dict[str, Any]] = self.report.get("signatures", [])
-        return result
 
 
 # ---------------------------------------------------------------------------

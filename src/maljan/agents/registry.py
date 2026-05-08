@@ -46,9 +46,9 @@ def register_agent(name: str, enabled: bool = True):  # type: ignore[no-untyped-
 
 def discover_agents() -> None:
     """Import all built-in agent modules to trigger @register_agent decorators."""
-    import maljan.agents.static_analyst  # noqa: F401
     import maljan.agents.dynamic_analyst  # noqa: F401
     import maljan.agents.network_analyst  # noqa: F401
+    import maljan.agents.static_analyst  # noqa: F401
 
 
 class AgentRegistry:
@@ -79,6 +79,3 @@ class AgentRegistry:
         cls = self.get_class(name)
         return cls(llm=llm, name=name)
 
-    def create_all(self, llm: BaseChatModel) -> dict[str, BaseAnalyst]:
-        """Instantiate all enabled registered agents."""
-        return {name: self.create(name, llm) for name in self.list_agents()}

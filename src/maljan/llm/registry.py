@@ -54,10 +54,6 @@ class LLMProviderRegistry:
         self._config = config
         discover_providers()
 
-    def list_providers(self) -> list[str]:
-        """Returns names of all registered providers."""
-        return list(_PROVIDER_REGISTRY.keys())
-
     def build_model(
         self,
         role: str = "expert",

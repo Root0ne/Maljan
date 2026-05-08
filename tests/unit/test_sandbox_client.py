@@ -97,37 +97,6 @@ class TestSubmissionResult:
         result = SubmissionResult(task_id="1", status="reported", report={})
         assert result.succeeded is False
 
-    def test_behavior_section_returns_dict(self) -> None:
-        result = SubmissionResult(
-            task_id="1",
-            status="reported",
-            report=_make_report(),
-        )
-        behavior = result.behavior_section()
-        assert "apistats" in behavior
-        assert "generic" in behavior
-
-    def test_behavior_section_empty_when_missing(self) -> None:
-        result = SubmissionResult(task_id="1", status="reported", report={})
-        assert result.behavior_section() == {}
-
-    def test_target_section_returns_dict(self) -> None:
-        result = SubmissionResult(
-            task_id="1", status="reported", report=_make_report(sha256="deadbeef")
-        )
-        assert result.target_section()["sha256"] == "deadbeef"
-
-    def test_signatures_returns_list(self) -> None:
-        result = SubmissionResult(task_id="1", status="reported", report=_make_report())
-        sigs = result.signatures()
-        assert len(sigs) == 1
-        assert sigs[0]["name"] == "ransomware_dropper"
-
-    def test_signatures_empty_when_missing(self) -> None:
-        result = SubmissionResult(task_id="1", status="reported", report={})
-        assert result.signatures() == []
-
-
 # ---------------------------------------------------------------------------
 # MockSandboxClient
 # ---------------------------------------------------------------------------
@@ -189,7 +158,7 @@ class TestMockSandboxClient:
 
         assert result.succeeded is True
         assert result.sample_sha256 == sha256
-        assert "apistats" in result.behavior_section()
+        assert "apistats" in result.report.get("behavior", {})
 
     def test_fetch_report_uses_name_fallback(self, tmp_path: Path) -> None:
         report = _make_report()

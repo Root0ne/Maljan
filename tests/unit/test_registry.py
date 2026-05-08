@@ -57,10 +57,3 @@ class TestParserRegistry:
         with pytest.raises(KeyError):
             registry.create("nonexistent")
 
-    def test_create_all_returns_all_parsers(self) -> None:
-        registry = ParserRegistry()
-        all_parsers = registry.create_all()
-        assert len(all_parsers) >= 3
-        assert "static" in all_parsers
-        assert "dynamic" in all_parsers
-        assert "network" in all_parsers

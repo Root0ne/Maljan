@@ -60,6 +60,3 @@ class ParserRegistry:
         cls = self.get_class(name)
         return cls()
 
-    def create_all(self) -> dict[str, BaseParser]:
-        """Instantiate all registered parsers."""
-        return {name: self.create(name) for name in self.list_parsers()}
