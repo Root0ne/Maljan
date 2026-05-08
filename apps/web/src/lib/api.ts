@@ -34,10 +34,13 @@ export interface JobDTO {
 export interface ReportSummaryDTO {
   id: string;
   job_id: string;
+  sample_filename: string;
   verdict: string;
   overall_confidence: number;
   malware_category: string | null;
   created_at: string;
+  techniques_count: number;
+  findings_count: number;
 }
 
 export interface AgentFindingDTO {
@@ -70,6 +73,33 @@ export interface DashboardStatsDTO {
   jobs_by_status: Record<string, number>;
   verdict_distribution: Record<string, number>;
   avg_duration_seconds: number | null;
+}
+
+export interface AuditLogDTO {
+  id: string;
+  user_id: string;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyDTO {
+  id: string;
+  user_id: string;
+  key_prefix: string;
+  name: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiKeyCreateDTO extends ApiKeyDTO {
+  raw_key: string;
 }
 
 /* ── API Client ───────────────────────────────────────── */
@@ -254,6 +284,46 @@ class ApiClient {
   getReportMitre(reportId: string) {
     return this.request<{ techniques: unknown[] }>(
       `/api/v1/reports/${reportId}/mitre`
+    );
+  }
+
+  getReports(page = 1, pageSize = 50) {
+    return this.request<PaginatedResponse<ReportSummaryDTO>>(
+      `/api/v1/reports?page=${page}&page_size=${pageSize}`
+    );
+  }
+
+  /* ── Audit Logs (admin) ──────────────────────────────── */
+  getAuditLogs(page = 1, pageSize = 50, action?: string, userId?: string) {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    if (action) params.set("action", action);
+    if (userId) params.set("user_id", userId);
+    return this.request<PaginatedResponse<AuditLogDTO>>(
+      `/api/v1/audit/logs?${params}`
+    );
+  }
+
+  /* ── API Keys ────────────────────────────────────────── */
+  getApiKeys(page = 1, pageSize = 50) {
+    return this.request<PaginatedResponse<ApiKeyDTO>>(
+      `/api/v1/audit/api-keys?page=${page}&page_size=${pageSize}`
+    );
+  }
+
+  createApiKey(name: string, expiresInDays?: number) {
+    return this.request<ApiKeyCreateDTO>(
+      "/api/v1/audit/api-keys",
+      { method: "POST", body: JSON.stringify({ name, expires_in_days: expiresInDays || null }) }
+    );
+  }
+
+  revokeApiKey(keyId: string) {
+    return this.request<void>(
+      `/api/v1/audit/api-keys/${keyId}`,
+      { method: "DELETE" }
     );
   }
 }

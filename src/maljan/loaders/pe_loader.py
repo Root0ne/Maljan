@@ -1,4 +1,4 @@
-"""PE/ELF static analysis loader using pefile and python-magic.
+"""PE/ELF static analysis loader using pefile and filetype.
 
 Extracts structural metadata from Windows PE files:
   - File type detection (PE32, PE32+, DLL, etc.)
@@ -10,7 +10,7 @@ Extracts structural metadata from Windows PE files:
 
 Graceful degradation:
   - If pefile is not installed, returns basic file stats only.
-  - If python-magic is not available, falls back to simple extension checks.
+  - If filetype is not available, falls back to header-byte detection.
 """
 
 from __future__ import annotations
@@ -23,23 +23,23 @@ from maljan.core.logger import logger
 
 
 def _detect_file_type(path: Path) -> str:
-    """Detect file type using python-magic or fallback to extension."""
+    """Detect file type using filetype or fallback to header bytes."""
     try:
-        import magic  # type: ignore[import-untyped]
+        import filetype  # type: ignore[import-untyped]
 
-        return magic.from_file(str(path))
+        kind = filetype.guess(str(path))
+        if kind is not None:
+            return f"{kind.extension.upper()} ({kind.mime})"
+        # Fallback: check first bytes for PE/ELF signature
+        with path.open("rb") as f:
+            header = f.read(4)
+        if header[:2] == b"MZ":
+            return "PE executable (Windows)"
+        if header[:4] == b"\x7fELF":
+            return "ELF executable (Linux)"
+        return f"Unknown (first bytes: {header.hex()})"
     except Exception:
-        # Fallback: check first bytes for PE signature
-        try:
-            with path.open("rb") as f:
-                header = f.read(4)
-            if header[:2] == b"MZ":
-                return "PE executable (Windows)"
-            if header[:4] == b"\x7fELF":
-                return "ELF executable (Linux)"
-            return f"Unknown (first bytes: {header.hex()})"
-        except Exception:
-            return "Unknown (cannot read file)"
+        return "Unknown (cannot detect)"
 
 
 class PELoader:
@@ -170,6 +170,7 @@ class PELoader:
             "file_type": self.file_type,
         }
 
+        result["strings"] = self._get_strings()
         if pe:
             result["entry_point"] = hex(pe.OPTIONAL_HEADER.AddressOfEntryPoint)
             result["image_base"] = hex(pe.OPTIONAL_HEADER.ImageBase)
@@ -177,7 +178,6 @@ class PELoader:
             result["sections"] = self._get_sections()
             result["imports"] = self._get_imports()
             result["exports"] = self._get_exports()
-            result["strings"] = self._get_strings()
         else:
             result["entry_point"] = "N/A (pefile unavailable)"
             result["image_base"] = "N/A"
@@ -185,7 +185,6 @@ class PELoader:
             result["sections"] = []
             result["imports"] = []
             result["exports"] = []
-            result["strings"] = []
 
         return result
 

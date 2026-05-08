@@ -1,23 +1,8 @@
 "use client";
 
-import { useState } from "react";
-
-interface ApiKeyConfig {
-  id: string;
-  name: string;
-  description: string;
-  envVar: string;
-  masked: string;
-  isSet: boolean;
-}
-
-const API_KEYS: ApiKeyConfig[] = [
-  { id: "gemini", name: "Google Gemini", description: "Primary LLM for malware analysis agents", envVar: "GEMINI_API_KEY", masked: "AIza...****", isSet: true },
-  { id: "triage", name: "Triage (Hatching)", description: "Cloud sandbox for dynamic analysis", envVar: "TRIAGE_API_KEY", masked: "c32d...****", isSet: true },
-  { id: "cape", name: "CAPEv2", description: "Local sandbox instance for behavioral analysis", envVar: "CAPE_API_URL", masked: "http://...", isSet: false },
-  { id: "vt", name: "VirusTotal", description: "Threat intelligence and multi-AV scanning", envVar: "VIRUSTOTAL_API_KEY", masked: "", isSet: false },
-  { id: "otx", name: "AlienVault OTX", description: "Open threat intelligence feeds", envVar: "OTX_API_KEY", masked: "", isSet: false },
-];
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 
 interface AnalysisConfig {
   key: string;
@@ -43,14 +28,75 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<"general" | "apikeys" | "analysis">("general");
   const [configs, setConfigs] = useState(ANALYSIS_CONFIGS);
 
+  // General tab state
+  const [user, setUser] = useState<{ full_name: string; email: string } | null>(null);
+  const [userLoading, setUserLoading] = useState(false);
+
+  // API Keys tab state
+  const [apiKeys, setApiKeys] = useState<ApiKeyDTO[]>([]);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [createdKey, setCreatedKey] = useState<ApiKeyCreateDTO | null>(null);
+
   const tabs = [
     { key: "general" as const, label: "General" },
     { key: "apikeys" as const, label: "API Keys" },
     { key: "analysis" as const, label: "Analysis Config" },
   ];
 
+  useEffect(() => {
+    if (activeTab === "general") {
+      setUserLoading(true);
+      api.getMe()
+        .then((me) => setUser(me))
+        .catch(() => setUser({ full_name: "Admin User", email: "admin@maljan.local" }))
+        .finally(() => setUserLoading(false));
+    }
+    if (activeTab === "apikeys") {
+      loadApiKeys();
+    }
+  }, [activeTab]);
+
+  function loadApiKeys() {
+    setApiKeysLoading(true);
+    api.getApiKeys(1, 50)
+      .then((res) => setApiKeys(res.items))
+      .catch(() => setApiKeys([]))
+      .finally(() => setApiKeysLoading(false));
+  }
+
+  async function handleCreateKey(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newKeyName.trim()) return;
+    try {
+      const key = await api.createApiKey(newKeyName.trim());
+      setCreatedKey(key);
+      setNewKeyName("");
+      loadApiKeys();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function handleRevokeKey(keyId: string) {
+    if (!confirm("Revoke this API key? It cannot be undone.")) return;
+    try {
+      await api.revokeApiKey(keyId);
+      loadApiKeys();
+    } catch {
+      /* ignore */
+    }
+  }
+
   function updateConfig(key: string, value: number | boolean | string) {
     setConfigs((prev) => prev.map((c) => (c.key === key ? { ...c, value } : c)));
+  }
+
+  function formatDate(iso: string | null) {
+    if (!iso) return "Never";
+    return new Date(iso).toLocaleDateString("en-US", {
+      month: "short", day: "numeric", year: "numeric",
+    });
   }
 
   return (
@@ -84,27 +130,30 @@ export default function SettingsPage() {
               </h2>
             </div>
             <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-xs text-text-secondary mb-1.5">Full Name</label>
-                <input
-                  type="text"
-                  defaultValue="Admin User"
-                  className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-secondary mb-1.5">Email</label>
-                <input
-                  type="email"
-                  defaultValue="admin@maljan.local"
-                  className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-                />
-              </div>
-              <div className="flex justify-end">
-                <button className="h-8 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors">
-                  Save Changes
-                </button>
-              </div>
+              {userLoading ? (
+                <div className="text-xs text-text-muted">Loading...</div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1.5">Full Name</label>
+                    <input
+                      type="text"
+                      defaultValue={user?.full_name || ""}
+                      readOnly
+                      className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1.5">Email</label>
+                    <input
+                      type="email"
+                      defaultValue={user?.email || ""}
+                      readOnly
+                      className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -134,47 +183,92 @@ export default function SettingsPage() {
 
       {/* API Keys Tab */}
       {activeTab === "apikeys" && (
-        <div className="space-y-3 max-w-3xl">
-          {API_KEYS.map((key) => (
-            <div key={key.id} className="bg-bg-surface border border-border rounded">
-              <div className="flex items-center justify-between p-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-sm font-medium text-text-primary">{key.name}</span>
-                    <span
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${
-                        key.isSet
-                          ? "bg-status-green/10 text-status-green"
-                          : "bg-status-red/10 text-status-red"
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${key.isSet ? "bg-status-green" : "bg-status-red"}`} />
-                      {key.isSet ? "Configured" : "Not Set"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-text-secondary">{key.description}</p>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className="text-xs text-text-muted font-mono bg-bg-deep px-1.5 py-0.5 rounded">
-                      {key.envVar}
-                    </span>
-                    {key.masked && (
-                      <span className="text-xs text-text-muted font-mono">{key.masked}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-2 ml-4 shrink-0">
-                  <button className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors">
-                    {key.isSet ? "Update" : "Configure"}
-                  </button>
-                  {key.isSet && (
-                    <button className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30 transition-colors">
-                      Revoke
-                    </button>
-                  )}
-                </div>
+        <div className="space-y-4 max-w-3xl">
+          {/* Create new key */}
+          <div className="bg-bg-surface border border-border rounded p-4">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-3">
+              Create API Key
+            </h2>
+            <form onSubmit={handleCreateKey} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Key name (e.g., CI/CD integration)"
+                value={newKeyName}
+                onChange={(e) => setNewKeyName(e.target.value)}
+                className="flex-1 h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+              >
+                Create
+              </button>
+            </form>
+            {createdKey && (
+              <div className="mt-3 p-3 bg-status-green/10 border border-status-green/20 rounded">
+                <p className="text-xs text-status-green font-medium mb-1">API key created successfully. Copy it now — it will not be shown again.</p>
+                <code className="text-xs font-mono text-text-primary bg-bg-deep px-2 py-1 rounded block break-all">
+                  {createdKey.raw_key}
+                </code>
+                <button
+                  onClick={() => setCreatedKey(null)}
+                  className="mt-2 text-xs text-text-secondary hover:text-text-primary"
+                >
+                  Dismiss
+                </button>
               </div>
+            )}
+          </div>
+
+          {/* Key list */}
+          {apiKeysLoading ? (
+            <div className="text-xs text-text-muted">Loading API keys...</div>
+          ) : apiKeys.length === 0 ? (
+            <div className="text-xs text-text-muted">No API keys found.</div>
+          ) : (
+            <div className="space-y-3">
+              {apiKeys.map((key) => (
+                <div key={key.id} className="bg-bg-surface border border-border rounded">
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-sm font-medium text-text-primary">{key.name}</span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${
+                            key.is_active
+                              ? "bg-status-green/10 text-status-green"
+                              : "bg-status-red/10 text-status-red"
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${key.is_active ? "bg-status-green" : "bg-status-red"}`} />
+                          {key.is_active ? "Active" : "Revoked"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-text-muted font-mono bg-bg-deep px-1.5 py-0.5 rounded">
+                          {key.key_prefix}***
+                        </span>
+                        <span className="text-xs text-text-muted">Created {formatDate(key.created_at)}</span>
+                        {key.expires_at && (
+                          <span className="text-xs text-status-orange">Expires {formatDate(key.expires_at)}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 ml-4 shrink-0">
+                      {key.is_active && (
+                        <button
+                          onClick={() => handleRevokeKey(key.id)}
+                          className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30 transition-colors"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 

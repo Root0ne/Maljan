@@ -29,9 +29,11 @@ class ReportService:
     ) -> dict:
         """List all reports for the user's jobs with pagination."""
         from sqlalchemy import func
+        from sqlalchemy.orm import selectinload
 
         base_query = (
             select(AnalysisReport)
+            .options(selectinload(AnalysisReport.job).selectinload(AnalysisJob.sample))
             .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
             .where(AnalysisJob.created_by == user.id)
         )
@@ -50,8 +52,26 @@ class ReportService:
         )
         reports = result.scalars().all()
 
+        # Enrich with computed fields for the frontend
+        items: list[dict] = []
+        for report in reports:
+            sample_filename = report.job.sample.original_filename if report.job and report.job.sample else "unknown"
+            mitre = report.mitre_techniques or []
+            findings = report.agent_findings or []
+            items.append({
+                "id": str(report.id),
+                "job_id": str(report.job_id),
+                "sample_filename": sample_filename,
+                "verdict": report.verdict,
+                "overall_confidence": report.overall_confidence,
+                "malware_category": report.malware_category,
+                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "techniques_count": len(mitre) if isinstance(mitre, list) else 0,
+                "findings_count": len(findings),
+            })
+
         return {
-            "items": reports,
+            "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,

@@ -25,7 +25,6 @@ dependencies = [
     "fastmcp>=3.2.4",
     "langchain>=1.2.15",
     "langchain-google-genai>=4.2.1",
-    "python-magic>=0.4.27",
     "pefile>=2024.8.26",
     "scapy>=2.6.1",
     "fastapi>=0.115.0",
@@ -39,10 +38,16 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "python-multipart>=0.0.6",
     "alembic>=1.14.0",
+    "filetype>=1.2.0",
 ]
 
 [project.scripts]
 maljan = "maljan.cli:main"
+
+[project.optional-dependencies]
+yara = [
+    "yara-python>=4.5.4",
+]
 
 [dependency-groups]
 dev = [

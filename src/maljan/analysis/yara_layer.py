@@ -40,6 +40,15 @@ from typing import Any
 
 from maljan.core.logger import logger
 
+# Optional yara-python integration (C extension, not available on all platforms)
+try:
+    import yara  # type: ignore[import-untyped]
+
+    _YARA_AVAILABLE = True
+except ImportError:
+    yara = None  # type: ignore[assignment]
+    _YARA_AVAILABLE = False
+
 # Default rules file relative to the repository root
 _DEFAULT_RULES_PATH = Path(__file__).parent.parent.parent.parent / "data" / "yara_ttp_rules.yaml"
 
@@ -145,6 +154,14 @@ class YaraLayer:
             rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.patterns]
             for rule in rules
         }
+        self._yara_rules: Any = None
+        self._yara_id_map: dict[str, str] = {}
+        if _YARA_AVAILABLE and rules:
+            compiled, id_map = self._compile_yara_rules(rules)
+            self._yara_rules = compiled
+            self._yara_id_map = id_map
+            if self._yara_rules:
+                logger.info("YaraLayer: compiled %d rules with yara-python engine.", len(rules))
         logger.debug("YaraLayer initialized with %d rules.", len(rules))
 
     # ------------------------------------------------------------------
@@ -219,19 +236,137 @@ class YaraLayer:
         return cls(rules=[])
 
     # ------------------------------------------------------------------
+    # YARA compilation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compile_yara_rules(rules: list[YaraTTPRule]) -> tuple[Any, dict[str, str]]:
+        """Compile YAML pattern rules into a yara.Rules object.
+
+        Translates each YaraTTPRule into a YARA rule string and compiles
+        the combined source. Returns None if compilation fails.
+        """
+        if yara is None:
+            return None
+
+        def _escape_yara_string(s: str) -> str:
+            return s.replace("\\", "\\\\").replace('"', '\\"')
+
+        def _yara_safe_id(rule_id: str) -> str:
+            """YARA rule names must be alphanumeric + underscore, max 128 chars."""
+            safe = "".join(c if c.isalnum() or c == "_" else "_" for c in rule_id)[:128]
+            return safe
+
+        # Map yara-safe rule name back to original rule id
+        _id_map: dict[str, str] = {}
+
+        rule_sources: list[str] = []
+        for rule in rules:
+            yara_id = _yara_safe_id(rule.id)
+            _id_map[yara_id] = rule.id
+            strings_block = "\n".join(
+                f'        ${i} = "{_escape_yara_string(p)}" nocase'
+                for i, p in enumerate(rule.patterns)
+            )
+            # YARA meta values: string, integer, boolean only (no float)
+            src = (
+                f"rule {yara_id} {{\n"
+                f"    meta:\n"
+                f'        original_id = "{rule.id}"\n'
+                f'        technique_id = "{rule.technique_id}"\n'
+                f'        confidence = "{rule.confidence}"\n'
+                f'        description = "{_escape_yara_string(rule.description)}"\n'
+                f"    strings:\n"
+                f"{strings_block}\n"
+                f"    condition:\n"
+                f"        any of them\n"
+                f"}}\n"
+            )
+            rule_sources.append(src)
+
+        combined = "\n".join(rule_sources)
+        try:
+            compiled = yara.compile(source=combined)
+            return compiled, _id_map
+        except Exception as exc:
+            logger.warning("YaraLayer: yara-python compilation failed: %s. Falling back to regex.", exc)
+            return None, {}
+
+    def _yara_scan(self, text: str) -> list[YaraMatch]:
+        """Scan text using the compiled yara-python engine."""
+        if self._yara_rules is None or yara is None:
+            return []
+
+        try:
+            matches = self._yara_rules.match(data=text.encode("utf-8", errors="replace"))
+        except Exception as exc:
+            logger.warning("YaraLayer: yara-python scan failed: %s. Falling back to regex.", exc)
+            return []
+
+        id_map: dict[str, str] = self._yara_id_map
+        results: list[YaraMatch] = []
+        for match in matches:
+            meta = match.meta
+            yara_id = match.rule
+            rule_id = id_map.get(yara_id, yara_id)
+            technique_id = meta.get("technique_id", "")
+            confidence = float(meta.get("confidence", "0.75"))
+            description = meta.get("description", "")
+
+            # Collect matched strings from yara result.
+            # yara-python >=4.5 uses StringMatch / StringMatchInstance objects.
+            matched_patterns: list[str] = []
+            seen: set[str] = set()
+            for string_match in match.strings:
+                identifier = string_match.identifier
+                # Identifier format is "$pN" where N is the pattern index
+                if identifier.startswith("$p"):
+                    try:
+                        idx = int(identifier[2:])
+                        if 0 <= idx < len(self._rules):
+                            # Find the rule to get the original pattern text
+                            for r in self._rules:
+                                if r.id == rule_id and idx < len(r.patterns):
+                                    pat = r.patterns[idx]
+                                    if pat not in seen:
+                                        matched_patterns.append(pat)
+                                        seen.add(pat)
+                                    break
+                    except ValueError:
+                        pass
+                else:
+                    # Fallback: use matched_data bytes
+                    for instance in string_match.instances:
+                        data = instance.matched_data
+                        try:
+                            decoded = data.decode("utf-8", errors="replace")
+                        except (AttributeError, UnicodeDecodeError):
+                            decoded = str(data)
+                        if decoded not in seen:
+                            matched_patterns.append(decoded)
+                            seen.add(decoded)
+
+            results.append(
+                YaraMatch(
+                    rule_id=rule_id,
+                    technique_id=technique_id,
+                    confidence=confidence,
+                    description=description,
+                    matched_patterns=matched_patterns,
+                )
+            )
+
+        return results
+
+    # ------------------------------------------------------------------
     # Core scanning
     # ------------------------------------------------------------------
 
     def scan(self, text: str) -> list[YaraMatch]:
         """Scan text against all loaded rules.
 
-        For each rule, checks whether any of its patterns appear in the
-        text. A rule match is recorded if at least one pattern is found.
-        Multiple patterns from the same rule that match are all reported.
-
-        The same technique_id may appear in multiple matches if more than
-        one rule covers it — higher-level callers deduplicate by taking
-        the maximum confidence.
+        Uses the compiled yara-python engine when available; falls back to
+        regex-based string matching otherwise.
 
         Args:
             text: Combined analysis text (analyst reports + ISR evidence_refs).
@@ -242,6 +377,18 @@ class YaraLayer:
         if not text or not self._rules:
             return []
 
+        # Prefer yara-python engine when available
+        if self._yara_rules is not None:
+            matches = self._yara_scan(text)
+            if matches:
+                logger.info(
+                    "YaraLayer: %d rule(s) triggered (yara-python) — techniques: %s",
+                    len(matches),
+                    sorted({m.technique_id for m in matches}),
+                )
+            return matches
+
+        # Fallback: regex-based string matching
         matches: list[YaraMatch] = []
 
         for rule in self._rules:
@@ -265,7 +412,7 @@ class YaraLayer:
 
         if matches:
             logger.info(
-                "YaraLayer: %d rule(s) triggered — techniques: %s",
+                "YaraLayer: %d rule(s) triggered (regex) — techniques: %s",
                 len(matches),
                 sorted({m.technique_id for m in matches}),
             )

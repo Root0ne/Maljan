@@ -31,3 +31,31 @@ class TestServiceContainer:
         agents = container.agent_registry.list_agents()
         assert isinstance(agents, list)
         assert len(agents) > 0
+
+    def test_load_sandbox_data_for_agent(self) -> None:
+        """load_sandbox_data_for_agent distributes report fields correctly."""
+        container = ServiceContainer(config=Settings(), mock=True)
+        report = {
+            "target": {"file": {"sha256": "abc123", "name": "test.exe"}},
+            "behavior": {"processes": [], "apistats": {}},
+            "network": {
+                "dns": [{"request": "evil.com"}],
+                "http": [],
+                "tcp": [],
+                "hosts": [],
+                "domains": [],
+            },
+            "signatures": [],
+            "ttp_tags": [],
+        }
+
+        static_chunks = container.load_sandbox_data_for_agent("static", report)
+        assert len(static_chunks) >= 1
+        assert "abc123" in static_chunks[0].content
+
+        dynamic_chunks = container.load_sandbox_data_for_agent("dynamic", report)
+        assert len(dynamic_chunks) >= 1
+
+        network_chunks = container.load_sandbox_data_for_agent("network", report)
+        assert len(network_chunks) >= 1
+        assert "evil.com" in network_chunks[0].content

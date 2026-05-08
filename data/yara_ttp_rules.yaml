@@ -1,2824 +1,372 @@
-version: "2.0"
-description: "Maljan YARA-TTP rule set — hand-crafted + MITRE ATT&CK derived."
-
+version: "1.0"
+description: "Maljan built-in YARA-TTP rules for deterministic ATT&CK technique detection"
 rules:
-  # -----------------------------------------------------------------------
-  # Process Injection (T1055)
-  # -----------------------------------------------------------------------
-generated_at: "2026-04-26"
-sources:
-  - "hand-crafted (baseline)"
-  - "mitre-attack/attack-stix-data (ATT&CK Enterprise)"
-  - "data/attck_labeled_sentences.jsonl (TRAM2 format)"
-  - id: proc_injection_classic
+  # T1055 - Process Injection
+  - id: process_injection_apis
     technique_id: "T1055"
-    confidence: 0.88
-    description: "Classic process injection via VirtualAllocEx + WriteProcessMemory + CreateRemoteThread"
-    patterns: ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"]
+    confidence: 0.90
+    description: "Process injection via classic Windows APIs"
+    patterns:
+      - "VirtualAllocEx"
+      - "WriteProcessMemory"
+      - "CreateRemoteThread"
+      - "NtCreateThreadEx"
+      - "QueueUserAPC"
+      - "SetThreadContext"
 
-  - id: proc_injection_nt
-    technique_id: "T1055"
-    confidence: 0.85
-    description: "NT API-level process injection (NtWriteVirtualMemory / RtlCreateUserThread)"
-    patterns: ["NtWriteVirtualMemory", "RtlCreateUserThread", "ZwCreateThread"]
-
-  - id: dll_injection
-    technique_id: "T1055.001"
-    confidence: 0.85
-    description: "DLL injection via LoadLibrary + CreateRemoteThread"
-    patterns: ["LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW"]
-
-  - id: pe_injection_unmap
-    technique_id: "T1055.002"
-    confidence: 0.85
-    description: "PE injection via NtUnmapViewOfSection (process hollowing pattern)"
-    patterns: ["NtUnmapViewOfSection", "ZwUnmapViewOfSection"]
-
+  # T1055.012 - Process Hollowing
   - id: process_hollowing
     technique_id: "T1055.012"
-    confidence: 0.90
-    description: "Process hollowing via NtUnmapViewOfSection + SetThreadContext + ResumeThread"
-    patterns: ["SetThreadContext", "NtUnmapViewOfSection", "ResumeThread"]
+    confidence: 0.92
+    description: "Process hollowing indicators"
+    patterns:
+      - "NtUnmapViewOfSection"
+      - " hollow"
+      - "RunPE"
+      - "Process Hollowing"
 
-  # -----------------------------------------------------------------------
-  # Command & Scripting Interpreter (T1059)
-  # -----------------------------------------------------------------------
-  - id: cmd_shell
-    technique_id: "T1059.003"
-    confidence: 0.80
-    description: "Windows Command Shell execution via cmd.exe"
-    patterns: ["cmd.exe", "cmd /c", "cmd /k", "CommandLine"]
-
-  - id: powershell_exec
-    technique_id: "T1059.001"
-    confidence: 0.85
-    description: "PowerShell execution indicators"
-    patterns: ["powershell.exe", "powershell -", "IEX(", "Invoke-Expression", "EncodedCommand", "-enc "]
-
-  - id: wscript_cscript
-    technique_id: "T1059.005"
-    confidence: 0.82
-    description: "VBScript / JScript execution via wscript/cscript"
-    patterns: ["wscript.exe", "cscript.exe", "WScript.Shell", "CreateObject("]
-
-  - id: mshta_exec
-    technique_id: "T1218.005"
-    confidence: 0.85
-    description: "Signed binary proxy execution via mshta.exe"
-    patterns: ["mshta.exe", "mshta http"]
-
-  - id: regsvr32_proxy
-    technique_id: "T1218.010"
-    confidence: 0.85
-    description: "Signed binary proxy execution via regsvr32"
-    patterns: ["regsvr32.exe", "regsvr32 /s", "regsvr32 /u"]
-
-  - id: rundll32_proxy
-    technique_id: "T1218.011"
-    confidence: 0.85
-    description: "Signed binary proxy execution via rundll32"
-    patterns: ["rundll32.exe", "rundll32 "]
-
-  # -----------------------------------------------------------------------
-  # Persistence (T1547, T1053, T1543)
-  # -----------------------------------------------------------------------
+  # T1547.001 - Registry Run Keys
   - id: registry_run_keys
     technique_id: "T1547.001"
     confidence: 0.88
-    description: "Registry Run key persistence"
+    description: "Persistence via Registry Run/RunOnce keys"
     patterns:
-      - "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-      - "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-      - "CurrentVersion\\Run"
+      - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
       - "RegSetValueEx"
+      - "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 
-  - id: scheduled_task
-    technique_id: "T1053.005"
+  # T1059.001 - PowerShell
+  - id: powershell_execution
+    technique_id: "T1059.001"
     confidence: 0.85
-    description: "Scheduled task creation for persistence"
-    patterns: ["schtasks", "ITaskScheduler", "ITaskService", "TaskScheduler", "at.exe /create"]
+    description: "Command and scripting interpreter: PowerShell"
+    patterns:
+      - "powershell.exe"
+      - "powershell -enc"
+      - "powershell -ep bypass"
+      - "IEX("
+      - "Invoke-Expression"
+      - "-EncodedCommand"
 
-  - id: windows_service
-    technique_id: "T1543.003"
-    confidence: 0.85
-    description: "Windows service creation for persistence"
-    patterns: ["CreateService", "OpenSCManager", "StartService", "sc create", "sc config"]
+  # T1059.003 - Windows Command Shell
+  - id: cmd_execution
+    technique_id: "T1059.003"
+    confidence: 0.80
+    description: "Command and scripting interpreter: cmd.exe"
+    patterns:
+      - "cmd.exe /c"
+      - "cmd.exe /k"
+      - "%COMSPEC%"
+      - "bat&"
 
-  - id: startup_folder
-    technique_id: "T1547.001"
+  # T1059.005 - Visual Basic
+  - id: vbs_execution
+    technique_id: "T1059.005"
+    confidence: 0.80
+    description: "Command and scripting interpreter: VBScript"
+    patterns:
+      - "wscript.exe"
+      - "cscript.exe"
+      - "CreateObject"
+      - "WScript.Shell"
+
+  # T1059.007 - JavaScript
+  - id: js_execution
+    technique_id: "T1059.007"
     confidence: 0.78
-    description: "Startup folder persistence"
-    patterns: ["\\Startup\\", "\\Start Menu\\Programs\\Startup", "shell:startup"]
+    description: "Command and scripting interpreter: JavaScript"
+    patterns:
+      - "wscript.exe"
+      - "mshta.exe"
+      - "javascript:"
+      - "JScript"
 
-  # -----------------------------------------------------------------------
-  # Defense Evasion (T1027, T1140, T1562, T1218, T1070)
-  # -----------------------------------------------------------------------
-  - id: obfuscated_base64
-    technique_id: "T1027"
-    confidence: 0.75
-    description: "Base64-based obfuscation"
-    patterns: ["base64", "Base64", "FromBase64String", "b64decode", "AAAA"]
-
-  - id: xor_encryption
-    technique_id: "T1027"
-    confidence: 0.75
-    description: "XOR-based obfuscation"
-    patterns: ["xor_key", "xor_decode", "XorEncrypt", "XorDecrypt", "0x41^"]
-
-  - id: antidebug_isdebuggerpresent
-    technique_id: "T1622"
-    confidence: 0.88
-    description: "Debugger detection via IsDebuggerPresent"
-    patterns: ["IsDebuggerPresent", "CheckRemoteDebuggerPresent", "NtQueryInformationProcess", "OutputDebugString"]
-
-  - id: disable_security_tools
-    technique_id: "T1562.001"
-    confidence: 0.85
-    description: "Security tool disabling via taskkill / net stop / sc stop"
-    patterns: ["taskkill", "net stop", "sc stop", "sc delete", "AV", "Defender"]
-
-  - id: clear_event_logs
-    technique_id: "T1070.001"
-    confidence: 0.90
-    description: "Event log clearing via wevtutil or ClearEventLog"
-    patterns: ["wevtutil cl", "ClearEventLog", "OpenEventLog", "System.Diagnostics.EventLog"]
-
-  - id: delete_volume_shadow
-    technique_id: "T1490"
-    confidence: 0.92
-    description: "Volume shadow copy deletion — ransomware indicator"
-    patterns: ["vssadmin delete shadows", "vssadmin.exe Delete", "wbadmin delete", "bcdedit /set", "shadowcopy delete"]
-
-  - id: file_deletion_indicator_removal
-    technique_id: "T1070.004"
-    confidence: 0.80
-    description: "File deletion for indicator removal"
-    patterns: ["DeleteFile", "DeleteFileW", "DeleteFileA", "del /f /q", "Remove-Item -Force"]
-
-  # -----------------------------------------------------------------------
-  # Credential Access (T1003, T1056, T1555)
-  # -----------------------------------------------------------------------
-  - id: lsass_memory_dump
-    technique_id: "T1003.001"
-    confidence: 0.92
-    description: "LSASS memory dump for credential extraction"
-    patterns: ["lsass.exe", "MiniDumpWriteDump", "sekurlsa", "procdump", "comsvcs.dll MiniDump"]
-
-  - id: mimikatz_indicators
-    technique_id: "T1003"
-    confidence: 0.95
-    description: "Mimikatz credential dumping tool indicators"
-    patterns: ["mimikatz", "sekurlsa::logonpasswords", "kerberos::list", "lsadump::sam", "privilege::debug"]
-
-  - id: keylogger_hook
-    technique_id: "T1056.001"
-    confidence: 0.88
-    description: "Keylogging via Windows hook (SetWindowsHookEx)"
-    patterns: ["SetWindowsHookEx", "WH_KEYBOARD_LL", "GetAsyncKeyState", "GetKeyState"]
-
-  - id: credential_vault
-    technique_id: "T1555"
-    confidence: 0.85
-    description: "Credential extraction from Windows Credential Manager / DPAPI"
-    patterns: ["CryptUnprotectData", "CredRead", "CredEnumerate", "DPAPI", "vault"]
-
-  # -----------------------------------------------------------------------
-  # Discovery (T1082, T1057, T1083, T1016)
-  # -----------------------------------------------------------------------
-  - id: system_info_discovery
-    technique_id: "T1082"
-    confidence: 0.78
-    description: "System information discovery"
-    patterns: ["GetSystemInfo", "GetComputerName", "GetUserName", "systeminfo", "ExpandEnvironmentStrings"]
-
-  - id: process_discovery
-    technique_id: "T1057"
-    confidence: 0.82
-    description: "Process enumeration via Toolhelp32 / WMI"
-    patterns: ["CreateToolhelp32Snapshot", "Process32First", "Process32Next", "EnumProcesses"]
-
-  - id: file_directory_discovery
-    technique_id: "T1083"
-    confidence: 0.75
-    description: "File/directory enumeration"
-    patterns: ["FindFirstFile", "FindNextFile", "GetFileAttributes", "PathFileExists"]
-
-  - id: network_config_discovery
-    technique_id: "T1016"
-    confidence: 0.80
-    description: "Network configuration discovery"
-    patterns: ["GetAdaptersInfo", "GetAdaptersAddresses", "ipconfig", "GetTcpTable", "GetUdpTable"]
-
-  - id: network_connections_discovery
-    technique_id: "T1049"
-    confidence: 0.80
-    description: "Active network connection enumeration"
-    patterns: ["GetTcpTable", "GetExtendedTcpTable", "netstat", "GetIpNetTable"]
-
-  # -----------------------------------------------------------------------
-  # Lateral Movement (T1021)
-  # -----------------------------------------------------------------------
-  - id: smb_lateral_movement
-    technique_id: "T1021.002"
-    confidence: 0.85
-    description: "SMB lateral movement via admin shares"
-    patterns: ["\\\\ADMIN$", "\\\\IPC$", "net use", "WNetAddConnection", "NetShareAdd"]
-
-  - id: rdp_lateral_movement
-    technique_id: "T1021.001"
-    confidence: 0.82
-    description: "Remote Desktop Protocol lateral movement"
-    patterns: ["mstsc.exe", "WTSOpenServer", "WTSQuerySessionInformation", "TerminalServices"]
-
-  # -----------------------------------------------------------------------
-  # C2 Communication (T1071, T1095)
-  # -----------------------------------------------------------------------
-  - id: http_c2
+  # T1071.001 - Application Layer Protocol: Web Protocols
+  - id: web_c2_communication
     technique_id: "T1071.001"
-    confidence: 0.75
-    description: "HTTP/HTTPS-based C2 communication"
-    patterns: ["WinHttpOpen", "InternetOpenUrl", "HttpSendRequest", "curl_easy_perform", "URLDownloadToFile"]
-
-  - id: raw_socket_c2
-    technique_id: "T1095"
-    confidence: 0.82
-    description: "Raw TCP socket for non-standard C2 channel"
-    patterns: ["socket(", "connect(", "recv(", "send(", "WSAConnect", "WSAStartup"]
-
-  - id: dns_c2
-    technique_id: "T1071.004"
-    confidence: 0.80
-    description: "DNS-based C2 communication"
-    patterns: ["DnsQuery", "DnsQueryEx", "nslookup", "Dns.GetHostEntry", "dns_query"]
-
-  # -----------------------------------------------------------------------
-  # Exfiltration (T1041, T1048)
-  # -----------------------------------------------------------------------
-  - id: exfil_http_post
-    technique_id: "T1041"
-    confidence: 0.78
-    description: "Data exfiltration over C2 channel via HTTP POST"
-    patterns: ["HttpSendRequestEx", "WinHttpSendRequest", "POST /", "multipart/form-data"]
-
-  - id: exfil_ftp
-    technique_id: "T1048.003"
     confidence: 0.85
-    description: "Data exfiltration via FTP"
-    patterns: ["FtpPutFile", "FtpOpenFile", "ftp.exe", "InternetConnect.*FTP"]
+    description: "C2 communication over HTTP/HTTPS"
+    patterns:
+      - "HttpSendRequest"
+      - "InternetOpenUrl"
+      - "WinHttpConnect"
+      - "URLDownloadToFile"
+      - "curl http"
+      - "wget http"
 
-  # -----------------------------------------------------------------------
-  # Impact (T1486, T1489)
-  # -----------------------------------------------------------------------
-  - id: ransomware_crypto_api
+  # T1027 - Obfuscated Files or Information
+  - id: obfuscation_indicators
+    technique_id: "T1027"
+    confidence: 0.82
+    description: "Obfuscation and packing indicators"
+    patterns:
+      - "UPX"
+      - "packed"
+      - "obfuscated"
+      - "encrypted payload"
+      - "RC4"
+      - "AES"
+      - "XOR"
+      - "Base64"
+
+  # T1027.002 - Software Packing
+  - id: software_packing
+    technique_id: "T1027.002"
+    confidence: 0.85
+    description: "Software packing detected"
+    patterns:
+      - "UPX"
+      - "ASPack"
+      - "PECompact"
+      - "packed"
+      - "compress"
+      - "lzma"
+
+  # T1083 - File and Directory Discovery
+  - id: file_discovery
+    technique_id: "T1083"
+    confidence: 0.78
+    description: "File and directory discovery"
+    patterns:
+      - "FindFirstFile"
+      - "FindNextFile"
+      - "GetLogicalDrives"
+      - "GetDriveType"
+
+  # T1112 - Modify Registry
+  - id: registry_modification
+    technique_id: "T1112"
+    confidence: 0.80
+    description: "Registry modification for defense evasion"
+    patterns:
+      - "RegSetValue"
+      - "RegCreateKey"
+      - "RegDeleteKey"
+      - "DisableTaskMgr"
+      - "DisableRegistryTools"
+
+  # T1562.001 - Disable or Modify Tools
+  - id: disable_defense_tools
+    technique_id: "T1562.001"
+    confidence: 0.88
+    description: "Disable or modify security tools"
+    patterns:
+      - "Anti-Virus"
+      - "Windows Defender"
+      - "Set-MpPreference"
+      - "DisableRealtimeMonitoring"
+      - "TamperProtection"
+
+  # T1497 - Virtualization/Sandbox Evasion
+  - id: sandbox_evasion
+    technique_id: "T1497"
+    confidence: 0.85
+    description: "Virtualization and sandbox evasion"
+    patterns:
+      - "IsDebuggerPresent"
+      - "CheckRemoteDebuggerPresent"
+      - "NtGlobalFlag"
+      - "HeapFlags"
+      - "vmware"
+      - "virtualbox"
+      - "sandbox"
+      - "SbieDll"
+
+  # T1497.001 - System Checks
+  - id: system_checks_evasion
+    technique_id: "T1497.001"
+    confidence: 0.82
+    description: "System checks for sandbox evasion"
+    patterns:
+      - "GetTickCount"
+      - "Sleep"
+      - "QueryPerformanceCounter"
+      - "GetCursorPos"
+      - "GetForegroundWindow"
+      - "mouse_event"
+
+  # T1003 - OS Credential Dumping
+  - id: credential_dumping
+    technique_id: "T1003"
+    confidence: 0.90
+    description: "OS credential dumping"
+    patterns:
+      - "mimikatz"
+      - "sekurlsa"
+      - "lsadump"
+      - "samdump"
+      - "WDigest"
+      - "Kerberos ticket"
+
+  # T1003.001 - LSASS Memory
+  - id: lsass_dump
+    technique_id: "T1003.001"
+    confidence: 0.91
+    description: "LSASS memory credential dumping"
+    patterns:
+      - "lsass.exe"
+      - "MiniDumpWriteDump"
+      - "sekurlsa::logonpasswords"
+      - "comsvcs.dll"
+      - "#24"
+
+  # T1105 - Ingress Tool Transfer
+  - id: tool_transfer
+    technique_id: "T1105"
+    confidence: 0.83
+    description: "Ingress tool transfer"
+    patterns:
+      - "certutil -urlcache"
+      - "bitsadmin"
+      - "mshta"
+      - " rundll32"
+
+  # T1218.011 - Rundll32
+  - id: rundll32_abuse
+    technique_id: "T1218.011"
+    confidence: 0.87
+    description: "System Binary Proxy Execution via rundll32"
+    patterns:
+      - "rundll32.exe"
+      - "ExecuteA"
+      - "DllRegisterServer"
+
+  # T1218.005 - Mshta
+  - id: mshta_abuse
+    technique_id: "T1218.005"
+    confidence: 0.87
+    description: "System Binary Proxy Execution via mshta"
+    patterns:
+      - "mshta.exe"
+      - "javascript:"
+      - "vbscript:"
+      - "hta:"
+
+  # T1218.010 - Regsvr32
+  - id: regsvr32_abuse
+    technique_id: "T1218.010"
+    confidence: 0.85
+    description: "System Binary Proxy Execution via regsvr32"
+    patterns:
+      - "regsvr32.exe"
+      - "scrobj.dll"
+      - "/i:http"
+      - "DllInstall"
+
+  # T1486 - Data Encrypted for Impact (Ransomware)
+  - id: ransomware_indicators
     technique_id: "T1486"
     confidence: 0.88
-    description: "Ransomware data encryption via CryptoAPI / BCrypt"
-    patterns: ["CryptEncrypt", "BCryptEncrypt", "CryptAcquireContext", "CryptGenKey", "AES", "RSA"]
+    description: "Ransomware data encryption indicators"
+    patterns:
+      - "ransom"
+      - "encrypt"
+      - ".locked"
+      - ".encrypted"
+      - "READ_ME"
+      - "DECRYPT"
+      - "Bitcoin"
+      - "monero"
 
-  - id: ransomware_extension_change
+  # T1486 - Additional ransomware file extensions
+  - id: ransomware_extensions
     technique_id: "T1486"
     confidence: 0.85
     description: "Ransomware file extension modification"
-    patterns: [".locked", ".encrypted", ".enc", ".crypt", ".ransom", "YOUR_FILES"]
-
-  - id: service_stop
-    technique_id: "T1489"
-    confidence: 0.85
-    description: "Service stopping for impact"
-    patterns: ["net stop", "sc stop", "ControlService", "SERVICE_CONTROL_STOP"]
-
-  # -----------------------------------------------------------------------
-  # Privilege Escalation (T1134, T1548)
-  # -----------------------------------------------------------------------
-  - id: token_impersonation
-    technique_id: "T1134.001"
-    confidence: 0.88
-    description: "Token impersonation / theft for privilege escalation"
-    patterns: ["ImpersonateLoggedOnUser", "DuplicateToken", "DuplicateTokenEx", "OpenProcessToken"]
-
-  - id: uac_bypass
-    technique_id: "T1548.002"
-    confidence: 0.88
-    description: "UAC bypass indicators"
-    patterns: ["fodhelper.exe", "eventvwr.exe", "ComputerDefaults.exe", "sdclt.exe", "RequestedExecutionLevel"]
-
-  # -----------------------------------------------------------------------
-  # Collection (T1005, T1115)
-  # -----------------------------------------------------------------------
-  - id: clipboard_capture
-    technique_id: "T1115"
-    confidence: 0.85
-    description: "Clipboard data capture"
-    patterns: ["GetClipboardData", "OpenClipboard", "CloseClipboard", "EmptyClipboard"]
-
-  - id: screenshot_capture
-    technique_id: "T1113"
-    confidence: 0.85
-    description: "Screen capture for collection"
-    patterns: ["BitBlt", "GetDC", "CreateCompatibleBitmap", "PrintWindow", "screenshot"]
-
-  # -----------------------------------------------------------------------
-  # MITRE ATT&CK derived rules (auto-generated 2026-04-26 — do not edit manually)
-  # Source: attck_labeled_sentences.jsonl + x_mitre_detection fields
-  # -----------------------------------------------------------------------
-  - id: command_and_control_t1001_0
-    technique_id: "T1001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data Obfuscation (T1001)"
-    patterns: ["Citation", "HTTP", "POST", "StrelaStealer", "Okrum", "July", "SLOTHFULMEDIA", "January"]
-
-  - id: command_and_control_t1001_001_0
-    technique_id: "T1001.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Junk Data (T1001.001)"
-    patterns: ["Citation", "ESET", "July", "ZeuS", "CISA", "February", "BendyBear", "PLEAD"]
-
-  - id: command_and_control_t1001_002_0
-    technique_id: "T1001.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Steganography (T1001.002)"
-    patterns: ["Citation", "ESET", "RDAT", "FireEye", "Duqu", "SUNBURST", "Turla", "Lunar"]
-
-  - id: command_and_control_t1001_003_0
-    technique_id: "T1001.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Protocol or Service Impersonation (T1001.003)"
-    patterns: ["Citation", "FakeTLS", "HTTP", "Zscaler", "PUBLOAD", "PANDA", "InvisiMole", "ESET"]
-
-  - id: credential_access_t1003_002_0
-    technique_id: "T1003.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Security Account Manager (T1003.002)"
-    patterns: ["Citation", "Account", "Mandiant", "SECURITY", "HKLM", "Manager", "Github", "NTLM"]
-
-  - id: credential_access_t1003_003_0
-    technique_id: "T1003.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: NTDS (T1003.003)"
-    patterns: ["Citation", "NTDS", "Directory", "Active", "Volexity", "Spider", "Microsoft", "Impacket"]
-
-  - id: credential_access_t1003_004_0
-    technique_id: "T1003.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: LSA Secrets (T1003.004)"
-    patterns: ["Citation", "LaZagne", "FireEye", "Impacket", "MuddyWater", "Symantec", "HKLM", "SECURITY"]
-
-  - id: credential_access_t1003_005_0
-    technique_id: "T1003.005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Cached Domain Credentials (T1003.005)"
-    patterns: ["Citation", "LaZagne", "FireEye", "July", "Symantec", "MuddyWater", "Okrum", "Leafminer"]
-
-  - id: credential_access_t1003_006_0
-    technique_id: "T1003.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: DCSync (T1003.006)"
-    patterns: ["Citation", "DCSync", "Microsoft", "December", "Wocao", "Solorigate", "January", "NetSync"]
-
-  - id: credential_access_t1003_007_0
-    technique_id: "T1003.007"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Proc Filesystem (T1003.007)"
-    patterns: ["Citation", "LaZagne", "GitHub", "Picus", "Labs", "Proc", "MimiPenguin", "PACEMAKER"]
-
-  - id: credential_access_t1003_008_0
-    technique_id: "T1003.008"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: /etc/passwd and /etc/shadow (T1003.008)"
-    patterns: ["LaZagne", "Citation", "ShadowRay", "GitHub", "Oligo", "Campaign", "shadow", "https"]
-
-  - id: collection_t1005_0
-    technique_id: "T1005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data from Local System (T1005)"
-    patterns: ["Citation", "ESET", "June", "July", "November", "Microsoft", "Kaspersky", "Mandiant"]
-
-  - id: defense_evasion_t1006_0
-    technique_id: "T1006"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Direct Volume Access (T1006)"
-    patterns: ["Citation", "Esentutl", "NTDS", "Nearest", "Neighbor", "Volume", "Shadow", "Copy"]
-
-  - id: discovery_t1007_0
-    technique_id: "T1007"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Service Discovery (T1007)"
-    patterns: ["Citation", "November", "Group", "Medusa", "Ransomware", "April", "Kaspersky", "Trend"]
-
-  - id: command_and_control_t1008_0
-    technique_id: "T1008"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Fallback Channels (T1008)"
-    patterns: ["Citation", "ESET", "HTTP", "July", "June", "Mandiant", "April", "Sednit"]
-
-  - id: discovery_t1010_0
-    technique_id: "T1010"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Application Window Discovery (T1010)"
-    patterns: ["Citation", "ESET", "April", "June", "Symantec", "GetForegroundWindow", "PAKLOG", "Novetta"]
-
-  - id: exfiltration_t1011_001_0
-    technique_id: "T1011.001"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Exfiltration Over Bluetooth (T1011.001)"
-    patterns: ["Bluetooth", "Flame", "BeetleJuice", "Citation", "Symantec", "https", "mitre", "org"]
-
-  - id: discovery_t1012_0
-    technique_id: "T1012"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Query Registry (T1012)"
-    patterns: ["Citation", "Microsoft", "ESET", "HKLM", "CurrentVersion", "HKCU", "June", "FireEye"]
-
-  - id: defense_evasion_t1014_0
-    technique_id: "T1014"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Rootkit (T1014)"
-    patterns: ["Citation", "ESET", "UEFI", "Winnti", "Cisco", "Rootkit", "LoJax", "Mandiant"]
-
-  - id: discovery_t1016_001_0
-    technique_id: "T1016.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Internet Connection Discovery (T1016.001)"
-    patterns: ["Citation", "HTTP", "Internet", "December", "Mandiant", "GoldFinder", "MSTIC", "NOBELIUM"]
-
-  - id: discovery_t1016_002_0
-    technique_id: "T1016.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Wi-Fi Discovery (T1016.002)"
-    patterns: ["Citation", "CharmPower", "Check", "Point", "January", "Nearest", "Neighbor", "PUBLOAD"]
-
-  - id: discovery_t1018_0
-    technique_id: "T1018"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Remote System Discovery (T1018)"
-    patterns: ["Citation", "FireEye", "October", "Active", "Directory", "Symantec", "April", "Kaspersky"]
-
-  - id: exfiltration_t1020_0
-    technique_id: "T1020"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Automated Exfiltration (T1020)"
-    patterns: ["Citation", "ESET", "June", "Talos", "Frankenstein", "Rover", "StrelaStealer", "StrongPity"]
-
-  - id: lateral_movement_t1021_0
-    technique_id: "T1021"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Remote Services (T1021)"
-    patterns: ["Citation", "Brute", "Ratel", "Wizard", "Spider", "WebDAV", "Ryuk", "Mandiant"]
-
-  - id: lateral_movement_t1021_003_0
-    technique_id: "T1021.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Distributed Component Object Model (T1021.003)"
-    patterns: ["Citation", "Empire", "SILENTTRINITY", "DCOM", "Cobalt", "Strike", "Github", "July"]
-
-  - id: lateral_movement_t1021_004_0
-    technique_id: "T1021.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: SSH (T1021.004)"
-    patterns: ["Citation", "Mandiant", "Leviathan", "Putty", "Spider", "FireEye", "Cobalt", "Strike"]
-
-  - id: lateral_movement_t1021_005_0
-    technique_id: "T1021.005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: VNC (T1021.005)"
-    patterns: ["Citation", "ZxShell", "Gamaredon", "February", "TightVNC", "August", "Carberp", "GCMAN"]
-
-  - id: lateral_movement_t1021_006_0
-    technique_id: "T1021.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Windows Remote Management (T1021.006)"
-    patterns: ["Citation", "WinRM", "Brute", "Ratel", "July", "Chimera", "January", "Management"]
-
-  - id: collection_t1025_0
-    technique_id: "T1025"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data from Removable Media (T1025)"
-    patterns: ["Citation", "ESET", "Kaspersky", "Gamaredon", "June", "March", "Machete", "USBStealer"]
-
-  - id: defense_evasion_t1027_001_0
-    technique_id: "T1027.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Binary Padding (T1027.001)"
-    patterns: ["Citation", "Black", "April", "TAINTEDSCRIBE", "July", "Trend", "Micro", "Group"]
-
-  - id: defense_evasion_t1027_002_0
-    technique_id: "T1027.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Software Packing (T1027.002)"
-    patterns: ["Citation", "April", "June", "Unit", "ESET", "Themida", "VMProtect", "Trend"]
-
-  - id: defense_evasion_t1027_003_0
-    technique_id: "T1027.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Steganography (T1027.003)"
-    patterns: ["Citation", "November", "ESET", "Trend", "Micro", "Tick", "July", "Dukes"]
-
-  - id: defense_evasion_t1027_004_0
-    technique_id: "T1027.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compile After Delivery (T1027.004)"
-    patterns: ["Citation", "Gamaredon", "June", "Sliver", "FoggyWeb", "Rocke", "MuddyWater", "Turtle"]
-
-  - id: defense_evasion_t1027_005_0
-    technique_id: "T1027.005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Indicator Removal from Tools (T1027.005)"
-    patterns: ["Citation", "PowerSploit", "OilRig", "GravityRAT", "Cobalt", "Strike", "Patchwork", "June"]
-
-  - id: defense_evasion_t1027_006_0
-    technique_id: "T1027.006"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: HTML Smuggling (T1027.006)"
-    patterns: ["Citation", "HTML", "Black", "Basta", "JavaScript", "QakBot", "Trend", "Micro"]
-
-  - id: defense_evasion_t1027_007_0
-    technique_id: "T1027.007"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Dynamic API Resolution (T1027.007)"
-    patterns: ["Citation", "APIs", "Mustang", "Panda", "PlugX", "Group", "Eset", "Korplug"]
-
-  - id: defense_evasion_t1027_008_0
-    technique_id: "T1027.008"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Stripped Payloads (T1027.008)"
-    patterns: ["Citation", "Cuckoo", "Stealer", "OSAMiner", "Applescripts", "AppleScript", "SentinelLabs", "Kandji"]
-
-  - id: defense_evasion_t1027_009_0
-    technique_id: "T1027.009"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Embedded Payloads (T1027.009)"
-    patterns: ["Citation", "Pikabot", "Agrius", "Microsoft", "ComRAT", "Google", "Cloud", "DEADEYE"]
-
-  - id: defense_evasion_t1027_010_0
-    technique_id: "T1027.010"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Command Obfuscation (T1027.010)"
-    patterns: ["Citation", "Base64", "FireEye", "MuddyWater", "ESET", "July", "Unit", "Talos"]
-
-  - id: defense_evasion_t1027_011_0
-    technique_id: "T1027.011"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Fileless Storage (T1027.011)"
-    patterns: ["Citation", "ESET", "HKCU", "Microsoft", "HKLM", "September", "CurrentVersion", "June"]
-
-  - id: defense_evasion_t1027_012_0
-    technique_id: "T1027.012"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: LNK Icon Smuggling (T1027.012)"
-    patterns: ["Citation", "Kimsuky", "TONESHELL", "MUSTANG", "PANDA", "PUBLOAD", "CSIRT", "PLUGX"]
-
-  - id: defense_evasion_t1027_013_0
-    technique_id: "T1027.013"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Encrypted/Encoded File (T1027.013)"
-    patterns: ["Citation", "ESET", "Base64", "April", "June", "November", "Unit", "July"]
-
-  - id: defense_evasion_t1027_014_0
-    technique_id: "T1027.014"
-    confidence: 0.79
-    description: "MITRE ATT&CK derived: Polymorphic Code (T1027.014)"
-    patterns: ["BendyBear", "Citation", "changes", "runtime", "footprint", "evade", "signature-based", "defenses"]
-
-  - id: defense_evasion_t1027_015_0
-    technique_id: "T1027.015"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compression (T1027.015)"
-    patterns: ["Citation", "Kaspersky", "June", "April", "February", "StrelaStealer", "ToddyCat", "Higaisa"]
-
-  - id: defense_evasion_t1027_016_0
-    technique_id: "T1027.016"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Junk Code Insertion (T1027.016)"
-    patterns: ["Citation", "ESET", "March", "June", "FinFisher", "Mustang", "Panda", "Maze"]
-
-  - id: exfiltration_t1029_0
-    technique_id: "T1029"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Scheduled Transfer (T1029)"
-    patterns: ["Citation", "ESET", "Kaspersky", "Flagpro", "LightNeuron", "ComRAT", "Linfo", "June"]
-
-  - id: exfiltration_t1030_0
-    technique_id: "T1030"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data Transfer Size Limits (T1030)"
-    patterns: ["Citation", "July", "Play", "RDAT", "Rclone", "Ransomware", "Advisory", "December"]
-
-  - id: discovery_t1033_0
-    technique_id: "T1033"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Owner/User Discovery (T1033)"
-    patterns: ["Citation", "June", "ESET", "July", "April", "March", "Talos", "FireEye"]
-
-  - id: defense_evasion_t1036_0
-    technique_id: "T1036"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Masquerading (T1036)"
-    patterns: ["Citation", "BeaverTail", "ContagiousInterview", "January", "InvisibleFerret", "November", "February", "October"]
-
-  - id: defense_evasion_t1036_001_0
-    technique_id: "T1036.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Invalid Code Signature (T1036.001)"
-    patterns: ["Citation", "Regin", "Corporation", "Windshift", "SplatCloak", "Gelsemium", "WindTail", "BADNEWS"]
-
-  - id: defense_evasion_t1036_002_0
-    technique_id: "T1036.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Right-to-Left Override (T1036.002)"
-    patterns: ["Citation", "Ferocious", "Kitten", "BlackTech", "November", "Scarlet", "Mimic", "Kaspersky"]
-
-  - id: defense_evasion_t1036_003_0
-    technique_id: "T1036.003"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Rename Legitimate Utilities (T1036.003)"
-    patterns: ["Citation", "StrelaStealer", "Daggerfly", "DCSO", "FireEye", "Sept", "Lazarus", "Group"]
-
-  - id: defense_evasion_t1036_004_0
-    technique_id: "T1036.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Masquerade Task or Service (T1036.004)"
-    patterns: ["Citation", "Microsoft", "ESET", "June", "April", "Update", "Mandiant", "Security"]
-
-  - id: defense_evasion_t1036_005_0
-    technique_id: "T1036.005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Match Legitimate Resource Name or Location (T1036.005)"
-    patterns: ["Citation", "Microsoft", "June", "ESET", "April", "Adobe", "Kaspersky", "Group"]
-
-  - id: defense_evasion_t1036_006_0
-    technique_id: "T1036.006"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: Space after Filename (T1036.006)"
-    patterns: ["Citation", "Keydnap", "Terminal", "https", "mitre", "org", "extension", "APT38"]
-
-  - id: defense_evasion_t1036_007_0
-    technique_id: "T1036.007"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Double File Extension (T1036.007)"
-    patterns: ["Citation", "Kimsuky", "Bazar", "MUSTANG", "PANDA", "DarkGate", "Trellix", "PreviewReport"]
-
-  - id: defense_evasion_t1036_008_0
-    technique_id: "T1036.008"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Masquerade File Type (T1036.008)"
-    patterns: ["Citation", "Microsoft", "Lazarus", "Group", "Word", "Trend", "Micro", "PlugX"]
-
-  - id: defense_evasion_t1036_009_0
-    technique_id: "T1036.009"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: Break Process Trees (T1036.009)"
-    patterns: ["BPFDoor", "Citation", "Sandfly", "init", "initial", "https", "mitre", "org"]
-
-  - id: defense_evasion_t1036_010_0
-    technique_id: "T1036.010"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Masquerade Account Name (T1036.010)"
-    patterns: ["Citation", "Flame", "Microsoft", "Kaspersky", "HelpAssistant", "Functionality", "Teams", "Magic"]
-
-  - id: defense_evasion_t1036_011_0
-    technique_id: "T1036.011"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: Overwrite Process Arguments (T1036.011)"
-    patterns: ["BPFDoor", "Citation", "Sandfly", "https", "mitre", "org", "S1161", "name"]
-
-  - id: defense_evasion_t1036_012_0
-    technique_id: "T1036.012"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Browser Fingerprint (T1036.012)"
-    patterns: ["FatDuke", "Citation", "ESET", "Dukes", "October", "https", "mitre", "org"]
-
-  - id: persistence_t1037_0
-    technique_id: "T1037"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Boot or Logon Initialization Scripts (T1037)"
-    patterns: ["Citation", "ArcaneDoor", "Mandiant", "RotaJakiro", "Rocke", "Line", "Runner", "Cisco"]
-
-  - id: persistence_t1037_001_0
-    technique_id: "T1037.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Logon Script (Windows) (T1037.001)"
-    patterns: ["Citation", "Environment", "UserInitMprLogonScript", "HKCU", "ESET", "Attor", "Zebrocy", "Cobalt"]
-
-  - id: persistence_t1037_004_0
-    technique_id: "T1037.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: RC Scripts (T1037.004)"
-    patterns: ["Citation", "Green", "Lambert", "HiddenWasp", "Cyclops", "Blink", "Velvet", "Sygnia"]
-
-  - id: collection_t1039_0
-    technique_id: "T1039"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data from Network Shared Drive (T1039)"
-    patterns: ["Citation", "Gamaredon", "Group", "ESET", "BRONZE", "BUTLER", "Egregor", "Sowbug"]
-
-  - id: credential_access_t1040_0
-    technique_id: "T1040"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Network Sniffing (T1040)"
-    patterns: ["Citation", "Cisco", "ArcaneDoor", "Mandiant", "FireEye", "Salt", "Typhoon", "Penquin"]
-
-  - id: discovery_t1046_0
-    technique_id: "T1046"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Network Service Discovery (T1046)"
-    patterns: ["Citation", "Group", "Cobalt", "FireEye", "Scanner", "March", "Medusa", "GitHub"]
-
-  - id: execution_t1047_0
-    technique_id: "T1047"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Windows Management Instrumentation (T1047)"
-    patterns: ["Citation", "Group", "FireEye", "June", "April", "Instrumentation", "Ransomware", "Management"]
-
-  - id: exfiltration_t1048_0
-    technique_id: "T1048"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exfiltration Over Alternative Protocol (T1048)"
-    patterns: ["Citation", "Play", "PoetRAT", "Talos", "Ransomware", "Chaes", "FrameworkPOS", "Kobalos"]
-
-  - id: exfiltration_t1048_002_0
-    technique_id: "T1048.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Exfiltration Over Asymmetric Encrypted Non-C2 Protocol (T1048.002)"
-    patterns: ["Citation", "HTTPS", "Rclone", "SolarWinds", "Cybersecurity", "Advisory", "Brute", "Force"]
-
-  - id: exfiltration_t1052_001_0
-    technique_id: "T1052.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exfiltration over USB (T1052.001)"
-    patterns: ["Citation", "Machete", "USBStealer", "ESET", "Tropic", "Trooper", "Mustang", "Panda"]
-
-  - id: execution_t1053_0
-    technique_id: "T1053"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: Scheduled Task/Job (T1053)"
-    patterns: ["Lokibot", "Citation", "Talos", "https", "mitre", "org", "S0447", "second"]
-
-  - id: execution_t1053_002_0
-    technique_id: "T1053.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: At (T1053.002)"
-    patterns: ["Citation", "Dell", "BRONZE", "BUTLER", "Threat", "HTTPBrowser", "PlugX", "CrackMapExec"]
-
-  - id: execution_t1053_003_0
-    technique_id: "T1053.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Cron (T1053.003)"
-    patterns: ["Citation", "Rocke", "January", "SpeakUp", "Anchor", "Janicab", "Skidmap", "August"]
-
-  - id: defense_evasion_t1055_003_0
-    technique_id: "T1055.003"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Thread Execution Hijacking (T1055.003)"
-    patterns: ["Citation", "Pikabot", "Waterbear", "Gazer", "Karagany", "SetContextThread", "Elastic", "Trend"]
-
-  - id: defense_evasion_t1055_004_0
-    technique_id: "T1055.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Asynchronous Procedure Call (T1055.004)"
-    patterns: ["Citation", "NtQueueApcThread", "BADHATCH", "Early", "Bird", "Pillowmint", "June", "InvisiMole"]
-
-  - id: defense_evasion_t1055_005_0
-    technique_id: "T1055.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Thread Local Storage (T1055.005)"
-    patterns: ["Citation", "Ursnif", "TrendMicro", "CANONSTAGER", "Thread", "Storage", "Google", "Threat"]
-
-  - id: defense_evasion_t1055_008_0
-    technique_id: "T1055.008"
-    confidence: 0.86
-    description: "MITRE ATT&CK derived: Ptrace System Calls (T1055.008)"
-    patterns: ["PACEMAKER", "PTRACE", "Citation", "Mandiant", "Pulse", "Secure", "April", "https"]
-
-  - id: defense_evasion_t1055_009_0
-    technique_id: "T1055.009"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Proc Memory (T1055.009)"
-    patterns: ["Botnet", "Citation", "Lumen", "KVBotnet", "https", "mitre", "org", "campaigns"]
-
-  - id: defense_evasion_t1055_011_0
-    technique_id: "T1055.011"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Extra Window Memory Injection (T1055.011)"
-    patterns: ["Explorer", "Citation", "Power", "Loader", "Epic", "ESET", "Recon", "Snake"]
-
-  - id: defense_evasion_t1055_013_0
-    technique_id: "T1055.013"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Process Doppelgänging (T1055.013)"
-    patterns: ["Citation", "SynAck", "Bazar", "July", "Leafminer", "NTFS", "SecureList", "Kaspersky"]
-
-  - id: defense_evasion_t1055_015_0
-    technique_id: "T1055.015"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: ListPlanting (T1055.015)"
-    patterns: ["InvisiMole", "ListPlanting", "Citation", "ESET", "June", "https", "mitre", "org"]
-
-  - id: collection_t1056_0
-    technique_id: "T1056"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Input Capture (T1056)"
-    patterns: ["Citation", "Leviathan", "Kobalos", "InvisibleFerret", "SentinelLabs", "Metador", "Technical", "Appendix"]
-
-  - id: collection_t1056_002_0
-    technique_id: "T1056.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: GUI Input Capture (T1056.002)"
-    patterns: ["Citation", "FireEye", "Metamorfo", "Calisto", "July", "Bundlore", "Hacking", "SILENTTRINITY"]
-
-  - id: collection_t1056_003_0
-    technique_id: "T1056.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Web Portal Capture (T1056.003)"
-    patterns: ["Citation", "Cutting", "Edge", "January", "IceApple", "Ivanti", "Winter", "Vivern"]
-
-  - id: collection_t1056_004_0
-    technique_id: "T1056.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Credential API Hooking (T1056.004)"
-    patterns: ["Citation", "Zeus", "Panda", "Versa", "Carberp", "FinFisher", "Ursnif", "TrendMicro"]
-
-  - id: execution_t1059_0
-    technique_id: "T1059"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Command and Scripting Interpreter (T1059)"
-    patterns: ["Citation", "FireEye", "Mandiant", "Perl", "ESET", "December", "April", "March"]
-
-  - id: execution_t1059_004_0
-    technique_id: "T1059.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Unix Shell (T1059.004)"
-    patterns: ["Citation", "Mandiant", "ESET", "Google", "Cloud", "Unix", "Turtle", "April"]
-
-  - id: execution_t1059_006_0
-    technique_id: "T1059.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Python (T1059.006)"
-    patterns: ["Citation", "Python", "Machete", "InvisibleFerret", "BeaverTail", "November", "February", "Google"]
-
-  - id: execution_t1059_007_0
-    technique_id: "T1059.007"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: JavaScript (T1059.007)"
-    patterns: ["Citation", "JavaScript", "June", "Cobalt", "BeaverTail", "Kimsuky", "Contagious", "February"]
-
-  - id: execution_t1059_010_0
-    technique_id: "T1059.010"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: AutoHotKey & AutoIT (T1059.010)"
-    patterns: ["Citation", "AutoIt", "XLoader", "OutSteel", "Lumma", "Stealer", "Qualys", "LummaStealer"]
-
-  - id: execution_t1059_011_0
-    technique_id: "T1059.011"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Lua (T1059.011)"
-    patterns: ["Citation", "EvilBunny", "RedLine", "Stealer", "ArcaneDoor", "PoetRAT", "Cyphort", "Remsec"]
-
-  - id: privilege_escalation_t1068_0
-    technique_id: "T1068"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exploitation for Privilege Escalation (T1068)"
-    patterns: ["Citation", "ESET", "Microsoft", "Cobalt", "FireEye", "Embargo", "Ransomware", "October"]
-
-  - id: discovery_t1069_0
-    technique_id: "T1069"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Permission Groups Discovery (T1069)"
-    patterns: ["Citation", "IcedID", "Carbon", "SolarWinds", "Exchange", "Admins", "Mandiant", "Siloscape"]
-
-  - id: discovery_t1069_001_0
-    technique_id: "T1069.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Groups (T1069.001)"
-    patterns: ["Citation", "Symantec", "Turla", "April", "October", "Kaspersky", "ESET", "Microsoft"]
-
-  - id: discovery_t1069_002_0
-    technique_id: "T1069.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Domain Groups (T1069.002)"
-    patterns: ["Citation", "Symantec", "July", "AdFind", "October", "Mandiant", "Domain", "CrowdStrike"]
-
-  - id: defense_evasion_t1070_0
-    technique_id: "T1070"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Indicator Removal (T1070)"
-    patterns: ["Citation", "Mandiant", "January", "Microsoft", "December", "March", "Internet", "Explorer"]
-
-  - id: defense_evasion_t1070_002_0
-    technique_id: "T1070.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Clear Linux or Mac System Logs (T1070.002)"
-    patterns: ["Citation", "Salt", "Typhoon", "UPSTYLE", "Cisco", "Turtle", "TeamTNT", "Rocke"]
-
-  - id: defense_evasion_t1070_003_0
-    technique_id: "T1070.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Clear Command History (T1070.003)"
-    patterns: ["Citation", "Group", "Medusa", "March", "TeamTNT", "Kobalos", "Hildegard", "Aquatic"]
-
-  - id: defense_evasion_t1070_005_0
-    technique_id: "T1070.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Network Share Connection Removal (T1070.005)"
-    patterns: ["Citation", "RobbinHood", "InvisiMole", "June", "Technet", "DELETE", "CarbonBlack", "DUSTTRAP"]
-
-  - id: defense_evasion_t1070_006_0
-    technique_id: "T1070.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Timestomp (T1070.006)"
-    patterns: ["Citation", "ESET", "June", "Mandiant", "FireEye", "November", "Novetta", "February"]
-
-  - id: defense_evasion_t1070_007_0
-    technique_id: "T1070.007"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Clear Network Connection History and Configurations (T1070.007)"
-    patterns: ["Citation", "RedPenguin", "Mandiant", "Fortinet", "Zero", "Junos", "Juniper", "SUNBURST"]
-
-  - id: defense_evasion_t1070_008_0
-    technique_id: "T1070.008"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Clear Mailbox Data (T1070.008)"
-    patterns: ["Citation", "Scattered", "Spider", "SolarWinds", "LunarMail", "ESET", "Turla", "Lunar"]
-
-  - id: defense_evasion_t1070_009_0
-    technique_id: "T1070.009"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Clear Persistence (T1070.009)"
-    patterns: ["Citation", "Microsoft", "MCMD", "July", "Group", "June", "PlugX", "Pillowmint"]
-
-  - id: command_and_control_t1071_0
-    technique_id: "T1071"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Application Layer Protocol (T1071)"
-    patterns: ["Citation", "Unit", "RaspberryRobin", "Hildegard", "Magic", "Hound", "Rocke", "August"]
-
-  - id: command_and_control_t1071_002_0
-    technique_id: "T1071.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: File Transfer Protocols (T1071.002)"
-    patterns: ["Citation", "Unit", "Machete", "ESET", "Havoc", "Talos", "CARROTBAT", "PoetRAT"]
-
-  - id: command_and_control_t1071_003_0
-    technique_id: "T1071.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Mail Protocols (T1071.003)"
-    patterns: ["Citation", "SMTP", "ESET", "Agent", "Tesla", "FireEye", "Microsoft", "Cannon"]
-
-  - id: command_and_control_t1071_005_0
-    technique_id: "T1071.005"
-    confidence: 0.86
-    description: "MITRE ATT&CK derived: Publish/Subscribe Protocols (T1071.005)"
-    patterns: ["GLOOXMAIL", "Google", "Jabber", "XMPP", "Citation", "Mandiant", "Appendix", "https"]
-
-  - id: execution_t1072_0
-    technique_id: "T1072"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Software Deployment Tools (T1072)"
-    patterns: ["Citation", "Group", "Medusa", "Mustang", "Panda", "Silence", "Wiper", "Dell"]
-
-  - id: collection_t1074_0
-    technique_id: "T1074"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data Staged (T1074)"
-    patterns: ["Citation", "Spider", "Ransom", "Volt", "Typhoon", "August", "Kobalos", "Scattered"]
-
-  - id: collection_t1074_001_0
-    technique_id: "T1074.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Data Staging (T1074.001)"
-    patterns: ["Citation", "ESET", "Mandiant", "April", "June", "TEMP", "FireEye", "Symantec"]
-
-  - id: collection_t1074_002_0
-    technique_id: "T1074.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Remote Data Staging (T1074.002)"
-    patterns: ["Citation", "Chimera", "Turtle", "Campaign", "November", "SolarWinds", "April", "FireEye"]
-
-  - id: defense_evasion_t1078_0
-    technique_id: "T1078"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Valid Accounts (T1078)"
-    patterns: ["Citation", "FireEye", "CISA", "December", "Mandiant", "Spider", "Group", "Microsoft"]
-
-  - id: defense_evasion_t1078_001_0
-    technique_id: "T1078.001"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Default Accounts (T1078.001)"
-    patterns: ["Citation", "HyperStack", "DefaultAccount", "QLogic", "Sygnia", "Elephant", "Beetle", "Server"]
-
-  - id: defense_evasion_t1078_002_0
-    technique_id: "T1078.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Domain Accounts (T1078.002)"
-    patterns: ["Citation", "October", "Microsoft", "November", "Salesforce", "April", "Leviathan", "January"]
-
-  - id: defense_evasion_t1078_003_0
-    technique_id: "T1078.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Accounts (T1078.003)"
-    patterns: ["Citation", "June", "FireEye", "Exchange", "Leviathan", "Emotet", "Play", "Trend"]
-
-  - id: lateral_movement_t1080_0
-    technique_id: "T1080"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Taint Shared Content (T1080)"
-    patterns: ["Citation", "Conti", "Ursnif", "Darkhotel", "Ramsay", "Gamaredon", "ESET", "June"]
-
-  - id: discovery_t1087_0
-    technique_id: "T1087"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Account Discovery (T1087)"
-    patterns: ["Citation", "Mandiant", "Havoc", "SolarWinds", "Aquatic", "Panda", "Crowdstrike", "HuntReport"]
-
-  - id: discovery_t1087_001_0
-    technique_id: "T1087.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Account (T1087.001)"
-    patterns: ["Citation", "June", "Group", "Symantec", "FireEye", "Stealer", "April", "Mandiant"]
-
-  - id: discovery_t1087_002_0
-    technique_id: "T1087.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Domain Account (T1087.002)"
-    patterns: ["Citation", "Active", "Directory", "Microsoft", "Group", "October", "Mandiant", "Spider"]
-
-  - id: discovery_t1087_003_0
-    technique_id: "T1087.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Email Account (T1087.003)"
-    patterns: ["Citation", "Outlook", "Exchange", "Trend", "Micro", "Grandoreiro", "ESET", "Lizar"]
-
-  - id: command_and_control_t1090_0
-    technique_id: "T1090"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Proxy (T1090)"
-    patterns: ["Citation", "SOCKS", "June", "ESET", "Mandiant", "GitHub", "Cloudflare", "Proxy"]
-
-  - id: command_and_control_t1090_001_0
-    technique_id: "T1090.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Internal Proxy (T1090.001)"
-    patterns: ["Citation", "Internet", "ESET", "Kaspersky", "October", "February", "Symantec", "Cobalt"]
-
-  - id: command_and_control_t1090_002_0
-    technique_id: "T1090.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: External Proxy (T1090.002)"
-    patterns: ["Citation", "FireEye", "MuddyWater", "InvisiMole", "HTTP", "Bitdefender", "ESET", "June"]
-
-  - id: command_and_control_t1090_003_0
-    technique_id: "T1090.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Multi-hop Proxy (T1090.003)"
-    patterns: ["Citation", "Medusa", "Mandiant", "ESET", "CISA", "Group", "Ursnif", "Ransomware"]
-
-  - id: command_and_control_t1090_004_0
-    technique_id: "T1090.004"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Domain Fronting (T1090.004)"
-    patterns: ["Citation", "Cobalt", "Strike", "SMOKEDHAM", "HTTP", "Header", "Manual", "November"]
-
-  - id: lateral_movement_t1091_0
-    technique_id: "T1091"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Replication Through Removable Media (T1091)"
-    patterns: ["Citation", "TrendMicro", "Autorun", "Kaspersky", "Trend", "Micro", "HIUPAN", "PlugX"]
-
-  - id: command_and_control_t1092_0
-    technique_id: "T1092"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Communication Through Removable Media (T1092)"
-    patterns: ["Citation", "Part", "ESET", "Sednit", "Microsoft", "USBStealer", "CHOPSTICK", "FireEye"]
-
-  - id: persistence_t1098_0
-    technique_id: "T1098"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Account Manipulation (T1098)"
-    patterns: ["Citation", "Novetta", "Blockbuster", "LSADUMP", "Calisto", "Lazarus", "Group", "Destructive"]
-
-  - id: persistence_t1098_002_0
-    technique_id: "T1098.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Additional Email Delegate Permissions (T1098.002)"
-    patterns: ["Citation", "ApplicationImpersonation", "Microsoft", "Attacks", "SolarWinds", "Mail", "Mandiant", "HomeLand"]
-
-  - id: persistence_t1098_004_0
-    technique_id: "T1098.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: SSH Authorized Keys (T1098.004)"
-    patterns: ["Citation", "Skidmap", "Salt", "Typhoon", "Cisco", "XCSSET", "Bundlore", "TeamTNT"]
-
-  - id: persistence_t1098_005_0
-    technique_id: "T1098.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Device Registration (T1098.005)"
-    patterns: ["Citation", "Azure", "AADInternals", "SolarWinds", "Mandiant", "Microsoft", "NCSC", "Documentation"]
-
-  - id: persistence_t1098_007_0
-    technique_id: "T1098.007"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Additional Local or Domain Groups (T1098.007)"
-    patterns: ["Citation", "SMOKEDHAM", "Admin", "FireEye", "Microsoft", "Administrators", "Desktop", "June"]
-
-  - id: command_and_control_t1102_0
-    technique_id: "T1102"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Web Service (T1102)"
-    patterns: ["Citation", "Google", "Drive", "GitHub", "March", "Pastebin", "January", "Dropbox"]
-
-  - id: command_and_control_t1102_001_0
-    technique_id: "T1102.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Dead Drop Resolver (T1102.001)"
-    patterns: ["Citation", "Securelist", "ESET", "Pastebin", "Mandiant", "TRANSLATEXT", "YouTube", "Brazilian"]
-
-  - id: command_and_control_t1102_002_0
-    technique_id: "T1102.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Bidirectional Communication (T1102.002)"
-    patterns: ["Citation", "ESET", "Google", "Microsoft", "Dropbox", "FireEye", "OneDrive", "Kimsuky"]
-
-  - id: command_and_control_t1102_003_0
-    technique_id: "T1102.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: One-Way Communication (T1102.003)"
-    patterns: ["Citation", "Twitter", "Metamorfo", "FireEye", "ArcaneDoor", "HTTP", "Cisco", "UPSTYLE"]
-
-  - id: command_and_control_t1104_0
-    technique_id: "T1104"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Multi-Stage Channels (T1104)"
-    patterns: ["Citation", "FireEye", "Bazar", "TechNet", "Lazarus", "Valak", "July", "Latrodectus"]
-
-  - id: command_and_control_t1105_0
-    technique_id: "T1105"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Ingress Tool Transfer (T1105)"
-    patterns: ["Citation", "ESET", "July", "June", "April", "FireEye", "March", "Unit"]
-
-  - id: execution_t1106_0
-    technique_id: "T1106"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Native API (T1106)"
-    patterns: ["Citation", "APIs", "ESET", "April", "Native", "June", "March", "GetProcAddress"]
-
-  - id: credential_access_t1110_0
-    technique_id: "T1110"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Brute Force (T1110)"
-    patterns: ["Citation", "FireEye", "September", "December", "CISA", "ClearSky", "August", "Chaos"]
-
-  - id: credential_access_t1110_001_0
-    technique_id: "T1110.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Password Guessing (T1110.001)"
-    patterns: ["Citation", "Emotet", "Sept", "Xbash", "March", "Malwarebytes", "SpeakUp", "Microsoft"]
-
-  - id: credential_access_t1110_002_0
-    technique_id: "T1110.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Password Cracking (T1110.002)"
-    patterns: ["Citation", "Hydra", "Salt", "Typhoon", "Night", "Dragon", "Emulation", "Plan"]
-
-  - id: credential_access_t1110_003_0
-    technique_id: "T1110.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Password Spraying (T1110.003)"
-    patterns: ["Citation", "Microsoft", "Rabbit", "September", "Nearest", "Neighbor", "Campaign", "Agrius"]
-
-  - id: credential_access_t1110_004_0
-    technique_id: "T1110.004"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Credential Stuffing (T1110.004)"
-    patterns: ["Citation", "Chimera", "Trickbot", "Group", "January", "ESET", "Bitdefender", "March"]
-
-  - id: credential_access_t1111_0
-    technique_id: "T1111"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Multi-Factor Authentication Interception (T1111)"
-    patterns: ["Citation", "Mandiant", "Leviathan", "Pulse", "Secure", "Sykipot", "Wocao", "Chimera"]
-
-  - id: defense_evasion_t1112_0
-    technique_id: "T1112"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Modify Registry (T1112)"
-    patterns: ["Citation", "Microsoft", "ESET", "June", "HKCU", "FireEye", "CurrentVersion", "Trend"]
-
-  - id: collection_t1114_0
-    technique_id: "T1114"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Email Collection (T1114)"
-    patterns: ["Citation", "CISA", "Emotet", "November", "TRANSLATEXT", "Scattered", "Spider", "Ember"]
-
-  - id: collection_t1114_001_0
-    technique_id: "T1114.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Email Collection (T1114.001)"
-    patterns: ["Citation", "Outlook", "ESET", "Smoke", "Loader", "QakBot", "June", "Trend"]
-
-  - id: collection_t1114_002_0
-    technique_id: "T1114.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Remote Email Collection (T1114.002)"
-    patterns: ["Citation", "Exchange", "Microsoft", "MailSniper", "Advisory", "Mandiant", "March", "Group"]
-
-  - id: collection_t1114_003_0
-    technique_id: "T1114.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Email Forwarding Rule (T1114.003)"
-    patterns: ["Citation", "Star", "Blizzard", "Scattered", "Spider", "CISA", "Kimsuky", "CrowdStrike"]
-
-  - id: collection_t1119_0
-    technique_id: "T1119"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Automated Collection (T1119)"
-    patterns: ["Citation", "ESET", "June", "Palo", "Alto", "StrelaStealer", "December", "January"]
-
-  - id: discovery_t1120_0
-    technique_id: "T1120"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Peripheral Device Discovery (T1120)"
-    patterns: ["Citation", "ESET", "Kaspersky", "August", "Gamaredon", "June", "April", "November"]
-
-  - id: collection_t1123_0
-    technique_id: "T1123"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Audio Capture (T1123)"
-    patterns: ["Citation", "Kaspersky", "ESET", "Machete", "Flame", "PowerSploit", "NanoCore", "InvisiMole"]
-
-  - id: discovery_t1124_0
-    technique_id: "T1124"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Time Discovery (T1124)"
-    patterns: ["Citation", "ESET", "Kaspersky", "CISA", "June", "November", "Sept", "GetTickCount"]
-
-  - id: collection_t1125_0
-    technique_id: "T1125"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Video Capture (T1125)"
-    patterns: ["Citation", "March", "April", "Machete", "June", "Talos", "February", "Kaspersky"]
-
-  - id: defense_evasion_t1127_001_0
-    technique_id: "T1127.001"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: MSBuild (T1127.001)"
-    patterns: ["Citation", "PlugX", "June", "Empire", "Frankenstein", "Framework", "Palo", "Alto"]
-
-  - id: execution_t1129_0
-    technique_id: "T1129"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Shared Modules (T1129)"
-    patterns: ["Citation", "LoadLibrary", "DLLs", "Hydraq", "ESET", "FoggyWeb", "PipeMon", "March"]
-
-  - id: command_and_control_t1132_0
-    technique_id: "T1132"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Data Encoding (T1132)"
-    patterns: ["Citation", "Ursnif", "Rabbit", "Velvet", "Sygnia", "VelvetAnt", "BADNEWS", "Forcepoint"]
-
-  - id: command_and_control_t1132_001_0
-    technique_id: "T1132.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Standard Encoding (T1132.001)"
-    patterns: ["Citation", "Base64", "Unit", "HTTP", "April", "June", "ESET", "Mandiant"]
-
-  - id: command_and_control_t1132_002_0
-    technique_id: "T1132.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Non-Standard Encoding (T1132.002)"
-    patterns: ["Citation", "Base64", "McAfee", "Small", "Sieve", "February", "NCSC", "TONESHELL"]
-
-  - id: persistence_t1133_0
-    technique_id: "T1133"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: External Remote Services (T1133)"
-    patterns: ["Citation", "VPNs", "CISA", "FireEye", "Citrix", "December", "July", "Group"]
-
-  - id: defense_evasion_t1134_0
-    technique_id: "T1134"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Access Token Manipulation (T1134)"
-    patterns: ["Citation", "SeDebugPrivilege", "AdjustTokenPrivileges", "PowerSploit", "GitHub", "Sliver", "KillDisk", "BlackCat"]
-
-  - id: defense_evasion_t1134_002_0
-    technique_id: "T1134.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Create Process with Token (T1134.002)"
-    patterns: ["Citation", "Azorult", "WTSQueryUserToken", "Turla", "ESET", "PipeMon", "Novetta", "Blockbuster"]
-
-  - id: defense_evasion_t1134_003_0
-    technique_id: "T1134.003"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Make and Impersonate Token (T1134.003)"
-    patterns: ["Citation", "BlackByte", "Microsoft", "Mafalda", "SentinelLabs", "Metador", "Technical", "Appendix"]
-
-  - id: defense_evasion_t1134_004_0
-    technique_id: "T1134.004"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Parent PID Spoofing (T1134.004)"
-    patterns: ["Citation", "Cobalt", "Strike", "PipeMon", "KONNI", "CreateProcessW", "Taskmgr", "Malwarebytes"]
-
-  - id: defense_evasion_t1134_005_0
-    technique_id: "T1134.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: SID-History Injection (T1134.005)"
-    patterns: ["Citation", "Kerberos", "Empire", "MISC", "AddSid", "Injection", "Golden", "Tickets"]
-
-  - id: discovery_t1135_0
-    technique_id: "T1135"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Network Share Discovery (T1135)"
-    patterns: ["Citation", "Ransomware", "Medusa", "Group", "March", "BlackByte", "April", "June"]
-
-  - id: persistence_t1136_0
-    technique_id: "T1136"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Create Account (T1136)"
-    patterns: ["Citation", "Spider", "Scattered", "Salt", "Typhoon", "Indrik", "Symantec", "WastedLocker"]
-
-  - id: persistence_t1136_001_0
-    technique_id: "T1136.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Account (T1136.001)"
-    patterns: ["Citation", "June", "FireEye", "Flame", "Unique", "Identifier", "Symantec", "Spider"]
-
-  - id: persistence_t1136_002_0
-    technique_id: "T1136.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Domain Account (T1136.002)"
-    patterns: ["Citation", "Medusa", "Group", "Pupy", "GALLIUM", "June", "Microsoft", "BlackByte"]
-
-  - id: persistence_t1137_0
-    technique_id: "T1137"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Office Application Startup (T1137)"
-    patterns: ["Citation", "Gamaredon", "Microsoft", "Outlook", "Cybereason", "Group", "VbaProject", "Oceanlotus"]
-
-  - id: persistence_t1137_001_0
-    technique_id: "T1137.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Office Template Macros (T1137.001)"
-    patterns: ["Citation", "MuddyWater", "BackConfig", "Excel", "Cobalt", "Strike", "Word", "Template"]
-
-  - id: persistence_t1137_002_0
-    technique_id: "T1137.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Office Test (T1137.002)"
-    patterns: ["Office", "Test", "Microsoft", "HKCU", "Special", "Perf", "Citation", "Palo"]
-
-  - id: persistence_t1137_003_0
-    technique_id: "T1137.003"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Outlook Forms (T1137.003)"
-    patterns: ["Ruler", "Outlook", "Forms", "Citation", "SensePost", "GitHub", "https", "mitre"]
-
-  - id: persistence_t1137_004_0
-    technique_id: "T1137.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Outlook Home Page (T1137.004)"
-    patterns: ["Outlook", "Home", "OilRig", "Page", "Citation", "Ruler", "FireEye", "Pages"]
-
-  - id: persistence_t1137_005_0
-    technique_id: "T1137.005"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Outlook Rules (T1137.005)"
-    patterns: ["Ruler", "Outlook", "Rules", "Citation", "SensePost", "GitHub", "https", "mitre"]
-
-  - id: persistence_t1137_006_0
-    technique_id: "T1137.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Add-ins (T1137.006)"
-    patterns: ["Citation", "Bisonal", "Naikon", "Outlook", "ESET", "Turla", "Lunar", "APPDATA"]
-
-  - id: defense_evasion_t1140_0
-    technique_id: "T1140"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Deobfuscate/Decode Files or Information (T1140)"
-    patterns: ["Citation", "ESET", "June", "Unit", "July", "April", "Mandiant", "January"]
-
-  - id: persistence_t1176_001_0
-    technique_id: "T1176.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Browser Extensions (T1176.001)"
-    patterns: ["Citation", "Google", "Chrome", "Kimsuky", "Mispadu", "Shlayer", "TRANSLATEXT", "Grandoreiro"]
-
-  - id: persistence_t1176_002_0
-    technique_id: "T1176.002"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: IDE Extensions (T1176.002)"
-    patterns: ["VSCode", "Mustang", "Panda", "Visual", "Studio", "Citation", "Chinese", "September"]
-
-  - id: collection_t1185_0
-    technique_id: "T1185"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Browser Session Hijacking (T1185)"
-    patterns: ["Citation", "IcedID", "TrickBot", "Carberp", "TRANSLATEXT", "Kimsuky", "April", "Grandoreiro"]
-
-  - id: credential_access_t1187_0
-    technique_id: "T1187"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Forced Authentication (T1187)"
-    patterns: ["Citation", "DarkHydrus", "Template", "Injection", "Unit", "Phishery", "Dragonfly", "Gigamon"]
-
-  - id: initial_access_t1189_0
-    technique_id: "T1189"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Drive-by Compromise (T1189)"
-    patterns: ["Citation", "ESET", "Secureworks", "June", "July", "March", "FireEye", "Symantec"]
-
-  - id: initial_access_t1190_0
-    technique_id: "T1190"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exploit Public-Facing Application (T1190)"
-    patterns: ["Citation", "Microsoft", "Exchange", "December", "Citrix", "CISA", "Mandiant", "Ransomware"]
-
-  - id: initial_access_t1195_0
-    technique_id: "T1195"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Supply Chain Compromise (T1195)"
-    patterns: ["Citation", "Stealer", "LummaStealer", "Lumma", "Cybereason", "LumaStealer", "Undated", "Fortinet"]
-
-  - id: initial_access_t1195_001_0
-    technique_id: "T1195.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compromise Software Dependencies and Development Tools (T1195.001)"
-    patterns: ["BeaverTail", "Citation", "ContagiousInterview", "InvisibleFerret", "November", "PaloAlto", "XCSSET", "Xcode"]
-
-  - id: initial_access_t1195_002_0
-    technique_id: "T1195.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compromise Software Supply Chain (T1195.002)"
-    patterns: ["Citation", "Secureworks", "SolarWinds", "June", "January", "ESET", "FireEye", "Mandiant"]
-
-  - id: defense_evasion_t1197_0
-    technique_id: "T1197"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: BITS Jobs (T1197)"
-    patterns: ["Citation", "BITS", "Cobalt", "Strike", "September", "Group", "Egregor", "UBoatRAT"]
-
-  - id: initial_access_t1199_0
-    technique_id: "T1199"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Trusted Relationship (T1199)"
-    patterns: ["Citation", "Indictment", "Managed", "Providers", "December", "Sandworm", "Team", "District"]
-
-  - id: initial_access_t1200_0
-    technique_id: "T1200"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Hardware Additions (T1200)"
-    patterns: ["DarkVishnya", "Bash", "Bunny", "Raspberry", "Citation", "Securelist", "https", "mitre"]
-
-  - id: discovery_t1201_0
-    technique_id: "T1201"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Password Policy Discovery (T1201)"
-    patterns: ["Citation", "Chimera", "Savill", "CrackMapExec", "Github", "September", "CuckooBees", "Cybereason"]
-
-  - id: defense_evasion_t1202_0
-    technique_id: "T1202"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Indirect Command Execution (T1202)"
-    patterns: ["Citation", "Forfiles", "Lazarus", "Group", "Qualys", "LolZarus", "VectorSec", "Revenge"]
-
-  - id: execution_t1203_0
-    technique_id: "T1203"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exploitation for Client Execution (T1203)"
-    patterns: ["Citation", "Microsoft", "Office", "Adobe", "Flash", "Cobalt", "June", "TrendMicro"]
-
-  - id: execution_t1204_0
-    technique_id: "T1204"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: User Execution (T1204)"
-    patterns: ["Citation", "Pikabot", "Scattered", "Spider", "LAPSUS", "LummaStealer", "Water", "Curupira"]
-
-  - id: execution_t1204_001_0
-    technique_id: "T1204.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Malicious Link (T1204.001)"
-    patterns: ["Citation", "FireEye", "April", "July", "March", "Unit", "June", "Proofpoint"]
-
-  - id: execution_t1204_002_0
-    technique_id: "T1204.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Malicious File (T1204.002)"
-    patterns: ["Citation", "Microsoft", "June", "Word", "April", "Unit", "February", "FireEye"]
-
-  - id: execution_t1204_004_0
-    technique_id: "T1204.004"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Malicious Copy and Paste (T1204.004)"
-    patterns: ["ClickFix", "Citation", "Contagious", "Interview", "Havoc", "Fortinet", "Sentinel", "September"]
-
-  - id: execution_t1204_005_0
-    technique_id: "T1204.005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Malicious Library (T1204.005)"
-    patterns: ["Citation", "Contagious", "Interview", "BeaverTail", "InvisibleFerret", "ContagiousInterview", "November", "Socket"]
-
-  - id: defense_evasion_t1205_0
-    technique_id: "T1205"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Traffic Signaling (T1205)"
-    patterns: ["Citation", "Mandiant", "PUBLOAD", "PANDA", "MUSTANG", "TONESHELL", "Cutting", "Edge"]
-
-  - id: defense_evasion_t1205_001_0
-    technique_id: "T1205.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Port Knocking (T1205.001)"
-    patterns: ["Citation", "SentinelLabs", "Metador", "Sept", "Cryshell", "Mandiant", "Mafalda", "Technical"]
-
-  - id: defense_evasion_t1205_002_0
-    technique_id: "T1205.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Socket Filters (T1205.002)"
-    patterns: ["Citation", "BPFDoor", "ICMP", "Mandiant", "PITSTOP", "Penquin", "CASTLETAP", "Fortinet"]
-
-  - id: defense_evasion_t1207_0
-    technique_id: "T1207"
-    confidence: 0.86
-    description: "MITRE ATT&CK derived: Rogue Domain Controller (T1207)"
-    patterns: ["Citation", "LSADUMP", "DCShadow", "Deply", "Adsecurity", "Guide", "Mimikatz", "https"]
-
-  - id: lateral_movement_t1210_0
-    technique_id: "T1210"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exploitation of Remote Services (T1210)"
-    patterns: ["Citation", "EternalBlue", "October", "Emotet", "WannaCry", "FireEye", "EternalRomance", "Flame"]
-
-  - id: defense_evasion_t1211_0
-    technique_id: "T1211"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Exploitation for Defense Evasion (T1211)"
-    patterns: ["Citation", "Velvet", "Cisco", "Switches", "Sygnia", "VelvetAnt", "Bitdefender", "Microsoft"]
-
-  - id: credential_access_t1212_0
-    technique_id: "T1212"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Exploitation for Credential Access (T1212)"
-    patterns: ["Leviathan", "Citation", "VMware", "Google", "Cloud", "Mandiant", "Australian", "Intrusions"]
-
-  - id: collection_t1213_0
-    technique_id: "T1213"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Data from Information Repositories (T1213)"
-    patterns: ["Citation", "Stealer", "Troll", "SolarWinds", "Compromise", "CrowdStrike", "StellarParticle", "January"]
-
-  - id: collection_t1213_002_0
-    technique_id: "T1213.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Sharepoint (T1213.002)"
-    patterns: ["Citation", "SharePoint", "Group", "Microsoft", "LAPSUS", "Alive", "Strong", "Chimera"]
-
-  - id: collection_t1213_006_0
-    technique_id: "T1213.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Databases (T1213.006)"
-    patterns: ["Citation", "Leviathan", "Sandworm", "Adminer", "ESET", "Turtle", "Building", "Management"]
-
-  - id: defense_evasion_t1216_001_0
-    technique_id: "T1216.001"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: PubPrn (T1216.001)"
-    patterns: ["PubPrn", "Citation", "Twitter", "ItsReallyNick", "Status", "Update", "APT32", "https"]
-
-  - id: discovery_t1217_0
-    technique_id: "T1217"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Browser Information Discovery (T1217)"
-    patterns: ["Citation", "BeaverTail", "Stealer", "Chrome", "OilRig", "ESET", "InvisibleFerret", "Contagious"]
-
-  - id: defense_evasion_t1218_0
-    technique_id: "T1218"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: System Binary Proxy Execution (T1218)"
-    patterns: ["Citation", "Lazarus", "Group", "Update", "Client", "January", "Qualys", "LolZarus"]
-
-  - id: defense_evasion_t1218_001_0
-    technique_id: "T1218.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compiled HTML File (T1218.001)"
-    patterns: ["Citation", "Silence", "OilRig", "Dark", "Caracal", "HTML", "Group", "Sept"]
-
-  - id: defense_evasion_t1218_002_0
-    technique_id: "T1218.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Control Panel (T1218.002)"
-    patterns: ["InvisiMole", "Citation", "Reaver", "Control", "Panel", "ESET", "June", "Palo"]
-
-  - id: defense_evasion_t1218_003_0
-    technique_id: "T1218.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: CMSTP (T1218.003)"
-    patterns: ["Citation", "Cobalt", "CMSTP", "MuddyWater", "LockBit", "Group", "Gang", "CHIMNEYSWEEP"]
-
-  - id: defense_evasion_t1218_004_0
-    technique_id: "T1218.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: InstallUtil (T1218.004)"
-    patterns: ["Citation", "InstallUtil", "Chaes", "WhisperGate", "Covenant", "April", "Saint", "Installutill"]
-
-  - id: defense_evasion_t1218_007_0
-    technique_id: "T1218.007"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Msiexec (T1218.007)"
-    patterns: ["Citation", "Installer", "IcedID", "June", "Cybereason", "ESET", "Latrodectus", "April"]
-
-  - id: defense_evasion_t1218_008_0
-    technique_id: "T1218.008"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Odbcconf (T1218.008)"
-    patterns: ["Citation", "Cobalt", "Group", "Bumblebee", "DLLs", "TrendMicro", "Cybereason", "August"]
-
-  - id: defense_evasion_t1218_009_0
-    technique_id: "T1218.009"
-    confidence: 0.84
-    description: "MITRE ATT&CK derived: Regsvcs/Regasm (T1218.009)"
-    patterns: ["Agent", "Tesla", "RegAsm", "Citation", "SentinelLabs", "https", "mitre", "org"]
-
-  - id: defense_evasion_t1218_012_0
-    technique_id: "T1218.012"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Verclsid (T1218.012)"
-    patterns: ["Hancitor", "Citation", "Canary", "Verclsid", "exe", "https", "mitre", "org"]
-
-  - id: defense_evasion_t1218_013_0
-    technique_id: "T1218.013"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Mavinject (T1218.013)"
-    patterns: ["TONESHELL", "Microsoft", "Application", "Virtualization", "Injector", "MAVInject", "Citation", "Trend"]
-
-  - id: defense_evasion_t1218_014_0
-    technique_id: "T1218.014"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: MMC (T1218.014)"
-    patterns: ["Medusa", "Group", "Microsoft", "Management", "Console", "Citation", "RedDelta", "CISA"]
-
-  - id: defense_evasion_t1218_015_0
-    technique_id: "T1218.015"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Electron Applications (T1218.015)"
-    patterns: ["Citation", "Lumma", "Stealer", "Electron", "Applications", "TrendMicro", "LummaStealer", "Supply"]
-
-  - id: command_and_control_t1219_0
-    technique_id: "T1219"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Remote Access Tools (T1219)"
-    patterns: ["Citation", "Group", "Medusa", "AnyDesk", "March", "Ransomware", "InvisibleFerret", "Cobalt"]
-
-  - id: command_and_control_t1219_001_0
-    technique_id: "T1219.001"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: IDE Tunneling (T1219.001)"
-    patterns: ["Mustang", "Panda", "Github", "Visual", "Studio", "Citation", "Chinese", "VSCode"]
-
-  - id: command_and_control_t1219_002_0
-    technique_id: "T1219.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Remote Desktop Software (T1219.002)"
-    patterns: ["Citation", "AnyDesk", "Scattered", "Spider", "TeamViewer", "BeaverTail", "Contagious", "Interview"]
-
-  - id: defense_evasion_t1220_0
-    technique_id: "T1220"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: XSL Script Processing (T1220)"
-    patterns: ["Citation", "Group", "Astaroth", "VBScript", "Cobalt", "Higaisa", "Lazarus", "JScript"]
-
-  - id: defense_evasion_t1221_0
-    technique_id: "T1221"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Template Injection (T1221)"
-    patterns: ["Citation", "Gamaredon", "Word", "Microsoft", "Unit", "Confucius", "Lazarus", "Group"]
-
-  - id: defense_evasion_t1222_0
-    technique_id: "T1222"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: File and Directory Permissions Modification (T1222)"
-    patterns: ["Qilin", "Citation", "Picus", "https", "mitre", "org", "S1242", "symbolic"]
-
-  - id: defense_evasion_t1222_001_0
-    technique_id: "T1222.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Windows File and Directory Permissions Modification (T1222.001)"
-    patterns: ["Citation", "Microsoft", "Everyone", "April", "Grandoreiro", "Ryuk", "CaddyWiper", "BlackCat"]
-
-  - id: defense_evasion_t1222_002_0
-    technique_id: "T1222.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Linux and Mac File and Directory Permissions Modification (T1222.002)"
-    patterns: ["Citation", "Shlayer", "Common", "Black", "TeamTNT", "Kinsing", "April", "COATHANGER"]
-
-  - id: defense_evasion_t1480_0
-    technique_id: "T1480"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Execution Guardrails (T1480)"
-    patterns: ["Citation", "BlackByte", "LockBit", "MSTIC", "Nobelium", "Toolset", "Mandiant", "ROADSWEEP"]
-
-  - id: defense_evasion_t1480_001_0
-    technique_id: "T1480.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Environmental Keying (T1480.001)"
-    patterns: ["Citation", "TONESHELL", "February", "Zscaler", "Kaspersky", "Pikabot", "Trend", "Micro"]
-
-  - id: defense_evasion_t1480_002_0
-    technique_id: "T1480.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Mutual Exclusion (T1480.002)"
-    patterns: ["Citation", "Embargo", "PANDA", "Ransomware", "ESET", "Qilin", "BPFDoor", "Deep"]
-
-  - id: discovery_t1482_0
-    technique_id: "T1482"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Domain Trust Discovery (T1482)"
-    patterns: ["Citation", "Nltest", "Active", "Directory", "Microsoft", "AdFind", "Ryuk", "January"]
-
-  - id: defense_evasion_t1484_001_0
-    technique_id: "T1484.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Group Policy Modification (T1484.001)"
-    patterns: ["Citation", "Group", "Policy", "Objects", "Microsoft", "LockBit", "Ransomware", "Egregor"]
-
-  - id: defense_evasion_t1484_002_0
-    technique_id: "T1484.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Trust Modification (T1484.002)"
-    patterns: ["Citation", "Microsoft", "AADInternals", "Scattered", "Spider", "Azure", "Ransomware", "Embargo"]
-
-  - id: impact_t1485_0
-    technique_id: "T1485"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Data Destruction (T1485)"
-    patterns: ["Citation", "Shamoon", "WhisperGate", "January", "Unit", "CaddyWiper", "REvil", "McAfee"]
-
-  - id: impact_t1491_001_0
-    technique_id: "T1491.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Internal Defacement (T1491.001)"
-    patterns: ["Citation", "Black", "Basta", "Group", "ShrinkLocker", "BlackCat", "Gamaredon", "June"]
-
-  - id: impact_t1491_002_0
-    technique_id: "T1491.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: External Defacement (T1491.002)"
-    patterns: ["Citation", "October", "Ember", "Bear", "Ukrainian", "Cadet", "Blizzard", "Sandworm"]
-
-  - id: impact_t1495_0
-    technique_id: "T1495"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Firmware Corruption (T1495)"
-    patterns: ["Rabbit", "Citation", "Trickboot", "Secure", "List", "TrickBot", "UEFI", "BIOS"]
-
-  - id: impact_t1496_001_0
-    technique_id: "T1496.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compute Hijacking (T1496.001)"
-    patterns: ["Citation", "XMRig", "TeamTNT", "Monero", "Unit", "Rocke", "Kinsing", "Lucifer"]
-
-  - id: defense_evasion_t1497_0
-    technique_id: "T1497"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Virtualization/Sandbox Evasion (T1497)"
-    patterns: ["Citation", "June", "ESET", "XLoader", "StrelaStealer", "Egregor", "RedLine", "Stealer"]
-
-  - id: defense_evasion_t1497_001_0
-    technique_id: "T1497.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Checks (T1497.001)"
-    patterns: ["Citation", "Virtual", "June", "April", "ESET", "VirtualBox", "VMware", "Talos"]
-
-  - id: defense_evasion_t1497_002_0
-    technique_id: "T1497.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: User Activity Based Checks (T1497.002)"
-    patterns: ["Citation", "Okrum", "Darkhotel", "Lastline", "Just", "Time", "Decryption", "ESET"]
-
-  - id: defense_evasion_t1497_003_0
-    technique_id: "T1497.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Time Based Checks (T1497.003)"
-    patterns: ["Citation", "March", "April", "GetTickCount", "ESET", "Lazarus", "February", "July"]
-
-  - id: impact_t1498_0
-    technique_id: "T1498"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Network Denial of Service (T1498)"
-    patterns: ["Citation", "NKAbuse", "Lucifer", "DDoS", "World", "Agency", "District", "Court"]
-
-  - id: impact_t1499_0
-    technique_id: "T1499"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Endpoint Denial of Service (T1499)"
-    patterns: ["Citation", "October", "Georgian", "ZxShell", "OnionDuke", "Denial", "ESET", "Dukes"]
-
-  - id: impact_t1499_004_0
-    technique_id: "T1499.004"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Application or System Exploitation (T1499.004)"
-    patterns: ["Industroyer", "Siemens", "SIPROTEC", "Citation", "ESET", "https", "mitre", "org"]
-
-  - id: persistence_t1505_001_0
-    technique_id: "T1505.001"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: SQL Stored Procedures (T1505.001)"
-    patterns: ["Citation", "Ukraine", "Electric", "Power", "Sandworm", "Team", "Dragos", "Crashoverride"]
-
-  - id: persistence_t1505_002_0
-    technique_id: "T1505.002"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Transport Agent (T1505.002)"
-    patterns: ["LightNeuron", "Microsoft", "Exchange", "Citation", "ESET", "https", "mitre", "org"]
-
-  - id: persistence_t1505_003_0
-    technique_id: "T1505.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Web Shell (T1505.003)"
-    patterns: ["Citation", "Mandiant", "Secure", "January", "Exchange", "Microsoft", "CISA", "Pulse"]
-
-  - id: persistence_t1505_004_0
-    technique_id: "T1505.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: IIS Components (T1505.004)"
-    patterns: ["Citation", "RGDoor", "IceApple", "Lazarus", "Internet", "Information", "SharePoint", "Unit"]
-
-  - id: discovery_t1518_0
-    technique_id: "T1518"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Software Discovery (T1518)"
-    patterns: ["Citation", "ESET", "November", "June", "Kaspersky", "April", "Stealer", "Trend"]
-
-  - id: discovery_t1518_001_0
-    technique_id: "T1518.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Security Software Discovery (T1518.001)"
-    patterns: ["Citation", "Kaspersky", "ESET", "April", "June", "Trend", "Micro", "Unit"]
-
-  - id: discovery_t1518_002_0
-    technique_id: "T1518.002"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Backup Software Discovery (T1518.002)"
-    patterns: ["Wizard", "Spider", "Citation", "Mandiant", "PowerShell", "https", "mitre", "org"]
-
-  - id: impact_t1529_0
-    technique_id: "T1529"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Shutdown/Reboot (T1529)"
-    patterns: ["Citation", "AcidRain", "Agrius", "Wiper", "SentinelOne", "Talos", "Unit", "Trend"]
-
-  - id: impact_t1531_0
-    technique_id: "T1531"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Account Access Removal (T1531)"
-    patterns: ["Citation", "LockerGoga", "MegaCortex", "Meteor", "DEADWOOD", "Akira", "Secureworks", "GOLD"]
-
-  - id: lateral_movement_t1534_0
-    technique_id: "T1534"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Internal Spearphishing (T1534)"
-    patterns: ["Citation", "Gamaredon", "Group", "Lazarus", "Outlook", "ESET", "June", "Kimsuky"]
-
-  - id: credential_access_t1539_0
-    technique_id: "T1539"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Steal Web Session Cookie (T1539)"
-    patterns: ["Citation", "Stealer", "Chrome", "RedLine", "TRANSLATEXT", "Google", "Kaspersky", "Kimsuky"]
-
-  - id: persistence_t1542_001_0
-    technique_id: "T1542.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Firmware (T1542.001)"
-    patterns: ["UEFI", "BIOS", "Citation", "Hacking", "Team", "LoJax", "ESET", "Sept"]
-
-  - id: persistence_t1542_002_0
-    technique_id: "T1542.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Component Firmware (T1542.002)"
-    patterns: ["Equation", "Citation", "Cyclops", "Blink", "Kaspersky", "WatchGuard", "NCSC", "February"]
-
-  - id: persistence_t1542_003_0
-    technique_id: "T1542.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Bootkit (T1542.003)"
-    patterns: ["Citation", "WhisperGate", "January", "Boot", "Record", "FireEye", "Master", "FinFisher"]
-
-  - id: persistence_t1543_0
-    technique_id: "T1543"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Create or Modify System Process (T1543)"
-    patterns: ["Citation", "Akira", "BOLDMOVE", "IMAPLoader", "Yellow", "Liderc", "CISA", "Ransomware"]
-
-  - id: persistence_t1543_002_0
-    technique_id: "T1543.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Systemd Service (T1543.002)"
-    patterns: ["Citation", "TeamTNT", "Sandworm", "GOGETTER", "Mandiant", "Pupy", "Fysbis", "RotaJakiro"]
-
-  - id: privilege_escalation_t1546_0
-    technique_id: "T1546"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Event Triggered Execution (T1546)"
-    patterns: ["Citation", "XCSSET", "Pacu", "Lambda", "UPSTYLE", "CloudFormation", "GitHub", "Botnet"]
-
-  - id: privilege_escalation_t1546_001_0
-    technique_id: "T1546.001"
-    confidence: 0.87
-    description: "MITRE ATT&CK derived: Change Default File Association (T1546.001)"
-    patterns: ["SILENTTRINITY", "Citation", "Kimsuky", "GitHub", "July", "Securelist", "Sept", "https"]
-
-  - id: privilege_escalation_t1546_002_0
-    technique_id: "T1546.002"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: Screensaver (T1546.002)"
-    patterns: ["Gazer", "Citation", "ESET", "https", "mitre", "org", "S0168", "establish"]
-
-  - id: privilege_escalation_t1546_003_0
-    technique_id: "T1546.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Windows Management Instrumentation Event Subscription (T1546.003)"
-    patterns: ["Citation", "October", "FireEye", "Microsoft", "Metador", "ESET", "Mockingbird", "Event"]
-
-  - id: privilege_escalation_t1546_004_0
-    technique_id: "T1546.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Unix Shell Configuration Modification (T1546.004)"
-    patterns: ["Citation", "HOME", "Green", "Lambert", "RotaJakiro", "Rabbit", "ShadowRay", "XCSSET"]
-
-  - id: privilege_escalation_t1546_007_0
-    technique_id: "T1546.007"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Netsh Helper DLL (T1546.007)"
-    patterns: ["Citation", "Demaske", "Persistence", "netsh", "https", "mitre", "org", "S0108"]
-
-  - id: privilege_escalation_t1546_008_0
-    technique_id: "T1546.008"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Accessibility Features (T1546.008)"
-    patterns: ["Citation", "Empire", "FireEye", "Sticky", "Keys", "Utilman", "Magnify", "Github"]
-
-  - id: privilege_escalation_t1546_009_0
-    technique_id: "T1546.009"
-    confidence: 0.86
-    description: "MITRE ATT&CK derived: AppCert DLLs (T1546.009)"
-    patterns: ["PUNCHBUGGY", "AppCertDLLs", "Citation", "FireEye", "Know", "Your", "Enemy", "https"]
-
-  - id: privilege_escalation_t1546_010_0
-    technique_id: "T1546.010"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: AppInit DLLs (T1546.010)"
-    patterns: ["Microsoft", "CurrentVersion", "Citation", "HKLM", "Cherry", "Picker", "Ramsay", "FLASH"]
-
-  - id: privilege_escalation_t1546_011_0
-    technique_id: "T1546.011"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Application Shimming (T1546.011)"
-    patterns: ["Citation", "Pillowmint", "Trustwave", "June", "SDBbot", "Proofpoint", "October", "FireEye"]
-
-  - id: privilege_escalation_t1546_012_0
-    technique_id: "T1546.012"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Image File Execution Options Injection (T1546.012)"
-    patterns: ["Citation", "Image", "Options", "Microsoft", "SUNBURST", "IFEO", "Debugger", "Cobalt"]
-
-  - id: privilege_escalation_t1546_013_0
-    technique_id: "T1546.013"
-    confidence: 0.82
-    description: "MITRE ATT&CK derived: PowerShell Profile (T1546.013)"
-    patterns: ["Turla", "Citation", "ESET", "PowerShell", "https", "mitre", "org", "groups"]
-
-  - id: privilege_escalation_t1546_015_0
-    technique_id: "T1546.015"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Component Object Model Hijacking (T1546.015)"
-    patterns: ["Citation", "ESET", "Classes", "CLSID", "Sednit", "Part", "HKCU", "Shell"]
-
-  - id: privilege_escalation_t1546_016_0
-    technique_id: "T1546.016"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Installer Packages (T1546.016)"
-    patterns: ["AppleJeus", "Citation", "Resources", "Launch", "Daemon", "ObjectiveSee", "Supply", "Chain"]
-
-  - id: persistence_t1546_017_0
-    technique_id: "T1546.017"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Udev Rules (T1546.017)"
-    patterns: ["REPTILE", "Citation", "Google", "Cloud", "Mandiant", "https", "mitre", "org"]
-
-  - id: persistence_t1547_0
-    technique_id: "T1547"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Boot or Logon Autostart Execution (T1547)"
-    patterns: ["Microsoft", "Citation", "HKCU", "HKLM", "Active", "Setup", "Installed", "Components"]
-
-  - id: persistence_t1547_002_0
-    technique_id: "T1547.002"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Authentication Package (T1547.002)"
-    patterns: ["Flame", "Authentication", "Packages", "Citation", "Crysys", "Skywiper", "https", "mitre"]
-
-  - id: persistence_t1547_004_0
-    technique_id: "T1547.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Winlogon Helper DLL (T1547.004)"
-    patterns: ["Citation", "Winlogon", "Microsoft", "CurrentVersion", "HKCU", "Shell", "Userinit", "HKLM"]
-
-  - id: persistence_t1547_005_0
-    technique_id: "T1547.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Security Support Provider (T1547.005)"
-    patterns: ["Citation", "PowerSploit", "Empire", "SSPs", "Deply", "Security", "Support", "Providers"]
-
-  - id: persistence_t1547_006_0
-    technique_id: "T1547.006"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Kernel Modules and Extensions (T1547.006)"
-    patterns: ["Citation", "Drovorub", "Skidmap", "August", "LKMs", "Trend", "Micro", "REPTILE"]
-
-  - id: persistence_t1547_008_0
-    technique_id: "T1547.008"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: LSASS Driver (T1547.008)"
-    patterns: ["Citation", "Wingbird", "Microsoft", "Pasam", "Security", "Accounts", "Manager", "Symantec"]
-
-  - id: persistence_t1547_009_0
-    technique_id: "T1547.009"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Shortcut Modification (T1547.009)"
-    patterns: ["Citation", "Startup", "FireEye", "Unit", "ESET", "Start", "Group", "July"]
-
-  - id: persistence_t1547_012_0
-    technique_id: "T1547.012"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Print Processors (T1547.012)"
-    patterns: ["Print", "Citation", "PipeMon", "Gelsemium", "ESET", "HKLM", "Control", "Environments"]
-
-  - id: persistence_t1547_013_0
-    technique_id: "T1547.013"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: XDG Autostart Entries (T1547.013)"
-    patterns: ["Citation", "Canary", "InvisibleFerret", "Autostart", "Netwire", "Zscaler", "ContagiousInterview", "BeaverTail"]
-
-  - id: persistence_t1547_014_0
-    technique_id: "T1547.014"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Active Setup (T1547.014)"
-    patterns: ["Citation", "PoisonIvy", "Active", "Setup", "Microsoft", "Tropic", "Trooper", "FireEye"]
-
-  - id: privilege_escalation_t1548_0
-    technique_id: "T1548"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Abuse Elevation Control Mechanism (T1548)"
-    patterns: ["VIBs", "Citation", "Installation", "Bundles", "Google", "Cloud", "Threat", "Intelligence"]
-
-  - id: privilege_escalation_t1548_001_0
-    technique_id: "T1548.001"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Setuid and Setgid (T1548.001)"
-    patterns: ["Keydnap", "Citation", "Exaramel", "ANSSI", "Sandworm", "January", "https", "mitre"]
-
-  - id: privilege_escalation_t1548_003_0
-    technique_id: "T1548.003"
-    confidence: 0.87
-    description: "MITRE ATT&CK derived: Sudo and Sudo Caching (T1548.003)"
-    patterns: ["Citation", "Cobalt", "Strike", "Manual", "November", "Proton", "NOPASSWD", "https"]
-
-  - id: defense_evasion_t1550_0
-    technique_id: "T1550"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Use Alternate Authentication Material (T1550)"
-    patterns: ["Citation", "SAML", "FoggyWeb", "SolarWinds", "Compromise", "Microsoft", "Defender", "Solorigate"]
-
-  - id: defense_evasion_t1550_002_0
-    technique_id: "T1550.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Pass the Hash (T1550.002)"
-    patterns: ["Citation", "Cobalt", "Mandiant", "Strike", "Cybereason", "Aquatic", "Panda", "Chimera"]
-
-  - id: defense_evasion_t1550_003_0
-    technique_id: "T1550.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Pass the Ticket (T1550.003)"
-    patterns: ["Citation", "Kerberos", "Ticket", "DCSync", "Pupy", "BRONZE", "BUTLER", "Granting"]
-
-  - id: credential_access_t1552_0
-    technique_id: "T1552"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Unsecured Credentials (T1552)"
-    patterns: ["Citation", "Leviathan", "CISA", "NirSoft", "Pacu", "Astaroth", "NPPSPY", "Australian"]
-
-  - id: credential_access_t1552_001_0
-    technique_id: "T1552.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Credentials In Files (T1552.001)"
-    patterns: ["Citation", "LaZagne", "Spider", "GitHub", "SharePoint", "Symantec", "FireEye", "CISA"]
-
-  - id: credential_access_t1552_002_0
-    technique_id: "T1552.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Credentials in Registry (T1552.002)"
-    patterns: ["Citation", "Outlook", "StrelaStealer", "IMAP", "Pentestlab", "Stored", "Credentials", "Cybereason"]
-
-  - id: credential_access_t1552_003_0
-    technique_id: "T1552.003"
-    confidence: 0.82
-    description: "MITRE ATT&CK derived: Shell History (T1552.003)"
-    patterns: ["Kinsing", "Citation", "Aqua", "April", "https", "mitre", "org", "S0599"]
-
-  - id: credential_access_t1552_004_0
-    technique_id: "T1552.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Private Keys (T1552.004)"
-    patterns: ["Citation", "Troll", "Stealer", "Microsoft", "TeamTNT", "Machete", "ESET", "Wocao"]
-
-  - id: credential_access_t1552_006_0
-    technique_id: "T1552.006"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Group Policy Preferences (T1552.006)"
-    patterns: ["Citation", "PowerSploit", "SILENTTRINITY", "GitHub", "July", "Exfiltration", "Group", "Policy"]
-
-  - id: defense_evasion_t1553_0
-    technique_id: "T1553"
-    confidence: 0.78
-    description: "MITRE ATT&CK derived: Subvert Trust Controls (T1553)"
-    patterns: ["Axiom", "Citation", "https", "mitre", "org", "groups", "G0001", "digital"]
-
-  - id: defense_evasion_t1553_002_0
-    technique_id: "T1553.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Code Signing (T1553.002)"
-    patterns: ["Citation", "ESET", "Stealer", "FireEye", "April", "March", "Group", "June"]
-
-  - id: defense_evasion_t1553_004_0
-    technique_id: "T1553.004"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Install Root Certificate (T1553.004)"
-    patterns: ["Citation", "Example", "ROOT", "ProgramData", "Palo", "Alto", "Retefe", "Library"]
-
-  - id: defense_evasion_t1553_005_0
-    technique_id: "T1553.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Mark-of-the-Web Bypass (T1553.005)"
-    patterns: ["Citation", "MOTW", "TrendMicro", "Amadey", "Zone", "Identifier", "Korean", "QakBot"]
-
-  - id: defense_evasion_t1553_006_0
-    technique_id: "T1553.006"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Code Signing Policy Modification (T1553.006)"
-    patterns: ["Citation", "Driver", "BlackEnergy", "Enforcement", "Turla", "RequireSigned", "DLLs", "FLASH"]
-
-  - id: persistence_t1554_0
-    technique_id: "T1554"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Compromise Host Software Binary (T1554)"
-    patterns: ["Citation", "Mandiant", "Secure", "Cutting", "Edge", "January", "Ivanti", "ESET"]
-
-  - id: credential_access_t1555_002_0
-    technique_id: "T1555.002"
-    confidence: 0.78
-    description: "MITRE ATT&CK derived: Securityd Memory (T1555.002)"
-    patterns: ["Keydnap", "Citation", "https", "mitre", "org", "S0276", "uses", "keychaindump"]
-
-  - id: credential_access_t1555_003_0
-    technique_id: "T1555.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Credentials from Web Browsers (T1555.003)"
-    patterns: ["Citation", "Chrome", "Firefox", "Internet", "Explorer", "Google", "ESET", "July"]
-
-  - id: credential_access_t1555_004_0
-    technique_id: "T1555.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Windows Credential Manager (T1555.004)"
-    patterns: ["Citation", "Credential", "Manager", "Vault", "OilRig", "GitHub", "PowerSploit", "July"]
-
-  - id: credential_access_t1555_005_0
-    technique_id: "T1555.005"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Password Managers (T1555.005)"
-    patterns: ["Citation", "KeePass", "InvisibleFerret", "Wocao", "December", "Threat", "February", "Spider"]
-
-  - id: credential_access_t1556_0
-    technique_id: "T1556"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Modify Authentication Process (T1556)"
-    patterns: ["Citation", "Ebury", "ESET", "SILENTTRINITY", "KeePass", "ArcaneDoor", "TortoiseSVN", "GitHub"]
-
-  - id: credential_access_t1556_001_0
-    technique_id: "T1556.001"
-    confidence: 0.87
-    description: "MITRE ATT&CK derived: Domain Controller Authentication (T1556.001)"
-    patterns: ["Chimera", "Citation", "Skeleton", "NTLM", "Cycraft", "April", "Dell", "https"]
-
-  - id: credential_access_t1556_002_0
-    technique_id: "T1556.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Password Filter DLL (T1556.002)"
-    patterns: ["Citation", "Kaspersky", "ProjectSauron", "Full", "Report", "Remsec", "OilRig", "Trend"]
-
-  - id: credential_access_t1556_003_0
-    technique_id: "T1556.003"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Pluggable Authentication Modules (T1556.003)"
-    patterns: ["Ebury", "Citation", "Skidmap", "ESET", "Trend", "Micro", "https", "mitre"]
-
-  - id: credential_access_t1556_006_0
-    technique_id: "T1556.006"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Multi-Factor Authentication (T1556.006)"
-    patterns: ["Scattered", "Spider", "Citation", "CISA", "Advisory", "November", "SLOWPULSE", "RADIUS"]
-
-  - id: credential_access_t1556_007_0
-    technique_id: "T1556.007"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Hybrid Identity (T1556.007)"
-    patterns: ["AADInternals", "Azure", "Citation", "PTASpy", "AzureADConnectAuthenticationAgentService", "Authentication", "Cloud", "Microsoft"]
-
-  - id: credential_access_t1557_0
-    technique_id: "T1557"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Adversary-in-the-Middle (T1557)"
-    patterns: ["Citation", "Turtle", "HTTP", "ArcaneDoor", "Cisco", "Kimsuky", "NPPSPY", "Winlogon"]
-
-  - id: credential_access_t1557_001_0
-    technique_id: "T1557.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: LLMNR/NBT-NS Poisoning and SMB Relay (T1557.001)"
-    patterns: ["Citation", "GitHub", "Responder", "Inveigh", "Impacket", "Empire", "Pupy", "Sniffing"]
-
-  - id: credential_access_t1557_002_0
-    technique_id: "T1557.002"
-    confidence: 0.87
-    description: "MITRE ATT&CK derived: ARP Cache Poisoning (T1557.002)"
-    patterns: ["Cleaver", "Citation", "LuminousMoth", "Cylance", "Bitdefender", "July", "ARP", "https"]
-
-  - id: credential_access_t1558_0
-    technique_id: "T1558"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: Steal or Forge Kerberos Tickets (T1558)"
-    patterns: ["Akira", "Kerberos", "Citation", "Cisco", "Ransomware", "https", "mitre", "org"]
-
-  - id: credential_access_t1558_001_0
-    technique_id: "T1558.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Golden Ticket (T1558.001)"
-    patterns: ["Citation", "Kerberos", "Rubeus", "Empire", "GitHub", "Sliver", "Group", "Alive"]
-
-  - id: credential_access_t1558_002_0
-    technique_id: "T1558.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Silver Ticket (T1558.002)"
-    patterns: ["Citation", "Rubeus", "GitHub", "AADInternals", "Empire", "March", "Kerberos", "AZUREADSSOACC"]
-
-  - id: credential_access_t1558_003_0
-    technique_id: "T1558.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Kerberoasting (T1558.003)"
-    patterns: ["Citation", "PowerSploit", "Kerberoasting", "Rubeus", "GitHub", "Leviathan", "Spider", "October"]
-
-  - id: credential_access_t1558_004_0
-    technique_id: "T1558.004"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: AS-REP Roasting (T1558.004)"
-    patterns: ["Citation", "Rubeus", "DFIR", "Ryuk", "Kerberos", "GitHub", "March", "Return"]
-
-  - id: credential_access_t1558_005_0
-    technique_id: "T1558.005"
-    confidence: 0.80
-    description: "MITRE ATT&CK derived: Ccache Files (T1558.005)"
-    patterns: ["Kerberos", "Citation", "Impacket", "https", "mitre", "org", "S0357", "getST"]
-
-  - id: execution_t1559_0
-    technique_id: "T1559"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Inter-Process Communication (T1559)"
-    patterns: ["Citation", "Mandiant", "RotaJakiro", "TONESHELL", "Havoc", "StealBit", "ROADSWEEP", "HyperStack"]
-
-  - id: execution_t1559_001_0
-    technique_id: "T1559.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Component Object Model (T1559.001)"
-    patterns: ["Citation", "ESET", "MuddyWater", "June", "Object", "DCOM", "Component", "Model"]
-
-  - id: execution_t1559_002_0
-    technique_id: "T1559.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Dynamic Data Exchange (T1559.002)"
-    patterns: ["Citation", "Word", "Talos", "McAfee", "MuddyWater", "Sidewinder", "June", "Ramsay"]
-
-  - id: collection_t1560_0
-    technique_id: "T1560"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Archive Collected Data (T1560)"
-    patterns: ["Citation", "ESET", "CISA", "July", "Kaspersky", "McAfee", "Symantec", "Stealer"]
-
-  - id: collection_t1560_001_0
-    technique_id: "T1560.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Archive via Utility (T1560.001)"
-    patterns: ["Citation", "WinRAR", "ESET", "Symantec", "July", "December", "April", "November"]
-
-  - id: collection_t1560_002_0
-    technique_id: "T1560.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Archive via Library (T1560.002)"
-    patterns: ["Citation", "April", "ESET", "InvisiMole", "June", "TajMahal", "Kaspersky", "Turla"]
-
-  - id: collection_t1560_003_0
-    technique_id: "T1560.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Archive via Custom Method (T1560.003)"
-    patterns: ["Citation", "FireEye", "ESET", "Mandiant", "Base64", "FoggyWeb", "June", "RawPOS"]
-
-  - id: impact_t1561_001_0
-    technique_id: "T1561.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Disk Content Wipe (T1561.001)"
-    patterns: ["Citation", "SentinelOne", "January", "Nearest", "Neighbor", "WhisperGate", "BlackCat", "Volexity"]
-
-  - id: impact_t1561_002_0
-    technique_id: "T1561.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Disk Structure Wipe (T1561.002)"
-    patterns: ["Citation", "WhisperGate", "Shamoon", "Master", "Record", "January", "Boot", "Wiper"]
-
-  - id: defense_evasion_t1562_0
-    technique_id: "T1562"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Impair Defenses (T1562)"
-    patterns: ["Citation", "BOLDMOVE", "BlackByte", "Fortinet", "Google", "Cloud", "Kernel", "Notify"]
-
-  - id: defense_evasion_t1562_002_0
-    technique_id: "T1562.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Disable Windows Event Logging (T1562.002)"
-    patterns: ["Citation", "Microsoft", "Wevtutil", "Documentation", "Threat", "SecureWorks", "BRONZE", "UNION"]
-
-  - id: defense_evasion_t1562_003_0
-    technique_id: "T1562.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Impair Command History Logging (T1562.003)"
-    patterns: ["Citation", "ArcaneDoor", "Cisco", "HISTFILE", "Medusa", "Turtle", "MySQL", "BPFDoor"]
-
-  - id: defense_evasion_t1562_004_0
-    technique_id: "T1562.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Disable or Modify System Firewall (T1562.004)"
-    patterns: ["Citation", "Firewall", "March", "Medusa", "BlackByte", "Group", "CISA", "June"]
-
-  - id: defense_evasion_t1562_006_0
-    technique_id: "T1562.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Indicator Blocking (T1562.006)"
-    patterns: ["Citation", "Event", "Tracing", "Brute", "Ratel", "Ebury", "Hermetic", "Wiper"]
-
-  - id: defense_evasion_t1562_009_0
-    technique_id: "T1562.009"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Safe Mode Boot (T1562.009)"
-    patterns: ["Citation", "Black", "Basta", "Safe", "Mode", "Trend", "Micro", "AvosLocker"]
-
-  - id: defense_evasion_t1562_010_0
-    technique_id: "T1562.010"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Downgrade Attack (T1562.010)"
-    patterns: ["Citation", "BlackByte", "NTLM", "FrostyGoop", "Incident", "Dragos", "Ransomware", "Trustwave"]
-
-  - id: defense_evasion_t1562_012_0
-    technique_id: "T1562.012"
-    confidence: 0.82
-    description: "MITRE ATT&CK derived: Disable or Modify Linux Audit System (T1562.012)"
-    patterns: ["Ebury", "OpenSSH", "Citation", "ESET", "https", "mitre", "org", "S0377"]
-
-  - id: lateral_movement_t1563_001_0
-    technique_id: "T1563.001"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: SSH Hijacking (T1563.001)"
-    patterns: ["MEDUSA", "Citation", "Google", "Cloud", "Mandiant", "SSH", "https", "mitre"]
-
-  - id: lateral_movement_t1563_002_0
-    technique_id: "T1563.002"
-    confidence: 0.82
-    description: "MITRE ATT&CK derived: RDP Hijacking (T1563.002)"
-    patterns: ["WannaCry", "Citation", "LogRhythm", "Axiom", "https", "mitre", "org", "S0366"]
-
-  - id: defense_evasion_t1564_0
-    technique_id: "T1564"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Hide Artifacts (T1564)"
-    patterns: ["Citation", "Shlayer", "Common", "DarkTortilla", "Tarrask", "XXXXXXXXXXXX", "Installer", "Bundlore"]
-
-  - id: defense_evasion_t1564_001_0
-    technique_id: "T1564.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Hidden Files and Directories (T1564.001)"
-    patterns: ["Citation", "July", "PlugX", "Mustang", "Panda", "ESET", "Trend", "Micro"]
-
-  - id: defense_evasion_t1564_002_0
-    technique_id: "T1564.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Hidden Users (T1564.002)"
-    patterns: ["Citation", "SMOKEDHAM", "Dragonfly", "FireEye", "June", "Kimsuky", "HKLM", "Microsoft"]
-
-  - id: defense_evasion_t1564_003_0
-    technique_id: "T1564.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Hidden Window (T1564.003)"
-    patterns: ["Citation", "Hidden", "WindowStyle", "ShowWindow", "Group", "February", "FireEye", "ESET"]
-
-  - id: defense_evasion_t1564_004_0
-    technique_id: "T1564.004"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: NTFS File Attributes (T1564.004)"
-    patterns: ["Citation", "NTFS", "Valak", "July", "Regin", "Extended", "Attributes", "Cybereason"]
-
-  - id: defense_evasion_t1564_005_0
-    technique_id: "T1564.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Hidden File System (T1564.005)"
-    patterns: ["Citation", "Kaspersky", "Equation", "ComRAT", "Regin", "TEMP", "ESET", "BOOTRASH"]
-
-  - id: defense_evasion_t1564_006_0
-    technique_id: "T1564.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Run Virtual Instance (T1564.006)"
-    patterns: ["Maze", "VirtualBox", "Citation", "Ragnar", "Sophos", "Locker", "LoudMiner", "September"]
-
-  - id: defense_evasion_t1564_008_0
-    technique_id: "T1564.008"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Email Hiding Rules (T1564.008)"
-    patterns: ["Citation", "Scattered", "Spider", "MSTIC", "Octo", "Tempest", "October", "Microsoft"]
-
-  - id: defense_evasion_t1564_010_0
-    technique_id: "T1564.010"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Process Argument Spoofing (T1564.010)"
-    patterns: ["Cobalt", "Strike", "Citation", "Manual", "November", "SombRAT", "FireEye", "FiveHands"]
-
-  - id: defense_evasion_t1564_011_0
-    technique_id: "T1564.011"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Ignore Process Interrupts (T1564.011)"
-    patterns: ["Citation", "BOLDMOVE", "SIGCHLD", "SIGPIPE", "Turtle", "Shlayer", "BPFDoor", "GoldMax"]
-
-  - id: defense_evasion_t1564_012_0
-    technique_id: "T1564.012"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: File/Path Exclusions (T1564.012)"
-    patterns: ["Turla", "LunarWeb", "Citation", "ESET", "Lunar", "https", "mitre", "org"]
-
-  - id: defense_evasion_t1564_013_0
-    technique_id: "T1564.013"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Bind Mounts (T1564.013)"
-    patterns: ["Botnet", "Citation", "Lumen", "KVBotnet", "bind", "https", "mitre", "org"]
-
-  - id: impact_t1565_0
-    technique_id: "T1565"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Data Manipulation (T1565)"
-    patterns: ["Citation", "Sygnia", "Elephant", "Beetle", "FIN13", "https", "mitre", "org"]
-
-  - id: impact_t1565_001_0
-    technique_id: "T1565.001"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Stored Data Manipulation (T1565.001)"
-    patterns: ["Citation", "SUNSPOT", "Orion", "SUNBURST", "SolarWinds", "MoveFileEx", "CrowdStrike", "Implant"]
-
-  - id: impact_t1565_002_0
-    technique_id: "T1565.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Transmitted Data Manipulation (T1565.002)"
-    patterns: ["Citation", "LightNeuron", "ESET", "Metamorfo", "Melcoz", "Securelist", "Brazilian", "Banking"]
-
-  - id: impact_t1565_003_0
-    technique_id: "T1565.003"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Runtime Data Manipulation (T1565.003)"
-    patterns: ["DYEPACK", "SWIFT", "Citation", "FireEye", "APT38", "https", "mitre", "org"]
-
-  - id: initial_access_t1566_0
-    technique_id: "T1566"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Phishing (T1566)"
-    patterns: ["Citation", "Royal", "Ransomware", "SentinelOne", "Ransom", "Turtle", "Hikit", "Kimsuky"]
-
-  - id: initial_access_t1566_001_0
+    patterns:
+      - ".crypto"
+      - ".vault"
+      - ".onion"
+      - ".crypt"
+      - "YOUR_FILES"
+      - "restore_files"
+
+  # T1566.001 - Spearphishing Attachment
+  - id: phishing_attachment
     technique_id: "T1566.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Spearphishing Attachment (T1566.001)"
-    patterns: ["Citation", "Microsoft", "Word", "April", "Unit", "July", "June", "FireEye"]
+    confidence: 0.80
+    description: "Spearphishing attachment delivery"
+    patterns:
+      - "macro"
+      - "AutoOpen"
+      - "Document_Open"
+      - "AutoExec"
+      - "Embedded OLE"
+      - ".docm"
+      - ".xlsm"
 
-  - id: initial_access_t1566_002_0
-    technique_id: "T1566.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Spearphishing Link (T1566.002)"
-    patterns: ["Citation", "April", "July", "Emotet", "September", "FireEye", "February", "Proofpoint"]
-
-  - id: initial_access_t1566_003_0
-    technique_id: "T1566.003"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Spearphishing via Service (T1566.003)"
-    patterns: ["Citation", "Contagious", "Interview", "Microsoft", "Lazarus", "LinkedIn", "BeaverTail", "InvisibleFerret"]
-
-  - id: initial_access_t1566_004_0
-    technique_id: "T1566.004"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Spearphishing Voice (T1566.004)"
-    patterns: ["Citation", "Microsoft", "RedCanary", "Scattered", "Spider", "Crowdstrike", "TELCO", "Campaign"]
-
-  - id: exfiltration_t1567_0
-    technique_id: "T1567"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exfiltration Over Web Service (T1567)"
-    patterns: ["Citation", "ESET", "Salesforce", "Telegram", "Google", "InvisibleFerret", "BlackByte", "Contagious"]
-
-  - id: exfiltration_t1567_001_0
-    technique_id: "T1567.001"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Exfiltration to Code Repository (T1567.001)"
-    patterns: ["Empire", "GitHub", "Citation", "PowerShell", "https", "mitre", "org", "S0363"]
-
-  - id: exfiltration_t1567_002_0
-    technique_id: "T1567.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Exfiltration to Cloud Storage (T1567.002)"
-    patterns: ["Citation", "Dropbox", "OneDrive", "Rclone", "MEGA", "Microsoft", "ESET", "Spider"]
-
-  - id: command_and_control_t1568_0
-    technique_id: "T1568"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Dynamic Resolution (T1568)"
-    patterns: ["Citation", "RedEcho", "Tomiris", "February", "RecordedFuture", "Gelsemium", "ESET", "Spalax"]
-
-  - id: command_and_control_t1568_001_0
-    technique_id: "T1568.001"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Fast Flux DNS (T1568.001)"
-    patterns: ["Citation", "Gamaredon", "Trend", "Micro", "Group", "Amadey", "Korean", "District"]
-
-  - id: command_and_control_t1568_002_0
-    technique_id: "T1568.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Domain Generation Algorithms (T1568.002)"
-    patterns: ["Citation", "ESET", "FireEye", "July", "URLs", "Conficker", "November", "ShadowPad"]
-
-  - id: command_and_control_t1568_003_0
-    technique_id: "T1568.003"
-    confidence: 0.83
-    description: "MITRE ATT&CK derived: DNS Calculation (T1568.003)"
-    patterns: ["Calculation", "Citation", "Meyers", "Numbered", "Panda", "https", "mitre", "org"]
-
-  - id: execution_t1569_002_0
-    technique_id: "T1569.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Service Execution (T1569.002)"
-    patterns: ["Citation", "Group", "Medusa", "June", "ESET", "March", "Microsoft", "Ransomware"]
-
-  - id: execution_t1569_003_0
-    technique_id: "T1569.003"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Systemctl (T1569.003)"
-    patterns: ["TeamTNT", "Citation", "Cisco", "Talos", "Intelligence", "Group", "https", "mitre"]
-
-  - id: lateral_movement_t1570_0
-    technique_id: "T1570"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Lateral Tool Transfer (T1570)"
-    patterns: ["Citation", "Group", "Microsoft", "Sandworm", "Team", "Impacket", "BlackByte", "ESXi"]
-
-  - id: command_and_control_t1571_0
-    technique_id: "T1571"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Non-Standard Port (T1571)"
-    patterns: ["Citation", "HTTP", "HTTPS", "FakeTLS", "ESET", "BeaverTail", "November", "RedEcho"]
-
-  - id: command_and_control_t1572_0
-    technique_id: "T1572"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Protocol Tunneling (T1572)"
-    patterns: ["Citation", "HTTP", "Cobalt", "FireEye", "November", "HTTPS", "Scattered", "Spider"]
-
-  - id: command_and_control_t1573_0
-    technique_id: "T1573"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Encrypted Channel (T1573)"
-    patterns: ["Citation", "Lizar", "Secureworks", "Chaes", "Cybereason", "Tropic", "Trooper", "February"]
-
-  - id: command_and_control_t1573_001_0
-    technique_id: "T1573.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Symmetric Cryptography (T1573.001)"
-    patterns: ["Citation", "ESET", "April", "June", "Mandiant", "FireEye", "July", "HTTP"]
-
-  - id: command_and_control_t1573_002_0
-    technique_id: "T1573.002"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Asymmetric Cryptography (T1573.002)"
-    patterns: ["Citation", "ESET", "Mandiant", "July", "HTTPS", "FireEye", "CISA", "April"]
-
-  - id: persistence_t1574_0
-    technique_id: "T1574"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Hijack Execution Flow (T1574)"
-    patterns: ["Citation", "Microsoft", "Pikabot", "Dtrack", "Program", "February", "COATHANGER", "DarkGate"]
-
-  - id: persistence_t1574_001_0
-    technique_id: "T1574.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: DLL (T1574.001)"
-    patterns: ["Citation", "PANDA", "DLLs", "MUSTANG", "PlugX", "April", "Microsoft", "Trend"]
-
-  - id: persistence_t1574_005_0
-    technique_id: "T1574.005"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Executable Installer File Permissions Weakness (T1574.005)"
-    patterns: ["Mustang", "Panda", "Setup", "Factory", "IRSetup", "Citation", "Trend", "Micro"]
-
-  - id: persistence_t1574_006_0
-    technique_id: "T1574.006"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Dynamic Linker Hijacking (T1574.006)"
-    patterns: ["Citation", "Ebury", "Crowdstrike", "Rocke", "Hildegard", "HiddenWasp", "COATHANGER", "ESET"]
-
-  - id: persistence_t1574_007_0
-    technique_id: "T1574.007"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Path Interception by PATH Environment Variable (T1574.007)"
-    patterns: ["Citation", "PowerSploit", "PATH", "Empire", "DarkGate", "GitHub", "Documentation", "Environment"]
-
-  - id: persistence_t1574_008_0
-    technique_id: "T1574.008"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Path Interception by Search Order Hijacking (T1574.008)"
-    patterns: ["Citation", "PowerSploit", "Empire", "Github", "Documentation", "PowerShell", "https", "mitre"]
-
-  - id: persistence_t1574_009_0
-    technique_id: "T1574.009"
-    confidence: 0.85
-    description: "MITRE ATT&CK derived: Path Interception by Unquoted Path (T1574.009)"
-    patterns: ["PowerSploit", "Citation", "Empire", "GitHub", "Documentation", "PowerShell", "https", "mitre"]
-
-  - id: persistence_t1574_010_0
-    technique_id: "T1574.010"
-    confidence: 0.79
-    description: "MITRE ATT&CK derived: Services File Permissions Weakness (T1574.010)"
-    patterns: ["BlackEnergy", "Citation", "driver", "One", "variant", "https", "mitre", "org"]
-
-  - id: persistence_t1574_011_0
-    technique_id: "T1574.011"
+  # T1204.002 - Malicious File
+  - id: malicious_file_execution
+    technique_id: "T1204.002"
     confidence: 0.82
-    description: "MITRE ATT&CK derived: Services Registry Permissions Weakness (T1574.011)"
-    patterns: ["Honeybee", "COMSysApp", "Citation", "McAfee", "load", "https", "mitre", "org"]
+    description: "User execution of malicious file"
+    patterns:
+      - "AutoIt"
+      - "AutoHotkey"
+      - ".scr"
+      - ".pif"
+      - "shortcut"
+      - ".lnk"
 
-  - id: persistence_t1574_012_0
-    technique_id: "T1574.012"
-    confidence: 0.87
-    description: "MITRE ATT&CK derived: COR_PROFILER (T1574.012)"
-    patterns: ["Mockingbird", "Citation", "DarkTortilla", "Blue", "RedCanary", "Secureworks", "wmic", "https"]
-
-  - id: persistence_t1574_013_0
-    technique_id: "T1574.013"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: KernelCallbackTable (T1574.013)"
-    patterns: ["Citation", "Lazarus", "KernelCallbackTable", "FinFisher", "Group", "January", "Qualys", "LolZarus"]
-
-  - id: persistence_t1574_014_0
-    technique_id: "T1574.014"
+  # T1053.005 - Scheduled Task/Job
+  - id: scheduled_task
+    technique_id: "T1053.005"
     confidence: 0.83
-    description: "MITRE ATT&CK derived: AppDomainManager (T1574.014)"
-    patterns: ["IMAPLoader", "AppDomainManager", "Citation", "Yellow", "Liderc", "https", "mitre", "org"]
+    description: "Scheduled task for persistence"
+    patterns:
+      - "schtasks.exe"
+      - "TaskScheduler"
+      - "CreateScheduledTask"
+      - "AT \\"
+      - "cmd /c start"
 
-  - id: credential_access_t1606_001_0
-    technique_id: "T1606.001"
+  # T1543.003 - Windows Service
+  - id: windows_service_persistence
+    technique_id: "T1543.003"
     confidence: 0.82
-    description: "MITRE ATT&CK derived: Web Cookies (T1606.001)"
-    patterns: ["SolarWinds", "Compromise", "Citation", "Volexity", "https", "mitre", "org", "campaigns"]
+    description: "Persistence via Windows Service"
+    patterns:
+      - "CreateService"
+      - "StartService"
+      - "OpenSCManager"
+      - "services.exe"
+      - " SERVICE_"
 
-  - id: credential_access_t1606_002_0
-    technique_id: "T1606.002"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: SAML Tokens (T1606.002)"
-    patterns: ["Citation", "SAML", "AADInternals", "SolarWinds", "Compromise", "Microsoft", "Customer", "Guidance"]
+  # T1574.002 - DLL Side-Loading
+  - id: dll_side_loading
+    technique_id: "T1574.002"
+    confidence: 0.85
+    description: "DLL side-loading for execution"
+    patterns:
+      - "LoadLibrary"
+      - "side-load"
+      - "hijack"
+      - "DLL Search Order"
+      - " fake"
+      - "phantom"
 
-  - id: privilege_escalation_t1611_0
-    technique_id: "T1611"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Escape to Host (T1611)"
-    patterns: ["Citation", "TeamTNT", "Peirates", "Doki", "Intezer", "Siloscape", "Unit", "Hildegard"]
+  # T1001 - Data Obfuscation
+  - id: data_obfuscation
+    technique_id: "T1001"
+    confidence: 0.78
+    description: "Data obfuscation for C2 communication"
+    patterns:
+      - "steganography"
+      - "covert channel"
+      - "DNS tunnel"
+      - "ICMP tunnel"
+      - "domain fronting"
 
-  - id: discovery_t1614_0
-    technique_id: "T1614"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Location Discovery (T1614)"
-    patterns: ["Citation", "Stealer", "RedLine", "BeaverTail", "InvisibleFerret", "April", "HexEval", "Contagious"]
-
-  - id: discovery_t1614_001_0
-    technique_id: "T1614.001"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: System Language Discovery (T1614.001)"
-    patterns: ["Citation", "Japanese", "Russian", "BlackByte", "LockBit", "Group", "Stealer", "April"]
-
-  - id: discovery_t1615_0
-    technique_id: "T1615"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Group Policy Discovery (T1615)"
-    patterns: ["Citation", "Leviathan", "Group", "Policy", "ESET", "Turla", "Empire", "Emissary"]
-
-  - id: defense_evasion_t1620_0
-    technique_id: "T1620"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Reflective Code Loading (T1620)"
-    patterns: ["Citation", "Load", "DLLs", "Reflection", "Assembly", "PlugX", "Group", "SharePoint"]
-
-  - id: credential_access_t1621_0
-    technique_id: "T1621"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Multi-Factor Authentication Request Generation (T1621)"
-    patterns: ["Citation", "Scattered", "Spider", "Suspected", "Russian", "Targeting", "Government", "Business"]
-
-  - id: credential_access_t1649_0
-    technique_id: "T1649"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Steal or Forge Authentication Certificates (T1649)"
-    patterns: ["Citation", "AADInternals", "Azure", "Documentation", "Mandiant", "Trello", "CRYPTO", "Adsecurity"]
-
-  - id: discovery_t1652_0
-    technique_id: "T1652"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Device Driver Discovery (T1652)"
-    patterns: ["Citation", "Ransomware", "Medusa", "HOPLIGHT", "Microsoft", "Group", "HKLM", "WBEM"]
-
-  - id: persistence_t1653_0
-    technique_id: "T1653"
-    confidence: 0.86
-    description: "MITRE ATT&CK derived: Power Settings (T1653)"
-    patterns: ["ArcaneDoor", "Cisco", "Line", "Citation", "Runner", "Dancer", "https", "mitre"]
-
-  - id: discovery_t1654_0
-    technique_id: "T1654"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Log Enumeration (T1654)"
-    patterns: ["Citation", "Palo", "Alto", "BeaverTail", "February", "Pulse", "Secure", "CISA"]
-
-  - id: defense_evasion_t1656_0
-    technique_id: "T1656"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Impersonation (T1656)"
-    patterns: ["Citation", "Contagious", "Interview", "Lazarus", "Scattered", "Spider", "October", "Salesforce"]
-
-  - id: impact_t1657_0
-    technique_id: "T1657"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Financial Theft (T1657)"
-    patterns: ["Citation", "BeaverTail", "Ransomware", "InvisibleFerret", "November", "ContagiousInterview", "Medusa", "Contagious"]
-
-  - id: initial_access_t1659_0
-    technique_id: "T1659"
-    confidence: 0.88
-    description: "MITRE ATT&CK derived: Content Injection (T1659)"
-    patterns: ["MoustachedBouncer", "HTTP", "Citation", "ESET", "August", "Disco", "Update", "https"]
-
-  - id: command_and_control_t1665_0
-    technique_id: "T1665"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Hide Infrastructure (T1665)"
-    patterns: ["Citation", "SOHO", "UPSTYLE", "Microsoft", "ZIRCONIUM", "Mandiant", "SolarWinds", "Compromise"]
-
-  - id: impact_t1667_0
-    technique_id: "T1667"
-    confidence: 0.79
-    description: "MITRE ATT&CK derived: Email Bombing (T1667)"
-    patterns: ["Citation", "RedCanary", "Storm-1811", "https", "mitre", "org", "groups", "G1046"]
-
-  - id: initial_access_t1669_0
-    technique_id: "T1669"
-    confidence: 0.86
-    description: "MITRE ATT&CK derived: Wi-Fi Networks (T1669)"
-    patterns: ["Citation", "Nearest", "Neighbor", "Volexity", "Charges", "Campaign", "APT28", "https"]
-
-  - id: discovery_t1673_0
-    technique_id: "T1673"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Virtual Machine Discovery (T1673)"
-    patterns: ["Citation", "ESXi", "Google", "Cloud", "Threat", "Intelligence", "Qilin", "Cheerscrypt"]
-
-  - id: execution_t1674_0
-    technique_id: "T1674"
-    confidence: 0.81
-    description: "MITRE ATT&CK derived: Input Injection (T1674)"
-    patterns: ["Citation", "USBs", "Flash", "PowerShell", "FIN7", "malicious", "emulate", "keystrokes"]
-
-  - id: defense_evasion_t1678_0
-    technique_id: "T1678"
-    confidence: 0.89
-    description: "MITRE ATT&CK derived: Delay Execution (T1678)"
-    patterns: ["Citation", "Mustang", "Panda", "PlugX", "HIUPAN", "TONESHELL", "Zscaler", "Eset"]
-
-  - id: defense_evasion_t1679_0
-    technique_id: "T1679"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Selective Exclusion (T1679)"
-    patterns: ["Medusa", "Citation", "Ransomware", "InvisibleFerret", "Group", "January", "ContagiousInterview", "BeaverTail"]
-
-  - id: discovery_t1680_0
-    technique_id: "T1680"
-    confidence: 0.90
-    description: "MITRE ATT&CK derived: Local Storage Discovery (T1680)"
-    patterns: ["Citation", "ESET", "McAfee", "June", "March", "Kaspersky", "April", "Trend"]
+  # T1078 - Valid Accounts
+  - id: valid_accounts
+    technique_id: "T1078"
+    confidence: 0.75
+    description: "Abuse of valid accounts for access"
+    patterns:
+      - "default password"
+      - "admin:admin"
+      - "password123"
+      - "brute force"
+      - "credential stuffing"
+      - "pass the hash"

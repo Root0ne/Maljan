@@ -1,18 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import type { ReportSummaryDTO } from "@/lib/api";
 
 interface ReportRow {
   id: string;
   job_id: string;
   sample_filename: string;
-  final_verdict: string;
-  confidence_score: number;
+  verdict: string;
+  overall_confidence: number;
   created_at: string;
   techniques_count: number;
-  yara_count: number;
-  sigma_count: number;
+  findings_count: number;
 }
 
 const VERDICT_STYLES: Record<string, { dot: string; text: string }> = {
@@ -23,12 +24,10 @@ const VERDICT_STYLES: Record<string, { dot: string; text: string }> = {
 };
 
 const MOCK_REPORTS: ReportRow[] = [
-  { id: "11111111-1111-1111-1111-111111111111", job_id: "11111111-1111-1111-1111-111111111111", sample_filename: "emotet_dropper.exe", final_verdict: "malicious", confidence_score: 87, created_at: "2026-05-02T14:30:00Z", techniques_count: 18, yara_count: 5, sigma_count: 5 },
-  { id: "22222222-2222-2222-2222-222222222222", job_id: "22222222-2222-2222-2222-222222222222", sample_filename: "invoice_macro.docm", final_verdict: "malicious", confidence_score: 92, created_at: "2026-05-02T12:15:00Z", techniques_count: 12, yara_count: 3, sigma_count: 4 },
-  { id: "33333333-3333-3333-3333-333333333333", job_id: "33333333-3333-3333-3333-333333333333", sample_filename: "setup_tool.msi", final_verdict: "suspicious", confidence_score: 58, created_at: "2026-05-01T09:45:00Z", techniques_count: 6, yara_count: 1, sigma_count: 2 },
-  { id: "44444444-4444-4444-4444-444444444444", job_id: "44444444-4444-4444-4444-444444444444", sample_filename: "readme.pdf", final_verdict: "benign", confidence_score: 12, created_at: "2026-04-30T16:20:00Z", techniques_count: 0, yara_count: 0, sigma_count: 0 },
-  { id: "55555555-5555-5555-5555-555555555555", job_id: "55555555-5555-5555-5555-555555555555", sample_filename: "lockbit3_payload.dll", final_verdict: "malicious", confidence_score: 96, created_at: "2026-04-30T11:00:00Z", techniques_count: 24, yara_count: 8, sigma_count: 7 },
-  { id: "66666666-6666-6666-6666-666666666666", job_id: "66666666-6666-6666-6666-666666666666", sample_filename: "chrome_update.exe", final_verdict: "malicious", confidence_score: 81, created_at: "2026-04-29T08:30:00Z", techniques_count: 14, yara_count: 4, sigma_count: 3 },
+  { id: "11111111-1111-1111-1111-111111111111", job_id: "11111111-1111-1111-1111-111111111111", sample_filename: "emotet_dropper.exe", verdict: "malicious", overall_confidence: 0.87, created_at: "2026-05-02T14:30:00Z", techniques_count: 18, findings_count: 5 },
+  { id: "22222222-2222-2222-2222-222222222222", job_id: "22222222-2222-2222-2222-222222222222", sample_filename: "invoice_macro.docm", verdict: "malicious", overall_confidence: 0.92, created_at: "2026-05-02T12:15:00Z", techniques_count: 12, findings_count: 3 },
+  { id: "33333333-3333-3333-3333-333333333333", job_id: "33333333-3333-3333-3333-333333333333", sample_filename: "setup_tool.msi", verdict: "suspicious", overall_confidence: 0.58, created_at: "2026-05-01T09:45:00Z", techniques_count: 6, findings_count: 1 },
+  { id: "44444444-4444-4444-4444-444444444444", job_id: "44444444-4444-4444-4444-444444444444", sample_filename: "readme.pdf", verdict: "benign", overall_confidence: 0.12, created_at: "2026-04-30T16:20:00Z", techniques_count: 0, findings_count: 0 },
 ];
 
 function formatDate(iso: string) {
@@ -41,13 +40,42 @@ function formatDate(iso: string) {
   });
 }
 
+function mapReport(dto: ReportSummaryDTO): ReportRow {
+  return {
+    id: dto.id,
+    job_id: dto.job_id,
+    sample_filename: dto.sample_filename,
+    verdict: dto.verdict,
+    overall_confidence: dto.overall_confidence,
+    created_at: dto.created_at,
+    techniques_count: dto.techniques_count,
+    findings_count: dto.findings_count,
+  };
+}
+
 export default function ReportsPage() {
   const [filter, setFilter] = useState<string>("all");
+  const [reports, setReports] = useState<ReportRow[]>(MOCK_REPORTS);
+  const [apiAvailable, setApiAvailable] = useState<boolean>(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.getReports(1, 50);
+        setReports(res.items.map(mapReport));
+        setApiAvailable(true);
+      } catch {
+        /* silently fall back to mock data */
+      }
+    })();
+  }, []);
 
   const filtered =
     filter === "all"
-      ? MOCK_REPORTS
-      : MOCK_REPORTS.filter((r) => r.final_verdict === filter);
+      ? reports
+      : reports.filter((r) => r.verdict === filter);
+
+  const confidencePercent = (c: number) => Math.round(c * 100);
 
   return (
     <div>
@@ -56,7 +84,7 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-lg font-semibold text-text-primary">Reports</h1>
           <p className="text-xs text-text-secondary mt-0.5">
-            {MOCK_REPORTS.length} analysis reports generated
+            {reports.length} analysis reports generated
           </p>
         </div>
         <div className="flex gap-2">
@@ -68,6 +96,12 @@ export default function ReportsPage() {
           </button>
         </div>
       </div>
+
+      {!apiAvailable && (
+        <div className="mb-3 px-3 py-2 text-xs bg-status-orange/10 text-status-orange border border-status-orange/20 rounded">
+          API not available. Showing demo data.
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex gap-1 mb-4 border-b border-border">
@@ -88,7 +122,7 @@ export default function ReportsPage() {
           >
             {f.label}
             <span className="ml-1.5 text-text-muted">
-              ({f.key === "all" ? MOCK_REPORTS.length : MOCK_REPORTS.filter((r) => r.final_verdict === f.key).length})
+              ({f.key === "all" ? reports.length : reports.filter((r) => r.verdict === f.key).length})
             </span>
           </button>
         ))}
@@ -103,15 +137,15 @@ export default function ReportsPage() {
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-28">Verdict</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-24">Score</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-20">TTPs</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-20">YARA</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-20">Sigma</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-20">Findings</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-36">Date</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-32">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border-light">
             {filtered.map((report) => {
-              const v = VERDICT_STYLES[report.final_verdict] || VERDICT_STYLES.unknown;
+              const v = VERDICT_STYLES[report.verdict] || VERDICT_STYLES.unknown;
+              const pct = confidencePercent(report.overall_confidence);
               return (
                 <tr key={report.id} className="hover:bg-bg-hover transition-colors">
                   <td className="px-4 py-3">
@@ -125,7 +159,7 @@ export default function ReportsPage() {
                   <td className="px-4 py-3">
                     <div className={`flex items-center gap-1.5 ${v.text}`}>
                       <span className={`w-2 h-2 rounded-full ${v.dot}`} />
-                      <span className="text-xs capitalize">{report.final_verdict}</span>
+                      <span className="text-xs capitalize">{report.verdict}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -134,27 +168,20 @@ export default function ReportsPage() {
                         <div
                           className="h-full rounded-sm"
                           style={{
-                            width: `${report.confidence_score}%`,
-                            backgroundColor: report.confidence_score >= 70 ? "var(--status-red)" : report.confidence_score >= 40 ? "var(--status-orange)" : "var(--status-green)",
+                            width: `${pct}%`,
+                            backgroundColor: pct >= 70 ? "var(--status-red)" : pct >= 40 ? "var(--status-orange)" : "var(--status-green)",
                             opacity: 0.7,
                           }}
                         />
                       </div>
-                      <span className="text-xs text-text-secondary font-mono">{report.confidence_score}</span>
+                      <span className="text-xs text-text-secondary font-mono">{pct}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-text-secondary">{report.techniques_count}</td>
-                  <td className="px-4 py-3 text-xs text-text-secondary">{report.yara_count}</td>
-                  <td className="px-4 py-3 text-xs text-text-secondary">{report.sigma_count}</td>
+                  <td className="px-4 py-3 text-xs text-text-secondary">{report.findings_count}</td>
                   <td className="px-4 py-3 text-xs text-text-muted">{formatDate(report.created_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1.5">
-                      <button
-                        className="px-2 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
-                        title="Download PDF"
-                      >
-                        PDF
-                      </button>
                       <button
                         className="px-2 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
                         title="Download JSON"

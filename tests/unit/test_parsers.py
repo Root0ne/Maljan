@@ -104,6 +104,38 @@ class TestDynamicParser:
         assert parser._is_notable_api("NtReadFile") is False
         assert parser._is_notable_api("GetProcAddress") is False
 
+    # --- Network indicators tests (Phase 2) ---
+
+    def test_network_indicators_in_output(self) -> None:
+        """DynamicParser should include network indicators from Triage report."""
+        data = {
+            "behavior": {
+                "generic": [{"category": "network", "description": "C2 communication"}],
+                "apistats": {"1234": {"HttpSendRequest": 5}},
+            },
+            "network": {
+                "dns": [{"request": "evil-c2.com"}],
+                "http": [{"host": "evil-c2.com", "uri": "/cmd", "status": 200}],
+                "tcp": [{"dst": "185.220.101.5", "dport": 443}],
+                "hosts": ["185.220.101.5"],
+                "domains": ["evil-c2.com"],
+            },
+        }
+        result = self.parser.parse(data)
+        assert "Network Indicators" in result
+        assert "evil-c2.com" in result
+        assert "185.220.101.5" in result
+        assert "443" in result
+
+    def test_network_indicators_empty(self) -> None:
+        """Empty network data should not crash."""
+        data = {
+            "behavior": {"generic": [], "apistats": {}},
+            "network": {},
+        }
+        result = self.parser.parse(data)
+        assert "Network Indicators" in result
+
 
 class TestNetworkParser:
     """Tests for the NetworkParser refinement engine."""
@@ -152,9 +184,45 @@ class TestNetworkParser:
         assert "Suspicious" in result
 
     def test_invalid_data_returns_message(self) -> None:
-        result = self.parser.parse({"not": "a list"})
+        result = self.parser.parse("not a dict or list")
         assert "Invalid" in result
+
+    def test_dict_parsed_as_triage(self) -> None:
+        """Dict input is now valid (Triage format)."""
+        result = self.parser.parse({"not": "a list"})
+        assert "Triage Sandbox" in result
 
     def test_empty_list_handled(self) -> None:
         result = self.parser.parse([])
         assert "No significant events" in result
+
+    # --- Triage format tests (Phase 2) ---
+
+    def test_triage_network_format(self) -> None:
+        """NetworkParser should support Triage sandbox dict format."""
+        data = {
+            "dns": [
+                {"request": "evil-c2.com", "answers": ["185.220.101.5"]},
+                {"request": "google.com", "answers": ["8.8.8.8"]},
+            ],
+            "http": [
+                {"host": "evil-c2.com", "uri": "/cmd", "method": "POST", "status": 200},
+            ],
+            "tcp": [
+                {"dst": "185.220.101.5", "dport": 443, "src": "10.0.0.5"},
+            ],
+            "hosts": ["185.220.101.5", "8.8.8.8"],
+            "domains": ["evil-c2.com", "google.com"],
+        }
+        result = self.parser.parse(data)
+        assert "Triage Sandbox" in result
+        assert "evil-c2.com" in result
+        assert "185.220.101.5" in result
+        assert "POST /cmd" in result
+        assert "443" in result
+
+    def test_triage_network_empty(self) -> None:
+        """Triage format with empty fields should not crash."""
+        data = {"dns": [], "http": [], "tcp": [], "hosts": [], "domains": []}
+        result = self.parser.parse(data)
+        assert "Triage Sandbox" in result

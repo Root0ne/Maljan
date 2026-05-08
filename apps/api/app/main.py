@@ -98,6 +98,7 @@ def create_app() -> FastAPI:
 
     # ── Routes ───────────────────────────────────────────────
     from app.api.v1.auth import router as auth_router
+    from app.api.v1.audit import router as audit_router
     from app.api.v1.dashboard import router as dashboard_router
     from app.api.v1.jobs import router as jobs_router
     from app.api.v1.reports import router as reports_router
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
 
     api_prefix = "/api/v1"
     app.include_router(auth_router, prefix=api_prefix)
+    app.include_router(audit_router, prefix=api_prefix)
     app.include_router(jobs_router, prefix=api_prefix)
     app.include_router(samples_router, prefix=api_prefix)
     app.include_router(reports_router, prefix=api_prefix)

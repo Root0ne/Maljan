@@ -188,6 +188,31 @@ class TestYaraLayerScan:
         assert "proc_injection" in proc_match.claim_text
 
 
+    def test_yara_and_regex_produce_same_matches(self, sample_rules: list) -> None:
+        """When yara-python is available, its output must match the regex fallback."""
+        from unittest.mock import patch
+
+        text = "VirtualAllocEx and powershell.exe"
+
+        # YARA engine path
+        yara_layer = YaraLayer(sample_rules)
+        yara_matches = yara_layer.scan(text)
+
+        # Regex fallback path (mock yara unavailable)
+        with (
+            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("maljan.analysis.yara_layer.yara", None),
+        ):
+            regex_layer = YaraLayer(sample_rules)
+            regex_matches = regex_layer.scan(text)
+
+        assert len(yara_matches) == len(regex_matches)
+        for ym, rm in zip(yara_matches, regex_matches):
+            assert ym.rule_id == rm.rule_id
+            assert ym.technique_id == rm.technique_id
+            assert ym.confidence == rm.confidence
+
+
 # ---------------------------------------------------------------------------
 # YaraLayer.to_isr()
 # ---------------------------------------------------------------------------

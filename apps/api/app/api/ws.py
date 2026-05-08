@@ -15,12 +15,16 @@ This provides real-time visibility into:
 
 import asyncio
 import json
+import uuid
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
-from app.config import settings
+from app.auth.jwt import decode_token
+from app.database import async_session_factory
 from app.logging_config import get_logger
+from app.models.job import AnalysisJob
 
 logger = get_logger("ws")
 
@@ -109,6 +113,10 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     Clients connect here to receive live updates about an analysis job.
     Events are forwarded from the ARQ worker via Redis PubSub.
 
+    Authentication:
+        Pass the JWT access token as a query parameter:
+        ``wss://api/ws/analysis/{job_id}?token=<jwt>``
+
     Event types:
         - ``status_change``: Job status transition
         - ``agent_progress``: Agent started/completed work
@@ -117,6 +125,60 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
         - ``error``: Analysis failed
         - ``cancelled``: Job was cancelled
     """
+    # ── Auth gate ────────────────────────────────────────────────────
+    token = websocket.query_params.get("token")
+    if not token:
+        logger.warning("WebSocket rejected: missing token (job=%s)", job_id)
+        await websocket.close(code=1008, reason="Unauthorized: missing token")
+        return
+
+    payload = decode_token(token)
+    if payload is None:
+        logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)
+        await websocket.close(code=1008, reason="Unauthorized: invalid token")
+        return
+
+    if payload.get("type") != "access":
+        logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)
+        await websocket.close(code=1008, reason="Unauthorized: access token required")
+        return
+
+    user_id = payload.get("sub")
+    if not user_id:
+        logger.warning("WebSocket rejected: token missing subject (job=%s)", job_id)
+        await websocket.close(code=1008, reason="Unauthorized: token missing subject")
+        return
+
+    # ── Job ownership check ──────────────────────────────────────────
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        logger.warning("WebSocket rejected: invalid job_id format (%s)", job_id)
+        await websocket.close(code=1008, reason="Bad request: invalid job ID")
+        return
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AnalysisJob).where(AnalysisJob.id == job_uuid)
+        )
+        job = result.scalar_one_or_none()
+
+        if job is None:
+            logger.warning("WebSocket rejected: job not found (%s)", job_id)
+            await websocket.close(code=1008, reason="Not found: job does not exist")
+            return
+
+        if str(job.created_by) != user_id:
+            logger.warning(
+                "WebSocket rejected: user %s does not own job %s",
+                user_id,
+                job_id,
+            )
+            await websocket.close(code=1008, reason="Forbidden: not your job")
+            return
+
+    # ── Connection accepted ──────────────────────────────────────────
+    logger.info("WebSocket authenticated: user=%s job=%s", user_id, job_id)
     await manager.connect(websocket, job_id)
 
     try:

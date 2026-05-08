@@ -13,7 +13,16 @@ export function useWebSocket(jobId: string | null) {
   const connect = useCallback(() => {
     if (!jobId) return;
 
-    const ws = new WebSocket(`${WS_BASE}/ws/analysis/${jobId}`);
+    const token =
+      typeof window !== "undefined"
+        ? localStorage.getItem("access_token")
+        : null;
+
+    const url = token
+      ? `${WS_BASE}/ws/analysis/${jobId}?token=${encodeURIComponent(token)}`
+      : `${WS_BASE}/ws/analysis/${jobId}`;
+
+    const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => setConnected(true);
@@ -29,8 +38,10 @@ export function useWebSocket(jobId: string | null) {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       setConnected(false);
+      /* Don't auto-reconnect on auth/policy failure (1008) */
+      if (event.code === 1008) return;
       /* auto-reconnect after 3s */
       setTimeout(() => connect(), 3000);
     };

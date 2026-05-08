@@ -85,19 +85,19 @@ class TestSettingsSandbox:
     def test_sandbox_field_present(self) -> None:
         from maljan.core.config import Settings
 
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert hasattr(settings, "sandbox")
 
     def test_sandbox_defaults_to_mock_backend(self) -> None:
         from maljan.core.config import Settings
 
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.sandbox.backend == "mock"
 
     def test_sandbox_config_type(self) -> None:
         from maljan.core.config import SandboxConfig, Settings
 
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert isinstance(settings.sandbox, SandboxConfig)
 
 
@@ -111,7 +111,7 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True)
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True)
         client = container.get_sandbox_client()
         assert isinstance(client, MockSandboxClient)
 
@@ -119,7 +119,7 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True)
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True)
         c1 = container.get_sandbox_client()
         c2 = container.get_sandbox_client()
         assert c1 is c2
@@ -128,7 +128,7 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True)
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True)
         client = container.get_sandbox_client()
         assert isinstance(client, SandboxClient)
 
@@ -136,7 +136,7 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True, samples_dir=str(tmp_path))
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path))
         client = container.get_sandbox_client()
         assert isinstance(client, MockSandboxClient)
         # Verify the client uses the correct fixtures directory
@@ -146,8 +146,8 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import SandboxConfig, Settings
         from maljan.core.container import ServiceContainer
 
-        cfg = Settings(sandbox=SandboxConfig(backend="cape2"))
-        container = ServiceContainer(config=cfg, mock=True)
+        cfg = Settings(_env_file=None, sandbox=SandboxConfig(backend="cape2"))
+        container = ServiceContainer(config=cfg, mock=False)
 
         with patch.dict("sys.modules", {"httpx": None}):
             # Reset cache to force rebuild
@@ -216,7 +216,7 @@ class TestMaljanAppSandboxClient:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True, samples_dir=str(tmp_path))
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path))
         sandbox_client = container.get_sandbox_client()
 
         chunks = container.loader.load_from_sandbox(
