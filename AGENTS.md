@@ -25,7 +25,7 @@ Maljan is a production-grade malware analysis platform that uses adversarial mul
 | Cache/Queue | Redis 7 (ARQ worker) | Alpine |
 | Object Storage | MinIO (S3-compatible) | latest |
 | Vector DB | Qdrant (LTM/RAG) | latest |
-| Detection | YARA rules, Sigma rules, TIEF classifier | Built-in |
+| Detection | YARA rules (yara-python engine + regex fallback), Sigma rules, TIEF classifier | Built-in |
 | Schemas | Pydantic v2, STIX 2.1, ISR models | >=2.12 |
 | Containerization | Docker Compose | Multi-service |
 | Linting | Ruff, MyPy | See pyproject.toml |
@@ -321,6 +321,9 @@ asyncio.run(init())
 ORM models: `apps/api/app/models/`
 Base class: `apps/api/app/database.py → Base`
 
+Migrations: `apps/api/alembic/versions/`
+Apply: `cd apps/api && alembic upgrade head`
+
 ---
 
 ## API Endpoints
@@ -341,6 +344,11 @@ Base path: `/api/v1`
 | GET | `/reports` | List reports |
 | GET | `/reports/{id}` | Get full report |
 | GET | `/dashboard/stats` | Dashboard statistics |
+| GET | `/audit/logs` | List audit logs (admin only) |
+| GET | `/audit/logs/{id}` | Get audit log entry (admin only) |
+| GET | `/audit/api-keys` | List user's API keys |
+| POST | `/audit/api-keys` | Create new API key |
+| DELETE | `/audit/api-keys/{id}` | Revoke API key |
 | WS | `/ws/analysis/{job_id}` | Real-time analysis events |
 | GET | `/health` | Health check (root, not /api/v1) |
 | GET | `/docs` | Swagger UI |
@@ -424,34 +432,31 @@ Test structure follows the source layout. Fixtures use `conftest.py` at `tests/`
 ## Known Constraints
 
 1. **Qdrant healthcheck:** Disabled in Docker (no curl/wget in image). Connection verified at API startup.
-2. **Alembic migrations:** Not yet populated. Tables created via `Base.metadata.create_all()`. Run `alembic revision --autogenerate` to initialize.
+2. **Alembic migrations:** Initial schema migration created (`apps/api/alembic/versions/20250505000000_initial_schema.py`). Run `cd apps/api && alembic upgrade head` to apply.
 3. **Frontend API URL:** Baked at build time via `NEXT_PUBLIC_API_URL`. For Docker-internal communication, the frontend container uses `http://backend-api:8000`.
-4. **Torch dependency:** Large (~2GB). Docker builds may be slow on first run due to PyTorch download.
+4. **Torch dependency:** Removed from pyproject.toml (was large ~2GB). No longer needed.
 5. **JWT secret:** Default is insecure. Must be changed for production via `JWT_SECRET_KEY` env var.
-6. **Pre-commit hooks:** Not installed in `.venv`. Use `git commit --no-verify` or install with `uv run pre-commit install`.
+6. **WebSocket Auth:** Authenticated via `?token=<jwt>` query parameter. Only the job owner can subscribe to `/ws/analysis/{job_id}`.
+7. **YARA engine:** `yara-python` is included as an optional dependency (`uv sync --extra yara`). Without it, YaraLayer falls back to regex-based string matching.
+8. **File type detection:** `python-magic` was replaced with `filetype` (pure Python, cross-platform) to avoid `libmagic` DLL issues on Windows.
+9. **Windows PostgreSQL port conflict:** If a local PostgreSQL service is running on Windows, Docker port mapping `5432:5432` will clash. Set `POSTGRES_PORT=5433` in `.env` and update `DATABASE_URL` accordingly.
+10. **Pre-commit hooks:** Not installed in `.venv`. Use `git commit --no-verify` or install with `uv run pre-commit install`.
 
 ---
 
 ## Local LLM Setup (Ollama)
 
-For development without cloud API rate limits, Ollama runs on the Windows host and is accessed from WSL.
+Ollama runs directly on the Windows host. No WSL required.
 
-### WSL → Windows Host Ollama Access
+### Starting Ollama
 
-1. **Start Ollama with `OLLAMA_HOST=0.0.0.0`** so it listens on all interfaces:
-   ```powershell
-   $env:OLLAMA_HOST="0.0.0.0"
-   ollama serve
-   ```
+```powershell
+ollama serve
+```
 
-2. **Find the Windows host IP from WSL:**
-   ```bash
-   ip route | grep default
-   # Example: default via 172.24.112.1 dev eth0
-   ```
-   Use this gateway IP (e.g., `172.24.112.1`) as `LLM__OLLAMA__BASE_URL`.
+Default `LLM__OLLAMA__BASE_URL=http://localhost:11434` works for host-side execution.
 
-3. **Do NOT use `/etc/resolv.conf` nameserver** (e.g., `10.255.255.254`) — this is the WSL DNS resolver, not the Windows host.
+When running inside Docker containers, Ollama is accessed via `host.docker.internal:11434` (automatically configured in `docker-compose.yml`).
 
 ### Recommended Models for 32GB RAM + 8GB VRAM (RTX 5060 Laptop)
 
@@ -463,25 +468,30 @@ For development without cloud API rate limits, Ollama runs on the Windows host a
 
 **Current setup:** `qwen2.5-coder:latest` (Q4_K_M, 7.6B) on RTX 5060 Laptop 8GB.
 
-### WSL Command Notes
+### Running Maljan CLI
 
-- `uv` is not in WSL PATH. Use `.venv/bin/python -m maljan.cli` instead of `uv run maljan`:
-  ```bash
-  cd /mnt/d/Projects/Maljan
-  export PYTHONPATH=src
-  .venv/bin/python -m maljan.cli analyze <hash> --provider ollama
-  ```
+```powershell
+cd d:\Projects\Maljan
+$env:PYTHONPATH="src"
+uv run python -m maljan.cli analyze <hash> --provider ollama
+```
 
 - `.env` is a sensitive file (blocked from ReadFile). Use Shell or StrReplaceFile to edit.
 
 ---
 
-## Recent Changes (Commit 8e9d240)
+## Recent Changes
 
-- `cli.py`: Fixed `analyze()` to use `Settings()` preserving `.env` vars instead of bare `LLMConfig()`.
-- `judge_agent.py`: Added try/except fallback for LLM structured Bundle output validation failure.
-- `registry.py`: Temporarily disabled `dynamic_analyst` and `network_analyst` imports to avoid slow/expensive ReAct loops during testing.
-- `config.py`: Reduced `react_agent_timeout` for faster iteration.
+- **Docker infrastructure:** PostgreSQL, Redis, MinIO, Qdrant, Ghidra MCP containers running. Port `5433` used for PostgreSQL to avoid Windows host conflict.
+- **Ghidra MCP Headless:** Built and running in Docker on `localhost:8089`. HTTP transport enabled. WSL dependency eliminated.
+- **Database:** Initial tables created via `init_db.py`, Alembic migration stamped.
+- **Frontend:** `node_modules` installed (`npm install`), dev server running on `localhost:3000`.
+- **PELoader:** `python-magic` replaced with `filetype` (pure Python, cross-platform). `python-magic` dependency removed from `pyproject.toml`.
+- **MCP client:** Added graceful handling for `RuntimeError: Attempted to exit cancel scope in a different task` during `stdio_client` cleanup.
+- **GhidraHTTPClient:** New HTTP-based client (`src/maljan/agents/ghidra_http_client.py`) for headless GhidraMCP REST API.
+- **API config:** `apps/api/pyproject.toml` updated to `maljan[yara]` so `yara-python` is installed in the API venv.
+- **Full stack verified:** Register/login flow works end-to-end (frontend → API → PostgreSQL). Swagger UI accessible at `/docs`.
+- **Tests:** 826/826 unit tests passing.
 
 ---
 
@@ -491,4 +501,4 @@ For development without cloud API rate limits, Ollama runs on the Windows host a
 2. **Re-enable agents:** Once local LLM is validated, re-enable `dynamic_analyst` and `network_analyst` in `registry.py`.
 3. **Structured output reliability:** Free/local models often return markdown-wrapped JSON. Consider adding a JSON cleanup layer before STIX validation.
 4. **MCP async cleanup:** `RuntimeError: Attempted to exit cancel scope in a different task` on cleanup — non-fatal but noisy.
-5. **Ghidra MCP:** Extension installed but requires Windows Ghidra + bridge or VcXsrv for GUI.
+5. **Ghidra MCP:** Headless Docker container running. No GUI or WSL required.

@@ -449,6 +449,82 @@ chunks = app.container.loader.load_from_sandbox(
 
 ---
 
+## Ghidra MCP Headless Server
+
+Maljan integrates with **Ghidra** via a headless REST API server running in Docker. No GUI, no WSL, no X11 required — the container exposes 165 analysis endpoints (decompile, xrefs, strings, imports, anti-analysis detection, etc.) over HTTP.
+
+### Architecture
+
+```
+StaticAnalyst ──► GhidraHTTPClient ──► http://ghidra-mcp:8089
+                      │
+                      ├── /load_program         (load binary into Ghidra)
+                      ├── /decompile_function   (C pseudocode)
+                      ├── /list_imports         (suspicious API detection)
+                      ├── /get_xrefs_to         (cross-reference tracing)
+                      ├── /find_anti_analysis_techniques
+                      └── /detect_malware_behaviors
+```
+
+### Configuration
+
+Ghidra MCP supports two transports. The headless Docker deployment uses **HTTP**:
+
+```bash
+# .env — HTTP transport (recommended for Docker)
+MCP__GHIDRA__ENABLED=true
+MCP__GHIDRA__TRANSPORT=http
+MCP__GHIDRA__URL=http://localhost:8089
+MCP__GHIDRA__AUTH_TOKEN=maljan_ghidra_secret_2026
+```
+
+Legacy stdio transport (requires WSL + local Python bridge) is still supported:
+```bash
+# .env — stdio transport (legacy, local dev only)
+MCP__GHIDRA__ENABLED=true
+MCP__GHIDRA__TRANSPORT=stdio
+MCP__GHIDRA__COMMAND=wsl.exe
+MCP__GHIDRA__ARGS=["-d", "Ubuntu", "-e", "python", "external/ghidra-mcp/bridge_mcp_ghidra.py"]
+```
+
+### Lifecycle Management
+
+The `scripts/ghidra_manager.py` tool automates version sync, smart rebuilds, and file watching:
+
+```bash
+# Check version alignment between pom.xml and Dockerfile
+make ghidra-status
+
+# Sync Dockerfile ARGs with pom.xml (auto-fetches release date from GitHub)
+make ghidra-sync
+
+# Smart rebuild — detects what changed and rebuilds only if necessary
+make ghidra-build
+
+# Auto-rebuild on every Java source file change (development mode)
+make ghidra-watch
+```
+
+**How smart rebuild works:**
+- Computes SHA-256 hash of all `src/**/*.java` files
+- Tracks `Dockerfile` and `pom.xml` hashes in `.ghidra_mcp_state.json`
+- If source changed → incremental rebuild (~1-2 min)
+- If version/date changed → full `--no-cache` rebuild (~3-5 min, re-downloads Ghidra ZIP)
+- If nothing changed → exits immediately with "already up-to-date"
+
+### Updating Ghidra
+
+When NSA releases a new Ghidra version (e.g., 12.0.4 → 12.0.5):
+
+1. Update `external/ghidra-mcp/pom.xml`:
+   ```xml
+   <ghidra.version>12.0.5</ghidra.version>
+   ```
+2. Run `make ghidra-sync` — auto-updates `Dockerfile` ARGs and fetches release date from GitHub
+3. Run `make ghidra-build` — performs full `--no-cache` rebuild
+
+---
+
 ## Heterogeneous Model Ensemble
 
 By default all agents share the global expert LLM. To reduce echo chamber risk, assign different model families to different agents:
@@ -567,6 +643,17 @@ All settings are Pydantic `BaseSettings` with `__` as the nesting delimiter. Val
 |---|---|---|
 | `MAX_TOKEN_LIMIT` | `128000` | Global token safety cap (Gemini 1M+ compatible) |
 | `MALJAN_ATTCK_CACHE` | `~/.cache/maljan/attck/` | ATT&CK bundle cache directory |
+
+### Ghidra MCP
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP__GHIDRA__ENABLED` | `false` | Enable Ghidra MCP integration |
+| `MCP__GHIDRA__TRANSPORT` | `stdio` | `http` (headless Docker) or `stdio` (legacy WSL) |
+| `MCP__GHIDRA__URL` | — | HTTP transport URL (e.g., `http://localhost:8089`) |
+| `MCP__GHIDRA__AUTH_TOKEN` | — | Bearer token for HTTP transport authentication |
+| `MCP__GHIDRA__COMMAND` | — | stdio transport: executable path |
+| `MCP__GHIDRA__ARGS` | `[]` | stdio transport: command-line arguments (JSON array) |
 
 ---
 
@@ -747,7 +834,7 @@ make check
 | LLM (local) | Ollama `llama3.1:70b` (judge) + `qwen2.5-coder:7b` (experts) | Air-gapped environments |
 | Heterogeneous ensemble | Anthropic (static) + OpenAI (dynamic) + Ollama (network) | Maximum model family diversity |
 | Sandbox | CAPEv2 (automatable via REST API) | Dynamic analysis source |
-| Static analysis | Ghidra + Radare2 | Decompilation + string extraction |
+| Static analysis | Ghidra MCP Headless (Docker) + Radare2 | Decompilation, xrefs, strings, anti-analysis detection via REST API |
 | Network capture | Zeek | PCAP to structured JSON |
 | Output format | STIX 2.1 | Interoperable with SIEM/SOAR platforms |
 | Observability | LangSmith | Full trace visibility; opt-in via `.env` |
@@ -805,12 +892,17 @@ npm run build        # Production build verification
 
 ## Full-Stack Docker Deployment
 
+All infrastructure and application services run in Docker — no WSL or local package installations required.
+
 ```bash
 # Copy environment template and configure
 cp .env.example .env
-# Edit .env with your API keys (GOOGLE_API_KEY, etc.)
+# Edit .env with your API keys and LLM provider settings
 
-# Start all services (PostgreSQL, Redis, Qdrant, MinIO, Backend API, Worker, Frontend)
+# Windows host: PostgreSQL may conflict on port 5432
+$env:POSTGRES_PORT="5433"
+
+# Start all 8 services (build on first run)
 cd docker
 docker compose up -d --build
 
@@ -818,8 +910,9 @@ docker compose up -d --build
 docker compose ps
 
 # Access the application
-# Frontend:   http://localhost:3000
-# Backend API: http://localhost:8000/docs
+# Frontend:      http://localhost:3000
+# Backend API:   http://localhost:8000/docs
+# Ghidra MCP:    http://localhost:8089/check_connection
 # MinIO Console: http://localhost:9001
 ```
 
@@ -827,10 +920,20 @@ docker compose ps
 
 | Service | Container | Port | Purpose |
 |---|---|---|---|
-| PostgreSQL 16 | maljan-postgres | 5432 | Relational data store |
+| PostgreSQL 16 | maljan-postgres | 5433 | Relational data store (mapped to 5433 to avoid host conflict) |
 | Redis 7 | maljan-redis | 6379 | Task queue, PubSub, cache |
 | Qdrant | maljan-qdrant | 6333 | Vector database (LTM / RAG) |
 | MinIO | maljan-minio | 9000/9001 | S3-compatible object storage |
+| Ghidra MCP | maljan-ghidra-mcp | 8089 | Headless static analysis engine (Java/Ghidra) |
 | Backend API | maljan-api | 8000 | FastAPI application server |
 | Worker | maljan-worker | — | ARQ background task runner |
 | Frontend | maljan-frontend | 3000 | Next.js web interface |
+
+### Ollama Connectivity (Windows)
+
+Containers cannot reach the host's Ollama via `localhost:11434`. The compose file automatically sets `LLM__OLLAMA__BASE_URL=http://host.docker.internal:11434` for backend and worker services. If your Ollama runs on a different host:
+
+```powershell
+$env:OLLAMA_HOST_URL="http://192.168.1.100:11434"
+docker compose up -d --build
+```

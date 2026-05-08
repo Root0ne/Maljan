@@ -59,7 +59,7 @@ Bu bölüm, her bir ajanın **gerçekte** hangi veri kaynağından beslendiğini
 
 ### 2.0.2 Static Analyst — Ghidra MCP'nin 200+ Aracı Gerçekten Kullanılabilir mi?
 
-**Kısa Cevap: Teorik olarak evet (upstream 225 araç var), pratikte hayır — Ghidra MCP devre dışı ve WSL'de çalışmıyor. Static Agent şu anda LLM-only çalışıyor.**
+**Kısa Cevap: Evet — Ghidra MCP headless Docker container'da çalışıyor, 165 araç expose ediliyor, HTTP transport üzerinden StaticAnalyst tarafından kullanılıyor.**
 
 `StaticAnalyst._initialize_mcp_client()` (`src/maljan/agents/static_analyst.py`, satır 60-135):
 
@@ -74,12 +74,14 @@ Bu bölüm, her bir ajanın **gerçekte** hangi veri kaynağından beslendiğini
 - `_ISR_SYSTEM` prompt'unda: *"call `load_tool_group(group='all')` to ensure all 225 analysis tools are loaded"*
 - **Ama:** Gerçekte `load_tool_group` çağrılsa bile, MCP bridge'in expose ettiği araç sayısı sınırlı (~29, filtre sonrası ~7).
 
-**Pratik Engel:**
-- Ghidra MCP **şu anda devre dışı** (`settings.mcp.ghidra.enabled = False`).
-- WSL'de X server yok, Ghidra GUI açılmıyor.
-- Static Agent şu anda Ghidra'sız çalışıyor — dosya yolunu veya ham metni doğrudan LLM'e veriyor.
+**Mevcut Durum:**
+- Ghidra MCP **enabled** (`settings.mcp.ghidra.enabled = True`) via HTTP transport.
+- Headless Docker container (`maljan-ghidra-mcp`) çalışıyor — GUI veya WSL gerektirmez.
+- `GhidraHTTPClient` 165 REST endpoint'i LangChain `StructuredTool`'a dönüştürüyor.
+- `debugger_*` araçları filtrelendiğinde ~160 analiz aracı kullanılabilir.
+- Static Agent artık LLM + Ghidra araçları ile çalışıyor.
 
-**Sonuç:** 225 araç **upstream'da mevcut** ama Maljan'ın MCP bridge'i çok daha azını expose ediyor. Dahası, Ghidra MCP devre dışı olduğu için Static Agent şu anda **hiçbir araç kullanmadan** LLM-only analiz yapıyor.
+**Sonuç:** 165 araç headless server üzerinden canlı olarak kullanılabilir.
 
 ---
 
@@ -264,9 +266,9 @@ llm/
 #### 2.4.4 Ghidra-MCP (`external/ghidra-mcp/`)
 **Durum: PARTIAL**
 
-- Ghidra 12.0.4 extension'u build edilmiş ve deploy edilmiş.
-- Ancak **Ghidra GUI çalışmıyor** — WSL'de X server yok.
-- MCP client kodunda Ghidra MCP disabled log'u görülüyor: `Ghidra MCP is disabled in config.`
+- Ghidra 12.0.4 headless server Docker container'da çalışıyor.
+- WSL veya X server gerektirmez.
+- MCP client kodunda HTTP transport kullanılıyor: `GhidraHTTPClient loaded 165 tools`.
 
 **MCP Kullanımı Pipeline'da:**
 - Network analyst → Network-MCP toolkit (3 tool)
@@ -848,7 +850,7 @@ def parse(self, raw_data: Any) -> str:
 2. `StaticAnalyst.analyze()` dosya yolunu tespit ediyor ve `PELoader.to_markdown()` ile parse ediyor.
 3. `python-magic` ve `pefile` bağımlılıkları artık kodda kullanılıyor.
 
-**Kalan:** Ghidra MCP entegrasyonu (WSL kısıtlaması nedeniyle opsiyonel). `PELoader` Ghidra'sız temel statik analiz sağlıyor.
+**Tamamlandı:** Ghidra MCP headless entegrasyonu tamamlandı. `GhidraHTTPClient` 165 araçla çalışıyor. `PELoader` temel statik analizi (PE header, imports, strings) sağlıyor.
 
 **Dosyalar:** `src/maljan/loaders/pe_loader.py`, `src/maljan/agents/static_analyst.py`
 
