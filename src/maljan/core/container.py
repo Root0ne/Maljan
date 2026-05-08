@@ -316,6 +316,47 @@ class ServiceContainer:
         # First access — load, cache, then chunk.
         return self.loader.load_chunked(sample_id, data_type)
 
+    def load_sandbox_data_for_agent(
+        self, agent_name: str, sandbox_report: dict[str, Any]
+    ) -> list[TextChunk]:
+        """Parse and chunk sandbox report data for a specific agent.
+
+        Distributes the normalized Triage report fields to the appropriate
+        agent parser:
+          - "static"  -> target metadata (sha256, md5, name, size)
+          - "dynamic" -> behavior + signatures + network indicators
+          - "network" -> network section only (dns, http, tcp, hosts, domains)
+
+        Args:
+            agent_name:     Agent registry key ("static", "dynamic", "network").
+            sandbox_report: Normalized report dict from TriageClient.
+
+        Returns:
+            List of TextChunk objects ready for the agent.
+        """
+        import json
+
+        if agent_name == "static":
+            target = sandbox_report.get("target", {})
+            text = json.dumps(target, indent=2, default=str)
+        elif agent_name == "network":
+            network = sandbox_report.get("network", {})
+            try:
+                parser = self.parser_registry.create("network")
+                text = parser.parse(network)
+            except KeyError:
+                text = json.dumps(network, indent=2, default=str)
+        elif agent_name == "dynamic":
+            try:
+                parser = self.parser_registry.create("dynamic")
+                text = parser.parse(sandbox_report)
+            except KeyError:
+                text = json.dumps(sandbox_report, indent=2, default=str)
+        else:
+            text = json.dumps(sandbox_report, indent=2, default=str)
+
+        return self.loader._chunker.chunk(agent_name, text)
+
     def get_yara_layer(self) -> YaraLayer:
         """Return the cached YaraLayer instance (Layer 0).
 

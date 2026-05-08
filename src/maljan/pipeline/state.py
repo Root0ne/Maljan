@@ -51,6 +51,8 @@ class AnalysisState(TypedDict):
     # Sample metadata
     file_hash: str
     file_name: str | None
+    sample_path: str | None  # Path to the original sample file (e.g. malware.exe)
+    sandbox_report: dict[str, Any] | None  # Full normalized sandbox report (network, behavior, target)
 
     # Agent reports: {"static": "...", "dynamic": "...", "network": "...", ...}
     # Legacy text format — kept for backward compatibility and LLM prompts.

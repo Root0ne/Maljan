@@ -144,10 +144,23 @@ class StaticAnalyst(BaseAnalyst):
 
         self._initialize_mcp_client()
 
-        # Treat `data` as a file path or hash if it's short, else raw disassembly
-        target_info = (
-            f"Target File: {data}" if len(data.strip()) < 512 else f"Static output:\n{data}"
-        )
+        # Phase 4: If data looks like a file path and exists, use PELoader
+        # for structural PE analysis instead of passing raw path to LLM.
+        target_info: str
+        if len(data.strip()) < 512 and os.path.exists(data.strip()):
+            try:
+                from maljan.loaders.pe_loader import PELoader
+
+                loader = PELoader(data.strip())
+                target_info = loader.to_markdown()
+                self.logger.info("PELoader parsed static data for '%s'.", data.strip())
+            except Exception as exc:
+                self.logger.warning("PELoader failed for '%s': %s. Falling back to raw path.", data.strip(), exc)
+                target_info = f"Target File: {data}"
+        elif len(data.strip()) < 512:
+            target_info = f"Target File: {data}"
+        else:
+            target_info = f"Static output:\n{data}"
 
         prompt_messages = [
             ("system", _ISR_SYSTEM),

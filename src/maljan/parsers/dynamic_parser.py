@@ -40,12 +40,37 @@ class DynamicParser(BaseParser):
             headers=["PID", "Sensitive API", "Call Count"], rows=api_rows
         )
 
+        # 3. Network Indicators (C2 / Exfiltration)
+        network = raw_data.get("network", {})
+        net_rows: list[list[str]] = []
+        for dns in network.get("dns", [])[:10]:
+            req = dns.get("request", dns.get("query", "N/A"))
+            net_rows.append(["DNS", str(req), "—"])
+        for http in network.get("http", [])[:10]:
+            host = http.get("host", "N/A")
+            uri = http.get("uri", "/")
+            net_rows.append(["HTTP", f"{host}{uri}", str(http.get("status", "?"))])
+        for tcp in network.get("tcp", [])[:10]:
+            dst = tcp.get("dst", "N/A")
+            dport = tcp.get("dport", "?")
+            net_rows.append(["TCP", f"{dst}:{dport}", "—"])
+        for host in network.get("hosts", [])[:10]:
+            net_rows.append(["HOST", str(host), "—"])
+        for domain in network.get("domains", [])[:10]:
+            net_rows.append(["DOMAIN", str(domain), "—"])
+
+        net_table = self._format_as_table(
+            headers=["Type", "Indicator", "Status"], rows=net_rows
+        )
+
         return (
             "### Sandbox Behavioral Summary\n\n"
             "#### Detected High-Value Behaviors:\n"
             f"{threat_table}\n\n"
             "#### Re-grouped API Metrics (Noise Filtered):\n"
-            f"{api_table}"
+            f"{api_table}\n\n"
+            "#### Network Indicators (C2 / Exfiltration):\n"
+            f"{net_table}"
         )
 
     def _calculate_severity(self, category: str, description: str) -> str:

@@ -20,22 +20,25 @@ if TYPE_CHECKING:
 
     from maljan.agents.base_agent import BaseAnalyst
 
-# Module-level registry dict: agent_name -> class
-_AGENT_REGISTRY: dict[str, type[BaseAnalyst]] = {}
+# Module-level registry dict: agent_name -> (class, enabled)
+_AGENT_REGISTRY: dict[str, tuple[type[BaseAnalyst], bool]] = {}
 
 
-def register_agent(name: str):  # type: ignore[no-untyped-def]
+def register_agent(name: str, enabled: bool = True):  # type: ignore[no-untyped-def]
     """Decorator that registers an analyst class under the given name.
 
     Example:
         @register_agent("memory")
         class MemoryAnalyst(BaseAnalyst): ...
+
+        @register_agent("experimental", enabled=False)
+        class ExperimentalAnalyst(BaseAnalyst): ...
     """
 
     def decorator(cls: type[BaseAnalyst]) -> type[BaseAnalyst]:
         if name in _AGENT_REGISTRY:
             logger.warning(f"Agent '{name}' is being re-registered (overwriting).")
-        _AGENT_REGISTRY[name] = cls
+        _AGENT_REGISTRY[name] = (cls, enabled)
         return cls
 
     return decorator
@@ -54,16 +57,22 @@ class AgentRegistry:
     def __init__(self) -> None:
         discover_agents()
 
-    def list_agents(self) -> list[str]:
-        """Returns names of all registered expert agents (excludes judge)."""
-        return list(_AGENT_REGISTRY.keys())
+    def list_agents(self, include_disabled: bool = False) -> list[str]:
+        """Returns names of registered expert agents.
+
+        By default only enabled agents are returned. Pass include_disabled=True
+        to see all registered agents.
+        """
+        if include_disabled:
+            return list(_AGENT_REGISTRY.keys())
+        return [name for name, (_, enabled) in _AGENT_REGISTRY.items() if enabled]
 
     def get_class(self, name: str) -> type[BaseAnalyst]:
         """Returns the class registered under the given name."""
         if name not in _AGENT_REGISTRY:
             available = ", ".join(_AGENT_REGISTRY.keys()) or "(none)"
             raise KeyError(f"No agent registered as '{name}'. Available: {available}")
-        return _AGENT_REGISTRY[name]
+        return _AGENT_REGISTRY[name][0]
 
     def create(self, name: str, llm: BaseChatModel) -> BaseAnalyst:
         """Instantiate a registered agent with the given LLM."""
@@ -71,5 +80,5 @@ class AgentRegistry:
         return cls(llm=llm, name=name)
 
     def create_all(self, llm: BaseChatModel) -> dict[str, BaseAnalyst]:
-        """Instantiate all registered agents."""
+        """Instantiate all enabled registered agents."""
         return {name: self.create(name, llm) for name in self.list_agents()}

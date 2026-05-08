@@ -348,11 +348,17 @@ class TriageClient:
             sha256[:16] + "...",
         )
 
+        import json as _json
+        payload = {
+            "kind": "file",
+            "interactive": False,
+            "targets": _DEFAULT_PROFILES,
+        }
         with sample_path.open("rb") as fh:
             response = await http.post(
                 "/samples",
                 files={"file": (filename, fh, "application/octet-stream")},
-                data={"_json": '{"kind":"file","interactive":false}'},
+                data={"_json": _json.dumps(payload)},
             )
 
         if response.status_code not in (200, 201):

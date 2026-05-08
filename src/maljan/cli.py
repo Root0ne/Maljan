@@ -28,6 +28,9 @@ def analyze(
     file_name: str | None = typer.Option(
         None, "--name", "-n", help="Optional human-readable filename."
     ),
+    sample_path: str | None = typer.Option(
+        None, "--sample", "-s", help="Path to the malware sample file for sandbox submission."
+    ),
     provider: str = typer.Option(
         "openai", "--provider", "-p", help="LLM provider: openai, anthropic, ollama."
     ),
@@ -60,7 +63,7 @@ def analyze(
     # Create and run
     try:
         maljan_app = MaljanApp(config=config, mock=mock)
-        result = maljan_app.run(file_hash=file_hash, file_name=file_name)
+        result = maljan_app.run(file_hash=file_hash, file_name=file_name, sample_path=sample_path)
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise typer.Exit(code=1) from None

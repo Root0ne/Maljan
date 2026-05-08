@@ -49,12 +49,14 @@ class MaljanApp:
         self,
         file_hash: str,
         file_name: str | None = None,
+        sample_path: str | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline synchronously.
 
         Args:
             file_hash: Sample identifier.
             file_name: Optional human-readable name.
+            sample_path: Optional path to the original sample file for sandbox submission.
 
         Returns:
             The final state dict including:
@@ -74,6 +76,8 @@ class MaljanApp:
         initial_state: AnalysisState = {
             "file_hash": file_hash,
             "file_name": file_name,
+            "sample_path": sample_path,
+            "sandbox_report": None,
             "reports": {},
             "revised_reports": {},
             "isr_reports": {},
@@ -102,6 +106,7 @@ class MaljanApp:
         self,
         file_hash: str,
         file_name: str | None = None,
+        sample_path: str | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -122,6 +127,8 @@ class MaljanApp:
         initial_state: AnalysisState = {
             "file_hash": file_hash,
             "file_name": file_name,
+            "sample_path": sample_path,
+            "sandbox_report": None,
             "reports": {},
             "revised_reports": {},
             "isr_reports": {},

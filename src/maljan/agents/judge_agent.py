@@ -413,10 +413,36 @@ class JudgeAgent:
 
         try:
             data = json.loads(raw)
+            # Filter out hallucinated T0000 technique IDs
+            data = self._filter_invalid_technique_ids(data)
             return Bundle.model_validate(data)
         except Exception as e:
             self.logger.warning("LLM did not return a valid Bundle: %s. Falling back to empty.", e)
             return Bundle(objects=[])
+
+    def _filter_invalid_technique_ids(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Remove objects with hallucinated T0000 technique IDs from the Bundle data.
+
+        T0000 is not a valid MITRE ATT&CK technique ID. Any object referencing
+        it is either removed (if it's the only reference) or the field is cleared.
+        """
+        objects = data.get("objects", [])
+        filtered: list[dict[str, Any]] = []
+        removed = 0
+        for obj in objects:
+            tid = obj.get("x_maljan_technique_id", "")
+            if tid == "T0000":
+                removed += 1
+                self.logger.warning(
+                    "Removing STIX object %s with hallucinated T0000.",
+                    obj.get("id", "unknown"),
+                )
+                continue
+            filtered.append(obj)
+        if removed:
+            self.logger.info("Filtered %d objects with T0000 hallucination.", removed)
+            data["objects"] = filtered
+        return data
 
     # ------------------------------------------------------------------
     # Private helpers

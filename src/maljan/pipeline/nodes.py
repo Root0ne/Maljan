@@ -88,7 +88,18 @@ def make_analyst_node(
             # Phase 3: Load as chunks — BinaryChunker decides whether to split.
             # When the data fits in one chunk (skip_if_fits=True), we get a
             # single-element list and take the optimised single-text path.
-            chunks = container.load_chunked(state["file_hash"], agent_name)
+            # Phase 2: If sandbox report is available in state, use it directly
+            # instead of loading from fixture files.
+            sandbox_report = state.get("sandbox_report")
+            if sandbox_report:
+                chunks = container.load_sandbox_data_for_agent(agent_name, sandbox_report)
+                logger.info(
+                    "Agent '%s': using sandbox report data (%d chunks).",
+                    agent_name,
+                    len(chunks),
+                )
+            else:
+                chunks = container.load_chunked(state["file_hash"], agent_name)
 
             if len(chunks) == 1:
                 # Fast path: no chunking overhead, existing ISR flow.
