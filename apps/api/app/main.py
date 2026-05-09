@@ -97,8 +97,8 @@ def create_app() -> FastAPI:
     )
 
     # ── Routes ───────────────────────────────────────────────
-    from app.api.v1.auth import router as auth_router
     from app.api.v1.audit import router as audit_router
+    from app.api.v1.auth import router as auth_router
     from app.api.v1.dashboard import router as dashboard_router
     from app.api.v1.jobs import router as jobs_router
     from app.api.v1.reports import router as reports_router

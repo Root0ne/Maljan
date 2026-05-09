@@ -55,7 +55,11 @@ class ReportService:
         # Enrich with computed fields for the frontend
         items: list[dict] = []
         for report in reports:
-            sample_filename = report.job.sample.original_filename if report.job and report.job.sample else "unknown"
+            sample_filename = (
+                report.job.sample.original_filename
+                if report.job and report.job.sample
+                else "unknown"
+            )
             mitre = report.mitre_techniques or []
             findings = report.agent_findings or []
             items.append({
@@ -152,7 +156,6 @@ class ReportService:
         confidence_history = negotiation.get("confidence_history", [])
 
         # Group arguments by round
-        rounds: list[dict[str, Any]] = []
         agents_per_round: dict[int, list] = {}
 
         for i, arg in enumerate(discussion):

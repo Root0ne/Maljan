@@ -69,6 +69,8 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 # Agent files contain LLM prompt strings that are intentionally long
 "src/maljan/agents/*.py" = ["E501"]
+# FastAPI dependency injection and query params are standard patterns
+# (configured in apps/api/pyproject.toml because that sub-package has its own Ruff config)
 
 [tool.mypy]
 python_version = "3.13"
@@ -94,4 +96,4 @@ module = [
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "apps/api"]

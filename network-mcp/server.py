@@ -1,6 +1,13 @@
-from mcp.server.fastmcp import FastMCP
-from scapy.all import rdpcap, IP, TCP, UDP, DNSQR
 import os
+
+from mcp.server.fastmcp import FastMCP
+from scapy.all import (  # type: ignore[attr-defined]
+    DNSQR,
+    IP,
+    TCP,
+    UDP,
+    rdpcap,
+)
 
 mcp = FastMCP("NetworkMCP")
 

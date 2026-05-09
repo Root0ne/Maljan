@@ -1,0 +1,15 @@
+# Semgrep ignore patterns — known false positives / non-production code
+# See: https://semgrep.dev/docs/ignoring-files-folders-code
+
+# Development Dockerfile intentionally runs as root for local dev
+apps/api/Dockerfile
+
+# Sigma detection rules contain intentional bidirectional (RTL) characters
+# used for detecting extension spoofing attacks
+data/sigma_rules/**
+
+# Script/utility files with hardcoded URLs (no user-controlled input)
+scripts/ghidra_manager.py
+scripts/prepare_attck_malware_fixtures.py
+scripts/prepare_tram_dataset.py
+src/maljan/memory/attck_loader.py

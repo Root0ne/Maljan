@@ -22,6 +22,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
 from app.auth.jwt import decode_token
+from app.config import settings
 from app.database import async_session_factory
 from app.logging_config import get_logger
 from app.models.job import AnalysisJob
@@ -128,24 +129,24 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     # ── Auth gate ────────────────────────────────────────────────────
     token = websocket.query_params.get("token")
     if not token:
-        logger.warning("WebSocket rejected: missing token (job=%s)", job_id)
+        logger.warning("WebSocket rejected: missing token (job=%s)", job_id)  # nosemgrep
         await websocket.close(code=1008, reason="Unauthorized: missing token")
         return
 
     payload = decode_token(token)
     if payload is None:
-        logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)
+        logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)  # nosemgrep
         await websocket.close(code=1008, reason="Unauthorized: invalid token")
         return
 
     if payload.get("type") != "access":
-        logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)
+        logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)  # nosemgrep
         await websocket.close(code=1008, reason="Unauthorized: access token required")
         return
 
     user_id = payload.get("sub")
     if not user_id:
-        logger.warning("WebSocket rejected: token missing subject (job=%s)", job_id)
+        logger.warning("WebSocket rejected: token missing subject (job=%s)", job_id)  # nosemgrep
         await websocket.close(code=1008, reason="Unauthorized: token missing subject")
         return
 

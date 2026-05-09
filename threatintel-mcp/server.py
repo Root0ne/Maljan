@@ -137,8 +137,8 @@ def _vt_domain_lookup(domain: str) -> str:
             verdict = "suspicious"
 
         return (
-            f"Domain {domain}: {verdict} — {malicious}/{total} malicious, {suspicious}/{total} suspicious. "
-            f"Categories: {cat_str}."
+            f"Domain {domain}: {verdict} — {malicious}/{total} malicious, "
+            f"{suspicious}/{total} suspicious. Categories: {cat_str}."
         )
     except httpx.TimeoutException:
         return f"VirusTotal timeout for domain {domain}."
@@ -336,8 +336,10 @@ def check_hash(file_hash: str) -> str:
 def get_threatintel_status() -> str:
     """Return the current status of ThreatIntel MCP integrations."""
     services = []
-    services.append(f"VirusTotal: {'configured' if VT_API_KEY else 'not configured (mock fallback)'}")
-    services.append(f"AbuseIPDB: {'configured' if ABUSEIPDB_API_KEY else 'not configured (mock fallback) '}")
+    vt_status = "configured" if VT_API_KEY else "not configured (mock fallback)"
+    abuse_status = "configured" if ABUSEIPDB_API_KEY else "not configured (mock fallback)"
+    services.append(f"VirusTotal: {vt_status}")
+    services.append(f"AbuseIPDB: {abuse_status}")
     services.append(f"Cache entries: {len(_cache)}")
     return "\n".join(services)
 

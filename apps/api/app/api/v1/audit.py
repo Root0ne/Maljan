@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -20,7 +20,6 @@ from app.schemas.audit import (
     APIKeyCreateRequest,
     APIKeyCreateResponse,
     APIKeyListResponse,
-    APIKeyResponse,
     AuditLogListResponse,
     AuditLogResponse,
 )
@@ -157,7 +156,7 @@ async def create_api_key(
 
     expires_at = None
     if req.expires_in_days:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=req.expires_in_days)
+        expires_at = datetime.now(UTC) + timedelta(days=req.expires_in_days)
 
     api_key = APIKey(
         user_id=user.id,

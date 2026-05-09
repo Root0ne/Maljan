@@ -54,7 +54,7 @@ async def create_job(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
-        )
+        ) from exc
 
 
 @router.get("", response_model=JobListResponse)
@@ -110,10 +110,10 @@ async def cancel_job(
             extra={"job_id": str(job_id), "user_id": str(user.id)},
         )
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found") from None
     except RuntimeError as exc:
         logger.warning(
             f"Job cancel rejected: {exc}",
             extra={"job_id": str(job_id), "user_id": str(user.id)},
         )
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

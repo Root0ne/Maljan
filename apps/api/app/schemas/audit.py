@@ -8,7 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ---------------------------------------------------------------------------
 # AuditLog schemas
 # ---------------------------------------------------------------------------
@@ -46,8 +45,12 @@ class AuditLogListResponse(BaseModel):
 class APIKeyCreateRequest(BaseModel):
     """Request body for creating a new API key."""
 
-    name: str = Field(..., min_length=1, max_length=255, description="Human-readable name for the key")
-    expires_in_days: int | None = Field(None, ge=1, le=365, description="Optional expiration in days")
+    name: str = Field(
+        ..., min_length=1, max_length=255, description="Human-readable name for the key"
+    )
+    expires_in_days: int | None = Field(
+        None, ge=1, le=365, description="Optional expiration in days"
+    )
 
 
 class APIKeyResponse(BaseModel):

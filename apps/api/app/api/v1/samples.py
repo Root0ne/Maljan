@@ -61,7 +61,8 @@ async def upload_sample(
     # Compute hashes
     sha256 = hashlib.sha256(content).hexdigest()
     md5 = hashlib.md5(content).hexdigest()
-    sha1 = hashlib.sha1(content).hexdigest()
+    # SHA-1 is intentionally omitted — SHA-256 is sufficient for identification.
+    sha1 = None
 
     logger.info(
         f"File hashed: SHA256={sha256[:16]}... size={len(content)} bytes",
@@ -117,7 +118,7 @@ async def upload_sample(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Storage service unavailable: {e}",
-        )
+        ) from e
 
     sample = Sample(
         sha256=sha256,

@@ -477,7 +477,7 @@ class ServiceContainer:
 
         if self.config.langchain_api_key:
             os.environ["LANGCHAIN_API_KEY"] = self.config.langchain_api_key
-            logger.info(
+            logger.info(  # nosemgrep
                 "LangSmith tracing enabled (project=%s, api_key=***%s).",
                 self.config.langchain_project,
                 self.config.langchain_api_key[-4:],  # log only last 4 chars

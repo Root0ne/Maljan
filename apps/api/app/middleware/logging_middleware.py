@@ -34,7 +34,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         method = request.method
         url = str(request.url.path)
-        query = str(request.url.query) if request.url.query else None
 
         # Log request start
         logger.info(
