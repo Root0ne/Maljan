@@ -108,8 +108,11 @@ def _normalize_report(triage_report: dict[str, Any], sample_name: str) -> dict[s
           "ttp_tags": ["T1055", ...]
         }
     """
-    sample_meta = triage_report.get("sample", {})
-    tasks = triage_report.get("tasks", {})
+    raw_sample = triage_report.get("sample", {})
+    sample_meta = raw_sample if isinstance(raw_sample, dict) else {}
+
+    raw_tasks = triage_report.get("tasks", {})
+    tasks = raw_tasks if isinstance(raw_tasks, dict) else {}
 
     # -- target section -------------------------------------------------
     target = {
@@ -170,21 +173,35 @@ def _normalize_report(triage_report: dict[str, Any], sample_name: str) -> dict[s
     }
 
     # -- network section ------------------------------------------------
-    # Triage'in network alanlari CAPEv2'ye oldukca benzer
+    # Triage'in network alanlari CAPEv2'ye oldukca benzer.
     raw_network = triage_report.get("network", {})
+    if not isinstance(raw_network, dict):
+        raw_network = {}
+
+    def _coerce_list(*candidates: Any) -> list[Any]:
+        """Return the first candidate that is a list, else an empty list."""
+        for c in candidates:
+            if isinstance(c, list):
+                return c
+        return []
+
     network: dict[str, Any] = {
-        "dns": raw_network.get("dns", []),
-        "http": raw_network.get("http", raw_network.get("requests", [])),
-        "tcp": raw_network.get("tcp", raw_network.get("flows", [])),
-        "udp": raw_network.get("udp", []),
-        "hosts": raw_network.get("hosts", []),
-        "domains": raw_network.get("domains", []),
+        "dns": _coerce_list(raw_network.get("dns")),
+        "http": _coerce_list(raw_network.get("http"), raw_network.get("requests")),
+        "tcp": _coerce_list(raw_network.get("tcp"), raw_network.get("flows")),
+        "udp": _coerce_list(raw_network.get("udp")),
+        "hosts": _coerce_list(raw_network.get("hosts")),
+        "domains": _coerce_list(raw_network.get("domains")),
     }
 
     # -- signatures section ---------------------------------------------
     raw_sigs = triage_report.get("signatures", [])
+    if not isinstance(raw_sigs, list):
+        raw_sigs = []
     signatures: list[dict[str, Any]] = []
     for sig in raw_sigs:
+        if not isinstance(sig, dict):
+            continue
         signatures.append(
             {
                 "name": sig.get("name", ""),
@@ -215,50 +232,49 @@ class TriageClient:
     SandboxClient protokolunu tam olarak uygular — CAPEv2Client ile
     ServiceContainer uzerinden degistirilebilir.
 
+    Implementation notes:
+        Sync methods use a dedicated ``httpx.Client``; async methods use
+        ``httpx.AsyncClient``. The previous implementation called
+        ``asyncio.run()`` from sync methods which exploded when LangGraph
+        called them from inside a running event loop.
+
     Args:
-        api_token:   Triage API token (tria.ge/account). Bos birakilirsa
-                     sadece public/anonim analizler gonderilir.
-        base_url:    Triage API base URL. Production: https://api.tria.ge
-        timeout:     Gorev tamamlanmasi icin maksimum bekleme suresi (saniye).
-        poll_interval: Durum sorgulama araligi (saniye).
+        api_token: Triage API token (https://tria.ge/account).
+        base_url:  Triage API base URL.
+        timeout:   Maximum wait time for task completion (seconds).
+        poll_interval: Polling interval (seconds).
     """
 
     def __init__(
         self,
-        api_token: str = "",
+        api_token: str | Any = "",
         base_url: str = _DEFAULT_BASE_URL,
         timeout: int = 300,
         poll_interval: int = 15,
     ) -> None:
-        self._api_token = api_token
+        # Accept SecretStr or plain str for the API token.
+        if hasattr(api_token, "get_secret_value"):
+            self._api_token = api_token.get_secret_value()
+        else:
+            self._api_token = str(api_token or "")
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._poll_interval = poll_interval
         self._api_prefix = f"{self._base_url}{_API_VERSION}"
-        self._http: Any = None  # httpx.AsyncClient — lazy init
+        self._http_async: Any = None  # httpx.AsyncClient — lazy
+        self._http_sync: Any = None  # httpx.Client — lazy
 
     # ------------------------------------------------------------------
     # SandboxClient Protocol implementation
     # ------------------------------------------------------------------
 
     def submit(self, sample_path: str | Path) -> str:
-        """Numune dosyasini Triage'e gonderir ve task ID dondurur.
-
-        Args:
-            sample_path: Gonderilecek numune dosyasinin yolu.
-
-        Returns:
-            task_id (str): Triage task ID (orn. "220411-abcd1234").
-
-        Raises:
-            FileNotFoundError: sample_path bulunamazsa.
-            RuntimeError: httpx kurulu degilse veya API hatasi.
-        """
+        """Numune dosyasini Triage'e gonderir ve task ID dondurur."""
         if not isinstance(sample_path, Path):
             sample_path = Path(sample_path)
         if not sample_path.exists():
             raise FileNotFoundError(f"Sample not found: {sample_path}")
-        return asyncio.run(self._async_submit(sample_path))
+        return self._sync_submit(sample_path)
 
     def wait_for_completion(
         self,
@@ -266,26 +282,30 @@ class TriageClient:
         timeout_seconds: int = 300,
         poll_interval_seconds: int = 10,
     ) -> str:
-        """Triage gorevi tamamlanana kadar polling yapar.
-
-        Args:
-            task_id: submit() tarafindan donen task ID.
-
-        Returns:
-            Final status string: "reported" | "failed" | "partial" | "timeout"
-        """
-        return asyncio.run(self._async_wait(task_id))
+        """Triage gorevi tamamlanana kadar polling yapar."""
+        return self._sync_wait(task_id, timeout_seconds, poll_interval_seconds)
 
     def fetch_report(self, task_id: str) -> SubmissionResult:
-        """Tamamlanan analizin raporunu alir ve normallestirir.
+        """Tamamlanan analizin raporunu alir ve normallestirir."""
+        return self._sync_fetch_report(task_id)
 
-        Args:
-            task_id: wait_for_completion() ile dogrulanan task ID.
+    def close(self) -> None:
+        """Sync httpx.Client'i kapatir (idempotent)."""
+        client = self._http_sync
+        if client is not None:
+            try:
+                client.close()
+            finally:
+                self._http_sync = None
 
-        Returns:
-            SubmissionResult — report alani CAPEv2-uyumlu semaya donusturulmus.
-        """
-        return asyncio.run(self._async_fetch_report(task_id))
+    async def aclose(self) -> None:
+        """Async httpx.AsyncClient'i kapatir (idempotent)."""
+        client = self._http_async
+        if client is not None:
+            try:
+                await client.aclose()
+            finally:
+                self._http_async = None
 
     async def submit_and_wait(self, sample_path: Path) -> SubmissionResult:
         """Asenkron all-in-one: gonder, bekle, raporla.
@@ -320,21 +340,159 @@ class TriageClient:
     # Async internals
     # ------------------------------------------------------------------
 
+    def _headers(self) -> dict[str, str]:
+        # Authorization is intentionally **not** logged anywhere. httpx debug
+        # logs would expose plain bearer tokens; we mark sensitive headers
+        # via the helper below and recommend setting httpx log level to INFO.
+        return {"Authorization": f"Bearer {self._api_token}"} if self._api_token else {}
+
     def _get_http(self) -> Any:
-        """Lazy httpx.AsyncClient olusturma."""
+        """Lazy httpx.AsyncClient olusturma (async path)."""
         try:
             import httpx  # type: ignore[import-untyped]
         except ImportError as exc:
             raise RuntimeError("TriageClient requires 'httpx'. Install with: uv add httpx") from exc
 
-        if self._http is None:
-            headers = {"Authorization": f"Bearer {self._api_token}"} if self._api_token else {}
-            self._http = httpx.AsyncClient(
+        if self._http_async is None:
+            self._http_async = httpx.AsyncClient(
                 base_url=self._api_prefix,
-                headers=headers,
+                headers=self._headers(),
                 timeout=60.0,
             )
-        return self._http
+        return self._http_async
+
+    def _get_http_sync(self) -> Any:
+        """Lazy httpx.Client olusturma (sync path)."""
+        try:
+            import httpx  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise RuntimeError("TriageClient requires 'httpx'. Install with: uv add httpx") from exc
+
+        if self._http_sync is None:
+            self._http_sync = httpx.Client(
+                base_url=self._api_prefix,
+                headers=self._headers(),
+                timeout=60.0,
+            )
+        return self._http_sync
+
+    # ------------------------------------------------------------------
+    # Sync internals (used when called from non-async code)
+    # ------------------------------------------------------------------
+
+    def _sync_submit(self, sample_path: Path) -> str:
+        import json as _json
+
+        http = self._get_http_sync()
+        filename = sample_path.name
+        sha256 = _sha256_file(sample_path)
+        logger.info(
+            "TriageClient: submitting sample '%s' (sha256=%s...).",
+            filename,
+            sha256[:16],
+        )
+        payload = {
+            "kind": "file",
+            "interactive": False,
+            "targets": _DEFAULT_PROFILES,
+        }
+        with sample_path.open("rb") as fh:
+            response = http.post(
+                "/samples",
+                files={"file": (filename, fh, "application/octet-stream")},
+                data={"_json": _json.dumps(payload)},
+            )
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                f"Triage /samples submission failed: HTTP {response.status_code} — "
+                f"{response.text[:200]}"
+            )
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"Triage /samples returned non-dict: {data!r}")
+        task_id: str = data.get("id", "")
+        if not task_id:
+            raise RuntimeError(f"Triage returned no task ID: {data}")
+        logger.info("TriageClient: task submitted, ID=%s.", task_id)
+        return task_id
+
+    def _sync_wait(
+        self,
+        task_id: str,
+        timeout_seconds: int,
+        poll_interval_seconds: int,
+    ) -> str:
+        http = self._get_http_sync()
+        deadline = time.monotonic() + timeout_seconds
+        attempt = 0
+        backoff = float(poll_interval_seconds)
+        max_backoff = max(60.0, backoff * 4)
+        consecutive_failures = 0
+        while time.monotonic() < deadline:
+            attempt += 1
+            try:
+                response = http.get(f"/samples/{task_id}")
+            except Exception as exc:
+                consecutive_failures += 1
+                logger.warning(
+                    "TriageClient: status poll #%d failed (%s); backoff=%.1fs.",
+                    attempt,
+                    exc,
+                    backoff,
+                )
+                time.sleep(backoff)
+                backoff = min(max_backoff, backoff * 2)
+                if consecutive_failures >= 5:
+                    raise RuntimeError(
+                        f"Triage status polling failed {consecutive_failures} times in a row"
+                    ) from exc
+                continue
+
+            consecutive_failures = 0
+            if response.status_code != 200:
+                logger.warning("TriageClient: poll HTTP %d, retrying.", response.status_code)
+                time.sleep(backoff)
+                backoff = min(max_backoff, backoff * 1.5)
+                continue
+
+            data = response.json()
+            if not isinstance(data, dict):
+                time.sleep(backoff)
+                continue
+            status: str = data.get("status", "")
+            if status in _FINAL_STATUSES:
+                return status
+
+            # Reset backoff once we know polling is working.
+            backoff = float(poll_interval_seconds)
+            time.sleep(backoff)
+        return "timeout"
+
+    def _sync_fetch_report(self, task_id: str) -> SubmissionResult:
+        http = self._get_http_sync()
+        response = http.get(f"/samples/{task_id}/summary")
+        if response.status_code != 200:
+            return SubmissionResult(
+                task_id=task_id,
+                status="failed",
+                error=f"Report fetch failed: HTTP {response.status_code}",
+            )
+        triage_data = response.json()
+        if not isinstance(triage_data, dict):
+            return SubmissionResult(
+                task_id=task_id,
+                status="failed",
+                error="Report fetch returned non-dict body",
+            )
+        raw_sample = triage_data.get("sample", {})
+        sample_name = raw_sample.get("name", task_id) if isinstance(raw_sample, dict) else task_id
+        normalized = _normalize_report(triage_data, sample_name=sample_name)
+        return SubmissionResult(
+            task_id=task_id,
+            sample_name=sample_name,
+            status=triage_data.get("status", "reported"),
+            report=normalized,
+        )
 
     async def _async_submit(self, sample_path: Path) -> str:
         """Triage'e numune yukler, task ID dondurur."""
@@ -349,6 +507,7 @@ class TriageClient:
         )
 
         import json as _json
+
         payload = {
             "kind": "file",
             "interactive": False,
@@ -368,6 +527,10 @@ class TriageClient:
             )
 
         data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"Triage /samples returned unexpected type {type(data).__name__}: {data!r}"
+            )
         task_id: str = data.get("id", "")
         if not task_id:
             raise RuntimeError(f"Triage returned no task ID: {data}")
@@ -396,6 +559,14 @@ class TriageClient:
                 continue
 
             data = response.json()
+            if not isinstance(data, dict):
+                logger.warning(
+                    "TriageClient: poll #%d returned unexpected type %s, retrying.",
+                    attempt,
+                    type(data).__name__,
+                )
+                await asyncio.sleep(self._poll_interval)
+                continue
             status: str = data.get("status", "")
             logger.debug("TriageClient: poll #%d — task=%s, status=%s.", attempt, task_id, status)
 
@@ -421,11 +592,48 @@ class TriageClient:
             )
 
         triage_data = response.json()
-        sample_meta = triage_data.get("sample", {})
+        if not isinstance(triage_data, dict):
+            return SubmissionResult(
+                task_id=task_id,
+                status="failed",
+                error=(
+                    f"Report fetch returned unexpected type {type(triage_data).__name__}: "
+                    f"{triage_data!r}"
+                ),
+            )
+
+        # Debug: log top-level keys and their types so we can diagnose malformed responses
+        type_map = {k: type(v).__name__ for k, v in triage_data.items()}
+        logger.debug("TriageClient: task=%s summary keys=%s", task_id, type_map)
+
+        raw_sample = triage_data.get("sample", {})
+        if not isinstance(raw_sample, dict):
+            logger.warning(
+                "TriageClient: task=%s 'sample' field is %s, not dict. Using empty.",
+                task_id,
+                type(raw_sample).__name__,
+            )
+            raw_sample = {}
+        sample_meta = raw_sample
         sha256 = sample_meta.get("sha256", "")
         sample_name = sample_meta.get("name", task_id)
 
-        normalized = _normalize_report(triage_data, sample_name)
+        try:
+            normalized = _normalize_report(triage_data, sample_name)
+        except Exception as exc:
+            logger.error(
+                "TriageClient: _normalize_report failed for task=%s: %s (%s).",
+                task_id,
+                type(exc).__name__,
+                exc,
+            )
+            return SubmissionResult(
+                task_id=task_id,
+                sample_sha256=sha256,
+                sample_name=sample_name,
+                status="failed",
+                error=f"Report normalization failed: {type(exc).__name__}: {exc}",
+            )
 
         logger.info(
             "TriageClient: report fetched for task=%s (sha256=%s, %d tasks).",
@@ -443,12 +651,6 @@ class TriageClient:
             error="",
         )
 
-    async def aclose(self) -> None:
-        """HTTP istemcisini duzgunce kapatir."""
-        if self._http is not None:
-            await self._http.aclose()
-            self._http = None
-
 
 # ---------------------------------------------------------------------------
 # Yardimci fonksiyon
@@ -464,7 +666,5 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-# Runtime protokol uyumluluk kontrolu
-assert isinstance(TriageClient, type)
-# SandboxClient Protocol uyumluluğunu docstring seviyesinde garanti ediyoruz.
-# Tam runtime_checkable kontrolu için: isinstance(TriageClient(...), SandboxClient)
+# Static protocol conformance is enforced by mypy. Runtime conformance can be
+# verified with ``isinstance(TriageClient(...), SandboxClient)`` if needed.

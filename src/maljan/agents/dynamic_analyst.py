@@ -55,18 +55,20 @@ class DynamicAnalyst(BaseAnalyst):
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.core.config import settings
+        from maljan.core.config import get_settings
 
-        if not settings.mcp.cape.enabled:
+        cfg = get_settings()
+
+        if not cfg.mcp.cape.enabled:
             self.logger.info("CAPEv2 MCP is disabled in config.")
             return
 
-        command = settings.mcp.cape.command
-        args = settings.mcp.cape.args
+        command = cfg.mcp.cape.command
+        args = cfg.mcp.cape.args
 
         env = os.environ.copy()
-        if settings.mcp.cape.env:
-            env.update(settings.mcp.cape.env)
+        if cfg.mcp.cape.env:
+            env.update(cfg.mcp.cape.env)
 
         from maljan.core.paths import get_project_root, resolve_mcp_args
 
@@ -92,25 +94,32 @@ class DynamicAnalyst(BaseAnalyst):
             loop.run_until_complete(toolkit.initialize())
 
         self.toolkit = toolkit
-        # Keep only essential analysis tools — exclude bulk download and admin tools.
-        # Reduces tool count from ~36 to ~12, preventing LLM timeouts on large tool schemas.
-        _ESSENTIAL_CAPE_TOOLS = {
-            "get_cuckoo_status",
-            "search_task",
-            "extended_search",
-            "submit_file",
-            "submit_static",
-            "get_task_status",
-            "get_task_report",
-            "get_task_iocs",
-            "get_task_config",
-            "list_tasks",
-            "view_task",
-            "get_latest_tasks",
-            "verify_auth",
-        }
+        # Essential CAPE tool list is config-driven: agents do not need to be
+        # rebuilt when the operator adds/removes a tool name. ``cape.tools`` is
+        # a list of allow-listed tool names; an empty list means "use the
+        # built-in default essentials".
+        configured = list(getattr(cfg.mcp.cape, "tools", []) or [])
+        essential_set: set[str] = (
+            set(configured)
+            if configured
+            else {
+                "get_cuckoo_status",
+                "search_task",
+                "extended_search",
+                "submit_file",
+                "submit_static",
+                "get_task_status",
+                "get_task_report",
+                "get_task_iocs",
+                "get_task_config",
+                "list_tasks",
+                "view_task",
+                "get_latest_tasks",
+                "verify_auth",
+            }
+        )
         all_tools = toolkit.get_tools()
-        self.tools = [t for t in all_tools if t.name in _ESSENTIAL_CAPE_TOOLS]
+        self.tools = [t for t in all_tools if t.name in essential_set]
         self.logger.info(
             "Initialized CAPEv2 MCP tools: %d/%d (essential only): %s",
             len(self.tools),

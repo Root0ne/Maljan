@@ -39,15 +39,6 @@ const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
 
 const FILTERS = ["all", "completed", "running", "pending", "failed", "cancelled"];
 
-const MOCK_JOBS: DisplayJob[] = [
-  { id: "11111111-1111-1111-1111-111111111111", sample_id: "s-11111111-1111-1111-1111-111111111111", status: "completed", created_at: new Date(Date.now() - 3600000).toISOString(), duration: "4m 12s" },
-  { id: "22222222-2222-2222-2222-222222222222", sample_id: "s-22222222-2222-2222-2222-222222222222", status: "running", created_at: new Date(Date.now() - 600000).toISOString(), duration: null },
-  { id: "33333333-3333-3333-3333-333333333333", sample_id: "s-33333333-3333-3333-3333-333333333333", status: "completed", created_at: new Date(Date.now() - 7200000).toISOString(), duration: "3m 48s" },
-  { id: "44444444-4444-4444-4444-444444444444", sample_id: "s-44444444-4444-4444-4444-444444444444", status: "failed", created_at: new Date(Date.now() - 10800000).toISOString(), duration: "0m 15s" },
-  { id: "55555555-5555-5555-5555-555555555555", sample_id: "s-55555555-5555-5555-5555-555555555555", status: "completed", created_at: new Date(Date.now() - 14400000).toISOString(), duration: "5m 02s" },
-  { id: "66666666-6666-6666-6666-666666666666", sample_id: "s-66666666-6666-6666-6666-666666666666", status: "pending", created_at: new Date(Date.now() - 300000).toISOString(), duration: null },
-];
-
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -68,17 +59,19 @@ function countByStatus(jobs: DisplayJob[]): Record<string, number> {
 
 export default function JobsPage() {
   const [filter, setFilter] = useState("all");
-  const [jobs, setJobs] = useState<DisplayJob[]>(MOCK_JOBS);
-  const [apiAvailable, setApiAvailable] = useState(false);
+  const [jobs, setJobs] = useState<DisplayJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await api.getJobs(1, 100);
         setJobs(res.items.map(mapJob));
-        setApiAvailable(true);
-      } catch {
-        /* use mock data */
+      } catch (err: any) {
+        setError(err.message || "Failed to load jobs.");
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
@@ -98,14 +91,37 @@ export default function JobsPage() {
   const counts = countByStatus(jobs);
   const filtered = filter === "all" ? jobs : jobs.filter((j) => j.status === filter);
 
+  if (loading) {
+    return (
+      <div className="animate-pulse">
+        <div className="h-8 w-48 bg-bg-active rounded mb-4" />
+        <div className="flex gap-6">
+          <div className="w-48 shrink-0">
+            <div className="h-64 bg-bg-surface border border-border rounded" />
+          </div>
+          <div className="flex-1 bg-bg-surface border border-border rounded">
+            <div className="h-10 border-b border-border" />
+            <div className="p-4 space-y-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-10 bg-bg-active rounded" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 text-sm text-status-red bg-status-red/10 border border-status-red/20 rounded">
+        {error}
+      </div>
+    );
+  }
+
   return (
     <div>
-      {!apiAvailable && (
-        <div className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
-          API not available. Showing demo data.
-        </div>
-      )}
-
       <div className="flex gap-6">
         {/* Filter Sidebar */}
         <div className="w-48 shrink-0">
@@ -160,52 +176,58 @@ export default function JobsPage() {
             </h2>
           </div>
           <div className="divide-y divide-border-light">
-            {filtered.map((job) => {
-              const badge = STATUS_BADGE[job.status] || STATUS_BADGE.pending;
-              const canCancel = job.status === "pending" || job.status === "running";
-              return (
-                <div
-                  key={job.id}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors"
-                >
-                  <Link
-                    href={`/analysis/${job.id}`}
-                    className="flex items-center gap-3 flex-1 min-w-0"
+            {filtered.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-text-muted">
+                No jobs found.
+              </div>
+            ) : (
+              filtered.map((job) => {
+                const badge = STATUS_BADGE[job.status] || STATUS_BADGE.pending;
+                const canCancel = job.status === "pending" || job.status === "running";
+                return (
+                  <div
+                    key={job.id}
+                    className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors"
                   >
-                    <svg
-                      width="14" height="14" viewBox="0 0 24 24" fill="none"
-                      stroke="var(--text-secondary)" strokeWidth="1.5"
+                    <Link
+                      href={`/analysis/${job.id}`}
+                      className="flex items-center gap-3 flex-1 min-w-0"
                     >
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                      <path d="M14 2v6h6" />
-                    </svg>
-                    <div className="min-w-0">
-                      <p className="text-sm text-text-primary truncate">{job.sample_id.slice(0, 12)}</p>
-                      <p className="text-xs text-text-muted">{timeAgo(job.created_at)}{job.duration ? ` / ${job.duration}` : ""}</p>
-                    </div>
-                  </Link>
-                  <div className="flex items-center gap-3 ml-3">
-                    {canCancel && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCancel(job.id);
-                        }}
-                        className="px-2 py-0.5 text-xs border border-status-red/30 text-status-red rounded hover:bg-status-red/10 transition-colors"
+                      <svg
+                        width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="var(--text-secondary)" strokeWidth="1.5"
                       >
-                        Cancel
-                      </button>
-                    )}
-                    <div className={`flex items-center gap-1.5 ${badge.class}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-                      <span className="text-xs font-medium uppercase tracking-wider">
-                        {job.status}
-                      </span>
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                        <path d="M14 2v6h6" />
+                      </svg>
+                      <div className="min-w-0">
+                        <p className="text-sm text-text-primary truncate">{job.sample_id.slice(0, 12)}</p>
+                        <p className="text-xs text-text-muted">{timeAgo(job.created_at)}{job.duration ? ` / ${job.duration}` : ""}</p>
+                      </div>
+                    </Link>
+                    <div className="flex items-center gap-3 ml-3">
+                      {canCancel && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCancel(job.id);
+                          }}
+                          className="px-2 py-0.5 text-xs border border-status-red/30 text-status-red rounded hover:bg-status-red/10 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <div className={`flex items-center gap-1.5 ${badge.class}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                        <span className="text-xs font-medium uppercase tracking-wider">
+                          {job.status}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>

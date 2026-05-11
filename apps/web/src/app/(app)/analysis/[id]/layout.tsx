@@ -56,6 +56,7 @@ const VERDICT_CONFIG: Record<
 const TABS = [
   { key: "", label: "SUMMARY" },
   { key: "/agents", label: "AGENTS" },
+  { key: "/pipeline", label: "PIPELINE" },
   { key: "/rules", label: "RULES" },
   { key: "/ttps", label: "TTPS" },
   { key: "/timeline", label: "TIMELINE" },
@@ -122,7 +123,7 @@ export default function AnalysisLayout({
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = report?.verdict?.toLowerCase() ?? "unknown";
-  const confidence = report?.overall_confidence ?? 0;
+  const confidence = Math.round((report?.overall_confidence ?? 0) * 100);
   const category = report?.malware_category ?? "";
   const sampleId = job?.sample_id ?? "";
   const duration = formatDuration(job?.duration_seconds);

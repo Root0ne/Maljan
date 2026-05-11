@@ -125,12 +125,6 @@ export default function TTpsTab() {
           <button className="px-3 py-1.5 text-xs bg-bg-active text-text-primary border-r border-border">
             Enterprise ({totalTechniques})
           </button>
-          <button className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary">
-            Mobile (0)
-          </button>
-          <button className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary">
-            ICS (0)
-          </button>
         </div>
         <input
           type="text"
@@ -139,11 +133,6 @@ export default function TTpsTab() {
           onChange={(e) => setSearch(e.target.value)}
           className="h-7 px-3 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none w-72"
         />
-        <div className="ml-auto flex gap-2">
-          <button className="px-3 py-1.5 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors">
-            Download TTPs
-          </button>
-        </div>
       </div>
 
       {filteredTactics.length === 0 ? (

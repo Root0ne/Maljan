@@ -38,19 +38,33 @@ class GhidraHTTPClient:
         self._schema: list[dict[str, Any]] = []
         self._output_guardrail = output_guardrail
         self._max_output_chars = max_output_chars
+        # Single long-lived AsyncClient — re-using the connection pool across
+        # tool calls cuts TLS/TCP handshake overhead and avoids the previous
+        # "new client per tool call" anti-pattern.
+        self._http: httpx.AsyncClient | None = None
+
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.auth_token}"} if self.auth_token else {}
+
+    async def _get_http(self) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(timeout=60.0, headers=self._auth_headers())
+        return self._http
+
+    async def aclose(self) -> None:
+        """Close the underlying httpx client (idempotent)."""
+        if self._http is not None:
+            try:
+                await self._http.aclose()
+            finally:
+                self._http = None
 
     async def initialize(self) -> None:
         """Fetch /mcp/schema and build LangChain tools."""
-        headers: dict[str, str] = {}
-        if self.auth_token:
-            headers["Authorization"] = f"Bearer {self.auth_token}"
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{self.base_url}/mcp/schema", headers=headers
-            )
-            resp.raise_for_status()
-            schema = resp.json()
+        client = await self._get_http()
+        resp = await client.get(f"{self.base_url}/mcp/schema")
+        resp.raise_for_status()
+        schema = resp.json()
 
         self._schema = schema.get("tools", [])
         for tool_def in self._schema:
@@ -73,6 +87,11 @@ class GhidraHTTPClient:
         method: str = tool_def.get("method", "GET").upper()
         description: str = tool_def.get("description", f"Call {path}")
         params: list[dict[str, Any]] = tool_def.get("params", [])
+
+        # Phase 2: Compress tool descriptions to reduce context bloat.
+        # 165 Ghidra tools were consuming ~15K-25K tokens per ReAct step.
+        # We add a category tag + truncate to ~120 chars max.
+        description = self._compress_description(path, description)
 
         # Build Pydantic args schema
         properties: dict[str, tuple[Any, Any]] = {}
@@ -126,10 +145,6 @@ class GhidraHTTPClient:
         kwargs: dict[str, Any],
     ) -> str:
         """Execute a single HTTP request against a GhidraMCP endpoint."""
-        headers: dict[str, str] = {}
-        if self.auth_token:
-            headers["Authorization"] = f"Bearer {self.auth_token}"
-
         url = f"{self.base_url}{path}"
         query: dict[str, Any] = {}
         body: dict[str, Any] = {}
@@ -143,21 +158,87 @@ class GhidraHTTPClient:
                 else:
                     query[pname] = kwargs[pname]
 
+        client = await self._get_http()
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                if method == "POST":
-                    headers["Content-Type"] = "application/json"
-                    resp = await client.post(url, params=query, json=body, headers=headers)
-                else:
-                    resp = await client.get(url, params=query, headers=headers)
-                resp.raise_for_status()
-                output = resp.text
+            if method == "POST":
+                resp = await client.post(
+                    url, params=query, json=body, headers={"Content-Type": "application/json"}
+                )
+            else:
+                resp = await client.get(url, params=query)
+            resp.raise_for_status()
+            output = resp.text
         except httpx.HTTPStatusError as exc:
-            output = f"HTTP error {exc.response.status_code}: {exc.response.text}"
+            output = (
+                f'{{"tool_error": "http_status", "status": {exc.response.status_code}, '
+                f'"path": "{path}"}}'
+            )
         except httpx.RequestError as exc:
-            output = f"Request error: {exc}"
+            output = (
+                f'{{"tool_error": "request_failed", "type": "{type(exc).__name__}", '
+                f'"path": "{path}"}}'
+            )
 
         return self._apply_output_guardrail(output)
+
+    def _compress_description(self, path: str, description: str) -> str:
+        """Add a category tag and truncate to keep ReAct context lean.
+
+        Category prefixes help the LLM quickly identify tool families
+        without reading full prose descriptions for all 165 tools.
+        """
+        name = path.lstrip("/").replace("/", "_")
+        prefix = name.split("_")[0]
+
+        # Map first word of tool name to a functional category
+        category_map: dict[str, str] = {
+            "analyze": "ANALYZE",
+            "decompile": "ANALYZE",
+            "disassemble": "ANALYZE",
+            "detect": "ANALYZE",
+            "find": "ANALYZE",
+            "diff": "ANALYZE",
+            "compare": "ANALYZE",
+            "inspect": "ANALYZE",
+            "emulate": "ANALYZE",
+            "extract": "ANALYZE",
+            "list": "LIST",
+            "get": "LIST",
+            "search": "LIST",
+            "batch": "BATCH",
+            "bulk": "BATCH",
+            "run": "EXEC",
+            "rename": "MODIFY",
+            "create": "MODIFY",
+            "delete": "MODIFY",
+            "set": "MODIFY",
+            "apply": "MODIFY",
+            "modify": "MODIFY",
+            "remove": "MODIFY",
+            "move": "MODIFY",
+            "clear": "MODIFY",
+            "convert": "MODIFY",
+            "clone": "MODIFY",
+            "force": "MODIFY",
+            "open": "NAV",
+            "close": "NAV",
+            "save": "NAV",
+            "load": "NAV",
+            "switch": "NAV",
+            "validate": "CHECK",
+            "can": "CHECK",
+            "read": "READ",
+            "import": "IMPORT",
+            "server": "META",
+        }
+        cat = category_map.get(prefix, "TOOL")
+
+        # Strip existing newlines and collapse whitespace
+        clean = " ".join(description.split())
+        if len(clean) > 100:
+            clean = clean[:97] + "..."
+
+        return f"[{cat}] {clean}"
 
     def _apply_output_guardrail(self, output: str) -> str:
         """Limit tool output size to prevent LLM context overflow."""

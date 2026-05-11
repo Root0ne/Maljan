@@ -65,7 +65,7 @@ class CAPEv2Client:
     def __init__(
         self,
         base_url: str,
-        api_token: str = "",
+        api_token: Any = "",
         timeout: int = 30,
     ) -> None:
         try:
@@ -77,11 +77,16 @@ class CAPEv2Client:
 
         import httpx
 
+        if hasattr(api_token, "get_secret_value"):
+            token_value: str = api_token.get_secret_value()
+        else:
+            token_value = str(api_token or "")
+
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._headers: dict[str, str] = {}
-        if api_token:
-            self._headers["Authorization"] = f"Token {api_token}"
+        if token_value:
+            self._headers["Authorization"] = f"Token {token_value}"
 
         # Persistent HTTP client for connection reuse across polling cycles
         self._http = httpx.Client(

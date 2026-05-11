@@ -1,29 +1,54 @@
-"""File-based data loader that reads JSON from the data/samples/ directory.
+"""File-based data loader that reads JSON from the local samples directory.
 
 Satisfies DataLoaderProtocol. Uses the ParserRegistry to find the correct
-parser for each data type.
-
-Phase 3 addition: load_chunked() returns a list of TextChunk objects
-so agents can process large inputs incrementally without context overflow.
-
-Phase 6 addition: load_from_sandbox() accepts a SandboxClient and a sample
-file path, submits to the sandbox, waits for completion, fetches the JSON
-report, and returns parsed + chunked text — same output shape as load_chunked().
-This means the pipeline nodes require zero changes to support live sandbox data.
+parser for each data type. Sandbox-driven runs land here through
+``load_from_sandbox`` which submits, polls, fetches, and parses in one call.
 """
 
+from __future__ import annotations
+
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.config import ChunkingConfig
-from maljan.core.exceptions import DataLoadError
+from maljan.core.exceptions import DataLoadError, UnsafePathError
 from maljan.core.logger import logger
 from maljan.loaders.binary_chunker import BinaryChunker, TextChunk
 from maljan.parsers.registry import ParserRegistry
 
 if TYPE_CHECKING:
     from maljan.loaders.sandbox_client import SandboxClient
+
+
+# Final sandbox statuses considered usable. ``partial`` is accepted because
+# Triage returns it when one task fails but other tasks completed.
+_USABLE_SANDBOX_STATUSES: frozenset[str] = frozenset({"reported", "partial"})
+
+# Hex-string sample identifiers (MD5/SHA-1/SHA-256/SHA-512) and a small set of
+# alphanumeric IDs used in fixtures. Anything else is rejected to prevent path
+# traversal via ``sample_id``.
+_SAMPLE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def _validate_sample_id(sample_id: str) -> str:
+    """Reject identifiers that contain separators, dots-only, or are empty.
+
+    The regex permits hex hashes, fixture IDs like ``sample_1``, and short
+    alphanumerics with limited punctuation. It explicitly forbids ``/`` and
+    ``\\`` so an attacker cannot escape the samples directory.
+    """
+    if not sample_id or sample_id in {".", ".."} or not _SAMPLE_ID_RE.match(sample_id):
+        raise UnsafePathError(f"Unsafe sample_id rejected: {sample_id!r}")
+    return sample_id
+
+
+def _validate_data_type(data_type: str) -> str:
+    """Restrict data_type to a conservative identifier shape."""
+    if not data_type or not re.match(r"^[A-Za-z0-9_]{1,32}$", data_type):
+        raise UnsafePathError(f"Unsafe data_type rejected: {data_type!r}")
+    return data_type
 
 
 class FileDataLoader:
@@ -35,49 +60,61 @@ class FileDataLoader:
         parser_registry: ParserRegistry | None = None,
         chunking_config: ChunkingConfig | None = None,
     ) -> None:
-        self.samples_path = Path(samples_dir)
+        self.samples_path = Path(samples_dir).resolve()
         self._parser_registry = parser_registry or ParserRegistry()
         self._chunking_config = chunking_config or ChunkingConfig()
         self._chunker = BinaryChunker(self._chunking_config)
 
+    # ------------------------------------------------------------------
+    # Public chunker access
+    # ------------------------------------------------------------------
+
+    def chunk_text(self, data_type: str, text: str) -> list[TextChunk]:
+        """Public entry point for chunking arbitrary already-parsed text.
+
+        Exposes the internal :class:`BinaryChunker` without leaking the
+        attribute. Callers (e.g. :class:`ServiceContainer`) should use this
+        instead of touching ``loader._chunker`` directly.
+        """
+        return self._chunker.chunk(data_type, text)
+
+    # ------------------------------------------------------------------
+    # File-based loading
+    # ------------------------------------------------------------------
+
+    def _resolve_sample_path(self, sample_id: str, data_type: str) -> Path:
+        sid = _validate_sample_id(sample_id)
+        dt = _validate_data_type(data_type)
+        candidate = (self.samples_path / dt / f"{sid}.json").resolve()
+        # Defence-in-depth: ensure the resolved path is still inside samples_path.
+        try:
+            candidate.relative_to(self.samples_path)
+        except ValueError as exc:
+            raise UnsafePathError(f"Resolved path escapes samples directory: {candidate}") from exc
+        return candidate
+
     def load(self, sample_id: str, data_type: str) -> str:
         """Load and parse data for a given sample and data type.
 
-        Args:
-            sample_id: Hash or identifier for the sample.
-            data_type: One of the registered parser names (e.g. "static", "dynamic").
-
         Returns:
-            Parsed Markdown string ready for LLM consumption.
+            Parsed Markdown string ready for LLM consumption. Returns a
+            placeholder string when no data file is present for the sample.
         """
-        path = self.samples_path / data_type / f"{sample_id}.json"
+        path = self._resolve_sample_path(sample_id, data_type)
         raw = self._load_json(path)
 
         if raw is None:
             return f"No {data_type} data available for sample {sample_id}."
 
-        # Use registered parser if available
         try:
             parser = self._parser_registry.create(data_type)
             return parser.parse(raw)
         except KeyError:
-            logger.warning(f"No parser registered for '{data_type}', returning raw JSON.")
+            logger.warning("No parser registered for '%s', returning raw JSON.", data_type)
             return json.dumps(raw, indent=2)
 
     def load_chunked(self, sample_id: str, data_type: str) -> list[TextChunk]:
-        """Load, parse, and split data into LLM-safe chunks.
-
-        When the parsed text fits within the configured token limit (and
-        chunking_config.skip_if_fits is True), returns a list with a single
-        chunk — no splitting overhead.
-
-        Args:
-            sample_id: Hash or identifier for the sample.
-            data_type: Domain type (e.g. "static", "dynamic", "network").
-
-        Returns:
-            Ordered list of TextChunk objects. At least one chunk is always returned.
-        """
+        """Load, parse, and split data into LLM-safe chunks."""
         text = self.load(sample_id, data_type)
         chunks = self._chunker.chunk(data_type, text)
         if len(chunks) > 1:
@@ -90,61 +127,40 @@ class FileDataLoader:
         return chunks
 
     def _load_json(self, path: Path) -> Any:
-        """Load a JSON file, returning None if not found."""
+        """Load a JSON file, returning ``None`` if not found."""
         try:
             if not path.exists():
-                logger.warning(f"File not found: {path}")
+                logger.warning("File not found: %s", path)
                 return None
             with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode JSON from {path}: {e}")
+            logger.error("Failed to decode JSON from %s: %s", path, e)
             raise DataLoadError(f"Corrupt data at {path}") from e
-        except Exception as e:
-            logger.error(f"Unexpected error loading {path}: {e}")
+        except OSError as e:
+            logger.error("Unexpected error loading %s: %s", path, e)
             raise DataLoadError(str(e)) from e
+
+    # ------------------------------------------------------------------
+    # Sandbox-driven loading
+    # ------------------------------------------------------------------
 
     def load_from_sandbox(
         self,
         sample_path: str,
         data_type: str,
-        sandbox_client: "SandboxClient",
+        sandbox_client: SandboxClient,
         timeout_seconds: int = 300,
         poll_interval_seconds: int = 10,
     ) -> list[TextChunk]:
-        """Submit a sample to a sandbox, wait for completion, and return parsed chunks.
+        """Submit a sample to a sandbox, wait for completion, and return parsed chunks."""
+        from maljan.loaders.sandbox_client import SandboxError as _SandboxError
 
-        Phase 6: CAPEv2 integration entry point.
-
-        The returned list of TextChunk objects is identical in shape to the
-        output of load_chunked(), so pipeline nodes require no changes to
-        consume live sandbox data.
-
-        Flow:
-          1. sandbox_client.submit(sample_path)         -> task_id
-          2. sandbox_client.wait_for_completion(task_id) -> status
-          3. sandbox_client.fetch_report(task_id)        -> SubmissionResult
-          4. result.report is parsed via the registered parser for data_type
-          5. Parsed text is chunked via BinaryChunker
-
-        Args:
-            sample_path:            Path to the sample file to submit.
-            data_type:              Parser domain ("dynamic", "network", etc.).
-            sandbox_client:         Any SandboxClient-protocol object.
-            timeout_seconds:        Forwarded to wait_for_completion().
-            poll_interval_seconds:  Forwarded to wait_for_completion().
-
-        Returns:
-            List of TextChunk objects (same as load_chunked()).
-
-        Raises:
-            DataLoadError: When submission, polling, or report fetch fails.
-        """
-        from maljan.loaders.sandbox_client import SandboxError
+        dt = _validate_data_type(data_type)
 
         try:
             task_id = sandbox_client.submit(sample_path)
-        except SandboxError as exc:
+        except _SandboxError as exc:
             raise DataLoadError(f"Sandbox submission failed: {exc}") from exc
 
         try:
@@ -153,33 +169,33 @@ class FileDataLoader:
                 timeout_seconds=timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
             )
-        except SandboxError as exc:
+        except _SandboxError as exc:
             raise DataLoadError(f"Sandbox polling failed: {exc}") from exc
 
-        if status not in {"reported"}:
+        if status not in _USABLE_SANDBOX_STATUSES:
             raise DataLoadError(
-                f"Sandbox task {task_id} ended with status '{status}' (not 'reported')."
+                f"Sandbox task {task_id} ended with status '{status}' "
+                f"(expected one of {sorted(_USABLE_SANDBOX_STATUSES)})."
             )
 
         try:
             result = sandbox_client.fetch_report(task_id)
-        except SandboxError as exc:
+        except _SandboxError as exc:
             raise DataLoadError(f"Report fetch failed: {exc}") from exc
 
-        # Pass the raw report dict through the existing parser path
         raw = result.report
         try:
-            parser = self._parser_registry.create(data_type)
+            parser = self._parser_registry.create(dt)
             parsed_text = parser.parse(raw)
         except KeyError:
-            logger.warning("load_from_sandbox: no parser for '%s', using raw JSON.", data_type)
+            logger.warning("load_from_sandbox: no parser for '%s', using raw JSON.", dt)
             parsed_text = json.dumps(raw, indent=2)
 
         logger.info(
             "load_from_sandbox: task=%s status=%s data_type=%s sample=%s",
             task_id,
             status,
-            data_type,
+            dt,
             sample_path,
         )
-        return self._chunker.chunk(data_type, parsed_text)
+        return self._chunker.chunk(dt, parsed_text)

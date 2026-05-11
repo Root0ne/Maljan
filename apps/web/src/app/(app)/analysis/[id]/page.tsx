@@ -33,15 +33,16 @@ export default function SummaryTab() {
   }
 
   const agentSummary = report?.agent_findings?.map(f => {
+    const pct = Math.round(f.final_confidence * 100);
     let verdict = "unknown";
-    if (f.final_confidence >= 80) verdict = "malicious";
-    else if (f.final_confidence >= 50) verdict = "suspicious";
+    if (pct >= 80) verdict = "malicious";
+    else if (pct >= 50) verdict = "suspicious";
     else verdict = "benign";
 
     return {
       name: f.agent_name,
       verdict: verdict,
-      confidence: Math.round(f.final_confidence),
+      confidence: pct,
     };
   }) || [];
 
@@ -52,6 +53,8 @@ export default function SummaryTab() {
         for (const claim of finding.claims) {
           if (claim && typeof claim === 'object' && 'description' in claim) {
              keyFindings.push(String((claim as any).description));
+          } else if (claim && typeof claim === 'object' && 'claim' in claim) {
+             keyFindings.push(String((claim as any).claim));
           } else if (typeof claim === 'string') {
              keyFindings.push(claim);
           }
@@ -70,7 +73,7 @@ export default function SummaryTab() {
   }
 
   const verdictLabel = report?.verdict ? report.verdict.charAt(0).toUpperCase() + report.verdict.slice(1) : "Unknown";
-  const confidence = report?.overall_confidence ? Math.round(report.overall_confidence) : 0;
+  const confidence = report?.overall_confidence ? Math.round(report.overall_confidence * 100) : 0;
   const verdictColorClass = VERDICT_TEXT[report?.verdict?.toLowerCase() || 'unknown'] || VERDICT_TEXT.unknown;
 
   return (

@@ -12,11 +12,13 @@ The run() method returns a result dict containing:
 
 import asyncio
 import time
+from pathlib import Path
 from typing import Any
 
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
 from maljan.core.logger import logger
+from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.state import AnalysisState
 
@@ -67,17 +69,13 @@ class MaljanApp:
         # execution share the same event loop (avoids nested asyncio.run).
         return asyncio.run(self.arun(file_hash, file_name, sample_path))
 
-    async def _submit_to_sandbox(
-        self, sample_path: str | None
-    ) -> dict[str, Any] | None:
+    async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return normalized report.
 
         Returns None if no sample_path is provided or if submission fails.
         """
         if not sample_path or self.container.is_mock:
             return None
-
-        from pathlib import Path
 
         path = Path(sample_path)
         if not path.exists():
@@ -96,7 +94,6 @@ class MaljanApp:
                 # Fallback: manual submit + wait + fetch for protocol-compliant clients
                 task_id = client.submit(sample_path)
                 status = client.wait_for_completion(task_id)
-                from maljan.loaders.sandbox_client import SubmissionResult
                 result = SubmissionResult(
                     task_id=task_id,
                     status=status,
@@ -105,6 +102,13 @@ class MaljanApp:
                 )
 
             if result.status in ("reported", "partial") and result.report:
+                if not isinstance(result.report, dict):
+                    logger.warning(
+                        "Sandbox returned success status but report is not a dict (type=%s). "
+                        "Treating as failure.",
+                        type(result.report).__name__,
+                    )
+                    return None
                 logger.info(
                     "Sandbox analysis complete: %s tasks, %d signatures, %d TTPs.",
                     len(result.report.get("_triage_raw_tasks", [])),
@@ -134,10 +138,10 @@ class MaljanApp:
         logger.info("=" * 60)
         logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
-        logger.info(f"Sample: {file_hash} ({file_name or 'unnamed'})")
-        logger.info(f"Mode: {'MOCK' if self.container.is_mock else self.config.llm.provider}")
-        logger.info(f"Registered agents: {self.container.agent_registry.list_agents()}")
-        logger.info(f"Max iterations: {self.config.negotiation.max_iterations}")
+        logger.info("Sample: %s (%s)", file_hash, file_name or "unnamed")
+        logger.info("Mode: %s", "MOCK" if self.container.is_mock else self.config.llm.provider)
+        logger.info("Registered agents: %s", self.container.agent_registry.list_agents())
+        logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
 
         # Phase 2: Submit to sandbox if sample_path is provided
@@ -160,7 +164,6 @@ class MaljanApp:
             "judge_report": None,
             "stix_output": None,
             "run_summary": None,
-            "_max_iterations": self.config.negotiation.max_iterations,
         }
 
         result = await self.graph.ainvoke(initial_state)

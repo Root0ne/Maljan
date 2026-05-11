@@ -33,50 +33,52 @@ router = APIRouter(tags=["WebSocket"])
 
 
 class ConnectionManager:
-    """Manages active WebSocket connections and Redis PubSub subscriptions."""
+    """Manages active WebSocket connections and Redis PubSub subscriptions.
+
+    All mutation of ``_active`` / ``_tasks`` happens under ``_lock`` so the
+    connect / disconnect paths cannot race when multiple clients arrive
+    simultaneously.
+    """
 
     def __init__(self) -> None:
-        self._active: dict[str, list[WebSocket]] = {}  # job_id -> [websockets]
-        self._tasks: dict[str, asyncio.Task] = {}  # job_id -> subscriber task
+        self._active: dict[str, list[WebSocket]] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, job_id: str) -> None:
         """Accept a WebSocket connection and start a PubSub listener if needed."""
-        await websocket.accept()
-        logger.info(f"WebSocket connected: job={job_id}")
+        await websocket.accept(subprotocol="maljan.v1")
+        logger.info("WebSocket connected: job=%s", job_id)
+        async with self._lock:
+            self._active.setdefault(job_id, []).append(websocket)
+            if job_id not in self._tasks or self._tasks[job_id].done():
+                self._tasks[job_id] = asyncio.create_task(self._redis_listener(job_id))
 
-        if job_id not in self._active:
-            self._active[job_id] = []
-        self._active[job_id].append(websocket)
-
-        # Start a Redis PubSub listener for this job if not already running
-        if job_id not in self._tasks or self._tasks[job_id].done():
-            self._tasks[job_id] = asyncio.create_task(self._redis_listener(job_id))
-
-    def disconnect(self, websocket: WebSocket, job_id: str) -> None:
+    async def disconnect(self, websocket: WebSocket, job_id: str) -> None:
         """Remove a WebSocket connection from tracking."""
-        logger.info(f"WebSocket disconnected: job={job_id}")
-        if job_id in self._active:
+        logger.info("WebSocket disconnected: job=%s", job_id)
+        async with self._lock:
+            if job_id not in self._active:
+                return
             self._active[job_id] = [ws for ws in self._active[job_id] if ws is not websocket]
-            # If no more connections for this job, cancel the listener
             if not self._active[job_id]:
                 del self._active[job_id]
                 task = self._tasks.pop(job_id, None)
                 if task and not task.done():
                     task.cancel()
-                    logger.debug(f"Redis PubSub listener cancelled: job={job_id}")
+                    logger.debug("Redis PubSub listener cancelled: job=%s", job_id)
 
     async def broadcast(self, job_id: str, message: str) -> None:
         """Send a message to all connected clients watching a job."""
-        dead_connections = []
-        for ws in self._active.get(job_id, []):
+        dead_connections: list[WebSocket] = []
+        for ws in list(self._active.get(job_id, [])):
             try:
                 await ws.send_text(message)
             except Exception:
                 dead_connections.append(ws)
 
-        # Clean up dead connections
         for ws in dead_connections:
-            self.disconnect(ws, job_id)
+            await self.disconnect(ws, job_id)
 
     async def _redis_listener(self, job_id: str) -> None:
         """Subscribe to Redis PubSub and forward events to WebSocket clients."""
@@ -127,9 +129,27 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
         - ``cancelled``: Job was cancelled
     """
     # ── Auth gate ────────────────────────────────────────────────────
-    token = websocket.query_params.get("token")
+    #
+    # Tokens MUST be sent via the WebSocket subprotocol so they do not appear
+    # in proxy access logs or browser Referer headers. The expected protocol
+    # is ``maljan.v1.<jwt-access-token>``. Legacy clients passing ``?token=``
+    # still work but are logged as deprecated and will be removed.
+    token: str | None = None
+    requested_protocols = websocket.headers.get("sec-websocket-protocol", "")
+    for raw in requested_protocols.split(","):
+        candidate = raw.strip()
+        if candidate.startswith("maljan.v1."):
+            token = candidate[len("maljan.v1.") :]
+            break
+
+    if token is None:
+        legacy = websocket.query_params.get("token")
+        if legacy:
+            logger.warning("WebSocket using deprecated query-string token (job=%s)", job_id)
+            token = legacy
+
     if not token:
-        logger.warning("WebSocket rejected: missing token (job=%s)", job_id)  # nosemgrep
+        logger.warning("WebSocket rejected: missing token (job=%s)", job_id)
         await websocket.close(code=1008, reason="Unauthorized: missing token")
         return
 
@@ -159,9 +179,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
         return
 
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(AnalysisJob).where(AnalysisJob.id == job_uuid)
-        )
+        result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
         job = result.scalar_one_or_none()
 
         if job is None:
@@ -201,4 +219,4 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        manager.disconnect(websocket, job_id)
+        await manager.disconnect(websocket, job_id)

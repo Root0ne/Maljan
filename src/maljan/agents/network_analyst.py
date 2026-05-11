@@ -40,21 +40,24 @@ _ISR_SYSTEM = (
     "T1048 (Exfiltration), T1568 (Dynamic Resolution)."
 )
 
-# Regex to detect PCAP file paths in the input data
-_PCAP_PATH_RE = re.compile(r"[\w/\\:.-]+\.pcapn?g?\b", re.IGNORECASE)
+# Regex to detect PCAP file paths in the input data.
+# Captures both bare paths and quoted paths (single/double).
+_PCAP_PATH_RE = re.compile(
+    r"""
+    (?:["']?)            # optional opening quote
+    (?P<path>[\w/\\:.-]+\.pcapn?g?)
+    (?:["']?)            # optional closing quote
+    (?=$|[\s,;)"'])     # boundary
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 def _detect_pcap_path(data: str) -> str | None:
-    """Extract a PCAP file path from the input data if present.
-
-    Returns the first path-like string ending in .pcap or .pcapng,
-    or None if no PCAP reference is found.
-    """
-    match = _PCAP_PATH_RE.search(data)
-    if match:
-        candidate = match.group(0)
-        # Basic sanity: must look like a real path (has directory separator or drive letter)
-        if os.sep in candidate or "/" in candidate or "\\" in candidate or ":" in candidate:
+    """Extract a PCAP file path from the input data if present."""
+    for match in _PCAP_PATH_RE.finditer(data):
+        candidate = match.group("path")
+        if any(sep in candidate for sep in (os.sep, "/", "\\", ":")):
             return candidate
     return None
 

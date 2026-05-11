@@ -31,13 +31,16 @@ export default function AgentsTab() {
   }
 
   const agents = (report?.agent_findings ?? []).map((f) => {
-    const verdict = confidenceToVerdict(f.final_confidence);
+    const pct = Math.round(f.final_confidence * 100);
+    const verdict = confidenceToVerdict(pct);
     // Extract first claim description as key finding
     let keyFinding = "No specific findings recorded.";
     if (f.claims && Array.isArray(f.claims) && f.claims.length > 0) {
       const first = f.claims[0];
       if (first && typeof first === "object" && "description" in first) {
         keyFinding = String((first as Record<string, unknown>).description);
+      } else if (first && typeof first === "object" && "claim" in first) {
+        keyFinding = String((first as Record<string, unknown>).claim);
       } else if (typeof first === "string") {
         keyFinding = first;
       }
@@ -45,7 +48,7 @@ export default function AgentsTab() {
     return {
       name: f.agent_name,
       verdict,
-      confidence: Math.round(f.final_confidence),
+      confidence: pct,
       domain: f.domain,
       key_finding: keyFinding,
       revision_rounds: f.revision_rounds,

@@ -54,6 +54,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             extra={"component": "redis"},
         )
 
+    # Alembic upgrade is OFF by default — run migrations as a deploy step.
+    # Multi-worker uvicorn deployments would otherwise race on `alembic upgrade head`.
+    if settings.run_migrations_on_startup:
+        try:
+            import asyncio
+            from pathlib import Path
+
+            from alembic import command
+            from alembic.config import Config
+
+            alembic_ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+            alembic_cfg = Config(str(alembic_ini))
+            await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+            logger.info("Database migrations applied successfully")
+        except Exception as exc:
+            logger.error(
+                "Alembic migration on startup FAILED: %s",
+                exc,
+                extra={"component": "database"},
+            )
+            raise
+    else:
+        logger.info(
+            "Skipping Alembic auto-upgrade (run_migrations_on_startup=False). "
+            "Run `alembic upgrade head` from your deploy pipeline instead."
+        )
+
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",
         extra={"component": "lifecycle"},
@@ -87,13 +114,26 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RequestLoggingMiddleware)
 
+    # ── Rate Limiting ────────────────────────────────────────
+    from app.middleware.rate_limit_middleware import RateLimitMiddleware
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        redis_url=settings.redis_url,
+        enabled=settings.rate_limit_enabled,
+        max_requests=settings.rate_limit_requests,
+        window_seconds=settings.rate_limit_window_seconds,
+        whitelist=settings.rate_limit_whitelist,
+    )
+
     # ── CORS ─────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=settings.cors_allow_methods,
+        allow_headers=settings.cors_allow_headers,
+        max_age=600,
     )
 
     # ── Routes ───────────────────────────────────────────────

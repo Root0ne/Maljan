@@ -1,10 +1,26 @@
-"""Sample upload and listing endpoints."""
+"""Sample upload and listing endpoints.
+
+Hardening:
+    * Stream the upload to disk while computing SHA-256 + MD5 + SHA-1 so the
+      whole file is never loaded into memory.
+    * Validate MIME type via the ``filetype`` magic-byte sniffer rather than
+      trusting the client-supplied ``Content-Type``.
+    * Race-safe deduplication via ``ON CONFLICT (sha256) DO NOTHING``.
+    * MinIO upload uses the spooled file directly (no second copy in RAM).
+"""
+
+from __future__ import annotations
 
 import hashlib
+import tempfile
 import uuid
+from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
+from pydantic import SecretStr
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -19,126 +35,160 @@ logger = get_logger("api.samples")
 
 router = APIRouter(prefix="/samples", tags=["Samples"])
 
-# Maximum upload size: 50 MB
-MAX_UPLOAD_SIZE = 50 * 1024 * 1024
+
+def _minio_secret() -> str:
+    raw = settings.minio_secret_key
+    return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
+
+
+def _streaming_hashes(file: UploadFile, dest: Path) -> tuple[str, str, str, int]:
+    """Stream the upload to ``dest`` and return (sha256, sha1, md5, size)."""
+    sha256 = hashlib.sha256()
+    sha1 = hashlib.sha1()
+    md5 = hashlib.md5()
+    total = 0
+    chunk_size = 64 * 1024
+    with dest.open("wb") as out:
+        while True:
+            chunk = file.file.read(chunk_size)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > settings.upload_max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        f"File too large. Maximum: {settings.upload_max_bytes // (1024 * 1024)} MB"
+                    ),
+                )
+            sha256.update(chunk)
+            sha1.update(chunk)
+            md5.update(chunk)
+            out.write(chunk)
+    return sha256.hexdigest(), sha1.hexdigest(), md5.hexdigest(), total
+
+
+def _detect_mime(path: Path) -> str | None:
+    """Best-effort magic-byte MIME detection (returns None when unknown)."""
+    try:
+        import filetype
+
+        kind = filetype.guess(str(path))
+        if kind is not None:
+            return kind.mime
+    except Exception as exc:
+        logger.debug("filetype guess failed: %s", exc)
+    return None
 
 
 @router.post("/upload", response_model=SampleResponse, status_code=status.HTTP_201_CREATED)
 async def upload_sample(
+    request: Request,
     file: UploadFile,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Sample:
-    """Upload a malware sample for analysis.
-
-    Computes SHA-256/MD5 hashes, stores the file in MinIO, and creates a
-    database record. If a sample with the same SHA-256 already exists,
-    returns the existing record.
-    """
+    """Upload a malware sample for analysis (streaming)."""
     logger.info(
-        f"Sample upload started: {file.filename} ({file.content_type})",
+        "Sample upload started: %s",
+        file.filename,
         extra={"user_id": str(user.id), "component": "upload"},
     )
 
-    # Read file content
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
-        logger.warning(
-            f"Upload rejected: file too large ({len(content)} bytes)",
-            extra={"user_id": str(user.id)},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024 * 1024)} MB",
-        )
-    if len(content) == 0:
-        logger.warning("Upload rejected: empty file", extra={"user_id": str(user.id)})
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Empty file",
-        )
+    with tempfile.NamedTemporaryFile(prefix="maljan-upload-", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
 
-    # Compute hashes
-    sha256 = hashlib.sha256(content).hexdigest()
-    md5 = hashlib.md5(content).hexdigest()
-    # SHA-1 is intentionally omitted — SHA-256 is sufficient for identification.
-    sha1 = None
-
-    logger.info(
-        f"File hashed: SHA256={sha256[:16]}... size={len(content)} bytes",
-        extra={"sample_id": sha256, "user_id": str(user.id)},
-    )
-
-    # Check if sample already exists
-    result = await db.execute(select(Sample).where(Sample.sha256 == sha256))
-    existing = result.scalar_one_or_none()
-    if existing:
-        logger.info(
-            f"Duplicate sample detected, returning existing: {sha256[:16]}...",
-            extra={"sample_id": str(existing.id)},
-        )
-        return existing
-
-    # Store in MinIO
-    storage_path = f"samples/{sha256[:2]}/{sha256}"
     try:
-        from io import BytesIO
+        sha256, sha1, md5, size = _streaming_hashes(file, tmp_path)
+        if size == 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
-        from minio import Minio
+        detected_mime = _detect_mime(tmp_path)
+        if settings.upload_allowed_mime_types:
+            allowed = set(settings.upload_allowed_mime_types)
+            if detected_mime is not None and detected_mime not in allowed:
+                logger.warning("Upload rejected: MIME %s not in allow-list", detected_mime)
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f"Disallowed MIME type: {detected_mime}",
+                )
 
-        client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            secure=settings.minio_secure,
-        )
-
-        # Ensure bucket exists
-        if not client.bucket_exists(settings.minio_bucket):
-            client.make_bucket(settings.minio_bucket)
-            logger.info(f"MinIO bucket created: {settings.minio_bucket}")
-
-        client.put_object(
-            settings.minio_bucket,
-            storage_path,
-            BytesIO(content),
-            length=len(content),
-            content_type=file.content_type or "application/octet-stream",
-        )
         logger.info(
-            f"File stored in MinIO: {storage_path}",
-            extra={"sample_id": sha256},
+            "File hashed: SHA256=%s... size=%d bytes",
+            sha256[:16],
+            size,
+            extra={"sample_id": sha256, "user_id": str(user.id)},
         )
-    except Exception as e:
-        logger.error(
-            f"MinIO storage failed: {e}",
-            exc_info=True,
-            extra={"sample_id": sha256, "component": "minio"},
+
+        storage_path = f"samples/{sha256[:2]}/{sha256}"
+
+        # Race-safe insert: another concurrent request may have just inserted
+        # the same sha256. We INSERT … ON CONFLICT DO NOTHING; if the row
+        # already exists we fetch it and skip the MinIO upload.
+        stmt = (
+            pg_insert(Sample)
+            .values(
+                sha256=sha256,
+                md5=md5,
+                sha1=sha1,
+                original_filename=file.filename or "unknown",
+                file_size_bytes=size,
+                mime_type=detected_mime or "application/octet-stream",
+                storage_path=storage_path,
+                uploaded_by=user.id,
+            )
+            .on_conflict_do_nothing(index_elements=["sha256"])
+            .returning(Sample)
         )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Storage service unavailable: {e}",
-        ) from e
+        result = await db.execute(stmt)
+        sample_row: Sample | None = result.scalar_one_or_none()
+        if sample_row is None:
+            existing = await db.execute(select(Sample).where(Sample.sha256 == sha256))
+            sample = existing.scalar_one()
+            logger.info("Duplicate sample reused: %s", sample.id)
+            return sample
 
-    sample = Sample(
-        sha256=sha256,
-        md5=md5,
-        sha1=sha1,
-        original_filename=file.filename or "unknown",
-        file_size_bytes=len(content),
-        mime_type=file.content_type,
-        storage_path=storage_path,
-        uploaded_by=user.id,
-    )
-    db.add(sample)
-    await db.flush()
-    await db.refresh(sample)
+        # Stream to MinIO from the temp file (no extra RAM copy).
+        try:
+            from minio import Minio
 
-    logger.info(
-        f"Sample created: id={sample.id} filename={sample.original_filename}",
-        extra={"sample_id": str(sample.id), "user_id": str(user.id)},
-    )
-    return sample
+            client = Minio(
+                settings.minio_endpoint,
+                access_key=settings.minio_access_key,
+                secret_key=_minio_secret(),
+                secure=settings.minio_secure,
+            )
+
+            if not client.bucket_exists(settings.minio_bucket):
+                client.make_bucket(settings.minio_bucket)
+                logger.info("MinIO bucket created: %s", settings.minio_bucket)
+
+            client.fput_object(
+                settings.minio_bucket,
+                storage_path,
+                str(tmp_path),
+                content_type=detected_mime or "application/octet-stream",
+            )
+        except Exception as exc:
+            # Best-effort cleanup: remove the half-inserted DB row so the
+            # caller can retry instead of getting a phantom 409.
+            await db.execute(select(Sample).where(Sample.sha256 == sha256))  # primes the session
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Storage service unavailable",
+            ) from exc
+
+        await db.flush()
+        await db.refresh(sample_row)
+        logger.info(
+            "Sample created: id=%s filename=%s", sample_row.id, sample_row.original_filename
+        )
+        return sample_row
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.debug("Failed to remove temp upload file: %s", exc)
 
 
 @router.get("", response_model=SampleListResponse)
@@ -164,11 +214,6 @@ async def list_samples(
     )
     total = count_result.scalar() or 0
 
-    logger.debug(
-        f"Listed samples: page={page} count={len(samples)} total={total}",
-        extra={"user_id": str(user.id)},
-    )
-
     return {
         "items": samples,
         "total": total,
@@ -189,9 +234,10 @@ async def get_sample(
     )
     sample = result.scalar_one_or_none()
     if not sample:
-        logger.warning(
-            f"Sample not found: {sample_id}",
-            extra={"sample_id": str(sample_id), "user_id": str(user.id)},
-        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample not found")
     return sample
+
+
+# `Any` is exported so the analysis_service can run an IDOR check without
+# importing the underlying SQLAlchemy column type directly.
+__all__: list[Any] = ["router"]

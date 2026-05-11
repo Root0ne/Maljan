@@ -26,13 +26,16 @@ class OpenAIProvider:
     ) -> BaseChatModel:
         from langchain_openai import ChatOpenAI
 
-        api_key = self._config.llm.openai.api_key
-        if not api_key:
+        secret = self._config.llm.openai.api_key
+        if not secret:
             raise LLMError("OPENAI_API_KEY is not set but provider is 'openai'.")
 
+        from pydantic import SecretStr
+
+        api_key = secret if isinstance(secret, SecretStr) else SecretStr(str(secret))
         build_kwargs: dict[str, Any] = {
             "model": model,
-            "api_key": api_key,  # type: ignore[dict-item]
+            "api_key": api_key,
             "temperature": temperature,
             **kwargs,
         }

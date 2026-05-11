@@ -112,27 +112,92 @@ class MCPLangChainToolkit:
 
         args_schema = create_model(f"{mcp_tool.name}Schema", **properties)  # type: ignore[call-overload]
 
-        # The actual function that will be executed
+        tool_name = mcp_tool.name
+
         async def arun_tool(**kwargs: Any) -> str:
             if not self.session:
-                return "Error: MCP session is not active."
+                # Structured marker so the agent prompt can detect "no session"
+                # without parsing free-form text.
+                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
             try:
-                result = await self.session.call_tool(mcp_tool.name, arguments=kwargs)
+                result = await self.session.call_tool(tool_name, arguments=kwargs)
                 if result.isError:
-                    return f"Error from tool: {result.content}"
-                # Join content parts (usually TextContent)
-                output = "\n".join([c.text for c in result.content if hasattr(c, "text")])
+                    return (
+                        f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
+                        f'"detail": {result.content!r}}}'
+                    )
+                output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
                 return self._apply_output_guardrail(output)
-            except Exception as e:
-                return f"Tool execution failed: {str(e)}"
+            except Exception as exc:
+                logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
+                return (
+                    f'{{"tool_error": "exception", "tool": "{tool_name}", '
+                    f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
+                )
+
+        # Compress description to reduce ReAct context bloat
+        raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
+        description = self._compress_description(mcp_tool.name, raw_desc)
 
         return StructuredTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
             coroutine=arun_tool,
             name=mcp_tool.name,
-            description=mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server.",
+            description=description,
             args_schema=args_schema,
         )
+
+    def _compress_description(self, name: str, description: str) -> str:
+        """Add a category tag and truncate to keep ReAct context lean."""
+        prefix = name.split("_")[0]
+
+        category_map: dict[str, str] = {
+            "analyze": "ANALYZE",
+            "decompile": "ANALYZE",
+            "disassemble": "ANALYZE",
+            "detect": "ANALYZE",
+            "find": "ANALYZE",
+            "diff": "ANALYZE",
+            "compare": "ANALYZE",
+            "inspect": "ANALYZE",
+            "emulate": "ANALYZE",
+            "extract": "ANALYZE",
+            "list": "LIST",
+            "get": "LIST",
+            "search": "LIST",
+            "batch": "BATCH",
+            "bulk": "BATCH",
+            "run": "EXEC",
+            "rename": "MODIFY",
+            "create": "MODIFY",
+            "delete": "MODIFY",
+            "set": "MODIFY",
+            "apply": "MODIFY",
+            "modify": "MODIFY",
+            "remove": "MODIFY",
+            "move": "MODIFY",
+            "clear": "MODIFY",
+            "convert": "MODIFY",
+            "clone": "MODIFY",
+            "force": "MODIFY",
+            "open": "NAV",
+            "close": "NAV",
+            "save": "NAV",
+            "load": "NAV",
+            "switch": "NAV",
+            "validate": "CHECK",
+            "can": "CHECK",
+            "read": "READ",
+            "import": "IMPORT",
+            "server": "META",
+        }
+        cat = category_map.get(prefix, "TOOL")
+
+        clean = " ".join(description.split())
+        if len(clean) > 100:
+            clean = clean[:97] + "..."
+
+        return f"[{cat}] {clean}"
 
     def _apply_output_guardrail(self, output: str) -> str:
         """Limit tool output size to prevent LLM context overflow.

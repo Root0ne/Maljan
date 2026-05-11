@@ -286,8 +286,14 @@ class BinaryChunker:
         for seg in safe_segments:
             if current_len + len(seg) > self._max_chars and current_parts:
                 bins.append("\n".join(current_parts))
-                # Carry the last segment as overlap
-                tail = current_parts[-1][-self._overlap_chars :] if self._overlap_chars else ""
+                # Carry the last `_overlap_chars` characters of the bin we just
+                # closed as overlap — not just the last segment, so the upper
+                # context survives bin transitions.
+                if self._overlap_chars:
+                    closed_bin = bins[-1]
+                    tail = closed_bin[-self._overlap_chars :]
+                else:
+                    tail = ""
                 current_parts = [tail, seg] if tail else [seg]
                 current_len = len(tail) + len(seg)
             else:
@@ -305,10 +311,22 @@ class BinaryChunker:
         return self._bins_to_chunks(domain, windows, ChunkStrategy.SLIDING_WINDOW)
 
     def _raw_sliding_windows(self, text: str) -> list[str]:
-        """Split text into overlapping fixed-size character windows."""
+        """Split text into overlapping fixed-size character windows.
+
+        Guards against pathological configurations: ``overlap >= max_chars``
+        would otherwise create an infinite loop. We clamp the step to at
+        least 1/4 of ``max_chars`` and log a warning.
+        """
         step = self._max_chars - self._overlap_chars
-        if step <= 0:
-            step = self._max_chars  # degenerate config guard
+        min_step = max(1, self._max_chars // 4)
+        if step < min_step:
+            logger.warning(
+                "BinaryChunker overlap (%d) too large for max_chars (%d); clamping step to %d.",
+                self._overlap_chars,
+                self._max_chars,
+                min_step,
+            )
+            step = min_step
         windows: list[str] = []
         start = 0
         while start < len(text):

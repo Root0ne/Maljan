@@ -26,13 +26,17 @@ class AnthropicProvider:
     ) -> BaseChatModel:
         from langchain_anthropic import ChatAnthropic  # type: ignore[import-untyped]
 
-        api_key = self._config.llm.anthropic.api_key
-        if not api_key:
+        secret = self._config.llm.anthropic.api_key
+        if not secret:
             raise LLMError("ANTHROPIC_API_KEY is not set but provider is 'anthropic'.")
+
+        from pydantic import SecretStr
+
+        api_key = secret if isinstance(secret, SecretStr) else SecretStr(str(secret))
 
         return ChatAnthropic(
             model_name=model,
-            api_key=api_key,  # type: ignore[arg-type]
+            api_key=api_key,
             temperature=temperature,
             **kwargs,
         )

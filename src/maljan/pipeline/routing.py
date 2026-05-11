@@ -2,16 +2,23 @@
 
 Determines whether to continue iterating (revision) or proceed to the judge.
 
-Phase 1: Sycophancy-aware routing — sycophancy detection overrides premature consensus.
-Phase 2: Adaptive termination — replaces a fixed round-count exit with a statistical
-         convergence detector based on a rolling standard deviation window over the
-         per-round mean-confidence values stored in `state["confidence_history"]`.
+Decision priority (highest to lowest):
+  1. Hard iteration limit — unconditional judge.
+  2. Sycophancy override — if sycophancy AND consensus, force revision.
+  3. Genuine LLM consensus — judge.
+  4. Adaptive termination — statistical confidence convergence → judge.
+  5. Default → revision.
 
-Convergence criterion (Phase 2):
-  - Window: last CONFIDENCE_WINDOW rounds
-  - Condition: std(window) < CONVERGENCE_STD_THRESHOLD AND mean(window) >= MIN_CONFIDENCE
-  - Rationale: SELENE (arXiv) showed adaptive stopping reduces token cost ~50% without
-    sacrificing accuracy. Rolling std is dependency-free and robust for 3-5 round windows.
+Convergence criterion:
+  - Window: last CONFIDENCE_WINDOW finite values.
+  - Sample std (n-1 in denominator) < CONVERGENCE_STD_THRESHOLD.
+  - Mean(window) >= MIN_CONVERGENCE_CONFIDENCE.
+  - NaN / inf values are filtered out before computation; if the resulting
+    window is too short, the loop continues.
+
+Rationale: SELENE (arXiv) showed adaptive stopping reduces token cost ~50%
+without sacrificing accuracy. Sample std (Bessel-corrected) is the standard
+statistical estimator for small windows.
 """
 
 from __future__ import annotations
@@ -22,25 +29,23 @@ from maljan.core.config import Settings
 from maljan.core.logger import logger
 from maljan.pipeline.state import AnalysisState
 
-# Number of consecutive rounds to examine for convergence
 CONFIDENCE_WINDOW: int = 3
-
-# Std threshold below which confidence is considered stable
 CONVERGENCE_STD_THRESHOLD: float = 0.04
-
-# Minimum mean confidence required to declare stable convergence
-# (prevents declaring convergence at a stably-low confidence like 0.3)
 MIN_CONVERGENCE_CONFIDENCE: float = 0.70
 
 
-def _rolling_std(values: list[float]) -> float:
-    """Pure-Python rolling standard deviation over a list of floats."""
+def _sample_std(values: list[float]) -> float:
+    """Sample (Bessel-corrected) standard deviation. ``inf`` if n<2."""
     n = len(values)
     if n < 2:
         return float("inf")
     mean = sum(values) / n
-    variance = sum((x - mean) ** 2 for x in values) / n
+    variance = sum((x - mean) ** 2 for x in values) / (n - 1)
     return math.sqrt(variance)
+
+
+def _finite(values: list[float]) -> list[float]:
+    return [v for v in values if math.isfinite(v)]
 
 
 def is_confidence_stable(
@@ -49,25 +54,17 @@ def is_confidence_stable(
     std_threshold: float = CONVERGENCE_STD_THRESHOLD,
     min_confidence: float = MIN_CONVERGENCE_CONFIDENCE,
 ) -> bool:
-    """Return True if the agent consensus confidence has statistically stabilized.
+    """Return True if recent confidence values have statistically stabilized.
 
-    Requires at least `window` rounds of history. The confidence must also be
-    above `min_confidence` to rule out stable low-confidence deadlocks.
-
-    Args:
-        confidence_history: Per-round mean-confidence values (growing list).
-        window: How many recent rounds to examine.
-        std_threshold: Maximum allowed standard deviation to declare stability.
-        min_confidence: Minimum mean confidence to accept stability.
-
-    Returns:
-        True if confidence is stable and high enough to finalize.
+    NaN / inf entries are dropped before assessment. Requires at least
+    ``window`` finite values.
     """
-    if len(confidence_history) < window:
+    finite_history = _finite(confidence_history)
+    if len(finite_history) < window:
         return False
 
-    recent = confidence_history[-window:]
-    std = _rolling_std(recent)
+    recent = finite_history[-window:]
+    std = _sample_std(recent)
     mean = sum(recent) / len(recent)
 
     stable = std < std_threshold and mean >= min_confidence
@@ -81,24 +78,19 @@ def is_confidence_stable(
         )
     else:
         logger.debug(
-            "Adaptive termination: not yet stable (std=%.4f, mean=%.3f, history_len=%d).",
+            "Adaptive termination: not yet stable "
+            "(std=%.4f, std_threshold=%.2f, mean=%.3f, min=%.2f, n=%d).",
             std,
+            std_threshold,
             mean,
-            len(confidence_history),
+            min_confidence,
+            len(finite_history),
         )
     return stable
 
 
 class ConsensusRouter:
-    """Routes the workflow based on consensus detection and iteration limits.
-
-    Decision priority (highest to lowest):
-      1. Hard iteration limit — always sends to judge regardless of other conditions.
-      2. Sycophancy override — if sycophancy detected AND consensus, force revision.
-      3. Genuine LLM consensus (no sycophancy) — proceed to judge.
-      4. Adaptive termination — confidence history is statistically stable → judge.
-      5. Default — continue with revision.
-    """
+    """Routes the workflow based on consensus detection and iteration limits."""
 
     def __init__(self, config: Settings) -> None:
         self._config = config
@@ -115,12 +107,13 @@ class ConsensusRouter:
         confidence_history: list[float] = state.get("confidence_history") or []
         max_iter = self._config.negotiation.max_iterations
 
-        # 1. Hard limit always takes precedence
+        # 1. Hard limit always wins.
         if iteration >= max_iter:
             logger.info("Hard iteration limit (%d) reached. Proceeding to judge.", max_iter)
             return "judge"
 
-        # 2. Sycophancy detected: override consensus and force another revision round
+        # 2. Sycophancy override: a "consensus" that comes with sycophancy
+        # is treated as premature → force another revision.
         if syco and consensus:
             logger.info(
                 "Sycophancy override: consensus premature at round %d. Forcing revision.",
@@ -128,12 +121,12 @@ class ConsensusRouter:
             )
             return "revision"
 
-        # 3. Genuine LLM consensus (no sycophancy)
+        # 3. Genuine consensus (no sycophancy).
         if consensus:
             logger.info("Genuine consensus reached at round %d.", iteration)
             return "judge"
 
-        # 4. Adaptive termination: statistical convergence on confidence_history
+        # 4. Adaptive termination on the confidence series.
         if is_confidence_stable(confidence_history):
             logger.info(
                 "Adaptive termination triggered at round %d (stable confidence).", iteration

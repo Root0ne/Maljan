@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from maljan.core.exceptions import ProjectRootNotFoundError
+
 # Markers that identify the project root directory
 _ROOT_MARKERS: tuple[str, ...] = ("pyproject.toml", ".git")
 
@@ -39,9 +41,7 @@ def get_project_root(max_up: int = 8) -> Path:
         if parent == current:
             break
         current = parent
-    raise RuntimeError(
-        f"Could not locate project root (looked for {_ROOT_MARKERS})"
-    )
+    raise ProjectRootNotFoundError(f"Could not locate project root (looked for {_ROOT_MARKERS})")
 
 
 def resolve_mcp_args(args: list[str]) -> list[str]:

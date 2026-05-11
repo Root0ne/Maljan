@@ -50,14 +50,14 @@ Phase 7.1 additions (Dynamic Schema Pruning):
 
 from __future__ import annotations
 
-import json
-import re
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.analysis.schema_pruner import get_pruned_schema_hint, infer_malware_category
+from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
@@ -97,14 +97,14 @@ class JudgeAgent:
         from maljan.agents.mcp_client import MCPLangChainToolkit
         from maljan.core.paths import get_project_root
 
-        project_root = str(get_project_root())
-        server_script = os.path.join(project_root, "threatintel-mcp", "server.py")
+        project_root = get_project_root()
+        server_script = str(project_root / "threatintel-mcp" / "server.py")
 
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[server_script],
             env=os.environ.copy(),
-            cwd=os.path.join(project_root, "threatintel-mcp"),
+            cwd=str(project_root / "threatintel-mcp"),
         )
 
         toolkit = MCPLangChainToolkit(server_params)
@@ -129,8 +129,6 @@ class JudgeAgent:
         from langchain_core.messages import HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
-        from maljan.core.config import settings
-
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
 
         agent_executor = create_react_agent(self.llm, self.tools)
@@ -144,7 +142,7 @@ class JudgeAgent:
             elif role == "human":
                 messages.append(HumanMessage(content=content))
 
-        timeout = settings.react_agent_timeout
+        timeout = get_settings().react_agent_timeout
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
             timeout,
@@ -154,7 +152,7 @@ class JudgeAgent:
             result = await asyncio.wait_for(
                 agent_executor.ainvoke(
                     {"messages": messages},
-                    {"recursion_limit": settings.react_agent_max_steps},
+                    {"recursion_limit": get_settings().react_agent_max_steps},
                 ),
                 timeout=timeout,
             )
@@ -164,6 +162,20 @@ class JudgeAgent:
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             raise
+
+    @staticmethod
+    def _has_explicit_dissent(isr_reports: dict[str, AgentISR] | None) -> bool:
+        """Check if any agent has registered explicit dissent against peer findings.
+
+        When all dissent_items are empty, agents fundamentally agree on the
+        evidence — the mediator only needs to confirm consensus, not run
+        ThreatIntel tools to resolve disputes.
+        """
+        if not isr_reports:
+            return True  # conservative: no ISR data means we can't tell
+        return any(
+            bool(isr.dissent_items) for isr in isr_reports.values() if isinstance(isr, AgentISR)
+        )
 
     async def mediate(
         self,
@@ -176,6 +188,11 @@ class JudgeAgent:
         Accepts a generic dict of agent reports so any number of agents can
         participate without requiring changes to this method's signature.
 
+        Fast path: when no explicit dissent is present in the ISRs, the mediator
+        skips the expensive ReAct tool loop and uses a single LLM call to
+        produce the structured verdict. ThreatIntel tools are only invoked when
+        agents actually disagree on specific indicators.
+
         Args:
             reports: Mapping of agent name to their latest report text.
             history: Accumulated negotiation arguments from prior rounds.
@@ -187,7 +204,7 @@ class JudgeAgent:
             Tuple of (AgentArgument with mediator findings, bool indicating consensus).
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
-        await self._initialize_mcp_client()
+        needs_tools = self._has_explicit_dissent(isr_reports)
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
@@ -210,22 +227,43 @@ class JudgeAgent:
                 "system",
                 "You are the Lead Cyber Security Mediator. Your task is to compare "
                 "all expert analyst reports and identify explicit contradictions. "
-                "You have access to Threat Intelligence tools to verify disputed IPs, domains, or hashes. "
-                "Use these tools if agents disagree on whether an indicator is malicious.\n\n"
-                "Write a detailed summary of your findings, including specific contradictions, "
+                + (
+                    "You have access to Threat Intelligence tools to verify disputed IPs, domains, or hashes. "
+                    "Use these tools if agents disagree on whether an indicator is malicious.\n\n"
+                    if needs_tools
+                    else "No Threat Intelligence tools are needed — agents show no explicit dissent.\n\n"
+                )
+                + "Write a detailed summary of your findings, including specific contradictions, "
                 "resolved issues, and your overall confidence.",
             ),
             (
                 "human",
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
-                "Analyze the reports, use threat intel tools if needed, and summarize your verdict.",
+                "Analyze the reports and summarize your verdict.",
             ),
         ]
 
-        tool_result_text = await self.execute_tool_loop(prompt_messages)
+        if needs_tools:
+            self.logger.info("Mediator: explicit dissent detected — running ReAct tool loop.")
+            await self._initialize_mcp_client()
+            reasoning_text = await self.execute_tool_loop(prompt_messages)
+        else:
+            self.logger.info("Mediator: no dissent — fast path (single LLM call).")
+            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            try:
+                response = await asyncio.wait_for(
+                    (prompt | self.llm).ainvoke({}),
+                    timeout=float(get_settings().react_agent_timeout),
+                )
+            except TimeoutError:
+                self.logger.error("Mediator fast-path timed out. Falling back to tool loop.")
+                await self._initialize_mcp_client()
+                reasoning_text = await self.execute_tool_loop(prompt_messages)
+            else:
+                reasoning_text = str(response.content)
 
         # Now extract the final structured output from the detailed reasoning.
-        # IMPORTANT: tool_result_text may contain curly braces from LLM output
+        # IMPORTANT: reasoning_text may contain curly braces from LLM output
         # (e.g. JSON, {type}), so we use a template variable instead of f-string.
         extract_prompt = ChatPromptTemplate.from_messages(
             [
@@ -244,19 +282,10 @@ class JudgeAgent:
             ]
         )
 
-        # Attempt structured output; fall back to text-based extraction on failure
-        try:
-            llm_structured = self.llm.with_structured_output(MediatorVerdict)
-            verdict: MediatorVerdict = await (extract_prompt | llm_structured).ainvoke(  # type: ignore[assignment]
-                {"reasoning_log": tool_result_text}
-            )
-            if not isinstance(verdict, MediatorVerdict):
-                raise ValueError("Unexpected output type from structured LLM")
-        except Exception as exc:
-            self.logger.warning(
-                "Structured output failed (%s), falling back to text extraction.", exc
-            )
-            verdict = self._fallback_mediate(tool_result_text)
+        # Structured output extraction with bounded retry; if every attempt
+        # still fails, fall back to the regex-based extractor so the
+        # negotiation loop can keep running.
+        verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
 
         is_consensus = verdict.confidence >= CONSENSUS_THRESHOLD
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
@@ -312,75 +341,54 @@ class JudgeAgent:
         """
         self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
 
-        reports_text = "\n\n".join(
-            f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
-        )
+        # Build compact reports to avoid context bloat.
+        # Full reports can exceed 15K tokens; we truncate each to ~500 chars
+        # and only keep ISR claims + cascade summary.
+        report_parts: list[str] = []
+        for name, report in reports.items():
+            truncated = report[:500] + "..." if len(report) > 500 else report
+            report_parts.append(f"--- {name.upper()} ANALYST ---\n{truncated}")
+        reports_text = "\n\n".join(report_parts)
 
-        # Include ISR summaries for richer claim-level context
+        # Include ISR summaries (compact)
         if isr_reports:
-            isr_block = "\n\n".join(
-                f"[ISR] {isr.to_text_summary()}" for isr in isr_reports.values() if isr.claims
+            isr_block = "\n".join(
+                f"[{name}] domain={isr.domain} | "
+                f"claims={len(isr.claims)} | "
+                f"mean_conf={isr.mean_confidence:.2f}"
+                for name, isr in isr_reports.items()
+                if isr.claims
             )
             if isr_block:
-                reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+                reports_text += f"\n\n=== ISR SUMMARIES ===\n{isr_block}"
 
-        # Phase 4.2: ATT&CK TTP validation grounding block
-        validation_block = self._build_validation_block(isr_reports, attck_validator)
-        if validation_block:
-            reports_text = f"{reports_text}\n\n{validation_block}"
-
-        # Phase 4.3: Three-layer TTP cascade block
+        # Phase 4.3: Three-layer TTP cascade block (compact)
         cascade_block = self._build_cascade_block(cascade_summary)
         if cascade_block:
-            reports_text = f"{reports_text}\n\n{cascade_block}"
+            # Cascade blocks can be huge; keep only first 800 chars
+            reports_text = f"{reports_text}\n\nCASCADE:\n{cascade_block[:800]}"
 
-        # Phase 7.1: Dynamic schema pruning block
+        # Phase 7.1: Schema hint (compact)
         schema_hint = self._build_schema_hint(reports, isr_reports)
         if schema_hint:
-            reports_text = f"{reports_text}\n\n{schema_hint}"
+            reports_text = f"{reports_text}\n\n{schema_hint[:400]}"
 
-        # Phase 5: Long-term memory few-shot context block
-        memory_block = self._build_memory_context(isr_reports, memory_store)
-        if memory_block:
-            reports_text = f"{reports_text}\n\n{memory_block}"
+        # Phase 5: Long-term memory (skip for now to keep prompt lean)
+        # memory_block = self._build_memory_context(isr_reports, memory_store)
+        # if memory_block:
+        #     reports_text = f"{reports_text}\n\n{memory_block}"
 
-        has_grounding = bool(validation_block or cascade_block)
         verdict_system = (
-            "You are the Chief Malware Judge. Based on expert reports and "
-            "negotiation history, provide a final verdict. "
-            "You MUST map findings to MITRE ATT&CK techniques in the STIX Bundle "
-            "using AttackPattern objects.\n\n"
-            "STIX CONFIDENCE INTERVALS (Phase 7.2 requirement):\n"
-            "For every Relationship object in the Bundle, you MUST populate the "
-            "following custom fields to provide per-claim uncertainty quantification:\n"
-            "  x_maljan_confidence: float 0.0-1.0\n"
-            "    - 0.90-1.0  = HIGH   (3-layer consensus, strong direct evidence)\n"
-            "    - 0.70-0.89 = MEDIUM (2-layer corroboration, reliable evidence)\n"
-            "    - 0.50-0.69 = LOW    (single-layer, indirect evidence)\n"
-            "    - 0.00-0.49 = SPECULATIVE (inference only, no direct evidence)\n"
-            "  x_maljan_evidence_basis: one of 'static', 'dynamic', 'network', "
-            "'static+dynamic', 'dynamic+network', 'static+network', 'all', 'unknown'\n"
-            "  x_maljan_contributing_agents: list of agent IDs that observed "
-            "supporting evidence (e.g. ['static', 'dynamic'])\n"
-            "  x_maljan_technique_id: MITRE ATT&CK technique ID if applicable "
-            "(e.g. 'T1055.001'), otherwise null\n"
-            "Use 'unknown' for x_maljan_evidence_basis only when evidence source "
-            "cannot be determined from the reports."
+            "You are the Chief Malware Judge. Based on the expert reports below, "
+            "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
+            "RULES:\n"
+            "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
+            "- Omit technique ID if unsure.\n"
+            "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
+            "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
+            "and x_maljan_contributing_agents list.\n"
+            "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
         )
-        if has_grounding or schema_hint:
-            verdict_system += (
-                "\n\nIMPORTANT: Grounding data is included below. "
-                "You MUST NOT use any technique IDs marked as [HALLUCINATED]. "
-                "Use the suggested alternatives instead. "
-                "Prioritize [CONSENSUS] and [CORROBORATED] techniques from the cascade. "
-                "Review [SUSPICIOUS] mappings carefully before including them."
-            )
-
-        # Phase 7.2: Append cascade-derived confidence hints so LLM has
-        # pre-computed values to ground x_maljan_confidence fields.
-        confidence_hint_block = self._build_confidence_instruction(cascade_summary)
-        if confidence_hint_block:
-            verdict_system = f"{verdict_system}\n\n{confidence_hint_block}"
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -389,62 +397,234 @@ class JudgeAgent:
                     "human",
                     "Expert Reports:\n{reports}\n\n"
                     "Negotiation History:\n{history}\n\n"
-                    "Generate a comprehensive STIX 2.1 Bundle with per-claim "
-                    "confidence intervals on all Relationship objects.",
+                    "Return a JSON STIX 2.1 Bundle.",
                 ),
             ]
         )
 
-        result_text = await (prompt | self.llm).ainvoke(
-            {"reports": reports_text, "history": str(history)}
-        )
+        # Use a longer timeout for verdict (300s) but keep prompt small so it
+        # finishes well before that. Previous failures were caused by prompt
+        # bloat (15K+ tokens), not by model slowness per se.
+        timeout = max(float(get_settings().react_agent_timeout), 120)
+        self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
+        try:
+            result_text = await asyncio.wait_for(
+                (prompt | self.llm).ainvoke(
+                    {"reports": reports_text, "history": str(history)[:800]}
+                ),
+                timeout=timeout,
+            )
+        except TimeoutError:
+            self.logger.error("JudgeAgent verdict timed out after %ds.", timeout)
+            return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
 
         # Extract JSON from markdown code blocks or raw text
         raw = str(getattr(result_text, "content", result_text))
 
+        from maljan.utils.json_cleaner import safe_parse_json
 
-        # Try to find JSON in markdown code blocks
-        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        if json_match:
-            raw = json_match.group(1)
-        else:
-            # Try to find the first JSON object
-            json_match = re.search(r"(\{.*\})", raw, re.DOTALL)
-            if json_match:
-                raw = json_match.group(1)
+        data = safe_parse_json(raw)
+        if data is None:
+            self.logger.warning(
+                "LLM did not return valid JSON. Attempting text-based fallback Bundle."
+            )
+            bundle = self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return bundle
+
+        if not isinstance(data, dict):
+            self.logger.warning(
+                "LLM returned JSON that is not a dict (type=%s). Falling back to text.",
+                type(data).__name__,
+            )
+            bundle = self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return bundle
 
         try:
-            data = json.loads(raw)
-            # Filter out hallucinated T0000 technique IDs
+            # Filter out hallucinated / invalid technique IDs
             data = self._filter_invalid_technique_ids(data)
             return Bundle.model_validate(data)
         except Exception as e:
-            self.logger.warning("LLM did not return a valid Bundle: %s. Falling back to empty.", e)
-            return Bundle(objects=[])
+            self.logger.warning(
+                "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", e
+            )
+            bundle = self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return bundle
+
+    async def _extract_mediator_verdict(
+        self,
+        extract_prompt: ChatPromptTemplate,
+        reasoning_text: str,
+        max_attempts: int = 3,
+        base_delay: float = 0.5,
+    ) -> MediatorVerdict:
+        """Run ``with_structured_output`` with bounded exponential-backoff retry."""
+        llm_structured = self.llm.with_structured_output(MediatorVerdict)
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await (extract_prompt | llm_structured).ainvoke(
+                    {"reasoning_log": reasoning_text}
+                )
+                if isinstance(result, MediatorVerdict):
+                    return result
+                raise ValueError(
+                    f"Structured output produced unexpected type: {type(result).__name__}"
+                )
+            except Exception as exc:
+                last_exc = exc
+                self.logger.warning(
+                    "Structured mediator output failed (attempt %d/%d): %s",
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(base_delay * (2 ** (attempt - 1)))
+
+        self.logger.error(
+            "Structured mediator output exhausted retries (%d). Falling back to text extraction. "
+            "Last error: %s",
+            max_attempts,
+            last_exc,
+        )
+        return self._fallback_mediate(reasoning_text)
+
+    # ------------------------------------------------------------------
+    # Verdict keyword detection (used by the text fallback path)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _verdict_from_text(text: str) -> str:
+        """Token-level verdict extraction.
+
+        The previous implementation searched for ``"malware"`` and
+        ``"benign"`` as substrings, which let phrases like *"not malware"*
+        or *"likely not benign"* flip the result. We now tokenise into
+        word-shape segments and ignore negation neighbours.
+        """
+        import re
+
+        tokens = re.findall(r"[a-z]+", text.lower())
+        if not tokens:
+            return "Suspicious"
+
+        negators = {"not", "no", "non", "neither", "without", "isn't"}
+        for i, tok in enumerate(tokens):
+            if tok == "malware":
+                prev = tokens[i - 1] if i > 0 else ""
+                if prev not in negators and prev != "non":
+                    return "Malware"
+        for i, tok in enumerate(tokens):
+            if tok in {"benign", "clean"} or tok.startswith("non-malicious"):
+                prev = tokens[i - 1] if i > 0 else ""
+                if prev not in negators:
+                    return "Benign"
+        return "Suspicious"
 
     def _filter_invalid_technique_ids(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Remove objects with hallucinated T0000 technique IDs from the Bundle data.
+        """Remove objects with invalid / hallucinated technique IDs from the Bundle data.
 
-        T0000 is not a valid MITRE ATT&CK technique ID. Any object referencing
-        it is either removed (if it's the only reference) or the field is cleared.
+        Valid MITRE ATT&CK technique IDs match the pattern T#### or T####.###
+        (e.g. T1055, T1055.001). Anything else (T0000, T123, T12345, etc.) is
+        treated as hallucinated and the object is removed.
         """
+        import re
+
+        _VALID_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
         objects = data.get("objects", [])
         filtered: list[dict[str, Any]] = []
         removed = 0
         for obj in objects:
             tid = obj.get("x_maljan_technique_id", "")
-            if tid == "T0000":
+            if tid and not _VALID_TID_RE.match(tid):
                 removed += 1
                 self.logger.warning(
-                    "Removing STIX object %s with hallucinated T0000.",
+                    "Removing STIX object %s with invalid technique ID '%s'.",
                     obj.get("id", "unknown"),
+                    tid,
                 )
                 continue
             filtered.append(obj)
         if removed:
-            self.logger.info("Filtered %d objects with T0000 hallucination.", removed)
+            self.logger.info("Filtered %d objects with invalid technique IDs.", removed)
             data["objects"] = filtered
         return data
+
+    def _fallback_bundle_from_text(
+        self,
+        text: str,
+        reports: dict[str, str],
+        isr_reports: dict[str, AgentISR] | None = None,
+    ) -> Bundle:
+        """Build a minimal STIX Bundle when the LLM fails to produce valid JSON.
+
+        Extracts the verdict from the text response and creates a minimal Bundle
+        with an Identity, Malware, and Report object so the pipeline never
+        returns an empty Bundle.
+        """
+        from maljan.schemas.stix_models import Bundle
+
+        decision = self._verdict_from_text(text)
+
+        self.logger.info(
+            "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
+            decision,
+            len(text),
+        )
+
+        # Gather any valid technique IDs from the raw text and ISR claims
+        import re
+
+        _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
+        tids = set(_VALID_TID_RE.findall(text))
+        if isr_reports:
+            for isr in isr_reports.values():
+                for claim in isr.claims:
+                    if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
+                        tids.add(claim.technique_id)
+
+        objects: list[dict[str, Any]] = [
+            {
+                "type": "identity",
+                "id": "identity--maljan-judge",
+                "name": "Maljan Judge Agent",
+                "identity_class": "software",
+            },
+            {
+                "type": "malware",
+                "id": "malware--maljan-verdict",
+                "name": "analyzed-sample",
+                "malware_types": ["unknown"],
+                "is_family": False,
+                "description": f"Fallback verdict extracted from text: {decision}.",
+            },
+            {
+                "type": "report",
+                "id": "report--maljan-fallback",
+                "name": "Maljan Analysis Report (Fallback)",
+                "report_types": ["malware-analysis"],
+                "object_refs": ["malware--maljan-verdict"],
+                "description": text[:2000] if text else "No structured output available.",
+            },
+        ]
+
+        for tid in sorted(tids):
+            objects.append(
+                {
+                    "type": "attack-pattern",
+                    "id": f"attack-pattern--{tid.lower()}",
+                    "name": tid,
+                    "external_references": [
+                        {
+                            "source_name": "mitre-attack",
+                            "external_id": tid,
+                            "url": f"https://attack.mitre.org/techniques/{tid}",
+                        }
+                    ],
+                }
+            )
+
+        return Bundle.model_validate({"objects": objects})
 
     # ------------------------------------------------------------------
     # Private helpers

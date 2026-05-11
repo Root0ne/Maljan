@@ -4,52 +4,33 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 
-interface AnalysisConfig {
-  key: string;
-  label: string;
-  description: string;
-  type: "number" | "toggle" | "select";
-  value: number | boolean | string;
-  options?: string[];
-}
-
-const ANALYSIS_CONFIGS: AnalysisConfig[] = [
-  { key: "max_rounds", label: "Max Negotiation Rounds", description: "Maximum debate rounds between agents (0 = unlimited)", type: "number", value: 0 },
-  { key: "confidence_threshold", label: "Confidence Threshold", description: "Minimum consensus confidence to auto-finalize verdict", type: "number", value: 80 },
-  { key: "sandbox_timeout", label: "Sandbox Timeout (s)", description: "Maximum duration for dynamic analysis execution", type: "number", value: 300 },
-  { key: "enable_network", label: "Network Analysis", description: "Enable PCAP capture and network traffic analysis", type: "toggle", value: true },
-  { key: "enable_stix", label: "STIX Export", description: "Auto-generate STIX 2.1 bundles for each analysis", type: "toggle", value: true },
-  { key: "llm_model", label: "Primary LLM Model", description: "Model used for agent reasoning", type: "select", value: "gemini-2.5-pro", options: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"] },
-  { key: "enable_yara", label: "YARA Scanning", description: "Run YARA rules against submitted samples", type: "toggle", value: true },
-  { key: "enable_sigma", label: "Sigma Detection", description: "Apply Sigma rules to behavioral logs", type: "toggle", value: true },
-];
-
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<"general" | "apikeys" | "analysis">("general");
-  const [configs, setConfigs] = useState(ANALYSIS_CONFIGS);
+  const [activeTab, setActiveTab] = useState<"general" | "apikeys">("general");
 
   // General tab state
   const [user, setUser] = useState<{ full_name: string; email: string } | null>(null);
   const [userLoading, setUserLoading] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
 
   // API Keys tab state
   const [apiKeys, setApiKeys] = useState<ApiKeyDTO[]>([]);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<ApiKeyCreateDTO | null>(null);
 
   const tabs = [
     { key: "general" as const, label: "General" },
     { key: "apikeys" as const, label: "API Keys" },
-    { key: "analysis" as const, label: "Analysis Config" },
   ];
 
   useEffect(() => {
     if (activeTab === "general") {
       setUserLoading(true);
+      setUserError(null);
       api.getMe()
         .then((me) => setUser(me))
-        .catch(() => setUser({ full_name: "Admin User", email: "admin@maljan.local" }))
+        .catch((err: any) => setUserError(err.message || "Failed to load user profile."))
         .finally(() => setUserLoading(false));
     }
     if (activeTab === "apikeys") {
@@ -59,9 +40,10 @@ export default function SettingsPage() {
 
   function loadApiKeys() {
     setApiKeysLoading(true);
+    setApiKeysError(null);
     api.getApiKeys(1, 50)
       .then((res) => setApiKeys(res.items))
-      .catch(() => setApiKeys([]))
+      .catch((err: any) => setApiKeysError(err.message || "Failed to load API keys."))
       .finally(() => setApiKeysLoading(false));
   }
 
@@ -73,8 +55,8 @@ export default function SettingsPage() {
       setCreatedKey(key);
       setNewKeyName("");
       loadApiKeys();
-    } catch {
-      /* ignore */
+    } catch (err: any) {
+      alert(err.message || "Failed to create API key.");
     }
   }
 
@@ -83,13 +65,9 @@ export default function SettingsPage() {
     try {
       await api.revokeApiKey(keyId);
       loadApiKeys();
-    } catch {
-      /* ignore */
+    } catch (err: any) {
+      alert(err.message || "Failed to revoke API key.");
     }
-  }
-
-  function updateConfig(key: string, value: number | boolean | string) {
-    setConfigs((prev) => prev.map((c) => (c.key === key ? { ...c, value } : c)));
   }
 
   function formatDate(iso: string | null) {
@@ -132,13 +110,15 @@ export default function SettingsPage() {
             <div className="p-4 space-y-4">
               {userLoading ? (
                 <div className="text-xs text-text-muted">Loading...</div>
-              ) : (
+              ) : userError ? (
+                <div className="text-xs text-status-red">{userError}</div>
+              ) : user ? (
                 <>
                   <div>
                     <label className="block text-xs text-text-secondary mb-1.5">Full Name</label>
                     <input
                       type="text"
-                      defaultValue={user?.full_name || ""}
+                      defaultValue={user.full_name || ""}
                       readOnly
                       className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                     />
@@ -147,35 +127,15 @@ export default function SettingsPage() {
                     <label className="block text-xs text-text-secondary mb-1.5">Email</label>
                     <input
                       type="email"
-                      defaultValue={user?.email || ""}
+                      defaultValue={user.email || ""}
                       readOnly
                       className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                     />
                   </div>
                 </>
+              ) : (
+                <div className="text-xs text-text-muted">No user data available.</div>
               )}
-            </div>
-          </div>
-
-          <div className="bg-bg-surface border border-border rounded">
-            <div className="px-4 py-3 border-b border-border">
-              <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-                Application Info
-              </h2>
-            </div>
-            <div className="p-4 space-y-2">
-              {[
-                ["Version", "1.0.0-beta"],
-                ["Backend", "FastAPI 0.115.x"],
-                ["Frontend", "Next.js 16.2.4"],
-                ["Database", "PostgreSQL 16"],
-                ["Queue", "ARQ + Redis"],
-              ].map(([k, v]) => (
-                <div key={k} className="flex items-center text-xs">
-                  <span className="text-text-muted w-24">{k}</span>
-                  <span className="text-text-secondary font-mono">{v}</span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -219,6 +179,12 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+
+          {apiKeysError && (
+            <div className="p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+              {apiKeysError}
+            </div>
+          )}
 
           {/* Key list */}
           {apiKeysLoading ? (
@@ -269,69 +235,6 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Analysis Config Tab */}
-      {activeTab === "analysis" && (
-        <div className="max-w-2xl">
-          <div className="bg-bg-surface border border-border rounded">
-            <div className="px-4 py-3 border-b border-border">
-              <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-                Analysis Configuration
-              </h2>
-            </div>
-            <div className="divide-y divide-border-light">
-              {configs.map((cfg) => (
-                <div key={cfg.key} className="flex items-center justify-between px-4 py-3">
-                  <div className="flex-1 min-w-0 pr-4">
-                    <p className="text-sm text-text-primary">{cfg.label}</p>
-                    <p className="text-xs text-text-muted mt-0.5">{cfg.description}</p>
-                  </div>
-                  <div className="shrink-0">
-                    {cfg.type === "number" && (
-                      <input
-                        type="number"
-                        value={cfg.value as number}
-                        onChange={(e) => updateConfig(cfg.key, Number(e.target.value))}
-                        className="w-20 h-8 px-2 text-sm text-center bg-bg-deep border border-border rounded text-text-primary font-mono focus:border-accent focus:outline-none"
-                      />
-                    )}
-                    {cfg.type === "toggle" && (
-                      <button
-                        onClick={() => updateConfig(cfg.key, !(cfg.value as boolean))}
-                        className={`relative w-10 h-5 rounded-full transition-colors ${
-                          cfg.value ? "bg-accent" : "bg-bg-active"
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-text-primary transition-transform ${
-                            cfg.value ? "left-5" : "left-0.5"
-                          }`}
-                        />
-                      </button>
-                    )}
-                    {cfg.type === "select" && (
-                      <select
-                        value={cfg.value as string}
-                        onChange={(e) => updateConfig(cfg.key, e.target.value)}
-                        className="h-8 px-2 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-                      >
-                        {cfg.options?.map((opt) => (
-                          <option key={opt} value={opt}>{opt}</option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="px-4 py-3 border-t border-border flex justify-end">
-              <button className="h-8 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors">
-                Save Configuration
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

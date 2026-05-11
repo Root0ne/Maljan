@@ -21,6 +21,10 @@ from app.models.user import User
 logger = get_logger("service.analysis")
 
 
+class JobEnqueueError(RuntimeError):
+    """Raised when ARQ enqueue fails so the route can return 503."""
+
+
 class AnalysisService:
     """Orchestrates analysis job lifecycle and pipeline triggering."""
 
@@ -57,11 +61,16 @@ class AnalysisService:
         Raises:
             ValueError: If the sample doesn't exist.
         """
-        # Verify sample exists
-        result = await self.db.execute(select(Sample).where(Sample.id == sample_id))
+        # Verify sample exists AND belongs to the requesting user (IDOR guard).
+        result = await self.db.execute(
+            select(Sample).where(
+                Sample.id == sample_id,
+                Sample.uploaded_by == user.id,
+            )
+        )
         sample = result.scalar_one_or_none()
         if not sample:
-            raise ValueError(f"Sample {sample_id} not found")
+            raise ValueError(f"Sample {sample_id} not found or access denied")
 
         # Create job record
         job = AnalysisJob(
@@ -74,15 +83,17 @@ class AnalysisService:
         await self.db.flush()
         await self.db.refresh(job)
 
-        # Enqueue to ARQ worker
+        # Enqueue to ARQ worker. Failure here is **propagated** as a 503 by the
+        # route handler — silently returning a "failed" job would mislead the
+        # caller into believing the analysis was accepted.
         try:
             arq = await self._get_arq_redis()
             await arq.enqueue_job("run_analysis", str(job.id))
         except Exception as exc:
-            # If Redis is unavailable, mark job as failed
             job.status = "failed"
             job.error_message = f"Failed to enqueue job: {exc}"
             await self.db.flush()
+            raise JobEnqueueError(str(exc)) from exc
 
         return job
 

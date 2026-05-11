@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .venv-wsl
+**/.venv/
 
 # External MCP tool installations (not part of Maljan — install separately)
 external/
@@ -20,4 +21,23 @@ external/
 # attck_valid_ids.json IS committed (small); labeled sentences is not.
 data/attck_labeled_sentences.jsonl
 
+# Real malware samples (must never be committed to a public repo)
+samples/
+
+# Local analysis outputs
+reports/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.serena/cache/
+
+# Frontend
+node_modules/
+apps/web/.next/
+apps/web/out/
+
 *.log
+
+.claude/settings.local.json

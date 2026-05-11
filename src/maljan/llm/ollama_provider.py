@@ -29,5 +29,7 @@ class OllamaProvider:
             model=model,
             base_url=self._config.llm.ollama.base_url,
             temperature=temperature,
+            keep_alive=self._config.llm.ollama.keep_alive,
+            num_ctx=self._config.llm.ollama.num_ctx,
             **kwargs,
         )

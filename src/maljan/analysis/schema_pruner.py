@@ -327,10 +327,15 @@ def infer_malware_category(
     if best_score == 0.0:
         return MalwareCategory.UNKNOWN
 
-    # Check for tie: if second-best has same score, return UNKNOWN (ambiguous)
+    # Tolerance-based tie-break: treat the top two as a tie only when the
+    # second-best is within 10 % of the leader. Hybrid samples (e.g. an
+    # infostealer that also drops a RAT) would otherwise be permanently
+    # routed to UNKNOWN even though the leader is clearly dominant.
     sorted_scores = sorted(scores.values(), reverse=True)
-    if len(sorted_scores) >= 2 and sorted_scores[0] == sorted_scores[1]:  # noqa: PLR2004
-        return MalwareCategory.UNKNOWN
+    if len(sorted_scores) >= 2 and sorted_scores[0] > 0:
+        gap = (sorted_scores[0] - sorted_scores[1]) / sorted_scores[0]
+        if gap < 0.10:  # within 10 %  -> ambiguous
+            return MalwareCategory.UNKNOWN
 
     return best_category
 

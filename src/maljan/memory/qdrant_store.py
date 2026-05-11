@@ -36,12 +36,17 @@ from collections import Counter
 from datetime import UTC
 from typing import Any
 
+from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
 from maljan.memory.long_term_memory import StoredCase
 
 
-class QdrantNotAvailableError(ImportError):
-    """Raised when qdrant-client is not installed."""
+class QdrantNotAvailableError(MemoryStoreError, ImportError):
+    """Raised when qdrant-client is not installed.
+
+    Inherits from both MemoryStoreError (canonical Maljan hierarchy) and
+    ImportError so legacy ``except ImportError`` callers continue to work.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +278,7 @@ class QdrantStore:
             return False
 
     def _ensure_collection(self, VectorParams: Any, Distance: Any) -> None:
-        """Create the collection if it does not yet exist (idempotent)."""
+        """Create the collection if needed and validate its vector dimension."""
         if self._collection_ready:
             return
 
@@ -290,5 +295,24 @@ class QdrantStore:
                 self._collection,
                 _EMBED_DIM,
             )
+        else:
+            # Validate that an existing collection's vector dimension matches
+            # our embedding size — silent dim mismatch causes upserts to fail
+            # asynchronously later, which is much harder to debug.
+            try:
+                info = self._client.get_collection(self._collection)
+                vectors = getattr(getattr(info, "config", None), "params", None)
+                vp = getattr(vectors, "vectors", None) if vectors else None
+                actual = getattr(vp, "size", None) if vp else None
+                if actual is not None and actual != _EMBED_DIM:
+                    raise QdrantNotAvailableError(
+                        f"QdrantStore: collection '{self._collection}' has vector dim "
+                        f"{actual} but client expected {_EMBED_DIM}. Re-create the "
+                        "collection or change the embedding implementation."
+                    )
+            except QdrantNotAvailableError:
+                raise
+            except Exception as exc:
+                logger.debug("QdrantStore: collection dim probe failed (%s); continuing.", exc)
 
         self._collection_ready = True

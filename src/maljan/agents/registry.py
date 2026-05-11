@@ -11,6 +11,7 @@ The registry is module-level. When agent modules are imported (via
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from maljan.core.logger import logger
@@ -20,8 +21,10 @@ if TYPE_CHECKING:
 
     from maljan.agents.base_agent import BaseAnalyst
 
-# Module-level registry dict: agent_name -> (class, enabled)
+# Module-level registry dict: agent_name -> (class, enabled).
 _AGENT_REGISTRY: dict[str, tuple[type[BaseAnalyst], bool]] = {}
+_REGISTRY_LOCK = threading.Lock()
+_DISCOVERY_DONE = False
 
 
 def register_agent(name: str, enabled: bool = True):  # type: ignore[no-untyped-def]
@@ -36,19 +39,28 @@ def register_agent(name: str, enabled: bool = True):  # type: ignore[no-untyped-
     """
 
     def decorator(cls: type[BaseAnalyst]) -> type[BaseAnalyst]:
-        if name in _AGENT_REGISTRY:
-            logger.warning(f"Agent '{name}' is being re-registered (overwriting).")
-        _AGENT_REGISTRY[name] = (cls, enabled)
+        with _REGISTRY_LOCK:
+            if name in _AGENT_REGISTRY:
+                logger.debug("Agent '%s' re-registered (overwriting).", name)
+            _AGENT_REGISTRY[name] = (cls, enabled)
         return cls
 
     return decorator
 
 
 def discover_agents() -> None:
-    """Import all built-in agent modules to trigger @register_agent decorators."""
-    import maljan.agents.dynamic_analyst  # noqa: F401
-    import maljan.agents.network_analyst  # noqa: F401
-    import maljan.agents.static_analyst  # noqa: F401
+    """Import all built-in agent modules once to trigger @register_agent."""
+    global _DISCOVERY_DONE
+    if _DISCOVERY_DONE:
+        return
+    with _REGISTRY_LOCK:
+        if _DISCOVERY_DONE:
+            return
+        import maljan.agents.dynamic_analyst  # noqa: F401
+        import maljan.agents.network_analyst  # noqa: F401
+        import maljan.agents.static_analyst  # noqa: F401
+
+        _DISCOVERY_DONE = True
 
 
 class AgentRegistry:
@@ -78,4 +90,3 @@ class AgentRegistry:
         """Instantiate a registered agent with the given LLM."""
         cls = self.get_class(name)
         return cls(llm=llm, name=name)
-

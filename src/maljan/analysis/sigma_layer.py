@@ -207,7 +207,7 @@ def _classify_log_source(log_source: str, product: str) -> str:
     """Normalize log source identifier to canonical string."""
     ls = log_source.lower()
     pr = product.lower()
-    if "sysmon" in ls or pr == "windows" and "process" in ls:
+    if "sysmon" in ls or (pr == "windows" and "process" in ls):
         return "sysmon"
     if "security" in ls or "4688" in ls or "4624" in ls:
         return "windows_security"

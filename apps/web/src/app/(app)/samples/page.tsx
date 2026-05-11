@@ -23,13 +23,6 @@ function mapSample(s: SampleDTO): SampleRow {
   };
 }
 
-const MOCK_SAMPLES: SampleRow[] = [
-  { id: "11111111-1111-1111-1111-111111111111", filename: "emotet_dropper.exe", sha256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", file_size: 245760, created_at: new Date(Date.now() - 86400000).toISOString() },
-  { id: "22222222-2222-2222-2222-222222222222", filename: "lockbit3_ransom.dll", sha256: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", file_size: 512000, created_at: new Date(Date.now() - 172800000).toISOString() },
-  { id: "33333333-3333-3333-3333-333333333333", filename: "cobalt_beacon.bin", sha256: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", file_size: 102400, created_at: new Date(Date.now() - 259200000).toISOString() },
-  { id: "44444444-4444-4444-4444-444444444444", filename: "qakbot_loader.js", sha256: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5", file_size: 8192, created_at: new Date(Date.now() - 345600000).toISOString() },
-];
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -47,10 +40,11 @@ function formatDate(dateStr: string): string {
 }
 
 export default function SamplesPage() {
-  const [samples, setSamples] = useState<SampleRow[]>(MOCK_SAMPLES);
+  const [samples, setSamples] = useState<SampleRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [apiAvailable, setApiAvailable] = useState(false);
   const [detailSample, setDetailSample] = useState<SampleDTO | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -60,9 +54,10 @@ export default function SamplesPage() {
       try {
         const res = await api.getSamples();
         setSamples(res.items.map(mapSample));
-        setApiAvailable(true);
-      } catch {
-        /* use mock data */
+      } catch (err: any) {
+        setError(err.message || "Failed to load samples.");
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
@@ -73,7 +68,6 @@ export default function SamplesPage() {
       await api.uploadSample(file);
       const res = await api.getSamples();
       setSamples(res.items.map(mapSample));
-      setApiAvailable(true);
     } catch (error: any) {
       alert(`Upload failed: ${error.message || "Unknown error"}`);
     } finally {
@@ -88,14 +82,32 @@ export default function SamplesPage() {
     if (file) handleUpload(file);
   };
 
+  if (loading) {
+    return (
+      <div className="animate-pulse space-y-6">
+        <div className="h-32 bg-bg-surface border border-border rounded" />
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="h-10 border-b border-border" />
+          <div className="p-4 space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-10 bg-bg-active rounded" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 text-sm text-status-red bg-status-red/10 border border-status-red/20 rounded">
+        {error}
+      </div>
+    );
+  }
+
   return (
     <div>
-      {!apiAvailable && (
-        <div className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
-          API not available. Showing demo data.
-        </div>
-      )}
-
       {/* Upload Area */}
       <div
         onDragOver={(e) => {
@@ -145,67 +157,73 @@ export default function SamplesPage() {
             Samples &mdash; {samples.length} files
           </h2>
         </div>
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-20">Size</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border-light">
-            {samples.map((s) => (
-              <tr key={s.id} className="hover:bg-bg-hover transition-colors">
-                <td className="px-4 py-2.5">
-                  <span className="text-sm text-text-primary">{s.filename}</span>
-                </td>
-                <td className="px-4 py-2.5">
-                  <code className="text-xs text-text-secondary font-mono">
-                    {s.sha256.slice(0, 16)}...
-                  </code>
-                </td>
-                <td className="px-4 py-2.5">
-                  <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
-                </td>
-                <td className="px-4 py-2.5">
-                  <span className="text-xs text-text-secondary">{formatDate(s.created_at)}</span>
-                </td>
-                <td className="px-4 py-2.5">
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={async () => {
-                        try {
-                          const detail = await api.getSample(s.id);
-                          setDetailSample(detail);
-                        } catch {
-                          /* demo mode */
-                        }
-                      }}
-                      className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
-                    >
-                      Details
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const job = await api.createJob(s.id);
-                          window.location.href = `/analysis/${job.id}/live`;
-                        } catch {
-                          /* demo mode */
-                        }
-                      }}
-                      className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
-                    >
-                      Analyze
-                    </button>
-                  </div>
-                </td>
+        {samples.length === 0 ? (
+          <div className="px-4 py-8 text-center text-xs text-text-muted">
+            No samples uploaded yet.
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
+                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
+                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-20">Size</th>
+                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
+                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {samples.map((s) => (
+                <tr key={s.id} className="hover:bg-bg-hover transition-colors">
+                  <td className="px-4 py-2.5">
+                    <span className="text-sm text-text-primary">{s.filename}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <code className="text-xs text-text-secondary font-mono">
+                      {s.sha256.slice(0, 16)}...
+                    </code>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-xs text-text-secondary">{formatDate(s.created_at)}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const detail = await api.getSample(s.id);
+                            setDetailSample(detail);
+                          } catch (err: any) {
+                            alert(err.message || "Failed to load sample details.");
+                          }
+                        }}
+                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                      >
+                        Details
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const job = await api.createJob(s.id);
+                            window.location.href = `/analysis/${job.id}/live`;
+                          } catch (err: any) {
+                            alert(err.message || "Failed to start analysis.");
+                          }
+                        }}
+                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+                      >
+                        Analyze
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Sample Detail Modal */}

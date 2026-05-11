@@ -8,14 +8,19 @@ It picks up jobs from Redis and runs the full multi-agent analysis
 pipeline, streaming progress events via Redis PubSub.
 """
 
+import asyncio
+import tempfile
 import time
 import traceback
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
 from arq import cron  # noqa: F401 — for future scheduled tasks
+from arq.connections import RedisSettings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -80,14 +85,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     db_session: async_sessionmaker = ctx["db_session"]
 
     async with db_session() as db:
+        job = None  # Ensure job is defined for the except block
         try:
             # ── 1. Load job ──────────────────────────────────────
             from app.models.job import AnalysisJob
             from app.models.sample import Sample
 
-            result = await db.execute(
-                select(AnalysisJob).where(AnalysisJob.id == uuid.UUID(job_id))
-            )
+            try:
+                job_uuid = uuid.UUID(job_id)
+            except ValueError as exc:
+                logger.error(f"Invalid job_id UUID: {job_id}", extra={"job_id": job_id})
+                await _publish_event(redis_conn, job_id, "error", {"message": "Invalid job ID"})
+                return {"status": "error", "message": f"Invalid job ID: {exc}"}
+
+            result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
             job = result.scalar_one_or_none()
 
             if not job:
@@ -175,12 +186,82 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     {"agent": agent_name, "phase": "analyzing"},
                 )
 
+            # Download sample from MinIO for sandbox submission
+            temp_path: str | None = None
+            try:
+                from minio import Minio
+                from pydantic import SecretStr as _SecretStr
+
+                secret = settings.minio_secret_key
+                secret_value = (
+                    secret.get_secret_value() if isinstance(secret, _SecretStr) else str(secret)
+                )
+                minio_client = Minio(
+                    settings.minio_endpoint,
+                    access_key=settings.minio_access_key,
+                    secret_key=secret_value,
+                    secure=settings.minio_secure,
+                )
+                # Re-derive the storage path from the sha256 instead of trusting
+                # the value in the DB row (defence in depth against tampering).
+                derived_path = f"samples/{sample.sha256[:2]}/{sample.sha256}"
+                if sample.storage_path != derived_path:
+                    logger.warning(
+                        "Sample storage_path drift detected: db=%s expected=%s",
+                        sample.storage_path,
+                        derived_path,
+                    )
+                temp_path = str(Path(tempfile.gettempdir()) / sample.sha256)
+                minio_client.fget_object(
+                    settings.minio_bucket,
+                    derived_path,
+                    temp_path,
+                )
+                logger.info(
+                    "Downloaded sample from MinIO: %s -> %s",
+                    sample.storage_path,
+                    temp_path,
+                    extra={"job_id": job_id, "component": "minio"},
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to download sample from MinIO: %s. Sandbox submission skipped.",
+                    exc,
+                    extra={"job_id": job_id, "component": "minio"},
+                )
+                temp_path = None
+
             # Execute the asynchronous pipeline natively to
             # avoid "Event loop is closed" errors caused by threading mismatches.
-            pipeline_result = await app.arun(
-                file_hash=sample.sha256,
-                file_name=sample.original_filename,
-            )
+            # Heartbeat task keeps the job alive in the DB and logs progress.
+            heartbeat_stop_event = asyncio.Event()
+
+            async def _heartbeat() -> None:
+                while not heartbeat_stop_event.is_set():
+                    try:
+                        await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=60.0)
+                    except TimeoutError:
+                        logger.info(
+                            "Pipeline heartbeat: job=%s still running...",
+                            job_id,
+                            extra={"job_id": job_id, "component": "heartbeat"},
+                        )
+
+            heartbeat_task = asyncio.create_task(_heartbeat())
+
+            try:
+                pipeline_result = await app.arun(
+                    file_hash=sample.sha256,
+                    file_name=sample.original_filename,
+                    sample_path=temp_path,
+                )
+            finally:
+                heartbeat_stop_event.set()
+                try:
+                    heartbeat_task.cancel()
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
 
             # Announce that all analysts have finished (pipeline -> negotiation phase)
             for agent_name in registered_agents:
@@ -257,14 +338,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 else:
                     continue
 
+                # Derive agent confidence from claims (ISR has no overall_confidence field)
+                claims = isr_data.get("claims", [])
+                agent_confidence = 0.0
+                if claims:
+                    agent_confidence = sum(c.get("confidence", 0) for c in claims) / len(claims)
+
                 finding = AgentFinding(
                     report_id=report.id,
                     agent_name=agent_name,
                     domain=isr_data.get("domain", agent_name),
-                    claims=isr_data.get("claims", []),
+                    claims=claims,
                     dissent_items=isr_data.get("dissent_items", []),
-                    revision_rounds=isr_data.get("revision_count", 0),
-                    final_confidence=isr_data.get("overall_confidence", 0.0),
+                    revision_rounds=isr_data.get("revision_round", 0),
+                    final_confidence=agent_confidence,
                 )
                 db.add(finding)
 
@@ -316,10 +403,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
 
             try:
-                job.status = "failed"
-                job.completed_at = datetime.now(UTC)
-                job.error_message = error_msg[:2000]
-                await db.commit()
+                if job is not None:
+                    job.status = "failed"
+                    job.completed_at = datetime.now(UTC)
+                    job.error_message = error_msg[:2000]
+                    await db.commit()
+                else:
+                    logger.warning(
+                        "Cannot update job status: job was never loaded (job_id=%s).",
+                        job_id,
+                        extra={"job_id": job_id},
+                    )
             except Exception as db_exc:
                 logger.error(
                     f"Failed to update job status: {db_exc}",
@@ -328,11 +422,27 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
                 await db.rollback()
 
+            # Do not leak tracebacks to clients — only emit an opaque error id
+            # that maps back to the structured log entry above.
+            import uuid as _uuid
+
+            error_id = _uuid.uuid4().hex
+            logger.error(
+                "Pipeline failure error_id=%s job=%s traceback=%s",
+                error_id,
+                job_id,
+                tb,
+                extra={"job_id": job_id, "error_id": error_id},
+            )
             await _publish_event(
                 redis_conn,
                 job_id,
                 "error",
-                {"status": "failed", "error": error_msg, "traceback": tb},
+                {
+                    "status": "failed",
+                    "error_id": error_id,
+                    "message": "Analysis failed. See server logs for details.",
+                },
             )
 
             return {"status": "failed", "error": error_msg}
@@ -436,11 +546,18 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
 
-    # Redis connection settings
-    redis_settings = None  # Will use ARQ defaults (localhost:6379)
+    # Parse Redis URL from app config so Docker networking works
+    _redis_parsed = urlparse(settings.redis_url)
+    redis_settings = RedisSettings(
+        host=_redis_parsed.hostname or "localhost",
+        port=_redis_parsed.port or 6379,
+        database=int((_redis_parsed.path or "/0").strip("/") or 0),
+    )
 
     # Worker tuning
-    max_jobs = 2  # Max concurrent analysis jobs
-    job_timeout = 1800  # 30 minutes max per analysis
+    # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.
+    # job_timeout=1800 (30 min) ensures hung jobs are killed instead of running forever.
+    max_jobs = 1
+    job_timeout = 1800
     max_tries = 1  # Don't retry failed analyses automatically
     health_check_interval = 30

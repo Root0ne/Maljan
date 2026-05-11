@@ -141,12 +141,14 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
         revision_round=max_round,
     )
 
+    keyed_kept = sum(1 for c in all_claims if c.technique_id)
+    unkeyed_kept = len(all_claims) - keyed_kept
     logger.info(
-        "Merged ISR for '%s': %d claims (%d with TTP, %d unkeyed), %d dissent items.",
+        "Merged ISR for '%s': %d claims kept (%d with TTP, %d unkeyed), %d dissent items.",
         agent_id,
         len(all_claims),
-        len(keyed_sorted[:MAX_MERGED_CLAIMS]),
-        len(unkeyed_sorted[: max(0, MAX_MERGED_CLAIMS - len(keyed_sorted))]),
+        keyed_kept,
+        unkeyed_kept,
         len(merged_dissent),
     )
 

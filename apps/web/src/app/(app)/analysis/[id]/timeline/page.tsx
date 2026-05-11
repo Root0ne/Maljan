@@ -124,11 +124,11 @@ export default function TimelineTab() {
 
   // Also use agent_findings as a fallback for the timeline (one entry per agent)
   const agentFallbackEntries: DebateEntry[] = debateEntries.length === 0
-    ? (report?.agent_findings ?? []).map((f, i) => ({
+    ? (report?.agent_findings ?? []).map((f) => ({
         round: 1,
         agent: f.agent_name,
-        position: confidenceToPosition(f.final_confidence),
-        confidence: Math.round(f.final_confidence),
+        position: confidenceToPosition(Math.round(f.final_confidence * 100)),
+        confidence: Math.round(f.final_confidence * 100),
         argument: `Agent completed analysis with ${f.revision_rounds} revision round(s). ${f.claims?.length ?? 0} claims recorded.`,
       }))
     : [];

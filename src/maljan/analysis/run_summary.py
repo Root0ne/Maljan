@@ -26,11 +26,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    pass
-
+from maljan.core.logger import logger
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -331,16 +329,24 @@ class RunSummaryBuilder:
         self._stix_object_count = stix_object_count
         return self
 
-    def set_negotiation(self, state: dict[str, Any]) -> RunSummaryBuilder:
-        """Extract negotiation metrics from the final pipeline state."""
+    def set_negotiation(
+        self,
+        state: dict[str, Any],
+        max_iterations: int | None = None,
+    ) -> RunSummaryBuilder:
+        """Extract negotiation metrics from the final pipeline state.
+
+        Args:
+            state: Final AnalysisState (subset OK).
+            max_iterations: Configured hard limit. If None, falls back to
+                ``iteration_count`` so the report stays self-consistent.
+        """
         confidence_history: list[float] = state.get("confidence_history") or []
         iteration_count: int = state.get("iteration_count", 0)
         is_consensus: bool = state.get("is_consensus", False)
         sycophancy_detected: bool = state.get("sycophancy_detected", False)
         discussion_history = state.get("discussion_history") or []
 
-        # Count sycophancy events from discussion history metadata
-        # (sycophancy_detected only reflects the last round)
         sycophancy_events = sum(
             1
             for arg in discussion_history
@@ -350,22 +356,22 @@ class RunSummaryBuilder:
         if sycophancy_detected and sycophancy_events == 0:
             sycophancy_events = 1
 
-        # Determine termination reason
         if is_consensus:
             termination_reason = "consensus"
         elif len(confidence_history) >= 3:
             recent = confidence_history[-3:]
             std = _rolling_std(recent)
-            if std < 0.02:
-                termination_reason = "convergence"
-            else:
-                termination_reason = "hard_limit"
+            termination_reason = "convergence" if std < 0.02 else "hard_limit"
         else:
             termination_reason = "hard_limit"
 
+        if max_iterations is None:
+            # Backward-compat: legacy callers passed state with "_max_iterations".
+            max_iterations = state.get("_max_iterations", iteration_count)
+
         self._negotiation = NegotiationMetrics(
             rounds_completed=iteration_count,
-            max_rounds=state.get("_max_iterations", iteration_count),
+            max_rounds=max_iterations,
             termination_reason=termination_reason,
             sycophancy_events=sycophancy_events,
             confidence_history=confidence_history,
@@ -404,8 +410,8 @@ class RunSummaryBuilder:
                 low_alignment=validation_summary.low_alignment,
                 hallucination_rate=validation_summary.hallucination_rate,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("set_validation_summary failed: %s", exc, exc_info=True)
         return self
 
     def set_cascade_summary(self, cascade_summary: Any, top_k: int = 5) -> RunSummaryBuilder:
@@ -429,8 +435,8 @@ class RunSummaryBuilder:
                 consensus_count=cascade_summary.consensus_count,
                 top_techniques=top_techniques,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("set_cascade_summary failed: %s", exc, exc_info=True)
         return self
 
     def build(self) -> RunSummary:

@@ -16,13 +16,15 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
 
     __tablename__ = "audit_log"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    # user_id is nullable: unauthenticated audit events (failed login) write
+    # the action even when no row in ``users`` matches the supplied email.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
     )
 
     action: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     resource_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    resource_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(INET, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

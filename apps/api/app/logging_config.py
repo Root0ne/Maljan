@@ -154,6 +154,10 @@ def setup_logging() -> None:
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("arq").setLevel(logging.INFO)
 
+    # Suppress known non-critical MCP stdio cancel-scope noise
+    # (anyio/nest_asyncio incompatibility in mcp client cleanup)
+    logging.getLogger("mcp.client.stdio").setLevel(logging.CRITICAL)
+
     # Log startup message
     logger = logging.getLogger("maljan.startup")
     logger.info(

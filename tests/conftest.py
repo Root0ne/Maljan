@@ -2,6 +2,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from maljan.app import MaljanApp
+
+
+@pytest.fixture
+def mock_maljan_app() -> MaljanApp:
+    """MaljanApp in mock mode for fast facade-level tests."""
+    return MaljanApp(mock=True)
+
 
 @pytest.fixture
 def mock_llm() -> MagicMock:

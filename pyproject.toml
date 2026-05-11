@@ -3,7 +3,7 @@ name = "maljan"
 version = "1.0.0"
 description = "Multi-Agent Malware Analysis Pipeline powered by LangGraph"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13, <3.14"
 dependencies = [
     "langchain-core>=1.2.25",
     "langchain-openai>=1.1.12",
@@ -49,6 +49,7 @@ yara = [
 
 [dependency-groups]
 dev = [
+    "fakeredis>=2.35.1",
     "mypy>=1.20.0",
     "pre-commit>=4.2.0",
     "pytest>=9.0.2",

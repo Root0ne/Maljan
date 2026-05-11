@@ -286,10 +286,15 @@ class ATTCKIndex:
             if term in self._idf  # ignore OOV terms
         }
 
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        """Lowercase, strip punctuation, remove stopwords."""
-        tokens = re.findall(r"\b[a-z][a-z0-9_-]{1,}\b", text.lower())
+    # Unicode-aware word matcher: includes any letter/number/underscore plus
+    # the dash separator commonly used in technique names. Minimum length 2
+    # keeps single-character noise out of the index.
+    _TOKEN_RE = re.compile(r"[\w][\w-]{1,}", flags=re.UNICODE)
+
+    @classmethod
+    def _tokenize(cls, text: str) -> list[str]:
+        """Lowercase, strip punctuation, remove stopwords (Unicode-aware)."""
+        tokens = cls._TOKEN_RE.findall(text.lower())
         return [t for t in tokens if t not in _STOPWORDS]
 
 

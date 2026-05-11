@@ -18,6 +18,7 @@ Layer weights:
   - dynamic: 0.45  (API calls / sandbox behaviours — hardest to spoof)
   - static:  0.35  (PE headers / strings / decompiled code)
   - network: 0.20  (weakest alone; strong corroborator)
+Unknown domains use DEFAULT_LAYER_WEIGHT = 0.25.
 
 Cross-layer multipliers:
   - 1 layer : 1.00 (no bonus — single point of evidence)
@@ -37,6 +38,7 @@ Usage:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -51,7 +53,6 @@ if TYPE_CHECKING:
 
 LAYER_WEIGHTS: dict[str, float] = {
     "yara": 0.90,  # deterministic signature matching (Layer 0)
-    "tief": 0.80,  # deterministic NLP classification (Layer 2)
     "sigma": 0.55,  # deterministic log-based rules (Sigma Layer 0)
     "dynamic": 0.45,  # sandbox behavioral evidence
     "static": 0.35,  # PE/decompiled code analysis
@@ -66,7 +67,7 @@ CROSS_LAYER_MULTIPLIERS: dict[int, float] = {
     1: 1.00,
     2: 1.25,
     3: 1.50,
-    4: 1.75,  # YARA + all 3 LLM domains
+    4: 1.75,  # YARA + Sigma + 2 LLM domains
     5: 1.90,  # YARA + Sigma + all 3 LLM domains
 }
 
@@ -254,11 +255,16 @@ class TTPCascadeEngine:
         # Step 1: Group claims by technique_id → domain → claims
         tech_domain_claims: dict[str, dict[str, list]] = {}
 
+        # Pre-filter invalid technique IDs so cascade only works with real TTPs.
+        _VALID_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
         for isr in isr_reports.values():
             for claim in isr.claims:
                 if claim.technique_id is None:
                     continue
                 tid = claim.technique_id
+                if not _VALID_TID_RE.match(tid):
+                    logger.debug("Skipping invalid technique_id '%s' from cascade.", tid)
+                    continue
                 dom: str = isr.domain  # type: ignore[assignment]
                 agent = isr.agent_id
 

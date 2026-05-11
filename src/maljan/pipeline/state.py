@@ -1,78 +1,57 @@
-"""Dynamic analysis state for the LangGraph workflow.
+"""Analysis state schema for the LangGraph workflow.
 
-The state uses a generic `reports` dict instead of hardcoded per-agent fields.
-When a new agent is registered, it writes to reports["agent_name"] automatically
-without requiring any state schema changes.
-
-Phase 1 additions:
-  - `isr_reports`: Structured ISR objects replacing raw text inter-agent passing.
-  - `sycophancy_detected`: Flag set when the sycophancy detector fires this round.
-  - `confidence_history`: Per-round mean-confidence snapshots for adaptive termination.
+The state uses agent-keyed dicts (reports, isr_reports) instead of hardcoded
+per-agent fields. Adding a new agent does NOT require any schema change.
 """
 
 import operator
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict, TypeVar
 
 from pydantic import BaseModel, Field
 
 from maljan.schemas.isr_models import AgentISR
 
+_V = TypeVar("_V")
+
 
 class AgentArgument(BaseModel):
-    """Represents a single argument/finding thrown by an agent during negotiation."""
+    """A single argument or finding raised by an agent during negotiation."""
 
     agent_name: str = Field(..., description="Name of the agent submitting the argument")
     finding: str = Field(..., description="The main finding or rebuttal")
     confidence_score: float = Field(0.0, description="Confidence of this specific argument (0-1)")
 
 
-def _merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    """LangGraph reducer: merge two dicts (right overwrites left keys)."""
-    merged = {**left}
-    merged.update(right)
-    return merged
-
-
-def _merge_isr_dicts(left: dict[str, AgentISR], right: dict[str, AgentISR]) -> dict[str, AgentISR]:
-    """LangGraph reducer for ISR dicts (right overwrites left keys)."""
-    merged = {**left}
+def _merge_dicts(left: dict[str, _V], right: dict[str, _V]) -> dict[str, _V]:
+    """LangGraph reducer: shallow merge; right keys overwrite left."""
+    merged: dict[str, _V] = {**left}
     merged.update(right)
     return merged
 
 
 class AnalysisState(TypedDict):
-    """Main state dictionary passed between all nodes in the LangGraph workflow.
-
-    Key design: `reports`, `revised_reports`, `isr_reports` are all generic
-    dicts keyed by agent name. Adding a new agent does NOT require changing
-    this schema.
-    """
+    """State dictionary passed between all nodes in the LangGraph workflow."""
 
     # Sample metadata
     file_hash: str
     file_name: str | None
-    sample_path: str | None  # Path to the original sample file (e.g. malware.exe)
-    # Full normalized sandbox report (network, behavior, target)
+    sample_path: str | None
     sandbox_report: dict[str, Any] | None
 
-    # Agent reports: {"static": "...", "dynamic": "...", "network": "...", ...}
-    # Legacy text format — kept for backward compatibility and LLM prompts.
+    # Per-agent text reports
     reports: Annotated[dict[str, str], _merge_dicts]
     revised_reports: Annotated[dict[str, str], _merge_dicts]
 
-    # Structured ISR reports: {"static": AgentISR, "dynamic": AgentISR, ...}
-    # Phase 1: agents populate this alongside their text reports.
-    isr_reports: Annotated[dict[str, AgentISR], _merge_isr_dicts]
+    # Per-agent structured ISR reports
+    isr_reports: Annotated[dict[str, AgentISR], _merge_dicts]
 
-    # Negotiation shared memory
+    # Mediator/argument log (append-only)
     discussion_history: Annotated[list[AgentArgument], operator.add]
 
-    # Sycophancy tracking
-    # True if the detector fired in the most recent negotiation round.
+    # Sycophancy detection flag for the latest negotiation round
     sycophancy_detected: bool
 
-    # Confidence history: list of per-round mean-confidence values across all agents.
-    # Used by the adaptive termination router (Phase 2).
+    # Per-round mean-confidence values for adaptive termination
     confidence_history: Annotated[list[float], operator.add]
 
     # Iteration tracking
@@ -82,10 +61,7 @@ class AnalysisState(TypedDict):
     # Final output
     final_decision: Literal["Malware", "Benign", "Suspicious"] | None
     judge_report: str | None
-    stix_output: dict | None
+    stix_output: dict[str, Any] | None
 
     # Observability: serialized RunSummary dict, populated after verdict generation.
-    run_summary: dict | None
-
-    # Internal: propagated so RunSummaryBuilder can read configured max iterations.
-    _max_iterations: int
+    run_summary: dict[str, Any] | None

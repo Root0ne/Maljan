@@ -19,6 +19,8 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -34,7 +36,7 @@ class OpenAIConfig(BaseModel):
     Kimi AI (Moonshot), DeepSeek, or Azure OpenAI.
     """
 
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     base_url: str | None = None
     expert_model: str = "gpt-4o-mini"
     judge_model: str = "gpt-4o"
@@ -43,7 +45,7 @@ class OpenAIConfig(BaseModel):
 class AnthropicConfig(BaseModel):
     """Anthropic-specific model selection."""
 
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     expert_model: str = "claude-sonnet-4-20250514"
     judge_model: str = "claude-sonnet-4-20250514"
 
@@ -52,8 +54,10 @@ class OllamaConfig(BaseModel):
     """Ollama (local) model selection."""
 
     base_url: str = "http://localhost:11434"
-    expert_model: str = "qwen2.5-coder:7b"
-    judge_model: str = "llama3.1:70b"
+    expert_model: str = "qwen3.5:9b"
+    judge_model: str = "qwen3.5:9b"
+    keep_alive: str = "30m"
+    num_ctx: int = 32768
 
 
 class GeminiConfig(BaseModel):
@@ -137,7 +141,7 @@ class NegotiationConfig(BaseModel):
     loops when adaptive convergence fails.
     """
 
-    max_iterations: int = 20
+    max_iterations: int = 5
     consensus_threshold: float = 0.85
 
 
@@ -208,11 +212,11 @@ class SandboxConfig(BaseModel):
 
     backend: str = "mock"  # "mock" | "cape2" | "triage"
     cape2_base_url: str = "http://localhost:8000"
-    cape2_api_token: str = ""
+    cape2_api_token: SecretStr = SecretStr("")
     cape2_timeout_seconds: int = 300
     cape2_poll_interval_seconds: int = 10
     # Hatching Triage sandbox (SaaS, free tier)
-    triage_api_token: str = ""
+    triage_api_token: SecretStr = SecretStr("")
     triage_base_url: str = "https://api.tria.ge"
     triage_timeout_seconds: int = 300
     triage_poll_interval_seconds: int = 15
@@ -341,19 +345,19 @@ class Settings(BaseSettings):
     max_token_limit: int = 128_000
 
     # ReAct agent execution limits
-    react_agent_timeout: int = 600  # seconds before agent loop times out
-    react_agent_max_steps: int = 50  # max LangGraph recursion steps
+    react_agent_timeout: int = 180  # seconds before agent loop times out
+    react_agent_max_steps: int = 10  # max LangGraph recursion steps
 
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx
     # ServiceContainer reads these and sets the OS env vars LangChain expects.
     langchain_tracing_v2: bool = False
-    langchain_api_key: str | None = None
+    langchain_api_key: SecretStr | None = None
     langchain_project: str = "maljan"
 
     # Flat shortcut env vars (backward compatibility with existing .env files)
-    openai_api_key: str | None = None
-    anthropic_api_key: str | None = None
+    openai_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
 
     def model_post_init(self, __context: object) -> None:
@@ -366,4 +370,53 @@ class Settings(BaseSettings):
             self.llm.gemini.api_key = self.google_api_key
 
 
-settings = Settings()
+# ---------------------------------------------------------------------------
+# Lazy access pattern
+# ---------------------------------------------------------------------------
+#
+# A previous version instantiated ``settings = Settings()`` at import time.
+# This caused two problems:
+#   1. ``monkeypatch.setenv(...)`` inside test fixtures could not override
+#      values because the singleton was already built.
+#   2. Validation errors broke the import of ``maljan.core.config`` itself,
+#      hiding the real failure behind an opaque ``ImportError``.
+#
+# The replacement is a memoised factory ``get_settings()``. Existing callers
+# that import the legacy ``settings`` symbol still work — it is now a thin
+# lazy proxy that constructs the Settings object on first attribute access.
+
+_settings_instance: "Settings | None" = None
+
+
+def get_settings() -> Settings:
+    """Return the process-wide Settings singleton (lazy)."""
+    global _settings_instance
+    if _settings_instance is None:
+        _settings_instance = Settings()
+    return _settings_instance
+
+
+def reset_settings_cache() -> None:
+    """Drop the cached Settings instance (intended for tests)."""
+    global _settings_instance
+    _settings_instance = None
+
+
+class _LazySettingsProxy:
+    """Attribute-forwarding proxy that builds Settings on first access."""
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_settings(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(get_settings(), name, value)
+
+    def __repr__(self) -> str:
+        return f"<LazySettingsProxy {get_settings()!r}>"
+
+
+# Public lazy handle used by legacy imports such as
+# ``from maljan.core.config import settings``.
+settings: Any = _LazySettingsProxy()

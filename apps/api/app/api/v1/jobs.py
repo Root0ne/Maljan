@@ -47,14 +47,21 @@ async def create_job(
         )
         return job
     except ValueError as exc:
-        logger.warning(
-            f"Job creation failed: {exc}",
-            extra={"sample_id": str(body.sample_id), "user_id": str(user.id)},
-        )
+        # Sample not found OR IDOR rejection — surface a 404 either way so
+        # we do not leak existence information.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+    except Exception as exc:
+        from app.services.analysis_service import JobEnqueueError
+
+        if isinstance(exc, JobEnqueueError):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Analysis queue is unavailable. Please retry shortly.",
+            ) from exc
+        raise
 
 
 @router.get("", response_model=JobListResponse)

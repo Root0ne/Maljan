@@ -150,18 +150,30 @@ class YaraLayer:
 
     def __init__(self, rules: list[YaraTTPRule]) -> None:
         self._rules = rules
-        self._compiled: dict[str, list[re.Pattern[str]]] = {
-            rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.patterns]
-            for rule in rules
-        }
         self._yara_rules: Any = None
         self._yara_id_map: dict[str, str] = {}
+        self._compiled: dict[str, list[re.Pattern[str]]] = {}
+
         if _YARA_AVAILABLE and rules:
             compiled, id_map = self._compile_yara_rules(rules)
             self._yara_rules = compiled
             self._yara_id_map = id_map
-            if self._yara_rules:
-                logger.info("YaraLayer: compiled %d rules with yara-python engine.", len(rules))
+
+        if self._yara_rules:
+            # yara-python is the canonical engine; the regex fallback is dead
+            # weight when it succeeds. Free that memory.
+            logger.info("YaraLayer: compiled %d rules with yara-python engine.", len(rules))
+        else:
+            # No yara-python: build the regex fallback so scanning still works.
+            self._compiled = {
+                rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.patterns]
+                for rule in rules
+            }
+            if rules:
+                logger.info(
+                    "YaraLayer: yara-python unavailable; using %d-rule regex fallback.",
+                    len(rules),
+                )
         logger.debug("YaraLayer initialized with %d rules.", len(rules))
 
     # ------------------------------------------------------------------
@@ -290,8 +302,7 @@ class YaraLayer:
             return compiled, _id_map
         except Exception as exc:
             logger.warning(
-                "YaraLayer: yara-python compilation failed: %s. "
-                "Falling back to regex.",
+                "YaraLayer: yara-python compilation failed: %s. Falling back to regex.",
                 exc,
             )
             return None, {}
@@ -399,9 +410,7 @@ class YaraLayer:
             triggered_patterns: list[str] = []
             compiled_patterns = self._compiled[rule.id]
 
-            for pattern_re, pattern_str in zip(
-                compiled_patterns, rule.patterns, strict=False
-            ):
+            for pattern_re, pattern_str in zip(compiled_patterns, rule.patterns, strict=False):
                 if pattern_re.search(text):
                     triggered_patterns.append(pattern_str)
 

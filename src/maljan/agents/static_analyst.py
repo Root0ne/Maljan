@@ -29,17 +29,17 @@ _ISR_SYSTEM = (
     "=== TOOL USAGE WORKFLOW ===\n"
     "Follow this reverse engineering sequence:\n"
     "1. Call `load_program(file=<path>)` to load the binary into Ghidra.\n"
-        "   The file path is the absolute path on the server filesystem.\n"
-        "2. Call `get_current_program_info` to verify the program loaded correctly.\n"
-        "3. Call `list_functions` to get an overview of all functions.\n"
-        "4. Call `list_imports` to identify suspicious API imports (VirtualAlloc, CreateRemoteThread, etc.).\n"
-        "5. Call `list_exports` to check exported symbols.\n"
-        "6. Call `list_strings` to find hardcoded C2 URLs, registry paths, or encoded data.\n"
-        "7. For suspicious functions: call `decompile_function(address=<addr>)` to read the C pseudocode.\n"
-        "8. Call `get_xrefs_to(address=<addr>)` to trace how a suspicious API is called.\n"
-        "9. Call `list_segments` or `list_namespaces` if you need memory layout context.\n\n"
-        "IMPORTANT:\n"
-        "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
+    "   The file path is the absolute path on the server filesystem.\n"
+    "2. Call `get_current_program_info` to verify the program loaded correctly.\n"
+    "3. Call `list_functions` to get an overview of all functions.\n"
+    "4. Call `list_imports` to identify suspicious API imports (VirtualAlloc, CreateRemoteThread, etc.).\n"
+    "5. Call `list_exports` to check exported symbols.\n"
+    "6. Call `list_strings` to find hardcoded C2 URLs, registry paths, or encoded data.\n"
+    "7. For suspicious functions: call `decompile_function(address=<addr>)` to read the C pseudocode.\n"
+    "8. Call `get_xrefs_to(address=<addr>)` to trace how a suspicious API is called.\n"
+    "9. Call `list_segments` or `list_namespaces` if you need memory layout context.\n\n"
+    "IMPORTANT:\n"
+    "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
     "- Focus decompilation on 5-10 most suspicious functions, not every function.\n"
     "- Large binaries may have 1000+ functions. Prioritize entry point, main, "
     "and functions referencing crypto/network/process APIs.\n"
@@ -56,40 +56,74 @@ class StaticAnalyst(BaseAnalyst):
     # MCP Tool Interface
     # ------------------------------------------------------------------
 
+    # Tool name prefixes that we never want the Ghidra MCP server to expose.
+    # These are real operations on the Ghidra database (mutating writes,
+    # debugger control, file deletion) that an LLM-driven agent must not be
+    # allowed to invoke regardless of prompting.
+    _GHIDRA_BLOCKED_PREFIXES: tuple[str, ...] = (
+        "debugger_",
+        "modify_",
+        "delete_",
+        "remove_",
+        "rename_",
+        "write_",
+        "set_",
+        "import_",
+        "create_",
+    )
+
+    def _filter_ghidra_tools(self, tools: list[Any]) -> list[Any]:
+        """Drop tools whose name starts with a blocked prefix."""
+        kept: list[Any] = []
+        dropped: list[str] = []
+        for tool in tools:
+            name = getattr(tool, "name", "").lower()
+            if name.startswith(self._GHIDRA_BLOCKED_PREFIXES):
+                dropped.append(name)
+                continue
+            kept.append(tool)
+        if dropped:
+            self.logger.info(
+                "Ghidra MCP: filtered %d destructive/mutating tools: %s",
+                len(dropped),
+                dropped,
+            )
+        return kept
+
     def _initialize_mcp_client(self) -> None:
         if getattr(self, "tools", None):
             return
 
-        import os
+        from maljan.core.config import get_settings
 
-        from maljan.core.config import settings
+        cfg = get_settings()
 
-        if not settings.mcp.ghidra.enabled:
+        if not cfg.mcp.ghidra.enabled:
             self.logger.info("Ghidra MCP is disabled in config.")
             return
 
         # Build output guardrail: use FunctionSummarizer if available
         output_guardrail = None
-        if settings.preprocessing.use_function_summarizer:
+        if cfg.preprocessing.use_function_summarizer:
             from maljan.core.container import ServiceContainer
 
-            container = ServiceContainer(config=settings)
+            container = ServiceContainer(config=cfg)
             summarizer = container.get_function_summarizer()
             if summarizer is not None:
                 output_guardrail = summarizer.summarize_chunk
                 self.logger.info("Ghidra output guardrail: FunctionSummarizer enabled.")
 
-        max_chars = settings.preprocessing.max_tool_output_chars
+        max_chars = cfg.preprocessing.max_tool_output_chars
 
         # ------------------------------------------------------------------
         # HTTP transport (headless Docker server)
         # ------------------------------------------------------------------
-        if settings.mcp.ghidra.transport == "http":
+        if cfg.mcp.ghidra.transport == "http":
             from maljan.agents.ghidra_http_client import GhidraHTTPClient
 
             client = GhidraHTTPClient(
-                base_url=settings.mcp.ghidra.url,
-                auth_token=settings.mcp.ghidra.auth_token,
+                base_url=cfg.mcp.ghidra.url,
+                auth_token=cfg.mcp.ghidra.auth_token,
                 output_guardrail=output_guardrail,
                 max_output_chars=max_chars,
             )
@@ -97,12 +131,11 @@ class StaticAnalyst(BaseAnalyst):
             self._run_async(client.initialize())
             self.toolkit = client
             all_tools = client.get_tools()
-            self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
+            self.tools = self._filter_ghidra_tools(list(all_tools))
             self.logger.info(
-                "Initialized Ghidra HTTP tools: %d/%d (debugger_* excluded): %s",
+                "Initialized Ghidra HTTP tools: %d/%d (after safety filter).",
                 len(self.tools),
                 len(all_tools),
-                [t.name for t in self.tools],
             )
             return
 
@@ -112,16 +145,15 @@ class StaticAnalyst(BaseAnalyst):
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.paths import resolve_mcp_args
 
-        command = settings.mcp.ghidra.command
-        args = settings.mcp.ghidra.args
+        command = cfg.mcp.ghidra.command
+        args = cfg.mcp.ghidra.args
 
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
-        if settings.mcp.ghidra.env:
-            env.update(settings.mcp.ghidra.env)
-
-        from maljan.core.paths import resolve_mcp_args
+        if cfg.mcp.ghidra.env:
+            env.update(cfg.mcp.ghidra.env)
 
         args = resolve_mcp_args(args)
         server_params = StdioServerParameters(command=command, args=args, env=env)
@@ -135,12 +167,11 @@ class StaticAnalyst(BaseAnalyst):
         self._run_async(toolkit.initialize())
         self.toolkit = toolkit  # type: ignore[assignment]
         all_tools = toolkit.get_tools()
-        self.tools = [t for t in all_tools if not t.name.startswith("debugger_")]
+        self.tools = self._filter_ghidra_tools(list(all_tools))
         self.logger.info(
-            "Initialized Ghidra MCP tools: %d/%d (debugger_* excluded): %s",
+            "Initialized Ghidra MCP tools: %d/%d (after safety filter).",
             len(self.tools),
             len(all_tools),
-            [t.name for t in self.tools],
         )
 
     def _run_async(self, coro: Any) -> None:
@@ -161,6 +192,7 @@ class StaticAnalyst(BaseAnalyst):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(coro)
+
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
@@ -182,7 +214,9 @@ class StaticAnalyst(BaseAnalyst):
                 target_info = loader.to_markdown()
                 self.logger.info("PELoader parsed static data for '%s'.", data.strip())
             except Exception as exc:
-                self.logger.warning("PELoader failed for '%s': %s. Falling back to raw path.", data.strip(), exc)
+                self.logger.warning(
+                    "PELoader failed for '%s': %s. Falling back to raw path.", data.strip(), exc
+                )
                 target_info = f"Target File: {data}"
         elif len(data.strip()) < 512:
             target_info = f"Target File: {data}"
@@ -373,19 +407,37 @@ class StaticAnalyst(BaseAnalyst):
 # ------------------------------------------------------------------
 
 
+# CRLF-tolerant separator that requires the dashes to occupy their own line.
+_BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
+_CLAIM_RE = re.compile(r"CLAIM:\s*(.+?)(?=\s*\n\s*EVIDENCE:|\Z)", flags=re.DOTALL)
+_EVIDENCE_RE = re.compile(r"EVIDENCE:\s*(.+?)(?=\s*\n\s*CONFIDENCE:|\Z)", flags=re.DOTALL)
+_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
+_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", flags=re.IGNORECASE)
+
+# DISPUTES section runs until end-of-string OR the next ALL-CAPS markdown-style
+# header (e.g. ``\nSUMMARY:`` or ``\nFINAL VERDICT:``). The previous greedy
+# pattern silently absorbed whatever followed.
+_DISPUTES_RE = re.compile(
+    r"DISPUTES:\s*(.*?)(?=\r?\n[A-Z][A-Z_ ]{2,}:|\Z)",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+
+
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
-    """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output."""
+    """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output.
+
+    Tolerates CRLF line endings and varying amounts of whitespace.
+    """
     claims: list[ClaimEvidence] = []
-    # Split on the --- separator
-    blocks = re.split(r"-{3,}", text)
+    blocks = _BLOCK_SPLIT_RE.split(text)
     for block in blocks:
         block = block.strip()
         if not block or "CLAIM:" not in block:
             continue
-        claim_match = re.search(r"CLAIM:\s*(.+?)(?=\nEVIDENCE:|\Z)", block, re.DOTALL)
-        evidence_match = re.search(r"EVIDENCE:\s*(.+?)(?=\nCONFIDENCE:|\Z)", block, re.DOTALL)
-        confidence_match = re.search(r"CONFIDENCE:\s*([\d.]+)", block)
-        technique_match = re.search(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", block)
+        claim_match = _CLAIM_RE.search(block)
+        evidence_match = _EVIDENCE_RE.search(block)
+        confidence_match = _CONFIDENCE_RE.search(block)
+        technique_match = _TECHNIQUE_RE.search(block)
 
         if not (claim_match and evidence_match and confidence_match):
             continue
@@ -395,7 +447,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         except ValueError:
             confidence = 0.5
 
-        technique_raw = technique_match.group(1) if technique_match else "NONE"
+        technique_raw = technique_match.group(1).upper() if technique_match else "NONE"
         technique_id = None if technique_raw == "NONE" else technique_raw
 
         claims.append(
@@ -410,16 +462,20 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
 
 
 def _parse_disputes(text: str) -> list[str]:
-    """Extract dispute items from the DISPUTES section of a revision response."""
+    """Extract dispute items from the DISPUTES section of a revision response.
+
+    Stops at the next ALL-CAPS header (e.g. ``SUMMARY:``) so trailing
+    sections do not get absorbed as dispute items.
+    """
     disputes: list[str] = []
-    disputes_match = re.search(r"DISPUTES:(.*?)(?:\Z)", text, re.DOTALL | re.IGNORECASE)
-    if not disputes_match:
+    match = _DISPUTES_RE.search(text)
+    if not match:
         return disputes
-    disputes_section = disputes_match.group(1).strip()
-    if disputes_section.upper() in ("NONE", "NONE.", ""):
+    section = match.group(1).strip()
+    if section.upper().rstrip(".") in {"", "NONE"}:
         return disputes
-    for line in disputes_section.splitlines():
-        line = line.strip().lstrip("-•* ")
-        if line:
-            disputes.append(line)
+    for line in section.splitlines():
+        cleaned = line.strip().lstrip("-*• ")
+        if cleaned:
+            disputes.append(cleaned)
     return disputes

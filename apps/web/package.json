@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "16.2.4",
@@ -16,6 +17,8 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
+    "@faker-js/faker": "^10.4.0",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -58,15 +58,33 @@ class ATTCKValidator:
     def get_instance(cls, force_refresh: bool = False) -> ATTCKValidator:
         """Return the shared ATTCKValidator, building the index if needed.
 
-        Thread-safe: uses double-checked locking.
+        Thread-safety:
+            ``force_refresh`` ALWAYS acquires the lock so that a refresh
+            cannot race with another caller that observes a stale instance
+            outside the lock. The previous implementation skipped the lock
+            when the singleton already existed, allowing two threads to
+            rebuild the index simultaneously.
         """
-        if cls._instance is None or force_refresh:
+        if force_refresh:
             with cls._lock:
-                if cls._instance is None or force_refresh:
+                logger.info("Force-refreshing ATTCKValidator (rebuilding index)...")
+                index = ATTCKIndex.from_loader(force_refresh=True)
+                cls._instance = cls(index)
+                return cls._instance
+
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
                     logger.info("Initializing ATTCKValidator (loading index)...")
-                    index = ATTCKIndex.from_loader(force_refresh=force_refresh)
+                    index = ATTCKIndex.from_loader(force_refresh=False)
                     cls._instance = cls(index)
         return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Drop the cached singleton (intended for test isolation)."""
+        with cls._lock:
+            cls._instance = None
 
     @classmethod
     def from_index(cls, index: ATTCKIndex) -> ATTCKValidator:

@@ -64,7 +64,6 @@ class SubmissionResult:
         return self.status == "reported" and bool(self.report)
 
 
-
 # ---------------------------------------------------------------------------
 # SandboxClient Protocol
 # ---------------------------------------------------------------------------
@@ -139,13 +138,18 @@ class SandboxClient(Protocol):
 # ---------------------------------------------------------------------------
 
 
-class SandboxError(RuntimeError):
-    """Base exception for sandbox client errors."""
+# Re-exported for backward compatibility; the canonical hierarchy now lives
+# in maljan.core.exceptions so callers can catch MaljanError uniformly.
+from maljan.core.exceptions import SandboxError as SandboxError  # noqa: E402
 
 
 class SandboxTimeoutError(SandboxError):
     """Raised when a task does not complete within the configured timeout."""
 
 
-class SandboxNotAvailableError(ImportError):
-    """Raised when required sandbox client dependencies are not installed."""
+class SandboxNotAvailableError(SandboxError, ImportError):
+    """Raised when required sandbox client dependencies are not installed.
+
+    Multi-inherits from SandboxError and ImportError for backward
+    compatibility with callers that catch ``ImportError``.
+    """
