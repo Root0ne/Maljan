@@ -115,7 +115,10 @@ services:
       QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
       MCP__GHIDRA__URL: http://ghidra-mcp:8089
-      # Ollama on Windows host is reachable via host.docker.internal
+      # llama-server on Windows host reachable via host.docker.internal
+      LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
+      LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
+      # Ollama fallback (active only if LLM__PROVIDER=ollama)
       LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
     volumes:
       - ../src:/app/src
@@ -153,6 +156,8 @@ services:
       QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
       MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
+      LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
       LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
     volumes:
       - ../src:/app/src

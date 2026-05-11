@@ -24,6 +24,11 @@ data/attck_labeled_sentences.jsonl
 # Real malware samples (must never be committed to a public repo)
 samples/
 
+# Local LLM model weights (large, downloaded separately)
+models/
+*.gguf
+*.safetensors
+
 # Local analysis outputs
 reports/
 
