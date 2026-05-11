@@ -276,9 +276,13 @@ class TestSafeAnalyzeISRChunked:
     def analyst(self) -> _ConcreteAnalyst:
         return self._ConcreteAnalyst()
 
-    def test_empty_chunks_returns_empty_isr(self, analyst: _ConcreteAnalyst) -> None:
-        result = analyst.safe_analyze_isr_chunked([])
-        assert result.claims == []
+    def test_empty_chunks_raises_analyst_error(self, analyst: _ConcreteAnalyst) -> None:
+        # Hardened behaviour (P4-11): an empty chunk list is a hard input
+        # error rather than a silent "no findings" success.
+        from maljan.core.exceptions import AnalystError
+
+        with pytest.raises(AnalystError):
+            analyst.safe_analyze_isr_chunked([])
 
     def test_single_chunk_calls_safe_analyze_isr(self, analyst: _ConcreteAnalyst) -> None:
         chunks = [_make_chunk(0, 1)]

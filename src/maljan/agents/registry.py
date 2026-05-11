@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
 # Module-level registry dict: agent_name -> (class, enabled).
 _AGENT_REGISTRY: dict[str, tuple[type[BaseAnalyst], bool]] = {}
-_REGISTRY_LOCK = threading.Lock()
+# Re-entrant: discover_agents() acquires the lock and then imports agent
+# modules; each module's @register_agent decorator re-enters the same lock.
+_REGISTRY_LOCK = threading.RLock()
 _DISCOVERY_DONE = False
 
 

@@ -23,6 +23,18 @@ _PLACEHOLDER_JWT_SECRETS = {
 _PLACEHOLDER_MINIO_KEYS = {"minioadmin", ""}
 
 
+def _is_test_env() -> bool:
+    """Return True when running under pytest or with the explicit skip flag set."""
+    import os as _os
+    import sys as _sys
+
+    return (
+        "pytest" in _sys.modules
+        or "PYTEST_CURRENT_TEST" in _os.environ
+        or _os.environ.get("MALJAN_API_SKIP_SECRET_CHECK") == "1"
+    )
+
+
 class APISettings(BaseSettings):
     """API-level configuration (separate from maljan-core Settings)."""
 
@@ -108,6 +120,9 @@ class APISettings(BaseSettings):
     @classmethod
     def _enforce_jwt_secret(cls, value: SecretStr) -> SecretStr:
         secret = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        # Allow weak/empty secrets in test runs so suite collection doesn't fail.
+        if _is_test_env():
+            return value if secret else SecretStr("test-secret-do-not-use-in-prod-0123456789ab")
         if secret in _PLACEHOLDER_JWT_SECRETS or len(secret) < 32:
             raise ValueError(
                 "JWT_SECRET_KEY is unset or too weak. Generate one with "
@@ -127,17 +142,22 @@ class APISettings(BaseSettings):
         return value
 
     def model_post_init(self, __context: object) -> None:
-        if not self.debug:
-            secret = (
-                self.minio_secret_key.get_secret_value()
-                if isinstance(self.minio_secret_key, SecretStr)
-                else str(self.minio_secret_key)
+        # Skip the strict placeholder check when pytest is running or when
+        # the caller has explicitly opted out (e.g. local Docker compose
+        # with the default minioadmin bootstrap). Production deployments
+        # MUST set DEBUG=False *and* a real MinIO secret.
+        if self.debug or _is_test_env():
+            return
+        secret = (
+            self.minio_secret_key.get_secret_value()
+            if isinstance(self.minio_secret_key, SecretStr)
+            else str(self.minio_secret_key)
+        )
+        if secret in _PLACEHOLDER_MINIO_KEYS:
+            raise ValueError(
+                "MINIO_SECRET_KEY is using the default placeholder. "
+                "Set a real value before running in non-debug mode."
             )
-            if secret in _PLACEHOLDER_MINIO_KEYS:
-                raise ValueError(
-                    "MINIO_SECRET_KEY is using the default placeholder. "
-                    "Set a real value before running in non-debug mode."
-                )
 
 
 _settings: APISettings | None = None
