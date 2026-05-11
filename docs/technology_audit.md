@@ -1,8 +1,14 @@
 # Maljan Teknoloji Kullanım Derinliği Analizi
 
-> Tarih: 2026-05-07  
-> Kapsam: `src/maljan/`, `apps/api/`, `apps/web/`, `docker/`, MCP server'lar  
+> Tarih: 2026-05-07
+> Kapsam: `src/maljan/`, `apps/api/`, `apps/web/`, `docker/`, MCP server'lar
 > Yöntem: Kaynak kod incelemesi, bağımlılık analizi, runtime log değerlendirmesi
+
+> **Güncelleme (2026-05-11):** Lokal LLM stratejisi Ollama'dan `ik_llama.cpp` +
+> `Qwen3.6-35B-A3B-IQ3_K_R4` ikilisine taşındı (8 GB GPU üzerinde 49 tok/s,
+> 256k context). Bu auditteki "Ollama" referansları o zamanki snapshot'tır —
+> kod tarafında Ollama provider'ı hâlâ destekleniyor, sadece default ve
+> önerilen yol değişti. Yeni kurulum: [`LOCAL_LLM_LLAMACPP.md`](LOCAL_LLM_LLAMACPP.md).
 
 ---
 
