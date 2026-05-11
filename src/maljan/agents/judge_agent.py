@@ -51,6 +51,7 @@ Phase 7.1 additions (Dynamic Schema Pruning):
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -116,31 +117,28 @@ class JudgeAgent:
 
     async def execute_tool_loop(self, prompt_messages: list) -> str:
         """Execute a tool-calling ReAct loop for the agent."""
-        from langchain_core.prompts import ChatPromptTemplate
+        import asyncio
+
+        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+        from langgraph.prebuilt import create_react_agent
+
+        messages_pre: list[BaseMessage] = []
+        for role, content in prompt_messages:
+            if role == "system":
+                messages_pre.append(SystemMessage(content=content))
+            elif role == "human":
+                messages_pre.append(HumanMessage(content=content))
 
         if not getattr(self, "tools", None):
             self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
-            prompt = ChatPromptTemplate.from_messages(prompt_messages)
-            response = await (prompt | self.llm).ainvoke({})
+            response = await self.llm.ainvoke(messages_pre)
             return str(response.content)
-
-        import asyncio
-
-        from langchain_core.messages import HumanMessage, SystemMessage
-        from langgraph.prebuilt import create_react_agent
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
 
         agent_executor = create_react_agent(self.llm, self.tools)
 
-        from langchain_core.messages import BaseMessage
-
-        messages: list[BaseMessage] = []
-        for role, content in prompt_messages:
-            if role == "system":
-                messages.append(SystemMessage(content=content))
-            elif role == "human":
-                messages.append(HumanMessage(content=content))
+        messages = messages_pre
 
         timeout = get_settings().react_agent_timeout
         self.logger.info(
@@ -249,10 +247,20 @@ class JudgeAgent:
             reasoning_text = await self.execute_tool_loop(prompt_messages)
         else:
             self.logger.info("Mediator: no dissent — fast path (single LLM call).")
-            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            # Pass already-formatted content as BaseMessage list to avoid
+            # ChatPromptTemplate interpreting literal { } inside report text
+            # (e.g. JSON snippets) as template variables.
+            from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
+            direct_messages: list[BaseMessage] = []
+            for role, content in prompt_messages:
+                if role == "system":
+                    direct_messages.append(SystemMessage(content=content))
+                elif role == "human":
+                    direct_messages.append(HumanMessage(content=content))
             try:
                 response = await asyncio.wait_for(
-                    (prompt | self.llm).ainvoke({}),
+                    self.llm.ainvoke(direct_messages),
                     timeout=float(get_settings().react_agent_timeout),
                 )
             except TimeoutError:
@@ -583,36 +591,29 @@ class JudgeAgent:
                     if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
                         tids.add(claim.technique_id)
 
+        malware_id = f"malware--{uuid.uuid4()}"
+        text_snippet = (text[:2000] if text else "No structured output available.").replace(
+            "\n", " "
+        )
         objects: list[dict[str, Any]] = [
             {
-                "type": "identity",
-                "id": "identity--maljan-judge",
-                "name": "Maljan Judge Agent",
-                "identity_class": "software",
-            },
-            {
                 "type": "malware",
-                "id": "malware--maljan-verdict",
+                "id": malware_id,
                 "name": "analyzed-sample",
                 "malware_types": ["unknown"],
                 "is_family": False,
-                "description": f"Fallback verdict extracted from text: {decision}.",
-            },
-            {
-                "type": "report",
-                "id": "report--maljan-fallback",
-                "name": "Maljan Analysis Report (Fallback)",
-                "report_types": ["malware-analysis"],
-                "object_refs": ["malware--maljan-verdict"],
-                "description": text[:2000] if text else "No structured output available.",
+                "description": (
+                    f"Fallback verdict='{decision}'. Reasoning excerpt: {text_snippet}"
+                ),
             },
         ]
 
         for tid in sorted(tids):
+            attack_id = f"attack-pattern--{uuid.uuid4()}"
             objects.append(
                 {
                     "type": "attack-pattern",
-                    "id": f"attack-pattern--{tid.lower()}",
+                    "id": attack_id,
                     "name": tid,
                     "external_references": [
                         {
@@ -621,6 +622,19 @@ class JudgeAgent:
                             "url": f"https://attack.mitre.org/techniques/{tid}",
                         }
                     ],
+                }
+            )
+            objects.append(
+                {
+                    "type": "relationship",
+                    "id": f"relationship--{uuid.uuid4()}",
+                    "relationship_type": "uses",
+                    "source_ref": malware_id,
+                    "target_ref": attack_id,
+                    "x_maljan_confidence": 0.5,
+                    "x_maljan_evidence_basis": "unknown",
+                    "x_maljan_contributing_agents": [],
+                    "x_maljan_technique_id": tid,
                 }
             )
 

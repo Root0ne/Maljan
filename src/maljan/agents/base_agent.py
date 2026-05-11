@@ -105,32 +105,33 @@ class BaseAnalyst(ABC):
             warning and raise TimeoutError. The daemon flag ensures the OS will
             reap the thread when the worker process eventually exits.
         """
-        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
+        # Build BaseMessages directly so literal `{...}` substrings in the
+        # report content (e.g. JSON like {"programs": [...]}) are not parsed
+        # as ChatPromptTemplate f-string variables.
+        prebuilt: list[BaseMessage] = []
+        for role, content in prompt_messages:
+            if role == "system":
+                prebuilt.append(SystemMessage(content=content))
+            elif role == "human":
+                prebuilt.append(HumanMessage(content=content))
 
         if not self.tools:
             # Fallback to simple invocation
-            prompt = ChatPromptTemplate.from_messages(prompt_messages)
-            response = (prompt | self.llm).invoke({})
+            response = self.llm.invoke(prebuilt)
             return str(response.content)
 
         import asyncio
         import threading
 
-        from langchain_core.messages import HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
         agent_executor = create_react_agent(self.llm, self.tools)
 
-        from langchain_core.messages import BaseMessage
-
-        messages: list[BaseMessage] = []
-        for role, content in prompt_messages:
-            if role == "system":
-                messages.append(SystemMessage(content=content))
-            elif role == "human":
-                messages.append(HumanMessage(content=content))
+        messages = prebuilt
 
         cfg = get_settings()
         timeout = cfg.react_agent_timeout
