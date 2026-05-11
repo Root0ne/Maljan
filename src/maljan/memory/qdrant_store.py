@@ -1,43 +1,45 @@
 """QdrantStore — Qdrant vector database backend for long-term memory.
 
-Phase 5 production backend. Full implementation using qdrant-client.
+Phase 5 production backend. Uses the shared ``maljan.memory.embeddings``
+module to encode text with a real semantic model (``BAAI/bge-small-en-v1.5``,
+384-dim) instead of the previous MD5-hash projection. This lets the judge
+retrieve "behaviorally similar" cases even when the wording differs.
 
 Requirements:
-  uv add qdrant-client
+  uv add qdrant-client fastembed
   docker run -p 6333:6333 qdrant/qdrant
 
-Design:
-  - Embedding: term-frequency bag-of-words (same algorithm as InMemoryStore)
-    projected to a fixed 512-dimensional vector via a deterministic hash
-    trick. No external embedding model required at runtime.
-  - Upgrade path: replace _embed() with a sentence-transformer or OpenAI
-    embedding call — only _embed() changes, nothing else.
-  - Upsert semantics: sample_id is hashed to a stable uint64 point ID so
-    re-analyzing the same file replaces the old entry.
-  - Collection auto-creation: if the collection does not exist on first
-    store(), it is created with COSINE distance.
-  - StoredCase fields are persisted as Qdrant point payload so they can be
-    fully reconstructed without a separate database.
-  - Connection: a single QdrantClient is created in __init__ and reused.
-    The Qdrant Python client is thread-safe for concurrent reads.
+Design notes:
+
+- **Collection name** is now ``maljan_cases_v2`` by default so legacy
+  hash-vector collections (dim=512) do not collide with the new 384-dim
+  schema. Operators upgrading from the old format should either point at a
+  fresh collection or delete the old one explicitly.
+- **Upsert semantics**: ``sample_id`` is hashed to a stable uint64 point ID
+  so re-analyzing the same file replaces the old entry.
+- **Collection auto-creation**: if the collection does not exist on first
+  ``store()``, it is created with COSINE distance and ``EMBED_DIM`` size.
+- **StoredCase fields** are persisted as Qdrant point payload so they can
+  be fully reconstructed without a separate database.
+- **Connection**: a single QdrantClient is created in ``__init__`` and
+  reused. The Qdrant Python client is thread-safe for concurrent reads.
 
 Configuration (.env):
   MEMORY__BACKEND=qdrant
   MEMORY__QDRANT_URL=http://localhost:6333
-  MEMORY__QDRANT_COLLECTION=maljan_cases
+  MEMORY__QDRANT_COLLECTION=maljan_cases_v2
   MEMORY__TOP_K=3
 """
 
 from __future__ import annotations
 
 import hashlib
-import math
-from collections import Counter
 from datetime import UTC
 from typing import Any
 
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
+from maljan.memory.embeddings import EMBED_DIM, encode
 from maljan.memory.long_term_memory import StoredCase
 
 
@@ -47,46 +49,6 @@ class QdrantNotAvailableError(MemoryStoreError, ImportError):
     Inherits from both MemoryStoreError (canonical Maljan hierarchy) and
     ImportError so legacy ``except ImportError`` callers continue to work.
     """
-
-
-# ---------------------------------------------------------------------------
-# Embedding helpers (deterministic, no external model)
-# ---------------------------------------------------------------------------
-
-_EMBED_DIM = 512  # fixed projection dimension
-
-
-def _tokenize(text: str) -> list[str]:
-    """Lowercase whitespace tokenizer."""
-    return text.lower().split()
-
-
-def _embed(text: str) -> list[float]:
-    """Project text to a _EMBED_DIM-dimensional float vector.
-
-    Algorithm:
-      1. Build a term-frequency Counter from the text tokens.
-      2. For each unique token, deterministically map it to one of the
-         _EMBED_DIM buckets using MD5 (no collision problems at this scale).
-      3. Accumulate TF-weighted contributions per bucket.
-      4. L2-normalize the result so Qdrant COSINE distance is meaningful.
-
-    This produces the same vector for the same text on every run (no
-    randomness), making it suitable for upsert/update workflows.
-    """
-    tf = Counter(_tokenize(text))
-    vec = [0.0] * _EMBED_DIM
-    for token, freq in tf.items():
-        # Stable bucket index from MD5
-        digest = hashlib.md5(token.encode(), usedforsecurity=False).digest()
-        idx = int.from_bytes(digest[:4], "little") % _EMBED_DIM
-        vec[idx] += float(freq)
-
-    # L2 normalize
-    norm = math.sqrt(sum(v * v for v in vec))
-    if norm > 0.0:
-        vec = [v / norm for v in vec]
-    return vec
 
 
 def _stable_id(sample_id: str) -> int:
@@ -101,11 +63,6 @@ def _stable_id(sample_id: str) -> int:
     return int.from_bytes(digest[:8], "little")
 
 
-# ---------------------------------------------------------------------------
-# QdrantStore
-# ---------------------------------------------------------------------------
-
-
 class QdrantStore:
     """Qdrant-backed MemoryStore for production long-term case retrieval.
 
@@ -113,7 +70,8 @@ class QdrantStore:
     InMemoryStore when persistence and semantic-search at scale are needed.
 
     Usage:
-        store = QdrantStore(url="http://localhost:6333", collection="maljan_cases")
+        store = QdrantStore(url="http://localhost:6333",
+                            collection="maljan_cases_v2")
         store.store(case)
         results = store.retrieve("ransomware encryption C2", top_k=3)
 
@@ -122,13 +80,13 @@ class QdrantStore:
         collection: Qdrant collection name. Auto-created on first store() call.
     """
 
-    def __init__(self, url: str, collection: str = "maljan_cases") -> None:
+    def __init__(self, url: str, collection: str = "maljan_cases_v2") -> None:
         try:
             from qdrant_client import QdrantClient
         except ImportError as exc:
             raise QdrantNotAvailableError(
                 "qdrant-client is required for QdrantStore.\n"
-                "Install with: uv add qdrant-client\n"
+                "Install with: uv add qdrant-client fastembed\n"
                 "Start Qdrant: docker run -p 6333:6333 qdrant/qdrant"
             ) from exc
 
@@ -141,7 +99,7 @@ class QdrantStore:
             "QdrantStore initialized (url=%s, collection=%s, embed_dim=%d).",
             url,
             collection,
-            _EMBED_DIM,
+            EMBED_DIM,
         )
 
     # ------------------------------------------------------------------
@@ -160,7 +118,7 @@ class QdrantStore:
         self._ensure_collection(VectorParams, Distance)
 
         point_id = _stable_id(case.sample_id)
-        vector = _embed(case.summary_text)
+        vector = encode(case.summary_text)
         payload = {
             "sample_id": case.sample_id,
             "summary_text": case.summary_text,
@@ -202,7 +160,7 @@ class QdrantStore:
             )
             return []
 
-        vector = _embed(query)
+        vector = encode(query)
         # query_points() is the current API (qdrant-client >= 1.9);
         # search() is deprecated in newer versions.
         response = self._client.query_points(
@@ -286,14 +244,14 @@ class QdrantStore:
             self._client.create_collection(
                 collection_name=self._collection,
                 vectors_config=VectorParams(
-                    size=_EMBED_DIM,
+                    size=EMBED_DIM,
                     distance=Distance.COSINE,
                 ),
             )
             logger.info(
                 "QdrantStore: created collection '%s' (dim=%d, distance=COSINE).",
                 self._collection,
-                _EMBED_DIM,
+                EMBED_DIM,
             )
         else:
             # Validate that an existing collection's vector dimension matches
@@ -304,11 +262,12 @@ class QdrantStore:
                 vectors = getattr(getattr(info, "config", None), "params", None)
                 vp = getattr(vectors, "vectors", None) if vectors else None
                 actual = getattr(vp, "size", None) if vp else None
-                if actual is not None and actual != _EMBED_DIM:
+                if actual is not None and actual != EMBED_DIM:
                     raise QdrantNotAvailableError(
                         f"QdrantStore: collection '{self._collection}' has vector dim "
-                        f"{actual} but client expected {_EMBED_DIM}. Re-create the "
-                        "collection or change the embedding implementation."
+                        f"{actual} but client expected {EMBED_DIM}. Delete the "
+                        "collection or point at a fresh one — likely a leftover from "
+                        "the pre-fastembed (dim=512) schema."
                     )
             except QdrantNotAvailableError:
                 raise

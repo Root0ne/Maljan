@@ -3,10 +3,10 @@
 Tests are divided into two groups:
 
   Offline tests (always run):
-    - _embed() produces a vector of correct dimension
-    - _embed() is deterministic for the same input
-    - _embed() produces different vectors for different inputs
-    - _embed() returns L2-normalized vector (norm ~= 1.0)
+    - encode() produces a vector of correct dimension (``EMBED_DIM``)
+    - encode() is deterministic for the same input
+    - encode() produces different vectors for different inputs
+    - encode() returns L2-normalized vector (norm ~= 1.0 or 0 for empty input)
     - _stable_id() produces consistent uint64 from a string
     - _stable_id() produces different IDs for different strings
     - QdrantStore raises QdrantNotAvailableError when qdrant-client missing
@@ -36,12 +36,11 @@ from typing import Any
 
 import pytest
 
+from maljan.memory.embeddings import EMBED_DIM, encode
 from maljan.memory.long_term_memory import StoredCase
 from maljan.memory.qdrant_store import (
-    _EMBED_DIM,
     QdrantNotAvailableError,
     QdrantStore,
-    _embed,
     _stable_id,
 )
 
@@ -101,39 +100,41 @@ requires_qdrant = pytest.mark.skipif(
 
 
 # ---------------------------------------------------------------------------
-# Offline tests — _embed
+# Offline tests — encode (semantic embeddings via fastembed, BoW fallback)
 # ---------------------------------------------------------------------------
 
 
 class TestEmbed:
     def test_output_dimension(self) -> None:
-        vec = _embed("ransomware encryption beacon")
-        assert len(vec) == _EMBED_DIM
+        vec = encode("ransomware encryption beacon")
+        assert len(vec) == EMBED_DIM
 
     def test_deterministic(self) -> None:
         text = "T1055 process injection WriteProcessMemory"
-        assert _embed(text) == _embed(text)
+        assert encode(text) == encode(text)
 
     def test_different_texts_produce_different_vectors(self) -> None:
-        v1 = _embed("ransomware encryption")
-        v2 = _embed("network beacon C2 dns")
+        v1 = encode("ransomware encryption")
+        v2 = encode("network beacon C2 dns")
         assert v1 != v2
 
     def test_l2_normalized(self) -> None:
-        vec = _embed("some text about malware techniques T1486")
+        vec = encode("some text about malware techniques T1486")
         norm = math.sqrt(sum(v * v for v in vec))
-        assert abs(norm - 1.0) < 1e-6
+        # Both the fastembed path (already L2-normalized) and the BoW fallback
+        # (explicitly normalized) target unit norm.
+        assert abs(norm - 1.0) < 1e-3
 
     def test_empty_string_returns_zero_vector(self) -> None:
-        vec = _embed("")
-        assert len(vec) == _EMBED_DIM
+        vec = encode("")
+        assert len(vec) == EMBED_DIM
         assert all(v == 0.0 for v in vec)
 
     def test_single_token(self) -> None:
-        vec = _embed("ransomware")
-        assert len(vec) == _EMBED_DIM
+        vec = encode("ransomware")
+        assert len(vec) == EMBED_DIM
         norm = math.sqrt(sum(v * v for v in vec))
-        assert abs(norm - 1.0) < 1e-6
+        assert abs(norm - 1.0) < 1e-3
 
 
 # ---------------------------------------------------------------------------

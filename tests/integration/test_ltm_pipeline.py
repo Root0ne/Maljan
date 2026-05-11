@@ -16,6 +16,8 @@ The integration points verified:
 
 from __future__ import annotations
 
+from typing import Any
+
 from maljan.memory.in_memory_store import InMemoryStore
 from maljan.memory.long_term_memory import MemoryStore, StoredCase, build_stored_case
 
@@ -45,34 +47,37 @@ def _make_case(sample_id: str, summary: str, ttps: list[str]) -> StoredCase:
 
 
 class TestContainerMemoryLifecycle:
-    def test_get_memory_store_returns_memory_store_protocol(self) -> None:
-        from maljan.core.config import Settings
+    """Lifecycle tests for the ServiceContainer's memory store.
+
+    These tests force ``backend='memory'`` so they exercise the in-process
+    InMemoryStore deterministically — independent of whether a Qdrant
+    container is reachable in the test environment.
+    """
+
+    @staticmethod
+    def _make_container() -> Any:
+        from maljan.core.config import MemoryConfig, Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True)
+        cfg = Settings(memory=MemoryConfig(backend="memory"))
+        return ServiceContainer(config=cfg, mock=True)
+
+    def test_get_memory_store_returns_memory_store_protocol(self) -> None:
+        container = self._make_container()
         store = container.get_memory_store()
         assert isinstance(store, MemoryStore)
 
     def test_get_memory_store_same_instance_across_calls(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-
-        container = ServiceContainer(config=Settings(), mock=True)
+        container = self._make_container()
         assert container.get_memory_store() is container.get_memory_store()
 
     def test_store_is_empty_on_fresh_container(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-
-        container = ServiceContainer(config=Settings(), mock=True)
+        container = self._make_container()
         store = container.get_memory_store()
         assert store.count() == 0
 
     def test_stored_case_is_retrievable_within_same_container(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-
-        container = ServiceContainer(config=Settings(), mock=True)
+        container = self._make_container()
         store = container.get_memory_store()
         case = _make_case("s1", "ransomware encryption T1486 shadow copy", ["T1486"])
         store.store(case)
@@ -96,10 +101,16 @@ class TestMaljanAppMemoryStore:
         assert isinstance(store, MemoryStore)
 
     def test_memory_store_shared_across_runs(self) -> None:
-        """Cases stored before a run are available inside give_verdict."""
-        from maljan.app import MaljanApp
+        """Cases stored before a run are available inside give_verdict.
 
-        app = MaljanApp(mock=True)
+        Forces ``backend='memory'`` so the test gets a fresh InMemoryStore
+        regardless of the global default (which is ``qdrant`` in production).
+        """
+        from maljan.app import MaljanApp
+        from maljan.core.config import MemoryConfig, Settings
+
+        cfg = Settings(memory=MemoryConfig(backend="memory"))
+        app = MaljanApp(config=cfg, mock=True)
         store = app.container.get_memory_store()
 
         # Pre-populate with a past case

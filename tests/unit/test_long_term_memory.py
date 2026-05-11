@@ -337,19 +337,22 @@ class TestBuildMemoryContext:
 
 
 class TestContainerGetMemoryStore:
-    def test_returns_in_memory_store_by_default(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+    def test_default_backend_is_qdrant(self) -> None:
+        """The default memory backend should be 'qdrant' so persistent RAG
+        works out of the box with the bundled Qdrant container.
 
-        container = ServiceContainer(config=Settings(), mock=True)
-        store = container.get_memory_store()
-        assert isinstance(store, InMemoryStore)
+        Use ``backend="memory"`` explicitly for in-process/test scenarios.
+        """
+        from maljan.core.config import Settings
+
+        assert Settings().memory.backend == "qdrant"
 
     def test_returns_cached_instance_on_second_call(self) -> None:
-        from maljan.core.config import Settings
+        from maljan.core.config import MemoryConfig, Settings
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer(config=Settings(), mock=True)
+        cfg = Settings(memory=MemoryConfig(backend="memory"))
+        container = ServiceContainer(config=cfg, mock=True)
         store1 = container.get_memory_store()
         store2 = container.get_memory_store()
         assert store1 is store2

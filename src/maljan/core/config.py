@@ -179,9 +179,13 @@ class MemoryConfig(BaseModel):
                         increase prompt length.
     """
 
-    backend: str = "memory"  # "memory" | "qdrant"
+    backend: str = "qdrant"  # "memory" | "qdrant"
     qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "maljan_cases"
+    # v2 collection name — created with fastembed/BGE 384-dim vectors. Operators
+    # upgrading from the pre-fastembed era (which used 512-dim hash vectors in
+    # a collection named ``maljan_cases``) should either point at this fresh
+    # name or delete the old collection explicitly.
+    qdrant_collection: str = "maljan_cases_v2"
     top_k: int = 3
 
 

@@ -1,69 +1,35 @@
 """InMemoryStore — pure-Python long-term memory backend.
 
-Phase 5 default backend. Uses word-count cosine similarity for retrieval —
-no external dependencies, no network access, no Docker required.
+Phase 5 default backend for ephemeral / single-run analyses. Uses the shared
+``maljan.memory.embeddings`` module so the similarity model matches whatever
+``QdrantStore`` would use in production:
 
-Similarity model:
-  - Tokenize: lowercase split on whitespace.
-  - Represent each text as a term-frequency (Counter) vector.
-  - Cosine similarity: dot(a, b) / (|a| * |b|).
-  - Simple, deterministic, reproducible — correct for tens of stored cases.
+- When fastembed is installed: semantic ``BAAI/bge-small-en-v1.5`` embeddings
+  (384-dim, cosine similarity). "ransomware encrypts files" and
+  "crypto-locker scrambles the disk" score similarly.
+- When fastembed is missing: deterministic BoW projection (~lexical match
+  only). Logged loudly so operators notice.
 
-Limitations vs. Qdrant/embedding models:
-  - No semantic understanding: "encryption" and "cipher" are unrelated tokens.
-  - O(n) scan on retrieve — fine for <1000 cases, degrades at large scale.
-  - No persistence across process restarts.
+Limitations vs. Qdrant:
+
+- O(n) cosine scan on retrieve — fine for <1000 cases, degrades at scale.
+- No persistence across process restarts (RAM only).
 
 When to upgrade to QdrantStore:
-  - Store grows beyond ~500 cases.
-  - Semantic similarity matters (same behavior, different terminology).
-  - Persistence across analysis sessions is required.
+
+- Store grows beyond ~500 cases.
+- Persistence across analysis sessions is required.
+- Multiple processes share the same memory base.
 """
 
 from __future__ import annotations
 
-import math
-from collections import Counter
-
+from maljan.memory.embeddings import cosine, encode
 from maljan.memory.long_term_memory import StoredCase
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _tokenize(text: str) -> list[str]:
-    """Lowercase whitespace-split tokenizer."""
-    return text.lower().split()
-
-
-def _term_freq_vector(text: str) -> Counter:
-    """Return a term-frequency Counter for the input text."""
-    return Counter(_tokenize(text))
-
-
-def _cosine_similarity(a: Counter, b: Counter) -> float:
-    """Compute cosine similarity between two term-frequency vectors.
-
-    Returns 0.0 for zero-length vectors (avoids division by zero).
-    """
-    if not a or not b:
-        return 0.0
-    dot = sum(a[w] * b[w] for w in a if w in b)
-    norm_a = math.sqrt(sum(v * v for v in a.values()))
-    norm_b = math.sqrt(sum(v * v for v in b.values()))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-# ---------------------------------------------------------------------------
-# InMemoryStore
-# ---------------------------------------------------------------------------
 
 
 class InMemoryStore:
-    """Pure-Python MemoryStore implementation with cosine similarity retrieval.
+    """Pure-Python MemoryStore implementation backed by semantic embeddings.
 
     Thread safety: NOT thread-safe. For single-threaded pipelines this is
     fine. If the store is shared across threads, wrap with a threading.Lock.
@@ -75,7 +41,9 @@ class InMemoryStore:
     """
 
     def __init__(self) -> None:
-        self._cases: list[StoredCase] = []
+        # Each entry: (case, embedding_vector). Embeddings are cached at
+        # store-time so retrieve() never recomputes them.
+        self._cases: list[tuple[StoredCase, list[float]]] = []
 
     def store(self, case: StoredCase) -> None:
         """Persist a case, replacing any existing entry with the same sample_id.
@@ -83,9 +51,8 @@ class InMemoryStore:
         Upsert semantics ensure repeated analysis runs on the same sample do
         not cause unbounded store growth.
         """
-        # Remove stale entry if it exists (upsert)
-        self._cases = [c for c in self._cases if c.sample_id != case.sample_id]
-        self._cases.append(case)
+        self._cases = [(c, v) for c, v in self._cases if c.sample_id != case.sample_id]
+        self._cases.append((case, encode(case.summary_text)))
 
     def retrieve(self, query: str, top_k: int = 3) -> list[StoredCase]:
         """Return the top_k stored cases most similar to the query text.
@@ -102,12 +69,10 @@ class InMemoryStore:
         if not self._cases or not query.strip():
             return []
 
-        query_vec = _term_freq_vector(query)
-        scored: list[tuple[float, StoredCase]] = []
-        for case in self._cases:
-            score = _cosine_similarity(query_vec, _term_freq_vector(case.summary_text))
-            scored.append((score, case))
-
+        query_vec = encode(query)
+        scored: list[tuple[float, StoredCase]] = [
+            (cosine(query_vec, vec), case) for case, vec in self._cases
+        ]
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [case for _, case in scored[:top_k]]
 

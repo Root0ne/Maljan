@@ -381,10 +381,13 @@ class JudgeAgent:
         if schema_hint:
             reports_text = f"{reports_text}\n\n{schema_hint[:400]}"
 
-        # Phase 5: Long-term memory (skip for now to keep prompt lean)
-        # memory_block = self._build_memory_context(isr_reports, memory_store)
-        # if memory_block:
-        #     reports_text = f"{reports_text}\n\n{memory_block}"
+        # Phase 5: Long-term memory — inject top-K similar past cases as
+        # weighted priors. The block is bounded (~1.2 KB worst case for
+        # top_k=3) and degrades gracefully to an empty string when the store
+        # is empty or retrieval fails.
+        memory_block = self._build_memory_context(isr_reports, memory_store)
+        if memory_block:
+            reports_text = f"{reports_text}\n\n{memory_block}"
 
         verdict_system = (
             "You are the Chief Malware Judge. Based on the expert reports below, "
