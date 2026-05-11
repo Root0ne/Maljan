@@ -51,11 +51,12 @@ Boyut: ~15.3 GB. SHA256'sını [HuggingFace sayfasından](https://huggingface.co
 ```powershell
 .\external\ik_llama.cpp\build\bin\Release\llama-server.exe `
   -m .\models\Qwen3.6-35B-A3B-IQ3_K_R4.gguf `
-  -ngl 99 -ncmoe 99 `
+  -ngl 99 --n-cpu-moe 99 `
   --host 127.0.0.1 --port 8080 `
-  --flash-attn `
-  -c 65536 `
+  -fa on `
+  -c 262144 `
   -ctk q4_0 -ctv q4_0 `
+  --jinja `
   --alias qwen3.6-35b-a3b
 ```
 
@@ -64,15 +65,18 @@ Bayraklar:
 | Bayrak | Açıklama |
 |---|---|
 | `-ngl 99` | Tüm attention/shared weights GPU'da |
-| `-ncmoe 99` | Tüm expert FFN'ler CPU+RAM'de (8 GB VRAM senaryosu) |
+| `--n-cpu-moe 99` | Tüm expert FFN'ler CPU+RAM'de (8 GB VRAM senaryosu) |
 | `--host 127.0.0.1` | Sadece localhost'tan erişim (güvenlik) |
 | `--port 8080` | Maljan `.env`'deki `LLM__OPENAI__BASE_URL` ile eşleşir |
-| `--flash-attn` | FlashAttention (KV scan hızlanır) |
-| `-c 65536` | 64k context (Maljan için fazlasıyla yeterli) |
+| `-fa on` | FlashAttention (KV scan hızlanır) — `on/off/auto` değer ister, çıplak flag değil |
+| `-c 262144` | 256k context (modelin tam eğitim sınırı). Maljan için 64k de yeterlidir |
 | `-ctk/-ctv q4_0` | KV cache 4-bit (RAM yarıya iner) |
+| `--jinja` | OpenAI `tools` parametresi (fonksiyon çağrısı / ReAct) için ZORUNLU |
 | `--alias` | OpenAI API'sinin `model` alanında dönen ad |
 
-Daha hızlı varyant (GPU bolsa): `-ncmoe 30` (11 expert GPU'da, ~60 t/s, 7.5 GB VRAM)
+Daha hızlı varyant (GPU bolsa): `--n-cpu-moe 30` (11 expert GPU'da, ~60 t/s, 7.5 GB VRAM)
+
+**Context vs. RAM:** q4_0 KV cache ile her token ~5 KB. 256k context → ~1.3 GB ek RAM. 64k istersen `-c 65536` yap, ~320 MB tasarruf.
 
 ### 4. Maljan'ı yapılandır
 
