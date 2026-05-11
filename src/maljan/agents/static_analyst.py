@@ -27,23 +27,31 @@ _ISR_SYSTEM = (
     "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
     "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
     "=== TOOL USAGE WORKFLOW ===\n"
-    "Follow this reverse engineering sequence:\n"
+    "Follow this reverse engineering sequence. Prefer the malware-specific\n"
+    "analyzers first — they return pre-digested triage signals in one call,\n"
+    "which is far cheaper than walking every function manually:\n"
     "1. Call `load_program(file=<path>)` to load the binary into Ghidra.\n"
     "   The file path is the absolute path on the server filesystem.\n"
     "2. Call `get_current_program_info` to verify the program loaded correctly.\n"
-    "3. Call `list_functions` to get an overview of all functions.\n"
-    "4. Call `list_imports` to identify suspicious API imports (VirtualAlloc, CreateRemoteThread, etc.).\n"
-    "5. Call `list_exports` to check exported symbols.\n"
-    "6. Call `list_strings` to find hardcoded C2 URLs, registry paths, or encoded data.\n"
-    "7. For suspicious functions: call `decompile_function(address=<addr>)` to read the C pseudocode.\n"
-    "8. Call `get_xrefs_to(address=<addr>)` to trace how a suspicious API is called.\n"
-    "9. Call `list_segments` or `list_namespaces` if you need memory layout context.\n\n"
+    "3. Call `detect_malware_behaviors` for a fast behavior-category summary.\n"
+    "4. Call `analyze_api_call_chains` for suspicious API sequences with threat\n"
+    "   classifications.\n"
+    "5. Call `find_anti_analysis_techniques` to surface packing/anti-debug/VM\n"
+    "   evasion patterns.\n"
+    "6. Call `extract_iocs_with_context` to pull URLs, IPs, registry keys, and\n"
+    "   filesystem paths with the calling function context.\n"
+    "7. Call `list_imports` to confirm suspicious API imports raised above.\n"
+    "8. Call `list_strings` for any encoded/hardcoded artefacts the IOC pass\n"
+    "   missed.\n"
+    "9. For the 3–5 most suspicious functions: `decompile_function(address=<addr>)`\n"
+    "   then `get_xrefs_to(address=<addr>)` to confirm call-sites.\n\n"
     "IMPORTANT:\n"
     "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
-    "- Focus decompilation on 5-10 most suspicious functions, not every function.\n"
-    "- Large binaries may have 1000+ functions. Prioritize entry point, main, "
-    "and functions referencing crypto/network/process APIs.\n"
-    "- Avoid calling `debugger_*` tools unless specifically doing dynamic debugging.\n"
+    "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
+    "  decompiling individual functions — they are much cheaper.\n"
+    "- Focus decompilation on 3-5 most suspicious functions, not every function.\n"
+    "- Large binaries may have 1000+ functions. Prioritize entry point, main,\n"
+    "  and functions referencing crypto/network/process APIs.\n"
     "- Summarize assembly patterns instead of dumping raw hex."
 )
 
@@ -56,38 +64,74 @@ class StaticAnalyst(BaseAnalyst):
     # MCP Tool Interface
     # ------------------------------------------------------------------
 
-    # Tool name prefixes that we never want the Ghidra MCP server to expose.
-    # These are real operations on the Ghidra database (mutating writes,
-    # debugger control, file deletion) that an LLM-driven agent must not be
-    # allowed to invoke regardless of prompting.
-    _GHIDRA_BLOCKED_PREFIXES: tuple[str, ...] = (
-        "debugger_",
-        "modify_",
-        "delete_",
-        "remove_",
-        "rename_",
-        "write_",
-        "set_",
-        "import_",
-        "create_",
+    # Allowlist of Ghidra MCP tools exposed to the ReAct agent.
+    #
+    # Rationale: Ghidra MCP advertises ~225 tools, of which ~165 reach our
+    # client. Past runs loaded 123 tools after a denylist filter, but each
+    # ReAct step then carries that entire catalogue in the prompt — for a
+    # 9B-parameter local model with a 32k context window this is the single
+    # largest contributor to per-step latency (3–5 minutes per round). The
+    # allowlist below covers everything a static malware analyst actually
+    # needs (load + enumerate + decompile + xrefs + malware-specific
+    # detectors) and nothing else, cutting the catalog ~5x.
+    _GHIDRA_ALLOWED_TOOLS: frozenset[str] = frozenset(
+        {
+            # Program lifecycle (must include load_program to start analysis)
+            "load_program",
+            "get_current_program_info",
+            "get_metadata",
+            "get_entry_points",
+            "list_open_programs",
+            # Function enumeration & decompilation
+            "list_functions",
+            "list_functions_enhanced",
+            "search_functions_enhanced",
+            "decompile_function",
+            "disassemble_function",
+            "get_function_signature",
+            "get_function_xrefs",
+            "get_function_callers",
+            "get_function_callees",
+            "get_function_call_graph",
+            # Symbols / strings (high-signal for malware triage)
+            "list_imports",
+            "list_exports",
+            "list_strings",
+            "search_memory_strings",
+            "list_namespaces",
+            # Memory & cross-references
+            "list_segments",
+            "list_data_items",
+            "get_xrefs_to",
+            "get_xrefs_from",
+            "search_byte_patterns",
+            "get_assembly_context",
+            # Malware-specific high-value analyzers (Ghidra MCP v5+)
+            "analyze_api_call_chains",
+            "detect_malware_behaviors",
+            "find_anti_analysis_techniques",
+            "extract_iocs_with_context",
+            "analyze_control_flow",
+            "analyze_call_graph",
+        }
     )
 
     def _filter_ghidra_tools(self, tools: list[Any]) -> list[Any]:
-        """Drop tools whose name starts with a blocked prefix."""
+        """Keep only allowlisted read-only analysis tools.
+
+        Cuts catalogue size ~5x so each ReAct step has a small enough tool
+        manifest for local 7-9B models to iterate at reasonable speed.
+        """
         kept: list[Any] = []
-        dropped: list[str] = []
         for tool in tools:
             name = getattr(tool, "name", "").lower()
-            if name.startswith(self._GHIDRA_BLOCKED_PREFIXES):
-                dropped.append(name)
-                continue
-            kept.append(tool)
-        if dropped:
-            self.logger.info(
-                "Ghidra MCP: filtered %d destructive/mutating tools: %s",
-                len(dropped),
-                dropped,
-            )
+            if name in self._GHIDRA_ALLOWED_TOOLS:
+                kept.append(tool)
+        self.logger.info(
+            "Ghidra MCP: kept %d/%d tools via static-analyst allowlist.",
+            len(kept),
+            len(tools),
+        )
         return kept
 
     def _initialize_mcp_client(self) -> None:
@@ -133,7 +177,7 @@ class StaticAnalyst(BaseAnalyst):
             all_tools = client.get_tools()
             self.tools = self._filter_ghidra_tools(list(all_tools))
             self.logger.info(
-                "Initialized Ghidra HTTP tools: %d/%d (after safety filter).",
+                "Initialized Ghidra HTTP tools: %d/%d (after allowlist).",
                 len(self.tools),
                 len(all_tools),
             )
@@ -169,7 +213,7 @@ class StaticAnalyst(BaseAnalyst):
         all_tools = toolkit.get_tools()
         self.tools = self._filter_ghidra_tools(list(all_tools))
         self.logger.info(
-            "Initialized Ghidra MCP tools: %d/%d (after safety filter).",
+            "Initialized Ghidra MCP tools: %d/%d (after allowlist).",
             len(self.tools),
             len(all_tools),
         )
