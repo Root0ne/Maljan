@@ -98,7 +98,27 @@ class ReportDetailResponse(BaseModel):
     agent_reports: dict | None
     negotiation_log: dict | None
     run_summary: dict | None
+    # Comprehensive MalwareReport JSON (Faz 5) — ``None`` for legacy rows
+    # produced before the report feature shipped. Frontend tabs fall back
+    # to the legacy fields above when this is missing.
+    malware_report: dict | None = None
     agent_findings: list[AgentFindingResponse]
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class IOCEntry(BaseModel):
+    """One flattened IOC row used by the ``/iocs`` endpoint."""
+
+    kind: str  # "domain" | "ip" | "url" | "user_agent" | "ja3" | "hash"
+    value: str
+    is_suspicious: bool = False
+    notes: str | None = None
+
+
+class IOCListResponse(BaseModel):
+    """Container for the ``/iocs`` endpoint output."""
+
+    items: list[IOCEntry]
+    total: int

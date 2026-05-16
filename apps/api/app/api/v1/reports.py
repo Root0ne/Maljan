@@ -6,12 +6,13 @@ Uses ReportService for business logic separation.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
-from app.schemas.job import ReportDetailResponse
+from app.schemas.job import IOCEntry, IOCListResponse, ReportDetailResponse
 from app.services.report_service import ReportService
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
@@ -90,6 +91,98 @@ async def get_mitre_techniques(
             detail="Report not found or MITRE data not available",
         )
     return {"techniques": techniques}
+
+
+# ---------------------------------------------------------------------------
+# Comprehensive MalwareReport endpoints (Faz 5)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{report_id}/full")
+async def get_full_malware_report(
+    report_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> dict:
+    """Get the comprehensive ``MalwareReport`` JSON document.
+
+    Returns the full Pydantic dump (identity / static / dynamic / network /
+    persistence / capability_matrix / executive_summary / detection_signatures
+    / ...) produced by the pipeline's report node. Legacy rows produced
+    before the feature shipped return 404.
+    """
+    mr = await svc.get_malware_report(report_id, user)
+    if mr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or no MalwareReport persisted",
+        )
+    return mr
+
+
+@router.get("/{report_id}/markdown", response_class=PlainTextResponse)
+async def get_full_malware_report_markdown(
+    report_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> str:
+    """Render the comprehensive report as markdown (text/markdown body)."""
+    markdown = await svc.get_malware_report_markdown(report_id, user)
+    if markdown is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or markdown could not be rendered",
+        )
+    return markdown
+
+
+@router.get("/{report_id}/iocs", response_model=IOCListResponse)
+async def get_full_malware_report_iocs(
+    report_id: uuid.UUID,
+    kind: str | None = Query(
+        default=None,
+        description="Filter to one of: hash, domain, ip, url, user_agent, ja3",
+    ),
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> IOCListResponse:
+    """Flat list of every IOC the report holds, optionally filtered by kind."""
+    items = await svc.get_malware_report_iocs(report_id, user, kind=kind)
+    if items is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or no MalwareReport persisted",
+        )
+    parsed = [IOCEntry.model_validate(row) for row in items]
+    return IOCListResponse(items=parsed, total=len(parsed))
+
+
+@router.get(
+    "/{report_id}/signatures/{kind}",
+    response_class=PlainTextResponse,
+)
+async def get_full_malware_report_signatures(
+    report_id: uuid.UUID,
+    kind: str,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> str:
+    """Return rule bodies for a single signature ``kind`` as plain text.
+
+    Accepted kinds: ``yara``, ``sigma``, ``suricata``, ``snort``.
+    """
+    if kind not in {"yara", "sigma", "suricata", "snort"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(f"Unknown signature kind '{kind}'. Use yara, sigma, suricata, or snort."),
+        )
+    body = await svc.get_malware_report_signature(report_id, user, kind=kind)
+    if body is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report not found or no {kind} signatures generated",
+        )
+    return body
 
 
 @router.get("/{report_id}/timeline")

@@ -32,6 +32,12 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     negotiation_log: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     run_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Comprehensive MalwareReport (Faz 5) — full Pydantic model_dump from
+    # the pipeline's report_node. ``NULL`` for legacy rows produced before
+    # the report feature shipped; the API ``/full`` endpoint surfaces this
+    # field directly to consumers.
+    malware_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     job = relationship("AnalysisJob", back_populates="report")
     agent_findings = relationship(

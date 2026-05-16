@@ -316,6 +316,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     "is_consensus": pipeline_result.get("is_consensus", False),
                 },
                 run_summary=pipeline_result.get("run_summary"),
+                malware_report=pipeline_result.get("malware_report"),
             )
             db.add(report)
             await db.flush()
