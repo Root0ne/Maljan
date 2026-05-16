@@ -92,6 +92,7 @@ class ServiceContainer:
         self._yara_layer_cache: YaraLayer | None = None
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
+        self._narrative_agent_cache: Any | None = None
         self._samples_dir = samples_dir
 
         logger.info(
@@ -231,6 +232,25 @@ class ServiceContainer:
                 cached = JudgeAgent(llm=llm)
                 self._judge_agent_cache[role] = cached
             return cached
+
+    def get_narrative_agent(self) -> Any | None:
+        """Return the singleton NarrativeAgent or ``None`` in mock mode.
+
+        Reuses ``get_judge_llm()`` — the judge LLM is already configured for
+        structured-output prompts so no new provider build is needed. Callers
+        receive ``None`` in mock mode and must fall back to the deterministic
+        narrative template.
+        """
+        if self.is_mock:
+            return None
+        with self._lock:
+            if self._narrative_agent_cache is None:
+                from maljan.reporting.narrative_agent import NarrativeAgent
+
+                llm = self.get_judge_llm()
+                max_tokens = self.config.reporting.narrative_max_tokens
+                self._narrative_agent_cache = NarrativeAgent(llm=llm, max_input_tokens=max_tokens)
+            return self._narrative_agent_cache
 
     # ------------------------------------------------------------------
     # Data loading

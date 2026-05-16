@@ -650,10 +650,44 @@ def make_report_node(container: ServiceContainer) -> Any:
                 malware_category=malware_category,
             )
             report = builder.build_deterministic()
-            report = MalwareReportBuilder.apply_fallback_narrative(report)
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {}
+
+        # Narrative LLM round (Faz 3). NarrativeAgent is None in mock mode;
+        # also returns None when the structured-output and manual-parse
+        # fallbacks both fail. In every "no narrative" branch we apply the
+        # deterministic template so the report never ships with empty prose.
+        narrative_dict: dict[str, Any] | None = None
+        try:
+            narrative_agent = container.get_narrative_agent()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
+            narrative_agent = None
+
+        if narrative_agent is not None:
+            try:
+                narrative_output = await narrative_agent.generate(report)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "report_node: NarrativeAgent.generate raised (%s); using fallback.",
+                    exc,
+                )
+                narrative_output = None
+            if narrative_output is not None:
+                narrative_dict = narrative_output.model_dump(mode="json")
+
+        if narrative_dict is not None:
+            report = MalwareReportBuilder.apply_narrative(report, narrative_dict)
+            logger.info(
+                "report_node: narrative LLM round succeeded (summary_chars=%d, "
+                "paragraphs=%d, recs=%d).",
+                len(report.executive_summary),
+                len(report.capabilities_narrative),
+                len(report.defensive_recommendations),
+            )
+        else:
+            report = MalwareReportBuilder.apply_fallback_narrative(report)
 
         markdown = MarkdownRenderer().render(report)
 
