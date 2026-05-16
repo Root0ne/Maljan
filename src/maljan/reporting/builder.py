@@ -179,6 +179,21 @@ class MalwareReportBuilder:
         return report
 
     @staticmethod
+    def attach_detection_signatures(report: MalwareReport) -> MalwareReport:
+        """Populate ``report.detection_signatures`` with template-generated rules.
+
+        Calls into :mod:`maljan.reporting.detection_signatures` which produces
+        up to three rules (YARA / Sigma / Suricata) keyed by the report's
+        IOCs. Missing evidence in any of the three input domains results in
+        that format being skipped (never an empty rule). Generation is
+        deterministic — no LLM involvement.
+        """
+        from maljan.reporting.detection_signatures import build_detection_rules
+
+        report.detection_signatures = build_detection_rules(report)
+        return report
+
+    @staticmethod
     def apply_fallback_narrative(report: MalwareReport) -> MalwareReport:
         """Fill narrative fields with a deterministic templated summary.
 

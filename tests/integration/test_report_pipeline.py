@@ -188,3 +188,28 @@ class TestNarrativeWithMockLLM:
 
         # Deterministic fallback should have run.
         assert "auto-generated summary" in report.executive_summary.lower()
+
+
+class TestDetectionSignaturesInReport:
+    """Faz 4: the report_node must attach YARA/Sigma/Suricata rules."""
+
+    def test_at_least_yara_signature_is_present(self, mock_settings: Settings) -> None:
+        app = MaljanApp(config=mock_settings, mock=True)
+        result = app.run("deadbeef" * 8, file_name="detect-test.exe")
+        report = MalwareReport.model_validate(result["malware_report"])
+
+        # Mock pipeline has no sandbox data; only YARA is guaranteed.
+        kinds = {rule.kind for rule in report.detection_signatures}
+        assert "yara" in kinds
+
+    def test_disabled_signatures_keep_list_empty(self) -> None:
+        s = Settings()
+        s.llm.provider = "ollama"
+        s.negotiation.max_iterations = 1
+        s.reporting.enabled = True
+        s.reporting.auto_generate_detection_rules = False
+
+        app = MaljanApp(config=s, mock=True)
+        result = app.run("deadbeef" * 8, file_name="no-detect.exe")
+        report = MalwareReport.model_validate(result["malware_report"])
+        assert report.detection_signatures == []

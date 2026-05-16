@@ -689,6 +689,20 @@ def make_report_node(container: ServiceContainer) -> Any:
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report)
 
+        # Detection signatures (Faz 4) — template-based YARA/Sigma/Suricata
+        # generation. Runs after narrative so the LLM-written family name can
+        # influence rule metadata. Disabled via config when desired.
+        if cfg is None or cfg.auto_generate_detection_rules:
+            try:
+                report = MalwareReportBuilder.attach_detection_signatures(report)
+                logger.info(
+                    "report_node: detection rules generated (count=%d, errors=%d).",
+                    len(report.detection_signatures),
+                    sum(1 for r in report.detection_signatures if r.compile_error),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: detection rule generation failed (%s).", exc)
+
         markdown = MarkdownRenderer().render(report)
 
         extended_dump: dict[str, Any] | None = None
