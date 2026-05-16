@@ -13,7 +13,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
 from app.schemas.job import IOCEntry, IOCListResponse, ReportDetailResponse
-from app.services.report_service import ReportService
+from app.services.report_service import EnrichmentEnqueueError, ReportService
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -183,6 +183,35 @@ async def get_full_malware_report_signatures(
             detail=f"Report not found or no {kind} signatures generated",
         )
     return body
+
+
+@router.post("/{report_id}/enrich", status_code=status.HTTP_202_ACCEPTED)
+async def enqueue_enrichment_job(
+    report_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> dict:
+    """Queue a post-hoc threat-intel enrichment for ``report_id``.
+
+    Idempotent — the ARQ job is keyed by ``enrich:{report_id}`` so repeated
+    calls coalesce. Returns ``202 Accepted`` with the queued job id (or
+    ``None`` when ARQ refused because an enrichment is already pending).
+    """
+    try:
+        job_id = await svc.enqueue_enrichment(report_id, user)
+    except EnrichmentEnqueueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Enrichment queue unavailable: {exc}",
+        ) from exc
+    if job_id is None:
+        # Authorization layer returns None when the report does not exist
+        # or the caller does not own it. ARQ returning None (already-queued)
+        # is fine; we still surface that as 202 with job_id=None.
+        report = await svc.get_report(report_id, user)
+        if report is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return {"status": "queued", "report_id": str(report_id), "job_id": job_id}
 
 
 @router.get("/{report_id}/timeline")

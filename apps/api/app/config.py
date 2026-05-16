@@ -95,6 +95,14 @@ class APISettings(BaseSettings):
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection: str = "maljan_ltm"
 
+    # ── Threat-intel enrichment (Faz 6) ──────────────────────────
+    # API keys are optional. When empty the enrichment task skips the
+    # corresponding provider and leaves reputation fields as ``null``.
+    virustotal_api_key: SecretStr = SecretStr("")
+    abuseipdb_api_key: SecretStr = SecretStr("")
+    enrichment_max_lookups: int = 25
+    enrichment_enabled: bool = True
+
     # ── Rate Limiting ────────────────────────────────────────────
     rate_limit_enabled: bool = Field(default=True)
     rate_limit_requests: int = Field(default=100)

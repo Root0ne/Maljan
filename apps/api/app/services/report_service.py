@@ -3,10 +3,12 @@
 import uuid
 from typing import Any
 
+from arq import ArqRedis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.logging_config import get_logger
 from app.models.job import AnalysisJob
 from app.models.report import AnalysisReport
@@ -15,11 +17,24 @@ from app.models.user import User
 logger = get_logger("service.report")
 
 
+class EnrichmentEnqueueError(RuntimeError):
+    """Raised when the ARQ enqueue for enrichment fails (503 to the client)."""
+
+
 class ReportService:
     """Handles report retrieval, STIX export, and MITRE mapping."""
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self._arq_redis: ArqRedis | None = None
+
+    async def _get_arq_redis(self) -> ArqRedis:
+        """Lazy-initialize ARQ Redis connection for job enqueueing."""
+        if self._arq_redis is None:
+            from arq.connections import RedisSettings, create_pool
+
+            self._arq_redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+        return self._arq_redis
 
     async def list_reports(
         self,
@@ -253,6 +268,35 @@ class ReportService:
         if not bodies:
             return None
         return "\n\n".join(bodies)
+
+    async def enqueue_enrichment(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+    ) -> str | None:
+        """Enqueue an ARQ threat-intel enrichment job for ``report_id``.
+
+        Returns the ARQ job id, ``None`` when ARQ refused (already queued —
+        unique key collision) or raises :class:`EnrichmentEnqueueError`
+        when the Redis connection itself failed.
+
+        Authorization is delegated to ``get_report`` — a 404 here means the
+        caller does not own the report.
+        """
+        report = await self.get_report(report_id, user)
+        if not report:
+            return None
+        try:
+            pool = await self._get_arq_redis()
+            job = await pool.enqueue_job(
+                "enrich_threat_intel",
+                str(report_id),
+                _job_id=f"enrich:{report_id}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("enrich enqueue failed: %s", exc)
+            raise EnrichmentEnqueueError(str(exc)) from exc
+        return job.job_id if job is not None else None
 
     async def get_negotiation_timeline(
         self,

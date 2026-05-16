@@ -385,6 +385,30 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "component": "lifecycle"},
             )
 
+            # ── 6. Auto-enqueue threat-intel enrichment (Faz 6) ────────
+            # The enrichment job is post-hoc; pipeline latency is unaffected.
+            # ARQ enforces the unique ``_job_id`` so duplicate triggers
+            # (e.g. operator also calling /enrich manually) are coalesced.
+            if settings.enrichment_enabled and report.malware_report:
+                try:
+                    arq_pool = ctx.get("arq_pool")
+                    if arq_pool is None:
+                        from arq.connections import ArqRedis
+
+                        arq_pool = ArqRedis(connection_pool=redis_conn.connection_pool)
+                    await arq_pool.enqueue_job(
+                        "enrich_threat_intel",
+                        str(report.id),
+                        _job_id=f"enrich:{report.id}",
+                    )
+                    logger.info(
+                        "enrich: queued report=%s",
+                        report.id,
+                        extra={"job_id": job_id, "component": "enrich"},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("enrich: enqueue failed (%s).", exc)
+
             return {
                 "status": "completed",
                 "verdict": report.verdict,
@@ -540,10 +564,16 @@ async def shutdown(ctx: dict) -> None:
     )
 
 
+# The enrichment task lives in a sibling module. Importing it at module
+# scope is fine — ``enrich_worker`` only re-enters this module lazily from
+# inside its function, so there is no real circular dependency.
+from app.worker.enrich_worker import enrich_threat_intel  # noqa: E402
+
+
 class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
 
-    functions = [run_analysis]
+    functions = [run_analysis, enrich_threat_intel]
     on_startup = startup
     on_shutdown = shutdown
 
