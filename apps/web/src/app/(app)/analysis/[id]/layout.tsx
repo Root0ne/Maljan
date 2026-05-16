@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
-import { useEffect, useState, createContext, useContext } from "react";
+import { useEffect, useRef, useState, createContext, useContext } from "react";
 import { api } from "@/lib/api";
 import type { ReportDetailDTO, JobDTO } from "@/lib/api";
+import { useWebSocket } from "@/lib/useWebSocket";
 
 /* ── Report Context (shared with child tabs) ─────────── */
 interface ReportCtx {
@@ -84,11 +85,24 @@ export default function AnalysisLayout({
   const [job, setJob] = useState<JobDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
+  const [enrichmentToast, setEnrichmentToast] = useState<string | null>(null);
+  const refetchRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const TERMINAL = new Set(["completed", "failed"]);
     const POLL_INTERVAL = 3000;
+
+    async function refetchReport() {
+      if (cancelled) return;
+      try {
+        const r = await api.getReportByJobId(id);
+        if (!cancelled) setReport(r);
+      } catch {
+        /* report still propagating; ignore */
+      }
+    }
+    refetchRef.current = refetchReport;
 
     async function fetchAll() {
       try {
@@ -98,12 +112,7 @@ export default function AnalysisLayout({
         setApiAvailable(true);
 
         if (TERMINAL.has(j.status)) {
-          try {
-            const r = await api.getReportByJobId(id);
-            if (!cancelled) setReport(r);
-          } catch {
-            /* report may not exist for failed jobs */
-          }
+          await refetchReport();
           if (!cancelled) setLoading(false);
           return; // stop polling
         }
@@ -120,6 +129,25 @@ export default function AnalysisLayout({
     fetchAll();
     return () => { cancelled = true; };
   }, [id]);
+
+  /* WS listener — react to enrichment_complete (and late completed) without
+   * waiting for polling to come back. */
+  const { events } = useWebSocket(id);
+  const lastWsCursor = useRef(0);
+  useEffect(() => {
+    if (events.length <= lastWsCursor.current) return;
+    for (let i = lastWsCursor.current; i < events.length; i++) {
+      const e = events[i];
+      if (e.type === "enrichment_complete" || e.type === "completed") {
+        refetchRef.current?.();
+        if (e.type === "enrichment_complete") {
+          setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
+          setTimeout(() => setEnrichmentToast(null), 5000);
+        }
+      }
+    }
+    lastWsCursor.current = events.length;
+  }, [events]);
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = report?.verdict?.toLowerCase() ?? "unknown";
@@ -139,6 +167,12 @@ export default function AnalysisLayout({
         {!apiAvailable && !loading && (
           <div className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
             Could not connect to the API. Please ensure the backend is running.
+          </div>
+        )}
+
+        {enrichmentToast && (
+          <div className="mb-4 p-2.5 text-xs text-status-blue bg-status-blue/10 border border-status-blue/20 rounded">
+            {enrichmentToast}
           </div>
         )}
 

@@ -84,6 +84,7 @@ export type WSEventType =
   | "agent_progress"
   | "phase_change"
   | "completed"
+  | "enrichment_complete"
   | "error"
   | "cancelled"
   | "heartbeat"

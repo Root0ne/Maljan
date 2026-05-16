@@ -1,3 +1,9 @@
+import type {
+  EnrichTriggerResponse,
+  IOCListResponse,
+  MalwareReport,
+} from "@/types/malware-report";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 /* ── Shared response types ────────────────────────────── */
@@ -64,6 +70,7 @@ export interface ReportDetailDTO {
   negotiation_log: Record<string, unknown> | null;
   run_summary: Record<string, unknown> | null;
   agent_findings: AgentFindingDTO[];
+  malware_report: MalwareReport | null;
   created_at: string;
 }
 
@@ -149,6 +156,39 @@ class ApiClient {
 
     if (res.status === 204) return {} as T;
     return res.json();
+  }
+
+  private async textRequest(
+    path: string,
+    options: RequestInit = {}
+  ): Promise<string> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+      }
+      throw new Error("Unauthorized");
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed: ${res.status}`);
+    }
+
+    return res.text();
   }
 
   private async uploadRequest<T>(
@@ -298,6 +338,30 @@ class ApiClient {
   getReports(page = 1, pageSize = 50) {
     return this.request<PaginatedResponse<ReportSummaryDTO>>(
       `/api/v1/reports?page=${page}&page_size=${pageSize}`
+    );
+  }
+
+  getReportFull(reportId: string) {
+    return this.request<MalwareReport>(`/api/v1/reports/${reportId}/full`);
+  }
+
+  getReportMarkdown(reportId: string) {
+    return this.textRequest(`/api/v1/reports/${reportId}/markdown`);
+  }
+
+  getReportIOCs(reportId: string, kind?: string) {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+    return this.request<IOCListResponse>(`/api/v1/reports/${reportId}/iocs${qs}`);
+  }
+
+  getReportSignature(reportId: string, kind: "yara" | "sigma" | "suricata" | "snort") {
+    return this.textRequest(`/api/v1/reports/${reportId}/signatures/${kind}`);
+  }
+
+  enrichReport(reportId: string) {
+    return this.request<EnrichTriggerResponse>(
+      `/api/v1/reports/${reportId}/enrich`,
+      { method: "POST" }
     );
   }
 
