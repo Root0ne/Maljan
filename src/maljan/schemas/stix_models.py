@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -185,12 +185,73 @@ class AttackPattern(STIXObject):
 
 
 # ---------------------------------------------------------------------------
-# Bundle — updated to include ConfidenceAnnotatedRelationship
+# Extended SDOs — populated by the report node's ExtendedSTIXRenderer.
+# ---------------------------------------------------------------------------
+
+
+class Identity(STIXObject):
+    """STIX 2.1 Identity — used to mark Maljan itself as the report producer."""
+
+    type: Literal["identity"] = "identity"
+    id: str = Field(default_factory=lambda: f"identity--{_generate_uuid()}")
+    name: str
+    identity_class: str = "software"
+    description: str | None = None
+
+
+class ObservedData(STIXObject):
+    """STIX 2.1 Observed Data — a snapshot of sandbox observations."""
+
+    type: Literal["observed-data"] = "observed-data"
+    id: str = Field(default_factory=lambda: f"observed-data--{_generate_uuid()}")
+    first_observed: datetime = Field(default_factory=get_utcnow)
+    last_observed: datetime = Field(default_factory=get_utcnow)
+    number_observed: int = 1
+    objects: dict[str, Any] = Field(default_factory=dict)
+
+
+class Note(STIXObject):
+    """STIX 2.1 Note — wraps the LLM-generated executive summary."""
+
+    type: Literal["note"] = "note"
+    id: str = Field(default_factory=lambda: f"note--{_generate_uuid()}")
+    abstract: str | None = None
+    content: str
+    object_refs: list[str] = Field(default_factory=list)
+
+
+class Report(STIXObject):
+    """STIX 2.1 Report — the top-level container linking every SDO in this analysis."""
+
+    type: Literal["report"] = "report"
+    id: str = Field(default_factory=lambda: f"report--{_generate_uuid()}")
+    name: str
+    description: str | None = None
+    report_types: list[str] = Field(default_factory=lambda: ["malware"])
+    published: datetime = Field(default_factory=get_utcnow)
+    object_refs: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Bundle — updated to include ConfidenceAnnotatedRelationship + extended SDOs
 # ---------------------------------------------------------------------------
 
 # Discriminated union: Pydantic resolves ambiguity between Relationship and
 # ConfidenceAnnotatedRelationship via the presence of x_maljan_confidence.
-_BundleObject = Indicator | Malware | ConfidenceAnnotatedRelationship | Relationship | AttackPattern
+# Extended SDOs (Identity/ObservedData/Note/Report) are appended — judge's
+# minimal bundle continues to validate because every member is still
+# left-to-right resolvable by the union.
+_BundleObject = (
+    Indicator
+    | Malware
+    | ConfidenceAnnotatedRelationship
+    | Relationship
+    | AttackPattern
+    | Identity
+    | ObservedData
+    | Note
+    | Report
+)
 
 
 class Bundle(BaseModel):

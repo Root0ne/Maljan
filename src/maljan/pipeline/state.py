@@ -65,3 +65,11 @@ class AnalysisState(TypedDict):
 
     # Observability: serialized RunSummary dict, populated after verdict generation.
     run_summary: dict[str, Any] | None
+
+    # Comprehensive malware analysis report produced by ``report_node`` after
+    # the judge verdict. Stays ``None`` if the reporting feature is disabled
+    # (``config.reporting.enabled = False``) — downstream consumers fall back
+    # to the legacy ``judge_report`` / ``stix_output`` pair.
+    malware_report: dict[str, Any] | None
+    malware_report_markdown: str | None
+    stix_bundle_extended: dict[str, Any] | None

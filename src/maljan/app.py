@@ -164,6 +164,9 @@ class MaljanApp:
             "judge_report": None,
             "stix_output": None,
             "run_summary": None,
+            "malware_report": None,
+            "malware_report_markdown": None,
+            "stix_bundle_extended": None,
         }
 
         result = await self.graph.ainvoke(initial_state)

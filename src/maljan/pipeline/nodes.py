@@ -559,3 +559,143 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
     node_fn.__name__ = "judge_node"
     return node_fn
+
+
+# ---------------------------------------------------------------------------
+# Report node — assembles the comprehensive MalwareReport (Faz 2)
+# ---------------------------------------------------------------------------
+
+
+def make_report_node(container: ServiceContainer) -> Any:
+    """Factory: builds the final ``MalwareReport`` and renders markdown + STIX.
+
+    Runs after the judge node. The narrative LLM round and the auto-generated
+    detection signatures are added in later phases; for now we ship a
+    deterministic fallback narrative so the report never leaves a consumer
+    with empty prose.
+    """
+
+    async def node_fn(state: AnalysisState) -> dict[str, Any]:
+        try:
+            cfg = container.config.reporting
+        except AttributeError:
+            cfg = None
+
+        # Feature flag: when reporting is disabled we leave the new state
+        # fields untouched so downstream consumers see ``None`` and fall back
+        # to ``judge_report`` / ``stix_output``.
+        if cfg is not None and not cfg.enabled:
+            return {}
+
+        from maljan.reporting.builder import MalwareReportBuilder
+        from maljan.reporting.renderers import ExtendedSTIXRenderer, MarkdownRenderer
+        from maljan.schemas.stix_models import Bundle
+
+        isr_reports = dict(state.get("isr_reports") or {})
+
+        cascade_summary = None
+        try:
+            cascade_summary = TTPCascadeEngine().compute(isr_reports)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("report_node: cascade recompute skipped (%s).", exc)
+
+        # Derive overall confidence — last entry of the confidence history if
+        # available, otherwise the negotiation block of run_summary, otherwise
+        # 0.0 (safe default for the severity heuristic).
+        confidence_history = state.get("confidence_history") or []
+        overall_confidence: float = 0.0
+        if confidence_history:
+            try:
+                overall_confidence = float(confidence_history[-1])
+            except (TypeError, ValueError):
+                overall_confidence = 0.0
+        run_summary_state = state.get("run_summary") or {}
+        if not overall_confidence:
+            try:
+                overall_confidence = float(
+                    (run_summary_state.get("negotiation") or {}).get("final_confidence") or 0.0
+                )
+            except (TypeError, ValueError):
+                overall_confidence = 0.0
+
+        # Best-effort malware category — cheap and fully deterministic.
+        malware_category: str | None = None
+        try:
+            malware_category = infer_malware_category(
+                reports=state.get("reports") or {},
+                isr_reports=isr_reports,
+            ).value
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("report_node: malware_category inference failed (%s).", exc)
+
+        discussion_history = [
+            arg.model_dump() if hasattr(arg, "model_dump") else dict(arg)
+            for arg in (state.get("discussion_history") or [])
+        ]
+
+        try:
+            builder = MalwareReportBuilder(
+                file_hash=state.get("file_hash"),
+                file_name=state.get("file_name"),
+                sample_path=state.get("sample_path"),
+                sandbox_report=state.get("sandbox_report"),
+                reports=state.get("reports"),
+                isr_reports=isr_reports,
+                stix_output=state.get("stix_output"),
+                run_summary=run_summary_state,
+                discussion_history=discussion_history,
+                final_decision=state.get("final_decision") or "Suspicious",
+                overall_confidence=overall_confidence,
+                cascade_summary=cascade_summary,
+                malware_category=malware_category,
+            )
+            report = builder.build_deterministic()
+            report = MalwareReportBuilder.apply_fallback_narrative(report)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
+            return {}
+
+        markdown = MarkdownRenderer().render(report)
+
+        extended_dump: dict[str, Any] | None = None
+        if cfg is None or cfg.include_extended_stix:
+            try:
+                base = (
+                    Bundle.model_validate(state["stix_output"])
+                    if state.get("stix_output")
+                    else None
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "report_node: judge bundle could not be re-validated (%s). "
+                    "Falling back to fresh extended bundle.",
+                    exc,
+                )
+                base = None
+            try:
+                extended_bundle = ExtendedSTIXRenderer().render(report, base)
+                extended_dump = extended_bundle.model_dump(mode="json")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: extended STIX render failed (%s).", exc)
+                extended_dump = None
+
+        if extended_dump is not None:
+            report.stix_bundle_extended = extended_dump
+
+        logger.info(
+            "report_node: built MalwareReport (verdict=%s, severity=%s, "
+            "markdown_chars=%d, extended_objects=%d).",
+            report.verdict,
+            report.severity.rating,
+            len(markdown),
+            len(extended_dump.get("objects", [])) if extended_dump else 0,
+        )
+
+        return {
+            "malware_report": report.model_dump(mode="json"),
+            "malware_report_markdown": markdown,
+            "stix_bundle_extended": extended_dump,
+        }
+
+    node_fn.__name__ = "report_node"
+    return node_fn

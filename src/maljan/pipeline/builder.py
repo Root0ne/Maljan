@@ -17,6 +17,7 @@ from maljan.pipeline.nodes import (
     make_analyst_node,
     make_judge_node,
     make_negotiation_node,
+    make_report_node,
     make_revision_node,
 )
 from maljan.pipeline.routing import ConsensusRouter
@@ -50,10 +51,20 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     for name in agent_names:
         builder.add_node(f"{name}_analyst", make_analyst_node(name, container))
 
-    # 3. Add negotiation, revision, and judge nodes
+    # 3. Add negotiation, revision, judge, and report nodes. The report
+    #    node only runs when ``config.reporting.enabled`` — the node itself
+    #    short-circuits when disabled, so the topology stays unchanged.
     builder.add_node("negotiation", make_negotiation_node(container))
     builder.add_node("revision", make_revision_node(container))
     builder.add_node("judge", make_judge_node(container))
+
+    reporting_enabled = True
+    try:
+        reporting_enabled = bool(container.config.reporting.enabled)
+    except AttributeError:
+        reporting_enabled = True
+    if reporting_enabled:
+        builder.add_node("report", make_report_node(container))
 
     # 4. Fan-out: START -> all analysts in parallel
     #    LangGraph will start every analyst node simultaneously.
@@ -79,7 +90,11 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     # 7. Revision loops back to negotiation
     builder.add_edge("revision", "negotiation")
 
-    # 8. Judge -> END
-    builder.add_edge("judge", END)
+    # 8. Judge -> report -> END (or Judge -> END when reporting is disabled).
+    if reporting_enabled:
+        builder.add_edge("judge", "report")
+        builder.add_edge("report", END)
+    else:
+        builder.add_edge("judge", END)
 
     return builder.compile()

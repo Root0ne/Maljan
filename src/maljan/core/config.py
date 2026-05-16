@@ -298,6 +298,36 @@ class MCPConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Reporting (Faz 2+)
+# ---------------------------------------------------------------------------
+
+
+class ReportingConfig(BaseModel):
+    """Comprehensive malware report generation settings.
+
+    The pipeline's ``report_node`` reads these flags:
+
+    - ``enabled``: when False the graph keeps the legacy ``judge → END`` edge
+      and downstream consumers receive only ``judge_report`` / ``stix_output``.
+    - ``include_extended_stix``: emit the extended Bundle (Identity / Note /
+      Report SDOs). Disable to halve serialization cost when consumers only
+      need the minimal judge bundle.
+    - ``narrative_max_tokens``: hard cap for the NarrativeAgent LLM round
+      (Faz 3). Keeps tail latency predictable.
+    - ``auto_generate_detection_rules``: template-based YARA/Sigma/Suricata
+      generation (Faz 4).
+    - ``enrichment_async``: enqueue a threat-intel enrichment ARQ job after
+      verdict instead of blocking the pipeline (Faz 6).
+    """
+
+    enabled: bool = True
+    include_extended_stix: bool = True
+    narrative_max_tokens: int = 1500
+    auto_generate_detection_rules: bool = True
+    enrichment_async: bool = True
+
+
+# ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
 
@@ -344,6 +374,7 @@ class Settings(BaseSettings):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    reporting: ReportingConfig = Field(default_factory=ReportingConfig)
 
     # Token overflow protection (128K is conservative for Gemini 1M+ context)
     max_token_limit: int = 128_000
