@@ -62,6 +62,10 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<DisplayJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmJob, setConfirmJob] = useState<DisplayJob | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -76,16 +80,42 @@ export default function JobsPage() {
     })();
   }, []);
 
-  const handleCancel = async (jobId: string) => {
-    if (!confirm("Cancel this job?")) return;
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const refreshJobs = async () => {
     try {
-      await api.cancelJob(jobId);
-      setJobs((prev) =>
-        prev.map((j) => (j.id === jobId ? { ...j, status: "cancelled" } : j))
-      );
-    } catch (err: any) {
-      alert(err.message || "Failed to cancel job");
+      const res = await api.getJobs(1, 100);
+      setJobs(res.items.map(mapJob));
+    } catch {
+      /* ignore - keep stale list */
     }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!confirmJob) return;
+    setCancelling(true);
+    setCancelError(null);
+    const idPrefix = confirmJob.id.slice(0, 8);
+    try {
+      await api.cancelJob(confirmJob.id);
+      setConfirmJob(null);
+      await refreshJobs();
+      setToast(`Job ${idPrefix} cancelled.`);
+    } catch (err: any) {
+      setCancelError(err.message || "Failed to cancel job.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const closeModal = () => {
+    if (cancelling) return;
+    setConfirmJob(null);
+    setCancelError(null);
   };
 
   const counts = countByStatus(jobs);
@@ -170,10 +200,15 @@ export default function JobsPage() {
 
         {/* Job List */}
         <div className="flex-1 bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Analysis Jobs &mdash; {filtered.length} results
             </h2>
+            {toast && (
+              <span className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-0.5">
+                {toast}
+              </span>
+            )}
           </div>
           <div className="divide-y divide-border-light">
             {filtered.length === 0 ? (
@@ -210,9 +245,10 @@ export default function JobsPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleCancel(job.id);
+                            setCancelError(null);
+                            setConfirmJob(job);
                           }}
-                          className="px-2 py-0.5 text-xs border border-status-red/30 text-status-red rounded hover:bg-status-red/10 transition-colors"
+                          className="px-3 py-1 text-xs border border-status-red/30 text-status-red rounded hover:bg-status-red/10 transition-colors"
                         >
                           Cancel
                         </button>
@@ -231,6 +267,57 @@ export default function JobsPage() {
           </div>
         </div>
       </div>
+
+      {/* Cancel Confirmation Modal */}
+      {confirmJob && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={closeModal}
+        >
+          <div
+            className="bg-bg-surface border border-border rounded w-full max-w-md p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-text-primary">Cancel Job</h3>
+              <button
+                onClick={closeModal}
+                disabled={cancelling}
+                className="text-text-muted hover:text-text-primary disabled:opacity-50"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-xs text-text-secondary mb-4 leading-relaxed">
+              Cancel job {confirmJob.id.slice(0, 8)}? This will stop the in-flight analysis and mark the job as cancelled. Cannot be undone.
+            </p>
+            {cancelError && (
+              <div className="mb-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5">
+                {cancelError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={closeModal}
+                disabled={cancelling}
+                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors disabled:opacity-50"
+              >
+                Keep running
+              </button>
+              <button
+                onClick={handleConfirmCancel}
+                disabled={cancelling}
+                className="px-3 py-1 text-xs bg-status-red text-white rounded hover:bg-status-red/90 transition-colors disabled:opacity-50"
+              >
+                {cancelling ? "Cancelling..." : "Cancel job"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

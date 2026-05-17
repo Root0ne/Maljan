@@ -137,6 +137,8 @@ def build_static_analysis(
         sections, imports, exports, embedded, packer_hint, obfuscation = _parse_pe(blob)
     elif blob[:4] == b"\x7fELF":
         sections = _parse_elf_sections(blob)
+        imports = _parse_elf_imports(blob)
+        exports = _parse_elf_exports(blob)
 
     strings = _extract_string_iocs(blob)
 
@@ -404,6 +406,142 @@ def _parse_elf_sections(blob: bytes) -> list[PESection]:
     return out
 
 
+# ELF API surface that's most useful to call out for malware triage:
+# native execution, anti-debug, code injection, persistence, network.
+_ELF_SUSPICIOUS_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "execve",
+        "execv",
+        "execvp",
+        "execvpe",
+        "execl",
+        "execle",
+        "execlp",
+        "fork",
+        "vfork",
+        "clone",
+        "system",
+        "popen",
+        "ptrace",
+        "syscall",
+        "mmap",
+        "mmap64",
+        "mprotect",
+        "memfd_create",
+        "dlopen",
+        "dlsym",
+        "socket",
+        "connect",
+        "bind",
+        "listen",
+        "accept",
+        "recv",
+        "send",
+        "recvfrom",
+        "sendto",
+        "inet_pton",
+        "inet_ntop",
+        "getaddrinfo",
+        "gethostbyname",
+        "setuid",
+        "setgid",
+        "seteuid",
+        "setegid",
+        "chroot",
+        "unshare",
+    }
+)
+
+
+def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
+    """Return DT_NEEDED libraries paired with undefined .dynsym symbols.
+
+    Each ``(library, function)`` pair becomes one :class:`ImportRow`. The
+    library column lists every DT_NEEDED entry once for the first import
+    and then ``""`` to keep tables compact. Set ``is_suspicious=True``
+    when the function name matches :data:`_ELF_SUSPICIOUS_FUNCTIONS`.
+    """
+    try:
+        from elftools.elf.dynamic import DynamicSection  # type: ignore[import-not-found]
+        from elftools.elf.elffile import ELFFile  # type: ignore[import-not-found]
+        from elftools.elf.sections import SymbolTableSection  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+
+    out: list[ImportRow] = []
+    try:
+        from io import BytesIO
+
+        elf = ELFFile(BytesIO(blob))
+        # DT_NEEDED libraries
+        libraries: list[str] = []
+        for section in elf.iter_sections():
+            if isinstance(section, DynamicSection):
+                for tag in section.iter_tags():
+                    if tag.entry.d_tag == "DT_NEEDED":
+                        libraries.append(tag.needed)
+
+        # Imported (undefined) symbols
+        dynsym = elf.get_section_by_name(".dynsym")
+        if not isinstance(dynsym, SymbolTableSection):
+            return []
+        functions: list[str] = []
+        for symbol in dynsym.iter_symbols():
+            if not symbol.name:
+                continue
+            info = symbol.entry.st_info
+            if info.type != "STT_FUNC" and info.type != "STT_NOTYPE":
+                continue
+            # Undefined section index → imported by the dynamic linker.
+            if symbol.entry.st_shndx == "SHN_UNDEF":
+                functions.append(symbol.name)
+
+        # Combine: emit each function once with its library hint, or "" if
+        # we cannot map it to a specific DT_NEEDED entry.
+        lib_label = libraries[0] if libraries else ""
+        for fn in functions:
+            out.append(
+                ImportRow(
+                    dll=lib_label,
+                    function=fn,
+                    is_suspicious=fn in _ELF_SUSPICIOUS_FUNCTIONS,
+                )
+            )
+            lib_label = ""  # compact: only the first row shows the lib
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pe_extractor: ELF imports parse failed (%s)", exc)
+    return out
+
+
+def _parse_elf_exports(blob: bytes) -> list[str]:
+    """Return defined (exported) function symbol names from .dynsym."""
+    try:
+        from elftools.elf.elffile import ELFFile  # type: ignore[import-not-found]
+        from elftools.elf.sections import SymbolTableSection  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+
+    out: list[str] = []
+    try:
+        from io import BytesIO
+
+        elf = ELFFile(BytesIO(blob))
+        dynsym = elf.get_section_by_name(".dynsym")
+        if not isinstance(dynsym, SymbolTableSection):
+            return []
+        for symbol in dynsym.iter_symbols():
+            if not symbol.name:
+                continue
+            info = symbol.entry.st_info
+            if info.type != "STT_FUNC":
+                continue
+            if symbol.entry.st_shndx != "SHN_UNDEF":
+                out.append(symbol.name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pe_extractor: ELF exports parse failed (%s)", exc)
+    return out
+
+
 def _shannon_entropy(data: bytes) -> float:
     if not data:
         return 0.0
@@ -476,8 +614,24 @@ def _extract_string_iocs(blob: bytes) -> list[StringIOC]:
 
 
 def _is_meaningful_ip(ip: str) -> bool:
-    if ip.startswith(("127.", "0.", "255.")):
-        return False
+    """Heuristic filter: only keep IPs that *look like* real public hosts.
+
+    Audit 2026-05-17 (IOC-01) tightened this from the original RFC1918 +
+    loopback filter — the IPv4 regex matched a flood of false positives
+    on Go binaries (X.509 ASN.1 OIDs ``2.5.4.62``, the well-known
+    ``1.1.1.1`` test constant, etc.). The full picture:
+
+    * Reject any octet > 255 (already enforced).
+    * Reject the canonical reserved blocks (loopback, broadcast,
+      RFC1918, link-local, multicast, documentation, IETF reserved).
+    * Reject ``1.x.x.x`` — Cloudflare's 1.1.1.1 / 1.0.0.1 are real, but
+      every Go runtime + IETF doc string also pulls ``1.1.1.1`` /
+      ``1.2.3.4`` out, so we drop the whole /8 rather than chase
+      false-positives one at a time. Operators who *really* need to
+      keep public 1.x.x.x can disable this filter at the caller.
+    * Reject any IP whose first octet is in 0..5 — overlaps with X.509
+      OID prefixes (``2.5.4.X``, ``5.4.X.X``) and reserved IETF blocks.
+    """
     parts = ip.split(".")
     if len(parts) != 4:
         return False
@@ -485,13 +639,39 @@ def _is_meaningful_ip(ip: str) -> bool:
         nums = [int(p) for p in parts]
     except ValueError:
         return False
-    if any(n > 255 for n in nums):
+    if any(n < 0 or n > 255 for n in nums):
         return False
-    if nums[0] == 10:
+
+    a, b, c, d = nums
+
+    # X.509 OID overlap + IETF reserved ranges
+    if a <= 5:
         return False
-    if nums[0] == 192 and nums[1] == 168:
+    # RFC1122 loopback
+    if a == 127:
         return False
-    if nums[0] == 172 and 16 <= nums[1] <= 31:
+    # RFC1918 private
+    if a == 10:
+        return False
+    if a == 172 and 16 <= b <= 31:
+        return False
+    if a == 192 and b == 168:
+        return False
+    # RFC3927 link-local
+    if a == 169 and b == 254:
+        return False
+    # RFC5737 documentation blocks
+    if (
+        (a == 192 and b == 0 and c == 2)
+        or (a == 198 and b == 51 and c == 100)
+        or (a == 203 and b == 0 and c == 113)
+    ):
+        return False
+    # Multicast + reserved
+    if a >= 224:
+        return False
+    # Limited broadcast
+    if a == 255 and b == 255 and c == 255 and d == 255:
         return False
     return True
 

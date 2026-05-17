@@ -66,8 +66,11 @@ async def get_current_user(
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     """Dependency that requires the current user to have admin role."""
     if user.role != "admin":
+        # Surface the user's actual role so the UI can show "you need admin"
+        # rather than a generic 403; clients sniffing this string can hide
+        # admin-only nav links instead of guessing.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
+            detail=f"Admin role required (current role: {user.role})",
         )
     return user

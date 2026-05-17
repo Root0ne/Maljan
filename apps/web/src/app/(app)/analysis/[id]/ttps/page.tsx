@@ -69,13 +69,21 @@ export default function TTpsTab() {
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
 
+  // Prefer ttp_mappings from the cached MalwareReport — saves one round-trip
+  // for every navigation to the TTPs tab. Fall back to the dedicated /mitre
+  // endpoint only when the rich report is absent (legacy rows pre-Phase 5).
   useEffect(() => {
+    const cached = report?.malware_report?.ttp_mappings;
+    if (cached && cached.length > 0) {
+      setMitreData(cached as unknown[]);
+      return;
+    }
     if (report?.id) {
       api.getReportMitre(report.id)
         .then((data) => setMitreData(data.techniques))
         .catch(() => {});
     }
-  }, [report?.id]);
+  }, [report?.id, report?.malware_report?.ttp_mappings]);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;

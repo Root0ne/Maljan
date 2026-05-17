@@ -18,11 +18,20 @@ from app.worker.analysis_worker import WorkerSettings, run_analysis
 
 @pytest_asyncio.fixture
 async def mock_db_session() -> AsyncMock:
-    """A mocked async DB session that supports async context manager."""
+    """A mocked async DB session that supports async context manager.
+
+    SQLAlchemy ``Session.add`` is a *synchronous* method but ``AsyncMock``
+    silently turns every attribute into an async coroutine, leaving the
+    return value unawaited and triggering ``RuntimeWarning`` at pytest
+    teardown. Explicitly mark sync methods (``add``) as ``MagicMock`` while
+    keeping ``flush`` / ``commit`` / ``rollback`` / aenter / aexit async.
+    """
     session = AsyncMock()
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     session.flush = AsyncMock()
+    session.add = MagicMock()
+    session.add_all = MagicMock()
     # Ensure async with db_session() as db: returns the same session object
     session.__aenter__.return_value = session
     session.__aexit__.return_value = False
@@ -32,8 +41,14 @@ async def mock_db_session() -> AsyncMock:
 @pytest_asyncio.fixture
 async def mock_ctx(mock_db_session: AsyncMock) -> dict[str, Any]:
     """Mock ARQ worker context with Redis and DB session."""
-    redis = AsyncMock()
+    # ``redis.asyncio.Redis`` uses sync attribute access on
+    # ``connection_pool.connection_kwargs`` during init; using a bare
+    # ``AsyncMock`` turns that into a coroutine and raises a runtime
+    # warning. ``MagicMock`` keeps the descriptor sync while we still
+    # override the few async methods we actually call.
+    redis = MagicMock()
     redis.publish = AsyncMock()
+    redis.aclose = AsyncMock()
     return {
         "redis": redis,
         "db_session": lambda: mock_db_session,
@@ -129,14 +144,35 @@ async def test_mock_pipeline_completes(
 
     async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
+        # The worker fires extra ``UPDATE`` statements for ``started_at``/
+        # ``completed_at`` after the audit 2026-05-17 TIME-01 fix. Those
+        # don't need a row payload — return an empty MagicMock so the
+        # commit/refresh path doesn't blow up.
+        if call_count >= len(exec_results):
+            return MagicMock()
         res = exec_results[call_count]
         call_count += 1
         return res
 
     mock_db_session.execute = _fake_execute
 
-    with patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False):
+    # Audit 2026-05-17 (W-01 permanent fix): mock mode now requires BOTH
+    # the env-var AND ``settings.mock_mode_allowed=True``. Without the
+    # second toggle the worker stays on the real LLM path — exactly the
+    # opposite of what this test wants. ``MOCK_MODE_ALLOWED`` flows
+    # through pydantic-settings env loading; combined with the cleared
+    # settings cache it produces a fresh ``APISettings`` with both gates
+    # on.
+    from app import config as api_config
+
+    api_config._settings = None
+    with patch.dict(
+        "os.environ",
+        {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+        clear=False,
+    ):
         result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None  # don't leak the test settings to neighbours
 
     assert result["status"] == "completed"
     assert result["verdict"] == "Malware"
@@ -167,6 +203,12 @@ async def test_pipeline_failure_sets_failed_status(
 
     async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
+        # The worker fires extra ``UPDATE`` statements for ``started_at``/
+        # ``completed_at`` after the audit 2026-05-17 TIME-01 fix. Those
+        # don't need a row payload — return an empty MagicMock so the
+        # commit/refresh path doesn't blow up.
+        if call_count >= len(exec_results):
+            return MagicMock()
         res = exec_results[call_count]
         call_count += 1
         return res

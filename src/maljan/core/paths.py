@@ -44,6 +44,23 @@ def get_project_root(max_up: int = 8) -> Path:
     raise ProjectRootNotFoundError(f"Could not locate project root (looked for {_ROOT_MARKERS})")
 
 
+def resolve_data(path_like: str | Path) -> Path:
+    """Resolve a relative ``data/...`` path against the project root.
+
+    Returns absolute paths untouched (operator opt-out). Relative paths
+    are joined onto :func:`get_project_root` so an arq worker started from
+    ``apps/api/`` still finds ``data/sigma_rules`` at the repo root.
+
+    Args:
+        path_like: A string or :class:`~pathlib.Path` (e.g. from config).
+
+    Returns:
+        Absolute :class:`~pathlib.Path`.
+    """
+    p = Path(path_like)
+    return p if p.is_absolute() else get_project_root() / p
+
+
 def resolve_mcp_args(args: list[str]) -> list[str]:
     """Resolve relative paths inside MCP ``args`` against the project root.
 

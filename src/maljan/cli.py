@@ -89,8 +89,11 @@ def analyze(
     if judge_report:
         typer.echo(f"\nJudge Report: {judge_report}")
 
-    # STIX output
-    stix = result.get("stix_output", {})
+    # STIX output — prefer the rich Bundle from ``report_node`` (54+ SDOs:
+    # Identity / Indicator / ObservedData / Note / Report) over the minimal
+    # judge fallback. ``stix_output`` remains the fallback for runs where the
+    # MalwareReport pipeline was disabled.
+    stix = result.get("stix_bundle_extended") or result.get("stix_output", {})
     if stix:
         stix_json = json.dumps(stix, indent=2, default=str)
         typer.echo(f"\nSTIX 2.1 Bundle:\n{stix_json}")

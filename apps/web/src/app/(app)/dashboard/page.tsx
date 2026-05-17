@@ -89,15 +89,26 @@ function timeAgo(dateStr: string): string {
 function mapApiStats(s: DashboardStatsDTO): DisplayStats {
   const byStatus = s.jobs_by_status || {};
   const byVerdict = s.verdict_distribution || {};
+
+  // The API returns the MalwareReport verdict casing ("Malware", "Suspicious",
+  // "Benign") plus legacy "malicious" from older rows. Build a canonical
+  // lookup keyed by lowercase so any combination resolves correctly. Without
+  // this, the chart silently shows "no data" even when the API reports counts.
+  const verdictLookup: Record<string, number> = {};
+  for (const [key, value] of Object.entries(byVerdict)) {
+    verdictLookup[key.toLowerCase()] = (verdictLookup[key.toLowerCase()] || 0) + (value || 0);
+  }
+
   return {
     total_jobs: s.total_jobs,
     total_samples: s.total_samples,
     completed: byStatus["completed"] || 0,
     running: byStatus["running"] || 0,
     failed: byStatus["failed"] || 0,
-    malicious_count: byVerdict["malicious"] || 0,
-    suspicious_count: byVerdict["suspicious"] || 0,
-    benign_count: byVerdict["benign"] || 0,
+    // "Malware" (canonical) and "malicious" (legacy) both count as malicious.
+    malicious_count: (verdictLookup["malware"] || 0) + (verdictLookup["malicious"] || 0),
+    suspicious_count: verdictLookup["suspicious"] || 0,
+    benign_count: verdictLookup["benign"] || 0,
     avg_duration_seconds: s.avg_duration_seconds || 0,
   };
 }

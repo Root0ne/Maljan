@@ -343,6 +343,42 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           )}
         </div>
       </div>
+
+      {/* External References — pulled from MalwareReport.references; the
+       * deterministic builder seeds VirusTotal / MalwareBazaar / ATT&CK links
+       * for every report so this section is reliably populated. */}
+      {mr.references && mr.references.length > 0 && (
+        <div className="col-span-2 bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              External References
+            </h2>
+          </div>
+          <ul className="p-4 space-y-1.5">
+            {mr.references.map((ref, i) => (
+              <li key={`${ref.source}-${i}`} className="flex items-baseline gap-3 text-xs">
+                <span className="text-text-muted uppercase tracking-wide w-28 shrink-0">
+                  {ref.source}
+                </span>
+                <a
+                  href={ref.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-status-blue hover:underline truncate"
+                  title={ref.url}
+                >
+                  {ref.url}
+                </a>
+                {ref.note && (
+                  <span className="text-text-muted text-[11px] truncate" title={ref.note}>
+                    — {ref.note}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

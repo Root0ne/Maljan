@@ -139,12 +139,21 @@ class QdrantStore:
             point_id,
         )
 
-    def retrieve(self, query: str, top_k: int = 3) -> list[StoredCase]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        exclude_sample_id: str | None = None,
+    ) -> list[StoredCase]:
         """Return the top_k most similar cases from Qdrant.
 
         Args:
             query:  Free-text search query (e.g., concatenated ISR claim text).
             top_k:  Maximum number of results to return.
+            exclude_sample_id: Optional sha256 of the current sample. Hits
+                with the same ``sample_id`` are filtered out so a fresh
+                analysis cannot feed its own previous run back into itself
+                as a "weighted prior" (audit 2026-05-17, LTM-01).
 
         Returns:
             List of StoredCase objects ordered by descending cosine similarity.
@@ -161,19 +170,26 @@ class QdrantStore:
             return []
 
         vector = encode(query)
+        # Fetch a few extra rows when we need to filter out the current
+        # sample — this keeps us at ``top_k`` results after exclusion.
+        fetch_k = top_k + 1 if exclude_sample_id else top_k
         # query_points() is the current API (qdrant-client >= 1.9);
         # search() is deprecated in newer versions.
         response = self._client.query_points(
             collection_name=self._collection,
             query=vector,
-            limit=top_k,
+            limit=fetch_k,
             with_payload=True,
         )
         hits = response.points
 
         results: list[StoredCase] = []
+        skipped_self = 0
         for hit in hits:
             p = hit.payload or {}
+            if exclude_sample_id and p.get("sample_id") == exclude_sample_id:
+                skipped_self += 1
+                continue
             try:
                 results.append(
                     StoredCase(
@@ -186,6 +202,14 @@ class QdrantStore:
                 )
             except (KeyError, TypeError) as exc:
                 logger.warning("QdrantStore.retrieve: skipping malformed payload: %s", exc)
+            if len(results) >= top_k:
+                break
+        if skipped_self:
+            logger.info(
+                "QdrantStore.retrieve: skipped %d self-match(es) for sample_id=%s.",
+                skipped_self,
+                exclude_sample_id[:16] + "..." if exclude_sample_id else "?",
+            )
 
         logger.debug(
             "QdrantStore.retrieve: query='%s...' top_k=%d returned %d results.",

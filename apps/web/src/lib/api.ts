@@ -246,6 +246,18 @@ class ApiClient {
     }>("/api/v1/auth/me");
   }
 
+  updateMe(body: { full_name?: string; password?: string }) {
+    return this.request<{
+      id: string;
+      email: string;
+      full_name: string;
+      role: string;
+    }>("/api/v1/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
   refresh(refreshToken: string) {
     return this.request<{ access_token: string; refresh_token: string }>(
       "/api/v1/auth/refresh",
@@ -306,6 +318,24 @@ class ApiClient {
       `/api/v1/jobs/${jobId}`,
       { method: "DELETE" }
     );
+  }
+
+  /**
+   * Replay historical pipeline events for a job from the Redis stream.
+   * Used by the Live tab on mount to back-fill events that fired before
+   * the WebSocket subscribed (audit 2026-05-17, LIVE-01).
+   */
+  getJobEvents(jobId: string, limit = 500) {
+    return this.request<{
+      job_id: string;
+      events: Array<{
+        type: string;
+        data: Record<string, unknown>;
+        ts: string;
+        stream_id: string;
+      }>;
+      count: number;
+    }>(`/api/v1/jobs/${jobId}/events?limit=${limit}`);
   }
 
   /* ── Reports ───────────────────────────────────────── */

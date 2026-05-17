@@ -38,6 +38,7 @@ dependencies = [
     "python-multipart>=0.0.6",
     "alembic>=1.14.0",
     "filetype>=1.2.0",
+    "pyelftools>=0.32",
 ]
 
 [project.scripts]

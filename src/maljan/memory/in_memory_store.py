@@ -54,13 +54,22 @@ class InMemoryStore:
         self._cases = [(c, v) for c, v in self._cases if c.sample_id != case.sample_id]
         self._cases.append((case, encode(case.summary_text)))
 
-    def retrieve(self, query: str, top_k: int = 3) -> list[StoredCase]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        exclude_sample_id: str | None = None,
+    ) -> list[StoredCase]:
         """Return the top_k stored cases most similar to the query text.
 
         Args:
             query:  Free-text search query (e.g., concatenated ISR claim text).
             top_k:  Maximum cases to return. May return fewer when the store
                     contains fewer than top_k entries.
+            exclude_sample_id: When provided, drop hits whose ``sample_id``
+                equals this value (audit 2026-05-17, LTM-01). Stops a
+                fresh analysis from feeding its own past run back to the
+                judge as a "weighted prior".
 
         Returns:
             Ordered list of StoredCase objects, descending by similarity score.
@@ -71,7 +80,9 @@ class InMemoryStore:
 
         query_vec = encode(query)
         scored: list[tuple[float, StoredCase]] = [
-            (cosine(query_vec, vec), case) for case, vec in self._cases
+            (cosine(query_vec, vec), case)
+            for case, vec in self._cases
+            if not exclude_sample_id or case.sample_id != exclude_sample_id
         ]
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [case for _, case in scored[:top_k]]

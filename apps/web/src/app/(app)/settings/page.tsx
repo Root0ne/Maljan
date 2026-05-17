@@ -12,6 +12,14 @@ export default function SettingsPage() {
   const [userLoading, setUserLoading] = useState(false);
   const [userError, setUserError] = useState<string | null>(null);
 
+  // General tab form state
+  const [fullName, setFullName] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   // API Keys tab state
   const [apiKeys, setApiKeys] = useState<ApiKeyDTO[]>([]);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
@@ -29,8 +37,14 @@ export default function SettingsPage() {
       setUserLoading(true);
       setUserError(null);
       api.getMe()
-        .then((me) => setUser(me))
-        .catch((err: any) => setUserError(err.message || "Failed to load user profile."))
+        .then((me) => {
+          setUser(me);
+          setFullName(me.full_name || "");
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Failed to load user profile.";
+          setUserError(msg);
+        })
         .finally(() => setUserLoading(false));
     }
     if (activeTab === "apikeys") {
@@ -43,8 +57,54 @@ export default function SettingsPage() {
     setApiKeysError(null);
     api.getApiKeys(1, 50)
       .then((res) => setApiKeys(res.items))
-      .catch((err: any) => setApiKeysError(err.message || "Failed to load API keys."))
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Failed to load API keys.";
+        setApiKeysError(msg);
+      })
       .finally(() => setApiKeysLoading(false));
+  }
+
+  const passwordsMatch = password === passwordConfirm;
+  const passwordRequested = password.length > 0 || passwordConfirm.length > 0;
+  const passwordValid = !passwordRequested || (password.length >= 8 && passwordsMatch);
+  const canSave = !saving && !!user && passwordValid;
+
+  async function handleSaveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    if (passwordRequested && !passwordsMatch) return;
+
+    setSaving(true);
+    setSaveSuccess(null);
+    setSaveError(null);
+
+    const body: { full_name?: string; password?: string } = {};
+    if (fullName !== user.full_name) {
+      body.full_name = fullName;
+    }
+    if (passwordRequested) {
+      body.password = password;
+    }
+
+    if (Object.keys(body).length === 0) {
+      setSaving(false);
+      setSaveSuccess("No changes to save.");
+      return;
+    }
+
+    try {
+      const updated = await api.updateMe(body);
+      setUser({ full_name: updated.full_name, email: updated.email });
+      setFullName(updated.full_name);
+      setPassword("");
+      setPasswordConfirm("");
+      setSaveSuccess("Profile updated successfully.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to update profile.";
+      setSaveError(msg);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleCreateKey(e: React.FormEvent) {
@@ -55,8 +115,9 @@ export default function SettingsPage() {
       setCreatedKey(key);
       setNewKeyName("");
       loadApiKeys();
-    } catch (err: any) {
-      alert(err.message || "Failed to create API key.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create API key.";
+      alert(msg);
     }
   }
 
@@ -65,8 +126,9 @@ export default function SettingsPage() {
     try {
       await api.revokeApiKey(keyId);
       loadApiKeys();
-    } catch (err: any) {
-      alert(err.message || "Failed to revoke API key.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to revoke API key.";
+      alert(msg);
     }
   }
 
@@ -113,13 +175,13 @@ export default function SettingsPage() {
               ) : userError ? (
                 <div className="text-xs text-status-red">{userError}</div>
               ) : user ? (
-                <>
+                <form onSubmit={handleSaveProfile} className="space-y-4">
                   <div>
                     <label className="block text-xs text-text-secondary mb-1.5">Full Name</label>
                     <input
                       type="text"
-                      defaultValue={user.full_name || ""}
-                      readOnly
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
                       className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                     />
                   </div>
@@ -132,7 +194,63 @@ export default function SettingsPage() {
                       className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                     />
                   </div>
-                </>
+
+                  <div className="pt-2 border-t border-border">
+                    <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-3">
+                      Change password (optional)
+                    </h3>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs text-text-secondary mb-1.5">New password</label>
+                        <input
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          autoComplete="new-password"
+                          minLength={8}
+                          className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                        />
+                        {passwordRequested && password.length > 0 && password.length < 8 && (
+                          <p className="mt-1 text-xs text-status-red">Must be at least 8 characters.</p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-xs text-text-secondary mb-1.5">Confirm new password</label>
+                        <input
+                          type="password"
+                          value={passwordConfirm}
+                          onChange={(e) => setPasswordConfirm(e.target.value)}
+                          autoComplete="new-password"
+                          className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                        />
+                        {passwordRequested && !passwordsMatch && (
+                          <p className="mt-1 text-xs text-status-red">Passwords do not match.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {saveSuccess && (
+                    <div className="p-3 bg-status-green/10 border border-status-green/20 rounded">
+                      <p className="text-xs text-status-green font-medium">{saveSuccess}</p>
+                    </div>
+                  )}
+                  {saveError && (
+                    <div className="p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+                      {saveError}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      disabled={!canSave}
+                      className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {saving ? "Saving..." : "Save changes"}
+                    </button>
+                  </div>
+                </form>
               ) : (
                 <div className="text-xs text-text-muted">No user data available.</div>
               )}

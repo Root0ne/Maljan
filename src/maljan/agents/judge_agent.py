@@ -220,24 +220,46 @@ class JudgeAgent:
             if isr_block:
                 reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
+        # Audit 2026-05-17 (MED-01): the mediator is NOT allowed to state a
+        # verdict or describe the sample as "clean". Its only job is to
+        # surface explicit contradictions between agents and quantify how
+        # aligned they are. The downstream judge LLM owns the verdict
+        # decision — earlier prompt wording let "CLEAN / NO THREAT DETECTED"
+        # prose leak into the judge prompt and bias the verdict toward
+        # benign even when YARA had a hit.
         prompt_messages = [
             (
                 "system",
-                "You are the Lead Cyber Security Mediator. Your task is to compare "
-                "all expert analyst reports and identify explicit contradictions. "
+                "You are the Lead Cyber Security Mediator. Your ONLY task is to "
+                "compare expert analyst reports and emit:\n"
+                "  1. A list of EXPLICIT contradictions between agents "
+                "(one bullet per contradiction).\n"
+                "  2. A single agreement_confidence in [0.0, 1.0] for how "
+                "aligned the agents are — NOT the maliciousness of the sample.\n\n"
+                "HARD RULES:\n"
+                "- DO NOT emit a verdict. Never write 'Malware', 'Benign', "
+                "'Suspicious', 'CLEAN', 'NO THREAT', or any synonym.\n"
+                "- DO NOT recommend re-running pipelines or filling data gaps.\n"
+                "- When an analyst has failed/empty output, write 'no input "
+                "from <agent>' and EXCLUDE that analyst from the contradiction "
+                "count. DO NOT treat absence of input as confirmation of "
+                "cleanliness.\n"
+                "- agreement_confidence reflects ONLY agent alignment, NOT how "
+                "suspicious the sample looks. Two analysts unanimously saying "
+                "nothing is still high alignment (1.0).\n"
+                "- The downstream Judge alone decides Malware/Benign/Suspicious. "
                 + (
-                    "You have access to Threat Intelligence tools to verify disputed IPs, domains, or hashes. "
-                    "Use these tools if agents disagree on whether an indicator is malicious.\n\n"
+                    "You have Threat Intelligence tools to verify disputed "
+                    "IPs/domains/hashes — use them only to resolve contradictions.\n"
                     if needs_tools
-                    else "No Threat Intelligence tools are needed — agents show no explicit dissent.\n\n"
-                )
-                + "Write a detailed summary of your findings, including specific contradictions, "
-                "resolved issues, and your overall confidence.",
+                    else "No Threat Intelligence tools are needed for this run.\n"
+                ),
             ),
             (
                 "human",
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
-                "Analyze the reports and summarize your verdict.",
+                "List the contradictions and give a single agreement_confidence "
+                "score. Do not state a verdict.",
             ),
         ]
 
@@ -319,6 +341,8 @@ class JudgeAgent:
         attck_validator: object | None = None,
         cascade_summary: CascadeSummary | None = None,
         memory_store: MemoryStore | None = None,
+        evidence_corpus: set[str] | None = None,
+        current_sample_id: str | None = None,
     ) -> Bundle:
         """Final judge decision returning a structured STIX 2.1 Bundle.
 
@@ -385,7 +409,9 @@ class JudgeAgent:
         # weighted priors. The block is bounded (~1.2 KB worst case for
         # top_k=3) and degrades gracefully to an empty string when the store
         # is empty or retrieval fails.
-        memory_block = self._build_memory_context(isr_reports, memory_store)
+        memory_block = self._build_memory_context(
+            isr_reports, memory_store, current_sample_id=current_sample_id
+        )
         if memory_block:
             reports_text = f"{reports_text}\n\n{memory_block}"
 
@@ -398,6 +424,14 @@ class JudgeAgent:
             "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
             "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
             "and x_maljan_contributing_agents list.\n"
+            "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
+            "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
+            "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
+            "- DO NOT emit Indicator objects whose pattern values are inferred, "
+            "hypothetical, or example. Every Indicator's pattern value MUST "
+            "appear verbatim in the deterministic evidence (static strings, "
+            "sandbox observations, or network IOCs). When in doubt, emit zero "
+            "Indicators — the deterministic renderer will fill them in.\n"
             "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
         )
 
@@ -453,6 +487,13 @@ class JudgeAgent:
         try:
             # Filter out hallucinated / invalid technique IDs
             data = self._filter_invalid_technique_ids(data)
+            # Audit 2026-05-17: rewrite placeholder/non-UUID STIX IDs
+            # (J-01), drop indicators whose pattern value isn't in the
+            # deterministic evidence (J-02), and back-fill
+            # ``attack-pattern.external_references`` (REP-01).
+            from maljan.agents.judge_postprocess import postprocess_judge_bundle
+
+            data = postprocess_judge_bundle(data, evidence_corpus=evidence_corpus)
             return Bundle.model_validate(data)
         except Exception as e:
             self.logger.warning(
@@ -833,6 +874,7 @@ class JudgeAgent:
     def _build_memory_context(
         isr_reports: dict | None,
         memory_store: MemoryStore | None,
+        current_sample_id: str | None = None,
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
@@ -871,7 +913,21 @@ class JudgeAgent:
             return ""
 
         try:
-            cases = memory_store.retrieve(query, top_k=3)
+            # Audit 2026-05-17 LTM-01: never retrieve the current
+            # sample's own past run as a "weighted prior". Newer
+            # QdrantStore.retrieve accepts ``exclude_sample_id``; older
+            # MemoryStore implementations (InMemoryStore in tests) may
+            # not — fall back to the unfiltered call in that case.
+            try:
+                cases = memory_store.retrieve(
+                    query,
+                    top_k=3,
+                    exclude_sample_id=current_sample_id,
+                )
+            except TypeError:
+                cases = memory_store.retrieve(query, top_k=3)
+                if current_sample_id:
+                    cases = [c for c in cases if c.sample_id != current_sample_id]
         except Exception:  # noqa: BLE001
             # Never let retrieval failure block verdict generation
             return ""

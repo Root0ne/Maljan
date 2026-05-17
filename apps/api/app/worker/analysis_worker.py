@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 import redis.asyncio as aioredis
 from arq import cron  # noqa: F401 — for future scheduled tasks
 from arq.connections import RedisSettings
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -38,21 +38,43 @@ async def _publish_event(
     event_type: str,
     data: dict[str, Any] | None = None,
 ) -> None:
-    """Publish a pipeline progress event to Redis PubSub.
+    """Publish a pipeline progress event to Redis PubSub + Stream.
 
-    Channel: ``analysis:{job_id}``
-    Message format: JSON ``{"type": ..., "data": ..., "ts": ...}``
+    PubSub channel ``analysis:{job_id}`` is used by the live WebSocket
+    fan-out. A parallel Redis Stream ``analysis:{job_id}:events`` keeps
+    the last 1000 events so a client opening the Live tab mid-run can
+    back-fill its event log via ``GET /api/v1/jobs/{job_id}/events``
+    (audit 2026-05-17, LIVE-01).
+
+    Message format on both channels:
+    ``{"type": ..., "data": ..., "ts": ...}``.
     """
     import json
 
-    message = json.dumps(
-        {
-            "type": event_type,
-            "data": data or {},
-            "ts": datetime.now(UTC).isoformat(),
-        }
-    )
+    payload = {
+        "type": event_type,
+        "data": data or {},
+        "ts": datetime.now(UTC).isoformat(),
+    }
+    message = json.dumps(payload)
     await redis_conn.publish(f"analysis:{job_id}", message)
+    # Persist into the bounded Stream so the live page can replay missed
+    # events when it mounts after the worker already started publishing.
+    try:
+        await redis_conn.xadd(
+            f"analysis:{job_id}:events",
+            {"payload": message},
+            maxlen=1000,
+            approximate=True,
+        )
+        # 24h TTL — every read keeps the key fresh; idle keys vanish.
+        await redis_conn.expire(f"analysis:{job_id}:events", 86_400)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "Event stream xadd failed (%s); pubsub-only.",
+            exc,
+            extra={"job_id": job_id, "component": "pubsub"},
+        )
     logger.debug(
         f"Published event: type={event_type} job={job_id[:8]}...",
         extra={"job_id": job_id, "component": "pubsub"},
@@ -123,9 +145,21 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
 
             # ── 2. Transition to running ─────────────────────────
+            # Use Postgres ``NOW()`` for the persisted ``started_at`` so
+            # it shares a clock source with ``TimestampMixin.created_at``
+            # (which is also ``server_default=func.now()``). Mixing host
+            # time ``datetime.now(UTC)`` here produced ``started_at <
+            # created_at`` on Windows hosts where Docker Desktop's VM
+            # clock drifts after sleep/hibernate. We still touch the
+            # Python attribute so synchronous callers/tests with mocked
+            # sessions can read the value before ``refresh`` lands.
             job.status = "running"
             job.started_at = datetime.now(UTC)
+            await db.execute(
+                update(AnalysisJob).where(AnalysisJob.id == job.id).values(started_at=func.now())
+            )
             await db.commit()
+            await db.refresh(job)
 
             await _publish_event(redis_conn, job_id, "status_change", {"status": "running"})
             logger.info(f"Job status -> running: {job_id}", extra={"job_id": job_id})
@@ -159,12 +193,35 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 if "llm_provider" in job.config:
                     core_settings.llm.provider = job.config["llm_provider"]
 
-            app = MaljanApp(
-                config=core_settings,
-                # MALJAN_MOCK_MODE=true skips all LLM calls and returns fixture responses.
-                # Useful when the LLM provider's daily/minute quota is exhausted.
-                mock=os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true",
+            # Mock-mode resolution (audit 2026-05-17: W-01 permanent fix).
+            # Two independent toggles must agree before the pipeline runs
+            # in mock mode:
+            #   1. ``settings.mock_mode_allowed`` — operator-level gate
+            #      (defaults False; must be flipped via API config).
+            #   2. Either the per-job ``config.mock_mode`` flag OR the
+            #      ``MALJAN_MOCK_MODE`` env var.
+            # A leaked env var alone is no longer sufficient — production
+            # workers stay on the real LLM/sandbox path even if a stale
+            # shell exports ``MALJAN_MOCK_MODE=true``.
+            _env_mock = os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true"
+            _job_mock = bool(job.config and job.config.get("mock_mode"))
+            _mock_requested = _env_mock or _job_mock
+            _mock_active = bool(settings.mock_mode_allowed and _mock_requested)
+            if _mock_requested and not _mock_active:
+                logger.warning(
+                    "Pipeline mock requested (env=%s, job=%s) but blocked: "
+                    "settings.mock_mode_allowed=False. Running real pipeline.",
+                    _env_mock,
+                    _job_mock,
+                )
+            logger.info(
+                "Pipeline mode: %s (env=%s job=%s allowed=%s).",
+                "MOCK" if _mock_active else "REAL",
+                _env_mock,
+                _job_mock,
+                settings.mock_mode_allowed,
             )
+            app = MaljanApp(config=core_settings, mock=_mock_active)
 
             # Announce which agents are about to run so the frontend can show them
             registered_agents = app.container.agent_registry.list_agents()
@@ -211,7 +268,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         sample.storage_path,
                         derived_path,
                     )
-                temp_path = str(Path(tempfile.gettempdir()) / sample.sha256)
+                # Preserve the original filename extension so the sandbox
+                # backend can pick the right VM profile from the suffix
+                # (``.elf`` → Linux, ``.exe`` → Windows, etc.). Otherwise
+                # the bare sha256 would be treated as an unknown blob.
+                _orig_ext = Path(sample.original_filename or "").suffix
+                temp_path = str(Path(tempfile.gettempdir()) / f"{sample.sha256}{_orig_ext}")
                 minio_client.fget_object(
                     settings.minio_bucket,
                     derived_path,
@@ -287,7 +349,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 verdict=pipeline_result.get("final_decision", "Unknown"),
                 overall_confidence=_extract_confidence(pipeline_result),
                 malware_category=_extract_category(pipeline_result),
-                stix_bundle=pipeline_result.get("stix_output"),
+                # Prefer the rich extended bundle produced by ``report_node``
+                # (54+ objects with Identity/Indicator/ObservedData/Note/Report
+                # SDOs) over the minimal judge bundle. The legacy field is the
+                # fallback for callers that pre-date the MalwareReport refactor.
+                stix_bundle=(
+                    pipeline_result.get("stix_bundle_extended")
+                    or pipeline_result.get("stix_output")
+                ),
                 mitre_techniques=_extract_mitre(pipeline_result),
                 agent_reports=pipeline_result.get("reports"),
                 negotiation_log={
@@ -362,10 +431,27 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
 
             # ── 5. Mark job complete ─────────────────────────────
+            # Postgres ``NOW()`` for ``completed_at`` to stay consistent
+            # with ``started_at`` (set via DB clock above). Also set the
+            # Python-side attribute so callers that read ``job.completed_at``
+            # right after this block (and tests with mocked sessions) see
+            # the same value without an extra round-trip.
             job.status = "completed"
             job.completed_at = datetime.now(UTC)
-            job.duration_seconds = int(elapsed)
+            job.duration_seconds = round(float(elapsed), 1)
+            await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job.id)
+                .values(
+                    completed_at=func.now(),
+                    # Round to one decimal so sub-second jobs (~0.7s) don't
+                    # collapse to zero; the column is ``Numeric(10,2)`` so
+                    # fractional values survive the round-trip.
+                    duration_seconds=round(float(elapsed), 1),
+                )
+            )
             await db.commit()
+            await db.refresh(job)
 
             await _publish_event(
                 redis_conn,
@@ -430,8 +516,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             try:
                 if job is not None:
                     job.status = "failed"
-                    job.completed_at = datetime.now(UTC)
                     job.error_message = error_msg[:2000]
+                    await db.execute(
+                        update(AnalysisJob)
+                        .where(AnalysisJob.id == job.id)
+                        .values(completed_at=func.now())
+                    )
                     await db.commit()
                 else:
                     logger.warning(
@@ -503,8 +593,29 @@ def _extract_category(result: dict) -> str | None:
 
 
 def _extract_mitre(result: dict) -> list | None:
-    """Extract MITRE ATT&CK techniques from the STIX bundle."""
-    stix = result.get("stix_output")
+    """Extract MITRE ATT&CK techniques for the legacy ``mitre_techniques`` column.
+
+    Preference order:
+      1. ``malware_report.ttp_mappings`` — the deterministic mapper output
+         (technique_id + name + evidence quotes + confidence).
+      2. ``stix_bundle_extended`` / ``stix_output`` — fall back to walking the
+         STIX bundle for ``attack-pattern`` SDOs when the report builder did
+         not run (mock mode without a configured pipeline, legacy rows).
+    """
+    mr = result.get("malware_report") or {}
+    mappings = mr.get("ttp_mappings") or []
+    if mappings:
+        return [
+            {
+                "technique_id": m.get("technique_id", ""),
+                "name": m.get("technique_name") or m.get("name", ""),
+                "description": " | ".join(m.get("evidence_quotes") or [])[:512],
+            }
+            for m in mappings
+            if m.get("technique_id")
+        ] or None
+
+    stix = result.get("stix_bundle_extended") or result.get("stix_output")
     if not stix or not isinstance(stix, dict):
         return None
 

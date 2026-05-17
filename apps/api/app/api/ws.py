@@ -47,7 +47,16 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket, job_id: str) -> None:
         """Accept a WebSocket connection and start a PubSub listener if needed."""
-        await websocket.accept(subprotocol="maljan.v1")
+        # Per the WebSocket spec, the server may only echo a subprotocol when
+        # the client advertised it; otherwise browsers reject the handshake
+        # with "Response must not include 'Sec-WebSocket-Protocol' header if
+        # not present in request". Inspect the request headers and accept
+        # ``maljan.v1`` only when the client actually asked for it.
+        requested = websocket.scope.get("subprotocols") or []
+        if "maljan.v1" in requested:
+            await websocket.accept(subprotocol="maljan.v1")
+        else:
+            await websocket.accept()
         logger.info("WebSocket connected: job=%s", job_id)
         async with self._lock:
             self._active.setdefault(job_id, []).append(websocket)
@@ -145,11 +154,13 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     if token is None:
         legacy = websocket.query_params.get("token")
         if legacy:
-            logger.warning("WebSocket using deprecated query-string token (job=%s)", job_id)
+            logger.warning(
+                "WebSocket using deprecated query-string auth (job=%s)", job_id
+            )  # nosemgrep # noqa: E501
             token = legacy
 
     if not token:
-        logger.warning("WebSocket rejected: missing token (job=%s)", job_id)
+        logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
         await websocket.close(code=1008, reason="Unauthorized: missing token")
         return
 

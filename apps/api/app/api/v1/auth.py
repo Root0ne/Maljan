@@ -38,6 +38,7 @@ from app.schemas.auth import (
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
+    UserUpdateRequest,
 )
 
 logger = get_logger("api.auth")
@@ -212,6 +213,45 @@ async def refresh_token(
 @router.get("/me", response_model=UserResponse)
 async def get_me(user: User = Depends(get_current_user)) -> User:
     """Get the currently authenticated user's profile."""
+    return user
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    body: UserUpdateRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Update the caller's own profile (full_name and/or password)."""
+    changed: list[str] = []
+
+    if body.full_name is not None:
+        user.full_name = body.full_name
+        changed.append("full_name")
+
+    if body.password is not None:
+        user.hashed_password = hash_password(body.password)
+        changed.append("credential")
+
+    if changed:
+        db.add(user)
+        await db.flush()
+        await db.refresh(user)
+        await _audit(
+            db,
+            user.id,
+            "auth.profile.update",
+            request=request,
+            detail=",".join(changed),
+        )
+        logger.info(
+            "Profile updated: user=%s fields=%s",
+            user.id,
+            ",".join(changed),
+            extra={"user_id": str(user.id)},
+        )
+
     return user
 
 

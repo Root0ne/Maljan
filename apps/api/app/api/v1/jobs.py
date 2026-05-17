@@ -104,6 +104,59 @@ async def get_job(
     return job
 
 
+@router.get("/{job_id}/events")
+async def get_job_events(
+    job_id: uuid.UUID,
+    limit: int = Query(500, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+) -> dict[str, Any]:
+    """Return historical pipeline events for this job.
+
+    The Live tab uses this on mount to back-fill its event log before
+    attaching the WebSocket (audit 2026-05-17, LIVE-01). Events live in
+    Redis Stream ``analysis:{job_id}:events`` with a 24 h TTL and a
+    1 000-entry cap. ``stream_id`` is the canonical ordering key —
+    clients dedupe against it when WS events arrive concurrently.
+    """
+    import json
+
+    import redis.asyncio as aioredis
+
+    from app.config import settings
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        entries = await redis_conn.xrange(
+            f"analysis:{job_id}:events", min="-", max="+", count=limit
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Event stream read failed for job={job_id}: {exc}")
+        entries = []
+    finally:
+        try:
+            await redis_conn.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+
+    events: list[dict[str, Any]] = []
+    for stream_id, fields in entries:
+        payload_raw = fields.get("payload") if isinstance(fields, dict) else None
+        if not payload_raw:
+            continue
+        try:
+            payload = json.loads(payload_raw)
+        except (ValueError, TypeError):
+            continue
+        payload["stream_id"] = stream_id
+        events.append(payload)
+    return {"job_id": str(job_id), "events": events, "count": len(events)}
+
+
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_job(
     job_id: uuid.UUID,

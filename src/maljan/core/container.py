@@ -69,8 +69,10 @@ class ServiceContainer:
         if not mock:
             self._llm_registry = LLMProviderRegistry(config)
 
+        from maljan.core.paths import resolve_data
+
         self.loader = FileDataLoader(
-            samples_dir=samples_dir,
+            samples_dir=str(resolve_data(samples_dir)),
             parser_registry=self.parser_registry,
             chunking_config=config.chunking,
         )
@@ -93,7 +95,7 @@ class ServiceContainer:
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
-        self._samples_dir = samples_dir
+        self._samples_dir = str(resolve_data(samples_dir))
 
         logger.info(
             "ServiceContainer initialized (mock=%s, agents=%s, parsers=%s)",
@@ -320,11 +322,10 @@ class ServiceContainer:
     def get_sigma_layer(self) -> SigmaLayer:
         with self._lock:
             if self._sigma_layer_cache is None:
-                from pathlib import Path
-
                 from maljan.analysis.sigma_layer import SigmaLayer
+                from maljan.core.paths import resolve_data
 
-                rules_dir = Path(self.config.analysis.sigma_rules_dir)
+                rules_dir = resolve_data(self.config.analysis.sigma_rules_dir)
                 self._sigma_layer_cache = SigmaLayer.from_rules_dir(rules_dir)
                 logger.info(
                     "SigmaLayer initialized: %d rules loaded from %s.",

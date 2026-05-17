@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,7 +31,10 @@ class AnalysisJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Timestamps
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ``Numeric(10, 2)`` so sub-second analyses (e.g. mock pipeline at ~0.7s)
+    # survive serialization. Integer truncated to 0 and broke the dashboard
+    # "AVG DURATION" tile + analysis page duration badge.
+    duration_seconds: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
     # Configuration snapshot (LLM provider, max_iterations, etc.)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

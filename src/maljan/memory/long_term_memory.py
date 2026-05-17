@@ -91,13 +91,21 @@ class MemoryStore(Protocol):
         """Persist a case. Upserts by sample_id (replaces existing entry)."""
         ...
 
-    def retrieve(self, query: str, top_k: int = 3) -> list[StoredCase]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        exclude_sample_id: str | None = None,
+    ) -> list[StoredCase]:
         """Return the top_k most similar stored cases for the given query.
 
         Args:
             query:  Free-text search query (typically the ISR summary text).
             top_k:  Maximum number of cases to return. May return fewer when
                     the store contains fewer than top_k entries.
+            exclude_sample_id: Optional sha256 to filter out (audit
+                2026-05-17, LTM-01): prevents a sample's prior run from
+                being injected as a "weighted prior" for itself.
 
         Returns:
             List of StoredCase objects, ordered by descending relevance.

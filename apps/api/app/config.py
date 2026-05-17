@@ -50,6 +50,13 @@ class APISettings(BaseSettings):
     app_name: str = "Maljan"
     app_version: str = "0.1.0"
     debug: bool = False
+
+    # ── Pipeline mock-mode gate ──────────────────────────────────
+    # ``MALJAN_MOCK_MODE=true`` alone no longer flips the pipeline
+    # into mock mode — the operator must ALSO set this gate to True
+    # (or pass ``config.mock_mode=true`` on the job itself). Stops a
+    # leaked env var from silently disabling real LLM + sandbox calls.
+    mock_mode_allowed: bool = False
     cors_origins: list[str] = Field(default=["http://localhost:3000", "http://127.0.0.1:3000"])
     cors_allow_methods: list[str] = Field(
         default=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -114,15 +121,33 @@ class APISettings(BaseSettings):
     # ── File upload ──────────────────────────────────────────────
     upload_max_bytes: int = Field(default=50 * 1024 * 1024)  # 50 MB
     upload_allowed_mime_types: list[str] = Field(
+        # The ``filetype`` library and libmagic disagree on a few common
+        # malware MIME types: ELF binaries are usually ``application/x-elf``
+        # via libmagic but ``application/x-executable`` via ``filetype``.
+        # Likewise PE files can come back as either ``application/x-msdownload``
+        # (legacy) or ``application/vnd.microsoft.portable-executable``.
+        # Listing the synonyms keeps both detection backends happy without
+        # weakening the allow-list (the matched MIME is still recorded on the
+        # ``Sample`` row for downstream auditing).
         default=[
             "application/x-dosexec",
             "application/x-mach-binary",
             "application/x-elf",
+            "application/x-executable",
+            "application/x-sharedlib",
+            "application/x-pie-executable",
+            "application/vnd.microsoft.portable-executable",
             "application/octet-stream",
             "application/zip",
             "application/x-msdownload",
+            "application/x-ms-installer",
+            "application/x-msi",
+            "application/vnd.android.package-archive",
             "application/x-7z-compressed",
             "application/x-rar-compressed",
+            "application/gzip",
+            "application/x-tar",
+            "application/java-archive",
         ]
     )
 

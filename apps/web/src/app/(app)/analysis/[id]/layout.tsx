@@ -178,6 +178,17 @@ export default function AnalysisLayout({
 
   const v = VERDICT_CONFIG[verdict] || VERDICT_CONFIG.unknown;
 
+  /* The H1 should identify the sample, not restate the verdict (the verdict
+   * badge already shows it). Prefer the original filename from the rich
+   * MalwareReport identity payload; fall back to a hash prefix if neither
+   * the report nor the legacy fields have it. */
+  const identity = report?.malware_report?.identity;
+  const fileName = identity?.file_name?.trim();
+  const sha256 = identity?.hashes?.sha256;
+  const headerTitle = fileName || (sha256 ? `${sha256.slice(0, 16)}…` : "Pending analysis");
+  const family = report?.malware_report?.attribution?.family;
+  const headerSubtitle = family || category || "";
+
   return (
     <ReportContext.Provider value={{ report, job, loading }}>
       <div>
@@ -206,15 +217,18 @@ export default function AnalysisLayout({
             {/* Info */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 mb-1">
-                <h1 className={`text-lg font-semibold ${v.text}`}>
-                  {v.label}
+                <h1 className="text-lg font-semibold text-text-primary truncate" title={headerTitle}>
+                  {headerTitle}
                 </h1>
+                <span className={`text-xs px-2 py-0.5 rounded ${v.bg} ${v.text}`}>
+                  {v.label}
+                </span>
                 <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
                   Score: {confidence}/100
                 </span>
-                {category && (
+                {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
-                    {category}
+                    {headerSubtitle}
                   </span>
                 )}
                 {job && (

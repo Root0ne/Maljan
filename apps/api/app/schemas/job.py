@@ -28,7 +28,7 @@ class JobResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
-    duration_seconds: int | None
+    duration_seconds: float | None
     error_message: str | None
 
     model_config = {"from_attributes": True}

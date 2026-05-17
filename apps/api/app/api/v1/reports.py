@@ -84,13 +84,21 @@ async def get_mitre_techniques(
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> dict:
-    """Get MITRE ATT&CK technique mappings."""
+    """Get MITRE ATT&CK technique mappings.
+
+    Returns ``{"techniques": []}`` when the report exists but the pipeline
+    did not map any ATT&CK techniques (mock mode, benign sample, narrative
+    LLM unavailable). Only an unknown / unauthorized report id returns 404 —
+    "empty MITRE list" is a legitimate analytical outcome, not a missing
+    resource.
+    """
     techniques = await svc.get_mitre_techniques(report_id, user)
     if techniques is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Report not found or MITRE data not available",
-        )
+        # Distinguish "report missing" from "no MITRE data" by checking
+        # whether the report itself exists for this user.
+        if await svc.get_report(report_id, user) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+        return {"techniques": []}
     return {"techniques": techniques}
 
 
@@ -195,9 +203,19 @@ async def enqueue_enrichment_job(
     """Queue a post-hoc threat-intel enrichment for ``report_id``.
 
     Idempotent — the ARQ job is keyed by ``enrich:{report_id}`` so repeated
-    calls coalesce. Returns ``202 Accepted`` with the queued job id (or
-    ``None`` when ARQ refused because an enrichment is already pending).
+    calls coalesce. The response surfaces three distinct states so the UI can
+    show "queued for enrichment" vs "already in flight" without ambiguity:
+
+      * ``queued`` + ``job_id``: a fresh ARQ task was scheduled.
+      * ``already_queued`` + ``job_id=null``: ARQ refused because an
+        enrichment for this report is still pending or running.
+      * 404: the report does not exist or the caller does not own it.
     """
+    # Verify ownership up-front so a missing report cannot be confused with an
+    # "already_queued" idempotent response.
+    if await svc.get_report(report_id, user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+
     try:
         job_id = await svc.enqueue_enrichment(report_id, user)
     except EnrichmentEnqueueError as exc:
@@ -205,14 +223,11 @@ async def enqueue_enrichment_job(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Enrichment queue unavailable: {exc}",
         ) from exc
-    if job_id is None:
-        # Authorization layer returns None when the report does not exist
-        # or the caller does not own it. ARQ returning None (already-queued)
-        # is fine; we still surface that as 202 with job_id=None.
-        report = await svc.get_report(report_id, user)
-        if report is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return {"status": "queued", "report_id": str(report_id), "job_id": job_id}
+    return {
+        "status": "queued" if job_id else "already_queued",
+        "report_id": str(report_id),
+        "job_id": job_id,
+    }
 
 
 @router.get("/{report_id}/timeline")

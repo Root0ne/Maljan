@@ -383,6 +383,13 @@ class Settings(BaseSettings):
     react_agent_timeout: int = 180  # seconds before agent loop times out
     react_agent_max_steps: int = 10  # max LangGraph recursion steps
 
+    # Per-agent timeout overrides. The default ``react_agent_timeout`` is
+    # tuned for the network/dynamic analysts (~1-3 tool calls). The
+    # static analyst attaches the Ghidra MCP server with many tools, so
+    # we give it more headroom by default. Override via env, e.g.
+    # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
+    react_agent_timeout_overrides: dict[str, int] = Field(default_factory=lambda: {"static": 600})
+
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx
     # ServiceContainer reads these and sets the OS env vars LangChain expects.

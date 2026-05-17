@@ -465,6 +465,25 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
 
+            # Audit 2026-05-17 J-02: build evidence corpus so the judge
+            # post-processor can drop hallucinated indicators whose
+            # pattern values never appeared in deterministic findings.
+            evidence_corpus: set[str] = set()
+            try:
+                from maljan.agents.judge_postprocess import build_evidence_corpus
+
+                # Best-effort — interesting strings come from a partial
+                # MalwareReport build later in the pipeline, so we pull
+                # from the raw sandbox report and any pre-built static
+                # block that's already in state.
+                sandbox_report = state.get("sandbox_report") or {}
+                evidence_corpus = build_evidence_corpus(
+                    interesting_strings=None,
+                    sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Evidence corpus build skipped: %s", exc)
+
             bundle = await judge.give_verdict(
                 reports=reports,
                 history=state.get("discussion_history") or [],
@@ -472,6 +491,8 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 attck_validator=attck_validator,
                 cascade_summary=cascade_summary,
                 memory_store=memory_store,
+                evidence_corpus=evidence_corpus or None,
+                current_sample_id=state.get("file_hash"),
             )
 
             stix_output: dict[str, Any] = {}
@@ -518,28 +539,64 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
             if memory_store is not None and isr_reports:
-                try:
-                    category = infer_malware_category(
-                        reports=state.get("reports") or {},
-                        isr_reports=isr_reports,
-                    ).value
-                    case = build_stored_case(
-                        sample_id=state.get("file_hash", "unknown"),
-                        isr_reports=isr_reports,
-                        stix_bundle_json=(
-                            bundle.model_dump_json() if isinstance(bundle, Bundle) else ""
-                        ),
-                        malware_category=category,
+                # Audit 2026-05-17 LTM-01: quality gate. Skip the upsert
+                # when the run is clearly degraded (no corroboration, no
+                # techniques, failed analysts, etc.). A polluted entry
+                # poisons future analyses via the few-shot prior block.
+                _ltm_skip_reason: str | None = None
+                _corroborated = (
+                    cascade_summary.corroborated_count if cascade_summary is not None else 0
+                )
+                _technique_count = (
+                    cascade_summary.total_techniques if cascade_summary is not None else 0
+                )
+                _failed_analysts = [
+                    name
+                    for name, text in (state.get("reports") or {}).items()
+                    if isinstance(text, str) and text.strip().startswith("[ERROR]")
+                ]
+                if _corroborated == 0 and _technique_count <= 1:
+                    _ltm_skip_reason = (
+                        f"low-quality cascade: corroborated={_corroborated}, "
+                        f"techniques={_technique_count}"
                     )
-                    memory_store.store(case)
+                elif _failed_analysts:
+                    _ltm_skip_reason = f"analyst failures: {', '.join(_failed_analysts)}"
+                elif state.get("iteration_count", 0) == 0 and not state.get("is_consensus", False):
+                    _ltm_skip_reason = "no negotiation rounds completed"
+
+                if _ltm_skip_reason is not None:
                     logger.info(
-                        "LTM: stored case '%s' (category=%s, techniques=%d).",
-                        case.sample_id,
-                        case.malware_category,
-                        len(case.technique_ids),
+                        "LTM: skipping store for '%s' (reason: %s).",
+                        state.get("file_hash", "unknown")[:16],
+                        _ltm_skip_reason,
                     )
-                except Exception as e:
-                    logger.warning("LTM store failed (%s). Analysis result is unaffected.", e)
+                else:
+                    try:
+                        category = infer_malware_category(
+                            reports=state.get("reports") or {},
+                            isr_reports=isr_reports,
+                        ).value
+                        case = build_stored_case(
+                            sample_id=state.get("file_hash", "unknown"),
+                            isr_reports=isr_reports,
+                            stix_bundle_json=(
+                                bundle.model_dump_json() if isinstance(bundle, Bundle) else ""
+                            ),
+                            malware_category=category,
+                        )
+                        memory_store.store(case)
+                        logger.info(
+                            "LTM: stored case '%s' (category=%s, techniques=%d).",
+                            case.sample_id,
+                            case.malware_category,
+                            len(case.technique_ids),
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "LTM store failed (%s). Analysis result is unaffected.",
+                            e,
+                        )
 
             return {
                 "final_decision": decision,

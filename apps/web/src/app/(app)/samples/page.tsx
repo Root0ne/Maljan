@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SampleDTO } from "@/lib/api";
 
@@ -47,6 +48,8 @@ export default function SamplesPage() {
   const [dragOver, setDragOver] = useState(false);
   const [detailSample, setDetailSample] = useState<SampleDTO | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const searchParams = useSearchParams();
+  const sampleParam = searchParams.get("sample");
 
   /* Fetch real samples on mount */
   useEffect(() => {
@@ -61,6 +64,23 @@ export default function SamplesPage() {
       }
     })();
   }, []);
+
+  /* Deep-link: open the detail modal when ?sample={id} is present. */
+  useEffect(() => {
+    if (!sampleParam) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await api.getSample(sampleParam);
+        if (!cancelled) setDetailSample(detail);
+      } catch {
+        /* Silently ignore; the param may reference a missing sample. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sampleParam]);
 
   const handleUpload = useCallback(async (file: File) => {
     setUploading(true);

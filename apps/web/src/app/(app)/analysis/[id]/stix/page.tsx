@@ -114,8 +114,17 @@ export default function StixTab() {
     }
   }, [report?.id]);
 
-  if (loading || (!report && job?.status !== "completed")) {
-    return <div className="p-4 text-sm text-text-secondary animate-pulse">Waiting for STIX bundle generation...</div>;
+  if (loading) {
+    return <div className="p-4 text-sm text-text-secondary">Loading…</div>;
+  }
+  if (!report && job?.status !== "completed") {
+    return (
+      <div className="p-4 text-sm text-text-secondary animate-pulse">
+        {job?.status === "failed"
+          ? "Analysis failed; no STIX bundle was produced."
+          : "Waiting for STIX bundle generation…"}
+      </div>
+    );
   }
 
   const bundle = stixData ?? report?.stix_bundle ?? {};

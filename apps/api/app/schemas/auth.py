@@ -46,3 +46,12 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UserUpdateRequest(BaseModel):
+    """Request body for the caller updating their own profile."""
+
+    full_name: str | None = None
+    password: str | None = Field(None, min_length=8, max_length=128)
+
+    model_config = {"extra": "forbid"}

@@ -76,45 +76,30 @@ class StaticAnalyst(BaseAnalyst):
     # detectors) and nothing else, cutting the catalog ~5x.
     _GHIDRA_ALLOWED_TOOLS: frozenset[str] = frozenset(
         {
-            # Program lifecycle (must include load_program to start analysis)
+            # Program lifecycle (load_program MUST run first).
             "load_program",
             "get_current_program_info",
-            "get_metadata",
-            "get_entry_points",
-            "list_open_programs",
-            # Function enumeration & decompilation
-            "list_functions",
-            "list_functions_enhanced",
-            "search_functions_enhanced",
-            "decompile_function",
-            "disassemble_function",
-            "get_function_signature",
-            "get_function_xrefs",
-            "get_function_callers",
-            "get_function_callees",
-            "get_function_call_graph",
-            # Symbols / strings (high-signal for malware triage)
-            "list_imports",
-            "list_exports",
-            "list_strings",
-            "search_memory_strings",
-            "list_namespaces",
-            # Memory & cross-references
-            "list_segments",
-            "list_data_items",
-            "get_xrefs_to",
-            "get_xrefs_from",
-            "search_byte_patterns",
-            "get_assembly_context",
-            # Malware-specific high-value analyzers (Ghidra MCP v5+)
-            "analyze_api_call_chains",
+            # Pre-digested high-value analyzers — give the LLM curated
+            # triage signals in one tool call instead of forcing it to
+            # walk the function graph by hand.
             "detect_malware_behaviors",
+            "analyze_api_call_chains",
             "find_anti_analysis_techniques",
             "extract_iocs_with_context",
-            "analyze_control_flow",
-            "analyze_call_graph",
+            # Compact enumeration tools the model uses to corroborate
+            # behavior calls without exploding the prompt.
+            "list_imports",
+            "list_strings",
+            "list_segments",
+            "get_entry_points",
+            # Targeted deep-dive when the analyzers point at a function.
+            "decompile_function",
+            "get_xrefs_to",
         }
     )
+    # 31 → 12 (audit 2026-05-17, A-01). The dropped tools were redundant
+    # call-graph traversals and function-listing variants that bloated
+    # the prompt and pushed each ReAct round into the 180-600 s range.
 
     def _filter_ghidra_tools(self, tools: list[Any]) -> list[Any]:
         """Keep only allowlisted read-only analysis tools.

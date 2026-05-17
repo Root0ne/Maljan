@@ -131,9 +131,16 @@ async def upload_sample(
 
         storage_path = f"samples/{sha256[:2]}/{sha256}"
 
-        # Race-safe insert: another concurrent request may have just inserted
-        # the same sha256. We INSERT … ON CONFLICT DO NOTHING; if the row
-        # already exists we fetch it and skip the MinIO upload.
+        # Check whether the bytes are already in MinIO (any prior uploader's
+        # row works — the storage path is sha256-derived). If yes, the new
+        # row points at the same path and we skip the costly re-upload.
+        prior_q = await db.execute(select(Sample.id).where(Sample.sha256 == sha256).limit(1))
+        bytes_already_stored = prior_q.scalar_one_or_none() is not None
+
+        # Per-user dedup: ON CONFLICT on the new ``(sha256, uploaded_by)``
+        # composite key. Re-uploading your own sample returns the existing
+        # row idempotently; another user uploading the same hash inserts a
+        # fresh metadata row pointing at the shared storage path.
         stmt = (
             pg_insert(Sample)
             .values(
@@ -146,16 +153,34 @@ async def upload_sample(
                 storage_path=storage_path,
                 uploaded_by=user.id,
             )
-            .on_conflict_do_nothing(index_elements=["sha256"])
+            .on_conflict_do_nothing(constraint="uq_samples_sha256_uploader")
             .returning(Sample)
         )
         result = await db.execute(stmt)
         sample_row: Sample | None = result.scalar_one_or_none()
         if sample_row is None:
-            existing = await db.execute(select(Sample).where(Sample.sha256 == sha256))
+            existing = await db.execute(
+                select(Sample).where(
+                    Sample.sha256 == sha256,
+                    Sample.uploaded_by == user.id,
+                )
+            )
             sample = existing.scalar_one()
             logger.info("Duplicate sample reused: %s", sample.id)
             return sample
+
+        if bytes_already_stored:
+            # Another user already pushed these bytes to MinIO; reuse the
+            # storage path and skip the upload. The MinIO bucket is keyed by
+            # sha256, so paths coincide and no double-write occurs.
+            await db.flush()
+            await db.refresh(sample_row)
+            logger.info(
+                "Sample created (shared storage): id=%s sha256=%s",
+                sample_row.id,
+                sha256[:12],
+            )
+            return sample_row
 
         # Stream to MinIO from the temp file (no extra RAM copy).
         try:

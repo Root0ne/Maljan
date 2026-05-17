@@ -158,7 +158,10 @@ def create_app() -> FastAPI:
 
     # ── Health Check ─────────────────────────────────────────
     @app.get("/health", tags=["System"])
+    @app.get("/healthz", tags=["System"])
     async def health_check() -> dict:
+        # Two paths so both bare ("/health") and Kubernetes-style
+        # ("/healthz") liveness probes succeed without extra config.
         return {
             "status": "healthy",
             "service": settings.app_name,

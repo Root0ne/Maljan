@@ -134,7 +134,11 @@ class BaseAnalyst(ABC):
         messages = prebuilt
 
         cfg = get_settings()
-        timeout = cfg.react_agent_timeout
+        # Per-agent timeout override (audit 2026-05-17, A-01). The static
+        # analyst with 31 Ghidra tools never finishes inside 180 s on
+        # commodity hardware; give it the operator-configured headroom.
+        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
+        timeout = overrides.get(self.name, cfg.react_agent_timeout)
         max_steps = cfg.react_agent_max_steps
         thread_result: dict | None = None
         thread_exception: Exception | None = None

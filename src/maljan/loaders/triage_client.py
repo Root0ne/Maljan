@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -257,7 +258,12 @@ class TriageClient:
             self._api_token = api_token.get_secret_value()
         else:
             self._api_token = str(api_token or "")
-        self._base_url = base_url.rstrip("/")
+        base_url = base_url.rstrip("/")
+        # Tolerate operators copying the docs URL ("https://api.tria.ge/v0")
+        # — strip a trailing ``/v0`` so we never double-prefix the API path.
+        if base_url.endswith(_API_VERSION):
+            base_url = base_url[: -len(_API_VERSION)]
+        self._base_url = base_url
         self._timeout = timeout
         self._poll_interval = poll_interval
         self._api_prefix = f"{self._base_url}{_API_VERSION}"
@@ -539,24 +545,48 @@ class TriageClient:
         return task_id
 
     async def _async_wait(self, task_id: str) -> str:
-        """Triage task'i tamamlanana kadar polling yapar."""
+        """Triage task'i tamamlanana kadar polling yapar.
+
+        Mirrors ``_sync_wait``'s reliability features: exponential backoff on
+        transient HTTP errors and a hard failure cap so a Triage outage stops
+        looping silently. Without these the async path could hammer the API
+        for the full ``self._timeout`` window even when every call returns 5xx.
+        """
         http = self._get_http()
         deadline = time.monotonic() + self._timeout
         attempt = 0
+        backoff = float(self._poll_interval)
+        max_backoff = max(60.0, backoff * 4)
+        consecutive_failures = 0
 
         while time.monotonic() < deadline:
             attempt += 1
             try:
                 response = await http.get(f"/samples/{task_id}")
             except Exception as exc:
-                logger.warning("TriageClient: status poll #%d failed (%s), retrying.", attempt, exc)
-                await asyncio.sleep(self._poll_interval)
+                consecutive_failures += 1
+                logger.warning(
+                    "TriageClient: status poll #%d failed (%s); backoff=%.1fs.",
+                    attempt,
+                    exc,
+                    backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, backoff * 2)
+                if consecutive_failures >= 5:
+                    raise RuntimeError(
+                        f"Triage status polling failed {consecutive_failures} times in a row"
+                    ) from exc
                 continue
 
+            consecutive_failures = 0
             if response.status_code != 200:
                 logger.warning("TriageClient: poll HTTP %d, retrying.", response.status_code)
-                await asyncio.sleep(self._poll_interval)
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, backoff * 1.5)
                 continue
+
+            backoff = float(self._poll_interval)  # reset after a clean response
 
             data = response.json()
             if not isinstance(data, dict):
@@ -607,14 +637,26 @@ class TriageClient:
         logger.debug("TriageClient: task=%s summary keys=%s", task_id, type_map)
 
         raw_sample = triage_data.get("sample", {})
-        if not isinstance(raw_sample, dict):
+        if isinstance(raw_sample, str):
+            # Triage occasionally returns ``sample`` as a bare *id* string
+            # instead of a dict (older API tier / pre-resolve summary).
+            # That id can be either the sample sha256 (64 hex chars) OR
+            # the Triage task id (e.g. ``260517-va7wrsbs9z``). Only the
+            # hex form is a usable sha256 — for the task-id case, leave
+            # ``sha256`` empty so downstream enrichment via
+            # ``/overview.json`` can hydrate the real value.
+            sample_meta = {"name": triage_data.get("name") or task_id}
+            if re.fullmatch(r"[0-9a-fA-F]{64}", raw_sample):
+                sample_meta["sha256"] = raw_sample.lower()
+        elif isinstance(raw_sample, dict):
+            sample_meta = raw_sample
+        else:
             logger.warning(
-                "TriageClient: task=%s 'sample' field is %s, not dict. Using empty.",
+                "TriageClient: task=%s 'sample' field is %s, ignoring.",
                 task_id,
                 type(raw_sample).__name__,
             )
-            raw_sample = {}
-        sample_meta = raw_sample
+            sample_meta = {}
         sha256 = sample_meta.get("sha256", "")
         sample_name = sample_meta.get("name", task_id)
 
@@ -642,6 +684,43 @@ class TriageClient:
             len(triage_data.get("tasks", {})),
         )
 
+        # Best-effort enrichment from per-task reports + corpus search.
+        # These are *additive* — if they fail, we still return the summary.
+        # We log at WARNING (not DEBUG) so degradation is visible at the
+        # default log level — empty enrichment was masking the bulk of
+        # Triage's signatures and network IOCs (audit 2026-05-17).
+        try:
+            await self._enrich_from_overview(task_id, normalized)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "TriageClient: overview enrichment failed (%s); "
+                "signatures and IOCs may be missing.",
+                exc,
+            )
+        try:
+            await self._enrich_from_task_reports(task_id, triage_data, normalized)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "TriageClient: per-task report enrichment failed (%s); "
+                "behavioural data may be incomplete.",
+                exc,
+            )
+
+        # Post-enrichment summary so operators see at a glance what made
+        # it into the normalized report. Empty values here usually mean
+        # ``overview.json`` was unreachable or returned a string sample id.
+        sigs = normalized.get("signatures") or []
+        network = normalized.get("network") or {}
+        logger.info(
+            "TriageClient: post-enrichment task=%s signatures=%d dns=%d http=%d tcp=%d udp=%d.",
+            task_id,
+            len(sigs) if isinstance(sigs, list) else 0,
+            len(network.get("dns", []) or []),
+            len(network.get("http", []) or []),
+            len(network.get("tcp", []) or []),
+            len(network.get("udp", []) or []),
+        )
+
         return SubmissionResult(
             task_id=task_id,
             sample_sha256=sha256,
@@ -650,6 +729,158 @@ class TriageClient:
             report=normalized,
             error="",
         )
+
+    # ------------------------------------------------------------------
+    # Richer endpoints (additive — augment the summary-based report)
+    # ------------------------------------------------------------------
+
+    async def fetch_overview(self, sample_id: str) -> dict[str, Any]:
+        """``GET /samples/{id}/overview.json`` — aggregated signatures + IOCs.
+
+        Richer than ``/summary`` (signatures with marks, network IOCs as
+        typed entities, ATT&CK tags). Returns an empty dict on failure so
+        callers can decide whether to merge or skip.
+        """
+        http = self._get_http()
+        try:
+            resp = await http.get(f"/samples/{sample_id}/overview.json")
+            if resp.status_code != 200:
+                logger.debug(
+                    "TriageClient: overview.json HTTP %d for sample=%s.",
+                    resp.status_code,
+                    sample_id,
+                )
+                return {}
+            data = resp.json()
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("TriageClient: overview.json fetch failed: %s.", exc)
+            return {}
+
+    async def fetch_task_report(self, sample_id: str, task_id: str) -> dict[str, Any]:
+        """``GET /samples/{sample_id}/{task_id}/report_triage.json`` — per-task behavior.
+
+        Carries the rich per-task behavior block: signatures with file/registry
+        marks, full process tree, network captures, IOC mark types. Falls back
+        to ``{}`` when the task did not produce a report (network-only task,
+        timeouts, etc.).
+        """
+        http = self._get_http()
+        try:
+            resp = await http.get(f"/samples/{sample_id}/{task_id}/report_triage.json")
+            if resp.status_code != 200:
+                logger.debug(
+                    "TriageClient: report_triage.json HTTP %d sample=%s task=%s.",
+                    resp.status_code,
+                    sample_id,
+                    task_id,
+                )
+                return {}
+            data = resp.json()
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("TriageClient: task report fetch failed: %s.", exc)
+            return {}
+
+    async def fetch_pcapng(self, sample_id: str, task_id: str) -> bytes:
+        """``GET /samples/{sample_id}/{task_id}/dump.pcapng`` — raw packet capture.
+
+        Returns the raw bytes for downstream pyshark / scapy parsing. Empty
+        bytes when the capture is not available.
+        """
+        http = self._get_http()
+        try:
+            resp = await http.get(f"/samples/{sample_id}/{task_id}/dump.pcapng")
+            if resp.status_code != 200:
+                return b""
+            return bytes(resp.content)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("TriageClient: pcapng fetch failed: %s.", exc)
+            return b""
+
+    async def search_corpus(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """``GET /v0/search`` — find similar samples in the Triage corpus.
+
+        ``query`` follows Triage's search syntax (e.g. ``family:emotet``,
+        ``tag:c2``, ``md5:...``). Used by the family-attribution agent to
+        anchor confidence on corpus-wide observations.
+        """
+        http = self._get_http()
+        try:
+            resp = await http.get("/search", params={"query": query, "limit": str(limit)})
+            if resp.status_code != 200:
+                logger.debug("TriageClient: search HTTP %d for query=%r.", resp.status_code, query)
+                return []
+            data = resp.json()
+            samples = data.get("data") if isinstance(data, dict) else None
+            return list(samples) if isinstance(samples, list) else []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("TriageClient: search failed: %s.", exc)
+            return []
+
+    async def _enrich_from_overview(self, sample_id: str, normalized: dict[str, Any]) -> None:
+        """Merge richer fields from ``overview.json`` into the normalized report.
+
+        Adds ``signatures.marks`` per signature, canonical typed network
+        IOCs, and ATT&CK tag aggregation when the overview is available.
+        Audit 2026-05-17 (T-01 follow-up): also back-fills the canonical
+        ``sample.sha256`` / ``sample.name`` / ``sample.size`` when those
+        landed empty because ``summary.sample`` was the bare task id
+        string rather than the resolved dict.
+        """
+        overview = await self.fetch_overview(sample_id)
+        if not overview:
+            return
+        sample_block = overview.get("sample")
+        if isinstance(sample_block, dict):
+            existing_sample = normalized.get("sample")
+            if not isinstance(existing_sample, dict) or not existing_sample.get("sha256"):
+                # Promote the overview's sample dict — it has sha256/size/name.
+                normalized["sample"] = {
+                    "sha256": str(sample_block.get("sha256", "") or "").lower(),
+                    "md5": sample_block.get("md5", ""),
+                    "name": sample_block.get("filename")
+                    or sample_block.get("target")
+                    or normalized.get("sample", {}).get("name")
+                    or sample_id,
+                    "size": int(sample_block.get("size") or 0),
+                }
+        sigs = overview.get("signatures")
+        if isinstance(sigs, list):
+            normalized.setdefault("signatures_rich", sigs)
+        targets = overview.get("targets")
+        if isinstance(targets, list) and targets:
+            for tgt in targets:
+                if isinstance(tgt, dict) and tgt.get("tags"):
+                    normalized.setdefault("attack_tags", []).extend(
+                        [t for t in tgt["tags"] if isinstance(t, str)]
+                    )
+
+    async def _enrich_from_task_reports(
+        self, sample_id: str, summary: dict[str, Any], normalized: dict[str, Any]
+    ) -> None:
+        """Pull per-task behavior reports (signatures, process tree, marks).
+
+        Iterates over ``summary["tasks"]`` (which the summary endpoint already
+        gave us) and pulls each task's ``report_triage.json``. Aggregates the
+        rich signatures + marks into ``normalized["behavior_rich"]`` so the
+        downstream Dynamic agent has access to the evidence quotes it needs.
+        """
+        tasks_block = summary.get("tasks")
+        if not isinstance(tasks_block, dict):
+            return
+        per_task: list[dict[str, Any]] = []
+        for task_id, task_info in list(tasks_block.items())[:5]:  # cap at 5 to bound cost
+            if not isinstance(task_info, dict):
+                continue
+            kind = task_info.get("kind")
+            if kind not in {"behavioral1", "behavioral2", "static1"}:
+                continue
+            task_report = await self.fetch_task_report(sample_id, str(task_id))
+            if task_report:
+                per_task.append({"task_id": task_id, "report": task_report})
+        if per_task:
+            normalized.setdefault("behavior_rich", per_task)
 
 
 # ---------------------------------------------------------------------------

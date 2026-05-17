@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { api } from "@/lib/api";
@@ -71,6 +71,12 @@ const AGENT_PHASE_STYLES: Record<AgentPhase, { dot: string; text: string; label:
   done: { dot: "bg-status-green", text: "text-status-green", label: "Done" },
 };
 
+interface PipelineEvent {
+  type: string;
+  data?: Record<string, unknown>;
+  ts?: string;
+}
+
 export default function LiveAnalysisPage() {
   const params = useParams();
   const jobId = params.id as string;
@@ -82,18 +88,27 @@ export default function LiveAnalysisPage() {
   const [phase, setPhase] = useState<PipelinePhase>("waiting");
 
   const processedCount = useRef(0);
+  // Dedupe key set — covers both stream_id (from backfill) and a stable
+  // composite key (type+ts+payload) for raw WS events that don't carry
+  // a stream_id. Prevents double-counting when WS replays events that
+  // arrived between the backfill request and subscription.
+  const seenKeys = useRef<Set<string>>(new Set());
 
-  // Process new WebSocket events as they arrive
-  useEffect(() => {
-    const newEvents = wsEvents.slice(processedCount.current);
-    processedCount.current = wsEvents.length;
-
-    for (const ev of newEvents) {
+  /** Apply one pipeline event to local state. Idempotent via seenKeys. */
+  const applyEvent = useCallback(
+    (ev: PipelineEvent & { stream_id?: string }, _appendToEnd = false) => {
       const data = ev.data ?? {};
-      const ts = ev.ts ? new Date(ev.ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+      const dedupeKey =
+        ev.stream_id ?? `${ev.type}|${ev.ts ?? ""}|${JSON.stringify(data)}`;
+      if (seenKeys.current.has(dedupeKey)) return;
+      seenKeys.current.add(dedupeKey);
+
+      const ts = ev.ts
+        ? new Date(ev.ts).toLocaleTimeString()
+        : new Date().toLocaleTimeString();
 
       // Skip heartbeats — don't clutter the log
-      if (ev.type === "heartbeat" || ev.type === "pong") continue;
+      if (ev.type === "heartbeat" || ev.type === "pong") return;
 
       // Update pipeline state machine
       if (ev.type === "status_change" && data.status === "running") {
@@ -111,10 +126,10 @@ export default function LiveAnalysisPage() {
         const agentPhase = (data.phase as AgentPhase | undefined) ?? "analyzing";
         setAgents((prev) => {
           const exists = prev.some((a) => a.name === agentName);
-          if (!exists) {
-            return [...prev, { name: agentName, phase: agentPhase }];
-          }
-          return prev.map((a) => (a.name === agentName ? { ...a, phase: agentPhase } : a));
+          if (!exists) return [...prev, { name: agentName, phase: agentPhase }];
+          return prev.map((a) =>
+            a.name === agentName ? { ...a, phase: agentPhase } : a
+          );
         });
       }
 
@@ -132,13 +147,45 @@ export default function LiveAnalysisPage() {
         setPhase("failed");
       }
 
-      // Append to event log
-      setEventLog((prev) => [
-        { ts, type: ev.type, message: buildMessage(ev.type, data) },
-        ...prev,
-      ]);
+      const entry: EventEntry = { ts, type: ev.type, message: buildMessage(ev.type, data) };
+      // Prepend so newest stays at the top, matching the WS-only ordering
+      // the page already shipped with.
+      setEventLog((prev) => [entry, ...prev]);
+    },
+    []
+  );
+
+  // One-shot backfill of historical events when the tab mounts mid-run
+  // (audit 2026-05-17, LIVE-01). Events come back in chronological order
+  // — feed them through ``applyEvent`` so the state machine and event
+  // log replay the same way they would have if WS had been attached.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getJobEvents(jobId);
+        if (cancelled) return;
+        for (const ev of res.events) {
+          applyEvent(ev as PipelineEvent & { stream_id?: string });
+        }
+      } catch {
+        /* Stream may not exist yet — WS will populate it. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, applyEvent]);
+
+  // Process new WebSocket events as they arrive. ``applyEvent`` dedupes
+  // against the backfill set so we never double-render an event.
+  useEffect(() => {
+    const newEvents = wsEvents.slice(processedCount.current);
+    processedCount.current = wsEvents.length;
+    for (const ev of newEvents) {
+      applyEvent(ev as PipelineEvent);
     }
-  }, [wsEvents]);
+  }, [wsEvents, applyEvent]);
 
   // Polling fallback: catches completed/failed even if WS was disconnected
   useEffect(() => {
@@ -186,8 +233,16 @@ export default function LiveAnalysisPage() {
           </h2>
 
           {agents.length === 0 ? (
-            <div className="bg-bg-surface border border-border rounded p-8 text-center text-xs text-text-muted animate-pulse">
-              Waiting for pipeline to initialize...
+            <div className="bg-bg-surface border border-border rounded p-8 text-center text-xs text-text-muted">
+              {phase === "completed"
+                ? "Analysis already completed. No live agents to display."
+                : phase === "failed"
+                ? "Analysis failed before any agent reported in. See Pipeline tab for details."
+                : phase === "waiting"
+                ? "Waiting for the worker to pick up this job…"
+                : (
+                  <span className="animate-pulse">Pipeline starting up — agent status will appear shortly.</span>
+                )}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -233,8 +288,12 @@ export default function LiveAnalysisPage() {
               </div>
             ))}
             {eventLog.length === 0 && (
-              <div className="p-4 text-xs text-text-muted text-center animate-pulse">
-                Waiting for events...
+              <div className="p-4 text-xs text-text-muted text-center">
+                {phase === "completed" || phase === "failed"
+                  ? "No live events were captured — pipeline finished before the page subscribed."
+                  : (
+                    <span className="animate-pulse">Waiting for events…</span>
+                  )}
               </div>
             )}
           </div>
