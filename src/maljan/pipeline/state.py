@@ -5,13 +5,11 @@ per-agent fields. Adding a new agent does NOT require any schema change.
 """
 
 import operator
-from typing import Annotated, Any, Literal, TypedDict, TypeVar
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from maljan.schemas.isr_models import AgentISR
-
-_V = TypeVar("_V")
 
 
 class AgentArgument(BaseModel):
@@ -22,9 +20,9 @@ class AgentArgument(BaseModel):
     confidence_score: float = Field(0.0, description="Confidence of this specific argument (0-1)")
 
 
-def _merge_dicts(left: dict[str, _V], right: dict[str, _V]) -> dict[str, _V]:
+def _merge_dicts[V](left: dict[str, V], right: dict[str, V]) -> dict[str, V]:
     """LangGraph reducer: shallow merge; right keys overwrite left."""
-    merged: dict[str, _V] = {**left}
+    merged: dict[str, V] = {**left}
     merged.update(right)
     return merged
 

@@ -9,6 +9,8 @@ the API in non-debug mode unless the operator provided real values.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -190,7 +192,7 @@ class _LazyAPISettings:
 
     __slots__ = ()
 
-    def __getattr__(self, name: str):  # noqa: ANN204
+    def __getattr__(self, name: str) -> Any:
         return getattr(get_settings(), name)
 
 

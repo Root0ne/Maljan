@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from maljan.core.config import AgentLLMConfig, LLMConfig, Settings
+from maljan.core.exceptions import ConfigurationError
 
 # ---------------------------------------------------------------------------
 # AgentLLMConfig
@@ -216,6 +217,8 @@ class TestBuildModelForAgent:
 
 class TestContainerGetAgentLLM:
     def _make_container(self, agents: dict | None = None) -> object:
+        import threading
+
         from maljan.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
@@ -227,6 +230,7 @@ class TestContainerGetAgentLLM:
         container._agent_cache = {}
         container._data_cache = {}
         container._llm_registry = MagicMock()
+        container._lock = threading.Lock()
         return container
 
     def test_delegates_to_registry(self) -> None:
@@ -262,13 +266,16 @@ class TestContainerGetAgentLLM:
         assert r_dynamic is llm_dynamic
 
     def test_mock_mode_raises(self) -> None:
+        import threading
+
         from maljan.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container._llm_registry = None
         container._agent_llm_cache = {}
+        container._lock = threading.Lock()
 
-        with pytest.raises(RuntimeError, match="mock mode"):
+        with pytest.raises(ConfigurationError, match="mock"):
             container.get_agent_llm("static")
 
 
@@ -279,10 +286,13 @@ class TestContainerGetAgentLLM:
 
 class TestContainerGetAgentUsesAgentLLM:
     def test_get_agent_calls_get_agent_llm_not_expert(self) -> None:
+        import threading
+
         from maljan.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container._agent_cache = {}
+        container._lock = threading.Lock()
 
         dedicated_llm = MagicMock()
         container.get_agent_llm = MagicMock(return_value=dedicated_llm)
@@ -300,12 +310,15 @@ class TestContainerGetAgentUsesAgentLLM:
         mock_registry.create.assert_called_once_with("static", dedicated_llm)
 
     def test_get_agent_cache_hit_does_not_rebuild_llm(self) -> None:
+        import threading
+
         from maljan.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
 
         cached_agent = MagicMock()
         container._agent_cache = {"static": cached_agent}
+        container._lock = threading.Lock()
         container.get_agent_llm = MagicMock()
         container.agent_registry = MagicMock()
 

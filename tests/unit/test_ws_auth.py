@@ -46,9 +46,7 @@ async def test_ws_rejects_missing_token(mock_ws: MagicMock) -> None:
 
     await ws_analysis(mock_ws, str(uuid.uuid4()))
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Unauthorized: missing token"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Unauthorized: missing token")
     mock_ws.accept.assert_not_awaited()
 
 
@@ -59,9 +57,7 @@ async def test_ws_rejects_invalid_token(mock_ws: MagicMock) -> None:
     with patch("app.api.ws.decode_token", return_value=None):
         await ws_analysis(mock_ws, str(uuid.uuid4()))
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Unauthorized: invalid token"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Unauthorized: invalid token")
 
 
 @pytest.mark.asyncio
@@ -71,9 +67,7 @@ async def test_ws_rejects_refresh_token(mock_ws: MagicMock) -> None:
     with patch("app.api.ws.decode_token", return_value={"sub": "user-1", "type": "refresh"}):
         await ws_analysis(mock_ws, str(uuid.uuid4()))
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Unauthorized: access token required"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Unauthorized: access token required")
 
 
 @pytest.mark.asyncio
@@ -83,9 +77,7 @@ async def test_ws_rejects_token_without_subject(mock_ws: MagicMock) -> None:
     with patch("app.api.ws.decode_token", return_value={"type": "access"}):
         await ws_analysis(mock_ws, str(uuid.uuid4()))
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Unauthorized: token missing subject"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Unauthorized: token missing subject")
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +92,7 @@ async def test_ws_rejects_invalid_job_id(mock_ws: MagicMock) -> None:
     with patch("app.api.ws.decode_token", return_value={"sub": "user-1", "type": "access"}):
         await ws_analysis(mock_ws, "not-a-uuid")
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Bad request: invalid job ID"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Bad request: invalid job ID")
 
 
 @pytest.mark.asyncio
@@ -124,9 +114,7 @@ async def test_ws_rejects_nonexistent_job(mock_ws: MagicMock) -> None:
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
         await ws_analysis(mock_ws, job_id)
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Not found: job does not exist"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Not found: job does not exist")
 
 
 @pytest.mark.asyncio
@@ -151,9 +139,7 @@ async def test_ws_rejects_wrong_owner(mock_ws: MagicMock, valid_token_payload: d
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
         await ws_analysis(mock_ws, job_id)
 
-    mock_ws.close.assert_awaited_once_with(
-        code=1008, reason="Forbidden: not your job"
-    )
+    mock_ws.close.assert_awaited_once_with(code=1008, reason="Forbidden: not your job")
 
 
 @pytest.mark.asyncio
@@ -179,6 +165,9 @@ async def test_ws_accepts_valid_owner(mock_ws: MagicMock, valid_token_payload: d
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_manager.connect = AsyncMock()
+        # The endpoint's finally-block awaits manager.disconnect; without the
+        # AsyncMock here the await raises TypeError on a plain MagicMock.
+        mock_manager.disconnect = AsyncMock()
         await ws_analysis(mock_ws, job_id)
 
     mock_ws.close.assert_not_awaited()

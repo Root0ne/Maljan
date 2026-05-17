@@ -66,7 +66,11 @@ class TestCreateLangChainToolDictSchema:
         lc_tool = toolkit._create_langchain_tool(mcp_tool)
 
         assert lc_tool.name == "submit_file"
-        assert lc_tool.description == "Submit a file for analysis"
+        # The MCP toolkit compresses descriptions with a leading category tag
+        # (e.g. "[TOOL]") so ReAct prompts stay compact — see
+        # ``MCPLangChainToolkit._compress_description``.
+        assert lc_tool.description.endswith("Submit a file for analysis")
+        assert lc_tool.description.startswith("[")
 
         # Verify schema fields exist
         schema = lc_tool.args_schema

@@ -497,7 +497,8 @@ def _extract_category(result: dict) -> str | None:
     """Extract malware category from the pipeline result."""
     run_summary = result.get("run_summary")
     if run_summary and isinstance(run_summary, dict):
-        return run_summary.get("malware_category")
+        category = run_summary.get("malware_category")
+        return str(category) if category is not None else None
     return None
 
 
@@ -547,7 +548,7 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
-    redis_conn: aioredis.Redis = ctx.get("redis")
+    redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
         await redis_conn.aclose()
 

@@ -297,8 +297,33 @@ def benchmark(
     evaluates TTP accuracy, STIX quality, and negotiation efficiency metrics.
 
     This command is safe to run without an LLM: no API keys or network access required.
+
+    The benchmark suite lives under ``tests/evaluation/`` which is only present
+    in source checkouts. When Maljan is invoked from a pip-installed wheel
+    without the dev extra, the import fails — we surface a clear actionable
+    message instead of the raw ``ModuleNotFoundError``.
     """
-    from tests.evaluation.benchmark_suite import run_fixture_benchmark
+    # ``tests/`` is a sibling of ``src/`` in the source checkout; add the
+    # repo root to sys.path so the import resolves even when ``maljan`` is
+    # invoked from an installed entry-point (where the package no longer
+    # sees its sibling ``tests/`` directory automatically).
+    import sys
+
+    _repo_root = Path(__file__).resolve().parents[2]
+    if _repo_root.is_dir() and str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
+
+    try:
+        from tests.evaluation.benchmark_suite import run_fixture_benchmark
+    except ModuleNotFoundError as exc:
+        typer.echo(
+            f"benchmark unavailable: {exc}.\n"
+            "The benchmark suite ships only with a source checkout. "
+            "Clone the repository and run from its root, or install the "
+            "package with: uv pip install -e '.[dev]'",
+            err=True,
+        )
+        raise typer.Exit(code=2) from None
 
     result = run_fixture_benchmark(
         fixtures_dir=fixtures_dir,

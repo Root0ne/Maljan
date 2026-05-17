@@ -42,9 +42,17 @@ def _minio_secret() -> str:
 
 
 def _streaming_hashes(file: UploadFile, dest: Path) -> tuple[str, str, str, int]:
-    """Stream the upload to ``dest`` and return (sha256, sha1, md5, size)."""
+    """Stream the upload to ``dest`` and return (sha256, sha1, md5, size).
+
+    SHA1 and MD5 are emitted alongside SHA256 because every downstream CTI
+    consumer (VirusTotal, MalwareBazaar, MISP, YARA imphash workflows)
+    indexes malware samples by all three. They are used here purely as
+    forensic identifiers, never as cryptographic signatures.
+    """
     sha256 = hashlib.sha256()
+    # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
     sha1 = hashlib.sha1()
+    # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-md5
     md5 = hashlib.md5()
     total = 0
     chunk_size = 64 * 1024
@@ -75,7 +83,8 @@ def _detect_mime(path: Path) -> str | None:
 
         kind = filetype.guess(str(path))
         if kind is not None:
-            return kind.mime
+            mime = kind.mime
+            return str(mime) if mime is not None else None
     except Exception as exc:
         logger.debug("filetype guess failed: %s", exc)
     return None

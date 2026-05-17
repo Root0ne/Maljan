@@ -199,7 +199,7 @@ class AnalysisService:
             .where(AnalysisJob.created_by == user.id)
             .group_by(AnalysisJob.status)
         )
-        status_counts = dict(status_result.all())
+        status_counts: dict[str, int] = {row[0]: int(row[1]) for row in status_result.all()}
 
         # Verdict distribution (from reports of user's jobs)
         verdict_result = await self.db.execute(
@@ -208,7 +208,7 @@ class AnalysisService:
             .where(AnalysisJob.created_by == user.id)
             .group_by(AnalysisReport.verdict)
         )
-        verdict_counts = dict(verdict_result.all())
+        verdict_counts: dict[str, int] = {row[0]: int(row[1]) for row in verdict_result.all()}
 
         # Average analysis time
         avg_result = await self.db.execute(

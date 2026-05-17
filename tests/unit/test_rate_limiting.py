@@ -29,6 +29,24 @@ def fake_redis():
     return FakeRedis()
 
 
+def _install_counter(middleware: RateLimitMiddleware) -> dict[str, int]:
+    """Replace the Lua-based incrementer with a pure-Python counter.
+
+    ``fakeredis.aioredis.FakeRedis`` does not support the ``EVAL`` command
+    so the production code's atomic INCR+TTL Lua script always falls through
+    to the "fail-open" branch (returning ``(0, window)``). For unit tests we
+    swap in a tiny dict-backed counter that mirrors the script's contract.
+    """
+    counts: dict[str, int] = {}
+
+    async def fake_incr(redis_client, key, window_seconds):
+        counts[key] = counts.get(key, 0) + 1
+        return counts[key], window_seconds
+
+    middleware._incr_with_ttl = fake_incr  # type: ignore[method-assign]
+    return counts
+
+
 class TestRateLimitMiddleware:
     """Tests for RateLimitMiddleware dispatch logic."""
 
@@ -44,6 +62,7 @@ class TestRateLimitMiddleware:
         )
         # Replace with fake Redis for testing
         middleware._redis_pool = fake_redis.connection_pool
+        _install_counter(middleware)
 
         request = Request(
             {
@@ -79,6 +98,7 @@ class TestRateLimitMiddleware:
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
+        _install_counter(middleware)
 
         request = Request(
             {
@@ -219,6 +239,7 @@ class TestRateLimitMiddleware:
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
+        _install_counter(middleware)
 
         async def call_next(req):
             return Response(content='{"ok":true}', status_code=200)

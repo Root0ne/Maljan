@@ -37,7 +37,8 @@ class TestDetectSycophancy:
         """
         isr_a = _make_isr("static", "static", "Encrypts files using AES-256 via CryptoAPI calls")
         isr_b = _make_isr("dynamic", "dynamic", "Encrypts files using AES-256 via CryptoAPI calls")
-        assert detect_sycophancy([isr_a, isr_b], threshold=0.70) is True
+        # ``iteration=1+`` is required — round 0 never triggers, by design.
+        assert detect_sycophancy([isr_a, isr_b], threshold=0.70, iteration=1) is True
 
     def test_distinct_summaries_not_detected(self) -> None:
         """ISRs from completely different analysis domains should not be flagged."""
@@ -74,7 +75,7 @@ class TestDetectSycophancy:
         isr_a = _make_isr("static", "static", claim)
         isr_b = _make_isr("dynamic", "dynamic", claim)
         isr_c = _make_isr("network", "network", "Beaconing to TOR hidden service exfiltrating data")
-        assert detect_sycophancy([isr_a, isr_b, isr_c], threshold=0.70) is True
+        assert detect_sycophancy([isr_a, isr_b, isr_c], threshold=0.70, iteration=1) is True
 
 
 class TestBuildRevisionDirective:

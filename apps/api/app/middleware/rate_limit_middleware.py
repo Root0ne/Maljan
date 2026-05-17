@@ -13,6 +13,8 @@ When limit is exceeded, returns 429 with Retry-After header.
 
 from __future__ import annotations
 
+from typing import cast
+
 import redis.asyncio as aioredis
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -82,7 +84,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window_seconds: int,
     ) -> tuple[int, int]:
         try:
-            result = await redis.eval(self._incr_script, 1, key, window_seconds)
+            # ``redis.eval`` type stubs return ``Awaitable[str] | str`` because
+            # the sync and async clients share a base class; in the async client
+            # it is always an awaitable, so the type narrowing is irrelevant at
+            # runtime.
+            raw = await redis.eval(  # type: ignore[misc]
+                self._incr_script, 1, key, str(window_seconds)
+            )
+            result = cast(list[int], raw)
             return int(result[0]), int(result[1])
         except Exception as exc:
             logger.warning("Rate-limit Lua script failed (%s); failing open.", exc)

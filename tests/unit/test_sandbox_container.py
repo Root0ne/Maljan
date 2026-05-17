@@ -55,7 +55,8 @@ class TestSandboxConfig:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig()
-        assert cfg.cape2_api_token == ""
+        # ``cape2_api_token`` is now ``SecretStr`` so we have to unwrap it.
+        assert cfg.cape2_api_token.get_secret_value() == ""
 
     def test_default_timeout_seconds(self) -> None:
         from maljan.core.config import SandboxConfig

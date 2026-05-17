@@ -183,7 +183,9 @@ class TestTriageClientInit:
 
     def test_no_http_client_on_init(self) -> None:
         client = TriageClient()
-        assert client._http is None
+        # Triage maintains separate sync + async httpx clients; both lazy.
+        assert client._http_async is None
+        assert client._http_sync is None
 
 
 # ---------------------------------------------------------------------------

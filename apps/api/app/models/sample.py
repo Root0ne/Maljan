@@ -1,6 +1,7 @@
 """Sample model — uploaded malware samples."""
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import BigInteger, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -36,7 +37,7 @@ class Sample(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     jobs = relationship("AnalysisJob", back_populates="sample", lazy="selectin")
 
     @property
-    def uploaded_at(self):
+    def uploaded_at(self) -> datetime:
         return self.created_at
 
     def __repr__(self) -> str:

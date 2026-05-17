@@ -4,6 +4,7 @@ import pytest
 
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
+from maljan.core.exceptions import ConfigurationError
 
 
 class TestServiceContainer:
@@ -17,12 +18,12 @@ class TestServiceContainer:
 
     def test_container_raises_on_llm_in_mock_mode(self) -> None:
         container = ServiceContainer(config=Settings(), mock=True)
-        with pytest.raises(RuntimeError, match="mock"):
+        with pytest.raises(ConfigurationError, match="mock"):
             container.get_expert_llm()
 
     def test_container_raises_on_judge_llm_in_mock_mode(self) -> None:
         container = ServiceContainer(config=Settings(), mock=True)
-        with pytest.raises(RuntimeError, match="mock"):
+        with pytest.raises(ConfigurationError, match="mock"):
             container.get_judge_llm()
 
     def test_container_agent_registry_creates_agents_in_mock(self) -> None:

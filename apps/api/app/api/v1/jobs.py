@@ -4,6 +4,7 @@ Uses AnalysisService for business logic separation.
 """
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,7 @@ async def create_job(
     body: JobCreateRequest,
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
-) -> dict:
+) -> Any:
     """Start a new analysis job for an uploaded sample."""
     logger.info(
         f"Creating analysis job for sample={body.sample_id}",
@@ -91,7 +92,7 @@ async def get_job(
     job_id: uuid.UUID,
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
-) -> dict:
+) -> Any:
     """Get a specific job's status and details."""
     job = await svc.get_job(job_id, user)
     if not job:

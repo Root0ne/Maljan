@@ -310,12 +310,21 @@ class TestSafeAnalyzeISRChunked:
 
 class TestServiceContainerLoadChunked:
     def _make_container(self, text: str = "sample data") -> MagicMock:
-        """Build a mock container with loader._chunker and _data_cache."""
+        """Build a mock container with loader.chunk_text and _data_cache.
+
+        The real ``ServiceContainer.load_chunked`` short-circuits to
+        ``loader.chunk_text(...)`` when the parsed-text cache is warm,
+        otherwise calls ``loader.load_chunked(...)`` which internally
+        re-parses + chunks.
+        """
+        import threading
+
         container = MagicMock()
         mock_chunk = _make_chunk(0, 1, content=text)
-        container.loader._chunker.chunk.return_value = [mock_chunk]
+        container.loader.chunk_text.return_value = [mock_chunk]
         container.loader.load_chunked.return_value = [mock_chunk]
         container._data_cache = {}
+        container._lock = threading.Lock()
         # Bind the real method
         from maljan.core.container import ServiceContainer
 
@@ -332,7 +341,7 @@ class TestServiceContainerLoadChunked:
         container = self._make_container()
         container._data_cache[("hash1", "static")] = "cached text"
         result = container.load_chunked("hash1", "static")
-        # Should use chunker directly, NOT call load_chunked
-        container.loader._chunker.chunk.assert_called_once_with("static", "cached text")
+        # Cache hit ⇒ chunk_text() is called directly; load_chunked is bypassed.
+        container.loader.chunk_text.assert_called_once_with("static", "cached text")
         container.loader.load_chunked.assert_not_called()
         assert len(result) == 1

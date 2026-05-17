@@ -4,6 +4,7 @@ Uses ReportService for business logic separation.
 """
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
@@ -38,7 +39,7 @@ async def get_report(
     report_id: uuid.UUID,
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
-) -> dict:
+) -> Any:
     """Get a full analysis report with per-agent findings."""
     report = await svc.get_report(report_id, user)
     if not report:
@@ -51,7 +52,7 @@ async def get_report_by_job_id(
     job_id: uuid.UUID,
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
-) -> dict:
+) -> Any:
     """Get a full analysis report by its associated job ID."""
     report = await svc.get_report_by_job(job_id, user)
     if not report:

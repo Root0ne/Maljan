@@ -135,6 +135,7 @@ def setup_logging() -> None:
     handler.setLevel(log_level)
 
     # Choose formatter based on environment
+    formatter: HumanReadableFormatter | StructuredFormatter
     if settings.debug:
         formatter = HumanReadableFormatter()
     else:

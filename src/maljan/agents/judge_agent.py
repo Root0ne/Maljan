@@ -468,11 +468,16 @@ class JudgeAgent:
         max_attempts: int = 3,
         base_delay: float = 0.5,
     ) -> MediatorVerdict:
-        """Run ``with_structured_output`` with bounded exponential-backoff retry."""
-        llm_structured = self.llm.with_structured_output(MediatorVerdict)
+        """Run ``with_structured_output`` with bounded exponential-backoff retry.
+
+        ``with_structured_output`` itself may raise for providers that don't
+        support the structured-output path — we build the wrapper inside the
+        loop so a provider-level failure also routes through the fallback.
+        """
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
+                llm_structured = self.llm.with_structured_output(MediatorVerdict)
                 result = await (extract_prompt | llm_structured).ainvoke(
                     {"reasoning_log": reasoning_text}
                 )
