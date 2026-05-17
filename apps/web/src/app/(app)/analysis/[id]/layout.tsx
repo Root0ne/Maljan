@@ -68,6 +68,7 @@ const TABS: TabDef[] = [
   { key: "/network", label: "NETWORK", group: "analysis" },
   { key: "/persistence", label: "PERSISTENCE", group: "analysis" },
   { key: "/capabilities", label: "ATT&CK", group: "intel" },
+  { key: "/attribution", label: "ATTRIBUTION", group: "intel" },
   { key: "/signatures", label: "SIGNATURES", group: "intel" },
   { key: "/defense", label: "DEFENSE", group: "intel" },
   { key: "/agents", label: "AGENTS", group: "advanced" },

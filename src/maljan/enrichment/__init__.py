@@ -23,10 +23,12 @@ from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
 from maljan.enrichment.orchestrator import enrich_malware_report
 from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
+from maljan.extractors.attribution import populate_similar_samples
 
 __all__ = [
     "AbuseIPDBClient",
     "VirusTotalClient",
     "WhoisClient",
     "enrich_malware_report",
+    "populate_similar_samples",
 ]

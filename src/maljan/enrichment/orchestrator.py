@@ -11,7 +11,7 @@ single enrichment never floods the provider quota.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -19,6 +19,10 @@ from maljan.core.logger import logger
 from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
 from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
+from maljan.extractors.attribution import populate_similar_samples
+
+if TYPE_CHECKING:
+    from maljan.memory.long_term_memory import MemoryStore
 
 
 async def enrich_malware_report(
@@ -28,19 +32,30 @@ async def enrich_malware_report(
     abuseipdb_api_key: str | None,
     max_lookups_per_kind: int = 25,
     http_client: httpx.AsyncClient | None = None,
+    memory_store: MemoryStore | None = None,
+    similar_top_k: int = 5,
 ) -> dict[str, Any]:
-    """Populate ``reputation`` / ``asn`` / ``geo`` fields in place.
+    """Populate reputation/asn/geo + attribution.similar_samples in place.
 
     Returns the (mutated) dict for convenience. Providers without API
-    keys are skipped — the matching fields stay ``None``. The caller is
-    expected to persist the returned dict back to ``AnalysisReport.malware_report``.
+    keys are skipped — the matching fields stay ``None``. When
+    ``memory_store`` is provided, the report's ``attribution.similar_samples``
+    is also populated from the LTM nearest-neighbour search (idempotent —
+    skipped when already filled). The caller is expected to persist the
+    returned dict back to ``AnalysisReport.malware_report``.
     """
     network = malware_report.get("network") or {}
     domains = network.get("domains") or []
     ips = network.get("ips") or []
 
+    # Attribution always runs (even with no network IOCs) so reports that
+    # touched nothing on the wire still get a "you have seen this before"
+    # panel from the LTM.
+    if memory_store is not None:
+        populate_similar_samples(malware_report, memory_store, top_k=similar_top_k)
+
     if not (domains or ips):
-        logger.info("enrich: no network IOCs in report, skipping.")
+        logger.info("enrich: no network IOCs in report, skipping reputation lookups.")
         return malware_report
 
     own_client = http_client is None

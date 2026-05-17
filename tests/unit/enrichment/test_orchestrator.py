@@ -168,3 +168,106 @@ class TestIPEnrichment:
         ip = mr["network"]["ips"][0]
         assert ip["asn"] == "AS15169 GOOGLE"
         assert ip["geo"] == "US"
+
+
+class _AttribStore:
+    """Stub for the memory store used by populate_similar_samples."""
+
+    def __init__(self, cases: list[Any]) -> None:
+        self._cases = cases
+        self.calls = 0
+
+    def retrieve(self, query: str, top_k: int = 3) -> list[Any]:
+        self.calls += 1
+        return self._cases[:top_k]
+
+
+class TestAttribution:
+    @pytest.mark.asyncio
+    async def test_memory_store_none_is_default_and_noop(self) -> None:
+        """Backward-compat: callers that don't pass memory_store still work."""
+        mr = _mr(ips=[{"address": "1.2.3.4"}])
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ) as http:
+            with patch(
+                "maljan.enrichment.orchestrator.WhoisClient",
+                return_value=_whois_mock(),
+            ):
+                out = await enrich_malware_report(
+                    mr,
+                    vt_api_key=None,
+                    abuseipdb_api_key=None,
+                    http_client=http,
+                )
+        # No attribution block injected when no store was provided.
+        assert "attribution" not in out or not out.get("attribution", {}).get("similar_samples")
+
+    @pytest.mark.asyncio
+    async def test_memory_store_populates_similar_samples(self) -> None:
+        from maljan.memory.long_term_memory import StoredCase
+
+        store = _AttribStore(
+            [
+                StoredCase(
+                    sample_id="b" * 64,
+                    summary_text="similar",
+                    technique_ids=["T1055"],
+                    malware_category="RAT",
+                ),
+                StoredCase(
+                    sample_id="c" * 64,
+                    summary_text="another",
+                    technique_ids=["T1071"],
+                    malware_category="STEALER",
+                ),
+            ]
+        )
+        mr: dict[str, Any] = {
+            "identity": {"hashes": {"sha256": "a" * 64}},
+            "malware_category": "RAT",
+            "ttp_mappings": [{"technique_id": "T1055", "technique_name": "Process Injection"}],
+            "network": {"domains": [], "ips": []},
+        }
+        out = await enrich_malware_report(
+            mr,
+            vt_api_key=None,
+            abuseipdb_api_key=None,
+            memory_store=store,  # type: ignore[arg-type]
+            similar_top_k=2,
+        )
+        sims = out["attribution"]["similar_samples"]
+        assert len(sims) == 2
+        assert store.calls == 1
+        assert sims[0]["source"] == "maljan-ltm"
+
+    @pytest.mark.asyncio
+    async def test_attribution_runs_even_without_network_iocs(self) -> None:
+        from maljan.memory.long_term_memory import StoredCase
+
+        store = _AttribStore(
+            [
+                StoredCase(
+                    sample_id="b" * 64,
+                    summary_text="ldr",
+                    technique_ids=["T1547"],
+                    malware_category="DROPPER",
+                ),
+            ]
+        )
+        mr: dict[str, Any] = {
+            "identity": {"hashes": {"sha256": "z" * 64}},
+            "malware_category": "DROPPER",
+            "ttp_mappings": [
+                {"technique_id": "T1547", "technique_name": "Boot or Logon Autostart"}
+            ],
+            # No network block → orchestrator short-circuits BEFORE reputation
+            # lookups, but attribution must still run.
+        }
+        out = await enrich_malware_report(
+            mr,
+            vt_api_key=None,
+            abuseipdb_api_key=None,
+            memory_store=store,  # type: ignore[arg-type]
+        )
+        assert len(out["attribution"]["similar_samples"]) == 1
