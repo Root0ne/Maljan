@@ -149,7 +149,25 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
 
 
 def _write_markdown_report(result: dict, report_path: str) -> None:
-    """Reconstruct a RunSummary from the result dict and write a Markdown report."""
+    """Write the Markdown report to disk.
+
+    Prefers the comprehensive ``MalwareReport`` rendering that the
+    ``report`` pipeline node leaves in ``result["malware_report_markdown"]``
+    (added in Phase 2 of the reporting refactor — see ``docs/REPORTING.md``).
+
+    Falls back to the legacy ``RunSummary.to_markdown()`` when the new
+    payload is absent — happens when ``MALJAN_REPORTING__ENABLED=false``
+    flips the pipeline back to the pre-Phase 2 ``judge → END`` edge.
+    """
+    new_markdown = result.get("malware_report_markdown")
+    if isinstance(new_markdown, str) and new_markdown.strip():
+        try:
+            Path(report_path).write_text(new_markdown, encoding="utf-8")
+            typer.echo(f"\nMalwareReport markdown written to: {report_path}")
+            return
+        except OSError as exc:
+            logger.warning(f"Failed to write malware_report_markdown: {exc}")
+
     run_summary_dict = result.get("run_summary")
     if not run_summary_dict:
         typer.echo("\nNo run summary available to write.")
@@ -226,7 +244,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
         )
 
         Path(report_path).write_text(summary.to_markdown(), encoding="utf-8")
-        typer.echo(f"\nAnalysis report written to: {report_path}")
+        typer.echo(f"\nLegacy run-summary report written to: {report_path}")
 
     except Exception as e:
         logger.warning(f"Failed to write report: {e}")

@@ -22,8 +22,10 @@ Maljan is a production-grade malware analysis platform that uses adversarial mul
 | Multi-layer TTP cascade | Cross-domain weighted scoring (YARA > Sigma > Dynamic > Static > Network) with corroboration multipliers up to 1.75x |
 | Long-term memory (RAG) | Past analyses are vectorized and retrieved by similarity; injected as few-shot context into verdict calls |
 | Heterogeneous ensemble | Each agent can use a different LLM provider/model via config, reducing echo-chamber risk across model families |
+| Comprehensive reports | Every run emits a structured `MalwareReport` (verdict, severity, identity, static + dynamic + network IOCs, persistence, ATT&CK heatmap, attribution + Qdrant nearest-neighbours, LLM narrative, auto-generated YARA/Sigma/Suricata, P0/P1/P2 defense playbook); rendered as Markdown / JSON / extended STIX 2.1 / MISP; surfaced through a 16-tab analysis UI. See [`docs/REPORTING.md`](docs/REPORTING.md). |
+| Post-hoc threat-intel enrichment | Async ARQ worker fills VirusTotal / AbuseIPDB / WHOIS / GeoIP reputation and Qdrant LTM nearest-neighbours after the verdict ships — verdict latency stays unaffected |
 
-> For deep-dive technical documentation see [`AGENTS.md`](AGENTS.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> For deep-dive technical documentation see [`AGENTS.md`](AGENTS.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), and [`docs/REPORTING.md`](docs/REPORTING.md).
 
 ---
 
