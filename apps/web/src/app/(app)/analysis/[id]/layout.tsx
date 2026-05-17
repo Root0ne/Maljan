@@ -54,15 +54,31 @@ const VERDICT_CONFIG: Record<
   },
 };
 
-const TABS = [
-  { key: "", label: "SUMMARY" },
-  { key: "/agents", label: "AGENTS" },
-  { key: "/pipeline", label: "PIPELINE" },
-  { key: "/rules", label: "RULES" },
-  { key: "/ttps", label: "TTPS" },
-  { key: "/timeline", label: "TIMELINE" },
-  { key: "/stix", label: "STIX" },
+interface TabDef {
+  key: string;
+  label: string;
+  group: "overview" | "analysis" | "intel" | "advanced";
+}
+
+const TABS: TabDef[] = [
+  { key: "", label: "SUMMARY", group: "overview" },
+  { key: "/identity", label: "IDENTITY", group: "overview" },
+  { key: "/static", label: "STATIC", group: "analysis" },
+  { key: "/dynamic", label: "DYNAMIC", group: "analysis" },
+  { key: "/network", label: "NETWORK", group: "analysis" },
+  { key: "/persistence", label: "PERSISTENCE", group: "analysis" },
+  { key: "/capabilities", label: "ATT&CK", group: "intel" },
+  { key: "/signatures", label: "SIGNATURES", group: "intel" },
+  { key: "/defense", label: "DEFENSE", group: "intel" },
+  { key: "/agents", label: "AGENTS", group: "advanced" },
+  { key: "/pipeline", label: "PIPELINE", group: "advanced" },
+  { key: "/rules", label: "RULES", group: "advanced" },
+  { key: "/ttps", label: "TTPS", group: "advanced" },
+  { key: "/timeline", label: "TIMELINE", group: "advanced" },
+  { key: "/stix", label: "STIX", group: "advanced" },
 ];
+
+const TAB_GROUP_ORDER: TabDef["group"][] = ["overview", "analysis", "intel", "advanced"];
 
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return "N/A";
@@ -230,26 +246,39 @@ export default function AnalysisLayout({
           </div>
         </div>
 
-        {/* Tab Bar */}
-        <div className="flex border-b border-border mb-4">
-          {TABS.map((tab) => {
-            const href = `${basePath}${tab.key}`;
-            const active =
-              tab.key === ""
-                ? pathname === basePath
-                : pathname.startsWith(href);
+        {/* Tab Bar — grouped by section with thin separators */}
+        <div className="flex flex-wrap items-end border-b border-border mb-4">
+          {TAB_GROUP_ORDER.map((group, gi) => {
+            const groupTabs = TABS.filter((t) => t.group === group);
             return (
-              <Link
-                key={tab.key}
-                href={href}
-                className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
-                  active
-                    ? "border-accent text-accent"
-                    : "border-transparent text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                {tab.label}
-              </Link>
+              <div key={group} className="flex items-end">
+                {gi > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="h-5 w-px bg-border mx-1.5 mb-2 self-center"
+                  />
+                )}
+                {groupTabs.map((tab) => {
+                  const href = `${basePath}${tab.key}`;
+                  const active =
+                    tab.key === ""
+                      ? pathname === basePath
+                      : pathname.startsWith(href);
+                  return (
+                    <Link
+                      key={tab.key}
+                      href={href}
+                      className={`px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
+                        active
+                          ? "border-accent text-accent"
+                          : "border-transparent text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {tab.label}
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </div>

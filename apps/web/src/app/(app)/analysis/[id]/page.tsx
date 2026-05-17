@@ -1,6 +1,10 @@
 "use client";
 
+import { useState } from "react";
+
 import { useReport } from "./layout";
+import { api } from "@/lib/api";
+import { downloadBlob } from "@/lib/report-utils";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { MalwareReport, TTPMapping } from "@/types/malware-report";
 
@@ -188,6 +192,8 @@ function LegacySummary() {
 
 /* ── MalwareReport summary (Faz 5+ payload) ──────────────────────────── */
 function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
+  const { report } = useReport();
+  const reportId = report?.id ?? "";
   const sevStyle = SEVERITY_STYLES[mr.severity.rating] ?? SEVERITY_STYLES.Informational;
   const confidence = pct(mr.overall_confidence);
   const verdict = lc(mr.verdict);
@@ -201,9 +207,12 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       ? [...mr.dynamic.sandbox_signatures].sort((a, b) => b.severity - a.severity).slice(0, 5)
       : [];
   const sha256 = mr.identity.hashes.sha256;
+  const shortHash = sha256.slice(0, 12);
 
   return (
     <div className="grid grid-cols-2 gap-4">
+      <DownloadBar reportId={reportId} mr={mr} shortHash={shortHash} />
+
       {/* Severity & Verdict card */}
       <div className="bg-bg-surface border border-border rounded col-span-2">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -351,6 +360,74 @@ function Stat({
     <div>
       <div className={`text-2xl font-mono ${accent ?? "text-text-primary"}`}>{value}</div>
       <div className="text-[10px] text-text-muted uppercase tracking-wider">{label}</div>
+    </div>
+  );
+}
+
+function DownloadBar({
+  reportId,
+  mr,
+  shortHash,
+}: {
+  reportId: string;
+  mr: MalwareReport;
+  shortHash: string;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const safeName = `maljan-${shortHash}`;
+
+  const downloadMarkdown = async () => {
+    if (!reportId) return;
+    setBusy("md");
+    try {
+      const body = await api.getReportMarkdown(reportId);
+      downloadBlob(body, `${safeName}.md`, "text/markdown");
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadStix = () => {
+    const body = JSON.stringify(mr.stix_bundle_extended, null, 2);
+    downloadBlob(body, `${safeName}-stix.json`, "application/json");
+  };
+
+  const downloadMisp = () => {
+    const body = JSON.stringify(mr.misp_attributes ?? [], null, 2);
+    downloadBlob(body, `${safeName}-misp.json`, "application/json");
+  };
+
+  const mispDisabled = !mr.misp_attributes || mr.misp_attributes.length === 0;
+
+  return (
+    <div className="col-span-2 flex flex-wrap items-center gap-2">
+      <span className="text-[10px] text-text-muted uppercase tracking-wider mr-1">
+        Export
+      </span>
+      <button
+        onClick={downloadMarkdown}
+        disabled={!reportId || busy === "md"}
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {busy === "md" ? "fetching..." : "↓ Markdown report"}
+      </button>
+      <button
+        onClick={downloadStix}
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+      >
+        ↓ STIX 2.1 bundle
+      </button>
+      <button
+        onClick={downloadMisp}
+        disabled={mispDisabled}
+        title={mispDisabled ? "No MISP attributes generated for this report" : undefined}
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        ↓ MISP attributes
+      </button>
     </div>
   );
 }
