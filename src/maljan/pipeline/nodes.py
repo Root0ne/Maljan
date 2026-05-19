@@ -584,6 +584,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
                                 bundle.model_dump_json() if isinstance(bundle, Bundle) else ""
                             ),
                             malware_category=category,
+                            corroborated_count=_corroborated,
+                            total_techniques=_technique_count,
+                            has_analyst_errors=bool(_failed_analysts),
                         )
                         memory_store.store(case)
                         logger.info(

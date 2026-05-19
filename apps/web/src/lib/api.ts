@@ -82,6 +82,28 @@ export interface DashboardStatsDTO {
   avg_duration_seconds: number | null;
 }
 
+export interface SystemStatusDTO {
+  app_name: string;
+  app_version: string;
+  mock_mode_allowed: boolean;
+  enrichment_enabled: boolean;
+  has_virustotal_key: boolean;
+  has_abuseipdb_key: boolean;
+}
+
+export interface LTMPurgeRequest {
+  max_total_techniques?: number;
+  require_uncorroborated?: boolean;
+  include_analyst_errors?: boolean;
+  dry_run?: boolean;
+}
+
+export interface LTMPurgeResponse {
+  removed: number;
+  backend: string;
+  dry_run: boolean;
+}
+
 export interface AuditLogDTO {
   id: string;
   user_id: string;
@@ -268,6 +290,18 @@ class ApiClient {
   /* ── Dashboard ─────────────────────────────────────── */
   getDashboardStats() {
     return this.request<DashboardStatsDTO>("/api/v1/dashboard/stats");
+  }
+
+  /* ── System ────────────────────────────────────────── */
+  getSystemStatus() {
+    return this.request<SystemStatusDTO>("/api/v1/system/status");
+  }
+
+  ltmPurge(body: LTMPurgeRequest) {
+    return this.request<LTMPurgeResponse>("/api/v1/system/ltm/purge", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   /* ── Samples ───────────────────────────────────────── */

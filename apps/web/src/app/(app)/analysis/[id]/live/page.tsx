@@ -86,6 +86,7 @@ export default function LiveAnalysisPage() {
   const [agents, setAgents] = useState<AgentState[]>([]);
   const [eventLog, setEventLog] = useState<EventEntry[]>([]);
   const [phase, setPhase] = useState<PipelinePhase>("waiting");
+  const [jobMockMode, setJobMockMode] = useState<boolean | null>(null);
 
   const processedCount = useRef(0);
   // Dedupe key set — covers both stream_id (from backfill) and a stable
@@ -177,6 +178,27 @@ export default function LiveAnalysisPage() {
     };
   }, [jobId, applyEvent]);
 
+  // Fetch the job once so we can surface whether THIS run was queued in
+  // mock mode (audit 2026-05-17, W-01 follow-up). Mock verdicts must be
+  // visually distinct from real ones; otherwise operators copy the
+  // misleading "Malware 0.95" out of the UI into reports.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const job = await api.getJob(jobId);
+        if (cancelled) return;
+        const cfg = (job.config ?? {}) as Record<string, unknown>;
+        setJobMockMode(Boolean(cfg.mock_mode));
+      } catch {
+        /* Best-effort: leave the badge absent when the API is unreachable. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
   // Process new WebSocket events as they arrive. ``applyEvent`` dedupes
   // against the backfill set so we never double-render an event.
   useEffect(() => {
@@ -217,11 +239,21 @@ export default function LiveAnalysisPage() {
         className={`p-3 rounded border text-xs font-medium flex items-center justify-between ${phaseConfig.banner}`}
       >
         <span>{phaseConfig.label}</span>
-        <span className="flex items-center gap-1.5 text-text-muted text-xs">
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-status-green animate-pulse" : "bg-text-muted"}`}
-          />
-          {connected ? "Live" : "Reconnecting..."}
+        <span className="flex items-center gap-2 text-text-muted text-xs">
+          {jobMockMode && (
+            <span
+              title="This run was submitted with mock_mode=true. Verdicts must not be trusted as production findings."
+              className="rounded border border-status-red/40 bg-status-red/10 px-1.5 py-0.5 font-semibold text-status-red"
+            >
+              MOCK
+            </span>
+          )}
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-status-green animate-pulse" : "bg-text-muted"}`}
+            />
+            {connected ? "Live" : "Reconnecting..."}
+          </span>
         </span>
       </div>
 

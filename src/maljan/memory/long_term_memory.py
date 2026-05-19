@@ -59,6 +59,15 @@ class StoredCase:
                             (e.g. "RANSOMWARE", "RAT", "UNKNOWN").
         stix_bundle_json:   JSON-serialized STIX 2.1 Bundle for this sample.
         created_at:         UTC timestamp of when this case was stored.
+        corroborated_count: How many TTPs were corroborated across multiple
+                            analysts at write time. Persisted so retroactive
+                            quality purges can identify low-signal runs even
+                            after the LTM-01 write-time gate (audit
+                            2026-05-17).
+        total_techniques:   Total distinct technique_ids recorded for this run.
+        has_analyst_errors: Whether any analyst returned an ``[ERROR]`` prefix
+                            during this analysis. Strong indicator of a
+                            degraded pipeline pass.
     """
 
     sample_id: str
@@ -67,6 +76,9 @@ class StoredCase:
     malware_category: str = "UNKNOWN"
     stix_bundle_json: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    corroborated_count: int = 0
+    total_techniques: int = 0
+    has_analyst_errors: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +133,31 @@ class MemoryStore(Protocol):
         """Remove all stored cases. Primarily used in tests."""
         ...
 
+    def purge_low_quality(
+        self,
+        *,
+        max_total_techniques: int = 1,
+        require_uncorroborated: bool = True,
+        include_analyst_errors: bool = True,
+    ) -> int:
+        """Delete stored cases that fall below the LTM-01 quality gate.
+
+        A case is considered low-quality (and therefore purged) when **any**
+        of the following hold:
+
+        - ``total_techniques <= max_total_techniques`` (default 1) AND
+          ``corroborated_count == 0`` if ``require_uncorroborated`` is True.
+        - ``has_analyst_errors`` is True (a pipeline pass with any
+          ``[ERROR]`` analyst output) — when ``include_analyst_errors``.
+
+        Returns the number of cases removed. Implementations should be safe to
+        invoke on collections that pre-date the quality-signal payload — older
+        points with no ``total_techniques`` field are treated as 0 and so are
+        considered low-quality by default. Operators can disable that branch
+        by passing ``max_total_techniques=-1``.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Helper: build_stored_case
@@ -132,6 +169,9 @@ def build_stored_case(
     isr_reports: dict[str, AgentISR],
     stix_bundle_json: str = "",
     malware_category: str = "UNKNOWN",
+    corroborated_count: int = 0,
+    total_techniques: int = 0,
+    has_analyst_errors: bool = False,
 ) -> StoredCase:
     """Build a StoredCase from pipeline artifacts.
 
@@ -183,4 +223,7 @@ def build_stored_case(
         technique_ids=technique_ids,
         malware_category=malware_category,
         stix_bundle_json=stix_bundle_json,
+        corroborated_count=corroborated_count,
+        total_techniques=total_techniques or len(technique_ids),
+        has_analyst_errors=has_analyst_errors,
     )

@@ -34,6 +34,7 @@ Configuration (.env):
 from __future__ import annotations
 
 import hashlib
+import uuid
 from datetime import UTC
 from typing import Any
 
@@ -126,6 +127,12 @@ class QdrantStore:
             "malware_category": case.malware_category,
             "stix_bundle_json": case.stix_bundle_json,
             "created_at": case.created_at.astimezone(UTC).isoformat(),
+            # Quality signals persisted so retroactive purges and dashboards
+            # can identify low-signal runs even after the write-time LTM-01
+            # gate (audit 2026-05-17, follow-up 2026-05-19).
+            "corroborated_count": case.corroborated_count,
+            "total_techniques": case.total_techniques or len(case.technique_ids),
+            "has_analyst_errors": case.has_analyst_errors,
         }
 
         self._client.upsert(
@@ -198,6 +205,9 @@ class QdrantStore:
                         technique_ids=p.get("technique_ids", []),
                         malware_category=p.get("malware_category", "UNKNOWN"),
                         stix_bundle_json=p.get("stix_bundle_json", ""),
+                        corroborated_count=int(p.get("corroborated_count", 0) or 0),
+                        total_techniques=int(p.get("total_techniques", 0) or 0),
+                        has_analyst_errors=bool(p.get("has_analyst_errors", False)),
                     )
                 )
             except (KeyError, TypeError) as exc:
@@ -240,6 +250,75 @@ class QdrantStore:
             self._client.delete_collection(collection_name=self._collection)
             self._collection_ready = False
             logger.info("QdrantStore.clear: collection '%s' deleted.", self._collection)
+
+    def purge_low_quality(
+        self,
+        *,
+        max_total_techniques: int = 1,
+        require_uncorroborated: bool = True,
+        include_analyst_errors: bool = True,
+    ) -> int:
+        """Delete low-quality stored cases from Qdrant.
+
+        Scrolls the collection with a small page size, evaluates each point
+        against the LTM-01 quality gate, and issues a single ``delete``
+        for the offending IDs. Older points that pre-date the quality-signal
+        payload (no ``total_techniques`` field) are treated as 0 — they are
+        purged by default. Operators can disable that branch by passing
+        ``max_total_techniques=-1``.
+        """
+        if not self._collection_exists():
+            return 0
+
+        # qdrant-client typechecks PointIdsList against the exact union
+        # ``list[int | str | UUID]`` — narrowing this is a mypy invariance
+        # error even though we only ever push ints. Match the lib's type.
+        to_delete: list[int | str | uuid.UUID] = []
+        offset: Any = None
+        while True:
+            try:
+                points, offset = self._client.scroll(
+                    collection_name=self._collection,
+                    limit=256,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            except Exception as exc:
+                logger.warning("QdrantStore.purge_low_quality: scroll failed (%s).", exc)
+                break
+
+            for pt in points:
+                payload = pt.payload or {}
+                if include_analyst_errors and bool(payload.get("has_analyst_errors", False)):
+                    to_delete.append(pt.id)
+                    continue
+                if max_total_techniques < 0:
+                    continue
+                total = int(payload.get("total_techniques", 0) or 0)
+                corroborated = int(payload.get("corroborated_count", 0) or 0)
+                if total > max_total_techniques:
+                    continue
+                if require_uncorroborated and corroborated > 0:
+                    continue
+                to_delete.append(pt.id)
+
+            if offset is None:
+                break
+
+        if to_delete:
+            from qdrant_client.models import PointIdsList
+
+            self._client.delete(
+                collection_name=self._collection,
+                points_selector=PointIdsList(points=to_delete),
+                wait=True,
+            )
+            logger.info(
+                "QdrantStore.purge_low_quality: removed %d low-quality case(s).",
+                len(to_delete),
+            )
+        return len(to_delete)
 
     def __repr__(self) -> str:
         return (

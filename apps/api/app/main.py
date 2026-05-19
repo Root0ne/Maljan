@@ -143,6 +143,7 @@ def create_app() -> FastAPI:
     from app.api.v1.jobs import router as jobs_router
     from app.api.v1.reports import router as reports_router
     from app.api.v1.samples import router as samples_router
+    from app.api.v1.system import router as system_router
     from app.api.ws import router as ws_router
 
     api_prefix = "/api/v1"
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(samples_router, prefix=api_prefix)
     app.include_router(reports_router, prefix=api_prefix)
     app.include_router(dashboard_router, prefix=api_prefix)
+    app.include_router(system_router, prefix=api_prefix)
 
     # WebSocket routes (no API prefix)
     app.include_router(ws_router)

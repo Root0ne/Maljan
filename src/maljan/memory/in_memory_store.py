@@ -95,5 +95,34 @@ class InMemoryStore:
         """Remove all stored cases."""
         self._cases.clear()
 
+    def purge_low_quality(
+        self,
+        *,
+        max_total_techniques: int = 1,
+        require_uncorroborated: bool = True,
+        include_analyst_errors: bool = True,
+    ) -> int:
+        """Drop low-quality cases per the LTM-01 audit gate.
+
+        See ``MemoryStore.purge_low_quality`` for the contract. The
+        in-memory implementation walks the case list and rebuilds it,
+        keeping only entries that pass the gate.
+        """
+
+        def _low_quality(case: StoredCase) -> bool:
+            if include_analyst_errors and case.has_analyst_errors:
+                return True
+            if max_total_techniques < 0:
+                return False
+            if case.total_techniques > max_total_techniques:
+                return False
+            if require_uncorroborated and case.corroborated_count > 0:
+                return False
+            return True
+
+        before = len(self._cases)
+        self._cases = [(c, v) for c, v in self._cases if not _low_quality(c)]
+        return before - len(self._cases)
+
     def __repr__(self) -> str:
         return f"InMemoryStore(count={self.count()})"

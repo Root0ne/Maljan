@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import type { DashboardStatsDTO, JobDTO } from "@/lib/api";
+import type { DashboardStatsDTO, JobDTO, SystemStatusDTO } from "@/lib/api";
 import {
   PieChart,
   Pie,
@@ -116,18 +116,23 @@ function mapApiStats(s: DashboardStatsDTO): DisplayStats {
 export default function DashboardPage() {
   const [stats, setStats] = useState<DisplayStats | null>(null);
   const [jobs, setJobs] = useState<JobDTO[]>([]);
+  const [systemStatus, setSystemStatus] = useState<SystemStatusDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, j] = await Promise.all([
+        const [s, j, sys] = await Promise.all([
           api.getDashboardStats(),
           api.getJobs(1, 10),
+          // System status is best-effort: failure here must not block the
+          // rest of the dashboard from rendering.
+          api.getSystemStatus().catch(() => null),
         ]);
         setStats(mapApiStats(s));
         setJobs(j.items.slice(0, 10));
+        setSystemStatus(sys);
       } catch (err: any) {
         setError(err.message || "Failed to load dashboard data.");
       } finally {
@@ -189,6 +194,25 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {/* Mock-mode banner (audit 2026-05-17, W-01 follow-up): operators
+          frequently miss the worker log line announcing mock mode. Red
+          banner makes the configuration impossible to overlook. */}
+      {systemStatus?.mock_mode_allowed && (
+        <div
+          role="alert"
+          className="mb-4 flex items-start gap-3 rounded border border-status-red/40 bg-status-red/10 p-3 text-sm"
+        >
+          <span className="font-semibold text-status-red">MOCK MODE ALLOWED</span>
+          <span className="text-text-secondary">
+            The worker accepts <code>MALJAN_MOCK_MODE=true</code> or per-job
+            <code> config.mock_mode=true</code> and may short-circuit the
+            real pipeline. Verdicts produced under this gate must not be
+            treated as production findings. Unset
+            <code> MOCK_MODE_ALLOWED</code> and restart the API to disable.
+          </span>
+        </div>
+      )}
+
       {/* Stats Row */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Analyses" value={stats?.total_jobs ?? 0} />

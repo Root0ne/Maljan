@@ -338,6 +338,109 @@ def benchmark(
         typer.echo(f"\nReport written to: {output}", err=True)
 
 
+memory_app = typer.Typer(
+    name="memory",
+    help="Inspect and maintain the long-term case memory store.",
+    no_args_is_help=True,
+)
+app.add_typer(memory_app, name="memory")
+
+
+def _build_memory_store_cli() -> object:
+    """Build a MemoryStore matching the operator's configuration.
+
+    Mirrors the API admin route; lives here so the CLI works without
+    requiring the API service to be running.
+    """
+    from maljan.memory.in_memory_store import InMemoryStore
+
+    cfg = Settings()
+    backend = (cfg.memory.backend or "in_memory").lower()
+    if backend == "qdrant":
+        from maljan.memory.qdrant_store import QdrantStore
+
+        return QdrantStore(
+            url=cfg.memory.qdrant_url,
+            collection=cfg.memory.qdrant_collection,
+        )
+    return InMemoryStore()
+
+
+@memory_app.command("stats")
+def memory_stats() -> None:
+    """Show the configured backend and current case count."""
+    store = _build_memory_store_cli()
+    typer.echo(f"Backend: {type(store).__name__}")
+    typer.echo(f"Cases:   {store.count()}")  # type: ignore[attr-defined]
+
+
+@memory_app.command("purge-low-quality")
+def memory_purge_low_quality(
+    max_total_techniques: int = typer.Option(
+        1,
+        "--max-techniques",
+        help=(
+            "Purge cases whose total_techniques is <= this value (set -1 to "
+            "disable the technique-count branch)."
+        ),
+    ),
+    require_uncorroborated: bool = typer.Option(
+        True,
+        "--require-uncorroborated/--allow-corroborated",
+        help="Also require corroborated_count == 0 before purging.",
+    ),
+    include_analyst_errors: bool = typer.Option(
+        True,
+        "--include-errors/--skip-errors",
+        help="Also purge cases recorded with any analyst [ERROR] output.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show how many cases would be removed without deleting."
+    ),
+) -> None:
+    """Retroactively purge low-quality LTM entries per the LTM-01 gate.
+
+    Helpful after the audit 2026-05-17 fixes: older Qdrant points stored
+    before the quality gate landed are still in the collection and would
+    otherwise keep biasing new analyses via the few-shot retrieval prior.
+    """
+    store = _build_memory_store_cli()
+    backend = type(store).__name__
+    if dry_run:
+        # Approximate by snapshotting count, running the purge against a
+        # detached InMemoryStore copy for cheap and accurate counting.
+        from maljan.memory.in_memory_store import InMemoryStore
+
+        if isinstance(store, InMemoryStore):
+            before = store.count()
+            removed = InMemoryStore()
+            removed._cases = list(store._cases)  # noqa: SLF001
+            n = removed.purge_low_quality(
+                max_total_techniques=max_total_techniques,
+                require_uncorroborated=require_uncorroborated,
+                include_analyst_errors=include_analyst_errors,
+            )
+            typer.echo(f"[dry-run] backend={backend} would remove {n} of {before} cases.")
+            return
+        # Qdrant: walk the same scroll loop the purge would use, but skip
+        # the delete step. Keeping the logic inside the store avoids
+        # leaking internals here — for now fall back to a count-only
+        # estimate via the in-memory simulator after retrieving all cases.
+        typer.echo(
+            "[dry-run] Qdrant dry-run requires the API admin endpoint "
+            "(POST /api/v1/system/ltm/purge with dry_run=true). The CLI "
+            "would have to scroll the whole collection — call the API."
+        )
+        return
+
+    n = store.purge_low_quality(  # type: ignore[attr-defined]
+        max_total_techniques=max_total_techniques,
+        require_uncorroborated=require_uncorroborated,
+        include_analyst_errors=include_analyst_errors,
+    )
+    typer.echo(f"backend={backend} removed={n}")
+
+
 def main() -> None:
     """Application entrypoint."""
     app()
