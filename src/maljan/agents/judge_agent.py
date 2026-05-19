@@ -514,7 +514,37 @@ class JudgeAgent:
         ``with_structured_output`` itself may raise for providers that don't
         support the structured-output path — we build the wrapper inside the
         loop so a provider-level failure also routes through the fallback.
+
+        PORTABLE-RESPONSE-FORMAT-01 (audit 2026-05-19): check the provider
+        capability table before attempting ``with_structured_output``.
+        Ollama (and any future provider that lacks tool-calling) is routed
+        directly to the text fallback so we don't pay 3 retry rounds for a
+        feature that will never work. The capability table lives in
+        ``maljan.llm.registry``.
         """
+        # Sniff the active provider name; the fallback is harmless if we
+        # can't determine it.
+        try:
+            from maljan.core.container import ServiceContainer  # noqa: F401 (typing only)
+            from maljan.llm.registry import provider_capabilities
+
+            cfg = getattr(self, "_config", None)
+            provider_name = (
+                cfg.llm.provider
+                if cfg is not None
+                else getattr(self.llm, "_llm_type", "openai") or "openai"
+            )
+            caps = provider_capabilities(str(provider_name))
+        except Exception:
+            caps = {"supports_structured_output": True}
+
+        if not caps.get("supports_structured_output", True):
+            self.logger.info(
+                "Provider lacks structured-output support; using text fallback "
+                "for mediator verdict extraction."
+            )
+            return self._fallback_mediate(reasoning_text)
+
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:

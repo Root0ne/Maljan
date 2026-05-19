@@ -131,6 +131,99 @@ export interface ApiKeyCreateDTO extends ApiKeyDTO {
   raw_key: string;
 }
 
+/* ── Runtime schema drift detection ───────────────────────
+ *
+ * FE-TYPE-SAFETY-DRIFT-01 (audit 2026-05-19): TypeScript types are
+ * compile-time only; nothing stops the API from returning a field with
+ * the wrong type at runtime. ``assertShape`` walks an "expected" sample
+ * once per response and emits a console.warn (with a Sentry breadcrumb
+ * hook for future wiring) when the shape diverges. Cheap enough to keep
+ * on in production for first-pass alerting; replace with zod when we
+ * accept the runtime dep.
+ */
+type ExpectedShape =
+  | "string"
+  | "number"
+  | "boolean"
+  | "string?"
+  | "number?"
+  | "boolean?"
+  | "object?"
+  | "array?"
+  | "unknown";
+
+const _schemaWarned: Set<string> = new Set();
+
+function _matchesExpected(value: unknown, kind: ExpectedShape): boolean {
+  if (kind.endsWith("?") && (value === null || value === undefined)) return true;
+  switch (kind.replace("?", "")) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && !Number.isNaN(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "array":
+      return Array.isArray(value);
+    case "unknown":
+      return true;
+    default:
+      return true;
+  }
+}
+
+function assertShape(
+  scope: string,
+  value: unknown,
+  schema: Record<string, ExpectedShape>
+): void {
+  if (typeof value !== "object" || value === null) {
+    if (_schemaWarned.has(scope)) return;
+    _schemaWarned.add(scope);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[api-schema-drift] ${scope}: expected an object, got ${typeof value}`
+    );
+    return;
+  }
+  const obj = value as Record<string, unknown>;
+  for (const [key, expectedKind] of Object.entries(schema)) {
+    if (!_matchesExpected(obj[key], expectedKind)) {
+      const cacheKey = `${scope}#${key}`;
+      if (_schemaWarned.has(cacheKey)) continue;
+      _schemaWarned.add(cacheKey);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[api-schema-drift] ${scope}.${key}: expected ${expectedKind}, ` +
+          `got ${typeof obj[key]} (value=${JSON.stringify(obj[key])?.slice(0, 80)})`
+      );
+    }
+  }
+}
+
+const _JOB_SCHEMA: Record<string, ExpectedShape> = {
+  id: "string",
+  sample_id: "string",
+  status: "string",
+  config: "object?",
+  created_at: "string",
+  started_at: "string?",
+  completed_at: "string?",
+  duration_seconds: "number?",
+  error_message: "string?",
+};
+
+const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
+  app_name: "string",
+  app_version: "string",
+  mock_mode_allowed: "boolean",
+  enrichment_enabled: "boolean",
+  has_virustotal_key: "boolean",
+  has_abuseipdb_key: "boolean",
+};
+
 /* ── API Client ───────────────────────────────────────── */
 
 class ApiClient {
@@ -293,8 +386,10 @@ class ApiClient {
   }
 
   /* ── System ────────────────────────────────────────── */
-  getSystemStatus() {
-    return this.request<SystemStatusDTO>("/api/v1/system/status");
+  async getSystemStatus() {
+    const data = await this.request<SystemStatusDTO>("/api/v1/system/status");
+    assertShape("getSystemStatus", data, _SYSTEM_STATUS_SCHEMA);
+    return data;
   }
 
   ltmPurge(body: LTMPurgeRequest) {
@@ -336,8 +431,10 @@ class ApiClient {
     );
   }
 
-  getJob(jobId: string) {
-    return this.request<JobDTO>(`/api/v1/jobs/${jobId}`);
+  async getJob(jobId: string) {
+    const data = await this.request<JobDTO>(`/api/v1/jobs/${jobId}`);
+    assertShape("getJob", data, _JOB_SCHEMA);
+    return data;
   }
 
   createJob(sampleId: string, config?: Record<string, unknown>) {

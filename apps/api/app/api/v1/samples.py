@@ -12,6 +12,7 @@ Hardening:
 from __future__ import annotations
 
 import hashlib
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -90,6 +91,42 @@ def _detect_mime(path: Path) -> str | None:
     return None
 
 
+_FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,255}$")
+
+
+def _sanitise_filename(raw: str | None) -> str:
+    """Reject path-traversal / control characters and double-extensions.
+
+    SEC-MIME-DOUBLE-EXT-01 (audit 2026-05-19): the storage path is sha256-
+    derived so the upload itself is safe even if the filename is hostile,
+    but the API returns ``original_filename`` verbatim and downstream
+    consumers (CLI download, web UI) sometimes use it for save-as. Reject
+    obviously dangerous shapes up-front.
+    """
+    name = (raw or "").strip() or "sample.bin"
+    # Strip directory separators in case a client tried to traverse.
+    name = name.replace("/", "_").replace("\\", "_")
+    if not _FILENAME_RE.match(name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Filename contains disallowed characters. Allowed: [A-Za-z0-9._-] (1-255 chars)."
+            ),
+        )
+    # Double-extension heuristic: more than one dot is fine for files like
+    # ``rust.targets.bin``, but reject filenames where two of the dotted
+    # segments look like *executable* extensions (e.g. ``invoice.exe.txt``).
+    _EXE_SHAPED = {"exe", "dll", "elf", "so", "apk", "dex", "bat", "cmd", "ps1", "scr"}
+    segs = [s.lower() for s in name.split(".") if s]
+    exe_segs = [s for s in segs if s in _EXE_SHAPED]
+    if len(exe_segs) >= 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename contains multiple executable extensions.",
+        )
+    return name
+
+
 @router.post("/upload", response_model=SampleResponse, status_code=status.HTTP_201_CREATED)
 async def upload_sample(
     request: Request,
@@ -98,9 +135,10 @@ async def upload_sample(
     db: AsyncSession = Depends(get_db),
 ) -> Sample:
     """Upload a malware sample for analysis (streaming)."""
+    safe_filename = _sanitise_filename(file.filename)
     logger.info(
         "Sample upload started: %s",
-        file.filename,
+        safe_filename,
         extra={"user_id": str(user.id), "component": "upload"},
     )
 
@@ -147,7 +185,7 @@ async def upload_sample(
                 sha256=sha256,
                 md5=md5,
                 sha1=sha1,
-                original_filename=file.filename or "unknown",
+                original_filename=safe_filename,
                 file_size_bytes=size,
                 mime_type=detected_mime or "application/octet-stream",
                 storage_path=storage_path,

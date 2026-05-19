@@ -201,6 +201,15 @@ class BaseAnalyst(ABC):
                         self.logger.debug("Loop close warning (non-critical): %s", close_exc)
 
         # Use a daemon thread so the OS can reap it even if it hangs.
+        # PERF-STATIC-ANALYST-LATENCY-01 (audit 2026-05-19): instrument the
+        # outer execute_tool_loop window so operators can correlate slow
+        # analysts with token / tool-call counts without sprinkling timers
+        # across the codebase. Minimal-viable implementation: wall-clock,
+        # message count, tool-call count. Per-step granularity is a
+        # follow-up that needs LangGraph callback hooks.
+        import time as _time
+
+        _t0 = _time.monotonic()
         thread_timeout = timeout + 30
         t = threading.Thread(target=_run_in_thread, daemon=True)
         t.start()
@@ -227,7 +236,49 @@ class BaseAnalyst(ABC):
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
-        final_message = thread_result["messages"][-1]
+        msgs = thread_result.get("messages", []) or []
+        # Tool calls are AIMessage instances whose ``tool_calls`` attribute
+        # is a non-empty list. Counting them is cheap and the most useful
+        # single metric for "did this analyst overspend on Ghidra".
+        tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
+        elapsed = _time.monotonic() - _t0
+        # PERF-STATIC-ANALYST-LATENCY-01 minimal viable: emit a WARNING
+        # when the analyst either hit the configured timeout's 90%
+        # ceiling OR exceeded a hard per-run Ghidra budget. Operators get
+        # a single grep target instead of having to derive latency from
+        # raw timestamps. TODO(audit-2026-05-19): per-step timing in a
+        # deeper refactor — add a LangGraph callback that times each
+        # tool round-trip individually.
+        cfg_obj = get_settings()
+        _budget = getattr(cfg_obj, "react_agent_tool_call_budget", 20)
+        if tool_call_count > _budget:
+            self.logger.warning(
+                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs).",
+                self.name,
+                tool_call_count,
+                _budget,
+                elapsed,
+            )
+        elif elapsed > 0.9 * float(timeout):
+            self.logger.warning(
+                "%s ReAct loop close to timeout: elapsed=%.1fs, "
+                "timeout=%ds, tool_calls=%d, messages=%d.",
+                self.name,
+                elapsed,
+                timeout,
+                tool_call_count,
+                len(msgs),
+            )
+        else:
+            self.logger.info(
+                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d.",
+                self.name,
+                elapsed,
+                tool_call_count,
+                len(msgs),
+            )
+
+        final_message = msgs[-1]
         return str(final_message.content)
 
     # ------------------------------------------------------------------

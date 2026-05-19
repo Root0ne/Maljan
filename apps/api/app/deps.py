@@ -63,8 +63,42 @@ async def get_current_user(
     return user
 
 
-async def require_admin(user: User = Depends(get_current_user)) -> User:
-    """Dependency that requires the current user to have admin role."""
+async def require_active_user(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Re-validate the user's ``is_active`` state at resource-access time.
+
+    SEC-TOCTOU-AUTHZ-01 (audit 2026-05-19): ``get_current_user`` decodes
+    the JWT and reads the user row, but a concurrent admin action can
+    deactivate the user *between* that lookup and the actual resource
+    operation. Endpoints that mutate or expose sensitive data should
+    depend on this re-check helper instead of plain ``get_current_user``;
+    the second SELECT is microseconds compared to a request's typical
+    lifetime and closes the TOCTOU window.
+    """
+    refreshed = await db.execute(select(User).where(User.id == user.id))
+    fresh = refreshed.scalar_one_or_none()
+    if fresh is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+        )
+    if not fresh.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+    return fresh
+
+
+async def require_admin(user: User = Depends(require_active_user)) -> User:
+    """Dependency that requires the current user to have admin role.
+
+    SEC-TOCTOU-AUTHZ-01 (audit 2026-05-19): now depends on
+    ``require_active_user`` so admin-gated endpoints get the same
+    deactivation re-check as ordinary user-gated mutations.
+    """
     if user.role != "admin":
         # Surface the user's actual role so the UI can show "you need admin"
         # rather than a generic 403; clients sniffing this string can hide

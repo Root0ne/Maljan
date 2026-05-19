@@ -324,6 +324,36 @@ class StaticAnalyst(BaseAnalyst):
 
         self._initialize_mcp_client()
 
+        # PIPE-ANA-01 (audit 2026-05-19): when the supplied target *looks*
+        # like a filename but doesn't exist on disk (the APK-SAND-01 leak
+        # case — Triage sent us the task_id, not the path), short-circuit
+        # to a zero-claim ISR rather than paying for an LLM round that
+        # ends with ``load_program: File not found``. ANA-MARK-01 already
+        # neutralises the placeholder text path; this is the equivalent
+        # cheap guard at the *structured* entry point.
+        stripped = data.strip()
+        looks_like_filename = (
+            len(stripped) < 512
+            and "\n" not in stripped
+            and stripped.endswith(
+                (".exe", ".dll", ".elf", ".so", ".apk", ".dex", ".sys", ".bin", ".dat")
+            )
+        )
+        if looks_like_filename and not os.path.exists(stripped):
+            self.logger.error(
+                "Static analyst received a non-existent path '%s'. Skipping LLM "
+                "round and emitting an empty ISR — downstream CONF-INFL-01 cap "
+                "will mark this run as degraded.",
+                stripped,
+            )
+            return AgentISR(
+                agent_id=self.name,
+                domain="static",
+                claims=[],
+                dissent_items=[],
+                revision_round=0,
+            )
+
         target_info = (
             f"Target File: {data}" if len(data.strip()) < 512 else f"Static output:\n{data}"
         )

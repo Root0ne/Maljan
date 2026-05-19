@@ -134,13 +134,39 @@ def make_analyst_node(
                 "isr_reports": {agent_name: isr},
             }
         except (AnalystError, LLMError) as e:
-            logger.error("%s analysis failed: %s", agent_name, e)
+            # OPS-ANALYST-ERROR-TRACKING-01 + OBS-STRUCTURED-LOGS-MISSING-FIELDS-01
+            # (audit 2026-05-19): structured error event so Loki/Promtail
+            # can aggregate ``event_type=analyst_error`` instead of regex-
+            # scanning free-text. ``sample_hash`` is short-fingerprinted so
+            # the log line stays human-skim-friendly.
+            logger.error(
+                "%s analysis failed: %s",
+                agent_name,
+                e,
+                extra={
+                    "event_type": "analyst_error",
+                    "agent": agent_name,
+                    "sample_hash": (state.get("file_hash") or "")[:16],
+                    "error_type": type(e).__name__,
+                },
+            )
             return {
                 "reports": {agent_name: f"[ERROR] {agent_name} analysis failed: {e}"},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
         except (ValueError, RuntimeError) as e:
-            logger.exception("%s analysis crashed with %s.", agent_name, type(e).__name__)
+            logger.exception(
+                "%s analysis crashed with %s.",
+                agent_name,
+                type(e).__name__,
+                extra={
+                    "event_type": "analyst_error",
+                    "agent": agent_name,
+                    "sample_hash": (state.get("file_hash") or "")[:16],
+                    "error_type": type(e).__name__,
+                    "fatal": True,
+                },
+            )
             return {
                 "reports": {agent_name: f"[ERROR] {agent_name} crashed: {e}"},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},

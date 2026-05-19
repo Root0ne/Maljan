@@ -382,6 +382,13 @@ class Settings(BaseSettings):
     # ReAct agent execution limits
     react_agent_timeout: int = 180  # seconds before agent loop times out
     react_agent_max_steps: int = 10  # max LangGraph recursion steps
+    # PERF-STATIC-ANALYST-LATENCY-01 (audit 2026-05-19) — tool-call budget.
+    # When an analyst's ReAct loop exceeds this many cumulative tool calls
+    # we log a WARNING. Not a hard limit (LangGraph's recursion_limit is
+    # the structural cap); this is the early signal that an analyst is
+    # spinning unproductively on tool calls. Set via env
+    # ``REACT_AGENT_TOOL_CALL_BUDGET``.
+    react_agent_tool_call_budget: int = 20
 
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The

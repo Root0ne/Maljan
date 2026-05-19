@@ -96,6 +96,17 @@ class APISettings(BaseSettings):
     jwt_issuer: str = "maljan-api"
     jwt_audience: str = "maljan-clients"
 
+    # SEC-JWT-ROTATION-01 (audit 2026-05-19) — minimal viable secret
+    # rotation. New tokens carry the ``kid`` header set to ``jwt_key_id``.
+    # During rotation, operators set ``jwt_previous_secret_key`` to the
+    # old value for a grace period; ``decode_token`` accepts both. Once
+    # every token with the old ``kid`` has expired, the previous secret
+    # can be removed. TODO(audit-2026-05-19): wire a cron / admin
+    # endpoint that automates the rotation cadence.
+    jwt_key_id: str = "v1"
+    jwt_previous_secret_key: SecretStr = SecretStr("")
+    jwt_previous_key_id: str = "v0"
+
     # Login throttle (per-account)
     login_max_attempts: int = 10
     login_lockout_seconds: int = 300

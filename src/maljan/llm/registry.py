@@ -27,6 +27,49 @@ from maljan.core.logger import logger
 _PROVIDER_REGISTRY: dict[str, type] = {}
 
 
+# PORTABLE-RESPONSE-FORMAT-01 + PORTABLE-TIMEOUT-QUIRKS-01 (audit
+# 2026-05-19): centralise per-provider capability flags so callers can
+# branch on "does this provider support langchain ``with_structured_output``"
+# / "what's the right place to set timeout?" without sniffing internal
+# state. Conservative defaults match the providers we ship today.
+PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "openai": {
+        "supports_structured_output": True,
+        # LangChain ChatOpenAI takes ``request_timeout`` as a top-level kwarg.
+        "timeout_kwarg": "request_timeout",
+    },
+    "anthropic": {
+        "supports_structured_output": True,
+        "timeout_kwarg": "timeout",
+    },
+    "gemini": {
+        "supports_structured_output": True,
+        "timeout_kwarg": "request_options",  # gRPC; honoured via ``timeout`` key
+    },
+    "ollama": {
+        # langchain-ollama exposes structured output via tool calling that
+        # most Ollama-served models don't honour cleanly. Treat as
+        # unsupported so callers prompt the LLM to emit JSON manually
+        # instead of relying on a silent regex fallback.
+        "supports_structured_output": False,
+        "timeout_kwarg": "request_timeout",
+    },
+}
+
+
+def provider_capabilities(provider_name: str) -> dict[str, Any]:
+    """Return the capability dict for ``provider_name``, or a safe default.
+
+    Callers should treat missing keys as conservative ``False`` /
+    ``"request_timeout"`` rather than raising — new providers join the
+    registry without needing a capability entry up-front.
+    """
+    return PROVIDER_CAPABILITIES.get(
+        provider_name,
+        {"supports_structured_output": False, "timeout_kwarg": "request_timeout"},
+    )
+
+
 def register_provider(name: str):  # type: ignore[no-untyped-def]
     """Decorator that registers an LLM provider class under the given name."""
 
