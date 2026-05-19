@@ -64,11 +64,17 @@ _DEFAULT_RULES_DIR = Path(__file__).resolve().parents[3] / "data" / "sigma_rules
 
 @dataclass(frozen=True)
 class SigmaMatch:
-    """Tek bir Sigma kural eslesme sonucu."""
+    """Tek bir Sigma kural eslesme sonucu.
+
+    ``technique_id`` is ``None`` when the matched Sigma rule carries no
+    ``attack.t####`` tag — previously this surfaced as the literal string
+    ``"T0000"``, which polluted the STIX bundle with an invalid MITRE
+    AttackPattern SDO. (2026-05-19 audit SIG-T0000-01.)
+    """
 
     rule_id: str
     rule_title: str
-    technique_id: str
+    technique_id: str | None
     confidence: float
     log_source: str
     matched_fields: dict[str, str] = field(default_factory=dict)
@@ -86,9 +92,9 @@ class SigmaMatch:
     @property
     def claim_text(self) -> str:
         """ISR ClaimEvidence.claim olarak kullanilacak aciklama cumlesi."""
+        tech = self.technique_id if self.technique_id else "unmapped"
         return (
-            f"Sigma rule detection: {self.rule_title} "
-            f"(technique {self.technique_id}, source={self.log_source})"
+            f"Sigma rule detection: {self.rule_title} (technique {tech}, source={self.log_source})"
         )
 
 
@@ -291,12 +297,22 @@ class SigmaLayer:
                     covered.add(tech_id)
         return covered
 
-    def _extract_technique_id(self, rule: SigmaRule) -> str:
+    def _extract_technique_id(self, rule: SigmaRule) -> str | None:
+        """Return the MITRE ATT&CK technique ID for a Sigma rule, or None.
+
+        Previously returned the hardcoded ``"T0000"`` sentinel when a rule
+        had no ``attack.t####`` tag — that placeholder leaked through the
+        cascade into the STIX bundle as an invalid AttackPattern SDO
+        (audit 2026-05-19 SIG-T0000-01). Now we return ``None`` so
+        downstream consumers that already accept ``Optional[str]`` (the
+        ISR ClaimEvidence model, the cascade engine's regex filter) treat
+        the rule as "untagged" rather than "T0000".
+        """
         for tag in rule.tags:
             tag_str = str(tag).lower()
             if tag_str.startswith("attack.t"):
                 return ".".join(tag_str.split(".")[1:]).upper()
-        return "T0000"
+        return None
 
     def _get_confidence(self, rule: SigmaRule) -> float:
         status = str(rule.status.name).lower() if rule.status else "experimental"

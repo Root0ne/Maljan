@@ -134,6 +134,8 @@ def postprocess_judge_bundle(
             bundle_dict["objects"] = kept
 
     # ── REP-01: back-fill external_references on AttackPatterns ────
+    _VALID_TID_RE_LOCAL = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+    _CURATED_PLACEHOLDERS = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
     for obj in objects:
         if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
             continue
@@ -141,7 +143,11 @@ def postprocess_judge_bundle(
         if refs:
             continue
         tid = _attack_pattern_technique_id(obj)
-        if not tid:
+        # FILT-COVERAGE-01 follow-up: never back-fill external_references
+        # with a placeholder or non-MITRE-shaped value. Without this guard,
+        # ``attack-pattern--<uuid>(name=T0000)`` would gain a synthesized
+        # MITRE reference that links to a non-existent technique page.
+        if not tid or tid in _CURATED_PLACEHOLDERS or not _VALID_TID_RE_LOCAL.match(tid):
             continue
         name, url = _MITRE_LOOKUP.get(
             tid,

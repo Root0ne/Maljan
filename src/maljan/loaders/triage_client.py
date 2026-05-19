@@ -491,7 +491,26 @@ class TriageClient:
                 error="Report fetch returned non-dict body",
             )
         raw_sample = triage_data.get("sample", {})
-        sample_name = raw_sample.get("name", task_id) if isinstance(raw_sample, dict) else task_id
+        # APK-SAND-01 (2026-05-19 audit): Triage's ``summary`` endpoint
+        # sometimes returns ``sample: {}`` (or omits ``name``) for APK
+        # submissions. The legacy fallback substituted the task_id verbatim,
+        # which downstream leaks into static analyst prompts as the binary
+        # filename and breaks Ghidra ``load_program``. Detect the gap loudly
+        # and use an explicit placeholder so the log + report make the
+        # silent corruption visible. The 2026-05-17 T-01 branch (string
+        # sha256) stays intact.
+        if isinstance(raw_sample, dict) and raw_sample.get("name"):
+            sample_name = str(raw_sample["name"])
+        elif isinstance(raw_sample, str) and re.fullmatch(r"[0-9a-fA-F]{64}", raw_sample):
+            sample_name = raw_sample
+        else:
+            logger.warning(
+                "TriageClient: task=%s sample.name absent; substituting placeholder. "
+                "Static/dynamic/network analyst inputs will reference a placeholder "
+                "rather than a real filename — downstream cascade may degrade.",
+                task_id,
+            )
+            sample_name = f"_triage_no_name_{task_id}"
         normalized = _normalize_report(triage_data, sample_name=sample_name)
         return SubmissionResult(
             task_id=task_id,

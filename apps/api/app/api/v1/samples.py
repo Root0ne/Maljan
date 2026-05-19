@@ -196,6 +196,37 @@ async def upload_sample(
             if not client.bucket_exists(settings.minio_bucket):
                 client.make_bucket(settings.minio_bucket)
                 logger.info("MinIO bucket created: %s", settings.minio_bucket)
+                # SEC-MINIO-BUCKET-ACL-01 (2026-05-19 audit): MinIO defaults
+                # to private buckets, but an operator can mis-configure
+                # ``MINIO_BROWSER_ALLOW_PUBLIC_BUCKETS`` or a prior process
+                # could have left the bucket public. Set an explicit deny
+                # policy on every new bucket so a malware corpus is never
+                # served unauthenticated. We deny anonymous reads at the
+                # ``s3:GetObject`` level — the API path still works because
+                # it presigns via the configured access key.
+                _deny_anonymous_policy = (
+                    '{"Version":"2012-10-17","Statement":[{'
+                    '"Effect":"Deny","Principal":{"AWS":["*"]},'
+                    '"Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],'
+                    f'"Resource":["arn:aws:s3:::{settings.minio_bucket}",'
+                    f'"arn:aws:s3:::{settings.minio_bucket}/*"],'
+                    '"Condition":{"StringEquals":{"aws:PrincipalType":"Anonymous"}}}]}'
+                )
+                try:
+                    client.set_bucket_policy(settings.minio_bucket, _deny_anonymous_policy)
+                    logger.info(
+                        "MinIO bucket policy set (anonymous-deny): %s",
+                        settings.minio_bucket,
+                    )
+                except Exception as policy_exc:
+                    # Failure to set the policy is non-fatal but loud —
+                    # operators must verify bucket privacy out-of-band.
+                    logger.warning(
+                        "MinIO set_bucket_policy failed for '%s' (%s). "
+                        "Verify the bucket is not anonymously readable.",
+                        settings.minio_bucket,
+                        policy_exc,
+                    )
 
             client.fput_object(
                 settings.minio_bucket,

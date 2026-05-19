@@ -167,6 +167,8 @@ class MaljanApp:
             "malware_report": None,
             "malware_report_markdown": None,
             "stix_bundle_extended": None,
+            "degraded_mode": False,
+            "degradation_reasons": [],
         }
 
         result = await self.graph.ainvoke(initial_state)

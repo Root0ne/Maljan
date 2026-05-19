@@ -71,3 +71,12 @@ class AnalysisState(TypedDict):
     malware_report: dict[str, Any] | None
     malware_report_markdown: str | None
     stix_bundle_extended: dict[str, Any] | None
+
+    # CONF-INFL-01 (2026-05-19 audit): flag set by the judge node when a
+    # run produced TTPs but zero LLM analyst corroboration, or when one
+    # or more analyst reports are tagged ``[ERROR]``. Consumers (report
+    # node + dashboard) cap ``overall_confidence`` and surface a clear
+    # "degraded" indicator instead of displaying the inflated cascade-
+    # only confidence as if it were a fully corroborated verdict.
+    degraded_mode: bool
+    degradation_reasons: list[str]

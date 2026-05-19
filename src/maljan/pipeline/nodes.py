@@ -538,23 +538,43 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as exc:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
+            # CONF-INFL-01 (2026-05-19 audit): compute corroboration /
+            # failure signals up front so we can both feed the LTM quality
+            # gate (LTM-01, already wired below) and emit a degraded-mode
+            # flag for the report node + dashboard. Without this, a run
+            # where every LLM analyst silently fails (zero claims, only
+            # YARA+Sigma layer matches) yields a 0.95+ confidence verdict
+            # that visually matches a fully corroborated one.
+            _corroborated = cascade_summary.corroborated_count if cascade_summary is not None else 0
+            _technique_count = (
+                cascade_summary.total_techniques if cascade_summary is not None else 0
+            )
+            _failed_analysts = [
+                name
+                for name, text in (state.get("reports") or {}).items()
+                if isinstance(text, str) and text.strip().startswith("[ERROR]")
+            ]
+            _degradation_reasons: list[str] = []
+            if _corroborated == 0 and _technique_count > 0:
+                _degradation_reasons.append(
+                    f"zero cross-layer corroboration ({_technique_count} single-layer techniques)"
+                )
+            if _failed_analysts:
+                _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
+            _degraded_mode = bool(_degradation_reasons)
+            if _degraded_mode:
+                logger.warning(
+                    "Degraded run detected (%s). Final confidence will be "
+                    "capped in the report node.",
+                    "; ".join(_degradation_reasons),
+                )
+
             if memory_store is not None and isr_reports:
                 # Audit 2026-05-17 LTM-01: quality gate. Skip the upsert
                 # when the run is clearly degraded (no corroboration, no
                 # techniques, failed analysts, etc.). A polluted entry
                 # poisons future analyses via the few-shot prior block.
                 _ltm_skip_reason: str | None = None
-                _corroborated = (
-                    cascade_summary.corroborated_count if cascade_summary is not None else 0
-                )
-                _technique_count = (
-                    cascade_summary.total_techniques if cascade_summary is not None else 0
-                )
-                _failed_analysts = [
-                    name
-                    for name, text in (state.get("reports") or {}).items()
-                    if isinstance(text, str) and text.strip().startswith("[ERROR]")
-                ]
                 if _corroborated == 0 and _technique_count <= 1:
                     _ltm_skip_reason = (
                         f"low-quality cascade: corroborated={_corroborated}, "
@@ -608,6 +628,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "run_summary": run_summary_dict,
                 # Persist YARA/Sigma layer ISRs so callers can inspect them.
                 "isr_reports": isr_reports,
+                # CONF-INFL-01: surface degraded-mode signal to the report
+                # node and downstream consumers (API/dashboard).
+                "degraded_mode": _degraded_mode,
+                "degradation_reasons": _degradation_reasons,
             }
         except (AnalystError, LLMError) as e:
             logger.error("Judge verdict failed: %s", e)
@@ -678,15 +702,57 @@ def make_report_node(container: ServiceContainer) -> Any:
             except (TypeError, ValueError):
                 overall_confidence = 0.0
 
+        # CONF-INFL-01 (2026-05-19 audit): cap confidence when the judge
+        # node flagged the run as degraded. Without this, a verdict drawn
+        # entirely from YARA/Sigma deterministic layers (with all three
+        # LLM analysts silently producing zero claims) lands at 0.98+ and
+        # is indistinguishable in the UI from a fully corroborated
+        # finding. The 0.60 ceiling is the same threshold the dashboard
+        # uses to render "low confidence" styling.
+        _DEGRADED_CONFIDENCE_CAP = 0.60
+        if state.get("degraded_mode") and overall_confidence > _DEGRADED_CONFIDENCE_CAP:
+            logger.warning(
+                "report_node: capping overall_confidence %.3f -> %.2f (degraded run: %s).",
+                overall_confidence,
+                _DEGRADED_CONFIDENCE_CAP,
+                "; ".join(state.get("degradation_reasons") or []) or "no reason recorded",
+            )
+            overall_confidence = _DEGRADED_CONFIDENCE_CAP
+
         # Best-effort malware category — cheap and fully deterministic.
+        #
+        # CAT-PERSIST-01 (2026-05-19 audit): the previous implementation
+        # swallowed every exception at DEBUG level, so a silently-failing
+        # ``.value`` access (e.g. when the inference returned a string
+        # instead of an enum, or when the schema_pruner module raised on a
+        # malformed ISR) left the DB row with ``malware_category = NULL``
+        # despite the worker log claiming "Schema pruning: inferred
+        # category 'rat'." in the judge phase. Promote the failure to
+        # WARNING and coerce non-enum returns to ``str`` so the field
+        # actually lands.
         malware_category: str | None = None
         try:
-            malware_category = infer_malware_category(
+            inferred = infer_malware_category(
                 reports=state.get("reports") or {},
                 isr_reports=isr_reports,
-            ).value
+            )
+            # ``infer_malware_category`` returns ``MalwareCategory`` (Enum)
+            # but a custom override could return a bare str; accept both.
+            raw_value = getattr(inferred, "value", inferred)
+            if isinstance(raw_value, str) and raw_value:
+                malware_category = raw_value
+            else:
+                logger.warning(
+                    "report_node: malware_category inference returned non-string %r;"
+                    " field will stay NULL.",
+                    raw_value,
+                )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("report_node: malware_category inference failed (%s).", exc)
+            logger.warning(
+                "report_node: malware_category inference failed (%s: %s).",
+                type(exc).__name__,
+                exc,
+            )
 
         discussion_history = [
             arg.model_dump() if hasattr(arg, "model_dump") else dict(arg)

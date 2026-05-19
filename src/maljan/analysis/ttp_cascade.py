@@ -256,13 +256,17 @@ class TTPCascadeEngine:
         tech_domain_claims: dict[str, dict[str, list]] = {}
 
         # Pre-filter invalid technique IDs so cascade only works with real TTPs.
+        # Audit 2026-05-19 SIG-T0000-01: ``T0000`` matches ``T\d{4}`` and was
+        # leaking past this guard. Reject the curated placeholder set
+        # explicitly as belt-and-braces.
         _VALID_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+        _CASCADE_DENYLIST = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
         for isr in isr_reports.values():
             for claim in isr.claims:
                 if claim.technique_id is None:
                     continue
                 tid = claim.technique_id
-                if not _VALID_TID_RE.match(tid):
+                if not _VALID_TID_RE.match(tid) or tid in _CASCADE_DENYLIST:
                     logger.debug("Skipping invalid technique_id '%s' from cascade.", tid)
                     continue
                 dom: str = isr.domain  # type: ignore[assignment]

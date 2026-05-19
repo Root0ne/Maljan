@@ -584,21 +584,59 @@ class JudgeAgent:
         Valid MITRE ATT&CK technique IDs match the pattern T#### or T####.###
         (e.g. T1055, T1055.001). Anything else (T0000, T123, T12345, etc.) is
         treated as hallucinated and the object is removed.
+
+        Audit 2026-05-19 FILT-COVERAGE-01: the previous implementation only
+        inspected the Maljan-custom ``x_maljan_technique_id`` field. STIX-
+        standard technique IDs surface in ``external_references[*].external_id``
+        and (for LLM-emitted SDOs) the ``name`` field, so we now check those
+        as well. ``_INVALID_TIDS`` is reused so curated placeholders such as
+        ``T0000`` get filtered even though they match the regex.
         """
         import re
 
         _VALID_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+        _CURATED_PLACEHOLDERS = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
+
+        def _technique_id_is_bad(tid: str) -> bool:
+            if not tid:
+                return False
+            if tid in _CURATED_PLACEHOLDERS:
+                return True
+            return not bool(_VALID_TID_RE.match(tid))
+
+        def _extract_ids_from(obj: dict[str, Any]) -> list[str]:
+            candidates: list[str] = []
+            tid = obj.get("x_maljan_technique_id")
+            if isinstance(tid, str):
+                candidates.append(tid)
+            for ref in obj.get("external_references") or []:
+                if isinstance(ref, dict):
+                    ext_id = ref.get("external_id")
+                    src = (ref.get("source_name") or "").lower()
+                    # Only enforce on MITRE-tagged refs; Sigma rule IDs etc.
+                    # would otherwise fail the T#### regex.
+                    if isinstance(ext_id, str) and src in {"mitre-attack", "mitre attack"}:
+                        candidates.append(ext_id)
+            # AttackPattern SDOs whose ``name`` is itself a T#### string
+            # (the SIG-T0000-01 leak path) — only check ``name`` for
+            # attack-pattern objects.
+            if obj.get("type") == "attack-pattern":
+                name = obj.get("name")
+                if isinstance(name, str) and name.startswith("T") and len(name) <= 12:
+                    candidates.append(name)
+            return candidates
+
         objects = data.get("objects", [])
         filtered: list[dict[str, Any]] = []
         removed = 0
         for obj in objects:
-            tid = obj.get("x_maljan_technique_id", "")
-            if tid and not _VALID_TID_RE.match(tid):
+            offending = [tid for tid in _extract_ids_from(obj) if _technique_id_is_bad(tid)]
+            if offending:
                 removed += 1
                 self.logger.warning(
-                    "Removing STIX object %s with invalid technique ID '%s'.",
+                    "Removing STIX object %s with invalid technique ID(s) %s.",
                     obj.get("id", "unknown"),
-                    tid,
+                    offending,
                 )
                 continue
             filtered.append(obj)
