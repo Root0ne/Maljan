@@ -136,6 +136,19 @@ def create_app() -> FastAPI:
         max_age=600,
     )
 
+    # ── Security Headers ─────────────────────────────────────
+    # SEC-CORS-HEADERS-01 (audit 2026-05-19): bare CORS leaves browsers
+    # without the standard hardening header set. The middleware below
+    # installs OWASP-recommended defaults (CSP / X-Frame-Options /
+    # X-Content-Type-Options / Referrer-Policy / Permissions-Policy)
+    # without touching API semantics. HSTS stays off in dev (HTTP).
+    from app.middleware.security_headers_middleware import SecurityHeadersMiddleware
+
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        enable_hsts=not settings.debug,
+    )
+
     # ── Routes ───────────────────────────────────────────────
     from app.api.v1.audit import router as audit_router
     from app.api.v1.auth import router as auth_router

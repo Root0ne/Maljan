@@ -393,9 +393,47 @@ class BaseAnalyst(ABC):
         flags=re.UNICODE,
     )
 
+    # ANA-MARK-01 (2026-05-19 audit): recognise meta-claim text so the
+    # judge / cascade / LTM gate can treat it as "no real claims" instead
+    # of inflating verdict confidence with a 1.0 sentence. The fallback
+    # strings come from ``file_loader.py:107`` ("No * data available for
+    # sample ...") and from analyst LLM fallbacks that copy that wording.
+    _META_CLAIM_RE = re.compile(
+        r"^\s*no\s+[a-z_]+\s+data\s+available\b",
+        flags=re.IGNORECASE,
+    )
+
+    def _is_meta_claim_text(self, text: str) -> bool:
+        """True when ``text`` is a fallback placeholder, not real analysis."""
+        if not text:
+            return True
+        # Match the placeholder anywhere near the start of the text — analysts
+        # sometimes prepend a one-line header before parroting the fallback.
+        first = text.strip().splitlines()[0] if text.strip() else ""
+        return bool(self._META_CLAIM_RE.match(first))
+
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR."""
         domain = self._infer_domain()
+
+        # ANA-MARK-01: when the agent returned only the placeholder
+        # ("No static data available for sample ..."), emit a *zero-claim*
+        # ISR rather than one with a meta-sentence. Downstream cascade +
+        # judge already drop empty-claim ISRs from the confidence math, so
+        # this is the single tightest place to plug the leak.
+        if self._is_meta_claim_text(text):
+            self.logger.info(
+                "%s: meta-claim text detected; emitting zero-claim ISR.",
+                self.name,
+            )
+            return AgentISR(
+                agent_id=self.name,
+                domain=domain,
+                claims=[],
+                dissent_items=[],
+                revision_round=revision_round,
+            )
+
         technique_ids = _extract_technique_ids(text)
 
         raw_sentences = [

@@ -211,6 +211,19 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     logger.info("WebSocket authenticated: user=%s job=%s", user_id, job_id)
     await manager.connect(websocket, job_id)
 
+    # SEC-WS-AUTH-CONTINUOUS-01 (audit 2026-05-19): the handshake checked
+    # ``exp``, but a long-lived connection could outlive its token. Read
+    # the original ``exp`` claim once and revalidate against the wall
+    # clock on every heartbeat tick (~30 s). When expired, close the
+    # connection with policy code 1008 so the client must re-auth before
+    # reconnecting.
+    import time as _time
+
+    _token_exp_ts: float | None = None
+    _raw_exp = payload.get("exp")
+    if isinstance(_raw_exp, int | float):
+        _token_exp_ts = float(_raw_exp)
+
     try:
         # Keep connection alive — also allows client-to-server messages
         while True:
@@ -222,6 +235,18 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 if data == "ping":
                     await websocket.send_text(json.dumps({"type": "pong", "data": {}}))
             except TimeoutError:
+                # Re-check token expiry on every heartbeat boundary.
+                if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
+                    logger.warning(
+                        "WebSocket closed: token expired mid-stream (user=%s job=%s).",
+                        user_id,
+                        job_id,
+                    )
+                    try:
+                        await websocket.close(code=1008, reason="Unauthorized: token expired")
+                    except Exception:
+                        pass
+                    break
                 # Send heartbeat to keep connection alive
                 try:
                     await websocket.send_text(json.dumps({"type": "heartbeat", "data": {}}))

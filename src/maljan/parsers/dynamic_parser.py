@@ -17,6 +17,40 @@ class DynamicParser(BaseParser):
         generic_events = behavior.get("generic", [])
         apistats = behavior.get("apistats", {})
 
+        # DYN-SAND-01 (2026-05-19 audit): when the sandbox reports completion
+        # but produced zero behavioral events AND zero network indicators,
+        # this is itself a strong signal — likely T1497 anti-sandbox evasion,
+        # a platform mismatch (APK in Linux VM), or a zero-byte sample. The
+        # analyst LLM previously saw an empty-rows table and emitted a
+        # meta-claim ("no dynamic data available") which the judge then
+        # treated as a 1.0-confidence claim. Surfacing this structured hint
+        # lets the analyst emit a concrete T1497 claim instead.
+        _network_root = raw_data.get("network", {}) or {}
+        _net_total = sum(
+            len(_network_root.get(k, []) or [])
+            for k in ("dns", "http", "tcp", "hosts", "domains", "udp")
+        )
+        _signatures = raw_data.get("signatures") or []
+        if not generic_events and not apistats and not _signatures and _net_total == 0:
+            return (
+                "### Sandbox Behavioral Summary\n\n"
+                "**SANDBOX COMPLETED WITH ZERO OBSERVED EVENTS.**\n\n"
+                "The sandbox report parsed successfully, but every section "
+                "(behavior.generic, behavior.apistats, network.*, signatures) "
+                "is empty. This is itself a behavioural observation — the "
+                "absence of any activity in a sandbox that reported "
+                "successful completion strongly suggests one of:\n\n"
+                "- **T1497 Virtualization/Sandbox Evasion** — the sample "
+                "detected the sandbox and aborted.\n"
+                "- **Platform mismatch** — e.g. an Android APK submitted to "
+                "a Linux/Windows VM that cannot execute it.\n"
+                "- **Zero-byte / corrupted sample** — nothing to run.\n\n"
+                "You SHOULD emit at least one structured claim covering "
+                "this observation (typical confidence 0.30-0.50) rather "
+                "than treating it as missing data. Do NOT report 'no "
+                "behaviour available' — the absence IS the evidence.\n"
+            )
+
         # 1. Behavioral Signatures (Injection, Persistence, Evasion, etc.)
         threat_rows: list[list[str]] = []
         for event in generic_events:
@@ -59,9 +93,7 @@ class DynamicParser(BaseParser):
         for domain in network.get("domains", [])[:10]:
             net_rows.append(["DOMAIN", str(domain), "—"])
 
-        net_table = self._format_as_table(
-            headers=["Type", "Indicator", "Status"], rows=net_rows
-        )
+        net_table = self._format_as_table(headers=["Type", "Indicator", "Status"], rows=net_rows)
 
         return (
             "### Sandbox Behavioral Summary\n\n"

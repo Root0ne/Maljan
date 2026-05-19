@@ -128,13 +128,22 @@ class TestDynamicParser:
         assert "443" in result
 
     def test_network_indicators_empty(self) -> None:
-        """Empty network data should not crash."""
+        """Empty sandbox report short-circuits to the DYN-SAND-01 hint.
+
+        Audit 2026-05-19 DYN-SAND-01 changed the contract: instead of
+        emitting an empty "Network Indicators" table when the sandbox
+        captured zero events (which the analyst LLM previously treated
+        as 'no analysis to do'), the parser now emits a structured
+        anti-sandbox hint so the analyst produces a real claim. See
+        ``src/maljan/parsers/dynamic_parser.py``.
+        """
         data = {
             "behavior": {"generic": [], "apistats": {}},
             "network": {},
         }
         result = self.parser.parse(data)
-        assert "Network Indicators" in result
+        assert "SANDBOX COMPLETED WITH ZERO OBSERVED EVENTS" in result
+        assert "T1497" in result
 
 
 class TestNetworkParser:

@@ -115,6 +115,21 @@ class RunSummary:
         cascade:            Three-layer cascade metrics (None if no TTP claims).
         elapsed_seconds:    Wall-clock time from start to verdict.
         timestamp:          Unix timestamp of verdict generation.
+
+        degraded_mode:      Set True when the verdict came from a partial /
+                            failed pipeline (zero corroboration, analyst
+                            errors). Audit 2026-05-19 OPS-DEGRADED-VERDICT-01.
+        degradation_reasons: Human-readable bullets explaining why this run
+                            is flagged as degraded.
+        failed_analysts:    Names of analysts whose ``reports[name]`` started
+                            with ``[ERROR]``. (Audit 2026-05-19
+                            OBS-ANALYST-ERRORS-METRIC-01.)
+        techniques_by_layer: Per-layer (yara / sigma / static / dynamic /
+                            network) technique counts so the report can show
+                            "1 yara + 9 sigma + 1 network + 0 static +
+                            0 dynamic = 11 total" attribution instead of the
+                            opaque "11 techniques". Audit 2026-05-19
+                            OBS-TTP-ATTRIBUTION-01.
     """
 
     file_hash: str
@@ -127,6 +142,10 @@ class RunSummary:
     cascade: CascadeMetrics | None
     elapsed_seconds: float
     timestamp: float = field(default_factory=time.time)
+    degraded_mode: bool = False
+    degradation_reasons: list[str] = field(default_factory=list)
+    failed_analysts: list[str] = field(default_factory=list)
+    techniques_by_layer: dict[str, int] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Rendering
@@ -147,6 +166,21 @@ class RunSummary:
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             "",
         ]
+
+        # OPS-DEGRADED-VERDICT-01 (audit 2026-05-19): banner the degraded
+        # run prominently so a reader can't miss it when scrolling.
+        if self.degraded_mode:
+            lines += [
+                "> [!WARNING]",
+                "> **DEGRADED RUN.** The verdict above was produced with "
+                "reduced signal — confidence has been capped at 0.60.",
+                "",
+            ]
+            if self.degradation_reasons:
+                lines += ["**Degradation reasons:**", ""]
+                for reason in self.degradation_reasons:
+                    lines.append(f"- {reason}")
+                lines.append("")
 
         # Negotiation
         n = self.negotiation
@@ -208,8 +242,32 @@ class RunSummary:
                         f"| {t['technique_id']} | {t['label']} | {t['confidence']:.3f} | {layers} |"
                     )
                 lines.append("")
+            # OBS-TTP-ATTRIBUTION-01 (audit 2026-05-19): per-layer breakdown.
+            if self.techniques_by_layer:
+                lines.append("**Per-layer attribution:**")
+                lines.append("")
+                # Stable order so the report is diffable run-to-run.
+                for layer in ("static", "dynamic", "network", "yara", "sigma"):
+                    count = self.techniques_by_layer.get(layer, 0)
+                    lines.append(f"- `{layer}`: {count}")
+                # Surface any other layers we didn't enumerate above.
+                for layer, count in sorted(self.techniques_by_layer.items()):
+                    if layer not in {"static", "dynamic", "network", "yara", "sigma"}:
+                        lines.append(f"- `{layer}`: {count}")
+                lines.append("")
         else:
             lines += ["## Three-Layer TTP Cascade", "", "*No TTP claims found.*", ""]
+
+        # OBS-ANALYST-ERRORS-METRIC-01 (audit 2026-05-19): always render the
+        # failed-analyst section so operators see "0 failures" rather than
+        # ambiguity.
+        lines += ["## Analyst Errors", ""]
+        if self.failed_analysts:
+            for name in self.failed_analysts:
+                lines.append(f"- `{name}` — reported `[ERROR]` status")
+        else:
+            lines.append("*No analyst failures recorded.*")
+        lines.append("")
 
         # ATT&CK Validation
         if self.validation:
@@ -264,6 +322,10 @@ class RunSummary:
             ],
             "cascade": None,
             "validation": None,
+            "degraded_mode": self.degraded_mode,
+            "degradation_reasons": list(self.degradation_reasons),
+            "failed_analysts": list(self.failed_analysts),
+            "techniques_by_layer": dict(self.techniques_by_layer),
         }
 
         if self.cascade:
@@ -318,6 +380,29 @@ class RunSummaryBuilder:
         self._agent_stats: list[ISRAgentStats] = []
         self._validation: ValidationMetrics | None = None
         self._cascade: CascadeMetrics | None = None
+        self._degraded_mode: bool = False
+        self._degradation_reasons: list[str] = []
+        self._failed_analysts: list[str] = []
+        self._techniques_by_layer: dict[str, int] = {}
+
+    def set_degraded_mode(
+        self, degraded: bool, reasons: list[str] | None = None
+    ) -> RunSummaryBuilder:
+        """Mark the run as degraded with optional human-readable reasons.
+
+        Audit 2026-05-19 OPS-DEGRADED-VERDICT-01.
+        """
+        self._degraded_mode = bool(degraded)
+        self._degradation_reasons = list(reasons or [])
+        return self
+
+    def set_failed_analysts(self, names: list[str]) -> RunSummaryBuilder:
+        """Record analysts whose reports failed with an [ERROR] prefix.
+
+        Audit 2026-05-19 OBS-ANALYST-ERRORS-METRIC-01.
+        """
+        self._failed_analysts = list(names)
+        return self
 
     def set_sample(self, file_hash: str, file_name: str | None) -> RunSummaryBuilder:
         self._file_hash = file_hash
@@ -435,6 +520,25 @@ class RunSummaryBuilder:
                 consensus_count=cascade_summary.consensus_count,
                 top_techniques=top_techniques,
             )
+            # OBS-TTP-ATTRIBUTION-01 (audit 2026-05-19): bucket every
+            # cascade result by *every* contributing layer (a technique can
+            # contribute to multiple layers if more than one analyst hit it).
+            # Use ``results`` not ``top_techniques(n=k)`` so the breakdown
+            # covers the whole cascade, not just the top-K.
+            counts: dict[str, int] = {}
+            try:
+                all_results = (
+                    list(cascade_summary.results.values())
+                    if hasattr(cascade_summary, "results")
+                    else top
+                )
+                for r in all_results:
+                    layers = getattr(r, "contributing_layers", None) or []
+                    for layer in layers:
+                        counts[str(layer)] = counts.get(str(layer), 0) + 1
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("techniques_by_layer compute failed: %s", exc)
+            self._techniques_by_layer = counts
         except Exception as exc:
             logger.debug("set_cascade_summary failed: %s", exc, exc_info=True)
         return self
@@ -461,6 +565,10 @@ class RunSummaryBuilder:
             validation=self._validation,
             cascade=self._cascade,
             elapsed_seconds=time.time() - self._start_time,
+            degraded_mode=self._degraded_mode,
+            degradation_reasons=self._degradation_reasons,
+            failed_analysts=self._failed_analysts,
+            techniques_by_layer=self._techniques_by_layer,
         )
 
 

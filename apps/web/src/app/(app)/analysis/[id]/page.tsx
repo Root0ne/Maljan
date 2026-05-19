@@ -209,9 +209,50 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const sha256 = mr.identity.hashes.sha256;
   const shortHash = sha256.slice(0, 12);
 
+  // OPS-DEGRADED-VERDICT-01 (audit 2026-05-19): surface the degraded flag
+  // from run_summary. Without this banner a 0.6 capped verdict reads the
+  // same as a confidently-low real one.
+  const runSummary = (report?.run_summary ?? null) as
+    | { degraded_mode?: boolean; degradation_reasons?: string[]; failed_analysts?: string[] }
+    | null;
+  const isDegraded = Boolean(runSummary?.degraded_mode);
+  const degradationReasons = runSummary?.degradation_reasons ?? [];
+  const failedAnalysts = runSummary?.failed_analysts ?? [];
+
   return (
     <div className="grid grid-cols-2 gap-4">
       <DownloadBar reportId={reportId} mr={mr} shortHash={shortHash} />
+
+      {isDegraded && (
+        <div
+          role="alert"
+          className="col-span-2 flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+        >
+          <span className="font-semibold text-status-orange shrink-0">
+            DEGRADED RUN
+          </span>
+          <div className="text-text-secondary space-y-1">
+            <p>
+              Confidence was capped at <span className="font-mono">0.60</span>{" "}
+              because the pipeline produced partial signal. Verdict and
+              severity should be treated as preliminary.
+            </p>
+            {degradationReasons.length > 0 && (
+              <ul className="list-disc list-inside text-xs">
+                {degradationReasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            )}
+            {failedAnalysts.length > 0 && (
+              <p className="text-xs">
+                Failed analysts:{" "}
+                <code className="font-mono">{failedAnalysts.join(", ")}</code>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Severity & Verdict card */}
       <div className="bg-bg-surface border border-border rounded col-span-2">

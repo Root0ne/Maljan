@@ -508,43 +508,13 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 except Exception as exc:
                     logger.debug("validate_isr_reports failed: %s", exc, exc_info=True)
 
-            run_summary_dict = None
-            try:
-                max_iters = container.config.negotiation.max_iterations
-                negotiation_state = {
-                    "confidence_history": state.get("confidence_history") or [],
-                    "iteration_count": state.get("iteration_count", 0),
-                    "is_consensus": state.get("is_consensus", False),
-                    "sycophancy_detected": state.get("sycophancy_detected", False),
-                    "discussion_history": state.get("discussion_history") or [],
-                }
-                summary = (
-                    RunSummaryBuilder(start_time=start_time)
-                    .set_sample(state.get("file_hash", ""), state.get("file_name"))
-                    .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
-                    .set_negotiation(negotiation_state, max_iterations=max_iters)
-                    .set_isr_stats(isr_reports)
-                    .set_validation_summary(ttp_validation_summary)
-                    .set_cascade_summary(cascade_summary)
-                    .build()
-                )
-                run_summary_dict = summary.to_dict()
-                logger.info(
-                    "RunSummary built: verdict=%s, rounds=%d, techniques=%d",
-                    decision,
-                    summary.negotiation.rounds_completed,
-                    summary.cascade.total_techniques if summary.cascade else 0,
-                )
-            except Exception as exc:
-                logger.warning("RunSummary build failed (%s). Skipping.", exc)
-
             # CONF-INFL-01 (2026-05-19 audit): compute corroboration /
-            # failure signals up front so we can both feed the LTM quality
-            # gate (LTM-01, already wired below) and emit a degraded-mode
-            # flag for the report node + dashboard. Without this, a run
-            # where every LLM analyst silently fails (zero claims, only
-            # YARA+Sigma layer matches) yields a 0.95+ confidence verdict
-            # that visually matches a fully corroborated one.
+            # failure signals up front so we can feed the LTM quality
+            # gate (LTM-01, below) AND the run_summary builder. Without
+            # this, a run where every LLM analyst silently fails (zero
+            # claims, only YARA+Sigma layer matches) yields a 0.95+
+            # confidence verdict that visually matches a fully
+            # corroborated one.
             _corroborated = cascade_summary.corroborated_count if cascade_summary is not None else 0
             _technique_count = (
                 cascade_summary.total_techniques if cascade_summary is not None else 0
@@ -568,6 +538,38 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     "capped in the report node.",
                     "; ".join(_degradation_reasons),
                 )
+
+            run_summary_dict = None
+            try:
+                max_iters = container.config.negotiation.max_iterations
+                negotiation_state = {
+                    "confidence_history": state.get("confidence_history") or [],
+                    "iteration_count": state.get("iteration_count", 0),
+                    "is_consensus": state.get("is_consensus", False),
+                    "sycophancy_detected": state.get("sycophancy_detected", False),
+                    "discussion_history": state.get("discussion_history") or [],
+                }
+                summary = (
+                    RunSummaryBuilder(start_time=start_time)
+                    .set_sample(state.get("file_hash", ""), state.get("file_name"))
+                    .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
+                    .set_negotiation(negotiation_state, max_iterations=max_iters)
+                    .set_isr_stats(isr_reports)
+                    .set_validation_summary(ttp_validation_summary)
+                    .set_cascade_summary(cascade_summary)
+                    .set_degraded_mode(_degraded_mode, _degradation_reasons)
+                    .set_failed_analysts(_failed_analysts)
+                    .build()
+                )
+                run_summary_dict = summary.to_dict()
+                logger.info(
+                    "RunSummary built: verdict=%s, rounds=%d, techniques=%d",
+                    decision,
+                    summary.negotiation.rounds_completed,
+                    summary.cascade.total_techniques if summary.cascade else 0,
+                )
+            except Exception as exc:
+                logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
             if memory_store is not None and isr_reports:
                 # Audit 2026-05-17 LTM-01: quality gate. Skip the upsert
