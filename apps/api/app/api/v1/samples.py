@@ -116,7 +116,68 @@ def _sanitise_filename(raw: str | None) -> str:
     # Double-extension heuristic: more than one dot is fine for files like
     # ``rust.targets.bin``, but reject filenames where two of the dotted
     # segments look like *executable* extensions (e.g. ``invoice.exe.txt``).
-    _EXE_SHAPED = {"exe", "dll", "elf", "so", "apk", "dex", "bat", "cmd", "ps1", "scr"}
+    # The set now covers every shape CAPE can detonate — keeps the
+    # ``X.SHAPE.pdf`` phishing pattern blocked across the wider file set.
+    _EXE_SHAPED = {
+        # Native binaries
+        "exe",
+        "dll",
+        "scr",
+        "cpl",
+        "sys",
+        "ocx",
+        "drv",
+        "elf",
+        "so",
+        "dylib",
+        # Installers + packages
+        "msi",
+        "msix",
+        "msp",
+        "appx",
+        "appxbundle",
+        "apk",
+        "dex",
+        "deb",
+        "rpm",
+        # Office macro-bearing
+        "docm",
+        "xlsm",
+        "pptm",
+        "dotm",
+        "xltm",
+        "potm",
+        # Scripts
+        "ps1",
+        "psm1",
+        "vbs",
+        "vbe",
+        "js",
+        "jse",
+        "wsf",
+        "wsh",
+        "bat",
+        "cmd",
+        "py",
+        "pyc",
+        "pyw",
+        "rb",
+        "pl",
+        "sh",
+        "hta",
+        "sct",
+        "lnk",
+        # Java / .NET / Flash
+        "jar",
+        "class",
+        "swf",
+        # Other detonation shapes
+        "iso",
+        "img",
+        "vhd",
+        "chm",
+        "reg",
+    }
     segs = [s.lower() for s in name.split(".") if s]
     exe_segs = [s for s in segs if s in _EXE_SHAPED]
     if len(exe_segs) >= 2:

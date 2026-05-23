@@ -141,35 +141,128 @@ class APISettings(BaseSettings):
     rate_limit_whitelist: list[str] = Field(default=["/health", "/docs", "/redoc", "/openapi.json"])
 
     # ── File upload ──────────────────────────────────────────────
-    upload_max_bytes: int = Field(default=50 * 1024 * 1024)  # 50 MB
+    upload_max_bytes: int = Field(default=100 * 1024 * 1024)  # 100 MB
     upload_allowed_mime_types: list[str] = Field(
-        # The ``filetype`` library and libmagic disagree on a few common
-        # malware MIME types: ELF binaries are usually ``application/x-elf``
-        # via libmagic but ``application/x-executable`` via ``filetype``.
-        # Likewise PE files can come back as either ``application/x-msdownload``
-        # (legacy) or ``application/vnd.microsoft.portable-executable``.
-        # Listing the synonyms keeps both detection backends happy without
-        # weakening the allow-list (the matched MIME is still recorded on the
-        # ``Sample`` row for downstream auditing).
+        # The list mirrors every analyzer package shipped by CAPEv2 under
+        # ``external/CAPEv2/analyzer/{windows,linux}/modules/packages/`` so
+        # any file the sandbox can detonate also clears the API gate.
+        #
+        # Synonym handling: ``filetype`` (magic-byte) and libmagic disagree
+        # on some entries — ELF is ``x-elf`` vs ``x-executable``; PE is
+        # ``x-msdownload`` vs ``vnd.microsoft.portable-executable``. Every
+        # documented synonym is listed. Scripts (.vbs/.ps1/.bat/.py/.js)
+        # typically come back as ``text/plain`` or ``None`` from filetype;
+        # those still pass because samples.py only enforces the allow-list
+        # when a MIME was actually detected.
         default=[
+            # ── Generic / catch-all ─────────────────────────────────
+            "application/octet-stream",
+            # ── Windows PE family (exe / dll / service / regsvr / msbuild) ──
             "application/x-dosexec",
+            "application/x-msdownload",
+            "application/vnd.microsoft.portable-executable",
+            # ── Windows installers (msi / msix / nsis) ──────────────
+            "application/x-ms-installer",
+            "application/x-msi",
+            "application/vnd.ms-msi",
+            # ── *nix executables (ELF / Mach-O / shared libs) ───────
             "application/x-mach-binary",
             "application/x-elf",
             "application/x-executable",
             "application/x-sharedlib",
             "application/x-pie-executable",
-            "application/vnd.microsoft.portable-executable",
-            "application/octet-stream",
-            "application/zip",
-            "application/x-msdownload",
-            "application/x-ms-installer",
-            "application/x-msi",
+            # ── Android (APK) ───────────────────────────────────────
             "application/vnd.android.package-archive",
+            # ── Archives (CAPE ``zip`` / ``rar`` / ``jar`` / ``archive``) ──
+            "application/zip",
+            "application/x-zip-compressed",
             "application/x-7z-compressed",
             "application/x-rar-compressed",
+            "application/vnd.rar",
             "application/gzip",
+            "application/x-gzip",
+            "application/x-bzip2",
+            "application/x-xz",
+            "application/x-lzma",
             "application/x-tar",
+            "application/x-iso9660-image",
             "application/java-archive",
+            # ── Linux package formats (CAPE Linux ``deb`` package) ──
+            "application/x-deb",
+            "application/vnd.debian.binary-package",
+            # ── PDF (CAPE ``pdf`` package) ──────────────────────────
+            "application/pdf",
+            # ── Microsoft Office — legacy binary formats ────────────
+            "application/msword",
+            "application/vnd.ms-word",
+            "application/vnd.ms-excel",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.ms-publisher",
+            "application/x-mspublisher",
+            "application/vnd.ms-access",
+            "application/x-msaccess",
+            "application/onenote",
+            "application/msonenote",
+            "application/vnd.ms-xpsdocument",
+            # ── Office Open XML (.docx / .xlsx / .pptx + macro variants) ──
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.ms-word.document.macroEnabled.12",
+            "application/vnd.ms-excel.sheet.macroEnabled.12",
+            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+            "application/vnd.ms-word.template.macroEnabled.12",
+            "application/vnd.ms-excel.template.macroEnabled.12",
+            # ── Rich Text + Hangul + Ichitaro ───────────────────────
+            "application/rtf",
+            "text/rtf",
+            "application/x-hwp",
+            "application/haansofthwp",
+            "application/x-ichitaro",
+            # ── Mail (CAPE ``eml`` / ``msg`` / ``mht``) ─────────────
+            "message/rfc822",
+            "application/vnd.ms-outlook",
+            "application/x-mimearchive",
+            "multipart/related",
+            # ── Browser / web (CAPE ``chrome`` / ``ie`` / ``crx``) ──
+            "text/html",
+            "application/xhtml+xml",
+            "application/xml",
+            "text/xml",
+            "application/x-chrome-extension",
+            # ── Shortcuts, HTA, registry, control panel ─────────────
+            "application/x-ms-shortcut",
+            "application/x-mslnk",
+            "application/hta",
+            "application/x-hta",
+            "application/x-registry",
+            "text/x-ms-regedit",
+            "application/x-cpl",
+            "application/x-rdp",
+            # ── Help, Flash, Java applet ────────────────────────────
+            "application/vnd.ms-htmlhelp",
+            "application/x-chm",
+            "application/x-shockwave-flash",
+            "application/x-java-applet",
+            # ── Scripts that DO carry a magic-byte MIME ─────────────
+            # (the .vbs/.ps1/.bat/.py/.js majority come back None and
+            # pass via samples.py's "detected_mime is None" branch)
+            "text/x-shellscript",
+            "application/x-shellscript",
+            "text/x-python",
+            "application/x-python",
+            "text/x-perl",
+            "application/x-perl",
+            "application/javascript",
+            "application/x-javascript",
+            "text/javascript",
+            "application/x-powershell",
+            "text/x-powershell",
+            "application/x-vbscript",
+            "text/vbscript",
+            "application/x-bat",
+            "text/x-msdos-batch",
+            "application/x-msdos-program",
         ]
     )
 
