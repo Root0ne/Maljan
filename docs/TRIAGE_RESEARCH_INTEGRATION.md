@@ -57,8 +57,19 @@ on these terms. See `https://tria.ge/policy` and `https://www.recordedfuture.com
    SANDBOX__BACKEND=triage
    SANDBOX__TRIAGE_API_TOKEN=tria_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    SANDBOX__TRIAGE_BASE_URL=https://api.tria.ge
-   SANDBOX__TRIAGE_TIMEOUT_SECONDS=600
+   SANDBOX__TRIAGE_TIMEOUT_SECONDS=1800
    SANDBOX__TRIAGE_POLL_INTERVAL_SECONDS=15
+
+   # Behavioral analysis settings
+   SANDBOX__TRIAGE_BEHAVIORAL_TIMEOUT=120   # seconds per task (Triage cap 3600)
+   SANDBOX__TRIAGE_NETWORK_MODE=internet    # internet | drop | tor
+
+   # Optional: pin a specific OS image (otherwise auto-pick by extension)
+   # SANDBOX__TRIAGE_FORCE_OS_TAG=os:android-13-x64
+
+   # Optional: pull the decrypted PCAPNG per behavioral task.
+   # SANDBOX__TRIAGE_FETCH_PCAPNG=true
+   # SANDBOX__TRIAGE_PCAP_DIR=data/triage_pcaps
    ```
 
 4. Install httpx (already a Maljan dependency, no extra install needed).
@@ -68,8 +79,92 @@ on these terms. See `https://tria.ge/policy` and `https://www.recordedfuture.com
    uv run maljan analyze <sha256> -s samples/zararli.apk --name triage-test -i 3
    ```
 
-The `report["sandbox_url"]` field in the persisted analysis report will hold
+The `report["sandbox_url"]` field in the persisted analysis report holds
 the citeable URL; quote it in the paper alongside the Maljan verdict.
+
+## Submission flow (deterministic behavioral execution)
+
+The client always embeds an explicit OS-tag profile in the submit
+payload. This guarantees behavioral execution even on accounts that have
+zero saved profiles configured via the web UI (the default state of a
+fresh Researcher account, where Triage's "auto" mode silently falls back
+to static-only).
+
+```
+submit (interactive=false, profiles=[{"profile": {"tags": ["os:<os>-<ver>-<arch>"]}}])
+  -> pending
+  -> scheduled
+  -> running            [behavioral profile executing]
+  -> processing
+  -> reported
+```
+
+Profile selection logic (`_pick_profile_tag`):
+
+| Extension                  | OS tag                  |
+|----------------------------|-------------------------|
+| `.apk`, `.dex`             | `os:android-13-x64`     |
+| `.elf`, `.so`, `.sh`, `.deb`, `.bin` | `os:ubuntu-22.04-amd64` |
+| `.dmg`, `.pkg`, `.app`, `.scpt` | `os:macos-10.15-amd64` |
+| everything else            | `os:windows10-2004-x64` |
+
+Override per-deployment with `SANDBOX__TRIAGE_FORCE_OS_TAG` (use any tag
+from `GET /v0/resources`, e.g. `os:windows11-21h2-x64`). Use the legacy
+interactive flow (`SANDBOX__TRIAGE_INTERACTIVE=true` +
+`SANDBOX__TRIAGE_AUTO_PROFILE=true`) only when the account has profiles
+saved via the web UI; otherwise prefer embedded profiles.
+
+## CTI surface in the normalized report
+
+Every fetch produces a flat `report["cti"]` block consolidating the
+research-relevant fields from `summary` + `overview.json` +
+per-task `report_triage.json`:
+
+```python
+report["cti"] = {
+    "family":    [...],                  # detected malware families
+    "ttp":       ["T1055", "T1059.001"], # MITRE ATT&CK technique IDs (deduped)
+    "tags":      [...],
+    "score":     8,                      # Triage 1-10
+    "c2": {
+        "urls":    [...],                # http://... / tcp://...
+        "domains": [...],                # raw domains
+        "ips":     [...],                # raw IPs
+    },
+    "mutexes":      [...],
+    "keys":         [{"kind": "AES", "key": "...", "value": ...}],
+    "credentials":  [{"protocol": "ftp", "host": "...", "username": "..."}],
+    "dropped_files":[{"name": "...", "sha256": "...", "md5": "...", "path": "..."}],
+    "dropper_urls": [{"type": "...", "url": "..."}],
+    "ransom_notes": [{"family": "...", "emails": [...], "wallets": [...], ...}],
+    "network": {
+        "dns_queries": [...],
+        "http_urls":   [...],
+        "domains":     [...],
+        "ips":         [...],
+        "tls_ja3":     [...],            # JA3 fingerprints from TLS flows
+        "tls_sni":     [...],            # SNI values observed
+    },
+    "indicators":  [{"ioc": "...", "description": "..."}],
+    "yara_rules":  [...],                # rule names that fired
+}
+```
+
+In addition the report carries:
+
+* `report["sandbox_url"]` — citeable `https://tria.ge/<id>` URL.
+* `report["pcapng_paths"]` — list of local PCAPNG paths (only when
+  `SANDBOX__TRIAGE_FETCH_PCAPNG=true`).
+* `report["behavior_rich"]` — raw per-task `report_triage.json` payloads
+  for any analyst that wants the unmapped Triage shape.
+* `report["signatures_rich"]` — raw signature objects with indicators
+  and YARA rules attached.
+* `report["extracted"]` — overview-level + per-task `extracted[].config`
+  blocks promoted verbatim.
+* `report["triage_score"]` — overall 1-10 from `analysis.score`.
+
+The CTI synthesizer dedupes lists while preserving first-seen order so a
+paper-time export is stable across reruns of the same sample.
 
 ## Score mapping
 

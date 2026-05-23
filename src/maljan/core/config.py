@@ -230,8 +230,32 @@ class SandboxConfig(BaseModel):
     cape2_poll_interval_seconds: int = 10
     triage_api_token: SecretStr = SecretStr("")
     triage_base_url: str = "https://api.tria.ge"
-    triage_timeout_seconds: int = 600
+    triage_timeout_seconds: int = 1800
     triage_poll_interval_seconds: int = 15
+    # Research-paper defaults: every submission embeds an explicit OS-tag
+    # profile derived from the file extension, so behavioral analysis is
+    # guaranteed even on Researcher-tier accounts that have no saved
+    # profiles (where ``auto: true`` would fall back to static-only).
+    # Override per-account by setting ``triage_force_os_tag`` to a tag from
+    # ``GET /v0/resources`` (e.g. ``os:windows10-2004-x64``); leave empty to
+    # use the built-in extension -> OS mapping.
+    triage_force_os_tag: str = ""
+    # Behavioral analysis timeout per task (seconds, Triage hard cap 3600).
+    triage_behavioral_timeout: int = 120
+    # Behavioral network mode: internet | drop | tor.
+    triage_network_mode: str = "internet"
+    # Set to True for the old static -> POST /profile {auto:true} flow.
+    # Only useful when the account has saved profiles via the web UI; the
+    # default embedded-profile path covers the typical research case.
+    triage_interactive: bool = False
+    triage_auto_profile: bool = False
+    # Pull the decrypted PCAPNG file for each behavioral task and persist it
+    # under data/triage_pcaps/<task>/. Off by default — PCAPs are large
+    # (often tens of MB) and only network-deep analyses need them.
+    triage_fetch_pcapng: bool = False
+    # Where to put fetched PCAPNG files. Relative paths resolve against the
+    # data root.
+    triage_pcap_dir: str = "data/triage_pcaps"
 
 
 class AnalysisConfig(BaseModel):

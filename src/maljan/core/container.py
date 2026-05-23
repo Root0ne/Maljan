@@ -195,19 +195,35 @@ class ServiceContainer:
                     self.config.sandbox.cape2_base_url,
                 )
             elif backend == "triage":
+                from maljan.core.paths import resolve_data
                 from maljan.loaders.triage_client import TriageClient
 
+                pcap_dir = (
+                    str(resolve_data(self.config.sandbox.triage_pcap_dir))
+                    if self.config.sandbox.triage_fetch_pcapng
+                    else None
+                )
                 self._sandbox_client_cache = TriageClient(
                     api_token=self.config.sandbox.triage_api_token,
                     base_url=self.config.sandbox.triage_base_url,
                     timeout=self.config.sandbox.triage_timeout_seconds,
                     poll_interval=self.config.sandbox.triage_poll_interval_seconds,
+                    interactive=self.config.sandbox.triage_interactive,
+                    auto_profile=self.config.sandbox.triage_auto_profile,
+                    force_os_tag=self.config.sandbox.triage_force_os_tag or None,
+                    behavioral_timeout=self.config.sandbox.triage_behavioral_timeout,
+                    network_mode=self.config.sandbox.triage_network_mode,
+                    pcap_dir=pcap_dir,
                 )
                 logger.info(
-                    "Sandbox backend: TriageClient (url=%s). "
-                    "WARNING: public-cloud submissions are world-visible and "
-                    "cannot be deleted — use research/published samples only.",
+                    "Sandbox backend: TriageClient (url=%s, force_os_tag=%s, "
+                    "behavioral_timeout=%ds, pcap=%s). WARNING: public-cloud "
+                    "submissions are world-visible and cannot be deleted — "
+                    "use research / published samples only.",
                     self.config.sandbox.triage_base_url,
+                    self.config.sandbox.triage_force_os_tag or "<auto>",
+                    self.config.sandbox.triage_behavioral_timeout,
+                    "on" if pcap_dir else "off",
                 )
             else:
                 from maljan.loaders.mock_sandbox_client import MockSandboxClient

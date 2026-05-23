@@ -19,9 +19,13 @@ from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.loaders.triage_client import (
     TriageClient,
     _apply_overview,
+    _apply_per_task_report,
+    _classify_c2,
     _normalize_report,
+    _pick_profile_tag,
     _resolve_sample_name,
     _sha256_file,
+    _synthesize_cti,
     _view_url,
 )
 
@@ -376,6 +380,277 @@ class TestTriageClientSyncFlow:
             client.close()
         assert result.status == "failed"
         assert "non-dict" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Interactive submit + auto-profile flow
+# ---------------------------------------------------------------------------
+
+
+class TestInteractiveFlow:
+    @staticmethod
+    def _install_mock_transport(client: TriageClient, handler: Any) -> None:
+        transport = httpx.MockTransport(handler)
+        client._http_sync = httpx.Client(
+            base_url=client._api_prefix,
+            headers=client._headers(),
+            timeout=5.0,
+            transport=transport,
+        )
+
+    def test_submit_embeds_extension_derived_os_tag(self, tmp_path: Path) -> None:
+        captured: dict[str, Any] = {}
+        apk = tmp_path / "evil.apk"
+        apk.write_bytes(b"PK\x03\x04dummy")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"id": "tid", "status": "pending"})
+
+        client = TriageClient()
+        self._install_mock_transport(client, handler)
+        try:
+            client.submit(apk)
+        finally:
+            client.close()
+        body = captured["body"].decode("utf-8", errors="ignore")
+        # Default is embedded profile (interactive=false) with Android tag
+        # for .apk samples + a behavioral defaults block.
+        assert '"interactive": false' in body
+        assert '"os:android-13-x64"' in body
+        assert '"defaults"' in body
+        assert '"network": "internet"' in body
+
+    def test_submit_honours_force_os_tag(self, sample_file: Path) -> None:
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"id": "tid", "status": "pending"})
+
+        client = TriageClient(force_os_tag="os:windows11-21h2-x64")
+        self._install_mock_transport(client, handler)
+        try:
+            client.submit(sample_file)
+        finally:
+            client.close()
+        body = captured["body"].decode("utf-8", errors="ignore")
+        assert '"os:windows11-21h2-x64"' in body
+
+    def test_submit_interactive_mode_skips_embedded_profile(self, sample_file: Path) -> None:
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"id": "tid", "status": "pending"})
+
+        client = TriageClient(interactive=True, auto_profile=True)
+        self._install_mock_transport(client, handler)
+        try:
+            client.submit(sample_file)
+        finally:
+            client.close()
+        body = captured["body"].decode("utf-8", errors="ignore")
+        assert '"interactive": true' in body
+        # When interactive=True we do NOT embed a profile — wait posts /profile.
+        assert '"profiles"' not in body
+
+    def test_wait_posts_auto_profile_on_static_analysis(self) -> None:
+        call_log: list[tuple[str, str]] = []
+        states = iter(
+            [
+                "pending",
+                "static_analysis",
+                "running",
+                "processing",
+                "reported",
+            ]
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            call_log.append((request.method, request.url.path))
+            if request.method == "POST" and request.url.path.endswith("/profile"):
+                return httpx.Response(200, json={})
+            try:
+                state = next(states)
+            except StopIteration:
+                state = "reported"
+            return httpx.Response(200, json={"status": state})
+
+        client = TriageClient(interactive=True, auto_profile=True)
+        self._install_mock_transport(client, handler)
+        try:
+            status = client.wait_for_completion("tid", timeout_seconds=10, poll_interval_seconds=0)
+        finally:
+            client.close()
+        assert status == "reported"
+        posts = [c for c in call_log if c[0] == "POST"]
+        assert len(posts) == 1
+        assert posts[0][1].endswith("/samples/tid/profile")
+
+
+class TestPickProfileTag:
+    def test_apk_maps_to_android(self, tmp_path: Path) -> None:
+        assert _pick_profile_tag(tmp_path / "evil.apk") == "os:android-13-x64"
+
+    def test_elf_maps_to_ubuntu(self, tmp_path: Path) -> None:
+        assert _pick_profile_tag(tmp_path / "evil.elf") == "os:ubuntu-22.04-amd64"
+
+    def test_dmg_maps_to_macos(self, tmp_path: Path) -> None:
+        assert _pick_profile_tag(tmp_path / "evil.dmg") == "os:macos-10.15-amd64"
+
+    def test_unknown_extension_falls_back_to_windows(self, tmp_path: Path) -> None:
+        assert _pick_profile_tag(tmp_path / "evil.foobar") == "os:windows10-2004-x64"
+
+    def test_force_tag_overrides_extension(self, tmp_path: Path) -> None:
+        assert (
+            _pick_profile_tag(tmp_path / "evil.apk", force_tag="os:windows11-21h2-x64")
+            == "os:windows11-21h2-x64"
+        )
+
+
+# ---------------------------------------------------------------------------
+# _apply_per_task_report
+# ---------------------------------------------------------------------------
+
+
+class TestApplyPerTaskReport:
+    def _base(self) -> dict[str, Any]:
+        return _normalize_report({}, "placeholder.bin")
+
+    def test_pours_processes_and_network_into_normalized(self) -> None:
+        per_task = [
+            {
+                "task_id": "behavioral1",
+                "report": {
+                    "processes": [
+                        {"image": "C:\\evil.exe", "pid": 1234, "cmd": "evil.exe --c2 1.2.3.4"}
+                    ],
+                    "network": {
+                        "flows": [
+                            {
+                                "proto": "tcp",
+                                "src": "10.0.0.5:54321",
+                                "dst": "1.2.3.4:443",
+                                "domain": "evil.com",
+                                "tls_sni": "evil.com",
+                                "tls_ja3": "deadbeef" * 4,
+                                "country": "NL",
+                            }
+                        ],
+                        "requests": [
+                            {
+                                "at": 1,
+                                "dns_request": {"questions": [{"name": "evil.com", "type": "A"}]},
+                                "dns_response": {"ip": ["1.2.3.4"]},
+                            },
+                            {
+                                "at": 2,
+                                "http_request": {"method": "GET", "url": "http://evil.com/x"},
+                            },
+                        ],
+                    },
+                    "dumped": [{"name": "payload.bin", "sha256": "f" * 64, "kind": "memory_dump"}],
+                    "signatures": [
+                        {"name": "C2 beacon", "ttp": ["T1071.001"], "yara_rule": "emotet_c2"}
+                    ],
+                    "analysis": {"tags": ["family:emotet"], "ttp": ["T1059.001"]},
+                },
+            }
+        ]
+        normalized = self._base()
+        _apply_per_task_report(per_task, normalized)
+        assert normalized["behavior"]["processes"][0]["pid"] == 1234
+        tcp = normalized["network"]["tcp"]
+        assert tcp[0]["dst"] == "1.2.3.4:443"
+        assert tcp[0]["tls_ja3"].startswith("deadbeef")
+        assert any("evil.com" in d for d in normalized["network"]["domains"])
+        assert normalized["network"]["dns"][0]["response"]["ip"] == ["1.2.3.4"]
+        assert normalized["network"]["http"][0]["url"] == "http://evil.com/x"
+        assert normalized["dumped"][0]["sha256"] == "f" * 64
+        assert "T1059.001" in normalized["ttp_tags"]
+        assert "T1071.001" in normalized["ttp_tags"]
+        assert any(s.get("yara_rule") == "emotet_c2" for s in normalized["signatures_rich"])
+
+    def test_empty_per_task_is_noop(self) -> None:
+        normalized = self._base()
+        _apply_per_task_report([], normalized)
+        assert normalized["behavior"]["processes"] == []
+
+
+# ---------------------------------------------------------------------------
+# _classify_c2 + _synthesize_cti
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyC2:
+    def test_buckets_url_domain_ip(self) -> None:
+        c2: dict[str, list[str]] = {"urls": [], "domains": [], "ips": []}
+        _classify_c2("http://evil.com/beacon", c2)
+        _classify_c2("evil.com", c2)
+        _classify_c2("evil.com:443/path", c2)
+        _classify_c2("1.2.3.4", c2)
+        _classify_c2("1.2.3.4:443", c2)
+        assert c2["urls"] == ["http://evil.com/beacon"]
+        assert c2["domains"] == ["evil.com", "evil.com"]
+        assert c2["ips"] == ["1.2.3.4", "1.2.3.4"]
+
+
+class TestSynthesizeCTI:
+    def test_promotes_extracted_config_into_cti(self) -> None:
+        normalized = _normalize_report({}, "p.bin")
+        normalized["extracted"] = [
+            {
+                "config": {
+                    "family": "emotet",
+                    "c2": ["http://evil.com/", "evil.com", "1.2.3.4:443"],
+                    "mutex": ["GlobalMutex_xyz"],
+                    "keys": [{"kind": "AES", "key": "deadbeef", "value": None}],
+                    "credentials": [{"protocol": "ftp", "host": "ftp.evil.com", "username": "u"}],
+                }
+            }
+        ]
+        cti = _synthesize_cti(normalized)
+        assert "emotet" in cti["family"]
+        assert "http://evil.com/" in cti["c2"]["urls"]
+        assert "evil.com" in cti["c2"]["domains"]
+        assert "1.2.3.4" in cti["c2"]["ips"]
+        assert "GlobalMutex_xyz" in cti["mutexes"]
+        assert cti["keys"][0]["kind"] == "AES"
+        assert cti["credentials"][0]["host"] == "ftp.evil.com"
+
+    def test_dedupes_lists(self) -> None:
+        normalized = _normalize_report({}, "p.bin")
+        normalized["ttp_tags"] = ["T1055", "T1055", "T1059.001"]
+        normalized["families"] = ["emotet", "emotet", "trickbot"]
+        cti = _synthesize_cti(normalized)
+        assert cti["ttp"] == ["T1055", "T1059.001"]
+        assert cti["family"] == ["emotet", "trickbot"]
+
+    def test_surfaces_network_iocs_and_dropped_files(self) -> None:
+        normalized = _normalize_report({}, "p.bin")
+        normalized["network"]["http"].append({"url": "http://evil.com/payload"})
+        normalized["network"]["domains"].append("evil.com")
+        normalized["network"]["tcp"].append(
+            {"dst": "1.2.3.4:443", "domain": "evil.com", "tls_sni": "evil.com", "tls_ja3": "abc"}
+        )
+        normalized["dumped"] = [{"name": "d.bin", "sha256": "f" * 64}]
+        normalized["signatures"] = [
+            {
+                "name": "sig1",
+                "indicators": [{"ioc": "evil.com", "description": "C2 contacted"}],
+                "yara_rule": "evil_rule",
+            }
+        ]
+        cti = _synthesize_cti(normalized)
+        assert "http://evil.com/payload" in cti["network"]["http_urls"]
+        assert "evil.com" in cti["network"]["domains"]
+        assert "1.2.3.4" in cti["network"]["ips"]
+        assert "evil.com" in cti["network"]["tls_sni"]
+        assert "abc" in cti["network"]["tls_ja3"]
+        assert cti["dropped_files"][0]["sha256"] == "f" * 64
+        assert "evil_rule" in cti["yara_rules"]
+        assert cti["indicators"][0]["ioc"] == "evil.com"
 
 
 # ---------------------------------------------------------------------------
