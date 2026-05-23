@@ -489,6 +489,129 @@ class TestInteractiveFlow:
         assert posts[0][1].endswith("/samples/tid/profile")
 
 
+class TestSubmitExtras:
+    @staticmethod
+    def _install_mock_transport(client: TriageClient, handler: Any) -> None:
+        transport = httpx.MockTransport(handler)
+        client._http_sync = httpx.Client(
+            base_url=client._api_prefix,
+            headers=client._headers(),
+            timeout=5.0,
+            transport=transport,
+        )
+
+    def test_payload_includes_password_user_tags_target(self, sample_file: Path) -> None:
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"id": "tid", "status": "pending"})
+
+        client = TriageClient(
+            archive_password="infected",
+            user_tags=["experiment:rq2", "batch:7"],
+            target_filename="renamed.exe",
+        )
+        self._install_mock_transport(client, handler)
+        try:
+            client.submit(sample_file)
+        finally:
+            client.close()
+        body = captured["body"].decode("utf-8", errors="ignore")
+        assert '"password": "infected"' in body
+        assert '"experiment:rq2"' in body
+        assert '"batch:7"' in body
+        assert '"target": "renamed.exe"' in body
+
+    def test_payload_includes_geolocation_when_set(self, sample_file: Path) -> None:
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"id": "tid", "status": "pending"})
+
+        client = TriageClient(geolocation="north-america", network_mode="vpn")
+        self._install_mock_transport(client, handler)
+        try:
+            client.submit(sample_file)
+        finally:
+            client.close()
+        body = captured["body"].decode("utf-8", errors="ignore")
+        assert '"geolocation": "north-america"' in body
+        assert '"network": "vpn"' in body
+
+
+class TestSubmitURL:
+    @staticmethod
+    def _install_mock_transport(client: TriageClient, handler: Any) -> None:
+        transport = httpx.MockTransport(handler)
+        client._http_sync = httpx.Client(
+            base_url=client._api_prefix,
+            headers=client._headers(),
+            timeout=5.0,
+            transport=transport,
+        )
+
+    def test_submit_url_kind(self) -> None:
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            captured["content_type"] = request.headers.get("content-type", "")
+            return httpx.Response(200, json={"id": "260523-zzz", "status": "pending"})
+
+        client = TriageClient()
+        self._install_mock_transport(client, handler)
+        try:
+            task_id = client.submit_url("http://malicious.example.com/landing")
+        finally:
+            client.close()
+        assert task_id == "260523-zzz"
+        body = captured["body"].decode("utf-8", errors="ignore")
+        assert '"kind": "url"' in body
+        assert '"url": "http://malicious.example.com/landing"' in body
+        # Falls back to Windows when no explicit force_os_tag.
+        assert '"os:windows10-2004-x64"' in body
+        assert captured["content_type"].startswith("application/json")
+
+    def test_submit_url_rejects_bad_kind(self) -> None:
+        client = TriageClient()
+        with pytest.raises(ValueError, match="kind must be url"):
+            client.submit_url("http://x", kind="garbage")
+
+    def test_submit_import_kind(self) -> None:
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"id": "260523-imp", "status": "pending"})
+
+        client = TriageClient()
+        self._install_mock_transport(client, handler)
+        try:
+            client.submit_url("https://tria.ge/250303-abcdefg", kind="import")
+        finally:
+            client.close()
+        body = captured["body"].decode("utf-8", errors="ignore")
+        assert '"kind": "import"' in body
+
+
+class TestApplyOverviewErrors:
+    def test_errors_promoted_into_sandbox_errors(self) -> None:
+        normalized = _normalize_report({}, "p.bin")
+        overview = {
+            "errors": [
+                {"task": "behavioral1", "backend": "win10", "reason": "Sample crashed"},
+                {"task": "behavioral2", "backend": "android-13", "reason": "Timeout"},
+            ]
+        }
+        _apply_overview(overview, normalized, fallback_sample_id="t")
+        errs = normalized["sandbox_errors"]
+        assert len(errs) == 2
+        assert errs[0]["task"] == "behavioral1"
+        assert errs[0]["reason"] == "Sample crashed"
+
+
 class TestPickProfileTag:
     def test_apk_maps_to_android(self, tmp_path: Path) -> None:
         assert _pick_profile_tag(tmp_path / "evil.apk") == "os:android-13-x64"

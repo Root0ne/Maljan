@@ -244,6 +244,15 @@ class SandboxConfig(BaseModel):
     triage_behavioral_timeout: int = 120
     # Behavioral network mode: internet | drop | tor.
     triage_network_mode: str = "internet"
+    # Optional VPN geolocation tag (see GET /v0/geolocations). Empty = default.
+    triage_geolocation: str = ""
+    # Optional password for encrypted archives. Common for malware
+    # distribution (e.g. "infected"-locked .zip / .rar).
+    triage_archive_password: str = ""
+    # Comma-separated experiment-metadata tags embedded in every
+    # submission (e.g. "experiment:rq2,batch:7"). Surfaces in Triage's
+    # report and lets the paper correlate runs by tag.
+    triage_user_tags: str = ""
     # Set to True for the old static -> POST /profile {auto:true} flow.
     # Only useful when the account has saved profiles via the web UI; the
     # default embedded-profile path covers the typical research case.
@@ -253,9 +262,17 @@ class SandboxConfig(BaseModel):
     # under data/triage_pcaps/<task>/. Off by default — PCAPs are large
     # (often tens of MB) and only network-deep analyses need them.
     triage_fetch_pcapng: bool = False
-    # Where to put fetched PCAPNG files. Relative paths resolve against the
-    # data root.
     triage_pcap_dir: str = "data/triage_pcaps"
+    # Download dropped/dumped binaries from each behavioral task — payload
+    # bytes themselves, not just sha256/path. Persisted under
+    # data/triage_dumps/<sample_id>/<sha256_prefix>_<name>. Off by default
+    # (can be many tens of MB per sample).
+    triage_fetch_dumps: bool = False
+    triage_dumps_dir: str = "data/triage_dumps"
+    # Pull the raw kernel-monitor JSON log for each behavioral task. Off
+    # by default. Persisted under data/triage_logs/<sample>/<task>.onemon.json.
+    triage_fetch_onemon: bool = False
+    triage_onemon_dir: str = "data/triage_logs"
 
 
 class AnalysisConfig(BaseModel):

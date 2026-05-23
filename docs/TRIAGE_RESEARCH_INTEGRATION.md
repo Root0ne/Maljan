@@ -153,8 +153,18 @@ report["cti"] = {
 In addition the report carries:
 
 * `report["sandbox_url"]` — citeable `https://tria.ge/<id>` URL.
-* `report["pcapng_paths"]` — list of local PCAPNG paths (only when
+* `report["sandbox_share_url"]` — token-embedded variant from `/magic`
+  (paper reviewer can open without an API key).
+* `report["sandbox_errors"]` — surfaced `errors[]` from summary +
+  overview (`{task, backend, reason}`) so an empty behavioral section
+  is explained instead of silent.
+* `report["pcapng_paths"]` — local PCAPNG paths (only when
   `SANDBOX__TRIAGE_FETCH_PCAPNG=true`).
+* `report["dump_paths"]` — local dropped-binary paths (only when
+  `SANDBOX__TRIAGE_FETCH_DUMPS=true`). The bytes themselves, not just
+  hashes.
+* `report["onemon_paths"]` — local raw kernel-monitor JSON paths (only
+  when `SANDBOX__TRIAGE_FETCH_ONEMON=true`).
 * `report["behavior_rich"]` — raw per-task `report_triage.json` payloads
   for any analyst that wants the unmapped Triage shape.
 * `report["signatures_rich"]` — raw signature objects with indicators
@@ -165,6 +175,63 @@ In addition the report carries:
 
 The CTI synthesizer dedupes lists while preserving first-seen order so a
 paper-time export is stable across reruns of the same sample.
+
+## Beyond file submission
+
+The TriageClient exposes three additional submission entry points
+(callable directly on the client instance — not part of the generic
+`SandboxClient` Protocol):
+
+```python
+client.submit_url("http://phishing.example.com/login", kind="url")
+# Triage opens the URL in a browser sandbox.
+
+client.submit_url("https://hosted.example.com/sample.exe", kind="fetch")
+# Triage downloads the URL and analyses the resulting binary.
+
+client.submit_url("https://tria.ge/250303-abcdefg", kind="import")
+# Replay an existing public Triage analysis on the current environment.
+```
+
+All three honor the same `force_os_tag` / `behavioral_timeout` /
+`network_mode` knobs configured on the client.
+
+## Corpus search
+
+`client.search_corpus(query, limit=20)` wraps `GET /v0/search`. Use it
+for family attribution checks ("did the corpus see other samples in this
+family?"):
+
+```python
+similar = await client.search_corpus("family:emotet", limit=50)
+```
+
+Triage's search syntax accepts `family:`, `tag:`, `md5:`, `sha256:`,
+`signature:`, etc. — anything the web UI's filter row supports.
+
+## Coverage summary (current build)
+
+| Triage feature | Status |
+|----------------|--------|
+| `POST /samples` (file/url/fetch/import) | yes |
+| `defaults.{timeout, network, geolocation}` | yes |
+| `password` / `user_tags` / `target` | yes |
+| Embedded + saved profiles | embedded by default; saved via interactive flow |
+| `GET /samples/{id}` status polling | yes |
+| `GET /samples/{id}/summary` | yes |
+| `GET /samples/{id}/overview.json` (incl. errors) | yes |
+| `GET /samples/{id}/{task}/report_triage.json` | yes |
+| `GET /samples/{id}/{task}/dump.pcapng` | opt-in |
+| `GET /samples/{id}/{task}/files/{name}` (drops) | opt-in |
+| `GET /samples/{id}/{task}/logs/onemon.json` | opt-in |
+| `GET /samples/{id}/magic` (shareable URL) | yes |
+| `GET /v0/search` (corpus query) | helper exposed |
+| `POST /samples/{id}/profile` (legacy interactive flow) | yes |
+| `GET /samples/{id}/events` (JSONL stream) | no (we poll) |
+| `GET /samples/{id}/sample` (download original) | no (have it locally) |
+| `DELETE /samples/{id}` | no (public cloud rejects) |
+| `/profiles`, `/yara`, `/users`, `/org-settings` CRUD | no (admin) |
+| URL-scan endpoints | no (we don't submit URLs end-to-end yet) |
 
 ## Score mapping
 

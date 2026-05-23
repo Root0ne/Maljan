@@ -273,7 +273,13 @@ class TriageClient:
         force_os_tag: str | None = None,
         behavioral_timeout: int = 120,
         network_mode: str = "internet",
+        geolocation: str | None = None,
+        archive_password: str | None = None,
+        user_tags: list[str] | None = None,
+        target_filename: str | None = None,
         pcap_dir: str | None = None,
+        dumps_dir: str | None = None,
+        onemon_dir: str | None = None,
     ) -> None:
         if hasattr(api_token, "get_secret_value"):
             self._api_token = api_token.get_secret_value()  # type: ignore[union-attr]
@@ -290,7 +296,13 @@ class TriageClient:
         self._force_os_tag = force_os_tag
         self._behavioral_timeout = behavioral_timeout
         self._network_mode = network_mode
+        self._geolocation = geolocation
+        self._archive_password = archive_password
+        self._user_tags = list(user_tags) if user_tags else None
+        self._target_filename = target_filename
         self._pcap_dir = Path(pcap_dir) if pcap_dir else None
+        self._dumps_dir = Path(dumps_dir) if dumps_dir else None
+        self._onemon_dir = Path(onemon_dir) if onemon_dir else None
         self._api_prefix = f"{self._base_url}{_API_VERSION}"
         self._http_async: Any = None
         self._http_sync: Any = None
@@ -304,6 +316,22 @@ class TriageClient:
         if not path.exists():
             raise FileNotFoundError(f"Sample not found: {path}")
         return self._sync_submit(path)
+
+    def submit_url(self, url: str, kind: str = "url") -> str:
+        """Submit a URL or trigger Triage to fetch a sample from a URL.
+
+        Args:
+            url:  Target URL.
+            kind: One of:
+                  - ``url``   — Triage opens the URL in a browser sandbox.
+                  - ``fetch`` — Triage downloads the URL and analyses it as
+                    a file (useful when the sample is hosted on S3/CDN).
+                  - ``import`` — replay an existing public ``tria.ge/<id>``
+                    submission on the current environment.
+        """
+        if kind not in {"url", "fetch", "import"}:
+            raise ValueError(f"kind must be url|fetch|import, got {kind!r}")
+        return self._sync_submit_url(url, kind)
 
     def wait_for_completion(
         self,
@@ -398,10 +426,15 @@ class TriageClient:
     # Submission payload builder
     # ------------------------------------------------------------------
 
-    def _build_submit_payload(self, sample_path: Path) -> dict[str, Any]:
+    def _build_submit_payload(
+        self,
+        sample_path: Path | None = None,
+        kind: str = "file",
+        url: str | None = None,
+    ) -> dict[str, Any]:
         """Return the ``_json`` payload for ``POST /samples``.
 
-        Two strategies:
+        Two strategies for ``kind=file``:
 
         1. ``interactive=False`` (default) — embed an explicit profile
            ``{"profile": {"tags": ["os:..."]}}``. Triage starts behavioral
@@ -411,18 +444,44 @@ class TriageClient:
            loop POSTs ``/samples/{id}/profile {auto: true}`` later. Only
            useful when the account has saved profiles configured via the
            web UI.
+
+        For ``kind=url`` / ``kind=fetch`` / ``kind=import`` the ``url``
+        argument is required and ``sample_path`` is ignored. URL kinds use
+        a Windows profile by default (Triage spawns a browser); override
+        with ``force_os_tag`` if a specific image is needed.
         """
         payload: dict[str, Any] = {
-            "kind": "file",
+            "kind": kind,
             "interactive": bool(self._interactive),
         }
-        if not self._interactive:
-            tag = _pick_profile_tag(sample_path, self._force_os_tag)
-            payload["profiles"] = [{"profile": {"tags": [tag]}}]
-        payload["defaults"] = {
+        if kind == "file":
+            if sample_path is None:
+                raise ValueError("kind='file' requires sample_path")
+            if not self._interactive:
+                tag = _pick_profile_tag(sample_path, self._force_os_tag)
+                payload["profiles"] = [{"profile": {"tags": [tag]}}]
+        else:
+            if not url:
+                raise ValueError(f"kind={kind!r} requires url")
+            payload["url"] = url
+            if not self._interactive:
+                tag = self._force_os_tag or _DEFAULT_OS_TAG
+                payload["profiles"] = [{"profile": {"tags": [tag]}}]
+
+        defaults: dict[str, Any] = {
             "timeout": int(self._behavioral_timeout),
             "network": self._network_mode or "internet",
         }
+        if self._geolocation:
+            defaults["geolocation"] = self._geolocation
+        payload["defaults"] = defaults
+
+        if self._archive_password:
+            payload["password"] = self._archive_password
+        if self._user_tags:
+            payload["user_tags"] = list(self._user_tags)
+        if self._target_filename:
+            payload["target"] = self._target_filename
         return payload
 
     # ------------------------------------------------------------------
@@ -435,7 +494,7 @@ class TriageClient:
         http = self._get_http_sync()
         filename = sample_path.name
         sha256 = _sha256_file(sample_path)
-        payload = self._build_submit_payload(sample_path)
+        payload = self._build_submit_payload(sample_path, kind="file")
         logger.info(
             "TriageClient: submitting '%s' (sha256=%s..., profile=%s).",
             filename,
@@ -448,6 +507,28 @@ class TriageClient:
                 files={"file": (filename, fh, "application/octet-stream")},
                 data={"_json": _json.dumps(payload)},
             )
+        return self._parse_submit_response(response)
+
+    def _sync_submit_url(self, url: str, kind: str) -> str:
+        import json as _json
+
+        http = self._get_http_sync()
+        payload = self._build_submit_payload(sample_path=None, kind=kind, url=url)
+        logger.info(
+            "TriageClient: submitting %s url=%r (profile=%s).",
+            kind,
+            url,
+            _summarize_profile(payload),
+        )
+        response = http.post(
+            "/samples",
+            content=_json.dumps(payload),
+            headers={"Content-Type": "application/json"},
+        )
+        return self._parse_submit_response(response)
+
+    @staticmethod
+    def _parse_submit_response(response: Any) -> str:
         if response.status_code not in (200, 201):
             raise RuntimeError(
                 f"Triage /samples submission failed: HTTP {response.status_code} — "
@@ -596,6 +677,47 @@ class TriageClient:
             except Exception as exc:
                 logger.warning("TriageClient: pcapng fetch failed (%s).", exc)
 
+        # Dropped binaries (opt-in) — download every dump entry that has a
+        # filename + sha256 and persist locally for secondary analysis.
+        if self._dumps_dir is not None:
+            try:
+                dump_paths = self._sync_fetch_dump_files(task_id, normalized, triage_data)
+                if dump_paths:
+                    normalized["dump_paths"] = dump_paths
+            except Exception as exc:
+                logger.warning("TriageClient: dump fetch failed (%s).", exc)
+
+        # Kernel monitor (opt-in) — raw syscall log per behavioral task.
+        if self._onemon_dir is not None:
+            try:
+                onemon_paths = self._sync_fetch_onemon(task_id, triage_data)
+                if onemon_paths:
+                    normalized["onemon_paths"] = onemon_paths
+            except Exception as exc:
+                logger.warning("TriageClient: onemon fetch failed (%s).", exc)
+
+        # Shareable analysis URL (no token needed by the recipient).
+        try:
+            magic = self._sync_fetch_magic_url(task_id)
+            if magic:
+                normalized["sandbox_share_url"] = magic
+        except Exception as exc:
+            logger.debug("TriageClient: magic URL fetch failed (%s).", exc)
+
+        # Surface summary-level errors[] too.
+        summary_errors = triage_data.get("errors")
+        if isinstance(summary_errors, list) and summary_errors:
+            bucket = normalized.setdefault("sandbox_errors", [])
+            for e in summary_errors:
+                if isinstance(e, dict):
+                    bucket.append(
+                        {
+                            "task": e.get("task", ""),
+                            "backend": e.get("backend", ""),
+                            "reason": e.get("reason", ""),
+                        }
+                    )
+
         normalized["cti"] = _synthesize_cti(normalized)
         _log_post_enrichment(task_id, normalized)
         return SubmissionResult(
@@ -605,6 +727,114 @@ class TriageClient:
             status=str(triage_data.get("status", "reported")),
             report=normalized,
         )
+
+    def _sync_fetch_dump_files(
+        self,
+        sample_id: str,
+        normalized: dict[str, Any],
+        summary: dict[str, Any],
+    ) -> list[str]:
+        if self._dumps_dir is None:
+            return []
+        http = self._get_http_sync()
+        tasks_block = summary.get("tasks")
+        if not isinstance(tasks_block, dict):
+            return []
+        target_dir = self._dumps_dir / sample_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        out: list[str] = []
+        # We iterate normalized["dumped"] (already populated by per-task
+        # extractor) and download each entry that has a name + the task
+        # context from the summary.
+        seen: set[tuple[str, str]] = set()
+        dumped = normalized.get("dumped") or []
+        for task_id in list(tasks_block.keys())[:5]:
+            task_info = tasks_block.get(task_id)
+            kind = str((task_info or {}).get("kind") or "")
+            if not kind.startswith("behavioral"):
+                continue
+            for dump in dumped:
+                if not isinstance(dump, dict):
+                    continue
+                name = dump.get("name") or ""
+                sha256 = dump.get("sha256") or ""
+                if not name or not sha256:
+                    continue
+                key = (task_id, name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    resp = http.get(f"/samples/{sample_id}/{task_id}/files/{name}")
+                except Exception as exc:
+                    logger.debug("TriageClient: dump GET failed %s (%s).", name, exc)
+                    continue
+                if resp.status_code != 200 or not resp.content:
+                    continue
+                local = target_dir / f"{sha256[:16]}_{name}"
+                local.write_bytes(resp.content)
+                out.append(str(local))
+                logger.info(
+                    "TriageClient: dump saved %s (%d bytes) -> %s.",
+                    name,
+                    len(resp.content),
+                    local,
+                )
+        return out
+
+    def _sync_fetch_onemon(self, sample_id: str, summary: dict[str, Any]) -> list[str]:
+        if self._onemon_dir is None:
+            return []
+        http = self._get_http_sync()
+        tasks_block = summary.get("tasks")
+        if not isinstance(tasks_block, dict):
+            return []
+        target_dir = self._onemon_dir / sample_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        out: list[str] = []
+        for task_id in list(tasks_block.keys())[:5]:
+            task_info = tasks_block.get(task_id)
+            kind = str((task_info or {}).get("kind") or "")
+            if not kind.startswith("behavioral"):
+                continue
+            try:
+                resp = http.get(f"/samples/{sample_id}/{task_id}/logs/onemon.json")
+            except Exception as exc:
+                logger.debug("TriageClient: onemon GET failed %s (%s).", task_id, exc)
+                continue
+            if resp.status_code != 200 or not resp.content:
+                continue
+            local = target_dir / f"{task_id}.onemon.json"
+            local.write_bytes(resp.content)
+            out.append(str(local))
+            logger.info(
+                "TriageClient: onemon saved task=%s (%d bytes).",
+                task_id,
+                len(resp.content),
+            )
+        return out
+
+    def _sync_fetch_magic_url(self, sample_id: str) -> str:
+        http = self._get_http_sync()
+        try:
+            resp = http.get(f"/samples/{sample_id}/magic")
+        except Exception as exc:
+            logger.debug("TriageClient: magic fetch failed (%s).", exc)
+            return ""
+        if resp.status_code != 200:
+            return ""
+        try:
+            data = resp.json()
+        except Exception:
+            return ""
+        token = ""
+        if isinstance(data, dict):
+            token = str(data.get("magic", data.get("token", ""))).strip()
+        elif isinstance(data, str):
+            token = data.strip()
+        if not token:
+            return ""
+        return f"https://tria.ge/{sample_id}?magic={token}"
 
     def _sync_fetch_pcapngs(self, sample_id: str, summary: dict[str, Any]) -> list[str]:
         if self._pcap_dir is None:
@@ -686,7 +916,7 @@ class TriageClient:
         http = self._get_http()
         filename = sample_path.name
         sha256 = _sha256_file(sample_path)
-        payload = self._build_submit_payload(sample_path)
+        payload = self._build_submit_payload(sample_path, kind="file")
         logger.info(
             "TriageClient: submitting '%s' (sha256=%s..., profile=%s).",
             filename,
@@ -1075,6 +1305,22 @@ def _apply_overview(
             normalized.setdefault("attack_tags", []).extend(
                 [t for t in analysis["tags"] if isinstance(t, str)]
             )
+
+    # Surface task / backend failure reasons so an empty behavioral block
+    # is explained rather than silent. ``errors`` is a list of
+    # ``{task, backend, reason}`` objects in both summary and overview.
+    errors = overview.get("errors")
+    if isinstance(errors, list) and errors:
+        bucket = normalized.setdefault("sandbox_errors", [])
+        for e in errors:
+            if isinstance(e, dict):
+                bucket.append(
+                    {
+                        "task": e.get("task", ""),
+                        "backend": e.get("backend", ""),
+                        "reason": e.get("reason", ""),
+                    }
+                )
 
 
 def _apply_per_task_report(per_task: list[dict[str, Any]], normalized: dict[str, Any]) -> None:
