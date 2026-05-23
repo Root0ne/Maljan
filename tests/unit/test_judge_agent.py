@@ -228,3 +228,197 @@ class TestJudgeAgentExtractConfidence:
     def test_defaults_to_0_5_when_not_found(self) -> None:
         result = JudgeAgent._extract_confidence_from_text("No score mentioned here.")
         assert result == 0.5
+
+
+class TestBuildCTIBlock:
+    """Coverage for the sandbox-CTI prompt-section helper."""
+
+    def test_returns_empty_for_none(self) -> None:
+        from maljan.agents.judge_agent import _build_cti_block
+
+        assert _build_cti_block(None) == ""
+
+    def test_returns_empty_for_empty_dict(self) -> None:
+        from maljan.agents.judge_agent import _build_cti_block
+
+        assert _build_cti_block({}) == ""
+
+    def test_returns_empty_when_all_lists_empty(self) -> None:
+        from maljan.agents.judge_agent import _build_cti_block
+
+        cti = {
+            "family": [],
+            "ttp": [],
+            "tags": [],
+            "c2": {"urls": [], "domains": [], "ips": []},
+            "mutexes": [],
+            "keys": [],
+            "credentials": [],
+            "dropped_files": [],
+            "dropper_urls": [],
+            "ransom_notes": [],
+            "network": {
+                "dns_queries": [],
+                "http_urls": [],
+                "domains": [],
+                "ips": [],
+                "tls_ja3": [],
+                "tls_sni": [],
+            },
+            "indicators": [],
+            "yara_rules": [],
+            "score": None,
+        }
+        assert _build_cti_block(cti) == ""
+
+    def test_renders_all_populated_sections(self) -> None:
+        from maljan.agents.judge_agent import _build_cti_block
+
+        cti = {
+            "family": ["emotet"],
+            "ttp": ["T1055", "T1059.001"],
+            "tags": ["malware:trojan"],
+            "score": 10,
+            "c2": {
+                "urls": ["http://evil.example/c2"],
+                "domains": ["evil.example"],
+                "ips": ["1.2.3.4"],
+            },
+            "mutexes": ["GlobalMutex_xyz"],
+            "keys": [{"kind": "AES", "key": "deadbeef", "value": None}],
+            "credentials": [{"protocol": "ftp", "host": "ftp.evil.example"}],
+            "dropped_files": [{"name": "payload.bin", "sha256": "f" * 64}],
+            "dropper_urls": [{"type": "exe", "url": "http://stager.example/p"}],
+            "ransom_notes": [{"family": "ransom"}],
+            "network": {
+                "dns_queries": ["evil.example"],
+                "http_urls": ["http://evil.example/x"],
+                "domains": ["evil.example"],
+                "ips": ["1.2.3.4"],
+                "tls_ja3": ["abc"],
+                "tls_sni": ["evil.example"],
+            },
+            "indicators": [{"ioc": "evil.example", "description": "C2 contacted"}],
+            "yara_rules": ["emotet_c2"],
+        }
+        out = _build_cti_block(cti)
+        assert out.startswith("=== SANDBOX_CTI")
+        assert out.rstrip().endswith("=== END SANDBOX_CTI ===")
+        assert "sandbox_score: 10/10" in out
+        assert "family: ['emotet']" in out
+        assert "mitre_ttp: ['T1055', 'T1059.001']" in out
+        assert "http://evil.example/c2" in out
+        assert "GlobalMutex_xyz" in out
+        assert "credentials_count: 1" in out
+        assert "payload.bin" in out
+        assert "fffffffffffffff" in out  # truncated sha256 visible
+        assert "stager.example" in out
+        assert "ransom_notes: 1 extracted" in out
+        assert "tls_sni: ['evil.example']" in out
+        assert "yara_rules: ['emotet_c2']" in out
+        assert "sandbox_indicators: ['evil.example']" in out
+
+    def test_truncates_long_lists(self) -> None:
+        from maljan.agents.judge_agent import _build_cti_block
+
+        cti = {
+            "ttp": [f"T{i:04d}" for i in range(50)],
+            "c2": {"domains": [f"evil-{i}.example" for i in range(30)], "urls": [], "ips": []},
+        }
+        out = _build_cti_block(cti)
+        # ttp helper caps at 12; the 13th and 30th must not appear verbatim.
+        assert "'T0011'" in out
+        assert "'T0012'" not in out
+        # c2 domain helper caps at 8.
+        assert "evil-7.example" in out
+        assert "evil-8.example" not in out
+
+
+class TestCTIReachesVerdictPrompt:
+    """Integration check: CTI passed to give_verdict() lands in the prompt
+    that reaches the LLM. We intercept the ChatPromptTemplate.from_messages
+    call to capture the formatted text."""
+
+    def test_cti_block_present_in_human_message(self) -> None:
+        from maljan.agents.judge_agent import JudgeAgent
+
+        captured: dict[str, str] = {}
+
+        class _FakeChain:
+            async def ainvoke(self, kwargs: dict) -> object:
+                captured["reports"] = str(kwargs.get("reports", ""))
+
+                class _R:
+                    content = "{}"  # invalid JSON triggers text fallback
+
+                return _R()
+
+        class _FakePrompt:
+            def __or__(self, _llm: object) -> _FakeChain:
+                return _FakeChain()
+
+        cti_block = {
+            "family": ["emotet"],
+            "ttp": ["T1055"],
+            "c2": {"urls": [], "domains": ["evil.example"], "ips": ["1.2.3.4"]},
+            "mutexes": ["GlobalMutex_xyz"],
+            "score": 9,
+        }
+
+        judge = JudgeAgent(llm=MagicMock())
+        with patch(
+            "maljan.agents.judge_agent.ChatPromptTemplate.from_messages",
+            return_value=_FakePrompt(),
+        ):
+            asyncio.run(
+                judge.give_verdict(
+                    reports={"static": "x"},
+                    history=[],
+                    cti_block=cti_block,
+                )
+            )
+
+        assert "reports" in captured
+        # CTI block must surface in the prompt text exactly as rendered by
+        # _build_cti_block — sandbox_score / family / c2 / mutex lines.
+        text = captured["reports"]
+        assert "SANDBOX_CTI" in text
+        assert "sandbox_score: 9/10" in text
+        assert "family: ['emotet']" in text
+        assert "evil.example" in text
+        assert "1.2.3.4" in text
+        assert "GlobalMutex_xyz" in text
+
+    def test_no_cti_block_means_no_section(self) -> None:
+        from maljan.agents.judge_agent import JudgeAgent
+
+        captured: dict[str, str] = {}
+
+        class _FakeChain:
+            async def ainvoke(self, kwargs: dict) -> object:
+                captured["reports"] = str(kwargs.get("reports", ""))
+
+                class _R:
+                    content = "{}"
+
+                return _R()
+
+        class _FakePrompt:
+            def __or__(self, _llm: object) -> _FakeChain:
+                return _FakeChain()
+
+        judge = JudgeAgent(llm=MagicMock())
+        with patch(
+            "maljan.agents.judge_agent.ChatPromptTemplate.from_messages",
+            return_value=_FakePrompt(),
+        ):
+            asyncio.run(
+                judge.give_verdict(
+                    reports={"static": "x"},
+                    history=[],
+                    cti_block=None,
+                )
+            )
+        assert "reports" in captured
+        # Without CTI, the SANDBOX_CTI header MUST NOT appear in the prompt.
+        assert "SANDBOX_CTI" not in captured["reports"]

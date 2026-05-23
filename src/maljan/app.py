@@ -171,6 +171,7 @@ class MaljanApp:
             "stix_bundle_extended": None,
             "degraded_mode": False,
             "degradation_reasons": [],
+            "sandbox_cti": None,
         }
 
         result = await self.graph.ainvoke(initial_state)

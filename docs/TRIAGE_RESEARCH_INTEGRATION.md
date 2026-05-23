@@ -191,10 +191,40 @@ client.submit_url("https://hosted.example.com/sample.exe", kind="fetch")
 
 client.submit_url("https://tria.ge/250303-abcdefg", kind="import")
 # Replay an existing public Triage analysis on the current environment.
+# NOTE: kind=import is a paid-tier feature. On the public Researcher
+# account it returns HTTP 400 ("The importing samples from the public
+# cloud feature is not enabled."). Use kind=fetch for any public URL
+# Triage can download itself, or upload via submit() instead.
 ```
 
 All three honor the same `force_os_tag` / `behavioral_timeout` /
 `network_mode` knobs configured on the client.
+
+## CTI consumption inside the verdict path
+
+Once the TriageClient populates ``report["cti"]``, the LangGraph pipeline
+forwards it to the chief judge:
+
+1. ``pipeline/nodes.py::make_judge_node`` extracts
+   ``state["sandbox_report"]["cti"]`` and passes it as ``cti_block`` to
+   ``JudgeAgent.give_verdict()``.
+2. ``JudgeAgent`` renders a compact ``SANDBOX_CTI`` block via
+   ``_build_cti_block`` (truncated to ~1 KB worst-case) and appends it
+   to the verdict prompt right after the long-term-memory block. The
+   verdict system prompt instructs the LLM to treat families it lists
+   as ground-truth — they MUST appear in the Bundle's Malware SDO; C2
+   entries become Indicator + Infrastructure SDOs; extracted
+   credentials / mutexes / keys become Indicator objects.
+3. ``pipeline/nodes.py::make_report_node`` reads the same CTI off state
+   (``state["sandbox_cti"]``) and attaches the full original dict to the
+   persisted extended STIX bundle under
+   ``stix_bundle_extended["x_maljan_cti"]``. The MalwareReport schema
+   does not need a dedicated column — the permissive STIX dump field
+   carries the CTI verbatim for paper exports and API consumers.
+
+Other sandbox backends (mock / CAPEv2) produce no CTI block, so
+``cti_block`` is ``None`` for them and the prompt section is silently
+skipped — no behavior change for non-Triage runs.
 
 ## Corpus search
 

@@ -80,3 +80,9 @@ class AnalysisState(TypedDict):
     # only confidence as if it were a fully corroborated verdict.
     degraded_mode: bool
     degradation_reasons: list[str]
+
+    # Sandbox CTI block surfaced by the judge node when the active sandbox
+    # client (currently TriageClient) synthesised ``report["cti"]``.
+    # Consumed by the report node to embed the deterministic threat-intel
+    # snapshot under ``stix_bundle_extended["x_maljan_cti"]``.
+    sandbox_cti: dict[str, Any] | None

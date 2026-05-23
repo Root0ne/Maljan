@@ -510,6 +510,17 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Evidence corpus build skipped: %s", exc)
 
+            # Sandbox CTI — when the active sandbox client synthesises a
+            # flat CTI block (currently TriageClient), forward it to the
+            # judge so deterministic family / C2 / extracted-secret
+            # evidence influences the verdict directly.
+            _cti_block: dict[str, Any] | None = None
+            _sb = state.get("sandbox_report")
+            if isinstance(_sb, dict):
+                _maybe = _sb.get("cti")
+                if isinstance(_maybe, dict):
+                    _cti_block = _maybe
+
             bundle = await judge.give_verdict(
                 reports=reports,
                 history=state.get("discussion_history") or [],
@@ -519,6 +530,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 memory_store=memory_store,
                 evidence_corpus=evidence_corpus or None,
                 current_sample_id=state.get("file_hash"),
+                cti_block=_cti_block,
             )
 
             stix_output: dict[str, Any] = {}
@@ -660,6 +672,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # node and downstream consumers (API/dashboard).
                 "degraded_mode": _degraded_mode,
                 "degradation_reasons": _degradation_reasons,
+                # Sandbox CTI surface for the report node — persisted into
+                # the extended STIX bundle so the UI / API / paper export
+                # can render the full deterministic threat-intel snapshot.
+                "sandbox_cti": _cti_block,
             }
         except (AnalystError, LLMError) as e:
             logger.error("Judge verdict failed: %s", e)
@@ -882,15 +898,25 @@ def make_report_node(container: ServiceContainer) -> Any:
                 extended_dump = None
 
         if extended_dump is not None:
+            # Attach the sandbox CTI block as a custom STIX extension so the
+            # full deterministic threat-intel snapshot is preserved with the
+            # report (paper exports / API consumers / dashboards can quote
+            # it directly without re-parsing the raw sandbox report).
+            sandbox_cti = state.get("sandbox_cti")
+            if isinstance(sandbox_cti, dict) and sandbox_cti:
+                extended_dump.setdefault("x_maljan_cti", sandbox_cti)
             report.stix_bundle_extended = extended_dump
 
         logger.info(
             "report_node: built MalwareReport (verdict=%s, severity=%s, "
-            "markdown_chars=%d, extended_objects=%d).",
+            "markdown_chars=%d, extended_objects=%d, cti=%s).",
             report.verdict,
             report.severity.rating,
             len(markdown),
             len(extended_dump.get("objects", [])) if extended_dump else 0,
+            "yes"
+            if isinstance(state.get("sandbox_cti"), dict) and state.get("sandbox_cti")
+            else "no",
         )
 
         return {
