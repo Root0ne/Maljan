@@ -72,14 +72,12 @@ _TRIAGE_VIEW_URL = "https://tria.ge/{sample_id}"
 def _normalize_report(triage_report: dict[str, Any], sample_name: str) -> dict[str, Any]:
     """Convert a Triage summary payload to Maljan's CAPE-shaped report.
 
-    Input (Triage ``GET /samples/{id}/summary``)::
-
-        {
-          "sample": {"id": "...", "md5": "...", "sha256": "...", ...},
-          "tasks": {"behavioral1": {"processes": [...], "ttp_tags": [...], ...}},
-          "network": {"flows": [...], "requests": [...]},
-          "signatures": [{"name": "...", "score": ...}, ...]
-        }
+    Triage's ``GET /samples/{id}/summary`` returns sample identity *either*
+    as a nested dict ``{"sample": {"sha256": "...", "name": "..."}}`` *or* as
+    a bare string id with top-level ``sha256`` / ``target`` / ``score`` keys.
+    The latter is what the modern Recorded Future Sandbox actually emits;
+    the former survives for legacy compatibility. This normalizer accepts
+    both.
 
     Output (matches existing fixture JSON consumed by DynamicParser /
     NetworkParser)::
@@ -90,7 +88,8 @@ def _normalize_report(triage_report: dict[str, Any], sample_name: str) -> dict[s
           "network":   {"dns": [...], "http": [...], "tcp": [...], "udp": [...],
                         "hosts": [...], "domains": [...]},
           "signatures":[{"name": "...", "description": "...", "severity": N, "marks": [...]}],
-          "ttp_tags":  ["T1055", ...]
+          "ttp_tags":  ["T1055", ...],
+          "triage_score": <int, optional>  # overall maliciousness 1-10
         }
     """
     raw_sample = triage_report.get("sample", {})
@@ -99,11 +98,18 @@ def _normalize_report(triage_report: dict[str, Any], sample_name: str) -> dict[s
     raw_tasks = triage_report.get("tasks", {})
     tasks = raw_tasks if isinstance(raw_tasks, dict) else {}
 
+    # Modern shape: top-level sha256 / target (filename) / score.
+    top_sha256 = triage_report.get("sha256", "")
+    top_target = triage_report.get("target", "")
+    top_score = triage_report.get("score")
+
+    sha256 = sample_meta.get("sha256") or top_sha256 or ""
+    filename = sample_meta.get("name") or top_target or sample_name
     target = {
         "file": {
-            "sha256": sample_meta.get("sha256", ""),
+            "sha256": str(sha256).lower(),
             "md5": sample_meta.get("md5", ""),
-            "name": sample_meta.get("name", sample_name),
+            "name": filename,
             "size": sample_meta.get("size", 0),
         }
     }
@@ -189,13 +195,16 @@ def _normalize_report(triage_report: dict[str, Any], sample_name: str) -> dict[s
             }
         )
 
-    return {
+    result: dict[str, Any] = {
         "target": target,
         "behavior": behavior,
         "network": network,
         "signatures": signatures,
         "ttp_tags": sorted(all_ttp_tags),
     }
+    if isinstance(top_score, int):
+        result["triage_score"] = top_score
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +449,23 @@ class TriageClient:
         sample_name = _resolve_sample_name(triage_data, task_id)
         normalized = _normalize_report(triage_data, sample_name=sample_name)
         normalized["sandbox_url"] = _view_url(task_id)
+
+        # Best-effort enrichment from the rich endpoints. Failures are logged
+        # at WARNING; the summary-derived report is still returned.
+        try:
+            overview = self._sync_fetch_overview(task_id)
+            if overview:
+                _apply_overview(overview, normalized, fallback_sample_id=task_id)
+        except Exception as exc:
+            logger.warning("TriageClient: overview enrichment failed (%s).", exc)
+        try:
+            per_task = self._sync_fetch_task_reports(task_id, triage_data)
+            if per_task:
+                normalized.setdefault("behavior_rich", per_task)
+        except Exception as exc:
+            logger.warning("TriageClient: per-task enrichment failed (%s).", exc)
+
+        _log_post_enrichment(task_id, normalized)
         return SubmissionResult(
             task_id=task_id,
             sample_name=sample_name,
@@ -447,6 +473,43 @@ class TriageClient:
             status=str(triage_data.get("status", "reported")),
             report=normalized,
         )
+
+    def _sync_fetch_overview(self, sample_id: str) -> dict[str, Any]:
+        http = self._get_http_sync()
+        try:
+            resp = http.get(f"/samples/{sample_id}/overview.json")
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:
+            logger.debug("TriageClient: sync overview fetch failed (%s).", exc)
+            return {}
+
+    def _sync_fetch_task_reports(
+        self, sample_id: str, summary: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        http = self._get_http_sync()
+        tasks_block = summary.get("tasks")
+        if not isinstance(tasks_block, dict):
+            return []
+        out: list[dict[str, Any]] = []
+        for task_id, task_info in list(tasks_block.items())[:5]:
+            if not isinstance(task_info, dict):
+                continue
+            kind = str(task_info.get("kind") or "")
+            if not kind.startswith(("static", "behavioral")):
+                continue
+            try:
+                resp = http.get(f"/samples/{sample_id}/{task_id}/report_triage.json")
+                if resp.status_code != 200:
+                    continue
+                body = resp.json()
+                if isinstance(body, dict):
+                    out.append({"task_id": task_id, "report": body})
+            except Exception as exc:
+                logger.debug("TriageClient: sync task report fetch failed (%s).", exc)
+        return out
 
     # ------------------------------------------------------------------
     # Async internals
@@ -554,18 +617,7 @@ class TriageClient:
         except Exception as exc:
             logger.warning("TriageClient: per-task enrichment failed (%s).", exc)
 
-        sigs = normalized.get("signatures") or []
-        network = normalized.get("network") or {}
-        logger.info(
-            "TriageClient: post-enrichment task=%s signatures=%d dns=%d http=%d tcp=%d udp=%d.",
-            task_id,
-            len(sigs) if isinstance(sigs, list) else 0,
-            len(network.get("dns", []) or []),
-            len(network.get("http", []) or []),
-            len(network.get("tcp", []) or []),
-            len(network.get("udp", []) or []),
-        )
-
+        _log_post_enrichment(task_id, normalized)
         return SubmissionResult(
             task_id=task_id,
             sample_name=sample_name,
@@ -634,40 +686,7 @@ class TriageClient:
         overview = await self.fetch_overview(sample_id)
         if not overview:
             return
-        sample_block = overview.get("sample")
-        if isinstance(sample_block, dict):
-            existing = normalized.get("target", {}).get("file", {})
-            if not existing.get("sha256"):
-                existing["sha256"] = str(sample_block.get("sha256", "") or "").lower()
-            if not existing.get("md5"):
-                existing["md5"] = sample_block.get("md5", "")
-            if not existing.get("size"):
-                existing["size"] = int(sample_block.get("size") or 0)
-            if not existing.get("name") or existing.get("name") == sample_id:
-                existing["name"] = (
-                    sample_block.get("filename")
-                    or sample_block.get("target")
-                    or existing.get("name", sample_id)
-                )
-        sigs = overview.get("signatures")
-        if isinstance(sigs, list):
-            normalized.setdefault("signatures_rich", sigs)
-        targets = overview.get("targets")
-        if isinstance(targets, list):
-            for tgt in targets:
-                if isinstance(tgt, dict) and tgt.get("tags"):
-                    normalized.setdefault("attack_tags", []).extend(
-                        [t for t in tgt["tags"] if isinstance(t, str)]
-                    )
-        # ``extracted[].config`` is Triage's family-attribution gold: c2, keys,
-        # mutex, botnet, campaign. Promote it verbatim so downstream agents can
-        # quote it.
-        extracted = overview.get("extracted")
-        if isinstance(extracted, list):
-            normalized.setdefault("extracted", extracted)
-        analysis = overview.get("analysis")
-        if isinstance(analysis, dict):
-            normalized.setdefault("analysis", analysis)
+        _apply_overview(overview, normalized, fallback_sample_id=sample_id)
 
     async def _enrich_from_task_reports(
         self, sample_id: str, summary: dict[str, Any], normalized: dict[str, Any]
@@ -676,12 +695,12 @@ class TriageClient:
         if not isinstance(tasks_block, dict):
             return
         per_task: list[dict[str, Any]] = []
-        # Cap to bound cost — 5 behavioral tasks covers the longest profile chain.
+        # Cap to bound cost — 5 tasks covers the longest profile chain.
         for task_id, task_info in list(tasks_block.items())[:5]:
             if not isinstance(task_info, dict):
                 continue
-            kind = task_info.get("kind")
-            if kind not in {"behavioral1", "behavioral2", "static1"}:
+            kind = str(task_info.get("kind") or "")
+            if not kind.startswith(("static", "behavioral")):
                 continue
             task_report = await self.fetch_task_report(sample_id, str(task_id))
             if task_report:
@@ -693,6 +712,86 @@ class TriageClient:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+def _apply_overview(
+    overview: dict[str, Any], normalized: dict[str, Any], fallback_sample_id: str
+) -> None:
+    """Merge fields from ``overview.json`` into the normalized report.
+
+    Backfills sample identity (sha256/md5/name/size) when the summary did not
+    carry them, promotes signatures into the main ``signatures`` list when it
+    is empty, exposes the family-attribution ``extracted[].config`` block
+    verbatim, and surfaces ATT&CK tags from ``targets[*].tags``.
+    """
+    sample_block = overview.get("sample")
+    if isinstance(sample_block, dict):
+        existing = normalized.setdefault("target", {}).setdefault("file", {})
+        if not existing.get("sha256"):
+            existing["sha256"] = str(sample_block.get("sha256", "") or "").lower()
+        if not existing.get("md5"):
+            existing["md5"] = sample_block.get("md5", "")
+        if not existing.get("size"):
+            existing["size"] = int(sample_block.get("size") or 0)
+        if not existing.get("name") or existing.get("name") == fallback_sample_id:
+            existing["name"] = (
+                sample_block.get("filename")
+                or sample_block.get("target")
+                or existing.get("name", fallback_sample_id)
+            )
+
+    sigs = overview.get("signatures")
+    if isinstance(sigs, list) and sigs:
+        # Always expose the rich form for downstream that wants raw shape.
+        normalized.setdefault("signatures_rich", sigs)
+        # Promote into the main "signatures" list (mapped to Maljan's shape)
+        # so the downstream parser and analyst see them even when the summary
+        # was sparse (typical when only a single static task ran).
+        if not normalized.get("signatures"):
+            normalized["signatures"] = [
+                {
+                    "name": s.get("name", ""),
+                    "description": s.get("desc") or s.get("description") or s.get("name", ""),
+                    "severity": s.get("score", s.get("severity", 1)),
+                    "marks": s.get("marks", []),
+                }
+                for s in sigs
+                if isinstance(s, dict)
+            ]
+
+    targets = overview.get("targets")
+    if isinstance(targets, list):
+        for tgt in targets:
+            if isinstance(tgt, dict) and tgt.get("tags"):
+                normalized.setdefault("attack_tags", []).extend(
+                    [t for t in tgt["tags"] if isinstance(t, str)]
+                )
+
+    extracted = overview.get("extracted")
+    if isinstance(extracted, list):
+        normalized.setdefault("extracted", extracted)
+
+    analysis = overview.get("analysis")
+    if isinstance(analysis, dict):
+        normalized.setdefault("analysis", analysis)
+        # Surface the overview score at top level too, in case the summary
+        # path missed it.
+        if "triage_score" not in normalized and isinstance(analysis.get("score"), int):
+            normalized["triage_score"] = analysis["score"]
+
+
+def _log_post_enrichment(task_id: str, normalized: dict[str, Any]) -> None:
+    sigs = normalized.get("signatures") or []
+    network = normalized.get("network") or {}
+    logger.info(
+        "TriageClient: post-enrichment task=%s signatures=%d dns=%d http=%d tcp=%d udp=%d.",
+        task_id,
+        len(sigs) if isinstance(sigs, list) else 0,
+        len(network.get("dns", []) or []),
+        len(network.get("http", []) or []),
+        len(network.get("tcp", []) or []),
+        len(network.get("udp", []) or []),
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -711,12 +810,25 @@ def _view_url(sample_id: str) -> str:
 def _resolve_sample_name(triage_data: dict[str, Any], task_id: str) -> str:
     """Best-effort extraction of the original filename.
 
-    Triage's ``summary.sample`` can be a dict, a bare sha256 string, or
-    omitted entirely. When the filename cannot be recovered we substitute a
-    visible placeholder so static analyst prompts do not silently treat the
-    task id as a binary filename (a Ghidra-load failure mode observed in the
-    2026-05-19 audit, fix APK-SAND-01).
+    Triage's ``GET /samples/{id}/summary`` exposes the filename in any of
+    three shapes depending on the API tier / endpoint generation:
+
+    1. Modern: top-level ``target`` field holds the filename.
+    2. Modern alt: top-level ``filename`` field.
+    3. Legacy: nested ``sample.name`` dict.
+    4. Edge: ``sample`` is a bare sha256 string (no filename available).
+
+    When none yield a usable filename we substitute a visible placeholder so
+    static analyst prompts do not silently treat the task id as a binary
+    filename (a Ghidra-load failure mode observed in the 2026-05-19 audit,
+    fix APK-SAND-01).
     """
+    top_target = triage_data.get("target")
+    if isinstance(top_target, str) and top_target:
+        return top_target
+    top_filename = triage_data.get("filename")
+    if isinstance(top_filename, str) and top_filename:
+        return top_filename
     raw_sample = triage_data.get("sample")
     if isinstance(raw_sample, dict) and raw_sample.get("name"):
         return str(raw_sample["name"])

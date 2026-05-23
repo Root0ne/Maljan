@@ -18,6 +18,7 @@ from pydantic import SecretStr
 from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.loaders.triage_client import (
     TriageClient,
+    _apply_overview,
     _normalize_report,
     _resolve_sample_name,
     _sha256_file,
@@ -136,6 +137,92 @@ class TestNormalizeReport:
         # pipeline.
         result = _normalize_report({"sample": "abc", "tasks": [], "network": []}, "fallback.exe")
         assert result["target"]["file"]["name"] == "fallback.exe"
+
+    def test_consumes_modern_top_level_shape(self) -> None:
+        # Modern Recorded Future Sandbox summary: sample is a bare task-id
+        # string but sha256/target/score live at the top level.
+        modern = {
+            "sample": "260523-v9veqaat9x",
+            "status": "reported",
+            "target": "zararli.apk",
+            "sha256": "a" * 64,
+            "score": 6,
+            "tasks": {},
+        }
+        result = _normalize_report(modern, "irrelevant-fallback")
+        assert result["target"]["file"]["sha256"] == "a" * 64
+        assert result["target"]["file"]["name"] == "zararli.apk"
+        assert result["triage_score"] == 6
+
+
+# ---------------------------------------------------------------------------
+# _apply_overview
+# ---------------------------------------------------------------------------
+
+
+class TestApplyOverview:
+    def _base_normalized(self) -> dict[str, Any]:
+        return _normalize_report({}, "placeholder.bin")
+
+    def test_promotes_overview_signatures_when_main_list_empty(self) -> None:
+        normalized = self._base_normalized()
+        overview = {
+            "signatures": [
+                {"name": "Dangerous perms", "score": 6, "desc": "asks for SMS"},
+                {"name": "Untrusted codesign", "score": 3, "label": "codesign_untrusted"},
+            ]
+        }
+        _apply_overview(overview, normalized, fallback_sample_id="t")
+        sigs = normalized["signatures"]
+        assert len(sigs) == 2
+        assert sigs[0]["name"] == "Dangerous perms"
+        assert sigs[0]["description"] == "asks for SMS"
+        assert sigs[0]["severity"] == 6
+        # Raw form also exposed for callers that want the original shape.
+        assert "signatures_rich" in normalized
+
+    def test_keeps_existing_signatures_intact(self) -> None:
+        normalized = self._base_normalized()
+        normalized["signatures"] = [{"name": "from_summary", "severity": 9}]
+        _apply_overview({"signatures": [{"name": "from_overview", "score": 3}]}, normalized, "t")
+        assert normalized["signatures"] == [{"name": "from_summary", "severity": 9}]
+
+    def test_backfills_sample_identity(self) -> None:
+        normalized = self._base_normalized()
+        # Simulate a normalized report where the summary did not carry sha256.
+        normalized["target"]["file"]["sha256"] = ""
+        normalized["target"]["file"]["name"] = "t"
+        overview = {
+            "sample": {
+                "sha256": "B" * 64,
+                "md5": "abc",
+                "size": 1234,
+                "target": "real.apk",
+            }
+        }
+        _apply_overview(overview, normalized, fallback_sample_id="t")
+        f = normalized["target"]["file"]
+        assert f["sha256"] == "b" * 64
+        assert f["md5"] == "abc"
+        assert f["size"] == 1234
+        assert f["name"] == "real.apk"
+
+    def test_promotes_extracted_config_block(self) -> None:
+        normalized = self._base_normalized()
+        overview = {"extracted": [{"config": {"family": "emotet", "c2": ["http://x"]}}]}
+        _apply_overview(overview, normalized, "t")
+        assert normalized["extracted"][0]["config"]["family"] == "emotet"
+
+    def test_surfaces_analysis_score_when_top_level_missing(self) -> None:
+        normalized = self._base_normalized()
+        _apply_overview({"analysis": {"score": 8}}, normalized, "t")
+        assert normalized["triage_score"] == 8
+
+    def test_resolve_sample_name_prefers_top_level_target(self) -> None:
+        assert _resolve_sample_name({"target": "real.apk"}, "task-1") == "real.apk"
+
+    def test_resolve_sample_name_falls_through_to_filename(self) -> None:
+        assert _resolve_sample_name({"filename": "x.exe"}, "task-1") == "x.exe"
 
 
 # ---------------------------------------------------------------------------
