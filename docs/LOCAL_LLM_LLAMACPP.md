@@ -36,28 +36,37 @@ cmake --build build --config Release --target llama-server -j
 
 Build artefact: `external\ik_llama.cpp\build\bin\Release\llama-server.exe`
 
-### 2. GGUF modeli indir
+### 2. GGUF modeli indir (Unsloth MTP varyantı)
+
+Mayıs 2026 Unsloth/AboveSpec/Snixtp X thread'lerinin tavsiyesi: **MTP (Multi-Token
+Prediction)** head'leri eklenmiş GGUF + ik_llama.cpp'nin `-mtp` flag'iyle decode
+1.4-2.4x hızlanıyor (özellikle uzun context'te).
 
 ```powershell
-hf download abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF `
-  Qwen3.6-35B-A3B-IQ3_K_R4.gguf `
+hf download unsloth/Qwen3.6-35B-A3B-MTP-GGUF `
+  Qwen3.6-35B-A3B-UD-IQ3_S.gguf `
   --local-dir .\models
 ```
 
-Boyut: ~15.3 GB. SHA256'sını [HuggingFace sayfasından](https://huggingface.co/abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF) doğrulayın.
+Boyut: ~14.3 GB.
 
-### 3. llama-server'ı başlat
+> **Alternatif** (MTP'siz, ik_llama hub'ı): `abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF`
+> dosyası `Qwen3.6-35B-A3B-IQ3_K_R4.gguf`. MTP yok, dosya boyutu aynı.
+
+### 3. llama-server'ı başlat (MTP + checkpoint-disable)
 
 ```powershell
 .\external\ik_llama.cpp\build\bin\Release\llama-server.exe `
-  -m .\models\Qwen3.6-35B-A3B-IQ3_K_R4.gguf `
+  -m .\models\Qwen3.6-35B-A3B-UD-IQ3_S.gguf `
   -ngl 99 --n-cpu-moe 99 `
   --host 127.0.0.1 --port 8080 `
   -fa on `
   -c 262144 `
   -ctk q4_0 -ctv q4_0 `
   --jinja `
-  --alias qwen3.6-35b-a3b
+  --alias qwen3.6-35b-a3b `
+  -mtp --spec-type mtp --draft-max 6 `
+  --ctx-checkpoints 0
 ```
 
 Bayraklar:
@@ -73,10 +82,25 @@ Bayraklar:
 | `-ctk/-ctv q4_0` | KV cache 4-bit (RAM yarıya iner) |
 | `--jinja` | OpenAI `tools` parametresi (fonksiyon çağrısı / ReAct) için ZORUNLU |
 | `--alias` | OpenAI API'sinin `model` alanında dönen ad |
+| **`-mtp --spec-type mtp`** | Multi-Token Prediction'ı aç — yeni GGUF'taki ek tahmin head'lerini kullanır |
+| **`--draft-max 6`** | Her adımda en fazla 6 token speculate et (Unsloth tavsiyesi) |
+| **`--ctx-checkpoints 0`** | Context checkpoint mekanizmasını kapat — uzun context'te decode 2x hızlanır (witcheer X thread) |
 
 Daha hızlı varyant (GPU bolsa): `--n-cpu-moe 30` (11 expert GPU'da, ~60 t/s, 7.5 GB VRAM)
+— MTP ile birlikte VRAM 10 GB'a çıkar, 8 GB GPU'lara sığmaz. **MTP veya ncmoe=30 — ikisinden birini seç.**
 
 **Context vs. RAM:** q4_0 KV cache ile her token ~5 KB. 256k context → ~1.3 GB ek RAM. 64k istersen `-c 65536` yap, ~320 MB tasarruf.
+
+**Ölçülen kaynak profil (RTX 5060 8 GB + AMD Ryzen 9 8940HX + 32 GB DDR5-5200):**
+
+| Metrik | IQ3_K_R4 (eski, MTP yok) | UD-IQ3_S + MTP (yeni) |
+|---|---|---|
+| RSS (llama-server) | 17.9 GB | **13.9 GB** (−4 GB) |
+| VRAM | 4.3 GB | 5.5 GB (+1.2 GB) |
+| Toplam (RAM+VRAM) | 22.2 GB | **19.4 GB** (−2.8 GB) |
+| Decode (reasoning'li) | ~30-50 t/s | 26-27 t/s (acceptance %93) |
+| Decode (uzun ctx >32K) | düşer | 1.4-2.4x sabit (Snixtp benchmark) |
+| Sistem free RAM | ~14 GB | **~18 GB** |
 
 ### 4. Maljan'ı yapılandır
 
@@ -141,6 +165,8 @@ Kod tarafında değişiklik yok — provider seçimi tamamen env üzerinden.
 | llama-server `failed to load model` | GGUF dosya yolu yanlış veya yetki sorunu | Mutlak yol ver, dosyanın okunabilir olduğunu kontrol et |
 | GPU OOM | `-ngl 99` ile attention da GPU'da kalmış | `-ncmoe 99` doğru, ama context'i (`-c`) küçült veya KV cache'i 4-bit'e indir (`-ctk q4_0`) |
 | Yavaş (40 t/s altı) | DDR4 RAM darboğazı | DDR5'e yükselt; yoksa daha küçük model (Q4_K_S) |
+| MTP draft acceptance düşük (<%80) | Model fazla "thinking" yapıyor, MTP fark edemiyor | Beklenen davranış — uzun çıktıda yine de net kazanç var. Reasoning'i kapatmak için sistem prompt'una `/no_think` ekleyin |
+| `error: unknown argument: -mtp` | ik_llama.cpp build eski | Repo'yu güncelleyip yeniden derleyin (MTP desteği 2026-Q2 sonrası) |
 | Pipeline mediator yine timeout | Local model hâlâ kompleks STIX bundle için yavaş | `REACT_AGENT_TIMEOUT=600` env ile timeout'u yükselt |
 | Build hatası: NCCL bulunamadı | NCCL Windows'ta yok, uyarı normal | Yoksay — single-GPU için NCCL gereksiz |
 
