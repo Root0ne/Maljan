@@ -22,8 +22,9 @@ if TYPE_CHECKING:
     from maljan.loaders.sandbox_client import SandboxClient
 
 
-# Final sandbox statuses considered usable. ``partial`` is accepted because
-# Triage returns it when one task fails but other tasks completed.
+# Final sandbox statuses considered usable. ``partial`` is accepted to
+# cover sandbox runs where one analyzer module failed but the rest
+# produced usable artefacts.
 _USABLE_SANDBOX_STATUSES: frozenset[str] = frozenset({"reported", "partial"})
 
 # Hex-string sample identifiers (MD5/SHA-1/SHA-256/SHA-512) and a small set of

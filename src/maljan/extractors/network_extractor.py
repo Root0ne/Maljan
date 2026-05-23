@@ -1,9 +1,9 @@
 """Extract the NetworkIOCs section from the sandbox report.
 
-The Maljan-normalised sandbox report exposes ``network`` with sub-lists for
-``dns``, ``http``, ``tcp``, ``udp``, ``hosts``, ``domains``. Different sandbox
-backends use slightly different shapes (Triage uses ``flows``, CAPEv2 uses
-``udp``/``tcp`` directly) so each accessor copes with both.
+The CAPEv2 sandbox report exposes ``network`` with sub-lists for ``dns``,
+``http``, ``tcp``, ``udp``, ``hosts``, ``domains``. Each accessor below
+tolerates minor shape variation across CAPE versions (some report TCP/UDP
+flows under ``flows`` rather than dedicated keys).
 
 Suspicion heuristics are deliberately simple and additive — the narrative
 agent and the threat-intel enrichment worker layer richer signal on top.

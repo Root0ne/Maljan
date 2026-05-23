@@ -11,16 +11,18 @@ class NetworkParser(BaseParser):
     def parse(self, raw_data: Any) -> str:
         """Sifts through network JSON logs for C2 and exfiltration indicators.
 
-        Supports both Zeek list format and Triage sandbox dict format.
+        Supports two shapes:
+          * dict — CAPEv2 ``network`` block (dns/http/tcp/hosts/domains keys)
+          * list — Zeek (Bro) connection log
         """
         if isinstance(raw_data, dict):
-            return self._parse_triage_network(raw_data)
+            return self._parse_sandbox_network(raw_data)
         if isinstance(raw_data, list):
             return self._parse_zeek_network(raw_data)
         return "Invalid network log format."
 
-    def _parse_triage_network(self, raw_data: dict[str, Any]) -> str:
-        """Parse Triage sandbox network format."""
+    def _parse_sandbox_network(self, raw_data: dict[str, Any]) -> str:
+        """Parse a sandbox ``network`` dict (CAPEv2 shape)."""
         dns_rows: list[list[str]] = []
         http_rows: list[list[str]] = []
         tcp_rows: list[list[str]] = []
@@ -58,18 +60,14 @@ class NetworkParser(BaseParser):
         dns_table = self._format_as_table(
             headers=["Target Domain", "IP Address", "Evaluation"], rows=dns_rows
         )
-        http_table = self._format_as_table(
-            headers=["Host", "Request", "Status"], rows=http_rows
-        )
-        tcp_table = self._format_as_table(
-            headers=["Destination", "Port", "Source"], rows=tcp_rows
-        )
+        http_table = self._format_as_table(headers=["Host", "Request", "Status"], rows=http_rows)
+        tcp_table = self._format_as_table(headers=["Destination", "Port", "Source"], rows=tcp_rows)
         host_table = self._format_as_table(
             headers=["Host/Domain", "Type", "Evaluation"], rows=host_rows
         )
 
         return (
-            "### Network Traffic Intelligence (Triage Sandbox)\n\n"
+            "### Network Traffic Intelligence (Sandbox)\n\n"
             "#### DNS Exfiltration & DGA Analysis:\n"
             f"{dns_table}\n\n"
             "#### HTTP Requests:\n"

@@ -325,8 +325,8 @@ class StaticAnalyst(BaseAnalyst):
         self._initialize_mcp_client()
 
         # PIPE-ANA-01 (audit 2026-05-19): when the supplied target *looks*
-        # like a filename but doesn't exist on disk (the APK-SAND-01 leak
-        # case — Triage sent us the task_id, not the path), short-circuit
+        # like a filename but doesn't exist on disk (e.g. a sandbox sent
+        # the task_id instead of the artefact path), short-circuit
         # to a zero-claim ISR rather than paying for an LLM round that
         # ends with ``load_program: File not found``. ANA-MARK-01 already
         # neutralises the placeholder text path; this is the equivalent

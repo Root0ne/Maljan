@@ -3,7 +3,7 @@
 Inputs that may be available:
 
 - Sample bytes on disk (``sample_path``) — exact hashes, magic bytes, size.
-- Sandbox report (Triage / CAPE normalised dict) — file_name, hashes pre-
+- Sandbox report (CAPEv2 ``target`` block) — file_name, hashes pre-
   computed by the sandbox.
 
 The extractor merges both, preferring locally computed hashes when the
@@ -98,7 +98,7 @@ def _compute_hashes(
     """Compute hashes from bytes when available, otherwise trust the sandbox."""
     if bytes_blob is not None:
         # MD5 and SHA1 below are sample fingerprints (VirusTotal, MalwareBazaar,
-        # Triage, MISP all index by them); they are NOT used as cryptographic
+        # MISP all index by them); they are NOT used as cryptographic
         # signatures. ``usedforsecurity=False`` is the canonical Python opt-out
         # but Semgrep's default rule doesn't recognise it — we suppress here
         # rather than weaken the fingerprint set.

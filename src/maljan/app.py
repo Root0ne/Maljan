@@ -86,20 +86,23 @@ class MaljanApp:
             client = self.container.get_sandbox_client()
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
-            # submit_and_wait is available on TriageClient but may not be on
-            # all SandboxClient implementations (e.g. MockSandboxClient).
+            # ``submit_and_wait`` is an optional convenience method some
+            # SandboxClient implementations expose; fall back to the
+            # Protocol triad (submit + wait + fetch_report) when missing.
             if hasattr(client, "submit_and_wait"):
                 result = await client.submit_and_wait(path)
             else:
-                # Fallback: manual submit + wait + fetch for protocol-compliant clients
                 task_id = client.submit(sample_path)
                 status = client.wait_for_completion(task_id)
-                result = SubmissionResult(
-                    task_id=task_id,
-                    status=status,
-                    report={},
-                    error="" if status == "reported" else f"Sandbox status: {status}",
-                )
+                if status == "reported":
+                    result = client.fetch_report(task_id)
+                else:
+                    result = SubmissionResult(
+                        task_id=task_id,
+                        status=status,
+                        report={},
+                        error=f"Sandbox status: {status}",
+                    )
 
             if result.status in ("reported", "partial") and result.report:
                 if not isinstance(result.report, dict):
@@ -110,8 +113,7 @@ class MaljanApp:
                     )
                     return None
                 logger.info(
-                    "Sandbox analysis complete: %s tasks, %d signatures, %d TTPs.",
-                    len(result.report.get("_triage_raw_tasks", [])),
+                    "Sandbox analysis complete: %d signatures, %d TTPs.",
                     len(result.report.get("signatures", [])),
                     len(result.report.get("ttp_tags", [])),
                 )

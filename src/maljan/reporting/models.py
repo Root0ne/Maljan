@@ -190,7 +190,7 @@ class RegistryMod(BaseModel):
 
 
 class SandboxSignature(BaseModel):
-    """One Triage / CAPE / Cuckoo signature hit with all its evidence marks."""
+    """One CAPEv2 / Cuckoo signature hit with all its evidence marks."""
 
     model_config = _STRICT_CONFIG
 

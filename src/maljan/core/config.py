@@ -214,16 +214,11 @@ class SandboxConfig(BaseModel):
         Seconds between status poll requests during task completion wait.
     """
 
-    backend: str = "mock"  # "mock" | "cape2" | "triage"
+    backend: str = "mock"  # "mock" | "cape2"
     cape2_base_url: str = "http://localhost:8000"
     cape2_api_token: SecretStr = SecretStr("")
     cape2_timeout_seconds: int = 300
     cape2_poll_interval_seconds: int = 10
-    # Hatching Triage sandbox (SaaS, free tier)
-    triage_api_token: SecretStr = SecretStr("")
-    triage_base_url: str = "https://api.tria.ge"
-    triage_timeout_seconds: int = 300
-    triage_poll_interval_seconds: int = 15
 
 
 class AnalysisConfig(BaseModel):

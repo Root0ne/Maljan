@@ -1,6 +1,6 @@
 # CAPEv2 entegrasyonu (Docker dev stack)
 
-Bu doküman Maljan'ın sandbox arka ucunu **Triage'dan CAPEv2'ye** çevirmek için iki kısma ayrılır:
+Bu doküman Maljan'ın sandbox entegrasyonunu **CAPEv2** üstüne kurmak için iki kısma ayrılır (eski Triage / tria.ge entegrasyonu tamamen kaldırıldı):
 
 1. **Dev tarafı (bu repodaki Docker stack):** CAPEv2 web + REST API container'da, Postgres ile, gerçek VM olmadan. Maljan'ın `CAPEv2Client` entegrasyon yolunu end-to-end test etmek için.
 2. **Prod tarafı (follow-up):** Gerçek malware analizi için Linux host + KVM + Windows guest VM gerekiyor — upstream CAPE deployment yolu.
@@ -198,13 +198,15 @@ Maljan tarafından **hiçbir kod değişikliği gerekmez**. Sadece `.env`:
 
 ---
 
-## 6. Triage'dan dönüş
+## 6. Mock backend
 
-Triage'a geri dönmek isterseniz:
+Lokal geliştirme + CI için sandbox'a hiç ihtiyaç olmadığı durumlarda
+fixture dosyalarından yararlanan `mock` backend kullanılabilir:
 
 ```
-SANDBOX__BACKEND=triage
-SANDBOX__TRIAGE_API_TOKEN=<token>
+SANDBOX__BACKEND=mock
 ```
 
-Maljan tarafında değişiklik yok — `ServiceContainer.get_sandbox_client()` factory'si flag'e bakıp doğru client'ı verir.
+`MockSandboxClient` `data/samples/dynamic/{sha256|name}.json` altındaki
+hazır rapor JSON'larını okur — gerçek bir CAPE örneğine erişim
+gerektirmez. Production kullanım için `cape2` backend'ine geçin.

@@ -2,10 +2,10 @@
 
 We look at three input sources:
 
-1. **Sandbox signatures** that explicitly call out persistence — Triage and
-   CAPEv2 both ship many of these (``InstallsAutoRun``,
-   ``CreatesScheduledTask``, ``InstallsService``, ...). The signature name
-   maps to a ``PersistenceMechanism.kind`` and the ``marks`` list gives the
+1. **Sandbox signatures** that explicitly call out persistence — CAPEv2
+   ships many of these (``InstallsAutoRun``, ``CreatesScheduledTask``,
+   ``InstallsService``, ...). The signature name maps to a
+   ``PersistenceMechanism.kind`` and the ``marks`` list gives the
    evidence string.
 2. **Raw registry modifications** that touch known autorun key paths —
    useful when the sandbox didn't ship a signature but the behaviour was

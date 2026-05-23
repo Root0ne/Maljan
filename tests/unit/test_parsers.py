@@ -107,7 +107,7 @@ class TestDynamicParser:
     # --- Network indicators tests (Phase 2) ---
 
     def test_network_indicators_in_output(self) -> None:
-        """DynamicParser should include network indicators from Triage report."""
+        """DynamicParser should include network indicators from sandbox report."""
         data = {
             "behavior": {
                 "generic": [{"category": "network", "description": "C2 communication"}],
@@ -196,19 +196,19 @@ class TestNetworkParser:
         result = self.parser.parse("not a dict or list")
         assert "Invalid" in result
 
-    def test_dict_parsed_as_triage(self) -> None:
-        """Dict input is now valid (Triage format)."""
+    def test_dict_parsed_as_sandbox(self) -> None:
+        """Dict input maps to the CAPEv2-style sandbox network parser."""
         result = self.parser.parse({"not": "a list"})
-        assert "Triage Sandbox" in result
+        assert "Network Traffic Intelligence (Sandbox)" in result
 
     def test_empty_list_handled(self) -> None:
         result = self.parser.parse([])
         assert "No significant events" in result
 
-    # --- Triage format tests (Phase 2) ---
+    # --- Sandbox dict format tests (CAPEv2 / dict shape) ---
 
-    def test_triage_network_format(self) -> None:
-        """NetworkParser should support Triage sandbox dict format."""
+    def test_sandbox_network_format(self) -> None:
+        """NetworkParser should support the CAPEv2 sandbox dict shape."""
         data = {
             "dns": [
                 {"request": "evil-c2.com", "answers": ["185.220.101.5"]},
@@ -224,14 +224,14 @@ class TestNetworkParser:
             "domains": ["evil-c2.com", "google.com"],
         }
         result = self.parser.parse(data)
-        assert "Triage Sandbox" in result
+        assert "Network Traffic Intelligence (Sandbox)" in result
         assert "evil-c2.com" in result
         assert "185.220.101.5" in result
         assert "POST /cmd" in result
         assert "443" in result
 
-    def test_triage_network_empty(self) -> None:
-        """Triage format with empty fields should not crash."""
+    def test_sandbox_network_empty(self) -> None:
+        """Sandbox dict with empty fields should not crash."""
         data = {"dns": [], "http": [], "tcp": [], "hosts": [], "domains": []}
         result = self.parser.parse(data)
-        assert "Triage Sandbox" in result
+        assert "Network Traffic Intelligence (Sandbox)" in result

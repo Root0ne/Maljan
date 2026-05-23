@@ -1,10 +1,10 @@
 """Extract the DynamicBehavior section from a normalised sandbox report.
 
-The Maljan ``TriageClient._normalize_report`` already produces a dict with
-``behavior.processes`` (with ``pid``, ``ppid``, ``command_line``, ``calls``),
-``behavior.apistats`` (``{proc_name: {api: count}}``), ``signatures`` (with
-optional ``marks``) and ``network`` blocks. This module re-shapes that data
-into typed report objects.
+The CAPEv2 sandbox report exposes ``behavior.processes`` (with ``pid``,
+``ppid``, ``command_line``, ``calls``), ``behavior.apistats``
+(``{proc_name: {api: count}}``), ``signatures`` (with optional ``marks``)
+and ``network`` blocks. This module re-shapes that data into typed report
+objects.
 
 Failure mode: every accessor uses ``.get(...)`` with safe defaults so a
 malformed sandbox report cannot crash the pipeline. Missing data means
@@ -366,7 +366,7 @@ def _extract_signatures(raw: list[Any]) -> list[SandboxSignature]:
 
 
 def _stringify_mark(mark: dict[str, Any]) -> str:
-    """Render a Triage-style mark dict into a readable single-line string."""
+    """Render a sandbox signature ``mark`` dict into a single-line string."""
     if "ioc" in mark:
         return f"ioc: {mark['ioc']}"
     if "call" in mark:

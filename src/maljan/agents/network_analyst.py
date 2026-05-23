@@ -7,7 +7,7 @@ TLS certificate anomalies, and protocol tunneling.
 Data Flow:
   - Fixture mode: Receives pre-parsed Zeek JSON text from NetworkParser.
     Analysis is LLM-only (text-based reasoning on parsed tables).
-  - Sandbox mode: Receives PCAP file path from CAPE/Triage sandbox.
+  - Sandbox mode: Receives PCAP file path from the CAPEv2 sandbox.
     Analysis uses Network MCP tools (read_pcap_summary, extract_dns,
     extract_http) for deep traffic inspection, falling back to text
     analysis if MCP initialization fails.
