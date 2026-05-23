@@ -15,7 +15,16 @@ wheels/
 external/
 
 # Environment variables (never commit real secrets)
+# Tracked: .env.example, .env.template, apps/*/. env.example
+# Ignored: every real .env and any *.local override anywhere in the tree.
 .env
+.env.*.local
+.env.local
+**/.env
+!**/.env.example
+!**/.env.template
+**/.env.local
+**/.env.*.local
 
 # Generated datasets (large, produced by prepare-* scripts)
 # attck_valid_ids.json IS committed (small); labeled sentences is not.
