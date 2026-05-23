@@ -337,6 +337,13 @@ async def upload_sample(
             # Best-effort cleanup: remove the half-inserted DB row so the
             # caller can retry instead of getting a phantom 409.
             await db.execute(select(Sample).where(Sample.sha256 == sha256))  # primes the session
+            logger.exception(
+                "MinIO upload failed: endpoint=%s bucket=%s path=%s tmp=%s",
+                settings.minio_endpoint,
+                settings.minio_bucket,
+                storage_path,
+                tmp_path,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Storage service unavailable",
