@@ -1,26 +1,26 @@
-"""Sigma kural tabanlı log analizi — ATT&CK Layer 0 deterministik tespiti.
+"""Sigma rule-based log analysis — ATT&CK Layer 0 deterministic detection.
 
-Sigma ve YARA tamamlayici katmanlardir:
-  - YARA: binary icerigine ve analiz metnine bakar.
-  - Sigma: log satirlarina bakar (Windows Event Log, Sysmon, Zeek, Suricata).
+Sigma and YARA are complementary layers:
+  - YARA: looks at binary content and analysis text.
+  - Sigma: looks at log lines (Windows Event Log, Sysmon, Zeek, Suricata).
 
-Bu iki kaynak birlikte tum deterministik sinyal yuzeyini kaplar.
-Sigma eslesmesi olmadan, log tabanli saldiri kaliplari (orn. LSASS erisimi,
-zaruretsiz LOLBin kullanimi) tamamen LLM'e havale edilmek zorunda kalinir.
+Together they cover the full deterministic-signal surface. Without Sigma,
+log-based attack patterns (e.g. LSASS access, unnecessary LOLBin usage)
+have to be handed entirely to the LLM.
 
-Tasarim kararlari:
-  - Harici bagimlilik yok: kurallari kendi basit YAML parser ile okur.
-    pySigma kurulumunu opsiyonel yapar; pySigma yoksa kurallar
-    field-match modunda calisir (string eslesme), yoksa None getirir.
-  - Graceful degradation: kural dizini yoksa bos instance, pipeline
-    durmaz.
-  - Singleton: ServiceContainer.get_sigma_layer() uzerinden erisim.
-  - to_isr(): eslesmeler dogrudan AgentISR'a donusturulur, domain="sigma".
+Design decisions:
+  - Self-contained: rules are parsed via pySigma into an AST and evaluated
+    in-process; no out-of-process Sigma backend is required.
+  - Graceful degradation: if the rules directory is missing, an empty
+    instance is returned and the pipeline keeps running.
+  - Singleton: accessed via ServiceContainer.get_sigma_layer().
+  - to_isr(): matches are converted directly into AgentISR with
+    domain="sigma".
 
-Kural seti kaynagi: data/sigma_rules/**/*.yml
-    Sigma YAML formati: https://sigmahq.io/docs/basics/rules.html
+Rule set source: data/sigma_rules/**/*.yml
+    Sigma YAML format: https://sigmahq.io/docs/basics/rules.html
 
-Kullanim:
+Usage:
     layer = SigmaLayer.from_default_rules()
     matches = layer.scan_log_lines(log_lines, log_source="sysmon")
     matches += layer.scan_report_text(report_text)
@@ -64,7 +64,7 @@ _DEFAULT_RULES_DIR = Path(__file__).resolve().parents[3] / "data" / "sigma_rules
 
 @dataclass(frozen=True)
 class SigmaMatch:
-    """Tek bir Sigma kural eslesme sonucu.
+    """One Sigma rule match result.
 
     ``technique_id`` is ``None`` when the matched Sigma rule carries no
     ``attack.t####`` tag — previously this surfaced as the literal string
@@ -81,7 +81,7 @@ class SigmaMatch:
 
     @property
     def evidence_ref(self) -> str:
-        """Kisa kanit referansi — ISR ClaimEvidence.evidence_ref olarak kullanilir."""
+        """Short evidence reference — used as ISR ClaimEvidence.evidence_ref."""
         fields_str = ", ".join(f"{k}={v}" for k, v in list(self.matched_fields.items())[:3])
         return (
             f"Sigma rule '{self.rule_title}' matched: {fields_str}"
@@ -91,7 +91,7 @@ class SigmaMatch:
 
     @property
     def claim_text(self) -> str:
-        """ISR ClaimEvidence.claim olarak kullanilacak aciklama cumlesi."""
+        """Description used as ISR ClaimEvidence.claim."""
         tech = self.technique_id if self.technique_id else "unmapped"
         return (
             f"Sigma rule detection: {self.rule_title} (technique {tech}, source={self.log_source})"
@@ -104,25 +104,25 @@ class SigmaMatch:
 
 
 class SigmaMemoryEvaluator:
-    """pySigma kurallarini bellek uzerinde Python sozluklerine karsi isleten motor."""
+    """Engine that evaluates pySigma rules in-process against Python dicts."""
 
     def __init__(self, rule: SigmaRule) -> None:
         self.rule = rule
 
     def evaluate(self, event: dict[str, str], strict: bool = True) -> dict[str, str] | None:
-        """Belirtilen olay sozluk (event dict) uzerinde kurali dener.
+        """Try the rule against the given event dict.
 
         Args:
-            event: Taranacak olay logu sozlugu.
-            strict: True ise tam eslesme (anchored regex), False ise arama (substring).
+            event: Event log dict to scan.
+            strict: True for exact match (anchored regex), False for search (substring).
 
         Returns:
-            Eslesen alanlar sozlugu (matched_fields) veya eslesmediyse None.
+            Matched-fields dict on hit, otherwise None.
         """
         if not self.rule.detection or not self.rule.detection.parsed_condition:
             return None
 
-        # Birden fazla condition varsa (nadiren), herhangi birinin tutmasi yeterli
+        # Multiple conditions are rare; any one matching is enough.
         for cond_tree in self.rule.detection.parsed_condition:
             match_dict = self._eval_node(cond_tree.parsed, event, strict)
             if match_dict is not None:
@@ -171,7 +171,7 @@ class SigmaMemoryEvaluator:
                         return {k: str(v)}
                 return None
 
-            # Belirli field uzerinde ara
+            # Search within a specific field.
             for k, v in event.items():
                 if k.lower() == field:
                     if regex.search(str(v)):
@@ -230,10 +230,10 @@ def _classify_log_source(log_source: str, product: str) -> str:
 
 
 class SigmaLayer:
-    """Sigma kural tabanlı log analizi — ATT&CK Layer 0 deterministik tespiti.
+    """Sigma rule-based log analysis — ATT&CK Layer 0 deterministic detection.
 
-    pySigma kütüphanesini kullanarak kurallari AST'ye cevirir ve
-    kendi yazdigimiz In-Memory Evaluator ile olaylari tarar.
+    Uses pySigma to parse rules into an AST and the in-tree
+    ``SigmaMemoryEvaluator`` to evaluate events.
     """
 
     def __init__(self, collection: SigmaCollection) -> None:
@@ -353,7 +353,7 @@ class SigmaLayer:
                             matched_fields=matched_fields,
                         )
                     )
-                    break  # Bir kural ayni event batch'inde 1 kez alarm uretir
+                    break  # Each rule fires at most once per event batch.
 
         return matches
 
@@ -362,7 +362,7 @@ class SigmaLayer:
         log_lines: list[str],
         log_source: str = "generic",
     ) -> list[SigmaMatch]:
-        """Yapisiz (Unstructured) raw metin satirlarini tarar. (Backward Compatibility)"""
+        """Scan unstructured raw text lines. (Backward compatibility path.)"""
         if not self._collection.rules or not log_lines:
             return []
 
@@ -388,7 +388,7 @@ class SigmaLayer:
                             matched_fields=matched_fields,
                         )
                     )
-                    break  # Bir kural ayni log kumesinde 1 kez alarm uretir
+                    break  # Each rule fires at most once per log batch.
 
         return matches
 

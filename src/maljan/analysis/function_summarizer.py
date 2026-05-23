@@ -1,34 +1,35 @@
-"""FunctionSummarizer — iki asarali token maliyet optimizasyonu.
+"""FunctionSummarizer — two-stage token-cost optimisation.
 
 Problem:
-    Buyuk binary analiz raporlari (decompile ciktisi, 1000+ fonksiyon)
-    dogrudan expert LLM'e gonderildiginde:
-      - Context penceresi asiyor (gpt-4o: 128k token = ~$0.60/analiz)
-      - Model performansi duser (needle in a haystack sorunu)
+    Large binary analysis reports (decompile output, 1000+ functions)
+    sent directly to the expert LLM:
+      - Blow past the context window (gpt-4o: 128k tokens = ~$0.60/run)
+      - Degrade model performance (needle-in-a-haystack effect)
 
-Cozum — iki asarali pipeline:
-    Asama 1 (Summarize): Kucuk/ucuz LLM (orn. llama3.2:3b, gpt-4o-mini)
-                         her chunk'i MAX_SUMMARY_WORDS kelimeye indirir.
-    Asama 2 (Analyze):   Expert LLM sadece ozet metni gorur.
+Solution — two-stage pipeline:
+    Stage 1 (Summarize): A small / cheap LLM (e.g. llama3.2:3b,
+                         gpt-4o-mini) condenses each chunk down to
+                         MAX_SUMMARY_WORDS words.
+    Stage 2 (Analyze):   The expert LLM only ever sees the summary text.
 
-Token maliyet karsilastirmasi (varsayimsal):
-    Dogrudan gonderim : ~20,000 token / analiz (@gpt-4o: ~$0.15)
-    Iki asarali       : ~3,000 token / analiz (@gpt-4o: ~$0.02)
-    Tasarruf          : ~%85 azalma
+Token-cost comparison (illustrative):
+    Direct send : ~20,000 tokens / analysis (@gpt-4o: ~$0.15)
+    Two-stage   : ~3,000 tokens / analysis (@gpt-4o: ~$0.02)
+    Savings     : ~85% reduction
 
-Sinifin tasarimi:
-    - Bagimsiz: sadece LangChain BaseChatModel gerekir.
-    - ServiceContainer.get_function_summarizer() ile erisim.
-    - Settings.preprocessing.use_function_summarizer=True ile devreye girer.
-    - None donduruldugunde pipeline'da seffaf sekilde atlanir.
+Class design:
+    - Self-contained: only a LangChain ``BaseChatModel`` is required.
+    - Accessed via ServiceContainer.get_function_summarizer().
+    - Activated with Settings.preprocessing.use_function_summarizer=True.
+    - When it returns None the pipeline transparently skips this stage.
 
-Kullanim:
+Usage:
     summarizer = container.get_function_summarizer()
     if summarizer is not None:
         condensed = summarizer.summarize_chunks(function_chunks)
     else:
         condensed = "\n".join(function_chunks)
-    # condensed artik expert LLM'e gidebilir
+    # ``condensed`` can now be handed to the expert LLM.
 """
 
 from __future__ import annotations
@@ -81,11 +82,11 @@ _MERGE_HUMAN_TMPL = (
 
 
 class FunctionSummarizer:
-    """Iki asarali LLM tabanlı token maliyet optimizasyonu.
+    """Two-stage LLM-based token-cost optimisation.
 
     Args:
-        llm:              Summarizer LLM (kucuk/ucuz model onerilir).
-        max_summary_words: Her chunk ozeti icin maksimum kelime sayisi.
+        llm:              Summarizer LLM (a small / cheap model is recommended).
+        max_summary_words: Maximum word count per chunk summary.
     """
 
     def __init__(
@@ -97,20 +98,20 @@ class FunctionSummarizer:
         self._max_words = max_summary_words
 
     def summarize_chunk(self, code_chunk: str) -> str:
-        """Tek bir kod veya fonksiyon blogu ozetler.
+        """Summarise a single block of code or list of functions.
 
         Args:
-            code_chunk: Decompile edilmis kod, fonksiyon listesi veya
-                        analiz raporu parcasi.
+            code_chunk: A decompiled-code excerpt, a function list, or a
+                        slice of an analysis report.
 
         Returns:
-            Guvenligi ilgili davranislari iceren kisaltilmis metin.
+            Condensed text covering only the security-relevant behaviours.
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
         prompt = _SUMMARIZE_HUMAN_TMPL.format(
             max_words=self._max_words,
-            code_chunk=code_chunk[:8000],  # Hard limit — token tasarrufu
+            code_chunk=code_chunk[:8000],  # Hard limit — token budget.
         )
 
         messages = [
@@ -132,20 +133,20 @@ class FunctionSummarizer:
             logger.warning(
                 "FunctionSummarizer.summarize_chunk failed: %s — returning raw chunk.", exc
             )
-            # Graceful degradation: hata durumunda ham chunk doner
-            return code_chunk[: self._max_words * 6]  # Yaklasik karakter limiti
+            # Graceful degradation: on error return the raw chunk.
+            return code_chunk[: self._max_words * 6]  # Approximate char limit.
 
     def summarize_chunks(self, chunks: list[str]) -> str:
-        """Birden fazla chunk'i ozetler ve birlestir.
+        """Summarise multiple chunks and merge the results.
 
-        Her chunk ayrı ayrı ozetlenir, ardından tum ozetler tek bir
-        birlesmis ozete indirgenebilir (birlesim opsiyonel).
+        Each chunk is summarised individually; the per-chunk summaries can
+        then be folded into a single merged summary (merge is optional).
 
         Args:
-            chunks: Ozetlenecek kod/rapor bloklari listesi.
+            chunks: List of code / report blocks to summarise.
 
         Returns:
-            Tum chunk'lerin birlesmis ozeti (tek metin).
+            Merged summary of all chunks (single text).
         """
         if not chunks:
             return ""
@@ -164,7 +165,7 @@ class FunctionSummarizer:
             summary = self.summarize_chunk(chunk)
             summaries.append(f"[Chunk {i}] {summary}")
 
-        # Tek ozet varsa birlestirme yapmaya gerek yok
+        # No need to merge if there are only a handful of summaries.
         if len(summaries) <= 3:
             merged = "\n\n".join(summaries)
         else:
@@ -182,20 +183,20 @@ class FunctionSummarizer:
     # ------------------------------------------------------------------
 
     def _merge_summaries(self, summaries: list[str]) -> str:
-        """Cok sayida chunk ozetini tek bir ozette birlestir.
+        """Merge many chunk summaries into a single combined summary.
 
         Args:
-            summaries: Her chunk icin ozet metinleri listesi.
+            summaries: List of per-chunk summary strings.
 
         Returns:
-            Birlesmis ozet metni.
+            Combined summary text.
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
         combined = "\n\n".join(summaries)
         prompt = _MERGE_HUMAN_TMPL.format(
             max_words=self._max_words * 2,
-            summaries=combined[:12000],  # Token korumasi
+            summaries=combined[:12000],  # Token budget guard.
         )
 
         messages = [

@@ -29,6 +29,9 @@ models/
 *.gguf
 *.safetensors
 
+# Local reference PDFs (Twitter threads, papers — collected per machine)
+docs/twitter/
+
 # Local analysis outputs
 reports/
 

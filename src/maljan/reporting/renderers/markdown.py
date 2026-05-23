@@ -34,8 +34,8 @@ from maljan.reporting.models import (
 class MarkdownRenderer:
     """Render a complete ``MalwareReport`` as a single markdown string."""
 
-    # Bölüm sırası burada tek bir yerde tutulur; her ``_section_*`` çağrısı
-    # bir veya iki başlıkla bir blok döner.
+    # Section order is kept in one place; each ``_section_*`` call returns
+    # a block with one or two headings.
 
     def render(self, report: MalwareReport) -> str:
         sections: list[str] = [

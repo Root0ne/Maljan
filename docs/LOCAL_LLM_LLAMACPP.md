@@ -1,27 +1,27 @@
 # Local LLM via ik_llama.cpp (Qwen3.6-35B-A3B)
 
-Maljan'ı yerel olarak çalıştırırken bir LLM sağlayıcıya ihtiyaç var. Bu belge, [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) (llama.cpp'nin imatrix-quant fork'u) üzerinden **Qwen3.6-35B-A3B** (35B MoE, sadece 3B param/token aktif) modelini Windows + NVIDIA üzerinde nasıl ayağa kaldıracağınızı anlatır.
+Running Maljan locally requires an LLM provider. This document explains how to bring up **Qwen3.6-35B-A3B** (35B MoE, only 3B params active per token) on Windows + NVIDIA via [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) (an imatrix-quant fork of llama.cpp).
 
-## Neden bu kurulum?
+## Why this setup?
 
-- Ollama + qwen3.5:9b ile çok-agent pipeline'da (3 expert + mediator + verdict) **timeout** ve sessiz crash'ler oluşuyordu.
-- `ik_llama.cpp` + `Qwen3.6-35B-A3B-IQ3_K_R4` kombinasyonu, 8 GB VRAM bir GPU üzerinde **55-60 tok/s** üretiyor ve context derinliği arttıkça **hız düşmüyor**.
-- Daha akıllı (35B) ve daha hızlı model → mediator/verdict zamanlarında nefes alıyoruz.
+- The previous Ollama + qwen3.5:9b combination produced **timeouts** and silent crashes in the multi-agent pipeline (3 experts + mediator + verdict).
+- `ik_llama.cpp` + `Qwen3.6-35B-A3B-IQ3_K_R4` runs at **55-60 t/s** on a single 8 GB VRAM GPU and **does not degrade** as context depth grows.
+- A larger (35B) and faster model gives the mediator / verdict stages real breathing room.
 
-Referans: [AboveSpec'in Mayıs 2026 X thread'leri](https://huggingface.co/abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF).
+Reference: [AboveSpec's May 2026 X threads](https://huggingface.co/abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF).
 
-## Önkoşullar (Windows)
+## Prerequisites (Windows)
 
 - Visual Studio Build Tools 2022 ("Desktop development with C++" workload)
-- CUDA Toolkit 12.x veya 13.x (NVIDIA driver versiyonuna uygun)
+- CUDA Toolkit 12.x or 13.x (matching your NVIDIA driver)
 - CMake 3.27+
 - Git for Windows
-- 16+ GB RAM (32 GB önerilir)
-- NVIDIA GPU (8 GB VRAM yeterli — RTX 3060/3070/4060 Ti/5060 sınıfı)
+- 16+ GB RAM (32 GB recommended)
+- An NVIDIA GPU (8 GB VRAM is enough — RTX 3060/3070/4060 Ti/5060 class)
 
-## Kurulum
+## Setup
 
-### 1. ik_llama.cpp'yi klonla ve derle
+### 1. Clone and build ik_llama.cpp
 
 ```powershell
 cd D:\Projects\Maljan
@@ -36,11 +36,9 @@ cmake --build build --config Release --target llama-server -j
 
 Build artefact: `external\ik_llama.cpp\build\bin\Release\llama-server.exe`
 
-### 2. GGUF modeli indir (Unsloth MTP varyantı)
+### 2. Download the GGUF model (Unsloth MTP variant)
 
-Mayıs 2026 Unsloth/AboveSpec/Snixtp X thread'lerinin tavsiyesi: **MTP (Multi-Token
-Prediction)** head'leri eklenmiş GGUF + ik_llama.cpp'nin `-mtp` flag'iyle decode
-1.4-2.4x hızlanıyor (özellikle uzun context'te).
+May 2026 X threads from Unsloth / AboveSpec / Snixtp converge on the same recipe: **MTP (Multi-Token Prediction)** heads baked into the GGUF + ik_llama.cpp's `-mtp` flag yields a 1.4-2.4x decode speedup (most noticeable at long context).
 
 ```powershell
 hf download unsloth/Qwen3.6-35B-A3B-MTP-GGUF `
@@ -48,12 +46,12 @@ hf download unsloth/Qwen3.6-35B-A3B-MTP-GGUF `
   --local-dir .\models
 ```
 
-Boyut: ~14.3 GB.
+Size: ~14.3 GB.
 
-> **Alternatif** (MTP'siz, ik_llama hub'ı): `abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF`
-> dosyası `Qwen3.6-35B-A3B-IQ3_K_R4.gguf`. MTP yok, dosya boyutu aynı.
+> **Alternative** (no MTP, ik_llama hub): `abovespec/Qwen3.6-35B-A3B-IQ3_K_R4-GGUF`,
+> file `Qwen3.6-35B-A3B-IQ3_K_R4.gguf`. No MTP, identical disk size.
 
-### 3. llama-server'ı başlat (MTP + checkpoint-disable)
+### 3. Launch llama-server (MTP + checkpoint-disable)
 
 ```powershell
 .\external\ik_llama.cpp\build\bin\Release\llama-server.exe `
@@ -69,42 +67,42 @@ Boyut: ~14.3 GB.
   --ctx-checkpoints 0
 ```
 
-Bayraklar:
+Flags:
 
-| Bayrak | Açıklama |
+| Flag | Description |
 |---|---|
-| `-ngl 99` | Tüm attention/shared weights GPU'da |
-| `--n-cpu-moe 99` | Tüm expert FFN'ler CPU+RAM'de (8 GB VRAM senaryosu) |
-| `--host 127.0.0.1` | Sadece localhost'tan erişim (güvenlik) |
-| `--port 8080` | Maljan `.env`'deki `LLM__OPENAI__BASE_URL` ile eşleşir |
-| `-fa on` | FlashAttention (KV scan hızlanır) — `on/off/auto` değer ister, çıplak flag değil |
-| `-c 262144` | 256k context (modelin tam eğitim sınırı). Maljan için 64k de yeterlidir |
-| `-ctk/-ctv q4_0` | KV cache 4-bit (RAM yarıya iner) |
-| `--jinja` | OpenAI `tools` parametresi (fonksiyon çağrısı / ReAct) için ZORUNLU |
-| `--alias` | OpenAI API'sinin `model` alanında dönen ad |
-| **`-mtp --spec-type mtp`** | Multi-Token Prediction'ı aç — yeni GGUF'taki ek tahmin head'lerini kullanır |
-| **`--draft-max 6`** | Her adımda en fazla 6 token speculate et (Unsloth tavsiyesi) |
-| **`--ctx-checkpoints 0`** | Context checkpoint mekanizmasını kapat — uzun context'te decode 2x hızlanır (witcheer X thread) |
+| `-ngl 99` | All attention / shared weights on the GPU |
+| `--n-cpu-moe 99` | All expert FFNs on CPU+RAM (8 GB VRAM scenario) |
+| `--host 127.0.0.1` | Localhost only (security) |
+| `--port 8080` | Matches `LLM__OPENAI__BASE_URL` in Maljan's `.env` |
+| `-fa on` | FlashAttention (speeds up KV scan) — takes `on/off/auto`, not a bare flag |
+| `-c 262144` | 256k context (model's full training window). 64k is more than enough for Maljan |
+| `-ctk/-ctv q4_0` | KV cache in 4-bit (halves the cache RAM) |
+| `--jinja` | REQUIRED for the OpenAI `tools` parameter (function calling / ReAct) |
+| `--alias` | The name returned in the OpenAI API `model` field |
+| **`-mtp --spec-type mtp`** | Enables Multi-Token Prediction — uses the extra prediction heads in the new GGUF |
+| **`--draft-max 6`** | Speculate at most 6 tokens per step (Unsloth's recommendation) |
+| **`--ctx-checkpoints 0`** | Disable the context-checkpoint mechanism — ~2x decode improvement at long context (witcheer X thread) |
 
-Daha hızlı varyant (GPU bolsa): `--n-cpu-moe 30` (11 expert GPU'da, ~60 t/s, 7.5 GB VRAM)
-— MTP ile birlikte VRAM 10 GB'a çıkar, 8 GB GPU'lara sığmaz. **MTP veya ncmoe=30 — ikisinden birini seç.**
+Faster variant (if you have VRAM to spare): `--n-cpu-moe 30` (11 experts on GPU, ~60 t/s, 7.5 GB VRAM)
+— combined with MTP this pushes VRAM to ~10 GB and will not fit on an 8 GB GPU. **Pick one: MTP or ncmoe=30.**
 
-**Context vs. RAM:** q4_0 KV cache ile her token ~5 KB. 256k context → ~1.3 GB ek RAM. 64k istersen `-c 65536` yap, ~320 MB tasarruf.
+**Context vs. RAM:** with q4_0 KV cache every token is ~5 KB. 256k context → ~1.3 GB extra RAM. Drop to `-c 65536` for 64k to save ~320 MB.
 
-**Ölçülen kaynak profil (RTX 5060 8 GB + AMD Ryzen 9 8940HX + 32 GB DDR5-5200):**
+**Measured resource profile (RTX 5060 8 GB + AMD Ryzen 9 8940HX + 32 GB DDR5-5200):**
 
-| Metrik | IQ3_K_R4 (eski, MTP yok) | UD-IQ3_S + MTP (yeni) |
+| Metric | IQ3_K_R4 (old, no MTP) | UD-IQ3_S + MTP (new) |
 |---|---|---|
 | RSS (llama-server) | 17.9 GB | **13.9 GB** (−4 GB) |
 | VRAM | 4.3 GB | 5.5 GB (+1.2 GB) |
-| Toplam (RAM+VRAM) | 22.2 GB | **19.4 GB** (−2.8 GB) |
-| Decode (reasoning'li) | ~30-50 t/s | 26-27 t/s (acceptance %93) |
-| Decode (uzun ctx >32K) | düşer | 1.4-2.4x sabit (Snixtp benchmark) |
-| Sistem free RAM | ~14 GB | **~18 GB** |
+| Total (RAM+VRAM) | 22.2 GB | **19.4 GB** (−2.8 GB) |
+| Decode (with reasoning) | ~30-50 t/s | 26-27 t/s (93% draft acceptance) |
+| Decode (long ctx >32K) | drops off | 1.4-2.4x flat (Snixtp benchmark) |
+| Free system RAM | ~14 GB | **~18 GB** |
 
-### 4. Maljan'ı yapılandır
+### 4. Configure Maljan
 
-`.env` dosyasında:
+In `.env`:
 
 ```env
 LLM__PROVIDER=openai
@@ -114,39 +112,39 @@ LLM__OPENAI__EXPERT_MODEL=qwen3.6-35b-a3b
 LLM__OPENAI__JUDGE_MODEL=qwen3.6-35b-a3b
 ```
 
-**Not:** `LLM__OPENAI__API_KEY` boş olamaz — provider başlangıçta reddediyor. llama-server kimlik doğrulaması yapmıyor; dummy değer yeterli.
+**Note:** `LLM__OPENAI__API_KEY` cannot be empty — the provider rejects it at startup. llama-server does not authenticate; a dummy value is enough.
 
-### 5. Docker stack ile çalıştırıyorsanız
+### 5. If you run via the Docker stack
 
-`docker-compose.yml` zaten `host.docker.internal:8080/v1`'a yönlendirilmiş. Sadece çevre değişkenleri override etmek isterseniz:
+`docker-compose.yml` already targets `host.docker.internal:8080/v1`. To override the env vars only:
 
 ```env
 LLM_OPENAI_BASE_URL=http://host.docker.internal:8080/v1
 LLM_OPENAI_API_KEY=dummy_key_no_auth_needed
 ```
 
-## Doğrulama
+## Verification
 
 ```powershell
-# llama-server ayakta mı?
+# Is llama-server up?
 curl http://127.0.0.1:8080/v1/models
 
-# Sohbet smoke test
+# Chat smoke test
 curl http://127.0.0.1:8080/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{\"model\":\"qwen3.6-35b-a3b\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hi\"}]}'
 
-# Maljan mock pipeline (LLM'i atlar, regresyon kontrolü)
+# Maljan mock pipeline (LLM bypassed — regression check)
 uv run maljan analyze test_sample --mock --name smoke -i 1
 
-# Maljan gerçek pipeline
+# Maljan real pipeline
 uv run maljan analyze f5a7696239b801496743753f8066775f68793e81b5d4eceb15f701950774733d `
   -s samples\zararli.elf --provider openai -i 3 --name llamacpp-test
 ```
 
-## Geri Alma (Ollama'ya dön)
+## Rollback (back to Ollama)
 
-`.env`'de aşağıdaki bloğu yorum işaretsiz, openai bloğunu yorumlu yapın:
+In `.env` uncomment the block below and comment out the openai block:
 
 ```env
 LLM__PROVIDER=ollama
@@ -155,23 +153,23 @@ LLM__OLLAMA__EXPERT_MODEL=qwen3.5:9b
 LLM__OLLAMA__JUDGE_MODEL=qwen3.5:9b
 ```
 
-Kod tarafında değişiklik yok — provider seçimi tamamen env üzerinden.
+No code changes required — provider selection is entirely env-driven.
 
-## Sorun Giderme
+## Troubleshooting
 
-| Belirti | Olası neden | Çözüm |
+| Symptom | Likely cause | Fix |
 |---|---|---|
-| `OPENAI_API_KEY is not set` | API key env'de yok | `LLM__OPENAI__API_KEY=dummy_key_no_auth_needed` ekle |
-| llama-server `failed to load model` | GGUF dosya yolu yanlış veya yetki sorunu | Mutlak yol ver, dosyanın okunabilir olduğunu kontrol et |
-| GPU OOM | `-ngl 99` ile attention da GPU'da kalmış | `-ncmoe 99` doğru, ama context'i (`-c`) küçült veya KV cache'i 4-bit'e indir (`-ctk q4_0`) |
-| Yavaş (40 t/s altı) | DDR4 RAM darboğazı | DDR5'e yükselt; yoksa daha küçük model (Q4_K_S) |
-| MTP draft acceptance düşük (<%80) | Model fazla "thinking" yapıyor, MTP fark edemiyor | Beklenen davranış — uzun çıktıda yine de net kazanç var. Reasoning'i kapatmak için sistem prompt'una `/no_think` ekleyin |
-| `error: unknown argument: -mtp` | ik_llama.cpp build eski | Repo'yu güncelleyip yeniden derleyin (MTP desteği 2026-Q2 sonrası) |
-| Pipeline mediator yine timeout | Local model hâlâ kompleks STIX bundle için yavaş | `REACT_AGENT_TIMEOUT=600` env ile timeout'u yükselt |
-| Build hatası: NCCL bulunamadı | NCCL Windows'ta yok, uyarı normal | Yoksay — single-GPU için NCCL gereksiz |
+| `OPENAI_API_KEY is not set` | API key missing in env | Add `LLM__OPENAI__API_KEY=dummy_key_no_auth_needed` |
+| llama-server `failed to load model` | Bad GGUF path or permission issue | Use an absolute path; verify the file is readable |
+| GPU OOM | Attention pinned to GPU via `-ngl 99` | `-ncmoe 99` is fine, but lower `-c` or quantise the KV cache further (`-ctk q4_0`) |
+| Slow (below 40 t/s) | DDR4 RAM bandwidth bottleneck | Upgrade to DDR5; otherwise use a smaller quant (Q4_K_S) |
+| MTP draft acceptance low (<80%) | The model is doing heavy "thinking" content MTP cannot anticipate | Expected — long-output workloads still see net gain. Append `/no_think` to the system prompt to disable reasoning |
+| `error: unknown argument: -mtp` | Old ik_llama.cpp build | Pull the repo and rebuild (MTP support landed mid-2026) |
+| Pipeline mediator still times out | The local model is still slow on complex STIX bundles | Raise the timeout via `REACT_AGENT_TIMEOUT=600` |
+| Build error: NCCL not found | NCCL is not available on Windows — the warning is normal | Ignore — NCCL is unnecessary for single-GPU setups |
 
-## Güvenlik notları
+## Security notes
 
-- `llama-server` `127.0.0.1`'e bind ediliyor → LAN/internet erişimi yok.
-- `models/` ve `external/ik_llama.cpp/` `.gitignore`'da → git'e sızmaz.
-- Maljan'ın mevcut güvenlik katmanları (MCP allowlist, JWT, rate limit) yerinde — bu kurulum onlara dokunmuyor.
+- `llama-server` binds to `127.0.0.1` → no LAN / internet exposure.
+- `models/` and `external/ik_llama.cpp/` are in `.gitignore` → they never reach the repo.
+- Maljan's existing security layers (MCP allowlist, JWT, rate limit) are untouched by this setup.
