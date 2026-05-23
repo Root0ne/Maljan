@@ -8,14 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import decode_token
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 
-security_scheme = HTTPBearer()
+# auto_error=False so the dependency still runs when ``auth_disabled`` is
+# active and the client sends no Authorization header.
+security_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Extract and validate the current user from the JWT bearer token.
@@ -24,6 +27,27 @@ async def get_current_user(
         HTTPException 401: If the token is invalid, expired, or user not found.
         HTTPException 403: If the user account is deactivated.
     """
+    if settings.auth_disabled:
+        dev_uuid = uuid.UUID(settings.auth_disabled_user_id)
+        result = await db.execute(select(User).where(User.id == dev_uuid))
+        dev_user = result.scalar_one_or_none()
+        if dev_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "auth_disabled is set but the dev user row is missing; "
+                    "restart the API to seed it."
+                ),
+            )
+        return dev_user
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = decode_token(credentials.credentials)
     if payload is None:
         raise HTTPException(

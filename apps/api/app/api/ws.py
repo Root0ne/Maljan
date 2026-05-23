@@ -143,43 +143,52 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     # in proxy access logs or browser Referer headers. The expected protocol
     # is ``maljan.v1.<jwt-access-token>``. Legacy clients passing ``?token=``
     # still work but are logged as deprecated and will be removed.
-    token: str | None = None
-    requested_protocols = websocket.headers.get("sec-websocket-protocol", "")
-    for raw in requested_protocols.split(","):
-        candidate = raw.strip()
-        if candidate.startswith("maljan.v1."):
-            token = candidate[len("maljan.v1.") :]
-            break
+    payload: dict[str, object] = {}
+    user_id: str
+    if settings.auth_disabled:
+        user_id = settings.auth_disabled_user_id
+    else:
+        token: str | None = None
+        requested_protocols = websocket.headers.get("sec-websocket-protocol", "")
+        for raw in requested_protocols.split(","):
+            candidate = raw.strip()
+            if candidate.startswith("maljan.v1."):
+                token = candidate[len("maljan.v1.") :]
+                break
 
-    if token is None:
-        legacy = websocket.query_params.get("token")
-        if legacy:
-            logger.warning(
-                "WebSocket using deprecated query-string auth (job=%s)", job_id
-            )  # nosemgrep # noqa: E501
-            token = legacy
+        if token is None:
+            legacy = websocket.query_params.get("token")
+            if legacy:
+                logger.warning(
+                    "WebSocket using deprecated query-string auth (job=%s)", job_id
+                )  # nosemgrep # noqa: E501
+                token = legacy
 
-    if not token:
-        logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
-        await websocket.close(code=1008, reason="Unauthorized: missing token")
-        return
+        if not token:
+            logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
+            await websocket.close(code=1008, reason="Unauthorized: missing token")
+            return
 
-    payload = decode_token(token)
-    if payload is None:
-        logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)  # nosemgrep
-        await websocket.close(code=1008, reason="Unauthorized: invalid token")
-        return
+        decoded = decode_token(token)
+        if decoded is None:
+            logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)  # nosemgrep
+            await websocket.close(code=1008, reason="Unauthorized: invalid token")
+            return
+        payload = decoded
 
-    if payload.get("type") != "access":
-        logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)  # nosemgrep
-        await websocket.close(code=1008, reason="Unauthorized: access token required")
-        return
+        if payload.get("type") != "access":
+            logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)  # nosemgrep
+            await websocket.close(code=1008, reason="Unauthorized: access token required")
+            return
 
-    user_id = payload.get("sub")
-    if not user_id:
-        logger.warning("WebSocket rejected: token missing subject (job=%s)", job_id)  # nosemgrep
-        await websocket.close(code=1008, reason="Unauthorized: token missing subject")
-        return
+        sub = payload.get("sub")
+        if not sub or not isinstance(sub, str):
+            logger.warning(  # nosemgrep
+                "WebSocket rejected: token missing subject (job=%s)", job_id
+            )
+            await websocket.close(code=1008, reason="Unauthorized: token missing subject")
+            return
+        user_id = sub
 
     # ── Job ownership check ──────────────────────────────────────────
     try:

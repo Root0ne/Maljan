@@ -81,6 +81,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Run `alembic upgrade head` from your deploy pipeline instead."
         )
 
+    if settings.auth_disabled:
+        try:
+            import uuid as _uuid
+
+            from sqlalchemy import select as _select
+            from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+
+            from app.models.user import User, UserRole
+
+            session_factory = _async_sessionmaker(async_engine, expire_on_commit=False)
+            dev_uuid = _uuid.UUID(settings.auth_disabled_user_id)
+            async with session_factory() as session:
+                existing = (
+                    await session.execute(_select(User).where(User.id == dev_uuid))
+                ).scalar_one_or_none()
+                if existing is None:
+                    session.add(
+                        User(
+                            id=dev_uuid,
+                            email=settings.auth_disabled_user_email,
+                            full_name=settings.auth_disabled_user_full_name,
+                            hashed_password="!disabled-auth-bypass!",
+                            role=UserRole.ADMIN,
+                            is_active=True,
+                        )
+                    )
+                    await session.commit()
+                    logger.warning(
+                        "AUTH_DISABLED is active — seeded dev admin user %s (%s). "
+                        "Do NOT run with this flag outside local development.",
+                        settings.auth_disabled_user_email,
+                        dev_uuid,
+                    )
+                else:
+                    logger.warning(
+                        "AUTH_DISABLED is active — every request will be attributed to %s.",
+                        settings.auth_disabled_user_email,
+                    )
+        except Exception as exc:
+            logger.critical("Failed to seed dev user for AUTH_DISABLED: %s", exc, exc_info=True)
+            raise
+
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",
         extra={"component": "lifecycle"},

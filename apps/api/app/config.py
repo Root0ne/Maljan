@@ -111,6 +111,17 @@ class APISettings(BaseSettings):
     login_max_attempts: int = 10
     login_lockout_seconds: int = 300
 
+    # ── Auth bypass (local development only) ─────────────────────
+    # When True, the API skips all JWT decoding and pretends every
+    # request is made by a fixed dev admin user. The user row is
+    # auto-seeded on startup. NEVER enable this outside trusted local
+    # environments — there is no rate limiting and every operation
+    # (including admin-only ones) becomes unauthenticated.
+    auth_disabled: bool = False
+    auth_disabled_user_id: str = "00000000-0000-0000-0000-000000000001"
+    auth_disabled_user_email: str = "dev@local"
+    auth_disabled_user_full_name: str = "Dev User"
+
     # ── Qdrant (passed through to maljan-core) ───────────────────
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection: str = "maljan_ltm"
@@ -188,6 +199,12 @@ class APISettings(BaseSettings):
         return value
 
     def model_post_init(self, __context: object) -> None:
+        # The auth-bypass flag is for interactive local development only;
+        # never let it leak into the test suite, where it would mask real
+        # 401 / 403 assertions. Force it off whenever pytest is active.
+        if _is_test_env() and self.auth_disabled:
+            object.__setattr__(self, "auth_disabled", False)
+
         # Skip the strict placeholder check when pytest is running or when
         # the caller has explicitly opted out (e.g. local Docker compose
         # with the default minioadmin bootstrap). Production deployments
