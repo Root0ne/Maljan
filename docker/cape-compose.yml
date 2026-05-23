@@ -1,0 +1,65 @@
+# CAPEv2 development stack — web + REST API only.
+#
+# WHAT THIS IS NOT: a full malware analysis platform. The official CAPEv2
+# deployment needs KVM/QEMU + Windows guest VMs to actually execute samples.
+# This stack only brings up the Django web app + the supporting Postgres
+# database so Maljan's CAPEv2Client integration can be exercised end-to-end.
+# See docs/CAPE2_DOCKER_INTEGRATION.md for the path to full deployment.
+#
+# Usage:
+#   docker compose -f docker/cape-compose.yml up -d --build
+#
+# Maljan then talks to it via .env:
+#   SANDBOX__BACKEND=cape2
+#   SANDBOX__CAPE2_BASE_URL=http://localhost:18000
+#   SANDBOX__CAPE2_API_TOKEN=<value matching CAPE_API_TOKEN below>
+
+services:
+  cape-postgres:
+    image: postgres:16-alpine
+    container_name: maljan-cape-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cape
+      POSTGRES_USER: cape
+      POSTGRES_PASSWORD: cape_dev_pw
+    volumes:
+      - cape_pgdata:/var/lib/postgresql/data
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cape -d cape"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  cape-web:
+    build:
+      context: ..
+      dockerfile: docker/cape/Dockerfile.cape-web
+    image: maljan/cape-web:dev
+    container_name: maljan-cape-web
+    restart: unless-stopped
+    depends_on:
+      cape-postgres:
+        condition: service_healthy
+    environment:
+      CAPE_POSTGRES_DSN: postgresql://cape:cape_dev_pw@cape-postgres:5432/cape
+      CAPE_WEB_HOST: 0.0.0.0
+      CAPE_WEB_PORT: "8000"
+      CAPE_API_TOKEN: ${CAPE_API_TOKEN:-maljan_cape_dev_token}
+      # Bypass settings.py's "do not run as root" guard. The container has
+      # no other user namespace; running as root inside an isolated
+      # container is the standard pattern (the warning targets bare-metal
+      # installs where CAPE writes into a shared $HOME).
+      CAPE_AS_ROOT: "1"
+    ports:
+      - "18000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/apiv2/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  cape_pgdata:

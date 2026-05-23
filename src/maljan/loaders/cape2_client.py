@@ -12,9 +12,9 @@ Requirements:
   - A running CAPEv2 instance reachable from this host.
 
 CAPEv2 API endpoints used:
-  POST /apiv2/tasks/create/file/  -- submit a sample file
-  GET  /apiv2/tasks/view/{id}/    -- check task status
-  GET  /apiv2/tasks/report/{id}/  -- fetch completed JSON report
+  POST /apiv2/tasks/create/file/        -- submit a sample file
+  GET  /apiv2/tasks/view/{id}/          -- check task status
+  GET  /apiv2/tasks/get/report/{id}/    -- fetch completed JSON report
 
 Authentication:
   CAPEv2 uses token authentication. Set the API token via the
@@ -126,8 +126,17 @@ class CAPEv2Client:
         self._raise_for_status(response, "submit")
         data = response.json()
 
-        # CAPEv2 returns {"task_id": 42} or {"task_ids": [42]}
-        task_id = data.get("task_id") or (data.get("task_ids") or [None])[0]
+        # Upstream CAPEv2 wraps the payload as
+        # ``{"error": false, "data": {"task_ids": [42]}, ...}``. Older
+        # versions returned flat ``{"task_id": 42}`` or ``{"task_ids": [...]}``;
+        # we accept either shape to stay compatible with both.
+        inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+        task_id = (
+            data.get("task_id")
+            or (data.get("task_ids") or [None])[0]
+            or inner.get("task_id")
+            or (inner.get("task_ids") or [None])[0]
+        )
         if task_id is None:
             raise SandboxError(f"Unexpected submit response: {data}")
 
@@ -190,7 +199,12 @@ class CAPEv2Client:
     def fetch_report(self, task_id: str) -> SubmissionResult:
         """Fetch the full JSON report for a completed task.
 
-        GET /apiv2/tasks/report/{task_id}/
+        GET /apiv2/tasks/get/report/{task_id}/
+
+        Note: the upstream CAPEv2 route is ``/apiv2/tasks/get/report/<id>/``
+        (see ``external/CAPEv2/web/apiv2/urls.py``). Earlier versions of
+        this client used ``/apiv2/tasks/report/<id>/`` which always 404'd
+        against a real instance.
 
         Args:
             task_id: Task ID from submit().
@@ -203,7 +217,7 @@ class CAPEv2Client:
         """
         logger.info("CAPEv2Client: fetching report for task %s.", task_id)
         try:
-            response = self._http.get(f"/apiv2/tasks/report/{task_id}/")
+            response = self._http.get(f"/apiv2/tasks/get/report/{task_id}/")
         except Exception as exc:
             raise SandboxError(f"Report request failed: {exc}") from exc
 

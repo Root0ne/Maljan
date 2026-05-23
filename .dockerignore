@@ -22,8 +22,10 @@ apps/web/.next/
 .DS_Store
 Thumbs.db
 
-# Docker (prevent recursive context)
+# Docker (prevent recursive context — but keep CAPE entrypoint reachable
+# for docker/cape/Dockerfile.cape-web which COPYs docker/cape/entrypoint.sh)
 docker/
+!docker/cape/
 
 # Build artifacts & logs
 *.log
