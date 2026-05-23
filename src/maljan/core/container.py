@@ -21,7 +21,7 @@ LangSmith Observability:
 
 Sandbox Backend:
     ``get_sandbox_client()`` returns the configured sandbox client (mock,
-    cape2) and caches it for the lifetime of the container.
+    cape2, triage) and caches it for the lifetime of the container.
 """
 
 from __future__ import annotations
@@ -193,6 +193,21 @@ class ServiceContainer:
                 logger.info(
                     "Sandbox backend: CAPEv2Client (url=%s).",
                     self.config.sandbox.cape2_base_url,
+                )
+            elif backend == "triage":
+                from maljan.loaders.triage_client import TriageClient
+
+                self._sandbox_client_cache = TriageClient(
+                    api_token=self.config.sandbox.triage_api_token,
+                    base_url=self.config.sandbox.triage_base_url,
+                    timeout=self.config.sandbox.triage_timeout_seconds,
+                    poll_interval=self.config.sandbox.triage_poll_interval_seconds,
+                )
+                logger.info(
+                    "Sandbox backend: TriageClient (url=%s). "
+                    "WARNING: public-cloud submissions are world-visible and "
+                    "cannot be deleted — use research/published samples only.",
+                    self.config.sandbox.triage_base_url,
                 )
             else:
                 from maljan.loaders.mock_sandbox_client import MockSandboxClient

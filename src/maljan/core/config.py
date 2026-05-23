@@ -190,7 +190,7 @@ class MemoryConfig(BaseModel):
 
 
 class SandboxConfig(BaseModel):
-    """Phase 6 CAPEv2 Sandbox configuration.
+    """Sandbox backend configuration.
 
     Controls which backend is used for dynamic sample analysis. The sandbox
     client is exposed via ServiceContainer.get_sandbox_client() and can be
@@ -200,25 +200,38 @@ class SandboxConfig(BaseModel):
         "mock"  (default) — MockSandboxClient loads fixture JSON files from
                 the samples directory. Requires no network access or external
                 services. Safe for CI, tests, and local development.
-        "cape2" — CAPEv2Client submits samples to a live CAPEv2 instance
-                via its REST API. Requires httpx and a running CAPEv2 server.
+        "cape2" — CAPEv2Client submits samples to a live CAPEv2 instance via
+                its REST API. Requires httpx and a running CAPEv2 server.
+                Recommended for production / private samples.
+        "triage" — TriageClient submits to Recorded Future Sandbox (tria.ge).
+                Public-cloud submissions on the free Researcher tier are
+                world-visible and cannot be deleted; use only with samples
+                whose public exposure is already acceptable (corpus samples,
+                published-IOC samples). Intended for academic / research-paper
+                reproducibility — every submission yields a citeable
+                tria.ge/<sample_id> URL.
 
-    cape2_base_url:
-        Base URL of the CAPEv2 REST API (only used when backend="cape2").
-    cape2_api_token:
-        CAPEv2 authentication token. Leave empty for unauthenticated
-        local instances.
-    cape2_timeout_seconds:
-        Maximum seconds to wait for a task to reach 'reported' status.
+    cape2_base_url, cape2_api_token, cape2_timeout_seconds,
     cape2_poll_interval_seconds:
-        Seconds between status poll requests during task completion wait.
+        CAPEv2 endpoint, optional bearer token, completion timeout and poll
+        interval. Token can be empty for unauthenticated local instances.
+
+    triage_api_token, triage_base_url, triage_timeout_seconds,
+    triage_poll_interval_seconds:
+        Triage API token (https://tria.ge/account -> API access), API base
+        URL (default https://api.tria.ge — leave the trailing /v0 off, the
+        client appends it), submission-to-report timeout and poll interval.
     """
 
-    backend: str = "mock"  # "mock" | "cape2"
+    backend: str = "mock"  # "mock" | "cape2" | "triage"
     cape2_base_url: str = "http://localhost:8000"
     cape2_api_token: SecretStr = SecretStr("")
     cape2_timeout_seconds: int = 300
     cape2_poll_interval_seconds: int = 10
+    triage_api_token: SecretStr = SecretStr("")
+    triage_base_url: str = "https://api.tria.ge"
+    triage_timeout_seconds: int = 600
+    triage_poll_interval_seconds: int = 15
 
 
 class AnalysisConfig(BaseModel):
