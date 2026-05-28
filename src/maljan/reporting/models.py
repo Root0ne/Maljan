@@ -79,6 +79,23 @@ class SignatureInfo(BaseModel):
     signature_valid: bool | None = None
 
 
+# Canonical platform taxonomy. Used by SampleIdentity, the rule layers
+# (Sigma/YARA), the TTP cascade, and the FP linter. "crossplatform"
+# is for samples that don't bind to one OS (e.g. JAR). "unknown" is
+# the conservative default when magic bytes don't identify the format
+# and the sandbox couldn't disambiguate either.
+Platform = Literal[
+    "windows",
+    "android",
+    "linux",
+    "macos",
+    "ios",
+    "cloud",
+    "crossplatform",
+    "unknown",
+]
+
+
 class SampleIdentity(BaseModel):
     """Everything needed to uniquely identify the sample on disk and in CTI."""
 
@@ -88,6 +105,10 @@ class SampleIdentity(BaseModel):
     file_name: str | None = None
     file_size_bytes: int = 0
     file_type: str = "unknown"
+    # Wave 4 (2026-05-28): the canonical platform inferred from
+    # file_type with sandbox fallback. Drives Sigma/YARA rule filtering
+    # and TTP cascade platform-aware drop decisions.
+    platform: Platform = "unknown"
     mime_type: str | None = None
     magic_bytes: str = ""  # hex string of first 16 bytes
     compile_timestamp: datetime | None = None

@@ -45,6 +45,14 @@ export default function IdentityTab() {
         <div className="p-4 grid grid-cols-2 gap-4">
           <Field label="File Name" value={identity.file_name || "(unknown)"} />
           <Field label="File Type" value={identity.file_type} />
+          <Field
+            label="Platform"
+            value={
+              identity.platform && identity.platform !== "unknown"
+                ? identity.platform.toUpperCase()
+                : "(unknown)"
+            }
+          />
           <Field label="Size" value={formatBytes(identity.file_size_bytes)} />
           <Field label="MIME Type" value={identity.mime_type || "(unknown)"} />
           <Field

@@ -430,6 +430,12 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             isr_reports: dict[str, AgentISR] = dict(state.get("isr_reports") or {})
 
+            # Wave 4: pick up the platform the bootstrap inferred. The
+            # rule layers + cascade use this to drop platform-mismatched
+            # signals (the 2026-05-28 audit found 6/7 sigma matches on
+            # an APK were Windows/macOS/cloud rules).
+            sample_platform = state.get("platform") or "unknown"
+
             async def _run_yara_scan() -> AgentISR | None:
                 try:
                     yara_layer = container.get_yara_layer()
@@ -438,12 +444,18 @@ def make_judge_node(container: ServiceContainer) -> Any:
                         for isr_obj in isr_reports.values():
                             scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
                         scan_text = " ".join(scan_parts)
-                        yara_matches = await asyncio.to_thread(yara_layer.scan, scan_text)
+                        yara_layer.reset_filter_stats()
+                        yara_matches = await asyncio.to_thread(
+                            yara_layer.scan, scan_text, sample_platform
+                        )
                         if yara_matches:
                             yara_isr: AgentISR = yara_layer.to_isr(yara_matches)
                             logger.info(
-                                "YARA Layer 0: %d match(es) -> cascade domain='yara'.",
+                                "YARA Layer 0: %d match(es), %d rule(s) dropped "
+                                "by platform=%s -> cascade domain='yara'.",
                                 len(yara_matches),
+                                yara_layer.last_filtered_count,
+                                sample_platform,
                             )
                             return yara_isr
                 except Exception as e:
@@ -458,15 +470,22 @@ def make_judge_node(container: ServiceContainer) -> Any:
                         for isr_obj in isr_reports.values():
                             sigma_scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
                         sigma_scan_text = "\n".join(sigma_scan_parts)
+                        sigma_layer.reset_filter_stats()
                         sigma_matches = await asyncio.to_thread(
-                            sigma_layer.scan_report_text, sigma_scan_text
+                            sigma_layer.scan_report_text,
+                            sigma_scan_text,
+                            sample_platform,
                         )
+                        if sigma_matches or sigma_layer.last_filtered_count:
+                            logger.info(
+                                "Sigma Layer 0: %d match(es), %d rule(s) dropped "
+                                "by platform=%s -> cascade domain='sigma'.",
+                                len(sigma_matches),
+                                sigma_layer.last_filtered_count,
+                                sample_platform,
+                            )
                         if sigma_matches:
                             sigma_isr = sigma_layer.to_isr(sigma_matches)
-                            logger.info(
-                                "Sigma Layer 0: %d match(es) -> cascade domain='sigma'.",
-                                len(sigma_matches),
-                            )
                             return sigma_isr
                 except Exception as e:
                     logger.warning("Sigma Layer 0 scan failed: %s. Skipping.", e)
@@ -480,7 +499,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             cascade_summary = None
             try:
-                cascade_summary = TTPCascadeEngine().compute(isr_reports)
+                cascade_summary = TTPCascadeEngine().compute(
+                    isr_reports, sample_platform=sample_platform
+                )
             except Exception as e:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)
 
@@ -750,9 +771,16 @@ def make_report_node(container: ServiceContainer) -> Any:
 
         isr_reports = dict(state.get("isr_reports") or {})
 
+        # Wave 4: re-run the cascade with the same sample_platform the judge
+        # node used, so the report_node's cascade output stays consistent
+        # with what the verdict + STIX bundle saw.
+        report_sample_platform = state.get("platform") or "unknown"
+
         cascade_summary = None
         try:
-            cascade_summary = TTPCascadeEngine().compute(isr_reports)
+            cascade_summary = TTPCascadeEngine().compute(
+                isr_reports, sample_platform=report_sample_platform
+            )
         except Exception as exc:  # noqa: BLE001
             logger.debug("report_node: cascade recompute skipped (%s).", exc)
 
@@ -956,9 +984,32 @@ def make_report_node(container: ServiceContainer) -> Any:
 
             report.stix_bundle_extended = extended_dump
 
+        # Wave 4 Step 8: post-pipeline FP linter. Run after every other
+        # mutation has happened (narrative + detection sigs + STIX dump)
+        # so the linter sees the exact payload a downstream consumer
+        # will see. Findings are merged into ``run_summary`` so the API
+        # serialiser ships them without further work.
+        try:
+            from maljan.qa.fp_linter import lint_report as _lint_report
+
+            fp_warnings = [w.to_dict() for w in _lint_report(report, report_sample_platform)]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report_node: FP linter raised (%s); continuing.", exc)
+            fp_warnings = []
+
+        if fp_warnings:
+            logger.warning(
+                "FP linter: %d warning(s) — %s",
+                len(fp_warnings),
+                ", ".join(w["rule"] for w in fp_warnings),
+            )
+            run_summary_dict = report.run_summary or {}
+            run_summary_dict["fp_warnings"] = fp_warnings
+            report.run_summary = run_summary_dict
+
         logger.info(
             "report_node: built MalwareReport (verdict=%s, severity=%s, "
-            "markdown_chars=%d, extended_objects=%d, cti=%s).",
+            "markdown_chars=%d, extended_objects=%d, cti=%s, fp_warnings=%d).",
             report.verdict,
             report.severity.rating,
             len(markdown),
@@ -966,6 +1017,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             "yes"
             if isinstance(state.get("sandbox_cti"), dict) and state.get("sandbox_cti")
             else "no",
+            len(fp_warnings),
         )
 
         return {

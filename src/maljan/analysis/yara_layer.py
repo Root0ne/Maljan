@@ -71,6 +71,12 @@ class YaraTTPRule:
         confidence:   Match confidence in [0.70, 1.0].
         description:  Human-readable description of what the rule detects.
         patterns:     List of string patterns (case-insensitive, literal match).
+        platform:     Wave 4 (2026-05-28) sample-platform allowlist. Tuple
+                      such as ``("windows",)`` for rules whose patterns are
+                      Windows-only APIs/strings, ``("any",)`` for
+                      cross-platform concepts. Empty / missing in the YAML
+                      defaults to ``("any",)`` so legacy rules don't
+                      silently drop out.
     """
 
     id: str
@@ -78,19 +84,52 @@ class YaraTTPRule:
     confidence: float
     description: str
     patterns: tuple[str, ...]
+    platform: tuple[str, ...] = ("any",)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> YaraTTPRule:
         """Construct a YaraTTPRule from a YAML rule dict."""
         confidence = max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
         patterns = tuple(str(p) for p in data.get("patterns", []))
+        raw_platforms = data.get("platform") or ["any"]
+        if isinstance(raw_platforms, str):
+            raw_platforms = [raw_platforms]
+        platform = tuple(str(p).strip().lower() for p in raw_platforms if str(p).strip())
+        if not platform:
+            platform = ("any",)
         return cls(
             id=str(data["id"]),
             technique_id=str(data["technique_id"]),
             confidence=confidence,
             description=str(data.get("description", "")),
             patterns=patterns,
+            platform=platform,
         )
+
+
+# ---------------------------------------------------------------------------
+# Platform compatibility (Wave 4)
+# ---------------------------------------------------------------------------
+
+
+def _yara_rule_compatible(rule_platforms: tuple[str, ...], sample_platform: str | None) -> bool:
+    """Return True when the YARA rule should be scanned against this sample.
+
+    Same semantics as the Sigma layer:
+      * ``sample_platform=None`` → legacy / no-filter caller; keep everything.
+      * ``"any"`` in ``rule_platforms`` → compatible with any sample.
+      * ``sample_platform="unknown"`` → drop platform-specific rules; keep
+        ``any`` rules.
+      * concrete platform → match against ``rule_platforms``.
+    """
+    if sample_platform is None:
+        return True
+    if "any" in rule_platforms:
+        return True
+    sp = sample_platform.strip().lower()
+    if sp == "" or sp == "unknown":
+        return False
+    return sp in rule_platforms
 
 
 @dataclass
@@ -103,6 +142,10 @@ class YaraMatch:
         confidence:   Rule-specified confidence value.
         description:  Human-readable rule description.
         matched_patterns: Specific patterns from the rule that were found.
+        rule_platforms: Source rule's declared platform tuple (Wave 4) —
+                        ``("any",)`` for cross-platform rules. Propagated
+                        into the ISR so the TTP cascade can honour the
+                        layer-declared platform over the MITRE catalog.
     """
 
     rule_id: str
@@ -110,6 +153,7 @@ class YaraMatch:
     confidence: float
     description: str
     matched_patterns: list[str] = field(default_factory=list)
+    rule_platforms: tuple[str, ...] = ()
 
     @property
     def evidence_ref(self) -> str:
@@ -153,6 +197,8 @@ class YaraLayer:
         self._yara_rules: Any = None
         self._yara_id_map: dict[str, str] = {}
         self._compiled: dict[str, list[re.Pattern[str]]] = {}
+        # Wave 4 platform-filter telemetry (parallel to SigmaLayer).
+        self._filtered_count: int = 0
 
         if _YARA_AVAILABLE and rules:
             compiled, id_map = self._compile_yara_rules(rules)
@@ -377,7 +423,7 @@ class YaraLayer:
     # Core scanning
     # ------------------------------------------------------------------
 
-    def scan(self, text: str) -> list[YaraMatch]:
+    def scan(self, text: str, sample_platform: str | None = None) -> list[YaraMatch]:
         """Scan text against all loaded rules.
 
         Uses the compiled yara-python engine when available; falls back to
@@ -385,6 +431,9 @@ class YaraLayer:
 
         Args:
             text: Combined analysis text (analyst reports + ISR evidence_refs).
+            sample_platform: Wave 4 — drop rules whose declared
+                ``platform`` field doesn't intersect the sample's
+                canonical platform. ``None`` keeps legacy callers green.
 
         Returns:
             List of YaraMatch objects, one per triggered rule.
@@ -392,9 +441,35 @@ class YaraLayer:
         if not text or not self._rules:
             return []
 
+        # Wave 4: pre-filter the rule list by platform compatibility.
+        # We keep _rules as the canonical full set so callers querying
+        # ``rule_count`` see the corpus; only the scan loop is filtered.
+        if sample_platform is None:
+            active_rules = self._rules
+        else:
+            active_rules = []
+            for r in self._rules:
+                if _yara_rule_compatible(r.platform, sample_platform):
+                    active_rules.append(r)
+                else:
+                    self._filtered_count += 1
+
+        if not active_rules:
+            return []
+
         # Prefer yara-python engine when available
         if self._yara_rules is not None:
             matches = self._yara_scan(text)
+            # Drop matches whose original rule is platform-incompatible.
+            # (Compiled yara_rules is built from the full corpus; we filter
+            # here rather than rebuild the compiled object per-scan.)
+            if sample_platform is not None:
+                active_ids = {r.id for r in active_rules}
+                matches = [m for m in matches if m.rule_id in active_ids]
+            # Attach rule_platforms metadata for the cascade.
+            id_to_platforms = {r.id: r.platform for r in self._rules}
+            for m in matches:
+                m.rule_platforms = id_to_platforms.get(m.rule_id, ())
             if matches:
                 logger.info(
                     "YaraLayer: %d rule(s) triggered (yara-python) — techniques: %s",
@@ -406,7 +481,7 @@ class YaraLayer:
         # Fallback: regex-based string matching
         regex_matches: list[YaraMatch] = []
 
-        for rule in self._rules:
+        for rule in active_rules:
             triggered_patterns: list[str] = []
             compiled_patterns = self._compiled[rule.id]
 
@@ -422,6 +497,7 @@ class YaraLayer:
                         confidence=rule.confidence,
                         description=rule.description,
                         matched_patterns=triggered_patterns,
+                        rule_platforms=rule.platform,
                     )
                 )
 
@@ -433,6 +509,15 @@ class YaraLayer:
             )
 
         return regex_matches
+
+    @property
+    def last_filtered_count(self) -> int:
+        """How many rules the most-recent scan dropped for platform."""
+        return self._filtered_count
+
+    def reset_filter_stats(self) -> None:
+        """Zero the rule-drop counter before a fresh scan."""
+        self._filtered_count = 0
 
     # ------------------------------------------------------------------
     # ISR conversion
@@ -463,6 +548,7 @@ class YaraLayer:
                     evidence_ref=match.evidence_ref,
                     confidence=match.confidence,
                     technique_id=match.technique_id,
+                    rule_platforms=list(match.rule_platforms) if match.rule_platforms else None,
                 )
             )
 

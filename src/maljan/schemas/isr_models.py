@@ -40,6 +40,24 @@ class ClaimEvidence(BaseModel):
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
     )
+    # Wave 4 (2026-05-28): the platforms the source rule/layer explicitly
+    # declared (e.g. ["windows"] for a Sigma rule with
+    # ``logsource.product=windows``, ["any"] for a YARA rule annotated
+    # cross-platform). Cascade engine prefers this over the MITRE catalog
+    # for the platform-compatibility check — that way a YARA rule
+    # explicitly marked cross-platform can still fire on an Android
+    # sample even when MITRE Enterprise says T1497 only targets
+    # Windows/Linux/macOS. ``None`` means the producing layer didn't
+    # declare anything (analyst LLM claim or legacy rule); cascade then
+    # falls back to MITRE platforms.
+    rule_platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "Platform tags the source rule/layer declared (Sigma "
+            "logsource.product, YARA platform metadata). Used by the TTP "
+            "cascade as the primary platform-compatibility signal."
+        ),
+    )
 
 
 class AgentISR(BaseModel):

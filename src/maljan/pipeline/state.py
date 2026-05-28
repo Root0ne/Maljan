@@ -36,6 +36,14 @@ class AnalysisState(TypedDict):
     sample_path: str | None
     sandbox_report: dict[str, Any] | None
 
+    # Wave 4 (2026-05-28): file_type + canonical platform inferred at
+    # pipeline bootstrap. Consumed by the Sigma/YARA scan helpers in the
+    # judge node (filter out platform-incompatible rules) and the TTP
+    # cascade (drop platform-mismatched techniques). Optional because
+    # legacy state dicts persisted before Wave 4 don't carry them.
+    file_type: str | None
+    platform: str | None
+
     # Per-agent text reports
     reports: Annotated[dict[str, str], _merge_dicts]
     revised_reports: Annotated[dict[str, str], _merge_dicts]

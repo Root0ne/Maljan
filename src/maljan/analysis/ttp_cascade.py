@@ -154,6 +154,22 @@ class CascadeResult:
 
 
 @dataclass
+class DroppedTechnique:
+    """One technique the cascade rejected for platform-incompatibility.
+
+    Carried forward (Wave 4) under ``CascadeSummary.dropped_by_platform``
+    so the UI/FP-linter can render forensic transparency rather than
+    silently swallowing claims.
+    """
+
+    technique_id: str
+    source_layer: str
+    rule_platforms: list[str]
+    sample_platform: str
+    reason: str
+
+
+@dataclass
 class CascadeSummary:
     """Full cascade analysis results across all ISR reports.
 
@@ -162,12 +178,16 @@ class CascadeSummary:
         total_techniques: Count of unique techniques.
         corroborated_count: Count of techniques with 2+ layers.
         consensus_count: Count of techniques with all 3 layers.
+        dropped_by_platform: Wave 4 (2026-05-28) audit trail of claims
+            rejected because the source rule's platform didn't match the
+            sample. Empty for legacy runs that didn't supply a platform.
     """
 
     results: list[CascadeResult]
     total_techniques: int
     corroborated_count: int
     consensus_count: int
+    dropped_by_platform: list[DroppedTechnique] = field(default_factory=list)
 
     def top_techniques(self, n: int = 10) -> list[CascadeResult]:
         """Return the top-n techniques by weighted_confidence (descending)."""
@@ -239,6 +259,7 @@ class TTPCascadeEngine:
         self,
         isr_reports: dict[str, AgentISR],
         layer_weights: dict[str, float] | None = None,
+        sample_platform: str | None = None,
     ) -> CascadeSummary:
         """Compute the three-layer TTP cascade for a complete set of ISR reports.
 
@@ -246,6 +267,9 @@ class TTPCascadeEngine:
             isr_reports: Mapping of agent_id to AgentISR from pipeline state.
             layer_weights: Optional override for domain weights. Defaults to
                            LAYER_WEIGHTS (dynamic=0.45, static=0.35, network=0.20).
+            sample_platform: Wave 4 (2026-05-28) — when set, the cascade
+                drops claims whose source rule explicitly declared an
+                incompatible platform. ``None`` preserves legacy behaviour.
 
         Returns:
             CascadeSummary with per-technique cascade results and aggregate stats.
@@ -254,6 +278,7 @@ class TTPCascadeEngine:
 
         # Step 1: Group claims by technique_id → domain → claims
         tech_domain_claims: dict[str, dict[str, list]] = {}
+        dropped: list[DroppedTechnique] = []
 
         # Pre-filter invalid technique IDs so cascade only works with real TTPs.
         # Audit 2026-05-19 SIG-T0000-01: ``T0000`` matches ``T\d{4}`` and was
@@ -269,6 +294,33 @@ class TTPCascadeEngine:
                 if not _VALID_TID_RE.match(tid) or tid in _CASCADE_DENYLIST:
                     logger.debug("Skipping invalid technique_id '%s' from cascade.", tid)
                     continue
+
+                # Wave 4: platform-compatibility check via source-layer
+                # declaration first, then MITRE catalog with a mobile-enterprise
+                # overlap allowlist. See plan ``Step 4`` for resolution order.
+                if not _is_claim_platform_compatible(
+                    claim_platforms=claim.rule_platforms,
+                    sample_platform=sample_platform,
+                    technique_id=tid,
+                ):
+                    dropped.append(
+                        DroppedTechnique(
+                            technique_id=tid,
+                            source_layer=isr.domain,  # type: ignore[arg-type]
+                            rule_platforms=list(claim.rule_platforms or []),
+                            sample_platform=sample_platform or "unknown",
+                            reason="platform_mismatch",
+                        )
+                    )
+                    logger.debug(
+                        "Cascade dropped %s (layer=%s) — rule_platforms=%s sample=%s",
+                        tid,
+                        isr.domain,
+                        claim.rule_platforms,
+                        sample_platform,
+                    )
+                    continue
+
                 dom: str = isr.domain  # type: ignore[assignment]
                 agent = isr.agent_id
 
@@ -349,9 +401,155 @@ class TTPCascadeEngine:
             consensus,
         )
 
+        if dropped:
+            logger.info(
+                "TTP cascade: %d claim(s) dropped for platform=%s (sample-incompatible rules).",
+                len(dropped),
+                sample_platform,
+            )
+
         return CascadeSummary(
             results=results,
             total_techniques=len(results),
             corroborated_count=corroborated,
             consensus_count=consensus,
+            dropped_by_platform=dropped,
         )
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 — platform-aware compatibility resolver
+# ---------------------------------------------------------------------------
+
+
+# Mobile Enterprise overlap: Enterprise ATT&CK technique IDs whose
+# conceptual coverage extends to mobile platforms (Android / iOS) even
+# though MITRE Enterprise's ``x_mitre_platforms`` doesn't list them.
+# Used as path 2 (analyst LLM claim with no rule_platforms) for mobile
+# samples. The set is intentionally small and curated — defense evasion,
+# obfuscation, masquerading, sandbox checks.
+MOBILE_ENTERPRISE_OVERLAP: frozenset[str] = frozenset(
+    {
+        "T1497",  # Virtualization/Sandbox Evasion
+        "T1497.001",  # System Checks
+        "T1497.002",  # User Activity Based Checks
+        "T1497.003",  # Time Based Evasion
+        "T1027",  # Obfuscated Files or Information
+        "T1027.002",  # Software Packing
+        "T1622",  # Debugger Evasion
+        "T1055",  # Process Injection (rare on Android via Frida but possible)
+        "T1036",  # Masquerading
+        "T1486",  # Data Encrypted for Impact (Android ransomware)
+        "T1071.001",  # Application Layer Protocol: Web (cross-platform C2)
+    }
+)
+
+
+def _is_claim_platform_compatible(
+    claim_platforms: list[str] | None,
+    sample_platform: str | None,
+    technique_id: str,
+) -> bool:
+    """Decide whether a single ClaimEvidence survives the platform check.
+
+    Resolution order (matches plan Step 4):
+      1. ``sample_platform`` is ``None`` → legacy / no-filter caller.
+         Keep everything.
+      2. ``sample_platform`` is ``"unknown"`` → bootstrap couldn't
+         disambiguate. Fall open (keep everything, log via the parent).
+      3. ``claim_platforms`` provided by source rule (Sigma/YARA Wave 4):
+         keep iff ``"any" in claim_platforms`` or the sample's platform
+         is in the list.
+      4. No ``claim_platforms`` (analyst LLM claim or legacy rule):
+         consult the MITRE catalog. For mobile samples, also keep
+         techniques in ``MOBILE_ENTERPRISE_OVERLAP``.
+    """
+    if sample_platform is None:
+        return True
+    sp = sample_platform.strip().lower()
+    if sp == "" or sp == "unknown":
+        return True  # fall open on inference failure
+
+    # Path 1: source-layer-declared platforms (Sigma/YARA after Wave 4).
+    if claim_platforms:
+        norm = {p.strip().lower() for p in claim_platforms if p}
+        if "any" in norm:
+            return True
+        return sp in norm
+
+    # Path 2: no rule_platforms → MITRE catalog lookup.
+    catalog_platforms = _mitre_platforms_for(technique_id)
+    if catalog_platforms is None:
+        # Technique not in our catalog — fall open (don't lose unknown signal).
+        return True
+
+    mitre_sp = _MITRE_PLATFORM_MAP.get(sp, ())
+    if not mitre_sp:
+        return True  # Unknown sample type vs. MITRE — fall open.
+
+    if any(p in catalog_platforms for p in mitre_sp):
+        return True
+
+    # Mobile-Enterprise overlap fallback.
+    if sp in ("android", "ios") and technique_id in MOBILE_ENTERPRISE_OVERLAP:
+        return True
+
+    return False
+
+
+# Map our canonical Platform taxonomy to MITRE's x_mitre_platforms strings.
+_MITRE_PLATFORM_MAP: dict[str, tuple[str, ...]] = {
+    "windows": ("Windows",),
+    "linux": ("Linux",),
+    "macos": ("macOS",),
+    "android": ("Android",),
+    "ios": ("iOS",),
+    "cloud": (
+        "IaaS",
+        "SaaS",
+        "Office 365",
+        "Azure AD",
+        "Google Workspace",
+        "Identity Provider",
+        "Containers",
+    ),
+    "crossplatform": ("Windows", "Linux", "macOS"),
+}
+
+
+def _mitre_platforms_for(technique_id: str) -> tuple[str, ...] | None:
+    """Lazy-load and cache the MITRE catalog; return platforms list or None."""
+    try:
+        catalog = _get_attck_catalog()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ATTCK catalog unavailable (%s); skipping MITRE platform check.", exc)
+        return None
+    if catalog is None:
+        return None
+    entry = catalog.get(technique_id)
+    if entry is None:
+        return None
+    return tuple(entry)
+
+
+_attck_cache: dict[str, tuple[str, ...]] | None = None
+
+
+def _get_attck_catalog() -> dict[str, tuple[str, ...]] | None:
+    """Build ``{technique_id: tuple(platforms)}`` from the loader once."""
+    global _attck_cache
+    if _attck_cache is not None:
+        return _attck_cache
+    try:
+        from maljan.memory.attck_loader import load_attck_bundle
+
+        techs = load_attck_bundle()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not load ATT&CK catalog: %s", exc)
+        return None
+    catalog: dict[str, tuple[str, ...]] = {}
+    for t in techs:
+        platforms = getattr(t, "platforms", None) or ()
+        catalog[t.technique_id] = tuple(platforms)
+    _attck_cache = catalog
+    return catalog

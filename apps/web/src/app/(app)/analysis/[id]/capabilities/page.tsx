@@ -41,6 +41,14 @@ export default function CapabilitiesTab() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const cells: CapabilityCell[] = report?.malware_report?.capability_matrix ?? [];
+  // Wave 4: transparency on platform-aware drops. The cascade now logs
+  // every technique it rejected for platform-incompatibility so the user
+  // knows why the matrix is sparser than the analyst reports might suggest.
+  const dropped =
+    (report?.malware_report?.run_summary as { cascade?: { dropped_by_platform?: unknown[] } } | undefined)
+      ?.cascade?.dropped_by_platform ?? [];
+  const sampleIdentityPlatform =
+    report?.malware_report?.identity?.platform ?? "unknown";
 
   /* Bucket cells by tactic id; preserve insertion order inside each bucket. */
   const grid = useMemo(() => {
@@ -75,6 +83,12 @@ export default function CapabilitiesTab() {
 
   return (
     <div className="space-y-4">
+      {dropped.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded px-4 py-2 text-[11px] text-text-muted">
+          {dropped.length} rule match{dropped.length === 1 ? "" : "es"} filtered
+          for platform compatibility (sample: {sampleIdentityPlatform})
+        </div>
+      )}
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">

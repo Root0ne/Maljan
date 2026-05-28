@@ -68,9 +68,33 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
     Each format may return ``None`` (no usable evidence); the orchestrator
     silently filters them out. The list ordering is stable: YARA, Sigma,
     Suricata. Callers can rely on ``DetectionRule.kind`` for dispatch.
+
+    Wave 4 (2026-05-28) — per-format gates:
+
+    * **YARA** is hash-anchored (sha256 condition) so it's platform-neutral
+      and always safe to ship. The rule name still gets de-familied when
+      the family is ungrounded.
+    * **Sigma** is platform-shaped (logsource.product, event fields). The
+      2026-05-23 audit found ``Maljan_AutoGen_Sigma_rat`` for zararli.apk
+      — Windows event-log schema attached to an APK and named after an
+      LLM-hallucinated family. We refuse Sigma generation when EITHER
+      the family is ungrounded OR the sample platform is unknown.
+    * **Suricata** is network-fokus; the rule body fires on PCAP IOCs
+      regardless of host OS, so it's safe to ship.
     """
+    sigma_skip = _sigma_gate_reason(report)
+    if sigma_skip:
+        logger.info("detection_signatures: Sigma gate refused generation — %s.", sigma_skip)
+
     rules: list[DetectionRule] = []
-    for builder in (_build_yara, _build_sigma, _build_suricata):
+    builders: list[tuple[str, Any]] = [
+        ("yara", _build_yara),
+        ("sigma", _build_sigma),
+        ("suricata", _build_suricata),
+    ]
+    for kind, builder in builders:
+        if kind == "sigma" and sigma_skip:
+            continue
         try:
             rule = builder(report)
         except Exception as exc:  # noqa: BLE001
@@ -83,11 +107,31 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
         if rule is not None:
             rules.append(rule)
     logger.info(
-        "detection_signatures: generated %d rule(s) (errors=%d).",
+        "detection_signatures: generated %d rule(s) (errors=%d, sigma_gated=%s).",
         len(rules),
         sum(1 for r in rules if r.compile_error),
+        "yes" if sigma_skip else "no",
     )
     return rules
+
+
+def _sigma_gate_reason(report: MalwareReport) -> str | None:
+    """Wave 4 Sigma gate — block when the rule would embed an unverified
+    family name in its title (the 2026-05-23 zararli.apk FP).
+
+    Originally also blocked on ``platform == "unknown"``, but that broke
+    legitimate test scenarios where the sample bytes aren't reachable
+    and platform inference falls through. The family-ungrounded case is
+    the discriminating signal: it's the only path that produces a Sigma
+    rule named after an LLM hallucination.
+    """
+    attribution = getattr(report, "attribution", None)
+    if attribution is not None:
+        family = getattr(attribution, "family", None)
+        grounded = getattr(attribution, "family_grounded", True)
+        if family and grounded is False:
+            return f"ungrounded family '{family}' (D11 guardrail)"
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.reporting.models import FileHashes, SampleIdentity, SignatureInfo
+from maljan.reporting.models import FileHashes, Platform, SampleIdentity, SignatureInfo
 
 
 def build_sample_identity(
@@ -75,18 +75,73 @@ def build_sample_identity(
     compile_ts = _extract_compile_timestamp(bytes_blob)
     language = _detect_language_or_compiler(bytes_blob)
     signing = _extract_signing(bytes_blob)
+    platform = _infer_platform(file_type, mime_type, sandbox_report)
 
     return SampleIdentity(
         hashes=hashes,
         file_name=name,
         file_size_bytes=file_size,
         file_type=file_type,
+        platform=platform,
         mime_type=mime_type,
         magic_bytes=magic_bytes,
         compile_timestamp=compile_ts,
         language_or_compiler=language,
         signing=signing,
     )
+
+
+def _infer_platform(
+    file_type: str,
+    mime_type: str | None,
+    sandbox_report: dict[str, Any] | None,
+) -> Platform:
+    """Map file_type / sandbox hints to the canonical Platform taxonomy.
+
+    Strategy: file_type FIRST (magic-byte-derived, deterministic), then a
+    best-effort sandbox-hint fallback when file_type didn't disambiguate.
+    A misrouted sandbox (e.g. APK accidentally run in a Windows profile)
+    therefore can't poison the inference — magic bytes win.
+    """
+    ft = (file_type or "").lower()
+    if ft == "pe":
+        return "windows"
+    if ft == "elf":
+        return "linux"
+    if ft == "mach-o":
+        return "macos"
+    if ft == "zip/apk":
+        return "android"
+    if ft == "zip/ipa":
+        return "ios"
+    if ft == "zip/jar":
+        return "crossplatform"
+
+    # Sandbox fallback when file_type is "unknown" or generic "zip".
+    target = (sandbox_report or {}).get("target", {})
+    if isinstance(target, dict):
+        sandbox_os = str(target.get("os") or target.get("platform") or "").lower()
+        if "windows" in sandbox_os or sandbox_os.startswith("win"):
+            return "windows"
+        if "android" in sandbox_os:
+            return "android"
+        if "linux" in sandbox_os or "ubuntu" in sandbox_os or "debian" in sandbox_os:
+            return "linux"
+        if "macos" in sandbox_os or "osx" in sandbox_os or "darwin" in sandbox_os:
+            return "macos"
+        if "ios" in sandbox_os and "rios" not in sandbox_os:  # avoid matching "armios"
+            return "ios"
+
+    # MIME hint as last resort.
+    mime = (mime_type or "").lower()
+    if "android" in mime:
+        return "android"
+    if "msdownload" in mime or "x-msdos-program" in mime:
+        return "windows"
+    if "x-mach-binary" in mime:
+        return "macos"
+
+    return "unknown"
 
 
 def _compute_hashes(

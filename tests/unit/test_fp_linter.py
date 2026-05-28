@@ -1,0 +1,155 @@
+"""Unit tests for the Wave 4 post-pipeline FP linter."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from maljan.qa.fp_linter import lint_report
+
+
+def _ns(**kw):  # type: ignore[no-untyped-def]
+    return SimpleNamespace(**kw)
+
+
+def _stub_report(
+    *,
+    capability_matrix=None,
+    defensive_recommendations=None,
+    executive_summary="",
+    attribution=None,
+    stix_bundle_extended=None,
+):
+    return _ns(
+        capability_matrix=capability_matrix or [],
+        defensive_recommendations=defensive_recommendations or [],
+        executive_summary=executive_summary,
+        attribution=attribution,
+        stix_bundle_extended=stix_bundle_extended,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Empty / clean report
+# ---------------------------------------------------------------------------
+
+
+class TestCleanReport:
+    def test_empty_report_no_warnings(self) -> None:
+        assert lint_report(_stub_report(), "android") == []
+
+    def test_unknown_platform_skips_some_rules(self) -> None:
+        # Ungrounded family still warns regardless of platform.
+        report = _stub_report(
+            attribution=_ns(family="rat", family_grounded=False),
+        )
+        warns = lint_report(report, "unknown")
+        rules = {w.rule for w in warns}
+        assert rules == {"C5"}
+
+
+# ---------------------------------------------------------------------------
+# C2 — defense recommendations citing unknown TTPs
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC2:
+    def test_warns_when_recommendation_cites_missing_ttp(self) -> None:
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1497")],
+            defensive_recommendations=[
+                _ns(action="Block PowerShell (T1059.001)", rationale="x", category="y"),
+            ],
+        )
+        warns = lint_report(report, "android")
+        c2 = [w for w in warns if w.rule == "C2"]
+        assert len(c2) == 1
+        assert "T1059.001" in c2[0].message
+
+    def test_no_warning_when_recommendation_ttp_present(self) -> None:
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1497")],
+            defensive_recommendations=[
+                _ns(action="Anti-emulation telemetry (T1497)", rationale="r", category="c"),
+            ],
+        )
+        warns = lint_report(report, "android")
+        assert not any(w.rule == "C2" for w in warns)
+
+
+# ---------------------------------------------------------------------------
+# C3 — exec summary mentioning platform-incompatible concepts
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC3:
+    def test_apk_with_powershell_mention(self) -> None:
+        report = _stub_report(
+            executive_summary="The sample uses powershell to escalate privileges.",
+        )
+        warns = lint_report(report, "android")
+        rules = {w.rule for w in warns}
+        assert "C3" in rules
+
+    def test_apk_with_rdp_mention(self) -> None:
+        report = _stub_report(
+            executive_summary="Establishes RDP session to attacker.",
+        )
+        warns = lint_report(report, "android")
+        assert any(w.rule == "C3" for w in warns)
+
+    def test_windows_with_powershell_mention_not_flagged(self) -> None:
+        report = _stub_report(
+            executive_summary="Uses powershell for execution.",
+        )
+        warns = lint_report(report, "windows")
+        assert not any(w.rule == "C3" for w in warns)
+
+
+# ---------------------------------------------------------------------------
+# C4 — file:name indicator overflow
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC4:
+    def test_overflow_triggers_warning(self) -> None:
+        # 11 file:name indicators (cap is 10).
+        objs = [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(11)]
+        report = _stub_report(stix_bundle_extended={"objects": objs})
+        warns = lint_report(report, "android")
+        assert any(w.rule == "C4" for w in warns)
+
+    def test_at_threshold_not_flagged(self) -> None:
+        objs = [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(10)]
+        report = _stub_report(stix_bundle_extended={"objects": objs})
+        warns = lint_report(report, "android")
+        assert not any(w.rule == "C4" for w in warns)
+
+
+# ---------------------------------------------------------------------------
+# C5 — ungrounded family
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC5:
+    def test_ungrounded_family_triggers_warning(self) -> None:
+        report = _stub_report(
+            attribution=_ns(family="rat", family_grounded=False),
+        )
+        warns = lint_report(report, "android")
+        c5 = [w for w in warns if w.rule == "C5"]
+        assert len(c5) == 1
+        assert "rat" in c5[0].message
+
+    def test_grounded_family_no_warning(self) -> None:
+        report = _stub_report(
+            attribution=_ns(family="emotet", family_grounded=True),
+        )
+        warns = lint_report(report, "android")
+        assert not any(w.rule == "C5" for w in warns)
+
+    def test_no_family_no_warning(self) -> None:
+        report = _stub_report(
+            attribution=_ns(family=None, family_grounded=True),
+        )
+        warns = lint_report(report, "android")
+        assert not any(w.rule == "C5" for w in warns)

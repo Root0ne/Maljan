@@ -56,6 +56,11 @@ export interface AgentFindingDTO {
   dissent_items: unknown[] | null;
   revision_rounds: number;
   final_confidence: number;
+  // D15+D16 (Wave 3, 2026-05-24): lifecycle status the worker derives
+  // from the ISR shape. Defaults server-side to ``"complete"`` for legacy
+  // rows so this is non-optional on the wire.
+  status: "complete" | "no_data" | "failed" | "timeout";
+  status_reason?: string | null;
 }
 
 export interface ReportDetailDTO {

@@ -6,6 +6,7 @@ rules:
     technique_id: "T1055"
     confidence: 0.90
     description: "Process injection via classic Windows APIs"
+    platform: ["windows"]
     patterns:
       - "VirtualAllocEx"
       - "WriteProcessMemory"
@@ -19,6 +20,7 @@ rules:
     technique_id: "T1055.012"
     confidence: 0.92
     description: "Process hollowing indicators"
+    platform: ["windows"]
     patterns:
       - "NtUnmapViewOfSection"
       - " hollow"
@@ -30,6 +32,7 @@ rules:
     technique_id: "T1547.001"
     confidence: 0.88
     description: "Persistence via Registry Run/RunOnce keys"
+    platform: ["windows"]
     patterns:
       - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
       - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
@@ -41,6 +44,7 @@ rules:
     technique_id: "T1059.001"
     confidence: 0.85
     description: "Command and scripting interpreter: PowerShell"
+    platform: ["windows"]
     patterns:
       - "powershell.exe"
       - "powershell -enc"
@@ -54,6 +58,7 @@ rules:
     technique_id: "T1059.003"
     confidence: 0.80
     description: "Command and scripting interpreter: cmd.exe"
+    platform: ["windows"]
     patterns:
       - "cmd.exe /c"
       - "cmd.exe /k"
@@ -65,6 +70,7 @@ rules:
     technique_id: "T1059.005"
     confidence: 0.80
     description: "Command and scripting interpreter: VBScript"
+    platform: ["windows"]
     patterns:
       - "wscript.exe"
       - "cscript.exe"
@@ -76,6 +82,7 @@ rules:
     technique_id: "T1059.007"
     confidence: 0.78
     description: "Command and scripting interpreter: JavaScript"
+    platform: ["windows"]
     patterns:
       - "wscript.exe"
       - "mshta.exe"
@@ -87,6 +94,7 @@ rules:
     technique_id: "T1071.001"
     confidence: 0.85
     description: "C2 communication over HTTP/HTTPS"
+    platform: ["any"]
     patterns:
       - "HttpSendRequest"
       - "InternetOpenUrl"
@@ -100,6 +108,7 @@ rules:
     technique_id: "T1027"
     confidence: 0.82
     description: "Obfuscation and packing indicators"
+    platform: ["any"]
     patterns:
       - "UPX"
       - "packed"
@@ -115,6 +124,7 @@ rules:
     technique_id: "T1027.002"
     confidence: 0.85
     description: "Software packing detected"
+    platform: ["any"]
     patterns:
       - "UPX"
       - "ASPack"
@@ -128,6 +138,7 @@ rules:
     technique_id: "T1083"
     confidence: 0.78
     description: "File and directory discovery"
+    platform: ["windows"]
     patterns:
       - "FindFirstFile"
       - "FindNextFile"
@@ -139,6 +150,7 @@ rules:
     technique_id: "T1112"
     confidence: 0.80
     description: "Registry modification for defense evasion"
+    platform: ["windows"]
     patterns:
       - "RegSetValue"
       - "RegCreateKey"
@@ -151,6 +163,7 @@ rules:
     technique_id: "T1562.001"
     confidence: 0.88
     description: "Disable or modify security tools"
+    platform: ["windows"]
     patterns:
       - "Anti-Virus"
       - "Windows Defender"
@@ -159,10 +172,16 @@ rules:
       - "TamperProtection"
 
   # T1497 - Virtualization/Sandbox Evasion
+  # Cross-platform concept: anti-emu / anti-debug applies to any sandbox.
+  # The patterns include both Win-flavored APIs and generic strings so the
+  # rule is intentionally broad. Marked "any" because the Android case
+  # (zararli.apk) legitimately uses the same evasion concept (sensor
+  # listening = sandbox detection).
   - id: sandbox_evasion
     technique_id: "T1497"
     confidence: 0.85
     description: "Virtualization and sandbox evasion"
+    platform: ["any"]
     patterns:
       - "IsDebuggerPresent"
       - "CheckRemoteDebuggerPresent"
@@ -178,6 +197,7 @@ rules:
     technique_id: "T1497.001"
     confidence: 0.82
     description: "System checks for sandbox evasion"
+    platform: ["windows"]
     patterns:
       - "GetTickCount"
       - "Sleep"
@@ -191,6 +211,7 @@ rules:
     technique_id: "T1003"
     confidence: 0.90
     description: "OS credential dumping"
+    platform: ["windows"]
     patterns:
       - "mimikatz"
       - "sekurlsa"
@@ -204,6 +225,7 @@ rules:
     technique_id: "T1003.001"
     confidence: 0.91
     description: "LSASS memory credential dumping"
+    platform: ["windows"]
     patterns:
       - "lsass.exe"
       - "MiniDumpWriteDump"
@@ -216,6 +238,7 @@ rules:
     technique_id: "T1105"
     confidence: 0.83
     description: "Ingress tool transfer"
+    platform: ["windows"]
     patterns:
       - "certutil -urlcache"
       - "bitsadmin"
@@ -227,6 +250,7 @@ rules:
     technique_id: "T1218.011"
     confidence: 0.87
     description: "System Binary Proxy Execution via rundll32"
+    platform: ["windows"]
     patterns:
       - "rundll32.exe"
       - "ExecuteA"
@@ -237,6 +261,7 @@ rules:
     technique_id: "T1218.005"
     confidence: 0.87
     description: "System Binary Proxy Execution via mshta"
+    platform: ["windows"]
     patterns:
       - "mshta.exe"
       - "javascript:"
@@ -248,6 +273,7 @@ rules:
     technique_id: "T1218.010"
     confidence: 0.85
     description: "System Binary Proxy Execution via regsvr32"
+    platform: ["windows"]
     patterns:
       - "regsvr32.exe"
       - "scrobj.dll"
@@ -259,6 +285,7 @@ rules:
     technique_id: "T1486"
     confidence: 0.88
     description: "Ransomware data encryption indicators"
+    platform: ["any"]
     patterns:
       - "ransom"
       - "encrypt"
@@ -274,6 +301,7 @@ rules:
     technique_id: "T1486"
     confidence: 0.85
     description: "Ransomware file extension modification"
+    platform: ["any"]
     patterns:
       - ".crypto"
       - ".vault"
@@ -287,6 +315,7 @@ rules:
     technique_id: "T1566.001"
     confidence: 0.80
     description: "Spearphishing attachment delivery"
+    platform: ["windows"]
     patterns:
       - "macro"
       - "AutoOpen"
@@ -301,6 +330,7 @@ rules:
     technique_id: "T1204.002"
     confidence: 0.82
     description: "User execution of malicious file"
+    platform: ["windows"]
     patterns:
       - "AutoIt"
       - "AutoHotkey"
@@ -314,6 +344,7 @@ rules:
     technique_id: "T1053.005"
     confidence: 0.83
     description: "Scheduled task for persistence"
+    platform: ["windows"]
     patterns:
       - "schtasks.exe"
       - "TaskScheduler"
@@ -326,6 +357,7 @@ rules:
     technique_id: "T1543.003"
     confidence: 0.82
     description: "Persistence via Windows Service"
+    platform: ["windows"]
     patterns:
       - "CreateService"
       - "StartService"
@@ -338,6 +370,7 @@ rules:
     technique_id: "T1574.002"
     confidence: 0.85
     description: "DLL side-loading for execution"
+    platform: ["windows"]
     patterns:
       - "LoadLibrary"
       - "side-load"
@@ -351,6 +384,7 @@ rules:
     technique_id: "T1001"
     confidence: 0.78
     description: "Data obfuscation for C2 communication"
+    platform: ["any"]
     patterns:
       - "steganography"
       - "covert channel"
@@ -363,6 +397,7 @@ rules:
     technique_id: "T1078"
     confidence: 0.75
     description: "Abuse of valid accounts for access"
+    platform: ["any"]
     patterns:
       - "default password"
       - "admin:admin"

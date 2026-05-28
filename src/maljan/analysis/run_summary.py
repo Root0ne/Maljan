@@ -93,6 +93,9 @@ class CascadeMetrics:
     corroborated_count: int
     consensus_count: int
     top_techniques: list[dict[str, Any]]  # technique_id, label, confidence, layers
+    # Wave 4 (2026-05-28): claims rejected for platform incompatibility.
+    # Empty for legacy runs that didn't supply a sample_platform.
+    dropped_by_platform: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -514,11 +517,23 @@ class RunSummaryBuilder:
                 }
                 for r in top
             ]
+            dropped = []
+            for d in getattr(cascade_summary, "dropped_by_platform", None) or []:
+                dropped.append(
+                    {
+                        "technique_id": getattr(d, "technique_id", ""),
+                        "source_layer": getattr(d, "source_layer", ""),
+                        "rule_platforms": getattr(d, "rule_platforms", []) or [],
+                        "sample_platform": getattr(d, "sample_platform", "unknown"),
+                        "reason": getattr(d, "reason", ""),
+                    }
+                )
             self._cascade = CascadeMetrics(
                 total_techniques=cascade_summary.total_techniques,
                 corroborated_count=cascade_summary.corroborated_count,
                 consensus_count=cascade_summary.consensus_count,
                 top_techniques=top_techniques,
+                dropped_by_platform=dropped,
             )
             # OBS-TTP-ATTRIBUTION-01 (audit 2026-05-19): bucket every
             # cascade result by *every* contributing layer (a technique can

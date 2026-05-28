@@ -124,7 +124,16 @@ def ransomware_report() -> MalwareReport:
                 "name": "InstallsAutoRun",
                 "description": "Installs registry auto-run entry",
                 "severity": 8,
-            }
+            },
+            # Wave 4: ground the "ransomware" family so the Sigma gate
+            # doesn't refuse generation. The D11 guardrail (shipped Wave 3)
+            # only allows the family through when a Triage CTI block,
+            # sandbox signature, or analyst claim corroborates it.
+            {
+                "name": "RansomwareEncryptsFiles",
+                "description": "Ransomware-style mass file encryption",
+                "severity": 9,
+            },
         ],
     }
     return _build(

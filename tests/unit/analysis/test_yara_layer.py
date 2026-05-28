@@ -187,7 +187,6 @@ class TestYaraLayerScan:
         assert "YARA" in proc_match.claim_text
         assert "proc_injection" in proc_match.claim_text
 
-
     def test_yara_and_regex_produce_same_matches(self, sample_rules: list) -> None:
         """When yara-python is available, its output must match the regex fallback."""
         from unittest.mock import patch
@@ -290,3 +289,102 @@ class TestYaraLayerFromDefaultRules:
         if layer.rule_count == 0:
             pytest.skip("Default rules file not found — skipping count test.")
         assert layer.rule_count >= 30
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 — Platform-aware filtering
+# ---------------------------------------------------------------------------
+
+
+class TestYaraPlatformFiltering:
+    """Wave 4: scan() should drop rules whose platform doesn't match the sample."""
+
+    @pytest.fixture()
+    def mixed_rules(self) -> list[YaraTTPRule]:
+        return [
+            YaraTTPRule(
+                id="powershell_only",
+                technique_id="T1059.001",
+                confidence=0.85,
+                description="PowerShell — windows only",
+                patterns=("powershell.exe",),
+                platform=("windows",),
+            ),
+            YaraTTPRule(
+                id="ransomware_anywhere",
+                technique_id="T1486",
+                confidence=0.85,
+                description="Ransomware indicators — cross-platform",
+                patterns=("ransom",),
+                platform=("any",),
+            ),
+        ]
+
+    def test_drops_windows_rule_for_android(self, mixed_rules: list[YaraTTPRule]) -> None:
+        layer = YaraLayer(mixed_rules)
+        text = "powershell.exe ransom"
+        layer.reset_filter_stats()
+        matches = layer.scan(text, sample_platform="android")
+        triggered = {m.rule_id for m in matches}
+        # Windows-only rule dropped; cross-platform rule survives.
+        assert "powershell_only" not in triggered
+        assert "ransomware_anywhere" in triggered
+        assert layer.last_filtered_count == 1
+
+    def test_keeps_windows_rule_for_windows(self, mixed_rules: list[YaraTTPRule]) -> None:
+        layer = YaraLayer(mixed_rules)
+        text = "powershell.exe ransom"
+        layer.reset_filter_stats()
+        matches = layer.scan(text, sample_platform="windows")
+        triggered = {m.rule_id for m in matches}
+        assert "powershell_only" in triggered
+        assert "ransomware_anywhere" in triggered
+        assert layer.last_filtered_count == 0
+
+    def test_keeps_t1497_sandbox_evasion_on_apk(self) -> None:
+        """The T1497 paradox: YARA sandbox_evasion is platform=any so it
+        survives on Android even though MITRE Enterprise's T1497.platforms
+        omits Android. This is the kingpin TP we must preserve."""
+        layer = YaraLayer.from_default_rules()
+        if layer.rule_count == 0:
+            pytest.skip("Default rules file not found")
+        # zararli.apk's Triage signature contained "sandbox" in the
+        # signature name; that string is one of the sandbox_evasion rule's
+        # patterns. With platform-aware filtering, the rule must still fire
+        # on an android sample.
+        matches = layer.scan("Listens for sandbox detection", sample_platform="android")
+        triggered = {m.rule_id for m in matches}
+        assert "sandbox_evasion" in triggered
+
+    def test_legacy_no_platform_filter(self, mixed_rules: list[YaraTTPRule]) -> None:
+        layer = YaraLayer(mixed_rules)
+        text = "powershell.exe ransom"
+        matches = layer.scan(text)  # no sample_platform → legacy path
+        triggered = {m.rule_id for m in matches}
+        assert "powershell_only" in triggered
+        assert "ransomware_anywhere" in triggered
+
+    def test_from_dict_default_platform_is_any(self) -> None:
+        rule = YaraTTPRule.from_dict(
+            {
+                "id": "no_platform_specified",
+                "technique_id": "T1055",
+                "confidence": 0.85,
+                "description": "Legacy rule with no platform field",
+                "patterns": ["VirtualAllocEx"],
+            }
+        )
+        assert rule.platform == ("any",)
+
+    def test_from_dict_platform_list(self) -> None:
+        rule = YaraTTPRule.from_dict(
+            {
+                "id": "windows_only",
+                "technique_id": "T1059.001",
+                "confidence": 0.85,
+                "description": "PowerShell",
+                "patterns": ["powershell.exe"],
+                "platform": ["windows"],
+            }
+        )
+        assert rule.platform == ("windows",)

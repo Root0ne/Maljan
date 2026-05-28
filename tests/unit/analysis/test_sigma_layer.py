@@ -19,6 +19,7 @@ from maljan.analysis.sigma_layer import (
     SigmaLayer,
     SigmaMatch,
     _classify_log_source,
+    _is_rule_compatible,
 )
 
 # ---------------------------------------------------------------------------
@@ -247,3 +248,94 @@ class TestClassifyLogSource:
 
     def test_generic_fallback(self) -> None:
         assert _classify_log_source("unknown_source", "other") == "generic"
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 platform filtering tests
+# ---------------------------------------------------------------------------
+
+
+class TestPlatformCompatibility:
+    """Wave 4: rule-vs-sample platform compatibility resolver."""
+
+    def test_none_sample_platform_is_legacy_pass_through(self) -> None:
+        # Legacy callers (older tests) pass sample_platform=None → keep all.
+        assert _is_rule_compatible("windows", None) is True
+        assert _is_rule_compatible("azure", None) is True
+        assert _is_rule_compatible(None, None) is True
+
+    def test_generic_rule_always_compatible(self) -> None:
+        for sp in (None, "windows", "android", "unknown", "cloud"):
+            assert _is_rule_compatible(None, sp) is True
+            assert _is_rule_compatible("", sp) is True
+
+    def test_windows_rule_dropped_for_android(self) -> None:
+        # The kingpin: T1059.001 PowerShell on an APK.
+        assert _is_rule_compatible("windows", "android") is False
+
+    def test_windows_rule_kept_for_windows(self) -> None:
+        assert _is_rule_compatible("windows", "windows") is True
+
+    def test_macos_rule_dropped_for_android(self) -> None:
+        # T1036.006 Space-after-Filename - macOS on an APK.
+        assert _is_rule_compatible("macos", "android") is False
+
+    def test_cloud_rule_dropped_for_binary(self) -> None:
+        # T1078.004 Cloud Accounts azure rule on an APK / PE / ELF.
+        assert _is_rule_compatible("azure", "android") is False
+        assert _is_rule_compatible("aws", "windows") is False
+        assert _is_rule_compatible("gcp", "linux") is False
+
+    def test_cloud_rule_kept_for_cloud_sample(self) -> None:
+        assert _is_rule_compatible("azure", "cloud") is True
+
+    def test_network_log_product_always_dropped(self) -> None:
+        # T1095 DNS Z Flag (zeek product) — no network-log layer yet.
+        assert _is_rule_compatible("zeek", "windows") is False
+        assert _is_rule_compatible("suricata", "linux") is False
+
+    def test_unknown_sample_drops_non_generic_rules(self) -> None:
+        # Conservative default: platform inference failed → no risky rules.
+        assert _is_rule_compatible("windows", "unknown") is False
+        assert _is_rule_compatible("azure", "unknown") is False
+        # Generic still fires.
+        assert _is_rule_compatible(None, "unknown") is True
+        assert _is_rule_compatible("", "unknown") is True
+
+
+class TestScanWithPlatformFilter:
+    """End-to-end: full scan loop should skip platform-incompatible rules."""
+
+    def test_filters_windows_rule_for_android(self, tmp_rules_dir: Path) -> None:
+        # zararli.apk scenario distilled to one rule.
+        _write_rule(tmp_rules_dir, "ps.yml", POWERSHELL_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        log_lines = ["CommandLine: powershell.exe -EncodedCommand aGVsbG8="]
+
+        layer.reset_filter_stats()
+        matches = layer.scan_log_lines(log_lines, sample_platform="android")
+
+        assert matches == []
+        assert layer.last_filtered_count == 1
+
+    def test_keeps_windows_rule_for_windows(self, tmp_rules_dir: Path) -> None:
+        _write_rule(tmp_rules_dir, "ps.yml", POWERSHELL_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        log_lines = ["CommandLine: powershell.exe -EncodedCommand aGVsbG8="]
+
+        layer.reset_filter_stats()
+        matches = layer.scan_log_lines(log_lines, sample_platform="windows")
+
+        assert len(matches) == 1
+        assert layer.last_filtered_count == 0
+        # Rule platform metadata propagates into the match for the cascade.
+        assert matches[0].rule_platforms == ("windows",)
+
+    def test_legacy_path_no_filter(self, tmp_rules_dir: Path) -> None:
+        # Backward compatibility: tests that don't pass sample_platform stay green.
+        _write_rule(tmp_rules_dir, "ps.yml", POWERSHELL_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        log_lines = ["CommandLine: powershell.exe -EncodedCommand aGVsbG8="]
+
+        matches = layer.scan_log_lines(log_lines)
+        assert len(matches) == 1

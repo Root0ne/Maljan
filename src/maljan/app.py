@@ -69,6 +69,43 @@ class MaljanApp:
         # execution share the same event loop (avoids nested asyncio.run).
         return asyncio.run(self.arun(file_hash, file_name, sample_path))
 
+    def _infer_sample_platform(
+        self,
+        sample_path: str | None,
+        sandbox_report: dict[str, Any] | None,
+    ) -> tuple[str, str]:
+        """Compute ``(file_type, platform)`` for the pipeline state.
+
+        Thin shim over the sample-identity extractor so the bootstrap
+        in ``arun`` doesn't have to know about magic-byte parsing or
+        sandbox-OS fallback. Returns ``("unknown", "unknown")`` when the
+        sample bytes are unreachable AND the sandbox didn't disambiguate.
+        """
+        from maljan.extractors.sample_identity import _detect_file_type, _infer_platform
+
+        file_type = "unknown"
+        mime_type: str | None = None
+        if sample_path:
+            try:
+                path = Path(sample_path)
+                if path.exists() and path.is_file():
+                    blob = path.read_bytes()
+                    file_type = _detect_file_type(path, blob)
+            except OSError as exc:
+                logger.warning("_infer_sample_platform: could not read %s (%s)", sample_path, exc)
+
+        # Best-effort MIME from the sandbox file block when we couldn't
+        # read the bytes ourselves.
+        target = (sandbox_report or {}).get("target", {})
+        if isinstance(target, dict):
+            sb_file = target.get("file") if isinstance(target.get("file"), dict) else {}
+            mt = sb_file.get("type") if isinstance(sb_file, dict) else None
+            if isinstance(mt, str):
+                mime_type = mt
+
+        platform = _infer_platform(file_type, mime_type, sandbox_report)
+        return file_type, platform
+
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return normalized report.
 
@@ -149,11 +186,24 @@ class MaljanApp:
         # Phase 2: Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 
+        # Wave 4 (2026-05-28): compute file_type + canonical platform up
+        # front so the judge node's Sigma/YARA scanners + TTP cascade can
+        # filter platform-incompatible rules. Without this the pipeline
+        # is platform-blind and yields cross-OS FPs (the 2026-05-28 audit
+        # found 6/7 ATT&CK techniques on an APK were Windows/macOS/cloud
+        # rules). The detector is deterministic + cheap so we just run it
+        # here, even on samples we couldn't read off disk (platform stays
+        # "unknown" in that case, which the cascade treats as fall-open).
+        file_type, platform = self._infer_sample_platform(sample_path, sandbox_report)
+        logger.info("Sample platform inferred: file_type=%s platform=%s", file_type, platform)
+
         initial_state: AnalysisState = {
             "file_hash": file_hash,
             "file_name": file_name,
             "sample_path": sample_path,
             "sandbox_report": sandbox_report,
+            "file_type": file_type,
+            "platform": platform,
             "reports": {},
             "revised_reports": {},
             "isr_reports": {},

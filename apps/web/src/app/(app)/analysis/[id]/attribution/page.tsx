@@ -54,6 +54,20 @@ export default function AttributionTab() {
 
   const familyConfidencePct = Math.round(attribution.family_confidence * 100);
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
+  // Wave 4 (D11 UI completion): when the family came back ungrounded the
+  // builder already zeroed the confidence. Render the name as muted +
+  // strikethrough + "(unverified)" suffix instead of bold so it's clearly
+  // signalled as LLM-only.
+  const familyUngrounded =
+    !!attribution.family && attribution.family_grounded === false;
+  const familyDisplay = attribution.family
+    ? familyUngrounded
+      ? `${attribution.family} (unverified)`
+      : attribution.family
+    : "(unattributed)";
+  const familyValueClass = familyUngrounded
+    ? "text-text-muted line-through"
+    : "";
 
   return (
     <div className="space-y-4">
@@ -66,12 +80,13 @@ export default function AttributionTab() {
         <div className="p-4 grid grid-cols-3 gap-4">
           <Field
             label="Family"
-            value={attribution.family || "(unattributed)"}
+            value={familyDisplay}
+            valueClassName={familyValueClass}
           />
           <Field
             label="Family Confidence"
             value={
-              attribution.family
+              attribution.family && !familyUngrounded
                 ? `${familyConfidencePct}%`
                 : "-"
             }
@@ -79,6 +94,13 @@ export default function AttributionTab() {
           <Field label="Actor" value={attribution.actor || "(unknown)"} />
           <Field label="Campaign" value={attribution.campaign || "(unknown)"} />
         </div>
+        {familyUngrounded && (
+          <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            Family was emitted by the verdict LLM but is not corroborated
+            by Triage CTI, sandbox signatures, or analyst claims. Treat as
+            unverified.
+          </div>
+        )}
       </div>
 
       <div className="bg-bg-surface border border-border rounded">
@@ -117,13 +139,25 @@ export default function AttributionTab() {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
   return (
     <div>
       <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
         {label}
       </div>
-      <div className="text-sm text-text-primary break-all">{value}</div>
+      <div
+        className={`text-sm text-text-primary break-all ${valueClassName ?? ""}`}
+      >
+        {value}
+      </div>
     </div>
   );
 }
