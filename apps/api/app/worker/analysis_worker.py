@@ -749,8 +749,13 @@ class WorkerSettings:
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.
-    # job_timeout=1800 (30 min) ensures hung jobs are killed instead of running forever.
+    # job_timeout=3600 (60 min) covers the Wave 4 pipeline (platform-aware
+    # cascade + per-platform Sigma scan + FP linter) which can run longer
+    # than 30 min on the 35B local LLM, especially on a cold-cache start.
+    # Wave 3 baseline was ~21 min; Wave 4 adds ~4-5 min of cascade work +
+    # variance from LLM throughput. 60 min gives ~2x headroom before
+    # we'd consider the run truly hung.
     max_jobs = 1
-    job_timeout = 1800
+    job_timeout = 3600
     max_tries = 1  # Don't retry failed analyses automatically
     health_check_interval = 30
