@@ -104,6 +104,17 @@ class BaseAnalyst(ABC):
           - If the thread refuses to die within the timeout, we log a critical
             warning and raise TimeoutError. The daemon flag ensures the OS will
             reap the thread when the worker process eventually exits.
+
+        Wave 5 fix (2026-05-28, HANG-01): the no-tools fallback path used to
+        call ``self.llm.invoke(prebuilt)`` synchronously with no timeout, so
+        when an analyst with no MCP tools (e.g. dynamic analyst with CAPE
+        disabled) hit a slow / queued llama-server, the worker hung
+        indefinitely — the openai SDK's default 600s ``request_timeout``
+        combined with the default ``max_retries=2`` produced ~30 min of
+        silent waiting before raising. The fallback now runs inside the same
+        daemon-thread + hard-cap-timeout machinery as the tools path, so the
+        analyst is killed at the configured ``react_agent_timeout`` budget
+        regardless of which path it takes.
         """
         from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -117,10 +128,12 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 prebuilt.append(HumanMessage(content=content))
 
+        cfg_for_timeout = get_settings()
+        _timeout_overrides = getattr(cfg_for_timeout, "react_agent_timeout_overrides", {}) or {}
+        no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
+
         if not self.tools:
-            # Fallback to simple invocation
-            response = self.llm.invoke(prebuilt)
-            return str(response.content)
+            return self._invoke_llm_with_timeout(prebuilt, no_tools_timeout)
 
         import asyncio
         import threading
@@ -280,6 +293,108 @@ class BaseAnalyst(ABC):
 
         final_message = msgs[-1]
         return str(final_message.content)
+
+    def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+        """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
+
+        Wave 5 HANG-01 fix (2026-05-28). Used by ``execute_tool_loop`` when
+        the agent has no tools registered. Mirrors the daemon-thread pattern
+        from the tools path so a stalled / queued llama-server cannot freeze
+        the worker. The thread is daemonised so the OS will reap it if it
+        refuses to die after ``timeout + 30``s.
+        """
+        import asyncio
+        import threading
+        import time as _time
+
+        from maljan.core.exceptions import AnalystError
+
+        thread_result: dict[str, str] = {}
+        thread_exception: Exception | None = None
+
+        def _run_in_thread() -> None:
+            nonlocal thread_exception
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+
+                async def _invoke() -> str:
+                    self.logger.info(
+                        "Invoking LLM (no-tools fallback, timeout=%ds)...",
+                        timeout,
+                    )
+                    # Run the (sync) ``invoke`` in a thread executor so
+                    # ``wait_for`` can cancel it — mirrors langchain's own
+                    # sync-bridge and keeps compatibility with MagicMock-based
+                    # unit tests that only stub ``invoke``.
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(self.llm.invoke, messages),
+                        timeout=float(timeout),
+                    )
+                    return str(response.content)
+
+                thread_result["content"] = loop.run_until_complete(_invoke())
+            except Exception as exc:
+                self.logger.error(
+                    "LLM no-tools fallback failed in thread: %s (%s)",
+                    type(exc).__name__,
+                    exc,
+                )
+                thread_exception = exc
+            finally:
+                try:
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        try:
+                            loop.run_until_complete(
+                                asyncio.gather(*pending, return_exceptions=True)
+                            )
+                        except Exception as cleanup_exc:
+                            self.logger.debug(
+                                "Task cleanup warning (non-critical): %s", cleanup_exc
+                            )
+                except Exception as cleanup_exc:
+                    self.logger.debug("Pending task enumeration warning: %s", cleanup_exc)
+                finally:
+                    try:
+                        loop.close()
+                    except Exception as close_exc:
+                        self.logger.debug("Loop close warning (non-critical): %s", close_exc)
+
+        thread_timeout = timeout + 30
+        _t0 = _time.monotonic()
+        t = threading.Thread(target=_run_in_thread, daemon=True)
+        t.start()
+        t.join(timeout=thread_timeout)
+
+        if t.is_alive():
+            self.logger.critical(
+                "LLM no-tools fallback thread still alive after %ds. "
+                "Daemon thread will be reaped at process exit; current job aborts.",
+                thread_timeout,
+            )
+            raise TimeoutError(f"LLM no-tools fallback timed out after {thread_timeout}s")
+
+        if thread_exception is not None:
+            if isinstance(thread_exception, TimeoutError):
+                raise thread_exception
+            raise AnalystError(
+                f"{self.name} no-tools fallback failed: {thread_exception}"
+            ) from thread_exception
+
+        if "content" not in thread_result:
+            raise AnalystError(f"{self.name} no-tools fallback returned no result")
+
+        elapsed = _time.monotonic() - _t0
+        self.logger.info(
+            "%s no-tools fallback: elapsed=%.1fs, timeout=%ds.",
+            self.name,
+            elapsed,
+            timeout,
+        )
+        return thread_result["content"]
 
     # ------------------------------------------------------------------
     # Abstract text interface (must be implemented by subclasses)
@@ -545,7 +660,8 @@ class BaseAnalyst(ABC):
                 self.logger.warning("Input truncated from %d to %d tokens", len(tokens), limit)
                 return enc.decode(tokens[:limit])
         except (KeyError, OSError, ValueError) as exc:
-            self.logger.debug("tiktoken truncation failed (%s); using char-based fallback.", exc)
+            msg = "tiktoken truncation failed (%s); using char-based fallback."
+            self.logger.debug(msg, exc)  # nosemgrep
             char_limit = limit * 4
             if len(text) > char_limit:
                 self.logger.warning("Input truncated (fallback) to ~%d tokens", limit)

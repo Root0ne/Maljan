@@ -43,4 +43,14 @@ class OpenAIProvider:
         if base_url:
             build_kwargs["base_url"] = base_url
 
+        # Wave 5 HANG-01 (2026-05-28): explicit ``request_timeout`` and
+        # ``max_retries`` so the openai SDK can't silently retry a stalled
+        # request three times (3 x default 600s = 30 min). Caller-supplied
+        # kwargs win. The outer ``execute_tool_loop`` / no-tools fallback
+        # already enforces a daemon-thread hard cap; this aligns the inner
+        # HTTP layer with that cap so we fail fast on a hung llama-server
+        # instead of waiting for the SDK retry loop to give up.
+        build_kwargs.setdefault("request_timeout", 300)
+        build_kwargs.setdefault("max_retries", 0)
+
         return ChatOpenAI(**build_kwargs)

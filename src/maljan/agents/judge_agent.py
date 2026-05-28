@@ -131,7 +131,16 @@ class JudgeAgent:
 
         if not getattr(self, "tools", None):
             self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
-            response = await self.llm.ainvoke(messages_pre)
+            # Wave 5 HANG-01 (2026-05-28): wrap the no-tools ainvoke in the
+            # same hard timeout used by the tools path so a stalled / queued
+            # llama-server cannot freeze the judge node.
+            no_tools_timeout = get_settings().react_agent_timeout_overrides.get(
+                "judge", get_settings().react_agent_timeout
+            )
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(messages_pre),
+                timeout=float(no_tools_timeout),
+            )
             return str(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))

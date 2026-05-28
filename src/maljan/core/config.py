@@ -449,7 +449,17 @@ class Settings(BaseSettings):
     # fallback path). Override via env, e.g.
     # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
     react_agent_timeout_overrides: dict[str, int] = Field(
-        default_factory=lambda: {"static": 600, "judge": 300}
+        default_factory=lambda: {
+            "static": 600,
+            "judge": 300,
+            # Wave 5 HANG-01 (2026-05-28): single-slot llama-server serialises
+            # all three analyst LLM calls — when the static analyst holds the
+            # slot for ~600s the dynamic / network analysts spend most of
+            # their budget queueing. Bump them so they don't time out before
+            # the LLM ever sees their request.
+            "dynamic": 600,
+            "network": 300,
+        }
     )
 
     # LangChain / LangSmith Tracing
