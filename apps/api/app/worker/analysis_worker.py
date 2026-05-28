@@ -311,6 +311,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             heartbeat_task = asyncio.create_task(_heartbeat())
 
+            # The pipeline (analysts -> mediator -> judge -> report nodes)
+            # runs inside ``app.arun()`` as a single LangGraph step, so the
+            # worker only sees phase boundaries at the start and end. We
+            # emit a phase marker here so live consumers can distinguish
+            # "running but no agent events yet" from "agents actively
+            # working". Mid-pipeline phases would require LangGraph
+            # callback wiring.
+            await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
             try:
                 pipeline_result = await app.arun(
                     file_hash=sample.sha256,
@@ -341,22 +349,35 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "duration_ms": round(elapsed * 1000)},
             )
 
+            # Persistence phase begins — the worker is about to insert
+            # the report and findings into Postgres. Live consumers use
+            # this to switch the UI into a "saving results" state.
+            await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
+
             # ── 4. Save report ───────────────────────────────────
             from app.models.report import AgentFinding, AnalysisReport
+
+            # Prefer the rich extended bundle produced by ``report_node``
+            # (54+ objects with Identity/Indicator/ObservedData/Note/Report
+            # SDOs) over the minimal judge bundle. The legacy field is the
+            # fallback for callers that pre-date the MalwareReport refactor.
+            stix_bundle_for_persist = pipeline_result.get(
+                "stix_bundle_extended"
+            ) or pipeline_result.get("stix_output")
+            # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
+            # the OASIS spec requires it on top-level bundle objects, and
+            # downstream tooling (OpenCTI / MISP / TAXII clients) silently
+            # rejects bundles that omit the field. Defensive: covers the
+            # case where the producer dropped it during serialization.
+            if isinstance(stix_bundle_for_persist, dict):
+                stix_bundle_for_persist.setdefault("spec_version", "2.1")
 
             report = AnalysisReport(
                 job_id=job.id,
                 verdict=pipeline_result.get("final_decision", "Unknown"),
                 overall_confidence=_extract_confidence(pipeline_result),
                 malware_category=_extract_category(pipeline_result),
-                # Prefer the rich extended bundle produced by ``report_node``
-                # (54+ objects with Identity/Indicator/ObservedData/Note/Report
-                # SDOs) over the minimal judge bundle. The legacy field is the
-                # fallback for callers that pre-date the MalwareReport refactor.
-                stix_bundle=(
-                    pipeline_result.get("stix_bundle_extended")
-                    or pipeline_result.get("stix_output")
-                ),
+                stix_bundle=stix_bundle_for_persist,
                 mitre_techniques=_extract_mitre(pipeline_result),
                 agent_reports=pipeline_result.get("reports"),
                 negotiation_log={
@@ -431,19 +452,21 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
 
             # ── 5. Mark job complete ─────────────────────────────
-            # Postgres ``NOW()`` for ``completed_at`` to stay consistent
-            # with ``started_at`` (set via DB clock above). Also set the
-            # Python-side attribute so callers that read ``job.completed_at``
-            # right after this block (and tests with mocked sessions) see
-            # the same value without an extra round-trip.
+            # Use Python ``datetime.now(UTC)`` instead of Postgres ``NOW()``.
+            # ``func.now()`` resolves to ``transaction_timestamp()`` which is
+            # the START of the current transaction — that equals
+            # ``started_at`` and produces a 0-second ``completed_at`` even
+            # for a 20-minute pipeline. ``duration_seconds`` is computed in
+            # Python anyway so a single clock source is correct.
+            now = datetime.now(UTC)
             job.status = "completed"
-            job.completed_at = datetime.now(UTC)
+            job.completed_at = now
             job.duration_seconds = round(float(elapsed), 1)
             await db.execute(
                 update(AnalysisJob)
                 .where(AnalysisJob.id == job.id)
                 .values(
-                    completed_at=func.now(),
+                    completed_at=now,
                     # Round to one decimal so sub-second jobs (~0.7s) don't
                     # collapse to zero; the column is ``Numeric(10,2)`` so
                     # fractional values survive the round-trip.
@@ -517,10 +540,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 if job is not None:
                     job.status = "failed"
                     job.error_message = error_msg[:2000]
+                    job.completed_at = datetime.now(UTC)
                     await db.execute(
                         update(AnalysisJob)
                         .where(AnalysisJob.id == job.id)
-                        .values(completed_at=func.now())
+                        .values(completed_at=job.completed_at)
                     )
                     await db.commit()
                 else:

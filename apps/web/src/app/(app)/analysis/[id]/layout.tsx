@@ -24,7 +24,7 @@ const VERDICT_CONFIG: Record<
   string,
   { bg: string; border: string; text: string; label: string; icon: string }
 > = {
-  malicious: {
+  malware: {
     bg: "bg-status-red/10",
     border: "border-status-red/30",
     text: "text-status-red",
@@ -77,6 +77,7 @@ const TABS: TabDef[] = [
   { key: "/ttps", label: "TTPS", group: "advanced" },
   { key: "/timeline", label: "TIMELINE", group: "advanced" },
   { key: "/stix", label: "STIX", group: "advanced" },
+  { key: "/live", label: "LIVE", group: "advanced" },
 ];
 
 const TAB_GROUP_ORDER: TabDef["group"][] = ["overview", "analysis", "intel", "advanced"];
@@ -246,7 +247,7 @@ export default function AnalysisLayout({
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-text-secondary">
                 <div>
                   <span className="text-text-muted">Sample: </span>
-                  <code className="font-mono">{sampleId.slice(0, 12)}</code>
+                  <code className="font-mono">{fileName ?? sampleId.slice(0, 12)}</code>
                 </div>
                 <div>
                   <span className="text-text-muted">Duration: </span>

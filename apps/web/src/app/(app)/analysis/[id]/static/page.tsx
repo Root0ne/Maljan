@@ -25,6 +25,8 @@ export default function StaticTab() {
   const [stringKind, setStringKind] = useState<StringIOCKind | "all">("all");
 
   const staticData = report?.malware_report?.static;
+  const fileType = report?.malware_report?.identity?.file_type;
+  const sectionsLabel = fileType ? `${fileType} Sections` : "Sections";
 
   const filteredImports = useMemo(() => {
     if (!staticData) return [];
@@ -83,7 +85,7 @@ export default function StaticTab() {
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            PE Sections ({staticData.sections.length})
+            {sectionsLabel} ({staticData.sections.length})
           </h2>
         </div>
         {staticData.sections.length === 0 ? (

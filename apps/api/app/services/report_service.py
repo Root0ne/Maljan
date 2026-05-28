@@ -253,6 +253,12 @@ class ReportService:
         """Return the concatenated rule bodies for a single signature ``kind``.
 
         ``kind`` is one of ``yara``, ``sigma``, ``suricata``, ``snort``.
+
+        Distinguishes "report missing" (``None`` -> caller raises 404) from
+        "report exists but no bodies of this kind" (empty string -> caller
+        returns 200 with an empty body). The previous behaviour collapsed
+        both into ``None`` which made the UI treat an empty Suricata set
+        as a missing report.
         """
         mr = await self.get_malware_report(report_id, user)
         if not mr:
@@ -265,9 +271,7 @@ class ReportService:
             name = sig.get("name") or "rule"
             body = sig.get("body") or ""
             bodies.append(f"// {name}\n{body}")
-        if not bodies:
-            return None
-        return "\n\n".join(bodies)
+        return "\n\n".join(bodies) if bodies else ""
 
     async def enqueue_enrichment(
         self,

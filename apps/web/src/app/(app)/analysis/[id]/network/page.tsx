@@ -136,45 +136,51 @@ export default function NetworkTab() {
         )}
       </div>
 
-      {(net.user_agents.length > 0 || net.ja3_fingerprints.length > 0) && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Fingerprints
-            </h2>
-          </div>
-          <div className="p-4 space-y-3 text-xs">
-            {net.user_agents.length > 0 && (
-              <div>
-                <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
-                  User-Agents
-                </div>
-                <ul className="space-y-1">
-                  {net.user_agents.map((ua, i) => (
-                    <li key={i} className="font-mono text-text-secondary break-all">
-                      {ua}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {net.ja3_fingerprints.length > 0 && (
-              <div>
-                <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
-                  JA3 Fingerprints
-                </div>
-                <ul className="space-y-1">
-                  {net.ja3_fingerprints.map((j, i) => (
-                    <li key={i} className="font-mono text-text-secondary break-all">
-                      {j}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            User-Agents ({net.user_agents.length})
+          </h2>
         </div>
-      )}
+        {net.user_agents.length === 0 ? (
+          <div className="p-8 text-center text-sm text-text-muted">No user agents observed.</div>
+        ) : (
+          <ul className="divide-y divide-border-light">
+            {net.user_agents.map((ua, i) => (
+              <li
+                key={i}
+                className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover transition-colors"
+              >
+                {ua}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            JA3 Fingerprints ({net.ja3_fingerprints.length})
+          </h2>
+        </div>
+        {net.ja3_fingerprints.length === 0 ? (
+          <div className="p-8 text-center text-sm text-text-muted">
+            No TLS JA3 fingerprints observed.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border-light">
+            {net.ja3_fingerprints.map((j, i) => (
+              <li
+                key={i}
+                className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover transition-colors"
+              >
+                {typeof j === "string" ? j : JSON.stringify(j)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

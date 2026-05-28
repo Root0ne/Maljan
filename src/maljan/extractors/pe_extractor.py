@@ -676,14 +676,74 @@ def _is_meaningful_ip(ip: str) -> bool:
     return True
 
 
+_NON_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    # Native binaries
+    ".exe",
+    ".dll",
+    ".sys",
+    ".so",
+    ".dylib",
+    # Source / scripts
+    ".py",
+    ".js",
+    ".c",
+    ".h",
+    ".cpp",
+    ".cxx",
+    ".cc",
+    ".hpp",
+    ".java",
+    # Android / mobile artefacts (zararli.apk dropped resources.arsc,
+    # classes.dex, etc. as DOMAIN matches before this list expanded)
+    ".apk",
+    ".aab",
+    ".arsc",
+    ".dex",
+    ".smali",
+    ".kotlin_module",
+    # Bundled assets shipped inside archives + APKs
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".xml",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".html",
+    ".htm",
+    ".css",
+    ".txt",
+    ".md",
+    ".csv",
+    # Java / .NET / Office formats
+    ".jar",
+    ".class",
+    ".war",
+    ".ear",
+    ".docx",
+    ".xlsx",
+    ".pptx",
+    ".doc",
+    ".xls",
+    ".ppt",
+    ".pdf",
+)
+
+
 def _looks_like_domain(text: str) -> bool:
     """Filter out obvious non-domain matches (filenames, version strings)."""
     if text.startswith(".") or text.endswith("."):
         return False
-    if any(
-        text.endswith(s)
-        for s in (".exe", ".dll", ".sys", ".so", ".dylib", ".py", ".js", ".c", ".h")
-    ):
+    lower = text.lower()
+    if any(lower.endswith(suffix) for suffix in _NON_DOMAIN_SUFFIXES):
         return False
     if text.count(".") > 4:
         return False
