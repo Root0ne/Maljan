@@ -459,8 +459,22 @@ class Settings(BaseSettings):
     # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
     react_agent_timeout_overrides: dict[str, int] = Field(
         default_factory=lambda: {
-            "static": 600,
-            "judge": 300,
+            # Wave 7.5 THROUGHPUT-02 (2026-05-28): the static analyst runs a
+            # full ReAct loop against Ghidra MCP (load_program → auto-
+            # analyze → behaviour scan → decompile). On the local 35B Qwen
+            # at ~4.6 tok/s output the previous 600s ceiling fired
+            # *during* Ghidra auto-analysis (live trace job 3450f9cd
+            # 2026-05-28 — Ghidra logged ``Loaded program: classes.dex``
+            # before the budget expired). 1200s covers a cold-cache cycle
+            # end-to-end while still leaving headroom under the arq
+            # 3600s job timeout once we add dynamic (600s) + network
+            # (300s) + negotiation + judge. Reduce to 600s for hosted
+            # multi-slot APIs.
+            "static": 1200,
+            # Judge budget bumped 300 → 600 for the same reason — the
+            # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
+            # at 180-300s in the 2026-05-28 sequential live runs.
+            "judge": 600,
             # Wave 5 HANG-01 (2026-05-28): single-slot llama-server serialises
             # all three analyst LLM calls — when the static analyst holds the
             # slot for ~600s the dynamic / network analysts spend most of
