@@ -245,6 +245,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             # Download sample from MinIO for sandbox submission
             temp_path: str | None = None
+            static_sample_path: str | None = None
             try:
                 from minio import Minio
                 from pydantic import SecretStr as _SecretStr
@@ -285,6 +286,41 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     temp_path,
                     extra={"job_id": job_id, "component": "minio"},
                 )
+
+                # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): mirror the binary
+                # into ``data/samples/<sha256><ext>`` (relative to the project
+                # root). That directory is bind-mounted into the Ghidra MCP
+                # container at ``/data/samples/``, so the static analyst can
+                # call ``load_program(file=/data/samples/<sha256><ext>)`` and
+                # actually get a hit. Previously the file only lived in the
+                # host's tempdir, invisible to the container, so every static
+                # analysis ran without ever loading the sample.
+                try:
+                    import shutil
+
+                    host_samples_dir = Path("data/samples")
+                    host_samples_dir.mkdir(parents=True, exist_ok=True)
+                    host_mirror = host_samples_dir / f"{sample.sha256}{_orig_ext}"
+                    shutil.copyfile(temp_path, host_mirror)
+                    # Container path mirrors the bind mount in
+                    # docker/docker-compose.yml (``../data/samples:/data/samples``).
+                    static_sample_path = (
+                        f"{settings.ghidra_container_samples_path.rstrip('/')}/"
+                        f"{sample.sha256}{_orig_ext}"
+                    )
+                    logger.info(
+                        "Mirrored sample to %s for Ghidra container (%s).",
+                        host_mirror,
+                        static_sample_path,
+                        extra={"job_id": job_id, "component": "ghidra-mirror"},
+                    )
+                except Exception as mirror_exc:
+                    logger.warning(
+                        "Failed to mirror sample to data/samples for Ghidra: %s. "
+                        "Static analyst will fall back to metadata-only prompt.",
+                        mirror_exc,
+                        extra={"job_id": job_id, "component": "ghidra-mirror"},
+                    )
             except Exception as exc:
                 logger.warning(
                     "Failed to download sample from MinIO: %s. Sandbox submission skipped.",
@@ -324,6 +360,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     file_hash=sample.sha256,
                     file_name=sample.original_filename,
                     sample_path=temp_path,
+                    static_sample_path=static_sample_path,
                 )
             finally:
                 heartbeat_stop_event.set()

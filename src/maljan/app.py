@@ -52,6 +52,7 @@ class MaljanApp:
         file_hash: str,
         file_name: str | None = None,
         sample_path: str | None = None,
+        static_sample_path: str | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline synchronously.
 
@@ -59,6 +60,8 @@ class MaljanApp:
             file_hash: Sample identifier.
             file_name: Optional human-readable name.
             sample_path: Optional path to the original sample file for sandbox submission.
+            static_sample_path: Optional container-visible path the static analyst's
+                Ghidra MCP server can read. See ``arun`` for full context.
 
         Returns:
             The final state dict including:
@@ -67,7 +70,7 @@ class MaljanApp:
         """
         # Delegate to async implementation so sandbox submission and graph
         # execution share the same event loop (avoids nested asyncio.run).
-        return asyncio.run(self.arun(file_hash, file_name, sample_path))
+        return asyncio.run(self.arun(file_hash, file_name, sample_path, static_sample_path))
 
     def _infer_sample_platform(
         self,
@@ -166,8 +169,23 @@ class MaljanApp:
         file_hash: str,
         file_name: str | None = None,
         sample_path: str | None = None,
+        static_sample_path: str | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
+
+        Args:
+            file_hash: Sample identifier (sha256).
+            file_name: Optional human-readable name.
+            sample_path: Optional host path to the original sample file for
+                sandbox submission (Triage / CAPE upload).
+            static_sample_path: Optional container-visible path the static
+                analyst's Ghidra MCP server can read. Worker on the host
+                writes the sample into ``data/samples/<sha256><ext>`` (bound
+                into the Ghidra container at ``/data/samples/``); the
+                analyst node then asks the LLM to call ``load_program(file=
+                static_sample_path)``. ``None`` falls back to the legacy
+                metadata-only prompt where the LLM had to guess the path
+                and timed out.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
@@ -201,6 +219,7 @@ class MaljanApp:
             "file_hash": file_hash,
             "file_name": file_name,
             "sample_path": sample_path,
+            "static_sample_path": static_sample_path,
             "sandbox_report": sandbox_report,
             "file_type": file_type,
             "platform": platform,

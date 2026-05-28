@@ -14,6 +14,22 @@ wheels/
 # External MCP tool installations (not part of Maljan — install separately)
 external/
 
+# Runtime sample mirror — worker copies MinIO-downloaded samples into
+# data/samples/ so the Ghidra container can read them through its mount.
+# These are real binaries, not test fixtures, so never commit them.
+# Test fixtures under data/samples/{dynamic,network,static}/ stay tracked.
+data/samples/*.apk
+data/samples/*.exe
+data/samples/*.dll
+data/samples/*.elf
+data/samples/*.so
+data/samples/*.dex
+data/samples/*.jar
+data/samples/*.bin
+data/samples/*.dat
+data/samples/*.sys
+data/samples/*.macho
+
 # Environment variables (never commit real secrets)
 # Tracked: .env.example, .env.template, apps/*/. env.example
 # Ignored: every real .env and any *.local override anywhere in the tree.

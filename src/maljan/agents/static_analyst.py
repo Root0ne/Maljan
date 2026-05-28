@@ -358,6 +358,15 @@ class StaticAnalyst(BaseAnalyst):
             f"Target File: {data}" if len(data.strip()) < 512 else f"Static output:\n{data}"
         )
 
+        # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): make the load_program
+        # path *explicit* in the human turn instead of leaving the LLM to
+        # infer it from the JSON. The path is injected upstream in
+        # ``nodes.py:_augment_static_chunks_with_path`` as
+        # ``analysis_file_path`` on the chunk JSON. When present we hoist
+        # it to a separate "Load using" line so the model can't miss it,
+        # even on a degraded local 8-9B run.
+        load_hint = _extract_load_hint(data)
+
         prompt_messages = [
             ("system", _ISR_SYSTEM),
             (
@@ -373,7 +382,7 @@ class StaticAnalyst(BaseAnalyst):
                 "CONFIDENCE: <float>\n"
                 "TECHNIQUE: <T-ID or NONE>\n"
                 "---\n\n"
-                f"{target_info}",
+                f"{load_hint}{target_info}",
             ),
         ]
 
@@ -464,6 +473,38 @@ class StaticAnalyst(BaseAnalyst):
 # ------------------------------------------------------------------
 # Shared parsing helpers (module-level, reused by other analysts)
 # ------------------------------------------------------------------
+
+
+def _extract_load_hint(data: str) -> str:
+    """Return a one-line ``load_program`` hint when the chunk carries a path.
+
+    Wave 6 GHIDRA-DELIVERY-01. The analyst-node wrapper splices the
+    container-visible sample path into the chunk JSON as
+    ``analysis_file_path``. We hoist that to a dedicated line at the top
+    of the human turn so the LLM doesn't have to discover it inside the
+    larger ``target`` block. Returns an empty string when the chunk
+    isn't JSON (the legacy raw-bytes path) or when no path is present,
+    keeping the prompt verbatim with the pre-Wave-6 behaviour.
+    """
+    import json as _json
+
+    stripped = data.strip()
+    if not stripped or not stripped.startswith("{"):
+        return ""
+    try:
+        parsed = _json.loads(stripped)
+    except (_json.JSONDecodeError, ValueError):
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    path = parsed.get("analysis_file_path")
+    if not isinstance(path, str) or not path:
+        return ""
+    return (
+        f'LOAD THIS BINARY FIRST: call ``load_program(file="{path}")``.\n'
+        "All subsequent analysis tools operate on the program loaded by "
+        "that call. Do not invent a path — use the one above verbatim.\n\n"
+    )
 
 
 # CRLF-tolerant separator that requires the dashes to occupy their own line.

@@ -88,6 +88,16 @@ class APISettings(BaseSettings):
     minio_bucket: str = "maljan-samples"
     minio_secure: bool = False
 
+    # ── Ghidra MCP container delivery (Wave 6 GHIDRA-DELIVERY-01) ───
+    # Worker mirrors each MinIO-downloaded sample into ``data/samples/``
+    # on the host so the Ghidra MCP container can read it through its
+    # bind mount. ``ghidra_container_samples_path`` is the path at which
+    # the Ghidra container sees that directory — it must match the
+    # right-hand side of the ``../data/samples:/data/samples`` mount in
+    # ``docker/docker-compose.yml``. Override via env when relocating
+    # the mount or running Ghidra outside Docker.
+    ghidra_container_samples_path: str = "/data/samples"
+
     # ── JWT Auth ─────────────────────────────────────────────────
     jwt_secret_key: SecretStr = SecretStr("")
     jwt_algorithm: str = "HS256"

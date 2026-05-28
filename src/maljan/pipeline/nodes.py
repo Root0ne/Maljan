@@ -44,6 +44,58 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     )
 
 
+def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list:
+    """Inject the container-visible sample path into the static analyst's chunks.
+
+    Wave 6 (2026-05-28, GHIDRA-DELIVERY-01). The static analyst's data
+    surface is a JSON-stringified ``target`` block from the sandbox report
+    (or a raw chunk when no sandbox ran). Before Wave 6 the chunk only
+    carried ``{sha256, md5, name, size}`` — there was no way for the LLM
+    to know which path to hand ``load_program``, so it either guessed
+    (always wrong, since the file lived in the host tempdir invisible to
+    the Ghidra container) or skipped the call entirely. We now splice
+    ``analysis_file_path`` into the JSON when the worker recorded a
+    container-visible mirror via ``state['static_sample_path']``.
+
+    The chunk objects are immutable dataclasses; rebuild with the same
+    chunker so downstream code (token budget, chunk_text) keeps working.
+    Best-effort: if the chunk content isn't valid JSON, return chunks
+    unchanged — the static analyst's own placeholder guard handles the
+    "no path, no analysis" path.
+    """
+    import json
+
+    static_path = state.get("static_sample_path")
+    if not static_path or not chunks:
+        return chunks
+
+    head = chunks[0]
+    try:
+        parsed = json.loads(head.content)
+    except (json.JSONDecodeError, ValueError):
+        return chunks
+    if not isinstance(parsed, dict):
+        return chunks
+
+    parsed["analysis_file_path"] = static_path
+    new_content = json.dumps(parsed, indent=2, default=str)
+
+    import dataclasses as _dc
+
+    try:
+        rebuilt = _dc.replace(
+            head,
+            content=new_content,
+            char_count=len(new_content),
+            token_estimate=len(new_content) // 4,
+        )
+    except TypeError:
+        # Not a dataclass (e.g. a future chunk type) — give up gracefully
+        # rather than crashing the analyst node over a presentation detail.
+        return chunks
+    return [rebuilt, *chunks[1:]]
+
+
 def _decide_from_bundle(bundle: Bundle) -> str:
     """Map a final STIX bundle to a high-level verdict.
 
@@ -102,6 +154,14 @@ def make_analyst_node(
                 )
             else:
                 chunks = container.load_chunked(state["file_hash"], agent_name)
+
+            # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): the static analyst
+            # needs to know the container-visible path to call
+            # ``load_program(file=...)``. Inject it into the chunk's JSON
+            # under ``analysis_file_path`` so the existing chunk-text flow
+            # carries the path into the LLM prompt without a new state hop.
+            if agent_name == "static":
+                chunks = _augment_static_chunks_with_path(chunks, state)
 
             if not chunks:
                 raise AnalystError(f"No data chunks produced for agent '{agent_name}'.")

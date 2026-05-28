@@ -44,6 +44,18 @@ class AnalysisState(TypedDict):
     file_type: str | None
     platform: str | None
 
+    # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): the container-visible path
+    # at which the static analyst's Ghidra MCP server can read the sample.
+    # The worker mirrors the MinIO download into ``data/samples/`` (host)
+    # which the Ghidra container sees through its bind mount at
+    # ``/data/samples/`` — this field carries the resolved container path
+    # so the analyst node can hand the LLM a ``load_program`` argument
+    # that actually resolves on the Ghidra side. ``None`` when no host
+    # mirror is available (e.g. legacy state or worker-side download
+    # failure); the static analyst then short-circuits to a zero-claim
+    # ISR via the existing PIPE-ANA-01 guard.
+    static_sample_path: str | None
+
     # Per-agent text reports
     reports: Annotated[dict[str, str], _merge_dicts]
     revised_reports: Annotated[dict[str, str], _merge_dicts]
