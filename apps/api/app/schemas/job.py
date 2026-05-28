@@ -81,6 +81,12 @@ class AgentFindingResponse(BaseModel):
     dissent_items: list | None
     revision_rounds: int
     final_confidence: float
+    # D15+D16: lifecycle status — defaults to "complete" so legacy rows
+    # (the column was added in 20250524000000) round-trip without losing
+    # meaning. ``status_reason`` carries the short failure string when
+    # status is "failed" or "timeout".
+    status: str = "complete"
+    status_reason: str | None = None
 
     model_config = {"from_attributes": True}
 

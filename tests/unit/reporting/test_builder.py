@@ -138,3 +138,68 @@ class TestFallbackNarrative:
         assert len(report.executive_summary) > 100
         assert report.capabilities_narrative  # non-empty
         assert report.defensive_recommendations  # non-empty
+
+
+class TestAttributionGrounding:
+    """D11 — family attribution guardrail.
+
+    The judge fallback path can hallucinate a family string when local
+    LLMs time out (the 2026-05-23 zararli.apk run produced
+    ``attribution.family = 'rat'`` with no Triage / signature / claim
+    corroboration). The builder must mark that case as ungrounded so the
+    UI can render it with a low-confidence badge.
+    """
+
+    def test_no_family_treated_as_grounded(self) -> None:
+        report = _build(category=None)
+        assert report.attribution.family is None
+        # Legacy behaviour: missing family => no grounding claim to make.
+        assert report.attribution.family_grounded is True
+
+    def test_ungrounded_family_zeroes_confidence(self) -> None:
+        report = _build(category="rat", confidence=0.6)
+        assert report.attribution.family == "rat"
+        assert report.attribution.family_grounded is False
+        # Confidence must drop to 0.0 — the value was unsupported by any
+        # deterministic layer.
+        assert report.attribution.family_confidence == 0.0
+
+    def test_family_grounded_via_triage_cti(self) -> None:
+        sandbox = {"cti": {"family": ["Trojan/RAT"]}}
+        report = _build(sandbox=sandbox, category="rat", confidence=0.6)
+        assert report.attribution.family_grounded is True
+        assert report.attribution.family_confidence == 0.6
+
+    def test_family_grounded_via_signature_name(self) -> None:
+        sandbox = {
+            "signatures": [
+                {"name": "LockBit ransomware payload", "severity": 9},
+            ]
+        }
+        report = _build(sandbox=sandbox, category="lockbit", confidence=0.8)
+        assert report.attribution.family_grounded is True
+        assert report.attribution.family_confidence == 0.8
+
+    def test_family_grounded_via_isr_claim(self) -> None:
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(
+                    claim="Sample matches Cobalt Strike beacon pattern",
+                    evidence_ref="strings: cobaltstrike-beacon-config",
+                    confidence=0.7,
+                    technique_id="T1059",
+                )
+            ],
+            dissent_items=[],
+            revision_round=0,
+        )
+        report = _build(
+            isr_reports={"static": isr},
+            category="cobaltstrike",
+            confidence=0.7,
+        )
+        assert report.attribution.family_grounded is True

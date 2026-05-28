@@ -1,12 +1,43 @@
 "use client";
 
 import { useReport } from "../layout";
+import type { AgentFindingStatus } from "@/types";
 
 const VERDICT_STYLES: Record<string, { icon: string; class: string }> = {
   malicious: { icon: "\u2716", class: "text-status-red" },
   suspicious: { icon: "?", class: "text-status-orange" },
   benign: { icon: "\u2714", class: "text-status-green" },
   unknown: { icon: "-", class: "text-text-muted" },
+};
+
+/* D15+D16: status badge styling. The status comes from the worker and
+ * is the source of truth for whether the analyst produced anything
+ * meaningful \u2014 verdict + confidence remain useful only when
+ * status === "complete". */
+const STATUS_STYLES: Record<
+  AgentFindingStatus,
+  { label: string; bg: string; text: string }
+> = {
+  complete: {
+    label: "complete",
+    bg: "bg-status-green/10",
+    text: "text-status-green",
+  },
+  no_data: {
+    label: "no data",
+    bg: "bg-text-muted/10",
+    text: "text-text-muted",
+  },
+  failed: {
+    label: "failed",
+    bg: "bg-status-red/10",
+    text: "text-status-red",
+  },
+  timeout: {
+    label: "timed out",
+    bg: "bg-status-orange/10",
+    text: "text-status-orange",
+  },
 };
 
 function confidenceToVerdict(confidence: number): string {
@@ -32,7 +63,11 @@ export default function AgentsTab() {
 
   const agents = (report?.agent_findings ?? []).map((f) => {
     const pct = Math.round(f.final_confidence * 100);
-    const verdict = confidenceToVerdict(pct);
+    const status: AgentFindingStatus = (f.status ?? "complete") as AgentFindingStatus;
+    // Verdict only makes sense for completed runs. For failed / timed-out
+    // / no-data the lifecycle status is the entire story; suppress the
+    // misleading derived verdict label.
+    const verdict = status === "complete" ? confidenceToVerdict(pct) : "unknown";
     // Extract first claim description as key finding
     let keyFinding = "No specific findings recorded.";
     if (f.claims && Array.isArray(f.claims) && f.claims.length > 0) {
@@ -45,6 +80,11 @@ export default function AgentsTab() {
         keyFinding = first;
       }
     }
+    // Prefer the status_reason for non-complete rows so the table
+    // explains the gap instead of repeating "No specific findings".
+    if (status !== "complete" && f.status_reason) {
+      keyFinding = String(f.status_reason);
+    }
     return {
       name: f.agent_name,
       verdict,
@@ -52,10 +92,14 @@ export default function AgentsTab() {
       domain: f.domain,
       key_finding: keyFinding,
       revision_rounds: f.revision_rounds,
+      status,
     };
   });
 
-  const maliciousCount = agents.filter((a) => a.verdict === "malicious").length;
+  const maliciousCount = agents.filter(
+    (a) => a.status === "complete" && a.verdict === "malicious",
+  ).length;
+  const completedCount = agents.filter((a) => a.status === "complete").length;
 
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -65,7 +109,11 @@ export default function AgentsTab() {
         </h2>
         <span className="text-xs text-text-muted">
           {agents.length > 0
-            ? `${maliciousCount}/${agents.length} flagged as malicious`
+            ? `${maliciousCount}/${completedCount} flagged as malicious${
+                completedCount < agents.length
+                  ? ` (${agents.length - completedCount} non-complete)`
+                  : ""
+              }`
             : "No agent data"}
         </span>
       </div>
@@ -97,30 +145,44 @@ export default function AgentsTab() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className={`flex items-center gap-1.5 ${style.class}`}>
-                      <span className="text-sm">{style.icon}</span>
-                      <span className="text-xs font-medium capitalize">{agent.verdict}</span>
-                    </div>
+                    {agent.status === "complete" ? (
+                      <div className={`flex items-center gap-1.5 ${style.class}`}>
+                        <span className="text-sm">{style.icon}</span>
+                        <span className="text-xs font-medium capitalize">{agent.verdict}</span>
+                      </div>
+                    ) : (
+                      <span
+                        className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${STATUS_STYLES[agent.status].bg} ${STATUS_STYLES[agent.status].text}`}
+                      >
+                        {STATUS_STYLES[agent.status].label}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-12 h-1.5 bg-bg-deep rounded-sm overflow-hidden">
-                        <div
-                          className="h-full rounded-sm"
-                          style={{
-                            width: `${agent.confidence}%`,
-                            backgroundColor:
-                              agent.confidence >= 75
-                                ? "var(--status-red)"
-                                : agent.confidence >= 45
-                                ? "var(--status-orange)"
-                                : "var(--status-green)",
-                            opacity: 0.7,
-                          }}
-                        />
+                    {agent.status === "complete" ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-12 h-1.5 bg-bg-deep rounded-sm overflow-hidden">
+                          <div
+                            className="h-full rounded-sm"
+                            style={{
+                              width: `${agent.confidence}%`,
+                              backgroundColor:
+                                agent.confidence >= 75
+                                  ? "var(--status-red)"
+                                  : agent.confidence >= 45
+                                  ? "var(--status-orange)"
+                                  : "var(--status-green)",
+                              opacity: 0.7,
+                            }}
+                          />
+                        </div>
+                        <span className="text-xs text-text-secondary font-mono">
+                          {agent.confidence}%
+                        </span>
                       </div>
-                      <span className="text-xs text-text-secondary font-mono">{agent.confidence}%</span>
-                    </div>
+                    ) : (
+                      <span className="text-xs text-text-muted">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-text-muted font-mono">{agent.revision_rounds}</span>

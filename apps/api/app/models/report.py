@@ -66,8 +66,38 @@ class AgentFinding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     revision_rounds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     final_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
+    # D15+D16: lifecycle status separate from confidence so the UI can
+    # tell a successful analyst with low confidence ("complete /
+    # benign") apart from one that failed entirely ("static analyst
+    # crashed loading the APK as a PE binary"). The 2026-05-23 E2E run
+    # surfaced this gap when the Ghidra static loop produced 0 claims
+    # but the row was persisted as "Benign 0%" — indistinguishable from
+    # a benign verdict.
+    #
+    # Values:
+    #   "complete" - analyst returned claims as expected
+    #   "no_data"  - analyst ran but produced 0 claims (e.g. nothing to
+    #                report, or LLM refused to contradict an obvious
+    #                empty sandbox report)
+    #   "failed"   - analyst raised / returned ``[ERROR]`` text
+    #   "timeout"  - analyst ReAct loop hit its asyncio.wait_for limit
+    #
+    # ``server_default`` is set so the Alembic migration backfills
+    # existing rows with the legacy meaning.
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="complete",
+        server_default="complete",
+        index=True,
+    )
+    status_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Relationships
     report = relationship("AnalysisReport", back_populates="agent_findings")
 
     def __repr__(self) -> str:
-        return f"<AgentFinding {self.agent_name} confidence={self.final_confidence:.2f}>"
+        return (
+            f"<AgentFinding {self.agent_name} status={self.status} "
+            f"confidence={self.final_confidence:.2f}>"
+        )

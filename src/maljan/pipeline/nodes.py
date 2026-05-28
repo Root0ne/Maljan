@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -562,6 +563,28 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 for name, text in (state.get("reports") or {}).items()
                 if isinstance(text, str) and text.strip().startswith("[ERROR]")
             ]
+            # D10: surface anti-emulation / anti-VM / sandbox-detection
+            # signatures so the existing DEGRADED RUN banner can explain
+            # the empty dynamic tab (sandbox traced nothing because the
+            # sample noticed it was being observed). Pattern matched
+            # case-insensitively against the signature name + description
+            # so Triage's verbose copy ("Listens for changes in the
+            # sensor environment (might be used to detect emulation)") is
+            # caught the same as CAPE's short ("anti-vm").
+            _ANTI_EMU_RE = re.compile(
+                r"emulation|anti[\s_-]?vm|anti[\s_-]?debug|sandbox\s*detect|"
+                r"qemu|virtualbox|vmware|hyper[\s_-]?v",
+                re.IGNORECASE,
+            )
+            _anti_emu_hits: list[str] = []
+            for sig in (state.get("sandbox_report") or {}).get("signatures") or []:
+                if not isinstance(sig, dict):
+                    continue
+                _haystack = f"{sig.get('name', '')} {sig.get('description', '')}"
+                if _ANTI_EMU_RE.search(_haystack):
+                    _hit_name = str(sig.get("name") or "").strip()
+                    if _hit_name and _hit_name not in _anti_emu_hits:
+                        _anti_emu_hits.append(_hit_name)
             _degradation_reasons: list[str] = []
             if _corroborated == 0 and _technique_count > 0:
                 _degradation_reasons.append(
@@ -569,6 +592,12 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
+            if _anti_emu_hits:
+                _short = _anti_emu_hits[0]
+                _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""
+                _degradation_reasons.append(
+                    f"sandbox detected anti-emulation behaviour: {_short}{_suffix}"
+                )
             _degraded_mode = bool(_degradation_reasons)
             if _degraded_mode:
                 logger.warning(
@@ -905,6 +934,26 @@ def make_report_node(container: ServiceContainer) -> Any:
             sandbox_cti = state.get("sandbox_cti")
             if isinstance(sandbox_cti, dict) and sandbox_cti:
                 extended_dump.setdefault("x_maljan_cti", sandbox_cti)
+
+            # D20 fix: rewrite the malware SDO description when the judge
+            # emitted a fallback placeholder (timeout / non-JSON output).
+            # The fallback writes a stale verdict that cross-layer
+            # aggregation may upgrade — STIX consumers should see the
+            # FINAL verdict in the user-visible description, not the
+            # intermediate ``judge fallback`` text.
+            _final_desc = (
+                f"Verdict: {report.verdict} "
+                f"(confidence={report.overall_confidence:.2f}; "
+                f"severity={report.severity.rating})"
+            )
+            for obj in extended_dump.get("objects", []) or []:
+                if obj.get("type") != "malware":
+                    continue
+                _desc = str(obj.get("description", "")).lower()
+                if "judge fallback" in _desc or "verdict pending" in _desc:
+                    obj["description"] = _final_desc
+                    break
+
             report.stix_bundle_extended = extended_dump
 
         logger.info(

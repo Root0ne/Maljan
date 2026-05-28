@@ -470,10 +470,15 @@ class JudgeAgent:
             ]
         )
 
-        # Use a longer timeout for verdict (300s) but keep prompt small so it
-        # finishes well before that. Previous failures were caused by prompt
-        # bloat (15K+ tokens), not by model slowness per se.
-        timeout = max(float(get_settings().react_agent_timeout), 120)
+        # Resolve the judge-specific timeout via the same override mechanism
+        # the analyst agents use. ``react_agent_timeout_overrides`` ships
+        # with ``{"static": 600, "judge": 300}`` so local Qwen3.6-35B has
+        # enough headroom for the verdict round (the 2026-05-23 E2E run hit
+        # the previous hardcoded 180s ceiling). Falls back to the global
+        # ``react_agent_timeout`` when no override is configured.
+        _settings = get_settings()
+        _overrides = getattr(_settings, "react_agent_timeout_overrides", {}) or {}
+        timeout = float(_overrides.get("judge", _settings.react_agent_timeout))
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
         try:
             result_text = await asyncio.wait_for(
@@ -732,6 +737,13 @@ class JudgeAgent:
                         tids.add(claim.technique_id)
 
         malware_id = f"malware--{uuid.uuid4()}"
+        # Don't bake the raw fallback text (which may contain ``[TIMEOUT]``
+        # or other internal markers) into the malware SDO description —
+        # downstream cross-layer aggregation can upgrade the verdict in
+        # ``report_node`` and the user-visible description should reflect
+        # the final verdict, not the intermediate fallback. The judge
+        # rationale is preserved in ``x_maljan_fallback_reasoning`` for
+        # debug consumers.
         text_snippet = (text[:2000] if text else "No structured output available.").replace(
             "\n", " "
         )
@@ -743,8 +755,9 @@ class JudgeAgent:
                 "malware_types": ["unknown"],
                 "is_family": False,
                 "description": (
-                    f"Fallback verdict='{decision}'. Reasoning excerpt: {text_snippet}"
+                    f"Verdict: {decision} (judge fallback; subject to cross-layer review)"
                 ),
+                "x_maljan_fallback_reasoning": text_snippet,
             },
         ]
 

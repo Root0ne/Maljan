@@ -343,6 +343,8 @@ class ReportService:
                     "revision_rounds": f.revision_rounds,
                     "claims_count": len(f.claims or []),
                     "dissent_count": len(f.dissent_items or []),
+                    "status": getattr(f, "status", "complete"),
+                    "status_reason": getattr(f, "status_reason", None),
                 }
                 for f in (report.agent_findings or [])
             ],

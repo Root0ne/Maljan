@@ -59,6 +59,8 @@ export interface AnalysisReport {
   created_at: string;
 }
 
+export type AgentFindingStatus = "complete" | "no_data" | "failed" | "timeout";
+
 export interface AgentFinding {
   agent_name: string;
   domain: string;
@@ -66,6 +68,11 @@ export interface AgentFinding {
   dissent_items: unknown[] | null;
   revision_rounds: number;
   final_confidence: number;
+  /* D15+D16: lifecycle status separate from confidence. Legacy rows
+   * persisted before the field existed default to ``"complete"`` server-
+   * side so this is non-optional on the wire. */
+  status: AgentFindingStatus;
+  status_reason?: string | null;
 }
 
 export interface MitreTechnique {

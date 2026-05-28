@@ -25,6 +25,17 @@ export default function DynamicTab() {
     (a, b) => b.severity - a.severity,
   );
 
+  // D10: detect anti-emulation / anti-VM / anti-debug signatures so the
+  // empty process-tree state can explain why the sandbox traced nothing.
+  // Mirrors the regex used by the worker's degradation_reasons builder
+  // (src/maljan/pipeline/nodes.py), so the banner copy and this hint
+  // stay in lockstep.
+  const ANTI_EMU_RE =
+    /emulation|anti[\s_-]?vm|anti[\s_-]?debug|sandbox\s*detect|qemu|virtualbox|vmware|hyper[\s_-]?v/i;
+  const antiEmulationHit = sortedSignatures.find(
+    (s) => ANTI_EMU_RE.test(s.name) || ANTI_EMU_RE.test(s.description ?? ""),
+  );
+
   return (
     <div className="space-y-4">
       <div className="bg-bg-surface border border-border rounded">
@@ -35,7 +46,20 @@ export default function DynamicTab() {
         </div>
         <div className="p-4">
           {dyn.process_tree.length === 0 ? (
-            <div className="text-xs text-text-muted">No process activity recorded.</div>
+            <div className="text-xs text-text-muted">
+              {antiEmulationHit ? (
+                <>
+                  Sandbox traced no process activity — sample employed
+                  anti-emulation behaviour
+                  <span className="ml-1 text-status-orange">
+                    ({antiEmulationHit.name})
+                  </span>
+                  .
+                </>
+              ) : (
+                <>No process activity recorded.</>
+              )}
+            </div>
           ) : (
             <div className="font-mono text-xs space-y-1">
               {dyn.process_tree.map((node, i) => (

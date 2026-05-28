@@ -421,6 +421,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             # Save per-agent findings
             isr_reports = pipeline_result.get("isr_reports", {})
+            pipeline_reports = pipeline_result.get("reports") or {}
             for agent_name, isr in isr_reports.items():
                 if hasattr(isr, "model_dump"):
                     isr_data = isr.model_dump()
@@ -435,6 +436,29 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 if claims:
                     agent_confidence = sum(c.get("confidence", 0) for c in claims) / len(claims)
 
+                # D15+D16: derive lifecycle status from the analyst's text
+                # report + claim shape so the UI can render "FAILED" /
+                # "NO DATA" badges instead of synthesising a misleading
+                # verdict from an empty payload.
+                _text_report = pipeline_reports.get(agent_name, "")
+                _stripped = _text_report.strip() if isinstance(_text_report, str) else ""
+                status: str
+                status_reason: str | None
+                if _stripped.startswith("[ERROR]"):
+                    _reason = _stripped[len("[ERROR]") :].strip()[:500] or None
+                    _low = (_reason or "").lower()
+                    if "timeout" in _low or "timed out" in _low:
+                        status = "timeout"
+                    else:
+                        status = "failed"
+                    status_reason = _reason
+                elif not claims:
+                    status = "no_data"
+                    status_reason = "Agent produced no claims"
+                else:
+                    status = "complete"
+                    status_reason = None
+
                 finding = AgentFinding(
                     report_id=report.id,
                     agent_name=agent_name,
@@ -443,6 +467,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     dissent_items=isr_data.get("dissent_items", []),
                     revision_rounds=isr_data.get("revision_round", 0),
                     final_confidence=agent_confidence,
+                    status=status,
+                    status_reason=status_reason,
                 )
                 db.add(finding)
 

@@ -97,10 +97,20 @@ class MalwareReportBuilder:
         )
         severity = self._severity_assessment(static, dynamic, network, persistence, cells)
         verdict = self._verdict_literal(self.final_decision)
+        _family_str = self.malware_category if self.malware_category else None
+        _grounded = self._is_family_grounded(_family_str)
         attribution = FamilyAttribution(
-            family=self.malware_category if self.malware_category else None,
-            family_confidence=self.overall_confidence,
+            family=_family_str,
+            family_confidence=(self.overall_confidence if _grounded else 0.0),
+            family_grounded=_grounded if _family_str else True,
         )
+        if _family_str and not _grounded:
+            logger.info(
+                "Attribution guardrail: family=%r marked as ungrounded — no "
+                "Triage CTI / sandbox sig / ISR claim corroborates it. "
+                "family_confidence forced to 0.0.",
+                _family_str,
+            )
 
         # Negotiation summary — compact projection of run_summary fields most
         # useful for the report header.
@@ -241,6 +251,67 @@ class MalwareReportBuilder:
         if normalised.startswith("benign"):
             return "Benign"
         return "Suspicious"
+
+    def _is_family_grounded(self, family: str | None) -> bool:
+        """Return True when ``family`` is corroborated by deterministic evidence.
+
+        D11 fix: in the 2026-05-23 E2E run the judge fallback path emitted
+        ``attribution.family = "rat"`` for zararli.apk despite Triage
+        returning an empty ``families[]`` and no analyst claim ever
+        naming the family. The previous builder copied the value through
+        unconditionally with the global ``overall_confidence`` as
+        ``family_confidence`` — UI consumers had no way to tell which
+        family assertions had grounding.
+
+        Grounding sources (any one is enough):
+        - Triage CTI ``family[]`` list contains the candidate (case
+          insensitive substring match — Triage often emits multi-token
+          entries like ``"trojan/rat"``).
+        - Triage ``signatures[].name`` mentions the family literally.
+        - Any ISR claim's ``claim``, ``evidence_ref``, or ``technique_id``
+          text contains the family name.
+
+        Returns ``True`` for an empty family input so callers that pass
+        ``None`` get the legacy "no claim made" default and don't trip
+        the guardrail on samples that simply have no family hypothesis.
+        """
+        if not family:
+            return True
+        needle = family.strip().lower()
+        if not needle:
+            return True
+
+        # Triage CTI block (synthesised by TriageClient._synthesize_cti)
+        cti = (self.sandbox_report or {}).get("cti") or {}
+        if isinstance(cti.get("family"), list):
+            for f in cti["family"]:
+                if isinstance(f, str) and needle in f.lower():
+                    return True
+
+        # Triage / CAPE sandbox signatures
+        sigs = (self.sandbox_report or {}).get("signatures") or []
+        for sig in sigs:
+            if not isinstance(sig, dict):
+                continue
+            name = str(sig.get("name") or "").lower()
+            desc = str(sig.get("description") or "").lower()
+            if needle in name or needle in desc:
+                return True
+
+        # ISR claims (analyst / yara_layer / sigma_layer)
+        for isr in (self.isr_reports or {}).values():
+            for claim in getattr(isr, "claims", []) or []:
+                _ctext = " ".join(
+                    (
+                        str(getattr(claim, "claim", "") or ""),
+                        str(getattr(claim, "evidence_ref", "") or ""),
+                        str(getattr(claim, "technique_id", "") or ""),
+                    )
+                ).lower()
+                if needle in _ctext:
+                    return True
+
+        return False
 
     def _severity_assessment(
         self,

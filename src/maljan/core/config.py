@@ -442,9 +442,15 @@ class Settings(BaseSettings):
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The
     # static analyst attaches the Ghidra MCP server with many tools, so
-    # we give it more headroom by default. Override via env, e.g.
+    # we give it more headroom by default. The judge agent also needs a
+    # larger budget on local models (Qwen3.6-35B on llama.cpp took 180+s
+    # to formulate the final verdict in the 2026-05-23 E2E run, hitting
+    # the previous ``max(timeout, 120)`` ceiling and triggering the
+    # fallback path). Override via env, e.g.
     # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
-    react_agent_timeout_overrides: dict[str, int] = Field(default_factory=lambda: {"static": 600})
+    react_agent_timeout_overrides: dict[str, int] = Field(
+        default_factory=lambda: {"static": 600, "judge": 300}
+    )
 
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx
