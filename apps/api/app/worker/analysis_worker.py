@@ -722,6 +722,70 @@ def _extract_mitre(result: dict) -> list | None:
 # ── ARQ Worker Configuration ────────────────────────────────────
 
 
+async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
+    """Mark abandoned ``running`` rows as ``failed`` at worker startup.
+
+    Wave 8 ORPHAN-JOBS-01 (2026-05-28). When the worker process is killed
+    mid-flight (e.g. operator ``Stop-Process`` during development, OOM
+    kill, deploy rollover) the ``run_analysis`` task has no chance to
+    flip the row from ``running`` → ``failed`` in its ``except`` block.
+    The DB then carries phantom ``running`` rows forever — the
+    dashboard reports them as in-flight even though no worker holds
+    them. Auditors looking at the legacy data assume the pipeline is
+    still busy.
+
+    Cleanup rule: any ``running`` row whose ``started_at`` is older
+    than ``WorkerSettings.job_timeout`` cannot possibly still be
+    processed by a live worker — arq would have killed it at that
+    boundary. Flip it to ``failed`` with a clear ``error_message`` so
+    the UI shows the right state and the FP rate stats become real.
+
+    This runs once per worker boot. It does not race with active jobs
+    because we only touch rows older than the hard timeout.
+    """
+    from datetime import UTC as _UTC
+    from datetime import datetime as _datetime
+    from datetime import timedelta as _timedelta
+
+    cutoff_seconds = WorkerSettings.job_timeout
+    cutoff_ts = _datetime.now(_UTC) - _timedelta(seconds=cutoff_seconds)
+
+    async with db_session() as db:
+        from app.models.job import AnalysisJob
+
+        stmt = (
+            update(AnalysisJob)
+            .where(
+                AnalysisJob.status == "running",
+                AnalysisJob.started_at < cutoff_ts,
+            )
+            .values(
+                status="failed",
+                completed_at=func.now(),
+                error_message=(
+                    "Worker process was killed mid-flight (no shutdown hook ran). "
+                    "Marked failed by startup sweep — re-submit the sample if needed."
+                ),
+            )
+            .returning(AnalysisJob.id)
+        )
+        result = await db.execute(stmt)
+        affected = [str(row[0]) for row in result.all()]
+        await db.commit()
+        if affected:
+            logger.warning(
+                "Startup orphan sweep: marked %d phantom 'running' job(s) as 'failed': %s",
+                len(affected),
+                ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
+                extra={"component": "worker.lifecycle", "job_count": len(affected)},
+            )
+        else:
+            logger.info(
+                "Startup orphan sweep: no phantom 'running' jobs found.",
+                extra={"component": "worker.lifecycle"},
+            )
+
+
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process
@@ -737,6 +801,19 @@ async def startup(ctx: dict) -> None:
 
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
+
+    # Wave 8 ORPHAN-JOBS-01: clean up phantom 'running' rows left behind
+    # when the previous worker was killed mid-flight (no shutdown hook
+    # fired). Without this, the dashboard accumulates fake in-flight
+    # jobs every time the operator restarts the worker.
+    try:
+        await _sweep_orphan_jobs(ctx["db_session"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Startup orphan sweep failed (non-fatal): %s",
+            exc,
+            extra={"component": "worker.lifecycle"},
+        )
 
     logger.info(
         "Worker started: connected to DB and Redis",
