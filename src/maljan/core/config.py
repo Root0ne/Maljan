@@ -102,6 +102,15 @@ class LLMConfig(BaseModel):
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
 
+    # Wave 7 THROUGHPUT-01 (2026-05-28): when True (default), analysts run
+    # in parallel — correct for hosted multi-slot LLMs. When False, the
+    # pipeline runs analysts sequentially so a single-slot local
+    # llama-server can give each analyst the full LLM bandwidth for its
+    # per-agent timeout budget instead of letting them choke each other
+    # in the request queue. Set ``LLM__PARALLEL_ANALYSTS=false`` for
+    # local llama.cpp / ollama deployments without ``--parallel N``.
+    parallel_analysts: bool = True
+
     @property
     def expert_model(self) -> str:
         """Returns the expert model name for the currently selected provider."""
