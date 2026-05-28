@@ -21,6 +21,14 @@ import ipaddress
 import re
 from typing import Any
 
+from maljan.agents._indicator_denylists import (
+    ANDROID_CLASS_REF_RE,
+    COMPILE_ARTIFACT_RE,
+    IOC_FILE_EXTENSIONS,
+    IOC_OS_RESOURCE_PREFIXES,
+    MAX_FILE_NAME_INDICATORS,
+    URL_DENY_HOSTS,
+)
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -98,11 +106,23 @@ class ExtendedSTIXRenderer:
             )
 
         # 5) StringIOC → Indicator.
+        #
+        # Wave 4 Step 5 (2026-05-28): apply the same acceptance-based filter
+        # used by the judge bundle postprocess (J-02) so deterministic
+        # interesting_strings can't smuggle noise (NDK build paths, Android
+        # class refs, random short strings) into the public STIX bundle.
+        # Without this, the 2026-05-23 zararli.apk audit's 49-noisy-paths
+        # FP reappears for every APK that compiles with the NDK.
         if report.static is not None:
+            file_name_kept = 0
             for ioc in report.static.interesting_strings[:50]:
                 pattern = _stix_pattern_for_string_ioc(ioc)
                 if pattern is None:
                     continue
+                if not _accept_string_ioc(ioc, pattern, file_name_kept):
+                    continue
+                if pattern.lstrip().startswith("[file:name"):
+                    file_name_kept += 1
                 ind = Indicator(
                     name=f"{ioc.kind} {ioc.value[:32]}",
                     pattern=pattern,
@@ -202,6 +222,64 @@ def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
     if ioc.kind == "path":
         return f"[file:name = '{value}']"
     return None
+
+
+def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> bool:
+    """Wave 4 Step 5: gate StringIOC → Indicator emission.
+
+    Mirrors :func:`maljan.agents.judge_postprocess._admit_indicator` so the
+    extended renderer can't bypass the J-02 noise floor. Mocking out the
+    LLM (or any judge bundle path) no longer means the bundle ships with
+    NDK build paths / Android class refs / random short strings.
+    """
+    stripped = pattern.lstrip()
+    value = (ioc.value or "").strip()
+
+    # URLs: denylist developer/build hosts.
+    if stripped.startswith("[url:value"):
+        host = _extract_url_host(value)
+        if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+            return False
+        return True
+
+    # file:name: acceptance-based admission + per-report cap.
+    if stripped.startswith("[file:name"):
+        if file_name_kept >= MAX_FILE_NAME_INDICATORS:
+            return False
+        if not value:
+            return False
+        if COMPILE_ARTIFACT_RE.search(value):
+            return False
+        if ANDROID_CLASS_REF_RE.match(value):
+            return False
+        return _looks_like_real_path(value)
+
+    return True
+
+
+def _extract_url_host(raw_url: str) -> str | None:
+    if not raw_url:
+        return None
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(raw_url)
+        if parsed.hostname:
+            return parsed.hostname.lower()
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _looks_like_real_path(value: str) -> bool:
+    lit_lower = value.lower()
+    for ext in IOC_FILE_EXTENSIONS:
+        if lit_lower.endswith(ext):
+            return True
+    for prefix in IOC_OS_RESOURCE_PREFIXES:
+        if value.startswith(prefix):
+            return True
+    return False
 
 
 def _ip_pattern(value: str) -> str:
