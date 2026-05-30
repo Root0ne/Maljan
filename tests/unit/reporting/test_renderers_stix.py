@@ -151,3 +151,44 @@ class TestRoundTrip:
         dumped = bundle.model_dump(mode="json")
         rebuilt = Bundle.model_validate(dumped)
         assert _types(rebuilt) == _types(bundle)
+
+
+class TestTotalIndicatorCap:
+    """Wave 9: cap total indicator count to MAX_TOTAL_INDICATORS with
+    priority hashes > network > file:name."""
+
+    def _packed_report(self) -> MalwareReport:
+        from maljan.reporting.models import StaticAnalysis, StringIOC
+
+        sandbox = {
+            "network": {
+                "dns": [{"request": f"d{i}.evil.test", "answers": []} for i in range(20)],
+            }
+        }
+        report = _build(sandbox_report=sandbox)
+        # Force a static block with 20 file:name candidates that pass
+        # _accept_string_ioc (real-looking paths with known extensions).
+        report.static = StaticAnalysis(
+            interesting_strings=[
+                StringIOC(value=f"/var/tmp/payload{i}.exe", kind="path", notes=None)
+                for i in range(20)
+            ]
+        )
+        return report
+
+    def test_total_capped_to_15(self) -> None:
+        from maljan.agents._indicator_denylists import MAX_TOTAL_INDICATORS
+
+        report = self._packed_report()
+        bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
+        indicators = [obj for obj in bundle.objects if isinstance(obj, Indicator)]
+        assert len(indicators) == MAX_TOTAL_INDICATORS == 15
+
+    def test_priority_keeps_hash_and_network_first(self) -> None:
+        report = self._packed_report()
+        bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
+        indicators = [obj for obj in bundle.objects if isinstance(obj, Indicator)]
+        # sha256 hash MUST be kept (priority 0).
+        assert any("file:hashes.'SHA-256'" in i.pattern for i in indicators)
+        # At least one network indicator must survive.
+        assert any("domain-name:value" in i.pattern for i in indicators)

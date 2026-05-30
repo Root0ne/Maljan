@@ -27,8 +27,10 @@ from maljan.agents._indicator_denylists import (
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
     MAX_FILE_NAME_INDICATORS,
+    MAX_TOTAL_INDICATORS,
     URL_DENY_HOSTS,
 )
+from maljan.core.logger import logger
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -87,6 +89,18 @@ class ExtendedSTIXRenderer:
             objects.append(malware_obj)
             malware_id = malware_obj.id
 
+        # Wave 9 (2026-05-29): collect indicators per-kind, then apply
+        # MAX_TOTAL_INDICATORS as a hard cap with priority order
+        # (hashes > network > file:name strings). The 2026-05-29 Linux
+        # ELF audit found 19 indicators leaking past G-FP-4's ≤15 ceiling
+        # because the per-kind cap (MAX_FILE_NAME_INDICATORS=10) ignored
+        # hashes and network IOCs.
+        # ``hash_inds`` always pairs an Indicator with its "indicates"
+        # Relationship; the tuple shape is explicit so mypy can narrow.
+        hash_inds: list[tuple[Indicator, Relationship]] = []
+        network_inds: list[Indicator] = []
+        string_inds: list[Indicator] = []
+
         # 4) Indicator for the file hash itself (always present).
         sha256 = report.identity.hashes.sha256
         if sha256 and _SHA256_RE.match(sha256):
@@ -96,14 +110,12 @@ class ExtendedSTIXRenderer:
                 pattern_type="stix",
                 indicator_types=["malicious-activity"],
             )
-            objects.append(indicator)
-            objects.append(
-                Relationship(
-                    relationship_type="indicates",
-                    source_ref=indicator.id,
-                    target_ref=malware_id,
-                )
+            rel = Relationship(
+                relationship_type="indicates",
+                source_ref=indicator.id,
+                target_ref=malware_id,
             )
+            hash_inds.append((indicator, rel))
 
         # 5) StringIOC → Indicator.
         #
@@ -129,22 +141,54 @@ class ExtendedSTIXRenderer:
                     pattern_type="stix",
                     indicator_types=["malicious-activity"],
                 )
-                objects.append(ind)
+                string_inds.append(ind)
 
         # 6) Network domain/IP/URL → Indicator.
         if report.network is not None:
             for domain in report.network.domains[:40]:
                 dom_ind = _indicator_for_domain(domain)
                 if dom_ind is not None:
-                    objects.append(dom_ind)
+                    network_inds.append(dom_ind)
             for ip in report.network.ips[:40]:
                 ip_ind = _indicator_for_ip(ip)
                 if ip_ind is not None:
-                    objects.append(ip_ind)
+                    network_inds.append(ip_ind)
             for url in report.network.urls[:40]:
                 url_ind = _indicator_for_url(url)
                 if url_ind is not None:
-                    objects.append(url_ind)
+                    network_inds.append(url_ind)
+
+        # 6.5) Apply the total-indicator cap with priority order.
+        budget = MAX_TOTAL_INDICATORS
+        dropped_counts = {"hash": 0, "network": 0, "string": 0}
+        for ind, rel in hash_inds:
+            if budget > 0:
+                objects.append(ind)
+                objects.append(rel)
+                budget -= 1
+            else:
+                dropped_counts["hash"] += 1
+        for ind in network_inds:
+            if budget > 0:
+                objects.append(ind)
+                budget -= 1
+            else:
+                dropped_counts["network"] += 1
+        for ind in string_inds:
+            if budget > 0:
+                objects.append(ind)
+                budget -= 1
+            else:
+                dropped_counts["string"] += 1
+        if sum(dropped_counts.values()):
+            logger.warning(
+                "stix_renderer: total indicator cap (%d) exceeded; dropped "
+                "hash=%d network=%d string=%d",
+                MAX_TOTAL_INDICATORS,
+                dropped_counts["hash"],
+                dropped_counts["network"],
+                dropped_counts["string"],
+            )
 
         # 7) ObservedData for the process tree roots.
         if report.dynamic is not None and report.dynamic.process_tree:
