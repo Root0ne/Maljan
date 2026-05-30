@@ -65,7 +65,7 @@ export default function DefenseTab() {
                     </span>
                   </div>
                   <div className="text-sm text-text-primary leading-relaxed">{rec.action}</div>
-                  <div className="text-xs text-text-secondary leading-relaxed mt-2 border-l-2 border-border-light pl-3">
+                  <div className="text-sm text-text-secondary leading-relaxed mt-2 border-l-2 border-border-light pl-3">
                     <span className="text-text-muted">Why: </span>
                     {rec.rationale}
                   </div>

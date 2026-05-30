@@ -111,7 +111,7 @@ export default function AttributionTab() {
           <button
             onClick={triggerEnrich}
             disabled={enrichBusy || !reportId}
-            className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
           >
             {enrichBusy ? "queueing..." : "trigger LTM lookup"}
           </button>
@@ -218,7 +218,7 @@ function SimilarSampleCard({ sample }: { sample: SimilarSample }) {
         </div>
       )}
       {sample.summary && (
-        <p className="mt-2 text-xs text-text-secondary leading-relaxed">
+        <p className="mt-2 text-sm text-text-secondary leading-relaxed">
           {sample.summary}
         </p>
       )}

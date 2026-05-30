@@ -284,7 +284,7 @@ export default function JobsPage() {
               <button
                 onClick={closeModal}
                 disabled={cancelling}
-                className="text-text-muted hover:text-text-primary disabled:opacity-50"
+                className="text-text-muted hover:text-text-primary disabled:text-text-disabled"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18" />
@@ -292,7 +292,7 @@ export default function JobsPage() {
                 </svg>
               </button>
             </div>
-            <p className="text-xs text-text-secondary mb-4 leading-relaxed">
+            <p className="text-sm text-text-secondary mb-4 leading-relaxed">
               Cancel job {confirmJob.id.slice(0, 8)}? This will stop the in-flight analysis and mark the job as cancelled. Cannot be undone.
             </p>
             {cancelError && (
@@ -304,7 +304,7 @@ export default function JobsPage() {
               <button
                 onClick={closeModal}
                 disabled={cancelling}
-                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors disabled:opacity-50"
+                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors disabled:text-text-disabled"
               >
                 Keep running
               </button>

@@ -234,7 +234,7 @@ export default function CapabilitiesTab() {
                   {selected.evidence.map((e, i) => (
                     <li
                       key={i}
-                      className="text-xs text-text-secondary border-l-2 border-border-light pl-3 leading-relaxed break-words"
+                      className="text-sm text-text-secondary border-l-2 border-border-light pl-3 leading-relaxed break-words"
                     >
                       {e}
                     </li>

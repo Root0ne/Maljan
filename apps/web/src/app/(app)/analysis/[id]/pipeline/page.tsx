@@ -145,7 +145,7 @@ function ClaimCard({ claim, index }: { claim: Claim; index: number }) {
           #{index + 1}
         </span>
         <div className="flex-1 min-w-0">
-          <p className="text-xs text-text-primary leading-relaxed">{text}</p>
+          <p className="text-sm text-text-primary leading-relaxed">{text}</p>
           <div className="flex flex-wrap items-center gap-3 mt-2">
             <div className="flex items-center gap-1.5">
               <div className="w-16 h-1.5 bg-bg-deep rounded-sm overflow-hidden">

@@ -262,7 +262,7 @@ export default function TimelineTab() {
                   </span>
                 </div>
                 {entry.argument && (
-                  <p className="text-xs text-text-secondary leading-relaxed">
+                  <p className="text-sm text-text-secondary leading-relaxed">
                     {entry.argument}
                   </p>
                 )}

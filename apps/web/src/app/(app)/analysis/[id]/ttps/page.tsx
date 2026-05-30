@@ -225,7 +225,7 @@ export default function TTpsTab() {
           placeholder="Search for technique or subtechnique"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-7 px-3 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none w-72"
+          className="h-7 px-3 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none w-72"
         />
       </div>
 

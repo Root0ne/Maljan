@@ -48,7 +48,7 @@ export default function Header() {
             onFocus={() => setPaletteOpen(true)}
             onKeyDown={() => setPaletteOpen(true)}
             placeholder="Search for files, hashes, IPs, or malware families..."
-            className="w-full h-8 pl-9 pr-12 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+            className="w-full h-8 pl-9 pr-12 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
             aria-expanded={paletteOpen}
             aria-controls="global-search-palette"
           />

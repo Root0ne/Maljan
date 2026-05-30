@@ -422,7 +422,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       </div>
 
       {/* Executive summary */}
-      <div className="col-span-2 bg-bg-surface border border-border rounded">
+      <div className="col-span-2 bg-bg-reading border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             Executive Summary
@@ -435,7 +435,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           {mr.capabilities_narrative.length > 0 && (
             <ul className="mt-3 space-y-2">
               {mr.capabilities_narrative.map((para, i) => (
-                <li key={i} className="text-xs text-text-secondary leading-relaxed">
+                <li key={i} className="text-sm text-text-secondary leading-relaxed">
                   <span className="text-text-muted mr-2">{i + 1}.</span>
                   {para}
                 </li>
@@ -547,7 +547,7 @@ function DownloadBar({
       <button
         onClick={downloadMarkdown}
         disabled={!reportId || busy === "md"}
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "md" ? "fetching..." : "↓ Markdown report"}
       </button>
@@ -561,7 +561,7 @@ function DownloadBar({
         onClick={downloadMisp}
         disabled={mispDisabled}
         title={mispDisabled ? "No MISP attributes generated for this report" : undefined}
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         ↓ MISP attributes
       </button>
