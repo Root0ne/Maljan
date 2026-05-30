@@ -30,6 +30,10 @@ data/samples/*.dat
 data/samples/*.sys
 data/samples/*.macho
 
+# Runtime upload staging — the API streams uploads through
+# data/uploads/.tmp (Defender-excluded) before pushing to MinIO. Ephemeral.
+data/uploads/
+
 # Environment variables (never commit real secrets)
 # Tracked: .env.example, .env.template, apps/*/. env.example
 # Ignored: every real .env and any *.local override anywhere in the tree.
