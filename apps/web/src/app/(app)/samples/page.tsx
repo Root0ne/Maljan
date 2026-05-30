@@ -1,10 +1,10 @@
-import { getErrorMessage } from "@/lib/errors";
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SampleDTO } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 
 /* ── Display interface (maps from SampleDTO) ───────── */
 interface SampleRow {
