@@ -96,6 +96,13 @@ class CascadeMetrics:
     # Wave 4 (2026-05-28): claims rejected for platform incompatibility.
     # Empty for legacy runs that didn't supply a sample_platform.
     dropped_by_platform: list[dict[str, Any]] = field(default_factory=list)
+    # Wave 9 (2026-05-29): pre-cascade platform-filter counters. The
+    # 2026-05-29 Linux ELF audit found ``dropped_by_platform`` empty
+    # because Sigma/YARA layers correctly pre-filter platform-mismatched
+    # rules BEFORE claims reach the cascade — so the cascade has nothing
+    # to drop. Surfacing per-layer counters lets the audit gate prove the
+    # filter ran without requiring shadow claims.
+    platform_filter_summary: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +344,8 @@ class RunSummary:
                 "corroborated_count": self.cascade.corroborated_count,
                 "consensus_count": self.cascade.consensus_count,
                 "top_techniques": self.cascade.top_techniques,
+                "dropped_by_platform": list(self.cascade.dropped_by_platform),
+                "platform_filter_summary": self.cascade.platform_filter_summary,
             }
 
         if self.validation:
@@ -556,6 +565,35 @@ class RunSummaryBuilder:
             self._techniques_by_layer = counts
         except Exception as exc:
             logger.debug("set_cascade_summary failed: %s", exc, exc_info=True)
+        return self
+
+    def set_platform_filter_summary(
+        self,
+        sigma_dropped: int,
+        yara_dropped: int,
+        sample_platform: str,
+    ) -> RunSummaryBuilder:
+        """Wave 9 (2026-05-29): record pre-cascade platform-filter counters.
+
+        The Sigma/YARA Layer 0 evaluators pre-filter rules by sample
+        platform before the cascade ever runs. Surfacing the drop counts
+        here lets the audit gate prove the filter executed even when the
+        cascade's ``dropped_by_platform`` list is empty (the normal case,
+        because the cascade only sees claims that survived the upstream
+        filter).
+        """
+        if self._cascade is None:
+            self._cascade = CascadeMetrics(
+                total_techniques=0,
+                corroborated_count=0,
+                consensus_count=0,
+                top_techniques=[],
+            )
+        self._cascade.platform_filter_summary = {
+            "sigma_dropped": int(sigma_dropped),
+            "yara_dropped": int(yara_dropped),
+            "sample_platform": sample_platform,
+        }
         return self
 
     def build(self) -> RunSummary:

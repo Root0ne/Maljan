@@ -372,3 +372,42 @@ class TestRunSummaryToDict:
     def test_validation_none_when_not_set(self) -> None:
         d = self._make_summary().to_dict()
         assert d["validation"] is None
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — platform_filter_summary plumbing
+# ---------------------------------------------------------------------------
+
+
+class TestPlatformFilterSummary:
+    """The Wave 9 audit gate G-FP-8 needs visible evidence the pre-cascade
+    Sigma/YARA platform filter actually ran. The RunSummaryBuilder exposes
+    `set_platform_filter_summary(sigma_dropped, yara_dropped, sample_platform)`
+    which lands on `run_summary.cascade.platform_filter_summary`."""
+
+    def _build_summary(self, sigma_dropped: int, yara_dropped: int, sample_platform: str) -> dict:
+        builder = (
+            RunSummaryBuilder(start_time=time.time())
+            .set_sample("abcd", "x.elf")
+            .set_verdict("Malware", 5)
+            .set_platform_filter_summary(
+                sigma_dropped=sigma_dropped,
+                yara_dropped=yara_dropped,
+                sample_platform=sample_platform,
+            )
+        )
+        return builder.build().to_dict()
+
+    def test_summary_surfaces_in_cascade(self) -> None:
+        d = self._build_summary(12, 0, "linux")
+        pfs = d["cascade"]["platform_filter_summary"]
+        assert pfs == {
+            "sigma_dropped": 12,
+            "yara_dropped": 0,
+            "sample_platform": "linux",
+        }
+
+    def test_summary_safe_when_dropped_zero(self) -> None:
+        d = self._build_summary(0, 0, "windows")
+        assert d["cascade"]["platform_filter_summary"]["sample_platform"] == "windows"
+        assert d["cascade"]["platform_filter_summary"]["sigma_dropped"] == 0

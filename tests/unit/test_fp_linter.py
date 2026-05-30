@@ -18,6 +18,7 @@ def _stub_report(
     executive_summary="",
     attribution=None,
     stix_bundle_extended=None,
+    run_summary=None,
 ):
     return _ns(
         capability_matrix=capability_matrix or [],
@@ -25,6 +26,7 @@ def _stub_report(
         executive_summary=executive_summary,
         attribution=attribution,
         stix_bundle_extended=stix_bundle_extended,
+        run_summary=run_summary or {},
     )
 
 
@@ -153,3 +155,125 @@ class TestRuleC5:
         )
         warns = lint_report(report, "android")
         assert not any(w.rule == "C5" for w in warns)
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — FPWarning.explanation populated
+# ---------------------------------------------------------------------------
+
+
+class TestExplanationField:
+    """Every emitted FPWarning must carry a non-empty explanation."""
+
+    def test_c2_includes_explanation(self) -> None:
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1497")],
+            defensive_recommendations=[
+                _ns(action="Block PowerShell (T1059.001)", rationale="x", category="y"),
+            ],
+        )
+        warns = lint_report(report, "android")
+        c2 = [w for w in warns if w.rule == "C2"]
+        assert c2 and all(w.explanation for w in c2)
+
+    def test_c3_includes_explanation(self) -> None:
+        report = _stub_report(
+            executive_summary="The sample uses powershell to escalate.",
+        )
+        warns = lint_report(report, "android")
+        c3 = [w for w in warns if w.rule == "C3"]
+        assert c3 and all(w.explanation for w in c3)
+
+    def test_c4_includes_explanation(self) -> None:
+        objs = [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(11)]
+        report = _stub_report(stix_bundle_extended={"objects": objs})
+        warns = lint_report(report, "android")
+        c4 = [w for w in warns if w.rule == "C4"]
+        assert c4 and all(w.explanation for w in c4)
+
+    def test_c5_includes_explanation(self) -> None:
+        report = _stub_report(attribution=_ns(family="rat", family_grounded=False))
+        warns = lint_report(report, "android")
+        c5 = [w for w in warns if w.rule == "C5"]
+        assert len(c5) == 1
+        assert c5[0].explanation
+        assert "D11" in c5[0].explanation
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — total-indicator cap branch of C4
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC4Total:
+    def test_total_overflow_triggers_warning(self) -> None:
+        # 16 indicators of various kinds (cap is 15).
+        objs = [
+            {"type": "indicator", "pattern": f"[file:hashes.'SHA-256' = 'h{i}']"} for i in range(4)
+        ]
+        objs += [
+            {"type": "indicator", "pattern": f"[domain-name:value = 'd{i}.test']"} for i in range(2)
+        ]
+        objs += [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(10)]
+        report = _stub_report(stix_bundle_extended={"objects": objs})
+        warns = lint_report(report, "android")
+        # Expect a C4 with the "total" wording (and the file:name C4 may also fire at >10).
+        total_msgs = [w for w in warns if w.rule == "C4" and "total" in w.message]
+        assert total_msgs, "expected total-indicator C4 warning"
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — C6 platform_filter_summary
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC6:
+    def test_missing_platform_filter_summary_warns(self) -> None:
+        # Cascade dict exists (evidence) but no platform_filter_summary.
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1497", platforms=None)],
+            run_summary={"cascade": {}},
+        )
+        warns = lint_report(report, "linux")
+        c6 = [w for w in warns if w.rule == "C6"]
+        assert len(c6) == 1
+        assert "platform_filter_summary" in c6[0].message
+        assert c6[0].explanation
+
+    def test_zero_drops_warns(self) -> None:
+        report = _stub_report(
+            run_summary={
+                "cascade": {
+                    "platform_filter_summary": {
+                        "sigma_dropped": 0,
+                        "yara_dropped": 0,
+                        "sample_platform": "linux",
+                    }
+                }
+            }
+        )
+        warns = lint_report(report, "linux")
+        c6 = [w for w in warns if w.rule == "C6"]
+        assert len(c6) == 1
+        assert "dropped 0 rules" in c6[0].message
+
+    def test_nonzero_drops_no_warning(self) -> None:
+        report = _stub_report(
+            run_summary={
+                "cascade": {
+                    "platform_filter_summary": {
+                        "sigma_dropped": 12,
+                        "yara_dropped": 0,
+                        "sample_platform": "linux",
+                    }
+                }
+            }
+        )
+        warns = lint_report(report, "linux")
+        assert not any(w.rule == "C6" for w in warns)
+
+    def test_unknown_platform_skips_c6(self) -> None:
+        # No platform → cannot validate, so skip.
+        report = _stub_report(run_summary={})
+        warns = lint_report(report, "unknown")
+        assert not any(w.rule == "C6" for w in warns)
