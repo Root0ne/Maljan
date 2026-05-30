@@ -74,13 +74,21 @@ link/accent split from R2):
 ### 1.3 Type scale (shipped)
 - `--text-xs: 0.8125rem` (**13px**), line-height `1.125rem` (18px, ratio ~1.38) — the
   dominant body/data size (was 12px).
-- `--text-sm: 0.875rem` (14px), line-height `1.375rem` (22px) — forms / prose.
-- `--text-2xl: 1.5rem` (24px), line-height `2rem`, **letter-spacing `-0.03em`** — big
-  display numbers.
+- `--text-sm: 0.875rem` (14px), line-height `1.375rem` (22px) — forms / prose. Long-form
+  NARRATIVE reading blocks were bumped 13 → 14px (executive summary, capability evidence
+  quotes, agent arguments, attribution summary, defense rationale, pipeline claim text,
+  cancel-confirm copy — 7 sites) so prose reads at the reports' comfortable body size while
+  dense tables/IOC cells stay at 13px.
+- **Full graduated scale completed** — every step now has an intentional line-height and a
+  negative tracking that scales with size (the "tok" model): `--text-base` 16px / LH 24px /
+  `-0.014em`; `--text-lg` 18px / LH 24px (NO letter-spacing token — `text-lg` is shared by
+  the positive-tracked brand wordmark and by `<h1>` titles that already get −3% from
+  `@layer base`, so a token here would fight both); `--text-xl` 20px / LH 26px / `-0.02em`;
+  `--text-2xl` 24px / LH 32px / `-0.03em`; `--text-3xl` 30px / LH 34px / `-0.03em`;
+  `--text-4xl` 36px / LH 40px / `-0.032em`.
 - Micro-label floor raised: every `text-[10px]` / `text-[9px]` / `text-[8px]` → `text-[11px]`
   (84 occurrences across 15 files). `text-[11px]` is the floor; recharts ticks bumped
   `fontSize 11 → 12`.
-- `text-lg` (18px), `text-base` (16px) keep Tailwind defaults.
 
 ### 1.4 Letter-spacing (shipped — "tok" negative tracking)
 - Body (global, inherited): **`-0.011em`** (−1.1%).
@@ -92,13 +100,32 @@ link/accent split from R2):
   Verified: h1 "zararli.apk" = −0.54px (−3%); h2 "Verdict & Severity" (uppercase) = +0.65px.
 
 ### 1.5 OpenType / rendering (shipped)
-- Body: `font-feature-settings: "liga" 1, "calt" 1, "cv05" 1, "cv08" 1;`
-  `font-variant-numeric: tabular-nums slashed-zero;` `font-optical-sizing: auto;`
-  `text-rendering: optimizeLegibility;` `-webkit-font-smoothing: antialiased;`
-  `-moz-osx-font-smoothing: grayscale;`.
+- Body: `font-feature-settings: "liga" 1, "calt" 1, "cv05" 1, "cv08" 1, "cv09" 1, "case" 1;`
+  (cv09 = flat-top 3; `case` re-centers brackets / braces / hyphens / colons to cap height for
+  the many uppercase tracking-wider labels) `font-variant-numeric: tabular-nums slashed-zero;`
+  `font-optical-sizing: auto;` `text-rendering: optimizeLegibility;`
+  `-webkit-font-smoothing: antialiased;` `-moz-osx-font-smoothing: grayscale;`. R3's `ss02`
+  "Disambiguation" set is reached granularly via cv05/cv08/cv09 rather than one bundle.
+- **Optical sizing verified live:** InterVariable's `opsz` axis responds (a 120px probe is
+  −52px narrower at `opsz 32` vs `opsz 14`), so `font-optical-sizing: auto` automatically gives
+  large titles/numbers the Display optical cut and body the Text cut — Inter's own equivalent
+  of a separate "Inter Display" face, with no extra font file.
 - Mono (`code, kbd, samp, pre, .font-mono`): `font-variant-numeric: tabular-nums slashed-zero;`
   `font-feature-settings: "liga" 0, "calt" 0, "zero" 1;` (ligatures OFF so `->`/`!=`/`==`
   stay literal in IOCs/rules).
+- **De-emphasis tiers now applied** (were defined but unused): `::placeholder` → tertiary
+  (`#768491`, ~4.9 AA on the `#0d1117` inputs, one step below the muted label tier); disabled
+  form controls (`input/textarea/select:disabled`) → SOLID `--text-disabled` (plus
+  `-webkit-text-fill-color`) instead of opacity — opacity on text can disable Windows ClearType
+  subpixel AA, so six ghost/outline buttons also switched `disabled:opacity-50 →
+  disabled:text-text-disabled` (filled buttons keep opacity, which is conventional there).
+- **User contrast control:** `@media (prefers-contrast: more)` lifts every tier toward the
+  bright band — primary → `#f0f6fc` (R4's brighter value, reserved for this mode), secondary
+  `#c9d1d9`, muted `#b1bac4`, tertiary `#9aa4af`, disabled `#768491`, accent-strong `#79c0ff`.
+  Pure CSS, OS-driven, nothing to persist; tokens are `var()`-resolved so every utility updates.
+- **Warm reading surface:** `--bg-reading: #1b1c21` (slightly lighter + warmer than the cool
+  `#161b22` surface, lowering blue-on-blue halation) applied to the full-width executive-summary
+  narrative pane; cool data surfaces unchanged.
 - Token-bypassing hardcoded chart hex synced to the new palette: `timeline` `AGENT_COLORS`
   (5 series) and `capabilities` heatmap end-point (`#e5484d → #ff7b72`).
 
@@ -107,6 +134,23 @@ link/accent split from R2):
 - Visual sweep (dashboard / summary / signatures / samples / network): readable, calmer
   semantics, slashed-zero visible, no overflow (one fix: samples Size column `w-20 → w-24`).
 - Build fix shipped alongside: `samples/page.tsx` `"use client"` restored to line 1.
+- **2026-05-30 Group-A pass — measured live in-browser:** body features =
+  `calt, case, cv05, cv08, cv09, liga`; `opsz` axis responds (−52px on a 120px probe);
+  placeholder = `rgb(118,132,145)` = tertiary while input text stays primary; reading pane bg
+  = `rgb(27,28,33)` = `#1b1c21`; narrative prose = 14px; `prefers-contrast: more` rule present
+  in the cascade. Full WCAG + APCA matrix recomputed on all four surfaces + the reading surface:
+  primary Lc 92–95 / WCAG 12.9–16.0 (AAA), secondary Lc 49–52 / 6.02–7.48, muted Lc 43–45 /
+  5.14–6.39 (**AA on all four**), tertiary Lc 33–35 / 3.97–4.94 (placeholder/non-essential),
+  disabled Lc 19–22 / 2.56–3.19 (disabled-only). Semantic text AA+ on every surface (red
+  6.04–7.51; orange/green/blue/purple 7.8–12.3); links (`#58a6ff`) 6.03–7.49.
+- **Solid-fill audit (#8):** the only status fill bearing text — the red cancel button — uses
+  dark text on `#ff7b72` = **7.51** (white-on-red would be 2.52, hence `text-bg-deep`); dark-on-
+  green/orange 9.8–12.3. White-on-`--accent` buttons = **3.10** (clears the 3:1 UI-component
+  bar but is below 4.5 normal-text); pre-existing and deliberately retained per the "keep
+  `--accent`" decision — flagged here, not changed.
+- Pre-existing build error fixed in passing: `reports/page.tsx` had `"use client"` on line 2
+  (below a `getErrorMessage` import) — the same W10 regression fixed earlier in
+  samples/audit/dashboard/jobs; restored to line 1.
 
 ---
 
@@ -660,24 +704,52 @@ token structure, adaptivity, layering, contrast standard.
 
 ---
 
-## 11. Open / future items (raised by the reports, not yet shipped)
+## 11. Open / future items
 
-- **14px running body** alternative (R1/R2/R3/R4 default body is 14px; we ship 13px for
-  density). Easy to revisit by bumping `--text-xs` and adding a `--text-sm`-based body.
-- **Inter Display** optical face for very large page titles (R2) — load as a separate
-  `--font-display`.
-- **User-selectable contrast control** (Linear model: base + accent + contrast variables) if
-  users report halation even at `#e6edf3` (R2).
-- **Warmer/dimmer "reading" surface** variant for long narrative panes, keeping cool data
-  surfaces unchanged (R2).
-- **Tertiary / disabled tiers** are defined as tokens (`#768491` / `#5a6571`) but not yet
-  applied per-component (currently most de-emphasized text uses `muted`).
-- **`cv09` (flat-top 3) + `case`** features (R4) and **`ss02`** (R3) not enabled — only
-  `cv05`/`cv08` are. Add if further glyph disambiguation is wanted.
-- **Validate every pair with an APCA tool** and test on a non-Retina Windows/ClearType laptop
-  (R2/R3), since `-webkit-font-smoothing` is inert there.
-- **MISP/severity color audits** for the new pastel semantics in fills (we kept `--accent`
-  for buttons; re-check any future solid-fill + text combinations).
+### 11.A Group A — previously "not yet shipped", now SHIPPED (2026-05-30)
+- ~~Tertiary / disabled tiers defined but unused~~ → **DONE**: placeholders → tertiary;
+  disabled form controls + 6 ghost buttons → solid `--text-disabled`.
+- ~~`cv09` (flat-top 3) + `case`; R3's `ss02`~~ → **DONE**: cv09 + case enabled on the body;
+  ss02's goal met granularly via cv05/cv08/cv09.
+- ~~User-selectable contrast control~~ → **DONE**: `@media (prefers-contrast: more)` (R4's
+  `#f0f6fc` becomes the high-contrast primary).
+- ~~Warmer/dimmer "reading" surface for narrative panes~~ → **DONE**: `--bg-reading: #1b1c21`
+  on the executive-summary pane.
+- ~~Validate every pair with an APCA tool~~ → **DONE**: full WCAG + APCA matrix recomputed
+  live (§1.6). A physical non-Retina ClearType laptop pass is still nice-to-have, but
+  `-webkit-font-smoothing` is inert on Windows so the residual risk is low.
+- ~~MISP/severity fill audit~~ → **DONE** (§1.6): only the red cancel button carries text on a
+  solid status fill (passes at 7.51); white-on-accent (3.10) flagged + retained.
+- **Inter Display** as a separate face → effectively **DONE without a new file**: the
+  self-hosted InterVariable carries the `opsz` axis and `font-optical-sizing: auto` is on, so
+  the Display optical cut is applied automatically at large sizes (verified, §1.6).
+- **14px running body** → applied as a **targeted** narrative-prose bump (7 sites → 14px);
+  dense data deliberately stays at 13px. Genuinely-open: a full 14px *global* body, only if the
+  app is ever made less dense.
+
+### 11.B Group B — deliberate divergences, re-evaluated (2026-05-30)
+Each report-conflict where the non-divergent option was chosen was re-examined; recommendation
++ disposition:
+1. **Geist Sans (R4) vs Inter** — **KEEP Inter** (not applied). Inter is self-hosted with the
+   full cv05/cv08/cv09/case + opsz tables we now depend on for hash/IOC disambiguation (3/4
+   reports called this essential); only R4 leaned Geist, and with an "Inter fallback". `opsz`
+   already covers Geist's display-cut appeal. Switching = high risk, marginal gain.
+2. **Subpixel (R3) vs `-webkit-font-smoothing: antialiased`** — **KEEP antialiased** (not
+   applied). Inert on the user's Windows anyway; on macOS the R1/R2/R4 majority favours
+   antialiased on dark (thins light-on-dark, less halation). R3's +0.5px-weight point is a 1/4
+   minority and works against the fatigue-reduction goal.
+3. **Negative tracking at small sizes (R3) vs positive on small caps** — **already reconciled**
+   (effectively applied). Small *lowercase* body/data already carries −1.1% from the global body
+   rule (≥ R3's −0.08px@13); positive `tracking-wider` is kept only on small *uppercase* labels,
+   which is correct per R1/R4/Apple/Material. No change.
+4. **Brighter/warmer primary `#f0f6fc`(R4) / `#e8ecf1`(R3) vs `#e6edf3`** — **partially applied**:
+   `#f0f6fc` adopted as the `prefers-contrast: more` primary (its correct home — the bright end
+   of the band = more halation, so wrong as the default). `#e6edf3` stays default (validated AAA,
+   user-approved). `#e8ecf1` (R3's barely-warmer) left as a one-line swap; the warm `--bg-reading`
+   surface already mitigates R3's blue-on-blue halo for the narrative pane.
+5. **Red `#ff6b62`(R3) vs `#ff7b72`(R4)** — **KEEP `#ff7b72`** (not applied). It is the calmer,
+   less-vibrating desaturated pastel consistent with the other four R4 semantics; mixing R3's
+   hotter red would break palette cohesion and there is no contrast reason (6.04–7.51, AA+).
 
 ---
 
