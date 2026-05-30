@@ -1,101 +1,81 @@
 # API & Infrastructure
 
+> Refreshed 2026-05-30 against `apps/api/`. Cross-refs: `mem:reporting_layer`,
+> `mem:extractors_enrichment_qa`, `mem:suggested_commands`.
+
 ## FastAPI Application (`apps/api/app/main.py`)
 
-### Lifespan Events
-1. **Startup**:
-   - Verify DB connectivity (`SELECT 1` via async SQLAlchemy engine).
-   - Verify Redis connectivity (ping).
-   - Log structured JSON with component tags.
-2. **Shutdown**:
-   - Dispose async engine.
+### Factory + Lifespan
+- `create_app()` factory; module-level `app = create_app()` for uvicorn.
+- Startup: ensure `upload_temp_dir` exists (resolved absolute — Wave 9 HOTFIX-08; Defender-excluded);
+  verify DB (`SELECT 1`); verify Redis (non-critical); optional **Alembic auto-upgrade**
+  (`run_migrations_on_startup`, OFF by default to avoid multi-worker races); optional `AUTH_DISABLED`
+  dev-admin seeding (must NOT run outside local dev). Shutdown: dispose async engine.
 
-### Middleware Stack
-1. `RequestLoggingMiddleware` — MUST be added first. Injects `correlation_id` per request, logs duration_ms, request/response details in structured JSON.
-2. `CORSMiddleware` — configured from `settings.cors_origins`.
+### Middleware (registration order)
+1. `RequestLoggingMiddleware` (added first) — injects `correlation_id`, logs duration_ms (structured JSON).
+2. `RateLimitMiddleware` — **Redis-backed rate limiting** (configurable `enabled`/`max_requests`/
+   `window_seconds`/`whitelist`). [NEW since last memory.]
+3. `CORSMiddleware` — from `settings.cors_origins` / methods / headers.
+4. `SecurityHeadersMiddleware` — OWASP headers (CSP, X-Frame-Options, X-Content-Type-Options,
+   Referrer-Policy, Permissions-Policy; HSTS on when not debug). SEC-CORS-HEADERS-01. [NEW.]
 
-### Routes
-- `/api/v1/auth` — JWT login/register/refresh
-- `/api/v1/samples` — CRUD + upload (MinIO storage)
-- `/api/v1/jobs` — Analysis job creation and management
-- `/api/v1/reports` — Report retrieval
-- `/api/v1/dashboard` — Statistics endpoint
-- `/ws/analysis/{job_id}` — WebSocket real-time events (no API prefix)
-- `/health` — Service health check
+### Routes (all `/api/v1` unless noted)
+- `auth`, `audit`, `jobs`, `samples`, `reports`, `dashboard`, `system` routers + `ws` (no prefix).
+- `/health` and `/healthz` (System); `/docs`, `/redoc`.
 
-## Analysis Service (`apps/api/app/services/analysis_service.py`)
+## Report Endpoints (`api/v1/reports.py`) — comprehensive report surface (Faz 5)
+- `GET /reports` (paginated), `GET /reports/{id}`, `GET /reports/job/{job_id}`.
+- `GET /reports/{id}/stix` (minimal judge bundle), `GET /reports/{id}/mitre` (empty list != 404).
+- `GET /reports/{id}/full` — comprehensive `MalwareReport` JSON.
+- `GET /reports/{id}/markdown` — text/markdown render.
+- `GET /reports/{id}/iocs` — flat IOC list, filterable by kind (hash/domain/ip/url/user_agent/ja3).
+- `GET /reports/{id}/signatures/{kind}` — rule bodies (yara/sigma/suricata/snort).
+- `POST /reports/{id}/enrich` — 202; idempotent ARQ job keyed `enrich:{report_id}`; returns
+  `queued` / `already_queued` / `skipped_no_network_iocs`.
+- `GET /reports/{id}/timeline` — negotiation timeline for visualization.
 
-### `AnalysisService`
-- **create_job(sample_id, user, config)**:
-  - Verifies sample exists in DB.
-  - Creates `AnalysisJob` record (status="pending").
-  - Enqueues to ARQ via `arq.enqueue_job("run_analysis", str(job.id))`.
-  - If Redis unavailable: marks job as failed with error message.
-- **get_job(job_id, user)**: User-scoped job lookup.
-- **list_jobs(user, page, page_size, status_filter)**: Paginated with count.
-- **cancel_job(job_id, user)**:
-  - Validates job exists and is cancellable (pending/running).
-  - Sets status="cancelled".
-  - Publishes cancellation event to Redis PubSub channel `analysis:{job_id}`.
-- **get_user_stats(user)**: Dashboard metrics:
-  - total_jobs, total_samples, jobs_by_status, verdict_distribution, avg_duration_seconds.
+## Services
+- `services/analysis_service.py` — job lifecycle: `create_job` (verify sample -> AnalysisJob pending ->
+  ARQ enqueue `run_analysis`; Redis down -> mark failed), `get_job`, `list_jobs`, `cancel_job`
+  (publish cancel to `analysis:{job_id}`), `get_user_stats` (dashboard metrics).
+- `services/report_service.py` [NEW] — report retrieval + MalwareReport accessors (full/markdown/iocs/
+  signature) + `enqueue_enrichment` (raises `EnrichmentEnqueueError` when queue unavailable).
 
-## ARQ Worker (`apps/api/app/worker/analysis_worker.py`)
+## ARQ Workers (`app/worker/`)
+- `analysis_worker.run_analysis(ctx, job_id)`: load job -> load sample -> status running ->
+  `MaljanApp.arun(file_hash, file_name)` -> persist `AnalysisReport` (+ `malware_report`) and
+  `AgentFinding` per agent -> status completed -> publish events. `WorkerSettings`: `max_jobs=2`,
+  `job_timeout=1800`, `max_tries=1`, `health_check_interval=30`.
+- `enrich_worker.py` [NEW]: `enrich_threat_intel(ctx, report_id)` — load report -> `enrich_malware_report()`
+  (VirusTotal/AbuseIPDB/WHOIS + Qdrant attribution) -> persist mutated report. Idempotent, fail-safe.
 
-### `run_analysis(ctx, job_id)`
-1. **Load job**: Query DB, validate not cancelled.
-2. **Load sample**: Get SHA256 and original filename.
-3. **Transition**: status="running", publish `status_change` event.
-4. **Setup pipeline**:
-   - Injects `src/` into `sys.path` for core engine imports.
-   - Builds `Settings()` with optional job config overrides (`max_iterations`, `llm_provider`).
-   - `MaljanApp(config=settings, mock=env MALJAN_MOCK_MODE)`.
-5. **Publish pipeline_started event**: Lists registered agents, sample info.
-6. **Execute**: `await app.arun(file_hash=sample.sha256, file_name=sample.original_filename)`.
-7. **Publish agent_progress + phase_change events**.
-8. **Save report**:
-   - `AnalysisReport`: verdict, confidence, malware_category, STIX bundle, MITRE techniques, negotiation log, run_summary.
-   - `AgentFinding` per agent: domain, claims, dissent_items, revision_rounds, final_confidence.
-9. **Mark complete**: status="completed", duration_seconds.
-10. **Publish completed event** with verdict and confidence.
+## Database (PostgreSQL 16, async SQLAlchemy 2.0 + asyncpg)
+Tables: users, api_keys, samples, analysis_jobs, analysis_reports (+ `malware_report` JSON column),
+agent_findings (+ status), audit_log.
 
-### Error Handling
-- Catches all exceptions, logs full traceback.
-- Updates job status="failed" with error_message (truncated to 2000 chars).
-- Publishes error event to Redis.
-- DB rollback on commit failure.
+### Alembic (`apps/api/alembic/versions/`) — 5 migrations [was "in progress"]
+1. `20250505000000_initial_schema`
+2. `20250516000000_add_malware_report`
+3. `20250517000000_fix_audit_resource_id_type`
+4. `20250517010000_multiuser_sample_dedup_and_numeric_duration`
+5. `20250524000000_add_agent_finding_status`
 
-### WorkerSettings
-- `max_jobs = 2` (concurrent analyses)
-- `job_timeout = 1800` (30 minutes)
-- `max_tries = 1` (no auto-retry)
-- `health_check_interval = 30`
+## Redis / WebSocket
+- ARQ queue + PubSub channel `analysis:{job_id}`. Events: status_change, pipeline_started,
+  agent_progress, phase_change, completed, error, cancelled.
+- `app/api/ws.py` `/ws/analysis/{job_id}` subscribes and forwards events to the live UI.
 
-## Database Schema (PostgreSQL)
+## MinIO
+- S3-compatible sample storage; worker mirrors download into `data/samples/` so the Ghidra MCP
+  container (bind mount `/data/samples/`) can read the binary (`static_sample_path`, GHIDRA-DELIVERY-01).
 
-| Table | Key Fields |
-|-------|-----------|
-| `users` | id, email, hashed_password, role, active |
-| `api_keys` | id, user_id, key_hash, name, created_at |
-| `samples` | id, sha256, original_filename, size_bytes, minio_path, uploaded_by, uploaded_at |
-| `analysis_jobs` | id, sample_id, created_by, status, config, started_at, completed_at, duration_seconds, error_message |
-| `analysis_reports` | id, job_id, verdict, overall_confidence, malware_category, stix_bundle, mitre_techniques, agent_reports, negotiation_log, run_summary |
-| `agent_findings` | id, report_id, agent_name, domain, claims, dissent_items, revision_rounds, final_confidence |
-| `audit_log` | id, user_id, action, resource_type, resource_id, timestamp |
+## Config (`apps/api/app/config.py`) — flat env vars
+DATABASE_URL, REDIS_URL, QDRANT_URL, MINIO_*, JWT secret, rate-limit settings, cors settings,
+VirusTotal/AbuseIPDB enrichment keys, `run_migrations_on_startup`, `auth_disabled*`, `upload_temp_dir`,
+`app_name`/`app_version`/`debug`.
 
-## Redis Usage
-1. **ARQ Queue**: Job enqueueing and worker task distribution.
-2. **PubSub**: Real-time pipeline events channel `analysis:{job_id}`.
-   - Event types: `status_change`, `pipeline_started`, `agent_progress`, `phase_change`, `completed`, `error`, `cancelled`.
-3. **Cancellation**: `PUBLISH analysis:{job_id} {"type":"cancelled"}`.
-
-## WebSocket (`apps/api/app/api/ws.py`)
-- Subscribes to Redis PubSub channel for job events.
-- Forwards events to connected WebSocket clients in real-time.
-- Frontend uses this to show live agent progress, phase changes, and final verdict.
-
-## Structured Logging
-- Logger factory: `app.logging_config.get_logger(name)`.
-- JSON format in production: `{timestamp, level, logger, message, correlation_id, component, ...}`.
-- Development mode (`DEBUG=true`): colored human-readable output.
-- All services use consistent component tags: `database`, `redis`, `pipeline`, `worker.lifecycle`, `report`, etc.
+## Docker (8 services, `docker/docker-compose.yml`)
+postgres:16, redis:7, qdrant, minio, ghidra-mcp (HTTP :8089), backend-api, backend-worker, frontend.
+Backend points `LLM__OPENAI__BASE_URL` at `host.docker.internal:8080/v1` (local llama-server);
+Ollama fallback at `:11434`. Dockerfiles: `docker/Dockerfile.backend`, `docker/Dockerfile.frontend`.

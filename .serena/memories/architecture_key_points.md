@@ -1,84 +1,94 @@
 # Architecture Key Points
 
+> Refreshed against code 2026-05-30. See also `mem:data_flow`, `mem:pipeline_deep_dive`,
+> `mem:reporting_layer`, `mem:extractors_enrichment_qa`, `mem:api_infrastructure`.
+
 ## 0. Entry Point — MaljanApp Facade (`src/maljan/app.py`)
-- `MaljanApp(config, mock, samples_dir)` is the **composition root facade**.
-- Constructs `ServiceContainer` and compiles the LangGraph via `build_graph()`.
-- `run(file_hash, file_name, sample_path)` → wraps `asyncio.run(self.arun(...))`.
-- `arun(...)` is the canonical async entry — used by CLI and ARQ worker (avoids "Event loop is closed" with google-genai).
-- `_submit_to_sandbox(sample_path)`: pre-pipeline sandbox submission (Triage/CAPE/Mock). Result stored as `state["sandbox_report"]`. Tries `submit_and_wait`, falls back to manual `submit → wait_for_completion → SubmissionResult`. Graceful: returns None on failure.
+- `MaljanApp(config, mock, samples_dir)` is the **composition root facade**: builds `ServiceContainer`,
+  compiles the LangGraph via `build_graph()`.
+- `run(...)` wraps `asyncio.run(self.arun(...))`. `arun(...)` is the canonical async entry (CLI + ARQ worker).
+- **Platform inference** at bootstrap: infers `file_type` + canonical `platform` from the sample
+  (magic bytes -> sandbox hints -> MIME) and seeds `state["platform"]` (Wave 4).
+- `_submit_to_sandbox(sample_path)`: pre-pipeline sandbox submission (Triage/CAPE/Mock).
+  Result -> `state["sandbox_report"]` (+ `state["sandbox_cti"]` for Triage). Graceful: None on failure.
 
-## 1. LangGraph Pipeline
-- **Builder**: `src/maljan/pipeline/builder.py::build_graph()` — discovers agents from `AgentRegistry`.
-- **Flow**: START → parallel analyst fan-out → fan-in to negotiation → [revision loop] → judge → END.
-- **Nodes** (`src/maljan/pipeline/nodes.py`):
-  - `make_analyst_node(name, container)` — Chunked analysis (`safe_analyze_isr_chunked`).
-  - `make_negotiation_node()` — Collects ISRs, sycophancy detection, `JudgeAgent.mediate()`.
-  - `make_revision_node()` — Per-agent revision with `_build_revision_context()` chunk-aware grounding.
-  - `make_judge_node()` — YARA/Sigma scan, TTP cascade, ATT&CK validation, LTM retrieval, schema pruning, STIX verdict, RunSummary, LTM persist.
-- **Routing** (`src/maljan/pipeline/routing.py`): `ConsensusRouter.should_continue` priority: hard-limit → sycophancy override → genuine consensus → adaptive termination (`std<0.04`, `mean≥0.70`, window=3) → revision.
-- **Sycophancy Detector**: cosine similarity on bag-of-words; > threshold → `DEVIL_ADVOCATE_DIRECTIVE`.
+## 1. LangGraph Pipeline (`pipeline/builder.py`)
+- Discovers agents from `AgentRegistry`. Nodes: per-agent analyst, negotiation, revision, judge,
+  and **report** (added only when `config.reporting.enabled`; node also self-short-circuits).
+- **Analyst topology toggle** `LLMConfig.parallel_analysts`:
+  - True -> parallel fan-out (START -> all analysts -> negotiation). Right for hosted multi-slot LLMs.
+  - False -> sequential chain in registry order. Right for single-slot local llama-server (avoids queue contention).
+- Flow: START -> analysts -> negotiation -> [revision loop] -> judge -> report -> END
+  (or judge -> END when reporting disabled).
+- Nodes (`pipeline/nodes.py`): `make_analyst_node`, `make_negotiation_node`, `make_revision_node`,
+  `make_judge_node`, **`make_report_node`**.
+- Routing (`pipeline/routing.py`): `ConsensusRouter.should_continue` priority:
+  hard-limit -> sycophancy+consensus override -> genuine consensus -> adaptive termination
+  (`CONVERGENCE_STD_THRESHOLD=0.04`, `MIN_CONVERGENCE_CONFIDENCE=0.70`, `CONFIDENCE_WINDOW=3`) -> revision.
 
-## 2. Dependency Injection & Caching
-- `ServiceContainer` (`src/maljan/core/container.py`) — composition root with lazy init.
-- Caches: expert LLM, judge LLM, per-agent LLMs, agents, data `(sample_id, type)`, memory store, sandbox client, YARA layer, Sigma layer, function summarizer.
-- `_configure_langsmith()` sets env vars when `langchain_tracing_v2=true`.
+## 2. Dependency Injection & Caching (`core/container.py`)
+- `ServiceContainer` — lazy caches: expert/judge/per-agent LLMs, agents, data `(sample_id, type)`,
+  memory store, sandbox client, YARA layer, Sigma layer, function summarizer, **narrative agent**.
+- `_configure_langsmith()` sets env when `langchain_tracing_v2=true`.
+- Config via lazy `get_settings()` factory (replaced import-time singleton for testability).
 
 ## 3. Agent System
-- **Base**: `BaseAnalyst` (abstract `analyze`, `revise`; ISR variants `analyze_isr`, `revise_isr`; safe wrappers `safe_*`; tiktoken truncation; `execute_tool_loop()` runs ReAct in thread-isolated event loop).
-- **Specialized**:
-  - `StaticAnalyst` — Ghidra MCP (225 tools, debugger excluded). T1027, T1106, T1055, T1140.
-  - `DynamicAnalyst` — CAPEv2 MCP. T1547, T1055, T1059, T1112.
-  - `NetworkAnalyst` — Network MCP + PCAP path heuristic. T1071, T1571, T1048, T1568.
-  - `JudgeAgent` — NOT a BaseAnalyst. `mediate()` + `give_verdict()` (structured Bundle output) + ThreatIntel MCP.
-- **Heterogeneous Ensemble**: per-agent LLM override via `LLM__AGENTS__<NAME>__PROVIDER` / `__MODEL`.
-- **Registry**: `@register_agent("name")` decorator + auto-discovery.
+- **Base**: `BaseAnalyst` (abstract `analyze`/`revise`; ISR variants `analyze_isr`/`revise_isr`;
+  `safe_*` wrappers; tiktoken truncation; `execute_tool_loop()` ReAct in thread-isolated event loop).
+  Per-agent ReAct timeouts: static=1200s, judge=600s, dynamic=600s, network=300s (config).
+- **Specialized**: StaticAnalyst (Ghidra MCP), DynamicAnalyst (CAPEv2 MCP), NetworkAnalyst (Network MCP).
+  Registered as exactly `{static, dynamic, network}` via `@register_agent`.
+- **JudgeAgent**: NOT a BaseAnalyst, NOT registered. `mediate()` + `give_verdict()` (structured Bundle).
+  `give_verdict()` runs `postprocess_judge_bundle()` (J-01/J-02/REP-01/REP-02) before Bundle validation.
+- **Heterogeneous Ensemble**: per-agent LLM via `LLM__AGENTS__<NAME>__PROVIDER` / `__MODEL`.
 
 ## 4. ISR & STIX Schemas
-- `ClaimEvidence` (`schemas/isr_models.py`): `claim`, `evidence_ref`, `confidence` (0-1), `technique_id` (`^T\d{4}(\.\d{3})?$`).
-- `AgentISR`: `agent_id`, `domain`, `claims`, `dissent_items`, `revision_round`. `mean_confidence`, `to_text_summary()` (with `[CONVERGENCE SIGNAL]` annotation).
-- `STIX Bundle` (`schemas/stix_models.py`): `ConfidenceAnnotatedRelationship` with `x_maljan_confidence`, `x_maljan_evidence_basis`, `x_maljan_contributing_agents`, `x_maljan_technique_id`.
-- `MediatorVerdict` lives in **`pipeline/mediation_models.py`** (NOT under schemas/).
-- `AnalysisState` (`pipeline/state.py`): TypedDict with reducers. Fields include `file_hash`, `file_name`, **`sample_path`**, **`sandbox_report`** (full normalized sandbox dict), `reports`, `revised_reports`, `isr_reports`, `discussion_history`, `sycophancy_detected`, `confidence_history`, `iteration_count`, `is_consensus`, `final_decision`, `judge_report`, `stix_output`, `run_summary`, `_max_iterations`.
+- `ClaimEvidence` (`schemas/isr_models.py`): `claim`, `evidence_ref`, `confidence` (0-1),
+  `technique_id` (`^T\d{4}(\.\d{3})?$`), **`rule_platforms: list[str] | None`** (Wave 4).
+- `AgentISR`: `agent_id`, `domain`, `claims`, `dissent_items`, `revision_round`.
+  **`domain` Literal is now `["static","dynamic","network","yara","sigma"] | str`** (TIEF removed; `| str` for extensibility).
+- STIX Bundle (`schemas/stix_models.py`): `ConfidenceAnnotatedRelationship` with `x_maljan_*` fields.
+  Extended SDOs (Identity/Indicator/ObservedData/Note/Report) added later by `ExtendedSTIXRenderer`.
+- `MediatorVerdict` in `pipeline/mediation_models.py`.
+- `AnalysisState` (`pipeline/state.py`): generic agent-keyed dicts + many scalar fields. See `mem:pipeline_deep_dive`
+  for the full field table (includes Wave 4 `file_type`/`platform`, Wave 6 `static_sample_path`,
+  reporting outputs `malware_report`/`malware_report_markdown`/`stix_bundle_extended`,
+  `degraded_mode`/`degradation_reasons`, `sandbox_cti`).
 
 ## 5. Deterministic Analysis Layers
-- **YARA** (`yara_layer.py`): `YaraLayer.from_default_rules()` loads `data/yara_ttp_rules.yaml`. `scan() → YaraMatch → to_isr()` injects as `domain="yara"`.
-- **Sigma** (`sigma_layer.py`): 2946 rules. `scan_report_text() → to_isr()` injects as `domain="sigma"`.
-- **TTP Cascade** (`ttp_cascade.py`): stateless, microseconds. Weights: yara=0.90, **tief=0.80** (weight retained even though `tief_classifier.py` was removed — TIEF claims may still arrive from other sources), sigma=0.55, dynamic=0.45, static=0.35, network=0.20. Multipliers: 1→1.00, 2→1.25, 3→1.50, 4→1.75, 5→1.90. `DEFAULT_LAYER_WEIGHT=0.25` for unknown domains.
-- **Schema Pruner** (`schema_pruner.py`): keyword-weighted (ATT&CK IDs weight highest) → ransomware/RAT/dropper/worm/infostealer/unknown.
-- **Chunk Merger** (`chunk_merger.py`): technique_id dedup (max conf) → text dedup → cap `MAX_MERGED_CLAIMS=20`.
-- **Function Summarizer** (`function_summarizer.py`): optional LLM preprocessing.
+- **YARA** (`yara_layer.py`): `from_default_rules()` loads `data/yara_ttp_rules.yaml`; injects `domain="yara"`.
+- **Sigma** (`sigma_layer.py`): 2946 rules under `data/sigma_rules/`; injects `domain="sigma"`.
+- **TTP Cascade** (`ttp_cascade.py`): stateless. Weights yara=0.90, sigma=0.55, dynamic=0.45,
+  static=0.35, network=0.20 (`DEFAULT_LAYER_WEIGHT=0.25`). Multipliers 1->1.00 .. 5->1.90.
+  **NO tief weight.** Pre-filters invalid/placeholder TTPs (T0000/T0000.000/T9999/T1234).
+  **Platform-aware (Wave 4)**: `compute(isr_reports, sample_platform=...)` drops platform-incompatible
+  claims via `_is_claim_platform_compatible()` (source rule_platforms -> MITRE catalog ->
+  `MOBILE_ENTERPRISE_OVERLAP`); records `CascadeSummary.dropped_by_platform`.
+- **Schema Pruner** (`schema_pruner.py`): keyword-weighted -> ransomware/RAT/dropper/worm/infostealer/unknown.
+- **Chunk Merger** (`chunk_merger.py`): technique dedup -> text dedup -> cap `MAX_MERGED_CLAIMS=20`.
 
-## 6. Memory / RAG System
-- **MemoryStore Protocol**: `store`, `retrieve`, `count`, `clear`. Upsert by sample_id.
-- **StoredCase**: `sample_id`, `summary_text`, `technique_ids`, `malware_category`, `stix_bundle_json`, `created_at`.
-- **QdrantStore**: vector backend with sentence-transformer embeddings.
-- **InMemoryStore**: cosine similarity fallback.
-- **ATT&CK Pipeline**:
-  - `attck_loader.py` — fetches/caches ATT&CK Enterprise bundle (`ATTCK_BUNDLE_URL`, cache file).
-  - `attck_index.py` — pure-Python TF-IDF index; `search()`, `validate_and_score()`.
-  - `attck_validator.py` — thread-safe singleton (double-checked locking); `validate_isr_reports()` → `TTPValidationSummary` (hallucination rate, threshold 0.05).
-  - `ttp_validation.py` — Pydantic models `TTPClaimValidation`, `TTPValidationSummary`.
+## 6. Memory / RAG
+- MemoryStore protocol (`store`/`retrieve`/`count`/`clear`), `StoredCase`.
+- **Default backend = qdrant** (`MemoryConfig`), collection `maljan_cases_v2`. InMemoryStore fallback.
+- **Embeddings** (`memory/embeddings.py`): fastembed BAAI/bge-small-en-v1.5 (384-dim) + BoW fallback;
+  `encode()`/`cosine()`; shared by both stores. (Old era used 512-dim hash vectors in `maljan_cases`.)
+- ATT&CK: `attck_loader` (bundle fetch+cache, exposes platforms), `attck_index` (TF-IDF),
+  `attck_validator` (thread-safe singleton; hallucination rate), `ttp_validation` (Pydantic models).
 
-## 7. Path & Utility Modules (new)
-- `core/paths.py`:
-  - `get_project_root(max_up=8)` — walks up looking for `pyproject.toml`/`.git`. Deterministic regardless of CWD.
-  - `resolve_mcp_args(args)` — resolves relative paths in MCP config args against project root. Lets `.env` use portable relative paths.
-- `utils/json_cleaner.py`: `extract_json`, `repair_json`, `safe_parse_json` — recover malformed LLM JSON output.
-- `preprocessors/cfg_orderer.py`: `CFGOrderer` (NetworkX-backed) — topological sort of control-flow graph; used by `binary_chunker.py` for code-locality chunking.
+## 7. Reporting, Extractors, Enrichment, QA (NEW subsystems)
+- See `mem:reporting_layer` (MalwareReport, builder, narrative, detection signatures, renderers, report_node).
+- See `mem:extractors_enrichment_qa` (extractors/, platform-aware filtering, enrichment ARQ task,
+  fp_linter C1-C6, judge_postprocess, _indicator_denylists).
 
-## 8. LLM & Config Infrastructure
-- Provider Registry (`llm/registry.py`) — `@register_provider` decorator, auto-discovers openai/anthropic/ollama/gemini.
-- `build_model(role="expert"|"judge")`: expert temp=0.1, judge temp=0.0.
-- `build_model_for_agent(agent_name)`: checks `LLMConfig.agents` override.
-- Core Config (`core/config.py`): nested Pydantic with `__` delimiter. Sections: LLM, Negotiation, Chunking, Memory, Sandbox, Analysis, Preprocessing, MCP.
-- API Config (`apps/api/app/config.py`): flat env vars.
+## 8. LLM & Config (`core/config.py`)
+- Provider registry (`llm/registry.py`): openai/anthropic/ollama/gemini. `build_model(role=expert|judge)`
+  (expert temp 0.1, judge 0.0); `build_model_for_agent(name)`.
+- 9 nested sections: LLM (+ per-provider + `agents` + `parallel_analysts`), Negotiation
+  (`max_iterations=5`, `consensus_threshold=0.85`), Chunking, Memory, Sandbox (rich Triage options),
+  Analysis, Preprocessing, MCP (ghidra+cape), **Reporting**. Root: token limits, ReAct limits +
+  per-agent timeout overrides, LangSmith, flat shortcut keys. Lazy `get_settings()` + `settings` proxy.
 
 ## 9. API / Worker / Infrastructure
-- **FastAPI** (`apps/api/app/main.py`): factory pattern, lifespan (DB + Redis), CORS, `RequestLoggingMiddleware`, routes under `/api/v1`, WebSocket `/ws/analysis/{job_id}`, `/health`.
-- **AnalysisService**: job lifecycle, ARQ enqueue, user stats.
-- **ARQ Worker**: `run_analysis(ctx, job_id)` — loads job → `MaljanApp.arun()` → saves `AnalysisReport` + `AgentFinding` → publishes Redis PubSub events. `max_jobs=2`, `job_timeout=1800s`, `max_tries=1`.
-- **DB**: PostgreSQL + asyncpg + SQLAlchemy 2.0. Tables: users, api_keys, samples, analysis_jobs, analysis_reports, agent_findings, audit_log.
-- **Alembic** dir exists under `apps/api/alembic/` (migrations in progress).
-- **Redis**: ARQ queue + PubSub events channel `analysis:{job_id}`.
-- **MinIO**: S3-compatible sample storage.
-- **Docker**: 8 services (added Ghidra MCP HTTP server `:8089`).
+- See `mem:api_infrastructure` for the full FastAPI/ARQ/DB/middleware breakdown. Highlights:
+  middleware stack (logging -> rate-limit -> CORS -> security-headers), 2 ARQ workers
+  (analysis + enrich), 5 alembic migrations, 8 Docker services.

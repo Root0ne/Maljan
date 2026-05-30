@@ -1,41 +1,46 @@
 # Style and Conventions
 
+> Refreshed 2026-05-30.
+
 ## Language & Formatting
-- **Language**: All code, comments, variable names, and commit messages in **English**.
-- **Line Length**: 100 characters (Ruff).
-- **No emojis** in code.
-- **Python**: 3.13+ with strict type hints (mypy strict mode).
+- All code, comments, identifiers, docs, and commit messages in **English**.
+- Line length 100 (Ruff). No emojis in code. Python 3.13+ with strict type hints (mypy strict).
 
 ## Linting & Formatting
-- **Ruff** rules: `E`, `F`, `I`, `W`, `UP`, `B`
-- **isort**: Absolute imports preferred; Ruff handles import sorting.
-- **Per-file ignores**: `src/maljan/agents/*.py` ignores `E501` for long LLM prompt strings.
-- **Type checking**: MyPy with `disallow_untyped_defs=true`, `disallow_incomplete_defs=true`, `warn_return_any=true`, `ignore_missing_imports=true`.
+- Ruff rules `E`, `F`, `I`, `W`, `UP`, `B`. Import sorting via Ruff.
+- Per-file ignore: `src/maljan/agents/*.py` ignores `E501` (long LLM prompt strings).
+- MyPy: `disallow_untyped_defs`, `disallow_incomplete_defs`, `warn_return_any`, `ignore_missing_imports`
+  (overrides for the LangChain/LangGraph/tiktoken/qdrant ecosystem).
 
 ## Async & IO
-- **Async-first**: All DB/Redis/HTTP/MinIO operations use `async`/`await`.
-- SQLAlchemy 2.0 async via `asyncpg`.
-- ARQ worker runs pipeline natively async (`MaljanApp.arun()`) to avoid "Event loop is closed" errors.
+- Async-first for all DB/Redis/HTTP/MinIO. SQLAlchemy 2.0 async via asyncpg.
+- ARQ workers run the pipeline natively async (`MaljanApp.arun()`) to avoid "Event loop is closed".
 
 ## Architecture Rules
-- **Dependency Injection**: Use `ServiceContainer` (`src/maljan/core/container.py`). Never global state or module-level singletons (except `ATTCKValidator` which uses double-checked locking for thread-safe lazy init).
+- **DI**: use `ServiceContainer` (`core/container.py`). No global state / module-level singletons
+  (exception: `ATTCKValidator` double-checked-locking singleton). Config via lazy `get_settings()` —
+  never instantiate `Settings()` at import time (breaks test monkeypatching).
 - **Models**: Pydantic v2 for validation, SQLAlchemy 2.0 for ORM.
-- **Agents**: New agents must extend `BaseAnalyst` and register via `@register_agent("name")` in `AgentRegistry`.
-- **Config**: Two separate systems:
-  1. Core: `src/maljan/core/config.py` – nested Pydantic models with `__` delimiter (e.g., `LLM__PROVIDER`, `LLM__AGENTS__STATIC__PROVIDER`).
-  2. API: `apps/api/app/config.py` – flat env vars (e.g., `DATABASE_URL`).
-- **Environment**: If changing config, update both `.env.example` and the relevant config model.
-- **Graceful Degradation**: All optional components (YARA, Sigma, ATT&CK validator, LTM, MCP) fail silently with logged warnings. Pipeline always continues.
+- **Agents**: new analysts extend `BaseAnalyst` + `@register_agent("name")`. JudgeAgent is the
+  exception (not registered, not a BaseAnalyst).
+- **Config duality**: core nested Pydantic (`src/maljan/core/config.py`, `__` delimiter) vs API flat
+  env (`apps/api/app/config.py`). Update `.env.example` + the relevant model when changing config.
+- **Analyst topology**: respect `LLMConfig.parallel_analysts` (hosted parallel vs local sequential).
+- **Graceful Degradation** (mandatory): YARA, Sigma, ATT&CK validator, LTM, MCP, sandbox, narrative,
+  detection signatures, extractors, and enrichment must all fail silently with a logged warning —
+  the pipeline always continues.
+- **Platform consistency (Wave 4)**: when touching the cascade / detection rules / fp_linter, keep
+  `state["platform"]` threaded consistently (judge and report nodes must use the same value).
+- **Confidence integrity (CONF-INFL-01)**: do not surface inflated cascade-only confidence; honour
+  `degraded_mode` and the 0.60 cap in consumers.
 
 ## Testing
-- **pytest** in `tests/` directory.
-- **Fixtures** in `tests/conftest.py`.
-- Unit tests: `tests/unit/` (35 modules)
-- Integration tests: `tests/integration/` (4 modules)
-- Benchmarks: `tests/evaluation/`
+- pytest in `tests/`; fixtures in `tests/conftest.py`.
+- Unit `tests/unit/` (~58 modules), integration `tests/integration/` (6), benchmarks `tests/evaluation/` (4).
+- **Frontend E2E**: Playwright in `apps/web/e2e/` (`playwright.config.ts`); run with `npx playwright test`.
 
 ## Development Workflow
-- `make setup` – install deps + pre-commit
-- `make check` – lint + format-check + typecheck + test (full gate)
-- `make ci-check` – lint + format-check + test (fast gate, no typecheck)
-- `make format` – auto-fix and format with Ruff
+- `make setup` — deps + pre-commit
+- `make check` — lint + format-check + typecheck + test (full gate)
+- `make ci-check` — lint + format-check + test (fast gate)
+- `make format` — auto-fix + format

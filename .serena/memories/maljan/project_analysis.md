@@ -1,180 +1,113 @@
 # Maljan Project Analysis Report
 
-> Comprehensive architectural and code-quality analysis of the Maljan multi-agent malware analysis framework. Updated after memory refresh.
+> Comprehensive architectural and code-quality analysis. Refreshed against code on 2026-05-30
+> (active "Wave 10"). Cross-refs: `mem:architecture_key_points`, `mem:reporting_layer`,
+> `mem:extractors_enrichment_qa`, `mem:wave_history`.
 
 ---
 
 ## 1. Project Overview
+**Maljan** classifies samples (Malware/Benign/Suspicious) via adversarial multi-agent debate
+(LangGraph), grounds verdicts with deterministic detection (YARA, Sigma) + ATT&CK validation,
+and emits both a comprehensive `MalwareReport` and a STIX 2.1 bundle with per-claim confidence.
 
-**Maljan** is a production-grade malware analysis platform using adversarial multi-agent debate (LangGraph) to classify samples as Malware, Benign, or Suspicious. Combines LLM reasoning with deterministic detection (YARA, Sigma) and outputs STIX 2.1 bundles with per-claim confidence annotations.
-
-- **Language**: Python 3.13 (pinned `>=3.13, <3.14`)
-- **Orchestration**: LangGraph >= 1.1.6
-- **API**: FastAPI + Uvicorn
-- **Frontend**: Next.js 16 + React 19 + TailwindCSS 4
-- **DB**: PostgreSQL 16 (async via SQLAlchemy + asyncpg)
-- **Queue**: Redis 7 + ARQ
-- **Storage**: MinIO (S3)
-- **Vectors**: Qdrant
-- **Tests**: 800+ passed
+- Python 3.13 (`>=3.13, <3.14`); LangGraph >= 1.1.6; FastAPI; Next.js 16 / React 19 / Tailwind 4.
+- PostgreSQL 16 (asyncpg) + Redis 7 (ARQ + PubSub) + MinIO (S3) + Qdrant (vectors).
+- Default LLM = local OpenAI-compatible llama-server (Ollama fallback).
 
 ---
 
-## 2. Architecture Assessment
-
-### 2.1 Pipeline Flow (LangGraph)
+## 2. Architecture (current)
 
 ```
 START
-  ├── static_analyst   ──┐
-  ├── dynamic_analyst  ──┤  (parallel fan-out)
-  └── network_analyst  ──┘
-           │
-     [fan-in: wait all]
-           │
-      negotiation ◄──────── revision (loop)
-           │                    │
-     [consensus? sycophancy? convergence? max_iter?]
-           │
-        judge
-           │
-      YARA + Sigma scan
-           │
-     TTP cascade + ATT&CK validation + schema pruning + LTM retrieval
-           │
-        STIX 2.1 Bundle + RunSummary
-           │
-          END
+  ├─ static / dynamic / network analyst   (parallel fan-out OR sequential chain)
+  └──────────────► negotiation ◄──── revision (loop)
+                       │ [router: hard-limit / sycophancy / consensus / adaptive-std]
+                     judge   (YARA+Sigma scan, platform-aware TTP cascade, ATT&CK validation,
+                       │       schema pruning, LTM, STIX verdict + judge_postprocess, degraded flag)
+                     report  (MalwareReport: extractors -> narrative LLM -> detection sigs ->
+                       │       markdown + extended STIX -> fp_linter)  [if reporting.enabled]
+                      END
+post-verdict, out-of-band: enrich_worker (VirusTotal/AbuseIPDB/WHOIS/attribution) via ARQ
 ```
 
-**Strengths:**
-- Dynamic graph from `AgentRegistry` — adding agents requires no pipeline changes.
-- Parallel fan-out for analyst nodes — O(1) wall-clock in agent count.
-- Generic agent-keyed dicts in `AnalysisState` — no schema migrations.
-- `MaljanApp` facade (`src/maljan/app.py`) is a clean entry point used by CLI + ARQ worker.
-- Sandbox submission decoupled from graph (`MaljanApp._submit_to_sandbox`) → result feeds in via `state["sandbox_report"]`.
+**Strengths**
+- Dynamic graph from `AgentRegistry`; generic agent-keyed state dicts (zero schema migration to add agents).
+- Builder runtime toggle `parallel_analysts` (hosted parallel vs local sequential).
+- `MaljanApp` facade is the single composition root (CLI + ARQ worker).
+- Reporting decoupled behind `config.reporting.enabled`; node short-circuits when disabled.
+- Pervasive graceful degradation (YARA/Sigma/ATT&CK/LTM/cascade/sandbox/narrative/enrichment/extractors).
 
-### 2.2 Key Design Patterns
+**Key patterns**: MaljanApp facade, ServiceContainer DI (lazy caches; `ATTCKValidator` singleton
+with double-checked locking), AgentRegistry decorator, ISR exchange, heterogeneous ensemble,
+adaptive termination, sycophancy detection, protocol-based extensibility, lazy `get_settings()` factory.
 
-1. **MaljanApp Facade** — Composition root that wires `ServiceContainer` + `build_graph()`; provides sync `run()` and async `arun()`.
-2. **ServiceContainer (DI)** — All agents, LLMs, loaders, stores cached here. No global state (exception: `ATTCKValidator` singleton with double-checked locking for lazy init).
-3. **AgentRegistry** — `@register_agent` decorator, auto-discovery.
-4. **ISR** — `AgentISR` objects exchanged during negotiation; every claim has `evidence_ref` and `confidence`.
-5. **Heterogeneous Ensemble** — Per-agent LLM via `LLM__AGENTS__<NAME>__PROVIDER`.
-6. **Adaptive Termination** — Rolling std<0.04 over last 3 rounds with mean≥0.70.
-7. **Sycophancy Detection** — Cosine similarity → forced devil's-advocate.
-8. **Protocol-based extensibility** — `MemoryStore`, `SandboxClient`, `DataLoaderProtocol` are runtime-checkable.
-
-### 2.3 Configuration System
-- **Core Engine** (`src/maljan/core/config.py`): nested Pydantic, `__` delimiter (e.g., `LLM__PROVIDER=openai`).
-- **API Server** (`apps/api/app/config.py`): flat env vars (`DATABASE_URL`, `JWT_SECRET_KEY`).
-- Two-config duality preserved (functional but adds cognitive overhead).
-
-### 2.4 Path Robustness — Fixed
-- Previously: brittle `os.path.dirname(__file__)` chains.
-- Now: `src/maljan/core/paths.py` provides `get_project_root()` (walks up for `pyproject.toml`/`.git`) and `resolve_mcp_args()` (resolves relative MCP arg paths against project root). This makes `.env` portable.
+**Two config systems**: core engine `src/maljan/core/config.py` (nested Pydantic, `__` delimiter,
+9 sections incl. new `reporting`) and API server `apps/api/app/config.py` (flat env vars).
 
 ---
 
-## 3. Code Quality & Standards
-
-### 3.1 Positive
-- Strict mypy (`disallow_untyped_defs`, `disallow_incomplete_defs`).
-- Near-universal docstrings.
-- Graceful degradation (YARA, Sigma, ATT&CK, LTM, cascade, sandbox).
-- Async-first (DB, Redis, HTTP).
-- `BaseAnalyst._truncate_input()` tiktoken w/ char fallback.
-- `execute_tool_loop()` thread-isolated event loop for ReAct (avoids nest_asyncio/anyio cancel scope conflicts).
-- `utils/json_cleaner.py` recovers malformed LLM JSON output.
-
-### 3.2 Linting & Formatting
-- Ruff 100 col, rules `E/F/I/W/UP/B`, per-file ignores for agent prompt strings.
-- MyPy 3.13 target, ignores missing imports for LangChain ecosystem.
-- Pre-commit configured.
-
-### 3.3 Identified Issues
-- **TIEF orphan weight**: `tief_classifier.py` was removed but `ttp_cascade.py` still has `tief=0.80` in `LAYER_WEIGHTS`. Dead weight unless TIEF ISRs come from another path.
-- **mediation_models location**: `MediatorVerdict` lives in `pipeline/mediation_models.py` (not the more idiomatic `schemas/`).
-- **Mock mode type leakage**: Mock ISRs use `domain=agent_name` with `# type: ignore[arg-type]` because the Literal type narrows to `static|dynamic|network`.
-- **TODO comments in production**: `nodes.py` still has `TODO-1`/`TODO-B` markers around now-implemented YARA/Sigma blocks.
+## 3. Code Quality
+- Strict mypy (`disallow_untyped_defs/incomplete_defs`, `warn_return_any`), Ruff 100col `E/F/I/W/UP/B`.
+- Near-universal docstrings; rich audit-ID comments documenting fixes (see `mem:wave_history`).
+- Async-first; tiktoken truncation; thread-isolated ReAct loop; `utils/json_cleaner` for LLM JSON recovery.
+- New defensive layers: `judge_postprocess` (hallucinated-IOC dropout), `_indicator_denylists`,
+  `qa/fp_linter` (C1-C6 structural FP checks), CONF-INFL-01 degraded-confidence cap.
 
 ---
 
 ## 4. Test Coverage
-
-- `tests/unit/` — 35+ modules (agents, container, DI cache, ISR models, judge, routing, sycophancy, workflow, LTM, ReAct routing, etc.).
-- `tests/integration/` — 4 modules.
-- `tests/evaluation/` — TRAM + ATT&CK malware benchmarks.
-- **Gaps**: No `MaljanApp.run()`/`arun()` facade-level tests; no frontend E2E (Playwright/Cypress).
+- `tests/unit/` ~58 modules, `tests/integration/` 6, `tests/evaluation/` 4 (TRAM + ATT&CK benchmarks).
+- **Frontend E2E now exists**: `apps/web/e2e/` (Playwright: auth, dashboard, ws_reconnect) + `playwright.config.ts`.
+- Remaining gap: facade-level `MaljanApp.run()/arun()` tests still light.
 
 ---
 
 ## 5. Security
-- JWT auth + bcrypt password hashing.
-- `api_keys` table for per-user keys.
-- `audit_log` table.
-- MockSandboxClient for CI/test isolation.
-- Token-aware truncation prevents oversized prompt injection.
-- **Concerns**: Default secrets in `.env.example` and Docker Compose (`minioadmin`, JWT placeholder); no visible rate-limiting middleware; CORS depends on `settings.cors_origins` (risk if misconfigured).
+- JWT auth + bcrypt; `api_keys` + `audit_log` tables; per-user scoping.
+- **Rate limiting implemented**: `middleware/rate_limit_middleware.py` (Redis-backed, configurable + whitelist).
+- **Security headers**: `middleware/security_headers_middleware.py` (CSP/X-Frame-Options/X-Content-Type-Options/
+  Referrer-Policy/Permissions-Policy; HSTS on when not debug) — SEC-CORS-HEADERS-01.
+- Auth throttle: `app/auth/throttle.py`. Enrichment clients enforce host-allowlist SSRF guards.
+- `AUTH_DISABLED` dev bypass exists (seeds a dev admin) — must never run outside local dev.
+- Concerns: default dev secrets in compose/.env.example (minioadmin, ghidra token, dev DB password).
 
 ---
 
 ## 6. Production Readiness
-
-### 6.1 Infrastructure
-- Docker Compose: **8 services** (API, Worker, Frontend, PostgreSQL, Redis, MinIO, Qdrant, Ghidra MCP HTTP `:8089`).
-- Alembic dir exists at `apps/api/alembic/` — migrations in progress.
-- ARQ worker with WebSocket `/ws/analysis/{job_id}` for real-time events.
-
-### 6.2 Observability
-- Structured JSON logging with `correlation_id`, `duration_ms`, `component`.
-- Optional LangSmith tracing.
-- `RunSummary` aggregate observability (negotiation metrics, agent stats, cascade, validation).
-
-### 6.3 Scalability
-- Stateless FastAPI (state in Postgres + Redis).
-- ARQ allows horizontal worker scaling (`max_jobs=2` per container).
-- ReAct uses `ThreadPoolExecutor(max_workers=1)` → serialized per agent (safe but bottleneck under heavy parallel tool use).
+- Docker Compose 8 services; Alembic with **5 real migrations** (initial_schema -> add_malware_report ->
+  fix_audit_resource_id_type -> multiuser_sample_dedup -> add_agent_finding_status). Auto-upgrade on
+  startup is OFF by default (`run_migrations_on_startup`) to avoid multi-worker races.
+- Two ARQ workers: `analysis_worker` (pipeline) + `enrich_worker` (threat-intel). WebSocket
+  `/ws/analysis/{job_id}` live events via Redis PubSub.
+- Observability: structured JSON logging (correlation_id/component/duration_ms), optional LangSmith,
+  `RunSummary` aggregate (now includes `cascade.platform_filter_summary` + `fp_warnings`).
 
 ---
 
-## 7. Strengths
-1. Multi-agent ISR architecture with sycophancy detection + adaptive termination — research-grade.
-2. Registry + DI + generic state dicts = trivial extension.
-3. Graceful degradation everywhere — pipeline never crashes on optional dependency failures.
-4. STIX 2.1 with per-claim confidence intervals (`x_maljan_*` extensions).
-5. Comprehensive CLI + Docker + benchmarks + structured logging.
+## 7. Resolved Since Last Analysis (were flagged as open issues)
+- TIEF orphan weight: REMOVED from `LAYER_WEIGHTS` and from the ISR domain Literal.
+- Rate limiting: IMPLEMENTED (middleware).
+- Alembic: real migrations exist (no longer "in progress").
+- TODO-1/TODO-B markers in nodes.py: GONE.
+- Frontend E2E tests: ADDED (Playwright).
+- Hardcoded paths: already addressed earlier via `core/paths.py`.
 
----
-
-## 8. Improvement Areas & Technical Debt
-
-| Priority | Area | Description |
-|----------|------|-------------|
-| **High** | Alembic migration workflow | `apps/api/alembic/` exists; ensure migrations are actually run rather than relying on `Base.metadata.create_all()`. |
-| **High** | Rate limiting | No middleware visible in `apps/api/app/main.py`. |
-| **Medium** | TIEF weight cleanup | Either remove `tief=0.80` from `LAYER_WEIGHTS` or restore the classifier. |
-| **Medium** | Frontend E2E tests | Add Playwright/Cypress for Next.js. |
-| **Medium** | Facade tests | Unit tests for `MaljanApp.run()`/`arun()`. |
-| **Low** | TODO cleanup | Remove `TODO-1`/`TODO-B` markers in `nodes.py`. |
-| **Low** | Config unification | Merge core+API config systems. |
-| **Low** | Mock type safety | Remove `# type: ignore[arg-type]` in mock ISR construction. |
-| **Low** | Schema location | Consider moving `mediation_models.py` from `pipeline/` to `schemas/` for consistency. |
+## 8. Remaining Improvement Areas
+| Priority | Area | Note |
+|----------|------|------|
+| Medium | Facade tests | `MaljanApp.run()/arun()` still under-tested. |
+| Low | Default dev secrets | Compose/.env.example ship placeholder creds. |
+| Low | Config unification | Core (nested) + API (flat) duality remains. |
+| Low | `mediation_models` location | Still in `pipeline/`, not `schemas/`. |
+| Low | Mock ISR type leakage | `domain=agent_name` with `# type: ignore[arg-type]`. |
 
 ---
 
 ## 9. Conclusion
-
-Maljan is a **well-architected, research-informed malware analysis framework** approaching production maturity. Strong typing, DI, async I/O, graceful degradation, and the multi-agent ISR design with sycophancy detection + adaptive termination are highlights.
-
-Recent improvements since last analysis:
-- New `MaljanApp` facade replaces ad-hoc entry points.
-- `core/paths.py` resolves the previously flagged "hardcoded paths" issue.
-- Sandbox submission (Triage client) added as a pre-pipeline step.
-- `apps/api/alembic/` directory exists.
-- 8th Docker service (Ghidra MCP) added.
-- Test count ~800+ passing.
-
-Remaining gaps: rate limiting, frontend tests, facade tests, dead TIEF weight, TODO markers.
-
-**Overall grade: A** (excellent architecture; minor production-hardening gaps).
+A well-architected, research-informed framework that has matured substantially: a new comprehensive
+reporting layer (MalwareReport + narrative + detection signatures), platform-aware deterministic
+filtering, defensive judge postprocessing, FP linting, rate limiting, security headers, and real DB
+migrations. Most previously-flagged gaps are resolved. **Overall grade: A** (strong architecture;
+minor production-hardening + facade-test gaps remain).
