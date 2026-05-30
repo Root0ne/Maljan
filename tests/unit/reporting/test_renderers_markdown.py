@@ -156,3 +156,60 @@ class TestSeverityBadge:
         report = _build(final_decision="Suspicious")
         markdown = MarkdownRenderer().render(report)
         assert "[SUSPICIOUS]" in markdown
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — per-section defensive isolation
+# ---------------------------------------------------------------------------
+
+
+class TestSectionFailureIsolation:
+    """The /reports/{id}/markdown endpoint 500-ed on the 2026-05-29 Linux
+    ELF audit because ``_section_dynamic_behavior`` called .get() on a
+    non-dict entry in ``notable_apis``. After Wave 9, each section is
+    wrapped so a single subtree failure cannot 500 the whole endpoint."""
+
+    def test_malformed_notable_apis_does_not_500(self) -> None:
+        from maljan.reporting.models import DynamicBehavior
+
+        report = _build()
+        # Pydantic normally rejects non-dict entries; bypass with
+        # ``model_construct`` to simulate a partially-corrupted upstream
+        # state (e.g., a state hop that lost a field). Renderer must still
+        # produce output without raising.
+        report.dynamic = DynamicBehavior.model_construct(
+            notable_apis=[
+                {"api": "CreateFile", "category": "fs", "process": "rat.exe", "count": 1},
+                None,
+                "bogus-string-not-a-dict",
+                {"api": "VirtualAlloc"},
+            ],
+            process_tree=[],
+            registry_mods=[],
+            file_operations=[],
+            sandbox_signatures=[],
+        )
+        markdown = MarkdownRenderer().render(report)
+        assert "## Dynamic Behavior" in markdown
+        assert "CreateFile" in markdown
+
+    def test_section_failure_isolated(self) -> None:
+        """If a single section raises, the others must still render."""
+        renderer = MarkdownRenderer()
+        report = _build()
+
+        def _boom(_report: MalwareReport) -> str:
+            raise RuntimeError("synthetic section failure")
+
+        # Monkey-patch one section to raise; the remaining sections + the
+        # safe-section stub must still produce a valid markdown body.
+        original = renderer._section_network  # type: ignore[attr-defined]
+        renderer._section_network = _boom  # type: ignore[assignment]
+        try:
+            markdown = renderer.render(report)
+        finally:
+            renderer._section_network = original  # type: ignore[assignment]
+
+        assert "# Malware Analysis Report" in markdown
+        assert "## Sample Identification" in markdown
+        assert "section 'network' rendering failed" in markdown

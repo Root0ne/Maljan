@@ -11,8 +11,10 @@ cleanly on terminals, PDFs and ticket systems alike.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
+from maljan.core.logger import logger
 from maljan.reporting.models import (
     CapabilityCell,
     DefensiveRecommendation,
@@ -38,25 +40,60 @@ class MarkdownRenderer:
     # a block with one or two headings.
 
     def render(self, report: MalwareReport) -> str:
+        # Wave 9 (2026-05-29): each section is wrapped in _safe_section so a
+        # single malformed subtree (e.g. degraded-mode runs where
+        # ``dynamic.notable_apis`` contains non-dict entries) cannot 500 the
+        # entire ``/reports/{id}/markdown`` endpoint. The 2026-05-29 Linux
+        # ELF audit hit exactly this — see G-FP report f072cd22.
         sections: list[str] = [
-            self._section_header(report),
-            self._section_identity(report),
-            self._section_severity(report.severity),
-            self._section_executive_summary(report),
-            self._section_capabilities_narrative(report),
-            self._section_static_analysis(report),
-            self._section_dynamic_behavior(report),
-            self._section_network(report),
-            self._section_persistence(report.persistence),
-            self._section_attack_matrix(report.capability_matrix),
-            self._section_capability_matrix(report.ttp_mappings),
-            self._section_attribution(report),
-            self._section_detection_signatures(report.detection_signatures),
-            self._section_defensive_recommendations(report.defensive_recommendations),
-            self._section_references(report),
-            self._section_run_summary(report.run_summary),
+            self._safe_section("header", lambda: self._section_header(report)),
+            self._safe_section("identity", lambda: self._section_identity(report)),
+            self._safe_section("severity", lambda: self._section_severity(report.severity)),
+            self._safe_section(
+                "executive_summary", lambda: self._section_executive_summary(report)
+            ),
+            self._safe_section(
+                "capabilities_narrative",
+                lambda: self._section_capabilities_narrative(report),
+            ),
+            self._safe_section("static_analysis", lambda: self._section_static_analysis(report)),
+            self._safe_section("dynamic_behavior", lambda: self._section_dynamic_behavior(report)),
+            self._safe_section("network", lambda: self._section_network(report)),
+            self._safe_section(
+                "persistence", lambda: self._section_persistence(report.persistence)
+            ),
+            self._safe_section(
+                "attack_matrix",
+                lambda: self._section_attack_matrix(report.capability_matrix),
+            ),
+            self._safe_section(
+                "capability_matrix",
+                lambda: self._section_capability_matrix(report.ttp_mappings),
+            ),
+            self._safe_section("attribution", lambda: self._section_attribution(report)),
+            self._safe_section(
+                "detection_signatures",
+                lambda: self._section_detection_signatures(report.detection_signatures),
+            ),
+            self._safe_section(
+                "defensive_recommendations",
+                lambda: self._section_defensive_recommendations(report.defensive_recommendations),
+            ),
+            self._safe_section("references", lambda: self._section_references(report)),
+            self._safe_section(
+                "run_summary", lambda: self._section_run_summary(report.run_summary)
+            ),
         ]
         return "\n\n".join(s.rstrip() for s in sections if s).rstrip() + "\n"
+
+    @staticmethod
+    def _safe_section(name: str, fn: Callable[[], str]) -> str:
+        """Run a section renderer, return a stub on failure."""
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001 — markdown is non-critical UX surface
+            logger.exception("markdown_renderer: section '%s' raised; substituting stub.", name)
+            return f"<!-- section '{name}' rendering failed — see server logs -->"
 
     # ------------------------------------------------------------------
     # Sections
@@ -235,6 +272,8 @@ class MarkdownRenderer:
             lines.append("| Path | Op | API |")
             lines.append("|---|---|---|")
             for op in dyn.file_operations[:40]:
+                if not isinstance(op, dict):
+                    continue
                 lines.append(
                     f"| `{_truncate(str(op.get('path', '')), 80)}` | "
                     f"{op.get('operation', '-')} | {op.get('api', '-')} |"
@@ -247,6 +286,8 @@ class MarkdownRenderer:
             lines.append("| API | Category | Process | Count |")
             lines.append("|---|---|---|---|")
             for api in dyn.notable_apis[:20]:
+                if not isinstance(api, dict):
+                    continue
                 lines.append(
                     f"| `{api.get('api', '-')}` | {api.get('category', '-')} | "
                     f"`{api.get('process', '-')}` | {api.get('count', 0)} |"

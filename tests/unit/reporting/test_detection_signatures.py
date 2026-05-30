@@ -76,12 +76,19 @@ class TestEmptyReport:
         """An empty sandbox/static report still produces a YARA rule because
         the sha256 fingerprint is always available."""
         report = _build()
+        # Wave 9 (2026-05-29): the YARA gate refuses generation for
+        # ungrounded family attribution (mirrors the Sigma gate). The
+        # builder fixture forces family_grounded=False; clear the family so
+        # the gate doesn't fire and we exercise the legacy "sha256-only"
+        # path.
+        report.attribution.family = None
         rules = build_detection_rules(report)
         kinds = {r.kind for r in rules}
         assert kinds == {"yara"}
 
     def test_yara_rule_has_sha256_condition(self) -> None:
         report = _build(file_hash="b" * 64)
+        report.attribution.family = None
         rules = build_detection_rules(report)
         yara_rule = next(r for r in rules if r.kind == "yara")
         assert "b" * 64 in yara_rule.body
@@ -266,3 +273,40 @@ class TestNoDynamicNoSigma:
         rules = build_detection_rules(report)
         # Without registry / persistence / sandbox sigs Sigma is skipped.
         assert all(r.kind != "sigma" for r in rules)
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — YARA family-grounded gate (mirror of the Wave 4 Sigma gate)
+# ---------------------------------------------------------------------------
+
+
+class TestYaraFamilyGroundedGate:
+    """The Wave 4 Sigma gate refuses generation when family_grounded=false.
+    Wave 9 extends the same gate to YARA so the 2026-05-29 Linux ELF audit's
+    ``Maljan_AutoGen_unknown`` stub cannot ship."""
+
+    def test_yara_gated_when_family_ungrounded(self) -> None:
+        report = _build()
+        # Force the ungrounded-family condition the audit hit.
+        report.attribution.family = "unknown"
+        report.attribution.family_grounded = False
+        rules = build_detection_rules(report)
+        assert all(r.kind != "yara" for r in rules), (
+            "YARA gate should refuse generation when family_grounded=false"
+        )
+
+    def test_yara_emitted_when_family_grounded(self) -> None:
+        report = _build()
+        report.attribution.family = "lockbit"
+        report.attribution.family_grounded = True
+        rules = build_detection_rules(report)
+        assert any(r.kind == "yara" for r in rules)
+
+    def test_yara_emitted_when_no_family_set(self) -> None:
+        # Common case: deterministic-only pipeline with no attribution. The
+        # gate must only fire on the explicit ungrounded-family path.
+        report = _build()
+        report.attribution.family = None
+        report.attribution.family_grounded = True
+        rules = build_detection_rules(report)
+        assert any(r.kind == "yara" for r in rules)

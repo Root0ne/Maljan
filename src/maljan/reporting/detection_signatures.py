@@ -83,8 +83,11 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
       regardless of host OS, so it's safe to ship.
     """
     sigma_skip = _sigma_gate_reason(report)
+    yara_skip = _yara_gate_reason(report)
     if sigma_skip:
         logger.info("detection_signatures: Sigma gate refused generation — %s.", sigma_skip)
+    if yara_skip:
+        logger.info("detection_signatures: YARA gate refused generation — %s.", yara_skip)
 
     rules: list[DetectionRule] = []
     builders: list[tuple[str, Any]] = [
@@ -94,6 +97,8 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
     ]
     for kind, builder in builders:
         if kind == "sigma" and sigma_skip:
+            continue
+        if kind == "yara" and yara_skip:
             continue
         try:
             rule = builder(report)
@@ -107,12 +112,32 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
         if rule is not None:
             rules.append(rule)
     logger.info(
-        "detection_signatures: generated %d rule(s) (errors=%d, sigma_gated=%s).",
+        "detection_signatures: generated %d rule(s) (errors=%d, sigma_gated=%s, yara_gated=%s).",
         len(rules),
         sum(1 for r in rules if r.compile_error),
         "yes" if sigma_skip else "no",
+        "yes" if yara_skip else "no",
     )
     return rules
+
+
+def _family_grounded_reason(report: MalwareReport) -> str | None:
+    """Shared family-grounding gate (D11 guardrail).
+
+    Returns a human-readable refusal reason when the attribution carries
+    a family name without grounding. Used by both the Sigma and YARA
+    gates so the two stay in lockstep — the 2026-05-29 Linux ELF audit
+    found YARA was unconditionally emitting ``Maljan_AutoGen_unknown``
+    even when family_grounded=false because the YARA gate was missing.
+    """
+    attribution = getattr(report, "attribution", None)
+    if attribution is None:
+        return None
+    family = getattr(attribution, "family", None)
+    grounded = getattr(attribution, "family_grounded", True)
+    if family and grounded is False:
+        return f"ungrounded family '{family}' (D11 guardrail)"
+    return None
 
 
 def _sigma_gate_reason(report: MalwareReport) -> str | None:
@@ -125,13 +150,19 @@ def _sigma_gate_reason(report: MalwareReport) -> str | None:
     the discriminating signal: it's the only path that produces a Sigma
     rule named after an LLM hallucination.
     """
-    attribution = getattr(report, "attribution", None)
-    if attribution is not None:
-        family = getattr(attribution, "family", None)
-        grounded = getattr(attribution, "family_grounded", True)
-        if family and grounded is False:
-            return f"ungrounded family '{family}' (D11 guardrail)"
-    return None
+    return _family_grounded_reason(report)
+
+
+def _yara_gate_reason(report: MalwareReport) -> str | None:
+    """Wave 9 YARA gate (2026-05-29) — mirror the Sigma gate.
+
+    The 2026-05-29 Linux ELF audit's report f072cd22 shipped a stub
+    ``Maljan_AutoGen_unknown`` YARA rule even though family_grounded=false
+    because the previous gate was Sigma-only. The rule body's
+    ``description = "Auto-generated, verdict=Malware, family=unknown"``
+    misleads downstream consumers — refuse generation outright instead.
+    """
+    return _family_grounded_reason(report)
 
 
 # ---------------------------------------------------------------------------

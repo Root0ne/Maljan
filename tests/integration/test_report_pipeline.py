@@ -193,14 +193,27 @@ class TestNarrativeWithMockLLM:
 class TestDetectionSignaturesInReport:
     """Faz 4: the report_node must attach YARA/Sigma/Suricata rules."""
 
-    def test_at_least_yara_signature_is_present(self, mock_settings: Settings) -> None:
+    def test_yara_gate_holds_in_pipeline_for_ungrounded_family(
+        self, mock_settings: Settings
+    ) -> None:
+        """Wave 9 D11 (2026-05-29): when the deterministic builder marks the
+        family attribution as ungrounded (the default for mock-mode runs
+        with no Triage CTI / sandbox sigs / ISR claim), the report_node's
+        ``detection_signatures`` must be empty — YARA generation is gated
+        by ``family_grounded`` just like Sigma. The earlier Faz 4
+        "YARA always present" assertion is superseded by
+        ``tests/unit/reporting/test_detection_signatures.py``'s
+        ``TestYaraFamilyGroundedGate`` which covers the gated /
+        grounded / no-family-set paths at the function level. This
+        integration test confirms the gate's effect propagates through
+        the report_node end-to-end.
+        """
         app = MaljanApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="detect-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
-        # Mock pipeline has no sandbox data; only YARA is guaranteed.
-        kinds = {rule.kind for rule in report.detection_signatures}
-        assert "yara" in kinds
+        assert report.attribution.family_grounded is False
+        assert report.detection_signatures == []
 
     def test_disabled_signatures_keep_list_empty(self) -> None:
         s = Settings()
