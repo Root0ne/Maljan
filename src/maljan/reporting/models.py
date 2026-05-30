@@ -300,7 +300,11 @@ class PersistenceMechanism(BaseModel):
 
     model_config = _STRICT_CONFIG
 
+    # Wave 9 (2026-05-29): Linux ELF / Mach-O persistence kinds added so
+    # the 2026-05-29 Mirai ELF audit's PERSISTENCE tab renders real
+    # signal instead of empty. Windows kinds remain canonical for PE.
     kind: Literal[
+        # ── Windows (PE) ─────────────────────────────────────
         "registry_run",
         "scheduled_task",
         "service",
@@ -312,6 +316,13 @@ class PersistenceMechanism(BaseModel):
         "appinit_dll",
         "lsa_provider",
         "winlogon_helper",
+        # ── Linux (ELF) — Wave 9 ─────────────────────────────
+        "systemd_service",
+        "cron_job",
+        "init_d",
+        "rc_local",
+        "ld_preload",
+        # ── Fallback ─────────────────────────────────────────
         "other",
     ]
     target: str  # registry path / file path / service name

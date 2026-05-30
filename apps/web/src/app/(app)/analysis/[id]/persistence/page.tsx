@@ -4,6 +4,7 @@ import { useReport } from "../layout";
 import type { PersistenceKind } from "@/types/malware-report";
 
 const KIND_LABELS: Record<PersistenceKind, string> = {
+  // Windows (PE)
   registry_run: "Registry Run Key",
   scheduled_task: "Scheduled Task",
   service: "Windows Service",
@@ -15,6 +16,13 @@ const KIND_LABELS: Record<PersistenceKind, string> = {
   appinit_dll: "AppInit DLL",
   lsa_provider: "LSA Provider",
   winlogon_helper: "Winlogon Helper",
+  // Linux (ELF) — Wave 9 (2026-05-29)
+  systemd_service: "Systemd Service",
+  cron_job: "Cron Job",
+  init_d: "init.d Script",
+  rc_local: "rc.local Modification",
+  ld_preload: "LD_PRELOAD Hijack",
+  // Fallback
   other: "Other",
 };
 
@@ -30,6 +38,11 @@ const KIND_COLORS: Record<PersistenceKind, string> = {
   appinit_dll: "text-status-red bg-status-red/10",
   lsa_provider: "text-status-red bg-status-red/10",
   winlogon_helper: "text-status-red bg-status-red/10",
+  systemd_service: "text-status-red bg-status-red/10",
+  cron_job: "text-status-orange bg-status-orange/10",
+  init_d: "text-status-red bg-status-red/10",
+  rc_local: "text-status-red bg-status-red/10",
+  ld_preload: "text-status-red bg-status-red/10",
   other: "text-text-secondary bg-bg-active",
 };
 

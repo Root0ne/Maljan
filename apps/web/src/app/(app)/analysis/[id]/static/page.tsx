@@ -49,8 +49,8 @@ export default function StaticTab() {
   if (!staticData) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No static analysis data available — the sample may not be a PE binary, or
-        the loader was unable to parse it.
+        No static analysis data available — the sample may not be a PE/ELF/Mach-O
+        binary, or the loader was unable to parse it.
       </div>
     );
   }

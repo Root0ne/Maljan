@@ -102,3 +102,49 @@ class TestForbidExtra:
             }
         )
         assert report.identity.hashes.sha256 == "a" * 64
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — PersistenceKind Linux Literal extension
+# ---------------------------------------------------------------------------
+
+
+class TestPersistenceLinuxKinds:
+    """The Pydantic Literal must accept the 5 Linux-flavoured kinds added
+    in Wave 9 (2026-05-29). The TypeScript mirror lives at
+    apps/web/src/types/malware-report.ts."""
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "systemd_service",
+            "cron_job",
+            "init_d",
+            "rc_local",
+            "ld_preload",
+        ],
+    )
+    def test_linux_kind_accepted(self, kind: str) -> None:
+        from maljan.reporting.models import PersistenceMechanism
+
+        pm = PersistenceMechanism.model_validate(
+            {"kind": kind, "target": "/etc/foo", "evidence_ref": "x"}
+        )
+        assert pm.kind == kind
+
+    def test_windows_kinds_still_accepted(self) -> None:
+        from maljan.reporting.models import PersistenceMechanism
+
+        for kind in ("registry_run", "scheduled_task", "service", "other"):
+            pm = PersistenceMechanism.model_validate(
+                {"kind": kind, "target": "x", "evidence_ref": "y"}
+            )
+            assert pm.kind == kind
+
+    def test_unknown_kind_rejected(self) -> None:
+        from maljan.reporting.models import PersistenceMechanism
+
+        with pytest.raises(ValueError):
+            PersistenceMechanism.model_validate(
+                {"kind": "totally_made_up", "target": "x", "evidence_ref": "y"}
+            )
