@@ -1123,11 +1123,30 @@ def make_report_node(container: ServiceContainer) -> Any:
             len(fp_warnings),
         )
 
-        return {
+        # Wave 9 HOTFIX-09 (2026-05-29): surface ``fp_warnings`` into the
+        # pipeline state's ``run_summary`` so the worker writes them to the
+        # ``reports.run_summary`` JSONB column. Without this the warnings
+        # only landed on ``MalwareReport.run_summary`` (saved to the
+        # ``malware_report`` column / ``/full`` endpoint); the UI SUMMARY
+        # tab reads from the ``/reports/{id}`` DTO which surfaces the
+        # narrower ``run_summary`` column, so the QA WARNINGS banner
+        # stayed empty even when the linter had real findings to show.
+        #
+        # Only override state["run_summary"] when there are warnings to
+        # add — leaving it untouched preserves the mock-mode contract
+        # (state.run_summary remains None when the judge node skipped
+        # RunSummaryBuilder, exercised by test_run_summary_is_none_in_mock_mode).
+        result: dict[str, Any] = {
             "malware_report": report.model_dump(mode="json"),
             "malware_report_markdown": markdown,
             "stix_bundle_extended": extended_dump,
         }
+        if fp_warnings:
+            result["run_summary"] = {
+                **(state.get("run_summary") or {}),
+                "fp_warnings": fp_warnings,
+            }
+        return result
 
     node_fn.__name__ = "report_node"
     return node_fn

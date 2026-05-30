@@ -149,12 +149,19 @@ class TestNewStateFields:
         """run_summary key must exist in the final state dict."""
         assert "run_summary" in mock_result
 
-    def test_run_summary_is_none_in_mock_mode(self, mock_result: dict) -> None:
-        """In mock mode, the judge node skips RunSummaryBuilder → run_summary is None."""
-        # This is expected behavior: the mock judge node returns early
-        # before the RunSummaryBuilder is invoked. RunSummary is only
-        # built in real (non-mock) runs.
-        assert mock_result.get("run_summary") is None
+    def test_run_summary_lacks_cascade_in_mock_mode(self, mock_result: dict) -> None:
+        """In mock mode, the judge node skips RunSummaryBuilder so the
+        cascade / agent_stats / negotiation fields stay absent. Wave 9
+        HOTFIX-09 (2026-05-29) may attach a ``fp_warnings`` passenger
+        when the FP linter fires (e.g. the mock pipeline's default
+        ``family='unknown'`` trips the C5 ungrounded-family rule); the
+        narrower contract here is "RunSummaryBuilder did not run", not
+        "run_summary is None"."""
+        rs = mock_result.get("run_summary") or {}
+        assert isinstance(rs, dict)
+        # Keys produced exclusively by RunSummaryBuilder must be absent.
+        for absent in ("cascade", "agent_stats", "negotiation", "validation"):
+            assert absent not in rs, f"Mock pipeline unexpectedly populated run_summary['{absent}']"
 
     def test_file_hash_preserved(self, mock_result: dict) -> None:
         assert mock_result.get("file_hash") == "sample_1"
