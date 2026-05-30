@@ -58,9 +58,7 @@ class TestPELoader:
 
     def test_interesting_strings_filter(self, tmp_path: Path) -> None:
         fake_file = tmp_path / "fake.exe"
-        fake_file.write_bytes(
-            b"http://evil.com/c2\x00normal_text\x00HKLM\\Software\x00"
-        )
+        fake_file.write_bytes(b"http://evil.com/c2\x00normal_text\x00HKLM\\Software\x00")
         loader = PELoader(fake_file)
         data = loader.parse()
         interesting = data["strings"]

@@ -97,6 +97,7 @@ class TestSubmissionResult:
         result = SubmissionResult(task_id="1", status="reported", report={})
         assert result.succeeded is False
 
+
 # ---------------------------------------------------------------------------
 # MockSandboxClient
 # ---------------------------------------------------------------------------

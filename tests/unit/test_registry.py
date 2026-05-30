@@ -56,4 +56,3 @@ class TestParserRegistry:
         registry = ParserRegistry()
         with pytest.raises(KeyError):
             registry.create("nonexistent")
-

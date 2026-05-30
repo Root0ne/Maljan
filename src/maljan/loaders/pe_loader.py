@@ -94,9 +94,7 @@ class PELoader:
         if hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
             for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
                 name = (
-                    exp.name.decode("utf-8", errors="ignore")
-                    if exp.name
-                    else f"ord_{exp.ordinal}"
+                    exp.name.decode("utf-8", errors="ignore") if exp.name else f"ord_{exp.ordinal}"
                 )
                 exports.append(name)
         return exports

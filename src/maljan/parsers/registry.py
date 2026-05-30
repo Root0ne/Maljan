@@ -59,4 +59,3 @@ class ParserRegistry:
         """Instantiate a registered parser."""
         cls = self.get_class(name)
         return cls()
-
