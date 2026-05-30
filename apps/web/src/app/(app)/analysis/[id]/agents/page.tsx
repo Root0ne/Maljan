@@ -3,10 +3,17 @@
 import { useReport } from "../layout";
 import type { AgentFindingStatus } from "@/types";
 
-const VERDICT_STYLES: Record<string, { icon: string; class: string }> = {
-  malicious: { icon: "\u2716", class: "text-status-red" },
-  suspicious: { icon: "?", class: "text-status-orange" },
-  benign: { icon: "\u2714", class: "text-status-green" },
+/* Per-agent confidence tier. IMPORTANT: ``final_confidence`` is each agent's
+ * confidence in its OWN claim \u2014 NOT a probability of maliciousness. A benign
+ * finding ("no malicious behavior") can legitimately carry 100% confidence, so
+ * this must never be rendered as a malicious/suspicious/benign verdict (that
+ * produced the "Malicious \u00b7 100% \u00b7 no malicious behavior" contradiction). We
+ * surface it as a neutral signal strength; the agent's actual stance lives in
+ * the Key Finding column. */
+const SIGNAL_STYLES: Record<string, { icon: string; class: string }> = {
+  high: { icon: "\u25cf", class: "text-text-primary" },
+  medium: { icon: "\u25d0", class: "text-text-secondary" },
+  low: { icon: "\u25cb", class: "text-text-muted" },
   unknown: { icon: "-", class: "text-text-muted" },
 };
 
@@ -40,10 +47,10 @@ const STATUS_STYLES: Record<
   },
 };
 
-function confidenceToVerdict(confidence: number): string {
-  if (confidence >= 75) return "malicious";
-  if (confidence >= 45) return "suspicious";
-  return "benign";
+function confidenceToSignal(confidence: number): string {
+  if (confidence >= 75) return "high";
+  if (confidence >= 45) return "medium";
+  return "low";
 }
 
 export default function AgentsTab() {
@@ -64,10 +71,9 @@ export default function AgentsTab() {
   const agents = (report?.agent_findings ?? []).map((f) => {
     const pct = Math.round(f.final_confidence * 100);
     const status: AgentFindingStatus = (f.status ?? "complete") as AgentFindingStatus;
-    // Verdict only makes sense for completed runs. For failed / timed-out
-    // / no-data the lifecycle status is the entire story; suppress the
-    // misleading derived verdict label.
-    const verdict = status === "complete" ? confidenceToVerdict(pct) : "unknown";
+    // Signal strength only makes sense for completed runs. For failed /
+    // timed-out / no-data the lifecycle status is the entire story.
+    const signal = status === "complete" ? confidenceToSignal(pct) : "unknown";
     // Extract first claim description as key finding
     let keyFinding = "No specific findings recorded.";
     if (f.claims && Array.isArray(f.claims) && f.claims.length > 0) {
@@ -87,7 +93,7 @@ export default function AgentsTab() {
     }
     return {
       name: f.agent_name,
-      verdict,
+      signal,
       confidence: pct,
       domain: f.domain,
       key_finding: keyFinding,
@@ -96,9 +102,6 @@ export default function AgentsTab() {
     };
   });
 
-  const maliciousCount = agents.filter(
-    (a) => a.status === "complete" && a.verdict === "malicious",
-  ).length;
   const completedCount = agents.filter((a) => a.status === "complete").length;
 
   return (
@@ -109,7 +112,9 @@ export default function AgentsTab() {
         </h2>
         <span className="text-xs text-text-muted">
           {agents.length > 0
-            ? `${maliciousCount}/${completedCount} flagged as malicious${
+            ? `${completedCount}/${agents.length} agent${
+                agents.length === 1 ? "" : "s"
+              } completed${
                 completedCount < agents.length
                   ? ` (${agents.length - completedCount} non-complete)`
                   : ""
@@ -127,7 +132,7 @@ export default function AgentsTab() {
           <thead>
             <tr className="border-b border-border">
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-44">Agent</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-28">Verdict</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-28">Signal</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Confidence</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-16">Rounds</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Key Finding</th>
@@ -135,7 +140,7 @@ export default function AgentsTab() {
           </thead>
           <tbody className="divide-y divide-border-light">
             {agents.map((agent) => {
-              const style = VERDICT_STYLES[agent.verdict] || VERDICT_STYLES.unknown;
+              const style = SIGNAL_STYLES[agent.signal] || SIGNAL_STYLES.unknown;
               return (
                 <tr key={agent.name} className="hover:bg-bg-hover transition-colors">
                   <td className="px-4 py-3">
@@ -148,7 +153,7 @@ export default function AgentsTab() {
                     {agent.status === "complete" ? (
                       <div className={`flex items-center gap-1.5 ${style.class}`}>
                         <span className="text-sm">{style.icon}</span>
-                        <span className="text-xs font-medium capitalize">{agent.verdict}</span>
+                        <span className="text-xs font-medium capitalize">{agent.signal}</span>
                       </div>
                     ) : (
                       <span

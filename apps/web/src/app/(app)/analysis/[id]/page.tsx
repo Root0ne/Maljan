@@ -22,6 +22,10 @@ const VERDICT_TEXT: Record<string, string> = {
   unknown: "text-text-muted",
 };
 
+// Mirrors the backend CONF-INFL-01 ceiling (report_node caps a degraded
+// run's overall_confidence at 0.60). Expressed in percent for the banner.
+const DEGRADED_CONFIDENCE_CAP_PCT = 60;
+
 function lc(v: string | null | undefined): string {
   return (v || "unknown").toLowerCase();
 }
@@ -236,9 +240,19 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           </span>
           <div className="text-text-secondary space-y-1">
             <p>
-              Confidence was capped at <span className="font-mono">0.60</span>{" "}
-              because the pipeline produced partial signal. Verdict and
+              The pipeline produced only partial signal, so the verdict and
               severity should be treated as preliminary.
+              {/* CONF-INFL-01: the 0.60 ceiling only actually lowers the
+                  score when the raw confidence exceeded it. Claiming "capped
+                  at 0.60" while showing e.g. 0.50 is misleading, so only state
+                  it when the displayed confidence reached the cap. */}
+              {confidence >= DEGRADED_CONFIDENCE_CAP_PCT ? (
+                <>
+                  {" "}
+                  Confidence was capped at{" "}
+                  <span className="font-mono">0.60</span>.
+                </>
+              ) : null}
             </p>
             {degradationReasons.length > 0 && (
               <ul className="list-disc list-inside text-xs">
