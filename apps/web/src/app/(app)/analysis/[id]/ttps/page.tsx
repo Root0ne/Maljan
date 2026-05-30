@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useReport } from "../layout";
+import { classifyMatrix, resolveMobileTactic } from "@/lib/mitre-mobile";
 
 interface Technique {
   id: string;
@@ -16,6 +17,7 @@ interface Tactic {
   name: string;
   technique_count: number;
   techniques: Technique[];
+  matrix: "enterprise" | "mobile" | "ics" | "unknown";
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -36,10 +38,26 @@ function parseTechniques(raw: unknown[]): Tactic[] {
 
     const techId = String(t.technique_id ?? t.id ?? "");
     const techName = String(t.technique_name ?? t.name ?? techId);
-    const tacticId = String(t.tactic_id ?? t.tactic ?? "TA0000");
-    const tacticName = String(t.tactic_name ?? t.tactic ?? "Unknown Tactic");
+    let tacticId = String(t.tactic_id ?? t.tactic ?? "TA0000");
+    let tacticName = String(t.tactic_name ?? t.tactic ?? "Unknown Tactic");
     const sources = Array.isArray(t.sources) ? (t.sources as string[]) : [];
     const matches = Number(t.matches ?? t.match_count ?? 1);
+
+    // Wave 10 W10-TTP-02 (2026-05-30): Mobile ATT&CK fallback. When the
+    // pipeline emits ``TA0000 / Unknown Tactic`` (cascade and sandbox-CTI
+    // sources frequently leave the tactic blank for Mobile techniques)
+    // resolve the parent technique ID against the curated Mobile map.
+    // Caps the matrix attribution so the rendering layer can group + tag
+    // appropriately. Failure to resolve leaves the "Unknown" fallback —
+    // better honest than misclassified.
+    const matrix = classifyMatrix(techId);
+    if (tacticId === "TA0000" || tacticName === "Unknown Tactic" || !tacticName) {
+      const mobile = resolveMobileTactic(techId);
+      if (mobile) {
+        tacticId = mobile.id;
+        tacticName = mobile.name;
+      }
+    }
 
     if (!tacticMap.has(tacticId)) {
       tacticMap.set(tacticId, {
@@ -47,6 +65,7 @@ function parseTechniques(raw: unknown[]): Tactic[] {
         name: tacticName,
         technique_count: 0,
         techniques: [],
+        matrix,
       });
     }
 
@@ -68,6 +87,14 @@ export default function TTpsTab() {
   const { report, job, loading } = useReport();
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
+  // Wave 10 W10-TTP-02 (2026-05-30): activeMatrix MUST be declared
+  // before the early returns below — React enforces a consistent hook
+  // call order across renders, and the original placement after the
+  // ``if (loading) return ...`` lines tripped the Rules of Hooks
+  // violation observed in the first 2026-05-30 smoke test.
+  const [activeMatrix, setActiveMatrix] = useState<
+    "enterprise" | "mobile" | "ics"
+  >("enterprise");
 
   // Prefer ttp_mappings from the cached MalwareReport — saves one round-trip
   // for every navigation to the TTPs tab. Fall back to the dedicated /mitre
@@ -103,9 +130,44 @@ export default function TTpsTab() {
 
   const tactics = parseTechniques(rawTechniques);
 
-  const totalTechniques = tactics.reduce((s, t) => s + t.techniques.length, 0);
+  // Wave 10 W10-TTP-02 (2026-05-30): split tactics by matrix so the
+  // existing "Enterprise (N)" pill grows a sibling "Mobile (M)" pill.
+  // Tactics whose matrix is "unknown" stay grouped with Enterprise so
+  // they don't disappear from the heatmap when the resolver misses one.
+  // Plain computation rather than useMemo — adding a hook here would
+  // have to live above the early returns to obey Rules of Hooks, and
+  // for the typical 1-10 tactic count the memo cost outweighs the win.
+  const tacticsByMatrix = {
+    enterprise: tactics.filter(
+      (t) => t.matrix === "enterprise" || t.matrix === "unknown",
+    ),
+    mobile: tactics.filter((t) => t.matrix === "mobile"),
+    ics: tactics.filter((t) => t.matrix === "ics"),
+  };
+  // Auto-pick the first non-empty matrix when the user-selected one
+  // is empty — handles the common Android case where activeMatrix
+  // defaults to "enterprise" but only "mobile" has techniques.
+  const matrixOrder = ["enterprise", "mobile", "ics"] as const;
+  const effectiveMatrix =
+    tacticsByMatrix[activeMatrix].length > 0
+      ? activeMatrix
+      : matrixOrder.find((m) => tacticsByMatrix[m].length > 0) ?? activeMatrix;
+  const activeTactics = tacticsByMatrix[effectiveMatrix];
 
-  const filteredTactics = tactics.map((tactic) => ({
+  const totalEnterprise = tacticsByMatrix.enterprise.reduce(
+    (s, t) => s + t.techniques.length,
+    0,
+  );
+  const totalMobile = tacticsByMatrix.mobile.reduce(
+    (s, t) => s + t.techniques.length,
+    0,
+  );
+  const totalICS = tacticsByMatrix.ics.reduce(
+    (s, t) => s + t.techniques.length,
+    0,
+  );
+
+  const filteredTactics = activeTactics.map((tactic) => ({
     ...tactic,
     techniques: tactic.techniques.filter(
       (tech) =>
@@ -130,9 +192,27 @@ export default function TTpsTab() {
       {/* Controls */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex border border-border rounded overflow-hidden">
-          <button className="px-3 py-1.5 text-xs bg-bg-active text-text-primary border-r border-border">
-            Enterprise ({totalTechniques})
-          </button>
+          {(
+            [
+              ["enterprise", "Enterprise", totalEnterprise],
+              ["mobile", "Mobile", totalMobile],
+              ["ics", "ICS", totalICS],
+            ] as const
+          )
+            .filter(([, , count]) => count > 0)
+            .map(([key, label, count], i, arr) => (
+              <button
+                key={key}
+                onClick={() => setActiveMatrix(key)}
+                className={`px-3 py-1.5 text-xs ${
+                  effectiveMatrix === key
+                    ? "bg-bg-active text-text-primary"
+                    : "bg-bg-surface text-text-secondary hover:text-text-primary"
+                } ${i < arr.length - 1 ? "border-r border-border" : ""}`}
+              >
+                {label} ({count})
+              </button>
+            ))}
         </div>
         <input
           type="text"
