@@ -74,7 +74,6 @@ const TABS: TabDef[] = [
   { key: "/agents", label: "AGENTS", group: "advanced" },
   { key: "/pipeline", label: "PIPELINE", group: "advanced" },
   { key: "/rules", label: "RULES", group: "advanced" },
-  { key: "/ttps", label: "TTPS", group: "advanced" },
   { key: "/timeline", label: "TIMELINE", group: "advanced" },
   { key: "/stix", label: "STIX", group: "advanced" },
   { key: "/live", label: "LIVE", group: "advanced" },
