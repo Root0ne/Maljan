@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/errors";
 "use client";
 
 import { useState, useEffect } from "react";
@@ -31,11 +32,11 @@ export default function AuditLogsPage() {
         const res = await api.getAuditLogs(page, pageSize);
         setLogs(res.items);
         setTotal(res.total);
-      } catch (err: any) {
-        if (err.message?.includes("403") || err.message?.toLowerCase().includes("forbidden") || err.message?.toLowerCase().includes("access denied")) {
+      } catch (err) {
+        if (getErrorMessage(err)?.includes("403") || getErrorMessage(err)?.toLowerCase().includes("forbidden") || getErrorMessage(err)?.toLowerCase().includes("access denied")) {
           setError("Access denied. Audit logs are restricted to administrators.");
         } else {
-          setError(err.message || "Failed to load audit logs.");
+          setError(getErrorMessage(err) || "Failed to load audit logs.");
         }
       } finally {
         setLoading(false);

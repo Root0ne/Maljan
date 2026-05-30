@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/errors";
 "use client";
 
 import { useState, useEffect } from "react";
@@ -72,8 +73,8 @@ export default function JobsPage() {
       try {
         const res = await api.getJobs(1, 100);
         setJobs(res.items.map(mapJob));
-      } catch (err: any) {
-        setError(err.message || "Failed to load jobs.");
+      } catch (err) {
+        setError(getErrorMessage(err) || "Failed to load jobs.");
       } finally {
         setLoading(false);
       }
@@ -105,8 +106,8 @@ export default function JobsPage() {
       setConfirmJob(null);
       await refreshJobs();
       setToast(`Job ${idPrefix} cancelled.`);
-    } catch (err: any) {
-      setCancelError(err.message || "Failed to cancel job.");
+    } catch (err) {
+      setCancelError(getErrorMessage(err) || "Failed to cancel job.");
     } finally {
       setCancelling(false);
     }

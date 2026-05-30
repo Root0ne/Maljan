@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/errors";
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -57,8 +58,8 @@ export default function SamplesPage() {
       try {
         const res = await api.getSamples();
         setSamples(res.items.map(mapSample));
-      } catch (err: any) {
-        setError(err.message || "Failed to load samples.");
+      } catch (err) {
+        setError(getErrorMessage(err) || "Failed to load samples.");
       } finally {
         setLoading(false);
       }
@@ -88,8 +89,8 @@ export default function SamplesPage() {
       await api.uploadSample(file);
       const res = await api.getSamples();
       setSamples(res.items.map(mapSample));
-    } catch (error: any) {
-      alert(`Upload failed: ${error.message || "Unknown error"}`);
+    } catch (error) {
+      alert(`Upload failed: ${getErrorMessage(error) || "Unknown error"}`);
     } finally {
       setUploading(false);
     }
@@ -216,8 +217,8 @@ export default function SamplesPage() {
                           try {
                             const detail = await api.getSample(s.id);
                             setDetailSample(detail);
-                          } catch (err: any) {
-                            alert(err.message || "Failed to load sample details.");
+                          } catch (err) {
+                            alert(getErrorMessage(err) || "Failed to load sample details.");
                           }
                         }}
                         className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
@@ -229,8 +230,8 @@ export default function SamplesPage() {
                           try {
                             const job = await api.createJob(s.id);
                             window.location.href = `/analysis/${job.id}/live`;
-                          } catch (err: any) {
-                            alert(err.message || "Failed to start analysis.");
+                          } catch (err) {
+                            alert(getErrorMessage(err) || "Failed to start analysis.");
                           }
                         }}
                         className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"

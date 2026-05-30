@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/errors";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -133,8 +134,8 @@ export default function DashboardPage() {
         setStats(mapApiStats(s));
         setJobs(j.items.slice(0, 10));
         setSystemStatus(sys);
-      } catch (err: any) {
-        setError(err.message || "Failed to load dashboard data.");
+      } catch (err) {
+        setError(getErrorMessage(err) || "Failed to load dashboard data.");
       } finally {
         setLoading(false);
       }

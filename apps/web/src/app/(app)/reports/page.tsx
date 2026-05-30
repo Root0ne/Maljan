@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/errors";
 "use client";
 
 import Link from "next/link";
@@ -57,8 +58,8 @@ export default function ReportsPage() {
       try {
         const res = await api.getReports(1, 50);
         setReports(res.items.map(mapReport));
-      } catch (err: any) {
-        setError(err.message || "Failed to load reports.");
+      } catch (err) {
+        setError(getErrorMessage(err) || "Failed to load reports.");
       } finally {
         setLoading(false);
       }
