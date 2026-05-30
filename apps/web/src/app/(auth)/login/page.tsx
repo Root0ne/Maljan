@@ -91,7 +91,7 @@ export default function LoginPage() {
 
         <p className="mt-4 text-xs text-text-muted text-center">
           No account?{" "}
-          <Link href="/register" className="text-accent hover:underline">
+          <Link href="/register" className="text-accent-strong hover:underline">
             Register
           </Link>
         </p>

@@ -52,7 +52,7 @@ export default function Header() {
             aria-expanded={paletteOpen}
             aria-controls="global-search-palette"
           />
-          <span className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 text-[10px] text-text-muted pointer-events-none">
+          <span className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 text-[11px] text-text-muted pointer-events-none">
             <kbd className="px-1 py-px border border-border rounded bg-bg-surface">Ctrl</kbd>
             <kbd className="px-1 py-px border border-border rounded bg-bg-surface">K</kbd>
           </span>

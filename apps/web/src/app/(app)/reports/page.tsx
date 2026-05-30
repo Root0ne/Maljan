@@ -164,7 +164,7 @@ export default function ReportsPage() {
                     <td className="px-4 py-3">
                       <Link
                         href={`/analysis/${report.job_id}`}
-                        className="text-sm text-accent hover:underline"
+                        className="text-sm text-accent-strong hover:underline"
                       >
                         {report.sample_filename}
                       </Link>

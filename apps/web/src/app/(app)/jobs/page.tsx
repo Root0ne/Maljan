@@ -311,7 +311,7 @@ export default function JobsPage() {
               <button
                 onClick={handleConfirmCancel}
                 disabled={cancelling}
-                className="px-3 py-1 text-xs bg-status-red text-white rounded hover:bg-status-red/90 transition-colors disabled:opacity-50"
+                className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 transition-colors disabled:opacity-50"
               >
                 {cancelling ? "Cancelling..." : "Cancel job"}
               </button>

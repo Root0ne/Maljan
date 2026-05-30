@@ -59,7 +59,7 @@ export default function StaticTab() {
     <div className="space-y-4">
       {(staticData.packer_hint || staticData.obfuscation_indicators.length > 0) && (
         <div className="bg-bg-surface border border-border rounded p-4">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2">
+          <div className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
             Packer / Obfuscation
           </div>
           {staticData.packer_hint && (
@@ -72,7 +72,7 @@ export default function StaticTab() {
               {staticData.obfuscation_indicators.map((ind) => (
                 <span
                   key={ind}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
                 >
                   {ind}
                 </span>
@@ -108,7 +108,7 @@ export default function StaticTab() {
                   <td className="px-4 py-2 text-xs font-mono text-text-primary">
                     {s.name}
                     {s.is_suspicious && (
-                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
+                      <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
                         SUSP
                       </span>
                     )}
@@ -179,7 +179,7 @@ export default function StaticTab() {
           </table>
         )}
         {filteredImports.length > 500 && (
-          <div className="px-4 py-2 text-[10px] text-text-muted border-t border-border">
+          <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
             Showing first 500 of {filteredImports.length}.
           </div>
         )}
@@ -195,7 +195,7 @@ export default function StaticTab() {
               <button
                 key={k}
                 onClick={() => setStringKind(k)}
-                className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors ${
+                className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors ${
                   stringKind === k
                     ? "border-accent text-accent"
                     : "border-border text-text-secondary hover:text-text-primary"
@@ -222,7 +222,7 @@ export default function StaticTab() {
             <tbody className="divide-y divide-border-light">
               {filteredStrings.slice(0, 300).map((s, i) => (
                 <tr key={i} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2 text-[10px] uppercase tracking-wider text-text-muted">
+                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                     {s.kind}
                   </td>
                   <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">
@@ -235,7 +235,7 @@ export default function StaticTab() {
           </table>
         )}
         {filteredStrings.length > 300 && (
-          <div className="px-4 py-2 text-[10px] text-text-muted border-t border-border">
+          <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
             Showing first 300 of {filteredStrings.length}.
           </div>
         )}

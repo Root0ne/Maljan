@@ -117,7 +117,7 @@ export default function NetworkTab() {
             <tbody className="divide-y divide-border-light">
               {net.urls.map((u, i) => (
                 <tr key={i} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2 text-[10px] uppercase tracking-wider text-text-muted">
+                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                     {u.method}
                   </td>
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">
@@ -194,7 +194,7 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
           <div className="flex items-center gap-2">
             <code className="text-sm font-mono text-status-blue break-all">{domain.fqdn}</code>
             {domain.is_suspicious && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red shrink-0">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red shrink-0">
                 SUSP
               </span>
             )}
@@ -212,7 +212,7 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
         {rep ? (
           <ReputationBadge rep={rep} />
         ) : (
-          <span className="text-[10px] text-text-muted">no reputation</span>
+          <span className="text-[11px] text-text-muted">no reputation</span>
         )}
       </div>
     </div>
@@ -233,17 +233,17 @@ function IPCard({ ip }: { ip: NetworkIP }) {
               </span>
             )}
             {ip.is_suspicious && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
                 SUSP
               </span>
             )}
             {ip.geo && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
                 {ip.geo}
               </span>
             )}
             {ip.asn && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary font-mono">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary font-mono">
                 {ip.asn}
               </span>
             )}
@@ -252,7 +252,7 @@ function IPCard({ ip }: { ip: NetworkIP }) {
         {ip.reputation ? (
           <ReputationBadge rep={ip.reputation as Record<string, unknown>} />
         ) : (
-          <span className="text-[10px] text-text-muted">no reputation</span>
+          <span className="text-[11px] text-text-muted">no reputation</span>
         )}
       </div>
     </div>
@@ -280,7 +280,7 @@ function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
 
   return (
     <span
-      className={`shrink-0 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-mono ${cls}`}
+      className={`shrink-0 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded font-mono ${cls}`}
       title={JSON.stringify(rep)}
     >
       {source}

@@ -27,9 +27,9 @@ function cellColor(confidence: number): string {
   if (confidence <= 0) return "#1f2126";
   // gradient from dim grey → status-red
   const c = Math.min(1, Math.max(0, confidence));
-  // base #2a2c33 → #e5484d, simple lerp on RGB
+  // base #2a2c33 → #ff7b72 (new --status-red), simple lerp on RGB
   const start = { r: 42, g: 44, b: 51 };
-  const end = { r: 229, g: 72, b: 77 };
+  const end = { r: 255, g: 123, b: 114 };
   const r = Math.round(start.r + (end.r - start.r) * c);
   const g = Math.round(start.g + (end.g - start.g) * c);
   const b = Math.round(start.b + (end.b - start.b) * c);
@@ -116,10 +116,10 @@ export default function CapabilitiesTab() {
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             MITRE ATT&amp;CK Capability Heatmap
           </h2>
-          <div className="flex items-center gap-2 text-[10px] text-text-muted">
+          <div className="flex items-center gap-2 text-[11px] text-text-muted">
             <span>conf:</span>
             <div className="w-24 h-2 rounded-sm" style={{
-              background: "linear-gradient(to right, #2a2c33, #e5484d)",
+              background: "linear-gradient(to right, #2a2c33, #ff7b72)",
             }} />
             <span>0 → 1</span>
           </div>
@@ -138,7 +138,7 @@ export default function CapabilitiesTab() {
                 className="border-r border-border last:border-r-0 bg-bg-surface"
               >
                 <div className="px-2 py-2 border-b border-border">
-                  <div className="text-[10px] font-mono text-text-muted">{col.tactic.id}</div>
+                  <div className="text-[11px] font-mono text-text-muted">{col.tactic.id}</div>
                   <div className="text-xs font-medium text-text-primary truncate" title={col.tactic.name}>
                     {col.tactic.name}
                   </div>
@@ -165,11 +165,11 @@ export default function CapabilitiesTab() {
                         style={{ background: cellColor(cell.confidence) }}
                         title={`${cell.technique_id} ${cell.technique_name} — ${(cell.confidence * 100).toFixed(0)}%`}
                       >
-                        <div className="text-[10px] font-mono text-text-primary">
+                        <div className="text-[11px] font-mono text-text-primary">
                           {cell.technique_id}
                         </div>
                         <div
-                          className="text-[10px] text-text-secondary truncate"
+                          className="text-[11px] text-text-secondary truncate"
                           title={cell.technique_name}
                         >
                           {cell.technique_name}
@@ -199,7 +199,7 @@ export default function CapabilitiesTab() {
               </span>
               <button
                 onClick={() => setSelectedKey(null)}
-                className="ml-2 text-[10px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary"
+                className="ml-2 text-[11px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary"
               >
                 close
               </button>
@@ -208,14 +208,14 @@ export default function CapabilitiesTab() {
           <div className="p-4 space-y-3">
             {selected.contributing_layers.length > 0 && (
               <div>
-                <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+                <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
                   Contributing layers
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {selected.contributing_layers.map((l) => (
                     <span
                       key={l}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary"
+                      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary"
                     >
                       {l}
                     </span>
@@ -224,7 +224,7 @@ export default function CapabilitiesTab() {
               </div>
             )}
             <div>
-              <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+              <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
                 Evidence ({selected.evidence.length})
               </div>
               {selected.evidence.length === 0 ? (

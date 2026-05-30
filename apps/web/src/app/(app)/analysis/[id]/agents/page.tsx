@@ -157,7 +157,7 @@ export default function AgentsTab() {
                       </div>
                     ) : (
                       <span
-                        className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${STATUS_STYLES[agent.status].bg} ${STATUS_STYLES[agent.status].text}`}
+                        className={`text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${STATUS_STYLES[agent.status].bg} ${STATUS_STYLES[agent.status].text}`}
                       >
                         {STATUS_STYLES[agent.status].label}
                       </span>

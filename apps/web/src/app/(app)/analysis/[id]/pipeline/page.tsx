@@ -157,18 +157,18 @@ function ClaimCard({ claim, index }: { claim: Claim; index: number }) {
               <span className={`text-xs font-mono ${confidenceColor(conf)}`}>{conf}%</span>
             </div>
             {claim.category && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
                 {claim.category}
               </span>
             )}
             {claim.technique_id && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted font-mono">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted font-mono">
                 {claim.technique_id}
               </span>
             )}
           </div>
           {claim.evidence_ref && (
-            <div className="mt-1.5 text-[10px] text-text-muted">
+            <div className="mt-1.5 text-[11px] text-text-muted">
               <span className="text-text-secondary">Evidence: </span>
               {formatEvidenceRef(claim.evidence_ref)}
             </div>
@@ -264,7 +264,7 @@ export default function PipelineTab() {
                   }`}
                 >
                   <span
-                    className={`flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold shrink-0 ${
+                    className={`flex items-center justify-center w-6 h-6 rounded text-[11px] font-mono font-bold shrink-0 ${
                       status === "done"
                         ? "bg-status-green/10 text-status-green"
                         : status === "current"
@@ -280,12 +280,12 @@ export default function PipelineTab() {
                         {step.title}
                       </span>
                       {status === "done" && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-green/10 text-status-green uppercase tracking-wider">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-green/10 text-status-green uppercase tracking-wider">
                           Done
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-text-muted mt-0.5">{step.description}</p>
+                    <p className="text-[11px] text-text-muted mt-0.5">{step.description}</p>
                   </div>
                   <Chevron open={isActive} />
                 </button>
@@ -304,7 +304,7 @@ export default function PipelineTab() {
                         </p>
                         {job?.config && (
                           <CollapsibleSection title="Job Configuration">
-                            <pre className="text-[10px] text-text-muted overflow-auto">
+                            <pre className="text-[11px] text-text-muted overflow-auto">
                               {JSON.stringify(job.config, null, 2)}
                             </pre>
                           </CollapsibleSection>
@@ -336,7 +336,7 @@ export default function PipelineTab() {
                         {staticFinding.dissent_items &&
                           staticFinding.dissent_items.length > 0 && (
                             <CollapsibleSection title={`Dissents (${staticFinding.dissent_items.length})`}>
-                              <pre className="text-[10px] text-text-muted overflow-auto">
+                              <pre className="text-[11px] text-text-muted overflow-auto">
                                 {JSON.stringify(staticFinding.dissent_items, null, 2)}
                               </pre>
                             </CollapsibleSection>
@@ -431,7 +431,7 @@ export default function PipelineTab() {
                                         style={{ height: `${h}px` }}
                                         title={`Round ${i + 1}: ${v.toFixed(1)}`}
                                       />
-                                      <span className="text-[8px] text-text-muted">
+                                      <span className="text-[11px] text-text-muted">
                                         {i + 1}
                                       </span>
                                     </div>
@@ -451,13 +451,13 @@ export default function PipelineTab() {
                                     className="p-2.5 bg-bg-surface border border-border-light rounded"
                                   >
                                     <div className="flex items-center gap-2 mb-1">
-                                      <span className="text-[10px] font-mono text-text-muted">
+                                      <span className="text-[11px] font-mono text-text-muted">
                                         R{round.round}
                                       </span>
                                       <span className="text-xs font-medium text-text-primary">
                                         {round.agent}
                                       </span>
-                                      <span className="text-[10px] text-text-muted">
+                                      <span className="text-[11px] text-text-muted">
                                         conf: {Math.round(round.confidence)}%
                                       </span>
                                     </div>
@@ -476,7 +476,7 @@ export default function PipelineTab() {
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-3 bg-bg-surface border border-border-light rounded">
-                            <span className="text-[10px] text-text-muted uppercase tracking-wider">
+                            <span className="text-[11px] text-text-muted uppercase tracking-wider">
                               Verdict
                             </span>
                             <p className="text-sm font-medium text-text-primary capitalize mt-0.5">
@@ -484,7 +484,7 @@ export default function PipelineTab() {
                             </p>
                           </div>
                           <div className="p-3 bg-bg-surface border border-border-light rounded">
-                            <span className="text-[10px] text-text-muted uppercase tracking-wider">
+                            <span className="text-[11px] text-text-muted uppercase tracking-wider">
                               Confidence
                             </span>
                             <p className="text-sm font-medium text-text-primary mt-0.5">
@@ -494,7 +494,7 @@ export default function PipelineTab() {
                         </div>
                         {report.malware_category && (
                           <div className="p-3 bg-bg-surface border border-border-light rounded">
-                            <span className="text-[10px] text-text-muted uppercase tracking-wider">
+                            <span className="text-[11px] text-text-muted uppercase tracking-wider">
                               Category
                             </span>
                             <p className="text-sm font-medium text-text-primary mt-0.5">
@@ -504,7 +504,7 @@ export default function PipelineTab() {
                         )}
                         {runSummary && (
                           <CollapsibleSection title="Run Summary">
-                            <pre className="text-[10px] text-text-muted overflow-auto">
+                            <pre className="text-[11px] text-text-muted overflow-auto">
                               {JSON.stringify(runSummary, null, 2)}
                             </pre>
                           </CollapsibleSection>
@@ -522,7 +522,7 @@ export default function PipelineTab() {
       {/* Raw Agent Reports */}
       {agentReports && (
         <CollapsibleSection title="Raw Agent Reports (JSON)">
-          <pre className="text-[10px] text-text-muted overflow-auto max-h-96">
+          <pre className="text-[11px] text-text-muted overflow-auto max-h-96">
             {JSON.stringify(agentReports, null, 2)}
           </pre>
         </CollapsibleSection>
@@ -531,7 +531,7 @@ export default function PipelineTab() {
       {/* Full Report JSON */}
       {report && (
         <CollapsibleSection title="Full Report (JSON)">
-          <pre className="text-[10px] text-text-muted overflow-auto max-h-96">
+          <pre className="text-[11px] text-text-muted overflow-auto max-h-96">
             {JSON.stringify(
               {
                 id: report.id,

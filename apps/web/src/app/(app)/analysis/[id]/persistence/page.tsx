@@ -71,12 +71,12 @@ export default function PersistenceTab() {
         >
           <div className="flex items-start gap-3 flex-wrap">
             <span
-              className={`text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded shrink-0 ${KIND_COLORS[p.kind]}`}
+              className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded shrink-0 ${KIND_COLORS[p.kind]}`}
             >
               {KIND_LABELS[p.kind]}
             </span>
             {p.technique_id && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
+              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
                 {p.technique_id}
               </span>
             )}
@@ -107,7 +107,7 @@ export default function PersistenceTab() {
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="text-[10px] uppercase tracking-wider text-text-muted w-16 shrink-0 mt-0.5">
+      <span className="text-[11px] uppercase tracking-wider text-text-muted w-16 shrink-0 mt-0.5">
         {label}
       </span>
       <div className="flex-1 min-w-0">{children}</div>

@@ -84,7 +84,7 @@ export default function DynamicTab() {
               <div key={i} className="p-4">
                 <div className="flex items-start gap-3">
                   <span
-                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
+                    className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
                       sig.severity >= 7
                         ? "bg-status-red/10 text-status-red"
                         : sig.severity >= 4
@@ -104,7 +104,7 @@ export default function DynamicTab() {
                         {sig.technique_ids.map((tid) => (
                           <span
                             key={tid}
-                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue"
+                            className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue"
                           >
                             {tid}
                           </span>
@@ -113,7 +113,7 @@ export default function DynamicTab() {
                     )}
                     {sig.marks.length > 0 && (
                       <details className="mt-2">
-                        <summary className="text-[10px] text-text-muted cursor-pointer hover:text-text-primary">
+                        <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-primary">
                           {sig.marks.length} evidence mark{sig.marks.length !== 1 ? "s" : ""}
                         </summary>
                         <ul className="mt-1 ml-3 space-y-1">
@@ -160,7 +160,7 @@ export default function DynamicTab() {
             <tbody className="divide-y divide-border-light">
               {dyn.registry_mods.slice(0, 200).map((r, i) => (
                 <tr key={i} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2 text-[10px] uppercase tracking-wider text-text-muted">
+                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                     {r.operation}
                   </td>
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">{r.hive}</td>
@@ -177,7 +177,7 @@ export default function DynamicTab() {
           </table>
         )}
         {dyn.registry_mods.length > 200 && (
-          <div className="px-4 py-2 text-[10px] text-text-muted border-t border-border">
+          <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
             Showing first 200 of {dyn.registry_mods.length}.
           </div>
         )}
@@ -236,7 +236,7 @@ function ProcessTreeNode({ node, depth }: { node: ProcessNode; depth: number }) 
           </span>
         )}
         {node.injected_into.length > 0 && (
-          <span className="text-[10px] px-1 rounded bg-status-red/10 text-status-red shrink-0">
+          <span className="text-[11px] px-1 rounded bg-status-red/10 text-status-red shrink-0">
             injects→{node.injected_into.join(",")}
           </span>
         )}

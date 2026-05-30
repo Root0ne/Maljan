@@ -307,7 +307,7 @@ export default function SearchPalette({
             if (items.length === 0) return null;
             return (
               <div key={group} className="py-1">
-                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-text-muted">
+                <div className="px-3 py-1 text-[11px] uppercase tracking-wider text-text-muted">
                   {groupLabel[group]}
                 </div>
                 {items.map((r) => {
@@ -337,7 +337,7 @@ export default function SearchPalette({
                       </span>
                       {r.badge && (
                         <span
-                          className={`text-[10px] uppercase tracking-wider ${
+                          className={`text-[11px] uppercase tracking-wider ${
                             r.badgeClass ?? "text-text-muted"
                           }`}
                         >

@@ -150,7 +150,7 @@ function Field({
 }) {
   return (
     <div>
-      <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
         {label}
       </div>
       <div
@@ -183,23 +183,23 @@ function SimilarSampleCard({ sample }: { sample: SimilarSample }) {
                   setTimeout(() => setCopied(false), 1500);
                 }
               }}
-              className="text-[10px] px-1.5 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+              className="text-[11px] px-1.5 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
             >
               {copied ? "copied" : "copy"}
             </button>
           )}
           {sample.malware_category && (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
+            <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
               {sample.malware_category}
             </span>
           )}
           {sample.source && (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
+            <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
               {sample.source}
             </span>
           )}
           {typeof sample.distance === "number" && (
-            <span className="text-[10px] font-mono text-text-muted">
+            <span className="text-[11px] font-mono text-text-muted">
               d={sample.distance.toFixed(3)}
             </span>
           )}
@@ -210,7 +210,7 @@ function SimilarSampleCard({ sample }: { sample: SimilarSample }) {
           {sample.technique_ids.slice(0, 12).map((tid) => (
             <span
               key={tid}
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue"
+              className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue"
             >
               {tid}
             </span>

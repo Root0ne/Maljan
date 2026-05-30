@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const inter = Inter({
+// Self-hosted full-feature InterVariable. The Google Fonts build of Inter
+// ships without the character-variant / stylistic-set tables, so cv05 (tailed
+// l), cv08 (serifed I) and slashed-zero never rendered — verified in-browser
+// (feature on/off were identical). The official InterVariable.woff2 includes
+// them; globals.css enables them via font-feature-settings. variable:
+// "--font-inter" preserves the existing theme wiring unchanged.
+const inter = localFont({
+  src: "./fonts/InterVariable.woff2",
   variable: "--font-inter",
-  subsets: ["latin"],
+  weight: "100 900",
   display: "swap",
 });
 

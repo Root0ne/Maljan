@@ -45,7 +45,7 @@ export default function DefenseTab() {
           <div key={priority}>
             <div className="flex items-center gap-2 mb-3">
               <span
-                className={`text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded ${style.text} ${style.bg}`}
+                className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded ${style.text} ${style.bg}`}
               >
                 {style.label}
               </span>
@@ -60,7 +60,7 @@ export default function DefenseTab() {
                   className="bg-bg-surface border border-border rounded p-4"
                 >
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                    <span className="text-[11px] uppercase tracking-wider text-text-muted">
                       {CATEGORY_LABELS[rec.category]}
                     </span>
                   </div>

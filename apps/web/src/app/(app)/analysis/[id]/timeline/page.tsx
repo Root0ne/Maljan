@@ -23,11 +23,11 @@ interface DebateEntry {
 }
 
 const AGENT_COLORS: Record<string, string> = {
-  "Static Analyst": "#4493f8",
-  "Dynamic Analyst": "#f85149",
-  "Network Analyst": "#d29922",
-  "Code Analyst": "#3fb950",
-  "Threat Intel Analyst": "#bc8cff",
+  "Static Analyst": "#79c0ff",
+  "Dynamic Analyst": "#ff7b72",
+  "Network Analyst": "#ffa657",
+  "Code Analyst": "#7ee787",
+  "Threat Intel Analyst": "#d2a8ff",
 };
 
 const FALLBACK_COLOR = "#888888";
@@ -172,7 +172,7 @@ export default function TimelineTab() {
               <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
               <XAxis
                 dataKey="round"
-                tick={{ fill: "var(--text-muted)", fontSize: 11 }}
+                tick={{ fill: "var(--text-muted)", fontSize: 12 }}
                 axisLine={{ stroke: "var(--border)" }}
                 tickLine={false}
                 label={{
@@ -180,12 +180,12 @@ export default function TimelineTab() {
                   position: "insideBottomRight",
                   offset: -5,
                   fill: "var(--text-muted)",
-                  fontSize: 11,
+                  fontSize: 12,
                 }}
               />
               <YAxis
                 domain={[0, 100]}
-                tick={{ fill: "var(--text-muted)", fontSize: 11 }}
+                tick={{ fill: "var(--text-muted)", fontSize: 12 }}
                 axisLine={{ stroke: "var(--border)" }}
                 tickLine={false}
                 label={{
@@ -193,7 +193,7 @@ export default function TimelineTab() {
                   angle: -90,
                   position: "insideLeft",
                   fill: "var(--text-muted)",
-                  fontSize: 11,
+                  fontSize: 12,
                 }}
               />
               <Tooltip
@@ -201,12 +201,12 @@ export default function TimelineTab() {
                   background: "var(--bg-elevated)",
                   border: "1px solid var(--border)",
                   borderRadius: "4px",
-                  fontSize: "11px",
+                  fontSize: "12px",
                   color: "var(--text-primary)",
                 }}
               />
               <Legend
-                wrapperStyle={{ fontSize: "11px" }}
+                wrapperStyle={{ fontSize: "12px" }}
                 formatter={(value: string) => (
                   <span style={{ color: "var(--text-secondary)" }}>{value}</span>
                 )}

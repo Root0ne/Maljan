@@ -299,7 +299,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
                   {w.message}
                 </p>
                 {w.field && (
-                  <p className="text-[10px] font-mono text-text-muted">
+                  <p className="text-[11px] font-mono text-text-muted">
                     field: {w.field}
                   </p>
                 )}
@@ -320,25 +320,25 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             Verdict & Severity
           </h2>
-          <code className="text-[10px] font-mono text-text-muted" title={sha256}>
+          <code className="text-[11px] font-mono text-text-muted" title={sha256}>
             {sha256.slice(0, 16)}…
           </code>
         </div>
         <div className="p-4 grid grid-cols-4 gap-4">
           <div>
-            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Verdict
             </div>
             <div className={`text-base font-semibold ${verdictText}`}>{mr.verdict}</div>
           </div>
           <div>
-            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Confidence
             </div>
             <div className="text-base font-mono">{confidence}/100</div>
           </div>
           <div>
-            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Severity
             </div>
             <span
@@ -349,7 +349,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             </span>
           </div>
           <div>
-            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Category
             </div>
             <div className="text-sm text-text-primary">
@@ -378,7 +378,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
               <span className="text-xs text-text-secondary flex-1 truncate" title={t.technique_name}>
                 {t.technique_name}
               </span>
-              <span className="text-[10px] font-mono text-text-muted w-12 text-right">
+              <span className="text-[11px] font-mono text-text-muted w-12 text-right">
                 {Math.round(t.confidence * 100)}%
               </span>
             </div>
@@ -401,7 +401,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
         </div>
         {topSigs.length > 0 && (
           <div className="px-4 pb-4">
-            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2">
+            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
               Top Sandbox Signatures
             </div>
             <ul className="space-y-1.5">
@@ -411,7 +411,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
                   <span className="truncate" title={s.description || s.name}>
                     {s.name}
                   </span>
-                  <span className="ml-auto text-[10px] font-mono text-text-muted">
+                  <span className="ml-auto text-[11px] font-mono text-text-muted">
                     sev {s.severity}
                   </span>
                 </li>
@@ -465,7 +465,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
                   href={ref.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-status-blue hover:underline truncate"
+                  className="text-accent-strong hover:underline truncate"
                   title={ref.url}
                 >
                   {ref.url}
@@ -496,7 +496,7 @@ function Stat({
   return (
     <div>
       <div className={`text-2xl font-mono ${accent ?? "text-text-primary"}`}>{value}</div>
-      <div className="text-[10px] text-text-muted uppercase tracking-wider">{label}</div>
+      <div className="text-[11px] text-text-muted uppercase tracking-wider">{label}</div>
     </div>
   );
 }
@@ -541,7 +541,7 @@ function DownloadBar({
 
   return (
     <div className="col-span-2 flex flex-wrap items-center gap-2">
-      <span className="text-[10px] text-text-muted uppercase tracking-wider mr-1">
+      <span className="text-[11px] text-text-muted uppercase tracking-wider mr-1">
         Export
       </span>
       <button

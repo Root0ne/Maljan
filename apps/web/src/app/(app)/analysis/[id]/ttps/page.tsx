@@ -263,7 +263,7 @@ export default function TTpsTab() {
                         {tech.sources.map((src) => (
                           <span
                             key={src}
-                            className={`inline-block w-4 h-4 rounded-full text-center text-[9px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
+                            className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
                             title={src}
                           >
                             {src[0]}

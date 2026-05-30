@@ -37,7 +37,7 @@ export default function IdentityTab() {
             Sample Identification
           </h2>
           <span
-            className={`text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded border ${sigState.cls}`}
+            className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded border ${sigState.cls}`}
           >
             {sigState.label}
           </span>
@@ -134,7 +134,7 @@ export default function IdentityTab() {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
         {label}
       </div>
       <div className="text-sm text-text-primary break-all">{value}</div>
@@ -146,7 +146,7 @@ function HashRow({ label, value }: { label: string; value: string | null }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-3">
-      <span className="text-[10px] text-text-muted uppercase tracking-wider w-20 shrink-0">
+      <span className="text-[11px] text-text-muted uppercase tracking-wider w-20 shrink-0">
         {label}
       </span>
       {value ? (
@@ -161,7 +161,7 @@ function HashRow({ label, value }: { label: string; value: string | null }) {
                 setTimeout(() => setCopied(false), 1500);
               }
             }}
-            className="text-[10px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+            className="text-[11px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
           >
             {copied ? "copied" : "copy"}
           </button>

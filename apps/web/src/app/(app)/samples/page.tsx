@@ -188,7 +188,7 @@ export default function SamplesPage() {
               <tr className="border-b border-border">
                 <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
                 <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-20">Size</th>
+                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
                 <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
                 <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
               </tr>

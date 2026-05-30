@@ -242,7 +242,7 @@ export default function DashboardPage() {
             </h2>
             <Link
               href="/jobs"
-              className="text-xs text-accent hover:underline"
+              className="text-xs text-accent-strong hover:underline"
             >
               View all
             </Link>

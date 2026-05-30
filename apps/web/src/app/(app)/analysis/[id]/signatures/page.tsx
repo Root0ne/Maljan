@@ -82,7 +82,7 @@ export default function SignaturesTab() {
                   /* ignore; UI button will still feel responsive */
                 }
               }}
-              className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+              className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
             >
               ↓ {k} bundle
             </button>
@@ -111,7 +111,7 @@ function KindButton({
   return (
     <button
       onClick={onClick}
-      className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors ${
+      className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors ${
         active
           ? "border-accent text-accent"
           : "border-border text-text-secondary hover:text-text-primary"
@@ -130,7 +130,7 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded shrink-0 ${
+            className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded shrink-0 ${
               rule.kind === "yara"
                 ? "bg-status-purple/10 text-status-purple"
                 : rule.kind === "sigma"
@@ -144,13 +144,13 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
             {rule.name}
           </code>
           {rule.auto_generated && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0">
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0">
               auto-gen
             </span>
           )}
           {rule.compile_error && (
             <span
-              className="text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red shrink-0"
+              className="text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red shrink-0"
               title={rule.compile_error}
             >
               compile error
@@ -165,13 +165,13 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
                 setTimeout(() => setCopied(false), 1500);
               }
             }}
-            className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
           >
             {copied ? "copied" : "copy"}
           </button>
           <button
             onClick={() => downloadBlob(rule.body, filename, KIND_MIME[rule.kind])}
-            className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
           >
             ↓ {KIND_EXT[rule.kind]}
           </button>
