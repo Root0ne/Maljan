@@ -33,6 +33,16 @@ export function useWebSocket(jobId: string | null) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const cancelledRef = useRef(false);
+  // Wave 10 W10-LINT-DEBT-02 (2026-05-30): ``connect`` referenced itself
+  // inside the ws.onclose reconnect handler, which the ESLint
+  // ``react-hooks/immutability`` rule flags as access-before-declared
+  // (the inner closure captures whichever ``connect`` exists at
+  // useCallback-construction time, not the latest one — fine for the
+  // current ``[jobId]`` dep set, but a stale-closure trap if a future
+  // dep is added). Indirecting through a ref means the timeout fires
+  // through whatever ``connect`` is current at the moment the timer
+  // ticks, not what was captured when the WebSocket opened.
+  const connectRef = useRef<() => void>(() => {});
 
   const connect = useCallback(() => {
     if (!jobId || cancelledRef.current) return;
@@ -76,11 +86,17 @@ export function useWebSocket(jobId: string | null) {
       if (cancelledRef.current) return;
       const delay = backoffDelay(attemptRef.current);
       attemptRef.current += 1;
-      reconnectTimerRef.current = setTimeout(() => connect(), delay);
+      reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
     };
 
     ws.onerror = () => ws.close();
   }, [jobId]);
+
+  // Keep the ref pointed at the latest ``connect`` so the reconnect
+  // timeout always invokes the current closure.
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     cancelledRef.current = false;

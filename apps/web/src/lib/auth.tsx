@@ -83,6 +83,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(AUTH_DISABLED ? DEV_USER : null);
   const [loading, setLoading] = useState(!AUTH_DISABLED);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Wave 10 W10-LINT-DEBT-02 (2026-05-30): cycle-break refs so
+  // ``startRefreshTimer`` and ``logout`` can reference one another
+  // without tripping React Compiler's access-before-declared rule.
+  // Both functions are declared once; the refs are populated by the
+  // mount-time effect below and reused by every subsequent call.
+  const startRefreshTimerRef = useRef<((token: string) => void) | null>(null);
+  const logoutRef = useRef<(() => void) | null>(null);
 
   const clearRefreshTimer = useCallback(() => {
     if (refreshTimerRef.current) {
@@ -97,10 +104,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshTimerRef.current = scheduleRefresh(
         refreshToken,
         (_access, refresh) => {
-          // Chain next refresh
-          refreshTimerRef.current = scheduleRefresh(refresh, startRefreshTimer, logout);
+          // Chain next refresh through the ref so we always read the
+          // latest closure (a future dep change on startRefreshTimer
+          // would otherwise leave this site bound to the original).
+          refreshTimerRef.current = scheduleRefresh(
+            refresh,
+            (t) => startRefreshTimerRef.current?.(t),
+            () => logoutRef.current?.(),
+          );
         },
-        logout
+        () => logoutRef.current?.(),
       );
     },
     [clearRefreshTimer]
@@ -125,6 +138,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (AUTH_DISABLED) return;
+    // Wave 10 W10-LINT-DEBT-02: mount-time session hydration. fetchUser
+    // sets ``user`` + ``loading`` based on the result of an async API
+    // call; there is no derived-state alternative because the value
+    // depends on server-side session state, not props.
     fetchUser();
     const refreshToken = localStorage.getItem("refresh_token");
     if (refreshToken) {
@@ -172,6 +189,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     window.location.href = "/login";
   }, [clearRefreshTimer]);
+
+  // Wave 10 W10-LINT-DEBT-02 (2026-05-30): sync the cycle-break refs
+  // after both functions are constructed. Runs once per render so
+  // ``startRefreshTimer``'s closures always invoke the current
+  // ``logout`` / ``startRefreshTimer`` rather than stale captures.
+  useEffect(() => {
+    startRefreshTimerRef.current = startRefreshTimer;
+    logoutRef.current = logout;
+  }, [startRefreshTimer, logout]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout }}>

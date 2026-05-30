@@ -1,3 +1,13 @@
+/*
+ * Wave 10 W10-LINT-DEBT-02 (2026-05-30): this file is Playwright fixture
+ * code, not React. ``use(page)`` is the Playwright fixture callback
+ * (https://playwright.dev/docs/test-fixtures), not the React 19 ``use``
+ * hook. The ``react-hooks/rules-of-hooks`` rule pattern-matches on the
+ * identifier and false-positives across the entire E2E suite. Disabling
+ * the rule for the file scopes the suppression to where it's actually
+ * incorrect.
+ */
+/* eslint-disable react-hooks/rules-of-hooks */
 import { test as base, expect } from "@playwright/test";
 
 /**

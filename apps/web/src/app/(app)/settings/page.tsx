@@ -34,6 +34,11 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (activeTab === "general") {
+      // Wave 10 W10-LINT-DEBT-02: legitimate data-fetch initialization
+      // for an async API call. The state transitions
+      // (loading=true → fetch → setUser + setLoading=false) cannot be
+      // derived from props alone — they reflect the in-flight request
+      // status, which is the correct use case for setState in an effect.
       setUserLoading(true);
       setUserError(null);
       api.getMe()

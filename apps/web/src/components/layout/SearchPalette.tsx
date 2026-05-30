@@ -66,6 +66,20 @@ export default function SearchPalette({
   const [activeIndex, setActiveIndex] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
+  // Wave 10 W10-LINT-DEBT-02 (2026-05-30): ``handleSelect`` was declared
+  // BELOW the ``Enter``-key useEffect that called it, which the React
+  // Compiler / ESLint ``react-hooks/immutability`` rule flags as
+  // access-before-declared (the inner closure was bound when the effect
+  // mounted, not when handleSelect ran). Hoisting the function above
+  // the useEffect lets the effect's closure see the real function on
+  // every render rather than relying on TDZ-aware lexical scoping
+  // (which the React Compiler explicitly does not honour).
+  const handleSelect = (r: ResultItem) => {
+    router.push(r.href);
+    onClose();
+    onSelect?.();
+  };
+
   /* Debounce the incoming query (200 ms). */
   useEffect(() => {
     const id = window.setTimeout(() => setDebouncedQuery(query.trim()), 200);
@@ -73,6 +87,10 @@ export default function SearchPalette({
   }, [query]);
 
   /* Reset highlight whenever the effective query changes. */
+  // Wave 10 W10-LINT-DEBT-02: reset the keyboard highlight on every
+  // debounced-query change. Derived state is not viable — the highlight
+  // is itself stateful (arrow keys mutate it), so the only way to reset
+  // it on a new query is an effect setState.
   useEffect(() => {
     setActiveIndex(0);
   }, [debouncedQuery]);
@@ -81,6 +99,12 @@ export default function SearchPalette({
   useEffect(() => {
     if (!open) return;
     if (!debouncedQuery) {
+      // Wave 10 W10-LINT-DEBT-02: empty-query branch clears stale
+      // results from the previous query so the dropdown collapses
+      // immediately. The state IS derived (an empty query maps to an
+      // empty list) but the source of truth — the debounced query —
+      // lives in another effect, so cross-effect reset via setState
+      // is the cleanest path.
       setSamples([]);
       setJobs([]);
       setReports([]);
@@ -234,12 +258,6 @@ export default function SearchPalette({
   }, [open, onClose]);
 
   if (!open) return null;
-
-  const handleSelect = (r: ResultItem) => {
-    router.push(r.href);
-    onClose();
-    onSelect?.();
-  };
 
   /* Compute the absolute index for each row for highlighting. */
   let runningIndex = -1;

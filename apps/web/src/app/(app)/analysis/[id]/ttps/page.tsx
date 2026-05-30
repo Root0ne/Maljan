@@ -102,11 +102,17 @@ export default function TTpsTab() {
   useEffect(() => {
     const cached = report?.malware_report?.ttp_mappings;
     if (cached && cached.length > 0) {
+      // Wave 10 W10-LINT-DEBT-02: legitimate data-fetch initialization —
+      // hydrate local state from the cached report fields so we skip the
+      // /mitre API round-trip. There is no derived-state alternative here
+      // because the cache key (``report?.id``) determines the source of
+      // truth and is an effect dep.
       setMitreData(cached as unknown[]);
       return;
     }
     if (report?.id) {
-      api.getReportMitre(report.id)
+      api
+        .getReportMitre(report.id)
         .then((data) => setMitreData(data.techniques))
         .catch(() => {});
     }
