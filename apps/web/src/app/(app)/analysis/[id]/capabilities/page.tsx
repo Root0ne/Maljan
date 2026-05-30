@@ -44,9 +44,10 @@ export default function CapabilitiesTab() {
   // Wave 4: transparency on platform-aware drops. The cascade now logs
   // every technique it rejected for platform-incompatibility so the user
   // knows why the matrix is sparser than the analyst reports might suggest.
+  // Wave 9: ``run_summary`` is now narrowed to ``RunSummary`` so the
+  // inline cast can be removed.
   const dropped =
-    (report?.malware_report?.run_summary as { cascade?: { dropped_by_platform?: unknown[] } } | undefined)
-      ?.cascade?.dropped_by_platform ?? [];
+    report?.malware_report?.run_summary?.cascade?.dropped_by_platform ?? [];
   const sampleIdentityPlatform =
     report?.malware_report?.identity?.platform ?? "unknown";
 

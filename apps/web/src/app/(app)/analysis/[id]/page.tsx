@@ -6,7 +6,7 @@ import { useReport } from "./layout";
 import { api } from "@/lib/api";
 import { downloadBlob } from "@/lib/report-utils";
 import { SEVERITY_STYLES } from "@/types/malware-report";
-import type { MalwareReport, TTPMapping } from "@/types/malware-report";
+import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
 
 const VERDICT_COLORS: Record<string, string> = {
   malicious: "bg-status-red",
@@ -211,13 +211,16 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
 
   // OPS-DEGRADED-VERDICT-01 (audit 2026-05-19): surface the degraded flag
   // from run_summary. Without this banner a 0.6 capped verdict reads the
-  // same as a confidently-low real one.
-  const runSummary = (report?.run_summary ?? null) as
-    | { degraded_mode?: boolean; degradation_reasons?: string[]; failed_analysts?: string[] }
-    | null;
+  // same as a confidently-low real one. Wave 9 narrowed the type so the
+  // cast is no longer needed.
+  const runSummary = report?.run_summary ?? null;
   const isDegraded = Boolean(runSummary?.degraded_mode);
   const degradationReasons = runSummary?.degradation_reasons ?? [];
   const failedAnalysts = runSummary?.failed_analysts ?? [];
+  // Wave 9 (2026-05-29): surface FP linter findings in a separate amber
+  // banner. ``explanation`` is shown as small muted text below each rule.
+  const fpWarnings: FpWarning[] = runSummary?.fp_warnings ?? [];
+  const hasErrorWarning = fpWarnings.some((w) => w.severity === "error");
 
   return (
     <div className="grid grid-cols-2 gap-4">
@@ -252,6 +255,49 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             )}
           </div>
         </div>
+      )}
+
+      {/* Wave 9 (2026-05-29): post-pipeline FP linter findings. The
+          banner is collapsed by default and auto-expanded if any warning
+          is ``severity=error``. */}
+      {fpWarnings.length > 0 && (
+        <details
+          open={hasErrorWarning}
+          className="col-span-2 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+        >
+          <summary className="flex items-center gap-3 cursor-pointer select-none">
+            <span className="font-semibold text-status-orange">
+              QA WARNINGS
+            </span>
+            <span className="text-xs text-text-muted">
+              {fpWarnings.length} finding{fpWarnings.length === 1 ? "" : "s"}
+              {hasErrorWarning ? " (errors present)" : ""}
+            </span>
+          </summary>
+          <ul className="mt-2 space-y-2 text-text-secondary">
+            {fpWarnings.map((w, i) => (
+              <li key={i} className="space-y-0.5">
+                <p className="text-xs">
+                  <code className="font-mono font-semibold">{w.rule}</code>{" "}
+                  <span className="uppercase text-text-muted">
+                    [{w.severity}]
+                  </span>{" "}
+                  {w.message}
+                </p>
+                {w.field && (
+                  <p className="text-[10px] font-mono text-text-muted">
+                    field: {w.field}
+                  </p>
+                )}
+                {w.explanation && (
+                  <p className="text-[11px] text-text-muted">
+                    {w.explanation}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {/* Severity & Verdict card */}

@@ -2,6 +2,7 @@ import type {
   EnrichTriggerResponse,
   IOCListResponse,
   MalwareReport,
+  RunSummary,
 } from "@/types/malware-report";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -73,7 +74,10 @@ export interface ReportDetailDTO {
   mitre_techniques: unknown[] | null;
   agent_reports: Record<string, unknown> | null;
   negotiation_log: Record<string, unknown> | null;
-  run_summary: Record<string, unknown> | null;
+  // Wave 9 (2026-05-29): narrowed from ``Record<string, unknown>`` so
+  // the SUMMARY tab can render the FP WARNINGS banner and the
+  // CAPABILITIES tab can read platform_filter_summary without casts.
+  run_summary: RunSummary | null;
   agent_findings: AgentFindingDTO[];
   malware_report: MalwareReport | null;
   created_at: string;
