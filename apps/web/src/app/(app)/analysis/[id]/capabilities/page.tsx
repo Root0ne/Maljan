@@ -25,9 +25,22 @@ const ENTERPRISE_TACTICS: { id: string; name: string }[] = [
   { id: "TA0040", name: "Impact" },
 ];
 
-function cellColor(confidence: number): string {
-  if (confidence <= 0) return "#1f2126";
-  // gradient from dim grey → status-red
+interface CellPaint {
+  bg: string;
+  fg: string;
+  sub: string;
+}
+
+// Lerp dim-grey → status-red by confidence, then choose a READABLE text colour
+// for that fill. The bright pink-red end (#ff7b72) is light, so the old light
+// ramp (#e6edf3 / #9aa4af) sat light-on-light and was unreadable; high-confidence
+// cells now get near-black text, dim cells keep the light ramp. The text colour
+// is picked by comparing WCAG contrast of near-black vs the light ramp against
+// the computed fill luminance.
+function cellPaint(confidence: number): CellPaint {
+  if (confidence <= 0) {
+    return { bg: "#1f2126", fg: "var(--text-primary)", sub: "var(--text-secondary)" };
+  }
   const c = Math.min(1, Math.max(0, confidence));
   // base #2a2c33 → #ff7b72 (new --status-red), simple lerp on RGB
   const start = { r: 42, g: 44, b: 51 };
@@ -35,7 +48,16 @@ function cellColor(confidence: number): string {
   const r = Math.round(start.r + (end.r - start.r) * c);
   const g = Math.round(start.g + (end.g - start.g) * c);
   const b = Math.round(start.b + (end.b - start.b) * c);
-  return `rgb(${r}, ${g}, ${b})`;
+  const bg = `rgb(${r}, ${g}, ${b})`;
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const darkText = (L + 0.05) / 0.05 >= 1.05 / (L + 0.05);
+  return darkText
+    ? { bg, fg: "#0d1117", sub: "rgba(13, 17, 23, 0.8)" }
+    : { bg, fg: "var(--text-primary)", sub: "var(--text-secondary)" };
 }
 
 /* ── ATT&CK capability heatmap (capability_matrix, confidence-graded) ── */
@@ -160,19 +182,21 @@ function CapabilityHeatmap() {
                     }
                     const key = `${cell.tactic}:${cell.technique_id}`;
                     const active = selectedKey === key;
+                    const paint = cellPaint(cell.confidence);
                     return (
                       <button
                         key={ri}
                         onClick={() => setSelectedKey(active ? null : key)}
                         className={`block w-full text-left px-2 py-1.5 border-b border-border-light hover:ring-1 hover:ring-accent transition-shadow ${active ? "ring-1 ring-accent" : ""}`}
-                        style={{ background: cellColor(cell.confidence) }}
+                        style={{ background: paint.bg }}
                         title={`${cell.technique_id} ${cell.technique_name} — ${(cell.confidence * 100).toFixed(0)}%`}
                       >
-                        <div className="text-[11px] font-mono text-text-primary">
+                        <div className="text-[11px] font-mono" style={{ color: paint.fg }}>
                           {cell.technique_id}
                         </div>
                         <div
-                          className="text-[11px] text-text-secondary truncate"
+                          className="text-[11px] truncate"
+                          style={{ color: paint.sub }}
                           title={cell.technique_name}
                         >
                           {cell.technique_name}
