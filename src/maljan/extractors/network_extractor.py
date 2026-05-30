@@ -307,3 +307,149 @@ def _extract_ja3(raw: dict[str, Any]) -> list[str]:
             seen.add(str(ja3))
             out.append(str(ja3))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Wave 10 W10-NET-01 (2026-05-30) — fold Triage SandboxCTI.network into the
+# typed NetworkIOCs. The 2026-05-30 UI walk found that
+# ``stix_bundle_extended.x_maljan_cti.network`` carried 6 domains + 19 IPs +
+# 3 URLs from Triage but ``MalwareReport.network`` was None, so the NETWORK
+# tab and SUMMARY snapshot card both rendered zeros.
+# ---------------------------------------------------------------------------
+
+
+def merge_sandbox_cti_network(
+    network_iocs: NetworkIOCs | None,
+    sandbox_cti: dict[str, Any] | None,
+) -> NetworkIOCs | None:
+    """Augment NetworkIOCs with the Triage SandboxCTI block (or build fresh).
+
+    SandboxCTI shape (from ``maljan/analysis/sandbox_cti.py``)::
+
+        {
+          "network": {
+            "ips":         [str],
+            "domains":     [str],
+            "http_urls":   [str],
+            "tls_ja3":     [str],
+            "tls_sni":     [str],   # treated as additional FQDNs
+            "dns_queries": [str],   # treated as additional FQDNs
+          },
+          ...
+        }
+
+    Returns ``network_iocs`` unchanged when ``sandbox_cti`` has no usable
+    network entries, or a merged ``NetworkIOCs`` with CTI rows appended (and
+    deduped by FQDN / address / URL).
+    """
+    if not isinstance(sandbox_cti, dict):
+        return network_iocs
+    cti_net = sandbox_cti.get("network")
+    if not isinstance(cti_net, dict):
+        return network_iocs
+
+    cti_domains_raw = _gather_strings(
+        cti_net.get("domains"), cti_net.get("tls_sni"), cti_net.get("dns_queries")
+    )
+    cti_ips_raw = _gather_strings(cti_net.get("ips"))
+    cti_urls_raw = _gather_strings(cti_net.get("http_urls"), cti_net.get("urls"))
+    cti_ja3_raw = _gather_strings(cti_net.get("tls_ja3"))
+
+    if not (cti_domains_raw or cti_ips_raw or cti_urls_raw or cti_ja3_raw):
+        return network_iocs
+
+    base = network_iocs or NetworkIOCs()
+    seen_fqdn = {d.fqdn.lower() for d in base.domains}
+    seen_addr = {ip.address for ip in base.ips}
+    seen_url = {u.url for u in base.urls}
+    seen_ja3 = set(base.ja3_fingerprints)
+
+    new_domains = list(base.domains)
+    for fqdn in cti_domains_raw:
+        key = fqdn.lower()
+        if key in seen_fqdn:
+            continue
+        seen_fqdn.add(key)
+        new_domains.append(
+            NetworkDomain(
+                fqdn=fqdn,
+                is_suspicious=_domain_is_suspicious(fqdn),
+                reason="From Triage SandboxCTI" if _domain_is_suspicious(fqdn) else None,
+            )
+        )
+
+    new_ips = list(base.ips)
+    for addr in cti_ips_raw:
+        if addr in seen_addr:
+            continue
+        try:
+            ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        seen_addr.add(addr)
+        new_ips.append(NetworkIP(address=addr))
+
+    new_urls = list(base.urls)
+    for url in cti_urls_raw:
+        if url in seen_url:
+            continue
+        seen_url.add(url)
+        new_urls.append(NetworkURL(url=url))
+
+    new_ja3 = list(base.ja3_fingerprints)
+    for ja3 in cti_ja3_raw:
+        if ja3 in seen_ja3:
+            continue
+        seen_ja3.add(ja3)
+        new_ja3.append(ja3)
+
+    added = (
+        (len(new_domains) - len(base.domains))
+        + (len(new_ips) - len(base.ips))
+        + (len(new_urls) - len(base.urls))
+        + (len(new_ja3) - len(base.ja3_fingerprints))
+    )
+    if added:
+        logger.info(
+            "network_extractor: merged %d SandboxCTI entries "
+            "(domains+%d, ips+%d, urls+%d, ja3+%d).",
+            added,
+            len(new_domains) - len(base.domains),
+            len(new_ips) - len(base.ips),
+            len(new_urls) - len(base.urls),
+            len(new_ja3) - len(base.ja3_fingerprints),
+        )
+
+    return NetworkIOCs(
+        domains=new_domains,
+        ips=new_ips,
+        urls=new_urls,
+        user_agents=list(base.user_agents),
+        ja3_fingerprints=new_ja3,
+    )
+
+
+def _gather_strings(*sources: Any) -> list[str]:
+    """Flatten the given sources into a deduped ordered list of clean strings."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for src in sources:
+        if not isinstance(src, list):
+            continue
+        for item in src:
+            if not isinstance(item, str):
+                continue
+            v = item.strip()
+            if not v or v in seen:
+                continue
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+def _domain_is_suspicious(fqdn: str) -> bool:
+    lower = fqdn.lower()
+    for token in _SUSPICIOUS_DOMAIN_TOKENS:
+        if token in lower:
+            return True
+    return False

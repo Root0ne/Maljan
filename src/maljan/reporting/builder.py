@@ -18,7 +18,10 @@ from typing import Any
 from maljan.core.logger import logger
 from maljan.extractors.capability_matrix import build_capability_matrix
 from maljan.extractors.dynamic_extractor import build_dynamic_behavior
-from maljan.extractors.network_extractor import build_network_iocs
+from maljan.extractors.network_extractor import (
+    build_network_iocs,
+    merge_sandbox_cti_network,
+)
 from maljan.extractors.pe_extractor import build_static_analysis
 from maljan.extractors.persistence_extractor import build_persistence_list
 from maljan.extractors.sample_identity import build_sample_identity
@@ -60,6 +63,14 @@ class MalwareReportBuilder:
         overall_confidence: float = 0.0,
         cascade_summary: Any | None = None,
         malware_category: str | None = None,
+        # Wave 10 W10-NET-01 (2026-05-30): Triage SandboxCTI block carries
+        # network IOCs (domains, IPs, URLs, JA3) that the CAPE-style
+        # ``sandbox_report['network']`` doesn't capture. Folding both
+        # through the same ``build_network_iocs`` pipeline keeps the
+        # NETWORK tab + SUMMARY snapshot card populated even when the
+        # cuckoo-like sandbox path is empty (the common case for the
+        # Triage-only Android flow).
+        sandbox_cti: dict[str, Any] | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -74,6 +85,7 @@ class MalwareReportBuilder:
         self.overall_confidence = overall_confidence
         self.cascade_summary = cascade_summary
         self.malware_category = malware_category
+        self.sandbox_cti = sandbox_cti
 
     # ------------------------------------------------------------------
     # Deterministic build
@@ -90,6 +102,11 @@ class MalwareReportBuilder:
         static = build_static_analysis(sample_path=self.sample_path)
         dynamic = build_dynamic_behavior(self.sandbox_report)
         network = build_network_iocs(self.sandbox_report)
+        # Wave 10 W10-NET-01 (2026-05-30): fold the Triage SandboxCTI
+        # network IOCs onto whatever the CAPE-style extractor produced.
+        # When the sandbox report is empty (Android Triage path) this is
+        # the only source of typed network indicators.
+        network = merge_sandbox_cti_network(network, self.sandbox_cti)
         persistence = build_persistence_list(self.sandbox_report)
         cells, mappings = build_capability_matrix(
             cascade_summary=self.cascade_summary,

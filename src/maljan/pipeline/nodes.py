@@ -978,6 +978,12 @@ def make_report_node(container: ServiceContainer) -> Any:
                 overall_confidence=overall_confidence,
                 cascade_summary=cascade_summary,
                 malware_category=malware_category,
+                # Wave 10 W10-NET-01 (2026-05-30): pass Triage SandboxCTI
+                # so the network extractor can populate
+                # ``MalwareReport.network`` even when the CAPE-style
+                # sandbox_report has no ``network`` block (the common
+                # case for the Triage-only Android flow).
+                sandbox_cti=state.get("sandbox_cti"),
             )
             report = builder.build_deterministic()
         except Exception as exc:  # noqa: BLE001
