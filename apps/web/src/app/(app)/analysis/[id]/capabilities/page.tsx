@@ -50,6 +50,23 @@ export default function CapabilitiesTab() {
     report?.malware_report?.run_summary?.cascade?.dropped_by_platform ?? [];
   const sampleIdentityPlatform =
     report?.malware_report?.identity?.platform ?? "unknown";
+  // Wave 10 W10-OBS-03 (2026-05-30): surface the pre-cascade Sigma/YARA
+  // Layer-0 filter counters from ``run_summary.cascade.platform_filter_summary``.
+  // The Wave 9 audit gate G-FP-8 introduced the field; the UI now renders
+  // it as a footer note so operators can see at a glance how many rules
+  // the platform pre-filter dropped (e.g. sigma_dropped=2938 on a clean
+  // Android APK run, proving the Windows-targeted Sigma corpus did not
+  // poison the cascade).
+  const pfs = report?.malware_report?.run_summary?.cascade?.platform_filter_summary;
+  const platformFilterBanner = pfs ? (
+    <div className="bg-bg-surface border border-border rounded px-4 py-2 text-[11px] text-text-muted">
+      Sigma {pfs.sigma_dropped} + YARA {pfs.yara_dropped} rule
+      {pfs.sigma_dropped + pfs.yara_dropped === 1 ? "" : "s"} pre-filtered for
+      sample platform <span className="text-text-secondary">{pfs.sample_platform}</span>
+      {" "}
+      (Layer 0 platform-aware filter)
+    </div>
+  ) : null;
 
   /* Bucket cells by tactic id; preserve insertion order inside each bucket. */
   const grid = useMemo(() => {
@@ -76,14 +93,18 @@ export default function CapabilitiesTab() {
 
   if (cells.length === 0) {
     return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        No ATT&amp;CK techniques have been mapped to this sample yet.
+      <div className="space-y-4">
+        {platformFilterBanner}
+        <div className="p-8 text-center text-sm text-text-secondary">
+          No ATT&amp;CK techniques have been mapped to this sample yet.
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {platformFilterBanner}
       {dropped.length > 0 && (
         <div className="bg-bg-surface border border-border rounded px-4 py-2 text-[11px] text-text-muted">
           {dropped.length} rule match{dropped.length === 1 ? "" : "es"} filtered
