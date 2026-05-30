@@ -27,7 +27,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from maljan.core.logger import logger
-from maljan.memory.attck_loader import ATTCKTechnique, load_attck_bundle
+from maljan.memory.attck_loader import ATTCKTactic, ATTCKTechnique, load_attck_data
 
 # Stopwords to exclude from TF-IDF tokens (minimal set for security domain)
 _STOPWORDS = frozenset(
@@ -122,6 +122,8 @@ class ATTCKIndex:
 
     def __init__(self) -> None:
         self.techniques: dict[str, ATTCKTechnique] = {}
+        self.tactics: list[ATTCKTactic] = []  # tactic catalogue in matrix order
+        self._tactic_by_slug: dict[str, ATTCKTactic] = {}
         self._idf: dict[str, float] = {}
         self._tf_vecs: dict[str, dict[str, float]] = {}  # technique_id → tf-idf vector
         self._built: bool = False
@@ -137,20 +139,27 @@ class ATTCKIndex:
     ) -> ATTCKIndex:
         """Build an index from the official MITRE ATT&CK STIX bundle.
 
-        Downloads and caches the bundle on first call (~9 MB).
-        Subsequent calls use the local cache.
+        Downloads and caches the bundle on first call (~50 MB) and parses both
+        techniques and the tactic catalogue. Subsequent calls use the local
+        cache (which auto-refreshes once stale — see attck_loader).
         """
-        techniques = load_attck_bundle(force_refresh=force_refresh)
-        return cls.from_techniques(techniques)
+        data = load_attck_data(force_refresh=force_refresh)
+        return cls.from_techniques(data.techniques, tactics=data.tactics)
 
     @classmethod
-    def from_techniques(cls, techniques: list[ATTCKTechnique]) -> ATTCKIndex:
+    def from_techniques(
+        cls,
+        techniques: list[ATTCKTechnique],
+        tactics: list[ATTCKTactic] | None = None,
+    ) -> ATTCKIndex:
         """Build an index from a pre-parsed list of ATTCKTechnique objects.
 
         Primarily used in tests with fixture data to avoid network calls.
+        ``tactics`` is the optional tactic catalogue (matrix columns).
         """
         index = cls()
         index._build(techniques)
+        index._set_tactics(tactics or [])
         return index
 
     # ------------------------------------------------------------------
@@ -164,6 +173,23 @@ class ATTCKIndex:
     def technique_exists(self, technique_id: str) -> bool:
         """Return True if the technique ID exists in the current ATT&CK release."""
         return technique_id.upper() in self.techniques
+
+    def _set_tactics(self, tactics: list[ATTCKTactic]) -> None:
+        """Store the tactic catalogue and index it by kill-chain slug."""
+        self.tactics = list(tactics)
+        self._tactic_by_slug = {t.shortname: t for t in tactics if t.shortname}
+
+    def get_tactic_by_slug(self, shortname: str) -> ATTCKTactic | None:
+        """Return the tactic for a kill-chain phase slug (e.g. 'defense-evasion')."""
+        return self._tactic_by_slug.get(shortname)
+
+    def get_tactic_by_id(self, tactic_id: str) -> ATTCKTactic | None:
+        """Return the tactic for a TA-id (e.g. 'TA0005')."""
+        tid = tactic_id.upper()
+        for t in self.tactics:
+            if t.tactic_id.upper() == tid:
+                return t
+        return None
 
     def search(
         self,

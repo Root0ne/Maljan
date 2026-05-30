@@ -16,9 +16,12 @@ The output is two complementary structures:
   - ``TTPMapping[]`` — one row per technique with all the evidence quotes,
     confidence, contributing layers; this is what the narrative agent reads.
 
-The mapping ``technique_phase_slug → (tactic_id, tactic_name)`` is hard-
-coded for the 14 MITRE Enterprise tactics — these IDs do not change so
-inlining them is safer than re-parsing the ATT&CK STIX bundle every run.
+The mapping ``technique_phase_slug → (tactic_id, tactic_name)`` is resolved
+from the LIVE ATT&CK bundle's tactic catalogue (so new releases — e.g. the v19
+"Defense Evasion" → "Stealth" + "Defense Impairment" split — map with no code
+change). The inlined ``_TACTIC_TABLE`` below is kept only as an offline
+fallback for when the catalogue is unavailable (first run with no network,
+tests, etc.).
 """
 
 from __future__ import annotations
@@ -28,9 +31,10 @@ from typing import Any
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
 
-# MITRE ATT&CK Enterprise tactic catalogue. ``kill_chain_phases`` in the
-# STIX bundle uses the slug form ("defense-evasion"); we map both to the
-# canonical TA-id and the human-readable name.
+# Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
+# when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
+# in the STIX bundle uses the slug form ("defense-evasion"); we map each slug
+# to the canonical TA-id and the human-readable name.
 _TACTIC_TABLE: tuple[tuple[str, str, str], ...] = (
     ("TA0043", "reconnaissance", "Reconnaissance"),
     ("TA0042", "resource-development", "Resource Development"),
@@ -77,7 +81,7 @@ def build_capability_matrix(
         confidence = float(info.get("confidence") or 0.0)
         layers = info.get("layers") or []
 
-        tactic_id, tactic_name = _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))
+        tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -94,6 +98,7 @@ def build_capability_matrix(
                 technique_id=tid,
                 technique_name=name,
                 tactic=tactic_id,
+                tactic_name=tactic_name,
                 evidence_quotes=evidence[:8],
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
@@ -232,3 +237,21 @@ def _resolve_technique_meta(index: Any | None, tid: str) -> tuple[str, str]:
     tactic_phases = getattr(tech, "tactic_phases", None) or []
     primary_phase = tactic_phases[0] if tactic_phases else ""
     return str(name), str(primary_phase)
+
+
+def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
+    """Resolve a kill-chain slug to ``(tactic_id, tactic_name)``.
+
+    Prefers the live ATT&CK bundle's tactic catalogue (via the index), so new
+    releases — e.g. the v19 Stealth / Defense Impairment split — resolve with no
+    code change. Falls back to the inlined ``_TACTIC_BY_SLUG`` table when the
+    catalogue is unavailable (offline first run, fixture-built index, tests).
+    """
+    if not tactic_slug:
+        return "", ""
+    getter = getattr(index, "get_tactic_by_slug", None)
+    if callable(getter):
+        tactic = getter(tactic_slug)
+        if tactic is not None:
+            return str(getattr(tactic, "tactic_id", "")), str(getattr(tactic, "name", ""))
+    return _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))
