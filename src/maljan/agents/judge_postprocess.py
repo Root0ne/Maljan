@@ -78,6 +78,7 @@ _PATTERN_LITERAL_RE = re.compile(r"'([^']+)'")
 def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
     evidence_corpus: set[str] | None = None,
+    valid_technique_ids: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Apply J-01 / J-02 / REP-01 fixes in place; return the same dict.
 
@@ -88,6 +89,14 @@ def postprocess_judge_bundle(
     drawn from the deterministic findings — interesting strings, sandbox
     observations, network IOCs. When provided, indicators whose pattern
     value isn't a substring of any corpus entry are dropped.
+
+    ``valid_technique_ids`` (Wave 9, 2026-05-29) is the set of TIDs that
+    survived the cascade and are present in the report's
+    capability_matrix. When provided, REP-01 drops AttackPattern SDOs
+    whose technique_id is not in the set (orphan attack-patterns), along
+    with any Relationship SDOs that referenced them. This prevents the
+    judge LLM from synthesizing a TTP the deterministic pipeline
+    rejected and giving it MITRE legitimacy via external_references.
     """
     objects = bundle_dict.get("objects")
     if not isinstance(objects, list):
@@ -164,6 +173,43 @@ def postprocess_judge_bundle(
         if dropped:
             objects = kept
             bundle_dict["objects"] = kept
+
+    # ── REP-02 (Wave 9): drop orphan attack-patterns absent from the
+    # report's capability_matrix. Sweep relationships pointing to them.
+    if valid_technique_ids is not None:
+        orphan_ap_ids: set[str] = set()
+        kept_ap: list[dict[str, Any]] = []
+        for obj in objects:
+            if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
+                kept_ap.append(obj)
+                continue
+            tid = _attack_pattern_technique_id(obj)
+            if tid and tid not in valid_technique_ids:
+                ap_id = obj.get("id")
+                if isinstance(ap_id, str):
+                    orphan_ap_ids.add(ap_id)
+                logger.warning(
+                    "judge_postprocess: dropping orphan attack-pattern (tid=%s "
+                    "not in capability_matrix; id=%s)",
+                    tid,
+                    obj.get("id", "<no-id>"),
+                )
+                continue
+            kept_ap.append(obj)
+        if orphan_ap_ids:
+            objects = [
+                obj
+                for obj in kept_ap
+                if not (
+                    isinstance(obj, dict)
+                    and obj.get("type") == "relationship"
+                    and (
+                        obj.get("source_ref") in orphan_ap_ids
+                        or obj.get("target_ref") in orphan_ap_ids
+                    )
+                )
+            ]
+            bundle_dict["objects"] = objects
 
     # ── REP-01: back-fill external_references on AttackPatterns ────
     _VALID_TID_RE_LOCAL = re.compile(r"^T\d{4}(?:\.\d{3})?$")

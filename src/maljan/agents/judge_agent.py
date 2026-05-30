@@ -530,7 +530,21 @@ class JudgeAgent:
             # ``attack-pattern.external_references`` (REP-01).
             from maljan.agents.judge_postprocess import postprocess_judge_bundle
 
-            data = postprocess_judge_bundle(data, evidence_corpus=evidence_corpus)
+            # Wave 9 (2026-05-29): when a cascade summary is available,
+            # derive the set of TIDs that survived the cascade and pass it
+            # to REP-02 so orphan attack-patterns (TTPs the LLM emitted
+            # but the deterministic pipeline rejected) are dropped from
+            # the bundle before validation.
+            valid_tids: frozenset[str] | None = None
+            if cascade_summary is not None:
+                valid_tids = frozenset(
+                    r.technique_id for r in cascade_summary.results if r.technique_id
+                )
+            data = postprocess_judge_bundle(
+                data,
+                evidence_corpus=evidence_corpus,
+                valid_technique_ids=valid_tids,
+            )
             return Bundle.model_validate(data)
         except Exception as e:
             self.logger.warning(

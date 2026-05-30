@@ -138,5 +138,99 @@ class TestLegacyKindsUnchanged:
         assert len([o for o in result["objects"] if o.get("type") == "indicator"]) == 1
 
 
+# ---------------------------------------------------------------------------
+# REP-02 (Wave 9) — orphan attack-pattern dropping
+# ---------------------------------------------------------------------------
+
+
+def _attack_pattern(uid: str, tid: str) -> dict:
+    return {
+        "type": "attack-pattern",
+        "id": f"attack-pattern--{uid}",
+        "name": tid,
+        "external_references": [],
+    }
+
+
+def _relationship(uid: str, src: str, tgt: str) -> dict:
+    return {
+        "type": "relationship",
+        "id": f"relationship--{uid}",
+        "relationship_type": "uses",
+        "source_ref": src,
+        "target_ref": tgt,
+    }
+
+
+class TestRep02OrphanDrop:
+    def test_drops_orphan_attack_pattern(self) -> None:
+        bundle = _bundle_with(
+            [
+                _attack_pattern("00000000-0000-4000-8000-000000000003", "T1497"),
+                _attack_pattern("00000000-0000-4000-8000-000000000004", "T1562"),
+            ]
+        )
+        result = postprocess_judge_bundle(
+            bundle,
+            valid_technique_ids=frozenset({"T1497"}),
+        )
+        aps = [o for o in result["objects"] if o.get("type") == "attack-pattern"]
+        assert len(aps) == 1
+        # REP-01 may promote the bare ID to the canonical MITRE name; check
+        # via the external_references TID instead.
+        refs = aps[0].get("external_references") or []
+        assert any(r.get("external_id") == "T1497" for r in refs)
+
+    def test_drops_relationships_to_orphan(self) -> None:
+        ap_id_keep = "attack-pattern--00000000-0000-4000-8000-000000000005"
+        ap_id_drop = "attack-pattern--00000000-0000-4000-8000-000000000006"
+        bundle = {
+            "type": "bundle",
+            "id": "bundle--00000000-0000-0000-0000-000000000099",
+            "objects": [
+                {
+                    "type": "attack-pattern",
+                    "id": ap_id_keep,
+                    "name": "T1497",
+                    "external_references": [],
+                },
+                {
+                    "type": "attack-pattern",
+                    "id": ap_id_drop,
+                    "name": "T1562",
+                    "external_references": [],
+                },
+                _relationship(
+                    "00000000-0000-4000-8000-000000000007",
+                    "malware--00000000-0000-4000-8000-000000000008",
+                    ap_id_keep,
+                ),
+                _relationship(
+                    "00000000-0000-4000-8000-000000000009",
+                    "malware--00000000-0000-4000-8000-00000000000a",
+                    ap_id_drop,
+                ),
+            ],
+        }
+        result = postprocess_judge_bundle(
+            bundle,
+            valid_technique_ids=frozenset({"T1497"}),
+        )
+        rels = [o for o in result["objects"] if o.get("type") == "relationship"]
+        assert len(rels) == 1
+        assert rels[0]["target_ref"] == ap_id_keep
+
+    def test_no_filter_when_set_is_none(self) -> None:
+        # Legacy callers (no cascade summary) must not see SDOs dropped.
+        bundle = _bundle_with(
+            [
+                _attack_pattern("00000000-0000-4000-8000-00000000000b", "T1562"),
+            ]
+        )
+        result = postprocess_judge_bundle(bundle, valid_technique_ids=None)
+        aps = [o for o in result["objects"] if o.get("type") == "attack-pattern"]
+        assert len(aps) == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
