@@ -275,6 +275,14 @@ class APISettings(BaseSettings):
             "application/x-msdos-program",
         ]
     )
+    # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit found that
+    # ``tempfile.NamedTemporaryFile`` defaults to the system temp dir
+    # (``%LOCALAPPDATA%\Temp`` on Windows), which is the Defender quarantine
+    # zone. Sample uploads + worker writes targeting that path were
+    # silently quarantined, surfacing as "Storage service unavailable"
+    # (HTTP 503). The fix: route every sample-handling tempfile through
+    # a Defender-excluded directory created at API startup.
+    upload_temp_dir: str = Field(default="data/uploads/.tmp")
 
     @field_validator("jwt_secret_key")
     @classmethod

@@ -164,7 +164,30 @@ def make_analyst_node(
                 chunks = _augment_static_chunks_with_path(chunks, state)
 
             if not chunks:
-                raise AnalystError(f"No data chunks produced for agent '{agent_name}'.")
+                # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
+                # found that an ELF sample with no PCAP / Triage network
+                # trace caused the network analyst to fail-hard with an
+                # AnalystError ([ERROR] prefix), which then routed into
+                # ``failed_analysts`` and forced ``degraded_mode=true``.
+                # For analysts whose absence of input data is normal (a
+                # PE without dynamic, or a Linux ELF without PCAP), this
+                # is graceful degradation, not failure — emit a [WARN]
+                # report with an empty ISR so the rest of the pipeline
+                # treats the analyst as "absent" rather than "broken".
+                logger.info(
+                    "Agent '%s': no data chunks available — emitting empty ISR "
+                    "as graceful degradation (Wave 9 no-data path).",
+                    agent_name,
+                )
+                return {
+                    "reports": {
+                        agent_name: (
+                            f"[WARN] {agent_name}: no {agent_name} data available "
+                            "for this sample — analyst skipped."
+                        )
+                    },
+                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                }
 
             if len(chunks) == 1:
                 isr = agent.safe_analyze_isr(chunks[0].content)
@@ -565,6 +588,21 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)
 
+            # Wave 9 (2026-05-29): capture pre-cascade platform-filter
+            # counters from both Layer 0 evaluators so the audit gate
+            # G-FP-8 can prove the filter ran even when the cascade has
+            # nothing to drop.
+            _sigma_dropped_total = 0
+            _yara_dropped_total = 0
+            try:
+                _yara_dropped_total = container.get_yara_layer().last_filtered_count
+            except Exception as e:
+                logger.debug("Could not read yara_layer.last_filtered_count: %s", e)
+            try:
+                _sigma_dropped_total = container.get_sigma_layer().last_filtered_count
+            except Exception as e:
+                logger.debug("Could not read sigma_layer.last_filtered_count: %s", e)
+
             start_time = time.time()
 
             memory_store: MemoryStore | None = None
@@ -705,6 +743,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     .set_isr_stats(isr_reports)
                     .set_validation_summary(ttp_validation_summary)
                     .set_cascade_summary(cascade_summary)
+                    .set_platform_filter_summary(
+                        sigma_dropped=_sigma_dropped_total,
+                        yara_dropped=_yara_dropped_total,
+                        sample_platform=str(sample_platform),
+                    )
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
                     .build()

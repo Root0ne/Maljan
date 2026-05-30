@@ -25,6 +25,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ── Startup ──────────────────────────────────────────────
     logger.info("Starting Maljan API server...")
 
+    # Wave 9 (2026-05-29): ensure the Defender-excluded sample upload tmp
+    # dir exists before any request can land. The 2026-05-29 Linux ELF
+    # audit found that uploads routed to ``%LOCALAPPDATA%\Temp`` were
+    # quarantined silently. See APISettings.upload_temp_dir.
+    from pathlib import Path as _Path
+
+    _upload_tmp = _Path(settings.upload_temp_dir)
+    try:
+        _upload_tmp.mkdir(parents=True, exist_ok=True)
+        logger.info("Upload temp dir ready: %s", _upload_tmp.resolve())
+    except OSError as exc:
+        logger.warning(
+            "Failed to create upload_temp_dir=%s (%s); falling back to OS temp.",
+            _upload_tmp,
+            exc,
+        )
+
     from app.database import async_engine
 
     # Verify database connectivity

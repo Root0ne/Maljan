@@ -9,7 +9,6 @@ pipeline, streaming progress events via Redis PubSub.
 """
 
 import asyncio
-import tempfile
 import time
 import traceback
 import uuid
@@ -274,7 +273,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # (``.elf`` → Linux, ``.exe`` → Windows, etc.). Otherwise
                 # the bare sha256 would be treated as an unknown blob.
                 _orig_ext = Path(sample.original_filename or "").suffix
-                temp_path = str(Path(tempfile.gettempdir()) / f"{sample.sha256}{_orig_ext}")
+                # Wave 9 (2026-05-29): use the Defender-excluded upload
+                # tmp dir instead of the system temp dir. See
+                # ``APISettings.upload_temp_dir``.
+                _worker_tmp = Path(settings.upload_temp_dir)
+                _worker_tmp.mkdir(parents=True, exist_ok=True)
+                temp_path = str(_worker_tmp / f"{sample.sha256}{_orig_ext}")
                 minio_client.fget_object(
                     settings.minio_bucket,
                     derived_path,

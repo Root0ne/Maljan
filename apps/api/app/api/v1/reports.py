@@ -213,8 +213,23 @@ async def enqueue_enrichment_job(
     """
     # Verify ownership up-front so a missing report cannot be confused with an
     # "already_queued" idempotent response.
-    if await svc.get_report(report_id, user) is None:
+    report_row = await svc.get_report(report_id, user)
+    if report_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+
+    # Wave 9 (2026-05-29) pre-flight: skip the enqueue when the report
+    # carries no network IOCs to enrich. The 2026-05-29 Linux ELF audit
+    # found that ELF samples with no PCAP / Triage network trace queued
+    # an ARQ job that silently no-op'd; surfacing ``skipped_no_network_iocs``
+    # makes the UI's "Enrich" button informative instead of misleading.
+    _mr = report_row.malware_report or {}
+    _net = _mr.get("network") if isinstance(_mr, dict) else None
+    if not _net or (not (_net.get("domains") or []) and not (_net.get("ips") or [])):
+        return {
+            "status": "skipped_no_network_iocs",
+            "report_id": str(report_id),
+            "job_id": None,
+        }
 
     try:
         job_id = await svc.enqueue_enrichment(report_id, user)

@@ -203,7 +203,16 @@ async def upload_sample(
         extra={"user_id": str(user.id), "component": "upload"},
     )
 
-    with tempfile.NamedTemporaryFile(prefix="maljan-upload-", delete=False) as tmp:
+    # Wave 9 (2026-05-29): route uploads through the Defender-excluded
+    # ``settings.upload_temp_dir`` instead of the OS temp dir. See the
+    # ``APISettings.upload_temp_dir`` field comment for the audit reference.
+    upload_tmp_root = Path(settings.upload_temp_dir)
+    upload_tmp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix="maljan-upload-",
+        delete=False,
+        dir=str(upload_tmp_root),
+    ) as tmp:
         tmp_path = Path(tmp.name)
 
     try:
