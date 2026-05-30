@@ -160,16 +160,40 @@ once auth is bypassed via `AUTH_DISABLED=true` in `.env`.
 
 ## 4. Known Operational Gotchas
 
-- **`apps/api/.venv` pydantic_core import fails** on fresh install (UV
-  hardlink fallback corruption). Use the project-root `.venv` for the
-  uvicorn process — `apps/api/.venv` was a historical layout that
-  ships partially populated. Tracked as Wave 10 W10-VENV-06.
-- **ESLint v9 config migration** — `apps/web/.eslintrc.json` is the
-  legacy v8 format; ESLint 9.39+ refuses to load it. Web `tsc --noEmit`
-  still works; the lint script does not. Tracked as Wave 10 W10-LINT-07.
-- **Mobile ATT&CK tactics render as "Unknown TA0000"** — the UI's
-  TTPS tab only knows the 14 Enterprise tactics. T1628 / T1429 / etc.
-  from Mobile ATT&CK lack a tactic resolver. Tracked as Wave 10 W10-TTP-02.
+Closed in 2026-05-30 Wave 10:
+
+- **`apps/api/.venv` pydantic_core import fails** (W10-VENV-06) — root
+  cause was a uv-cache hardlink corruption that left ``pydantic_core``
+  installed without its compiled wheel. Repair with::
+
+    cd apps/api
+    $env:VIRTUAL_ENV = (Resolve-Path .\.venv).Path
+    uv pip install --reinstall pydantic-core
+
+  After the reinstall the version moves to ``2.47.0`` and ``import
+  pydantic`` succeeds. The repo's root ``.venv`` was unaffected.
+
+- **ESLint v9 config migration** (W10-LINT-07) — ``apps/web/eslint.config.mjs``
+  now carries the flat-config recipe sourced from
+  ``node_modules/next/dist/docs/01-app/03-api-reference/05-config/03-eslint.md``.
+  ``apps/web/node_modules/.bin/eslint.cmd .`` returns exit 0 with 17
+  warnings, 0 errors after the W10-LINT-DEBT-01/02 sweeps.
+
+- **Mobile ATT&CK tactics render as "Unknown TA0000"** (W10-TTP-02) —
+  ``apps/web/src/lib/mitre-mobile.ts`` ships a curated TID → tactic
+  lookup for ~60 Mobile ATT&CK techniques. The TTPS tab now exposes
+  a Mobile/Enterprise/ICS matrix selector and auto-promotes whichever
+  matrix has techniques.
+
+Still tracked as backlog:
+
+- **Defender real-time protection blocks malware reads** (W10-ENV-04) —
+  the recipe in section 1 above must be applied per operator host.
+  The classifier blocked the automated apply in the 2026-05-30
+  Wave 10 session ("Adding Windows Defender exclusion paths weakens
+  endpoint security controls; user's generic 'continue' does not
+  explicitly authorize modifying host AV configuration"). Operator
+  must run the elevated PowerShell commands manually.
 
 ---
 
