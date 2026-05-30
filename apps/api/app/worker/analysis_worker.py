@@ -276,7 +276,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # Wave 9 (2026-05-29): use the Defender-excluded upload
                 # tmp dir instead of the system temp dir. See
                 # ``APISettings.upload_temp_dir``.
-                _worker_tmp = Path(settings.upload_temp_dir)
+                # Wave 9 HOTFIX-08 (2026-05-29): ``.resolve()`` is critical
+                # here — the 2026-05-29 ELF smoke test (job f4a1fee9)
+                # produced a relative ``data\uploads\.tmp\<sha>.elf`` path
+                # which then broke TriageClient.submit_and_wait with
+                # ``[Errno 22] Invalid argument`` when its httpx coroutine
+                # opened the path from a different CWD. The fix is to
+                # resolve once at use-site so every downstream consumer
+                # (Triage submit, Ghidra container path map, sandbox
+                # uploader) receives an absolute path.
+                _worker_tmp = Path(settings.upload_temp_dir).resolve()
                 _worker_tmp.mkdir(parents=True, exist_ok=True)
                 temp_path = str(_worker_tmp / f"{sample.sha256}{_orig_ext}")
                 minio_client.fget_object(

@@ -31,10 +31,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # quarantined silently. See APISettings.upload_temp_dir.
     from pathlib import Path as _Path
 
-    _upload_tmp = _Path(settings.upload_temp_dir)
+    # Wave 9 HOTFIX-08 (2026-05-29): resolve to absolute BEFORE writing so
+    # downstream consumers (worker MinIO download, Triage submit) don't
+    # inherit a CWD-dependent relative path. The 2026-05-29 ELF smoke test
+    # hit ``[Errno 22] Invalid argument`` from TriageClient.submit_and_wait
+    # when its httpx coroutine context tried to open
+    # ``data\uploads\.tmp\<sha>.elf`` from a CWD that wasn't the project root.
+    _upload_tmp = _Path(settings.upload_temp_dir).resolve()
     try:
         _upload_tmp.mkdir(parents=True, exist_ok=True)
-        logger.info("Upload temp dir ready: %s", _upload_tmp.resolve())
+        logger.info("Upload temp dir ready: %s", _upload_tmp)
     except OSError as exc:
         logger.warning(
             "Failed to create upload_temp_dir=%s (%s); falling back to OS temp.",

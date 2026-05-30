@@ -206,7 +206,10 @@ async def upload_sample(
     # Wave 9 (2026-05-29): route uploads through the Defender-excluded
     # ``settings.upload_temp_dir`` instead of the OS temp dir. See the
     # ``APISettings.upload_temp_dir`` field comment for the audit reference.
-    upload_tmp_root = Path(settings.upload_temp_dir)
+    # Wave 9 HOTFIX-08: ``.resolve()`` to keep the path CWD-independent — the
+    # original ELF smoke test hit "Invalid argument" downstream when a
+    # different coroutine opened the relative path from a different CWD.
+    upload_tmp_root = Path(settings.upload_temp_dir).resolve()
     upload_tmp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         prefix="maljan-upload-",

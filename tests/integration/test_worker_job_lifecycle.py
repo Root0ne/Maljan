@@ -321,3 +321,42 @@ async def test_startup_sweep_handles_no_phantoms_gracefully() -> None:
     # Should complete without raising.
     await _sweep_orphan_jobs(db_session_factory)
     assert sweep_session.commit.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 HOTFIX-08 (2026-05-29) — upload_temp_dir must resolve to absolute
+# ---------------------------------------------------------------------------
+
+
+def test_upload_temp_dir_resolves_to_absolute_path() -> None:
+    """Regression: the original Wave 9 ERGO-06 commit set
+    ``APISettings.upload_temp_dir = "data/uploads/.tmp"`` (relative) and
+    consumers (API startup, sample upload endpoint, worker MinIO download)
+    used ``Path(settings.upload_temp_dir)`` directly. When TriageClient's
+    httpx coroutine then tried to open that relative path from a CWD that
+    wasn't the project root it failed with ``[Errno 22] Invalid argument``.
+
+    The hotfix is ``Path(settings.upload_temp_dir).resolve()`` at every
+    use-site so the path stays absolute / CWD-independent. This test
+    documents the invariant — Python's ``Path.resolve()`` will turn any
+    relative settings value into an absolute Path that the downstream
+    Triage / MinIO / Ghidra consumers can rely on.
+    """
+    from pathlib import Path
+
+    from app.config import APISettings
+
+    # Default settings value is "data/uploads/.tmp" — explicitly relative
+    # for repo-portability across operator machines.
+    settings = APISettings()
+    assert not Path(settings.upload_temp_dir).is_absolute()
+
+    # After resolve(), it MUST be absolute. Every Wave 9 use-site is
+    # required to call ``.resolve()`` before handing the path to a
+    # consumer.
+    resolved = Path(settings.upload_temp_dir).resolve()
+    assert resolved.is_absolute(), (
+        f"Wave 9 HOTFIX-08 invariant violated: "
+        f"upload_temp_dir resolved to non-absolute path {resolved!r}. "
+        "Add ``.resolve()`` at the affected call site."
+    )
