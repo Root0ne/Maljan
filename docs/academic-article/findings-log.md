@@ -173,45 +173,47 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   scoring LLM-generated malware narratives, and independent validation that 7–9B
   local models suffice for the narration task.
 
-### 3.2 View-decomposition for small-model static analysis — `EXPERIMENTAL` (controlled probe, N=1 per arm, deterministic decoding)
-- **Question.** Given identical Ghidra-derived evidence, does a small local model
-  produce sharper, better-grounded findings under **focused per-view sub-prompts**
-  (AppPoet [3] style) than under **one monolithic prompt**?
+### 3.2 View-decomposition for small-model static analysis — `EXPERIMENTAL` → `INCONCLUSIVE`
+- **Question.** Given identical evidence, does focused per-view sub-prompting
+  (AppPoet [3] style) beat one monolithic prompt for a small local model?
 - **Method.** Self-contained A/B harness (no production code touched). Fixed,
-  balanced 4-view evidence bundle (imports/API, strings/IOC, sink/control-flow,
-  crypto) modelling a Linux ELF backdoor. Same live local model (Qwen3.6-35B-A3B at
-  262k), temperature 0. Arm A = 1 monolithic call; Arm B = 4 per-view calls + 1
-  synthesis call. Metrics: distinct correct findings, ATT&CK technique coverage,
-  grounding (fraction of claims citing an artifact present in the bundle), tokens,
-  wall-clock. Two runs (one with reasoning on, one with the reasoning soft-switch
-  off). Harness: `D:/tmp/view_ab_experiment.py` (throwaway).
-- **Results (consistent across both runs).**
+  balanced evidence bundle modelling a Linux ELF backdoor. Same live local model
+  (Qwen3.6-35B-A3B), temperature 0. Arms: monolithic (1 call); 2-view
+  (behaviour vs artifacts, 2+1 calls); 4-view (4+1 calls). Metrics: parsed CLAIM
+  count, ATT&CK technique IDs, grounding (evidence-artifact presence), tokens,
+  wall-clock. Harness: `D:/tmp/view_ab_experiment.py`.
+- **Result — the parsed-claim ranking was UNSTABLE across runs.**
 
-  | Metric | Monolithic (A) | View-decomposed (B) |
-  |---|---|---|
-  | Distinct correct findings | 2 | **4** |
-  | Grounding (hallucinated claims) | 100% (0) | 100% (0) |
-  | Techniques missed by A but caught by B | — | LD_PRELOAD dynamic-linker hijack (T1574.007), distinct C2 (T1071.001), XOR-config→`connect()` dataflow |
-  | Tokens | ~2.2k | ~3× (clean) / inflated by §3.3 loop |
-  | Wall-clock | ~33 s | ~7× serial (parallelisable; views are independent) |
+  | Run (per-call budget) | monolithic | 2-view | 4-view |
+  |---|---|---|---|
+  | max_tokens 1400 | 2 | 2 | 4 |
+  | max_tokens 4000 | **9** | 2 | 4 |
 
-- **Finding 1 (confirms [3] on a *small local* model).** View-decomposition roughly
-  **doubled finding completeness** (2 → 4) and recovered distinct techniques the
-  monolithic arm missed, **without** adding hallucination (grounding stayed 100%).
-- **Finding 2 (novel observation — fault isolation).** When the small model derailed
-  on one view (the degenerate loop of §3.3), the *other* views' findings — already
-  captured in separate calls — survived into the synthesis. In the monolithic arm a
-  single derailment truncated all subsequent analysis. **Decomposition provides
-  fault isolation, a benefit beyond the "focused attention" hypothesis.** `OBSERVED`.
-- **Cost framing.** The token overhead (~3× clean) is effectively free on a
-  self-hosted local model (no per-token billing); the latency overhead is
-  parallelisable because the views are independent. This makes decomposition more
-  attractive for *local* deployment than its raw cost suggests.
-- **Limitations (state plainly in the paper).** N=1 per arm; single sample; a
-  synthetic (though realistic) evidence bundle chosen because the available live
-  sample was statically linked (sparse named-import/sink views). A powered study
-  needs multiple real samples, blinded scoring of correctness (not just grounding),
-  and parallel-call latency measurement.
+  Raising the per-call budget flipped the ranking: monolithic jumped 2 → 9 and
+  overtook the decomposed arms.
+- **Root cause (the real finding).** Three factors swamp the prompt-structure effect
+  at N=1: (i) **unequal total generation budget** — a 4-view run gets ~5× monolithic's
+  total tokens, so the earlier "more findings under decomposition" was largely a
+  budget artifact; (ii) **unreliable reasoning suppression × truncation** — how much
+  *formatted* output survives depends on a per-run thinking-vs-budget interaction;
+  (iii) **claim-count is a poor quality proxy** — with more budget monolithic
+  over-generated, including a **hallucinated technique ID (T1000, not a valid ATT&CK
+  ID)** and a mis-applied one (T1055.012 Process Hollowing on a Linux ELF). The
+  grounding metric (100% across all arms) does NOT catch technique-level
+  hallucination — it only checks evidence-artifact presence.
+- **What survives as defensible (budget-independent, structural).**
+  - **Fault isolation** `OBSERVED`: when the model derailed on one view (the §3.3
+    loop), findings from the other views — captured in separate calls — survived; in
+    the monolithic arm one derailment truncated everything after it.
+  - **Output stability** `OBSERVED`: decomposed arms held a stable claim count across
+    budgets (2-view ≈ 2, 4-view ≈ 4) while monolithic was volatile (2 ↔ 9), because
+    per-view calls bound the per-call work.
+- **Conclusion.** `INCONCLUSIVE` on completeness. The earlier "~2× completeness"
+  reading was a budget/measurement artifact and is **retracted**. The structurally
+  defensible benefits are fault isolation and output stability. A valid study
+  requires: equal total generation budget per arm; N ≫ 1 with mean ± bootstrap CI;
+  a forced/structured output format to remove truncation as a variable; and blinded
+  correctness scoring of both claim and technique (not claim count + string-grounding).
 
 ### 3.3 Novel failure mode: degenerate technique-ID loop — `OBSERVED` (reproducible)
 - **Phenomenon.** On anti-analysis evidence (`ptrace`/`prctl`), the model does not
@@ -230,6 +232,19 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   the common evasion/loader/injection techniques so it retrieves rather than guesses;
   (iii) decomposition (§3.2) as a *blast-radius limiter* for such loops.
 
+### 3.4 Negative methodological finding: single-run claim-count is not a valid instrument — `NEGATIVE`
+- Running the §3.2 A/B three times under different decoding budgets produced
+  **contradictory rankings of the same arms**. The dominant variance came from the
+  measurement setup (reasoning-suppression reliability × token budget ×
+  over-generation), not from the independent variable (prompt structure).
+- **Takeaway for the paper's methodology section.** For reasoning LLMs emitting
+  free-form structured findings, a naive single-run parsed-claim count is **not a
+  valid measurement instrument**. Valid comparison requires: (a) equal total
+  generation budget across arms; (b) a constrained/forced output format; (c) scoring
+  *correctness* (claim AND technique), not count; (d) N ≫ 1 with confidence
+  intervals. We surface this as a cautionary methodology result for LLM-for-malware
+  evaluation — easy to get wrong, and wrong in a way that silently inverts rankings.
+
 ---
 
 ## 4. Open threads / planned experiments
@@ -240,39 +255,29 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   lighter 2-view variant (behaviour vs artifacts) to trade completeness for cost.
 - `HYPOTHESIS` Adopt a MaLAware-style [4] multi-metric narrative-quality evaluation
   harness for the report/NarrativeAgent.
-- Leads not yet evaluated (likely high transfer — "LLM-as-analyst" paradigm):
-  MARD (multi-agent) [5], TraceRAG (RAG + explainable) [6], LAMD [7].
+- Leads to evaluate (likely high transfer — "LLM-as-analyst" paradigm):
+  MARD (multi-agent, arXiv:2604.25264), TraceRAG (RAG + explainable, arXiv:2509.08865),
+  LAMD (arXiv:2502.13055).
 
 ---
 
 ## References
 
-1. Z. Yu, M. Wen, X. Guo, H. Jin. *Maltracker: A Fine-Grained NPM Malware Tracker
-   Copiloted by LLM-Enhanced Dataset.* ISSTA 2024, pp. 1759–1771. DOI
-   10.1145/3650212.3680397.
-2. N. Rollinson, N. Polatidis. *LLM-Generated Samples for Android Malware Detection.*
-   Digital 2026, 6(1), 5. DOI 10.3390/digital6010005. (Preprint: arXiv:2510.02391.)
-3. W. Zhao, J. Wu, Z. Meng. *AppPoet: Large Language Model based Android malware
-   detection via multi-view prompt engineering.* Expert Systems with Applications
-   262 (2025) 125546. (Preprint: arXiv:2404.18816.)
-4. B. Saha, N. Rani, S. K. Shukla. *MaLAware: Automating the Comprehension of
-   Malicious Software Behaviours using Large Language Models (LLMs).* MSR 2025.
-   arXiv:2504.01145.
-5. *MARD: A Multi-Agent Framework for Robust Android Malware Detection.*
-   arXiv:2604.25264. (Lead — not yet evaluated.)
-6. *TraceRAG: A LLM-Based Framework for Explainable Android Malware Detection and
-   Behavior Analysis.* arXiv:2509.08865. (Lead — not yet evaluated.)
-7. *LAMD: Context-driven Android Malware Detection and Classification with LLMs.*
-   arXiv:2502.13055. (Lead — not yet evaluated.)
-8. A. Guerra-Manzanares, H. Bahsi, S. Nõmm. *KronoDroid: Time-Based Hybrid-Featured
-   Dataset for Effective Android Malware Detection and Characterization.* Computers &
-   Security 110 (2021) 102399. (Dataset used by [2].)
+Only work we directly built on or positioned against — kept deliberately short.
 
-### Tooling / infrastructure
-- Ghidra MCP server (bethington/ghidra-mcp, v5.6.0; `com.xebyte`, ~201 `@McpTool`
-  endpoints; P-code emulation, call-graph extraction).
-- ik_llama.cpp `llama-server`; Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant (vector + exact
-  payload-filter stores); MITRE ATT&CK.
+1. Yu et al. *Maltracker: A Fine-Grained NPM Malware Tracker Copiloted by LLM-Enhanced
+   Dataset.* ISSTA 2024. DOI 10.1145/3650212.3680397. — basis for §1.1 (sink-reachability).
+2. Rollinson & Polatidis. *LLM-Generated Samples for Android Malware Detection.*
+   Digital 6(1):5, 2026. DOI 10.3390/digital6010005. — negative-transfer case; supports
+   our deterministic-corpus discipline (§3.1).
+3. Zhao et al. *AppPoet: LLM-based Android malware detection via multi-view prompt
+   engineering.* Expert Syst. Appl. 262, 2025. arXiv:2404.18816. — basis for §3.2 (views)
+   and validation of "LLM proposes, deterministic layer disposes."
+4. Saha et al. *MaLAware: Automating the Comprehension of Malicious Software Behaviours
+   using LLMs.* MSR 2025. arXiv:2504.01145. — narrative-quality evaluation protocol (§4).
+
+**Stack:** Ghidra MCP (bethington/ghidra-mcp v5.6.0); ik_llama.cpp `llama-server`;
+Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ---
 
@@ -282,5 +287,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   function-hash attribution (implemented this session), §1.3 verification discipline,
   §1.4 curated allowlist; §2.1 KV-cache measurement + 262k deployment, §2.2 tool-scale
   limit, §2.3 MTP negative result; §3.1 literature transfer assessment, §3.2
-  view-decomposition probe, §3.3 degenerate technique-ID loop. Reviewed [1][2][3][4];
-  logged leads [5][6][7].
+  view-decomposition probe, §3.3 degenerate technique-ID loop. Reviewed [1][2][3][4].
+- **2026-06-01 correction.** Ran the §3.2 A/B a 3rd time with equalised per-call
+  budget: the parsed-claim ranking **inverted** (monolithic 2 → 9). **Retracted** the
+  "~2× completeness" claim as a budget/measurement artifact; kept only fault-isolation
+  + output-stability as defensible. Added §3.4 (single-run claim-count is not a valid
+  instrument). Trimmed references to the 4 we directly used.
