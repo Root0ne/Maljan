@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.analysis.schema_pruner import infer_malware_category
@@ -814,6 +814,63 @@ def make_judge_node(container: ServiceContainer) -> Any:
                             e,
                         )
 
+            # Function-hash attribution (deterministic, exact opcode-hash).
+            # Read side: which known families this sample shares code with
+            # (threaded into the report). Write side: upsert this sample's
+            # function hashes under its inferred family so the corpus grows.
+            # Fully gated + fail-safe; never affects the verdict.
+            _func_hash_report: list[dict[str, Any]] = []
+            try:
+                from maljan.core.config import get_settings
+
+                _cfg = get_settings()
+                _static_path = state.get("static_sample_path")
+                if (
+                    _cfg.preprocessing.use_function_hash_attribution
+                    and _cfg.mcp.ghidra.transport == "http"
+                    and _cfg.memory.backend == "qdrant"
+                    and _static_path
+                ):
+                    from maljan.analysis.function_hash_attribution import (
+                        aggregate_matches,
+                        fetch_bulk_function_hashes,
+                        to_report_dicts,
+                    )
+                    from maljan.memory.function_hash_store import FunctionHashStore
+
+                    _sample_id = state.get("file_hash", "") or ""
+                    _funcs = fetch_bulk_function_hashes(
+                        base_url=_cfg.mcp.ghidra.url,
+                        auth_token=_cfg.mcp.ghidra.auth_token,
+                        file_path=_static_path,
+                        min_instructions=_cfg.preprocessing.function_hash_min_instructions,
+                    )
+                    if _funcs:
+                        _fh_store = FunctionHashStore(
+                            url=_cfg.memory.qdrant_url,
+                            collection=_cfg.memory.qdrant_function_hash_collection,
+                        )
+                        # Read side: surface prior family overlap in the report.
+                        _func_hash_report = to_report_dicts(
+                            aggregate_matches(
+                                _fh_store.match(
+                                    [h for _n, h in _funcs],
+                                    exclude_sample_id=_sample_id or None,
+                                ),
+                                max_families=_cfg.preprocessing.function_hash_max_matches,
+                            )
+                        )
+                        # Write side: only persist under a grounded family so an
+                        # UNKNOWN verdict cannot pollute the attribution corpus.
+                        _family = infer_malware_category(
+                            reports=state.get("reports") or {},
+                            isr_reports=isr_reports,
+                        ).value
+                        if _family and _family.upper() != "UNKNOWN":
+                            _fh_store.upsert_sample(_sample_id, _family, _funcs)
+            except Exception as _e:
+                logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
+
             return {
                 "final_decision": decision,
                 "judge_report": "Analyzed negotiation history and expert reports.",
@@ -825,6 +882,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # node and downstream consumers (API/dashboard).
                 "degraded_mode": _degraded_mode,
                 "degradation_reasons": _degradation_reasons,
+                # Exact opcode-hash family overlap, surfaced into the report's
+                # FamilyAttribution.function_hash_matches by the report node.
+                "function_hash_matches": _func_hash_report,
                 # Sandbox CTI surface for the report node — persisted into
                 # the extended STIX bundle so the UI / API / paper export
                 # can render the full deterministic threat-intel snapshot.
@@ -986,6 +1046,12 @@ def make_report_node(container: ServiceContainer) -> Any:
                 sandbox_cti=state.get("sandbox_cti"),
             )
             report = builder.build_deterministic()
+            # Thread the judge node's exact opcode-hash family overlap into the
+            # report (deterministic code-reuse links). Best-effort post-build,
+            # mirroring how ``similar_samples`` is populated in enrichment.
+            _fh_matches = cast("list[dict[str, Any]]", state.get("function_hash_matches") or [])
+            if _fh_matches and getattr(report, "attribution", None) is not None:
+                report.attribution.function_hash_matches = _fh_matches
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {}

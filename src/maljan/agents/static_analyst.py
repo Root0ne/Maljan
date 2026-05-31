@@ -317,6 +317,78 @@ class StaticAnalyst(BaseAnalyst):
             )
             return ""
 
+    def _compute_function_hash_hint(self, file_path: str, sample_hash: str) -> str:
+        """Pre-pass: surface known-family code reuse via exact opcode-hash match.
+
+        Computes per-function normalized-opcode hashes for the binary, asks the
+        FunctionHashStore which known samples share them, and renders an
+        "attribution prior" hint. Deterministic and fail-safe: any error (or an
+        empty corpus / no overlap) returns an empty string and the analyst
+        proceeds normally. ``get_bulk_function_hashes`` is deliberately NOT in
+        the model allowlist — it is driven here from Python so the small local
+        model never carries that tool in its prompt.
+        """
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        if not cfg.preprocessing.use_function_hash_attribution:
+            return ""
+        if cfg.mcp.ghidra.transport != "http":
+            return ""  # the pre-pass speaks the headless REST API directly
+        if cfg.memory.backend != "qdrant":
+            return ""  # the function-hash store needs the Qdrant backend
+
+        try:
+            from maljan.analysis.function_hash_attribution import (
+                aggregate_matches,
+                build_attribution_hint,
+                fetch_bulk_function_hashes,
+            )
+            from maljan.memory.function_hash_store import FunctionHashStore
+
+            functions = fetch_bulk_function_hashes(
+                base_url=cfg.mcp.ghidra.url,
+                auth_token=cfg.mcp.ghidra.auth_token,
+                file_path=file_path,
+                min_instructions=cfg.preprocessing.function_hash_min_instructions,
+            )
+            if not functions:
+                return ""
+
+            store = FunctionHashStore(
+                url=cfg.memory.qdrant_url,
+                collection=cfg.memory.qdrant_function_hash_collection,
+            )
+            matches = store.match(
+                [fh for _name, fh in functions],
+                exclude_sample_id=sample_hash or None,
+            )
+            results = aggregate_matches(
+                matches, max_families=cfg.preprocessing.function_hash_max_matches
+            )
+            hint = build_attribution_hint(results)
+            if hint:
+                self.logger.info(
+                    "Function-hash pre-pass: %d family prior(s) from %d shared "
+                    "function(s) for '%s'.",
+                    len(results),
+                    sum(r.shared_functions for r in results),
+                    file_path,
+                )
+            else:
+                self.logger.info(
+                    "Function-hash pre-pass: no known-family overlap (new sample "
+                    "or empty corpus) — no prior emitted."
+                )
+            return hint
+        except Exception as exc:  # fail-safe: never break analysis over a hint
+            self.logger.warning(
+                "Function-hash pre-pass failed (%s: %s); continuing without prior.",
+                type(exc).__name__,
+                exc,
+            )
+            return ""
+
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
@@ -468,9 +540,16 @@ class StaticAnalyst(BaseAnalyst):
         # ReAct loop decompiles the malicious core first. Fail-safe: empty
         # string when disabled, unavailable, or the binary has no named sinks.
         sink_hint = ""
+        attr_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
             sink_hint = self._compute_sink_priority_hint(analysis_path)
+            # Function-hash attribution prior: exact opcode-hash matches against
+            # previously analysed samples. Hoisted ABOVE the sink hint so a known
+            # family link frames the whole analysis. Fail-safe and corpus-gated.
+            attr_hint = self._compute_function_hash_hint(
+                analysis_path, _extract_sample_hash(data) or ""
+            )
 
         prompt_messages = [
             ("system", _ISR_SYSTEM),
@@ -487,7 +566,7 @@ class StaticAnalyst(BaseAnalyst):
                 "CONFIDENCE: <float>\n"
                 "TECHNIQUE: <T-ID or NONE>\n"
                 "---\n\n"
-                f"{sink_hint}{load_hint}{target_info}",
+                f"{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]
 
@@ -632,6 +711,32 @@ def _extract_analysis_path(data: str) -> str | None:
         return None
     path = parsed.get("analysis_file_path")
     return path if isinstance(path, str) and path else None
+
+
+def _extract_sample_hash(data: str) -> str | None:
+    """Return the sample's full sha256 from a chunk JSON, or None.
+
+    The static chunk carries ``{sha256, md5, name, size, ...}``; the full
+    ``sha256`` equals the pipeline ``file_hash`` used as the LTM/function-hash
+    ``sample_id``, so a re-analysis can exclude its own prior matches. Falls
+    back to the short ``sample_hash`` fingerprint. Best-effort: None on any miss.
+    """
+    import json as _json
+
+    stripped = data.strip()
+    if not stripped or not stripped.startswith("{"):
+        return None
+    try:
+        parsed = _json.loads(stripped)
+    except (_json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    for key in ("sha256", "sample_hash"):
+        val = parsed.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return None
 
 
 # CRLF-tolerant separator that requires the dashes to occupy their own line.

@@ -1,22 +1,40 @@
 # ik_llama.cpp llama-server: Qwen3.6-35B-A3B-IQ3_K_R4 on RTX 5060 8 GB (38-44 tok/s output, ~15 min/sample end-to-end).
 #
 # Wave 10 W10-LLM-05 (2026-05-30): context window bumped 16384 -> 32768.
-# The 2026-05-30 ELF + APK smoke runs (jobs f4a1fee9, 37d9c976) both
-# tripped the static analyst's ReAct loop with HTTP 500
-# "context shift is disabled" -- the 16k ceiling could not hold the
-# Ghidra MCP tool schemas (12 tools) plus a 5-round ReAct conversation.
-# At -c 32768 + -ctk q8_0 the KV cache grows by ~64 MiB, which still
-# fits inside the RTX 5060's 8 GiB budget alongside the IQ3_K_R4 weights
-# (~7 GiB resident with --n-cpu-moe 36 offload). If the operator runs
-# llama-server on a smaller card, drop -c back to 16384 and adjust
-# react.max_iterations downstream instead.
+# 2026-05-31: 32768 -> 131072 -> 262144 (the model's native max).
+#
+# KV-cache (MEASURED at boot, 2026-05-31, -ctk q8_0 -ctv q8_0 -fa on):
+#   - ~10.85 KiB/token, both caches (128k measured at 1422.82 MiB on CUDA0).
+#     262144 -> ~2.78 GiB KV, GPU-resident, next to the ~2.5 GiB of resident
+#     weight tensors. The bulk of the model (~12.1 GiB of MoE experts) sits in
+#     PINNED HOST RAM via --n-cpu-moe 36, so context size barely moves system
+#     RAM -- the RAM cost is the weight offload, NOT the KV cache. (An earlier
+#     "262k = OOM" note was wrong: KV had been over-estimated ~4x.)
+#   - Observed at idle (128k): llama-server working set ~12.7 GiB; ~5.0 GiB free
+#     of 31 GiB. 262k adds only ~1.4 GiB more KV (on the GPU, not host RAM).
+#     The real pressure during analysis is the Dockerized Ghidra container
+#     competing for the remaining host headroom -- NOT the KV cache. Watch
+#     FreePhysicalMemory on very large binaries; cap the WSL2 VM via .wslconfig
+#     (memory=...) so Ghidra cannot starve llama-server.
+#   - -ctv q8_0 (added 2026-05-31, was K-only) halves the V-cache vs f16.
+#     Requires -fa (already on).
+#   - 262144 is the GGUF native max (n_ctx_train). Our prompts (tool schemas +
+#     decompiled code + ReAct) never approach it; the headroom just removes the
+#     "context shift is disabled" 500s on the largest binaries. Trade-off: a
+#     bigger -c only lengthens worst-case prefill, never idle cost.
+# If the operator runs llama-server on a smaller card, drop -c back to 131072 /
+# 32768 / 16384 and adjust react.max_iterations downstream instead.
+#
+# Launch check: some ik_llama builds reject a quantized V-cache. If the server
+# fails to boot, drop `-ctv q8_0` (keep `-c 131072`) and re-launch.
 & "D:\Projects\Maljan\external\ik_llama.cpp\build\bin\Release\llama-server.exe" `
   -m "D:\Projects\Maljan\models\Qwen3.6-35B-A3B-IQ3_K_R4.gguf" `
   -ngl 99 `
   --n-cpu-moe 36 `
   -fa on `
-  -c 32768 `
+  -c 262144 `
   -ctk q8_0 `
+  -ctv q8_0 `
   --jinja `
   --alias qwen3.6-35b-a3b `
   --host 127.0.0.1 `

@@ -389,6 +389,11 @@ class FamilyAttribution(BaseModel):
     campaign: str | None = None
     # Filled by ``attribution.py`` from the Qdrant LTM nearest neighbours.
     similar_samples: list[dict[str, Any]] = Field(default_factory=list)
+    # Exact normalized-opcode-hash matches against previously analysed samples
+    # (deterministic code-reuse links). Each row: family, confidence,
+    # shared_functions, sample_ids, example_functions, match_method, source.
+    # Populated by the report builder from the judge node's function-hash pass.
+    function_hash_matches: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

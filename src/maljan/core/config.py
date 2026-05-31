@@ -196,6 +196,12 @@ class MemoryConfig(BaseModel):
     # name or delete the old collection explicitly.
     qdrant_collection: str = "maljan_cases_v2"
     top_k: int = 3
+    # Function-hash attribution tier (deterministic, exact opcode-hash match).
+    # A separate Qdrant collection stores per-function normalized-opcode hashes
+    # keyed to the malware family, so a new sample sharing functions with a
+    # known one yields a high-precision family link. Independent of the
+    # semantic ``qdrant_collection`` above (which does fuzzy prose retrieval).
+    qdrant_function_hash_collection: str = "maljan_function_hashes_v1"
 
 
 class SandboxConfig(BaseModel):
@@ -330,6 +336,19 @@ class PreprocessingConfig(BaseModel):
     # malicious core. Fail-safe: any error or a stripped binary yields no hint.
     use_sink_reachability: bool = True
     sink_reachability_max_funcs: int = 12
+
+    # Function-hash attribution tier. When enabled, the static analyst runs a
+    # deterministic pre-pass that computes per-function normalized-opcode hashes
+    # (Ghidra ``get_bulk_function_hashes``) and queries the function-hash store
+    # for exact matches against past samples, injecting a high-precision
+    # "attribution prior" hint. The judge node mirrors this write-side, upserting
+    # the current sample's hashes under its inferred family so the corpus grows.
+    # Functions with fewer than ``function_hash_min_instructions`` instructions
+    # are ignored — tiny thunks/stubs collide across unrelated binaries and would
+    # otherwise produce false family links. Fail-safe and http-transport only.
+    use_function_hash_attribution: bool = True
+    function_hash_min_instructions: int = 8
+    function_hash_max_matches: int = 8
 
 
 # ---------------------------------------------------------------------------
