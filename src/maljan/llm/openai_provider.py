@@ -43,6 +43,25 @@ class OpenAIProvider:
         if base_url:
             build_kwargs["base_url"] = base_url
 
+        # Degenerate-loop guard (2026-06-01): forward a repetition penalty to
+        # local OpenAI-compatible servers (llama.cpp / ik_llama.cpp) via
+        # extra_body. The small reasoning model otherwise loops catastrophically
+        # while trying to recall an ATT&CK technique ID, burning the whole decode
+        # budget. Only when base_url is set (vanilla OpenAI would reject the param)
+        # and the value is a real penalty. llama.cpp forks disagree on the key
+        # name; send both — unknown sampler keys are ignored, not rejected.
+        # Empirically (2026-06-01, live ik_llama probe): ``repeat_penalty`` is the
+        # honored key (changes greedy output); ``repetition_penalty`` is silently
+        # ignored. The penalty damps catastrophic single-token loops but does NOT
+        # by itself make the small model converge on an ATT&CK ID — that is what
+        # the deterministic TF-IDF re-grounding (correct_isr_reports) handles.
+        rp = self._config.llm.openai.repetition_penalty
+        if base_url and rp and rp != 1.0:
+            extra = dict(build_kwargs.get("extra_body") or {})
+            extra.setdefault("repeat_penalty", rp)
+            extra.setdefault("repetition_penalty", rp)
+            build_kwargs["extra_body"] = extra
+
         # Wave 5 HANG-01 + Wave 7 THROUGHPUT-01 (2026-05-28): explicit
         # ``request_timeout`` and ``max_retries`` so the openai SDK can't
         # silently retry a stalled request three times (3 x default 600s

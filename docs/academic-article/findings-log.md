@@ -114,6 +114,33 @@ positioning.
   passes), handing the model only focused results. This unifies §1.1, §1.2 and the
   view-decomposition idea (§3.2).
 
+### 1.5 Deterministic ATT&CK technique-ID assignment (describe-then-map) — `IMPLEMENTED`
+- **What.** The small model is the wrong instrument for *recalling* a numeric ID from a
+  600+ technique taxonomy it has not memorised (it loops — §3.3). So the ID-recall
+  sub-task is moved off the model: the analyst only **describes behaviour** (CLAIM +
+  EVIDENCE), and a deterministic pre-cascade pass **re-grounds the technique ID** against
+  an in-house TF-IDF index over the official MITRE ATT&CK Enterprise corpus
+  (`correct_isr_reports`). Invalid IDs (well-formed but absent from the catalog) are
+  replaced by the top evidence-derived suggestion; valid-but-poorly-aligned IDs are
+  swapped only when a *strictly* better-aligned candidate exists; well-aligned and
+  `NONE` IDs are left untouched. Layer-0 rule sources (YARA/Sigma) are skipped — their
+  IDs are rule-authoritative. The correction runs before the cascade so it propagates to
+  corroboration, the judge's grounding, the report, and the STIX bundle.
+- **Why deterministic beats the model here.** The TF-IDF index cannot loop or
+  hallucinate, draws from the full catalog, and is strictly superior for the
+  *ID-existence/assignment* sub-task; the model keeps only what it is good at (describing
+  behaviour). Its own failure mode is lexical (keyword, no synonyms), which is why
+  assignment is **gated** (only override invalid or strictly-worse-aligned IDs), not blind.
+- **Novelty / principle.** A concrete instance of "LLM proposes, deterministic layer
+  disposes" applied to the *label-assignment* step itself: separate **description**
+  (model) from **taxonomy mapping** (deterministic retrieval). The project already had
+  this index but used it only *advisorily* (validation summary injected into the judge
+  prompt); the contribution is making it **authoritative** for ID assignment.
+- **Artifacts.** `correct_isr_reports` in `src/maljan/memory/attck_validator.py` (over the
+  TF-IDF `src/maljan/memory/attck_index.py`); wired in `src/maljan/pipeline/nodes.py`
+  before cascade; `tests/unit/test_attck_memory.py` (6 correction tests). Config-gated
+  (`use_attck_autocorrect`) and fail-safe.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -215,22 +242,32 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   a forced/structured output format to remove truncation as a variable; and blinded
   correctness scoring of both claim and technique (not claim count + string-grounding).
 
-### 3.3 Novel failure mode: degenerate technique-ID loop — `OBSERVED` (reproducible)
+### 3.3 Novel failure mode: degenerate technique-ID loop — `OBSERVED` (reproducible) → `IMPLEMENTED` (fixed)
 - **Phenomenon.** On anti-analysis evidence (`ptrace`/`prctl`), the model does not
   know the correct ATT&CK technique ID and enters a **catastrophic degenerate loop**,
   emitting "I'll just use T1578.005?" hundreds of times and burning the entire token
   budget, while repeatedly proposing *wrong* IDs (T1578.005 is a cloud technique;
   T1553.002 is trust-subversion — neither is anti-debug, which is T1622 Debugger
   Evasion). Reproduced across both experiment runs and both prompt structures.
-- **Why it is paper-worthy.** It is a concrete, reproducible *small-model pathology*
-  at the intersection of (a) under-specified label spaces (a 600+ technique
-  taxonomy the model has not memorised) and (b) autoregressive self-reinforcement.
-  It also has a **practical security-tooling consequence**: any production analyst
-  driving this model on a sample with anti-debug primitives risks the same loop.
-- **Mitigations (candidate contributions).** (i) per-call repetition penalty +
-  max-token guard; (ii) supplying the model a **curated ATT&CK anchor table** for
-  the common evasion/loader/injection techniques so it retrieves rather than guesses;
-  (iii) decomposition (§3.2) as a *blast-radius limiter* for such loops.
+  Practical consequence: any production analyst driving this model on a sample with
+  anti-debug primitives risks the same budget-burning loop.
+- **Fix (implemented two-layer).** (i) **Mechanical damper** — a repetition penalty
+  forwarded to the local server (§1.5 partner); (ii) **root-cause removal** — route
+  technique-ID assignment through the deterministic TF-IDF index (§1.5), so the model
+  never has to recall the ID. (i) is a damper; (ii) is the actual fix.
+- **Empirical sampler finding (live ik_llama probe, 2026-06-01).** Reproducing the
+  `ptrace`/`prctl` loop and toggling sampler params on the OpenAI-compatible endpoint:
+  `repeat_penalty` is the **honored** key (it changes greedy output); `repetition_penalty`,
+  `frequency_penalty`, and `presence_penalty` are **silently ignored** by this engine.
+  More important: the penalty only **converts a tight single-token loop into a slower
+  ID-enumeration ramble** (e.g. cycling T1574.001…T1574.017) — it still burns the full
+  budget and does **not** make the small model converge on a correct ID. This is the
+  empirical justification for fix (ii): penalty tuning alone is insufficient; the
+  ID-recall task must be removed, not merely damped.
+- **Why it is paper-worthy.** A concrete, reproducible small-model pathology
+  (under-specified 600+ label space × autoregressive self-reinforcement), plus the
+  finding that the obvious mitigation (sampler penalties) is necessary-but-insufficient,
+  and a clean fix (offload the taxonomy lookup to deterministic retrieval).
 
 ### 3.4 Negative methodological finding: single-run claim-count is not a valid instrument — `NEGATIVE`
 - Running the §3.2 A/B three times under different decoding budgets produced
@@ -249,8 +286,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 
 ## 4. Open threads / planned experiments
 
-- `HYPOTHESIS` Production-wire the technique-ID loop guard (repetition penalty +
-  curated ATT&CK anchor) and measure FP/throughput impact on real samples.
+- `DONE` (§1.5, §3.3) Production-wired the technique-ID loop fix — repetition-penalty
+  damper + deterministic TF-IDF ID re-grounding. Next: measure FP/throughput impact on
+  real samples (how often correction fires, and correction precision vs a labelled set).
 - `HYPOTHESIS` Config-gated view-decomposition pilot with **parallel** view calls; a
   lighter 2-view variant (behaviour vs artifacts) to trade completeness for cost.
 - `HYPOTHESIS` Adopt a MaLAware-style [4] multi-metric narrative-quality evaluation
@@ -293,3 +331,11 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   "~2× completeness" claim as a budget/measurement artifact; kept only fault-isolation
   + output-stability as defensible. Added §3.4 (single-run claim-count is not a valid
   instrument). Trimmed references to the 4 we directly used.
+- **2026-06-01 fix.** Implemented the §3.3 degenerate-loop fix. Added §1.5
+  (deterministic ATT&CK ID assignment via the in-house TF-IDF index — made authoritative,
+  not just advisory). Marked §3.3 `IMPLEMENTED` and **rejected the earlier "curated anchor
+  table" mitigation** as redundant/inferior to the full-catalog index. Recorded the live
+  sampler probe: `repeat_penalty` honored, `repetition_penalty`/`frequency_penalty`/
+  `presence_penalty` ignored by ik_llama, and penalty-only damping is
+  necessary-but-insufficient. All checks green (ruff/mypy clean; 67 ATT&CK + 26
+  agent/judge/pipeline tests pass). No new references.

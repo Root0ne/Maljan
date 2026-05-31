@@ -10,6 +10,7 @@ import pytest
 from maljan.memory.attck_index import ATTCKIndex, SearchResult, _cosine_similarity
 from maljan.memory.attck_loader import ATTCKTechnique, _parse_bundle
 from maljan.memory.attck_validator import ATTCKValidator
+from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -294,6 +295,102 @@ class TestATTCKValidator:
     def test_from_index_factory(self, index: ATTCKIndex) -> None:
         v = ATTCKValidator.from_index(index)
         assert v.technique_count == index.size
+
+
+# ---------------------------------------------------------------------------
+# ATTCKValidator.correct_isr_reports
+# ---------------------------------------------------------------------------
+
+
+def _isr(agent_id: str, domain: str, *claims: ClaimEvidence) -> AgentISR:
+    return AgentISR(agent_id=agent_id, domain=domain, claims=list(claims))
+
+
+def _claim(claim: str, evidence: str, technique_id: str | None) -> ClaimEvidence:
+    return ClaimEvidence(
+        claim=claim, evidence_ref=evidence, confidence=0.8, technique_id=technique_id
+    )
+
+
+class TestCorrectIsrReports:
+    def test_invalid_id_replaced_with_suggestion(self, validator: ATTCKValidator) -> None:
+        # T9999 is well-formed but not in the catalog; ransomware evidence
+        # should re-ground onto T1486 (Data Encrypted for Impact).
+        claim = _claim(
+            "Encrypts files for ransom",
+            "AES encryption ransomware file encryption CryptoAPI impact",
+            "T9999",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+
+        n = validator.correct_isr_reports(reports)
+
+        assert n == 1
+        assert claim.technique_id == "T1486"
+
+    def test_valid_well_aligned_untouched(self, validator: ATTCKValidator) -> None:
+        claim = _claim(
+            "Injects code into a remote process",
+            "process injection WriteProcessMemory VirtualAllocEx CreateRemoteThread",
+            "T1055",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+
+        n = validator.correct_isr_reports(reports, min_alignment=0.001)
+
+        assert n == 0
+        assert claim.technique_id == "T1055"
+
+    def test_low_alignment_swapped_for_better_candidate(self, validator: ATTCKValidator) -> None:
+        # Valid ID (T1071, C2) but the evidence is pure ransomware — a strictly
+        # better-aligned candidate (T1486) exists, so it is swapped.
+        claim = _claim(
+            "Encrypts data on disk",
+            "AES encryption ransomware file encryption CryptoAPI impact",
+            "T1071",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+
+        n = validator.correct_isr_reports(reports, min_alignment=0.05)
+
+        assert n == 1
+        assert claim.technique_id == "T1486"
+
+    def test_none_technique_untouched(self, validator: ATTCKValidator) -> None:
+        claim = _claim("Generic observation", "some evidence ref", None)
+        reports = {"static": _isr("static", "static", claim)}
+
+        n = validator.correct_isr_reports(reports)
+
+        assert n == 0
+        assert claim.technique_id is None
+
+    def test_layer0_sources_skipped(self, validator: ATTCKValidator) -> None:
+        # yara/sigma IDs are rule-authoritative; even an invalid-looking ID
+        # is left untouched.
+        yara_claim = _claim("YARA rule match", "rule: Ransomware_Generic", "T9999")
+        sigma_claim = _claim("Sigma rule match", "rule: susp_encrypt", "T9999")
+        reports = {
+            "yara_layer": _isr("yara_layer", "yara", yara_claim),
+            "sigma_layer": _isr("sigma_layer", "sigma", sigma_claim),
+        }
+
+        n = validator.correct_isr_reports(reports)
+
+        assert n == 0
+        assert yara_claim.technique_id == "T9999"
+        assert sigma_claim.technique_id == "T9999"
+
+    def test_invalid_id_with_no_suggestion_dropped(self, validator: ATTCKValidator) -> None:
+        # Out-of-vocabulary evidence yields no TF-IDF match -> the hallucinated
+        # ID is dropped to None rather than left in place.
+        claim = _claim("xyzqwmfoo", "barberizatorxxx zzzqqq", "T9999")
+        reports = {"static": _isr("static", "static", claim)}
+
+        n = validator.correct_isr_reports(reports)
+
+        assert n == 1
+        assert claim.technique_id is None
 
 
 # ---------------------------------------------------------------------------

@@ -241,6 +241,93 @@ class ATTCKValidator:
         )
         return summary
 
+    def correct_isr_reports(
+        self,
+        isr_reports: dict[str, AgentISR],
+        *,
+        min_alignment: float = HALLUCINATION_SCORE_THRESHOLD,
+        skip_agents: frozenset[str] = frozenset({"yara_layer", "sigma_layer"}),
+    ) -> int:
+        """Deterministically re-ground each LLM claim's technique_id in place.
+
+        Unlike validate_isr_reports (which only advises), this MUTATES
+        ``claim.technique_id`` so the corrected ID propagates to the cascade,
+        the judge's grounding, the report, and the STIX bundle. It moves the
+        loop-prone ID-recall sub-task off the small model: the analyst only has
+        to describe behaviour, and the full-catalog TF-IDF index assigns the ID.
+
+        Correction policy (per claim with a non-None technique_id):
+          - Invalid ID (not in the ATT&CK catalog): replace with the top
+            evidence-derived suggestion; drop to None if the search is empty
+            (a hallucinated ID is worse than no ID).
+          - Valid but low-alignment ID (< ``min_alignment``): replace ONLY when a
+            candidate suggestion is *strictly* better aligned with the evidence —
+            never overwrite a weak-but-plausible ID with a noisier guess.
+          - Valid, well-aligned, or None: left untouched.
+
+        Layer-0 deterministic sources in ``skip_agents`` are skipped because
+        their IDs come straight from rule matches and are authoritative.
+
+        Returns the number of claims whose technique_id was changed. Fail-safe:
+        any error returns the count accumulated so far without raising.
+        """
+        corrected = 0
+        try:
+            for isr in isr_reports.values():
+                if isr.agent_id in skip_agents:
+                    continue
+                for claim in isr.claims:
+                    tid = claim.technique_id
+                    if tid is None:
+                        continue
+                    query = f"{claim.evidence_ref} {claim.claim}".strip()
+
+                    if not self._index.technique_exists(tid):
+                        results = self._index.search(query, top_k=1)
+                        new_id = results[0].technique.technique_id if results else None
+                        if new_id != tid:
+                            logger.info(
+                                "ATT&CK autocorrect [%s]: invalid '%s' -> '%s'.",
+                                isr.agent_id,
+                                tid,
+                                new_id,
+                            )
+                            claim.technique_id = new_id
+                            corrected += 1
+                        continue
+
+                    score = self._index.validate_and_score(tid, claim.evidence_ref)
+                    if score >= min_alignment:
+                        continue
+
+                    best_id: str | None = None
+                    best_score = score
+                    for result in self._index.search(query, top_k=3):
+                        cand = result.technique.technique_id
+                        if cand == tid:
+                            continue
+                        cand_score = self._index.validate_and_score(cand, claim.evidence_ref)
+                        if cand_score > best_score:
+                            best_id, best_score = cand, cand_score
+                    if best_id is not None:
+                        logger.info(
+                            "ATT&CK autocorrect [%s]: low-align '%s' (%.3f) -> '%s' (%.3f).",
+                            isr.agent_id,
+                            tid,
+                            score,
+                            best_id,
+                            best_score,
+                        )
+                        claim.technique_id = best_id
+                        corrected += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("correct_isr_reports failed: %s", exc, exc_info=True)
+            return corrected
+
+        if corrected:
+            logger.info("ATT&CK autocorrect: corrected %d technique id(s).", corrected)
+        return corrected
+
     def get_technique(self, technique_id: str) -> ATTCKTechnique | None:
         """Return the full ATTCKTechnique object for a given ID."""
         return self._index.get_by_id(technique_id)

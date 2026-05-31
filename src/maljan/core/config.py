@@ -40,6 +40,12 @@ class OpenAIConfig(BaseModel):
     base_url: str | None = None
     expert_model: str = "gpt-4o-mini"
     judge_model: str = "gpt-4o"
+    # Sampler repetition penalty forwarded to OpenAI-compatible local servers
+    # (llama.cpp / ik_llama.cpp) via extra_body. 1.0 = no-op. Values around
+    # 1.15 break the small reasoning model out of the catastrophic ATT&CK
+    # ID-recall loops observed in live runs. Only applied when base_url is
+    # set, so vanilla OpenAI (which would 400 on the param) stays untouched.
+    repetition_penalty: float = 1.0
 
 
 class AnthropicConfig(BaseModel):
@@ -349,6 +355,17 @@ class PreprocessingConfig(BaseModel):
     use_function_hash_attribution: bool = True
     function_hash_min_instructions: int = 8
     function_hash_max_matches: int = 8
+
+    # Deterministic ATT&CK technique-ID correction. When enabled, the judge node
+    # runs a pre-cascade pass that re-grounds each LLM analyst claim's technique_id
+    # against the in-memory TF-IDF ATT&CK index: invalid IDs are replaced with the
+    # top evidence-derived suggestion, and valid-but-poorly-aligned IDs are swapped
+    # only when a strictly better-aligned suggestion exists. This removes the small
+    # model's loop-prone ID-recall sub-task from the critical path; the model just
+    # describes behaviour and the index assigns the ID. Layer-0 deterministic
+    # sources (yara/sigma) are skipped — their IDs are rule-authoritative. Fail-safe.
+    use_attck_autocorrect: bool = True
+    attck_autocorrect_min_alignment: float = 0.08
 
 
 # ---------------------------------------------------------------------------

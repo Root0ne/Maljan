@@ -580,6 +580,35 @@ def make_judge_node(container: ServiceContainer) -> Any:
             if sigma_result is not None:
                 isr_reports["sigma_layer"] = sigma_result
 
+            # Deterministic ATT&CK technique-ID correction (2026-06-01). Run
+            # BEFORE the cascade so corrected IDs flow into corroboration, the
+            # judge's grounding, the report and the STIX bundle. Re-grounds each
+            # LLM analyst claim against the full-catalog TF-IDF index, replacing
+            # the small model's loop-prone ID-recall guess. Layer-0 yara/sigma
+            # ISRs are skipped (rule-authoritative). Fail-safe + config-gated.
+            if (
+                container.config.preprocessing.use_attck_autocorrect
+                and attck_validator is not None
+                and hasattr(attck_validator, "correct_isr_reports")
+            ):
+                try:
+                    # Mutates claim.technique_id in place on the shared AgentISR
+                    # objects, which this node already returns as "isr_reports"
+                    # (below), so report_node / LTM see the corrected IDs.
+                    _n_corrected = attck_validator.correct_isr_reports(
+                        isr_reports,
+                        min_alignment=(
+                            container.config.preprocessing.attck_autocorrect_min_alignment
+                        ),
+                    )
+                    if _n_corrected:
+                        logger.info(
+                            "ATT&CK autocorrect: %d technique id(s) re-grounded before cascade.",
+                            _n_corrected,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("ATT&CK autocorrect skipped: %s", exc, exc_info=True)
+
             cascade_summary = None
             try:
                 cascade_summary = TTPCascadeEngine().compute(
