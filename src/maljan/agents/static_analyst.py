@@ -45,6 +45,28 @@ _ISR_SYSTEM = (
     "   missed.\n"
     "9. For the 3–5 most suspicious functions: `decompile_function(address=<addr>)`\n"
     "   then `get_xrefs_to(address=<addr>)` to confirm call-sites.\n\n"
+    "=== ADVANCED TOOLS (reach for these when the triage signals call for them) ===\n"
+    "- API names resolved by hash (a hashing loop, sparse imports): call\n"
+    "  `emulate_hash_batch` to brute-force the obfuscated API names.\n"
+    "- Suspected encryption / ransomware: `detect_crypto_constants`.\n"
+    "- Trace a key, config value, or decoded buffer through a function:\n"
+    "  `analyze_dataflow(address=<addr>, direction=backward|forward)`.\n"
+    "- Run a small hash / decode routine to see its output: `emulate_function`.\n"
+    "- Packed binary with few functions: `find_code_gaps` to surface missed code.\n"
+    "- Record `get_function_hash` on the core malicious function for attribution.\n\n"
+    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
+    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
+    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
+    "  FALSIFY it first: `emulate_function` with a known input vs the expected\n"
+    "  output, OR `analyze_dataflow(direction=backward)` to confirm its origin.\n"
+    "  If you cannot run the check (non-leaf, syscall/heap side effects), cap\n"
+    "  CONFIDENCE at 0.7.\n"
+    "- `emulate_hash_batch`: read the FULL `matches` list. If more than one API\n"
+    "  name collides, do NOT blindly take `best_match` — disambiguate via the\n"
+    "  likely source DLL, or emit CONFIDENCE <= 0.5.\n"
+    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
+    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
+    "  contradictory signals before emitting.\n\n"
     "IMPORTANT:\n"
     "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
     "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
@@ -95,11 +117,25 @@ class StaticAnalyst(BaseAnalyst):
             # Targeted deep-dive when the analyzers point at a function.
             "decompile_function",
             "get_xrefs_to",
+            # 2026-05-31: high-value malware analyzers surfaced by the
+            # ghidra-mcp v5.6.0 audit (we were using 12/165 tools). These
+            # close the evasion / crypto / dynamic-emulation gaps.
+            "emulate_hash_batch",  # resolve API-hash obfuscation (ROR13/CRC32/djb2/FNV)
+            "emulate_function",  # run a hash/crypto/deobfuscation routine in isolation
+            "detect_crypto_constants",  # AES/RC4/etc. constants (ransomware/packing)
+            "analyze_dataflow",  # PCode taint: trace keys / C2 config / decode chains
+            "get_function_hash",  # normalized opcode hash for family attribution
+            "search_byte_patterns",  # masked in-binary signature hunt
+            "find_code_gaps",  # surface missed functions in packed/obfuscated code
+            "analyze_function_complete",  # one-call comprehensive function analysis
         }
     )
     # 31 → 12 (audit 2026-05-17, A-01). The dropped tools were redundant
     # call-graph traversals and function-listing variants that bloated
     # the prompt and pushed each ReAct round into the 180-600 s range.
+    # 2026-05-31: 12 → 20 — added 8 high-value malware analyzers (emulate /
+    # crypto / dataflow / code-gap). The sink-reachability pre-pass focuses
+    # the loop, offsetting the larger tool manifest.
 
     def _filter_ghidra_tools(self, tools: list[Any]) -> list[Any]:
         """Keep only allowlisted read-only analysis tools.

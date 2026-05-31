@@ -278,7 +278,11 @@ def build_priority_hint(call_graph_text: str, max_funcs: int = 12) -> str:
             f"({f.distance} hop{'s' if f.distance != 1 else ''})"
         )
     lines.append(
-        "Use decompile_function / get_function_callees on the above before "
-        "exploring other functions.\n"
+        "Use decompile_function / get_function_callees on these first. NOTE: "
+        "reachable is NOT the same as data-connected — before asserting a "
+        "'capability reached' claim, confirm the data path with analyze_dataflow "
+        "(forward from the source, or backward from the sink argument) and "
+        "classify the terminal (caller-supplied / decoded-config / fixed "
+        "constant) to pick the right ATT&CK technique.\n"
     )
     return "\n".join(lines)
