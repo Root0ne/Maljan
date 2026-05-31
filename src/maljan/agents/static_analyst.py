@@ -222,6 +222,65 @@ class StaticAnalyst(BaseAnalyst):
             asyncio.set_event_loop(loop)
             loop.run_until_complete(coro)
 
+    def _compute_sink_priority_hint(self, file_path: str) -> str:
+        """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.
+
+        Loads + auto-analyses the binary on the Ghidra MCP server, pulls the
+        full call graph, and renders a "priority functions" hint pointing the
+        ReAct loop at the malicious core first. Deterministic and fail-safe:
+        any error (or a stripped binary with no named sink APIs) returns an
+        empty string and the analyst proceeds with its normal behaviour.
+        """
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        if not cfg.preprocessing.use_sink_reachability:
+            return ""
+        if cfg.mcp.ghidra.transport != "http":
+            return ""  # the pre-pass speaks the headless REST API directly
+
+        try:
+            import httpx
+
+            from maljan.analysis.sink_reachability import build_priority_hint
+
+            base = cfg.mcp.ghidra.url.rstrip("/")
+            token = cfg.mcp.ghidra.auth_token
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            with httpx.Client(timeout=120.0, headers=headers) as http:
+                http.post(f"{base}/load_program", json={"file": file_path}).raise_for_status()
+                http.post(f"{base}/run_analysis", json={}).raise_for_status()
+                resp = http.get(
+                    f"{base}/get_full_call_graph",
+                    params={"format": "json", "limit": 20000},
+                )
+                resp.raise_for_status()
+                graph_text = resp.text
+
+            hint = build_priority_hint(
+                graph_text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
+            )
+            if hint:
+                self.logger.info(
+                    "Sink-reachability pre-pass: priority-functions hint built "
+                    "(%d chars) for '%s'.",
+                    len(hint),
+                    file_path,
+                )
+            else:
+                self.logger.info(
+                    "Sink-reachability pre-pass: no named sink APIs reachable "
+                    "(stripped/static binary?) — no hint emitted."
+                )
+            return hint
+        except Exception as exc:  # fail-safe: never break analysis over a hint
+            self.logger.warning(
+                "Sink-reachability pre-pass failed (%s: %s); continuing without hint.",
+                type(exc).__name__,
+                exc,
+            )
+            return ""
+
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
@@ -367,6 +426,16 @@ class StaticAnalyst(BaseAnalyst):
         # even on a degraded local 8-9B run.
         load_hint = _extract_load_hint(data)
 
+        # Maltracker-style sink-reachability triage: when we have a
+        # container-visible path, run a deterministic call-graph pre-pass and
+        # hoist the resulting priority-function list above the target so the
+        # ReAct loop decompiles the malicious core first. Fail-safe: empty
+        # string when disabled, unavailable, or the binary has no named sinks.
+        sink_hint = ""
+        analysis_path = _extract_analysis_path(data)
+        if analysis_path:
+            sink_hint = self._compute_sink_priority_hint(analysis_path)
+
         prompt_messages = [
             ("system", _ISR_SYSTEM),
             (
@@ -382,7 +451,7 @@ class StaticAnalyst(BaseAnalyst):
                 "CONFIDENCE: <float>\n"
                 "TECHNIQUE: <T-ID or NONE>\n"
                 "---\n\n"
-                f"{load_hint}{target_info}",
+                f"{sink_hint}{load_hint}{target_info}",
             ),
         ]
 
@@ -505,6 +574,28 @@ def _extract_load_hint(data: str) -> str:
         "All subsequent analysis tools operate on the program loaded by "
         "that call. Do not invent a path — use the one above verbatim.\n\n"
     )
+
+
+def _extract_analysis_path(data: str) -> str | None:
+    """Return the ``analysis_file_path`` from a chunk JSON, or None.
+
+    Mirrors ``_extract_load_hint``'s parse but exposes the raw container path
+    so the sink-reachability pre-pass can drive Ghidra directly. Best-effort:
+    non-JSON or pathless chunks return None.
+    """
+    import json as _json
+
+    stripped = data.strip()
+    if not stripped or not stripped.startswith("{"):
+        return None
+    try:
+        parsed = _json.loads(stripped)
+    except (_json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    path = parsed.get("analysis_file_path")
+    return path if isinstance(path, str) and path else None
 
 
 # CRLF-tolerant separator that requires the dashes to occupy their own line.

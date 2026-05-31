@@ -323,6 +323,14 @@ class PreprocessingConfig(BaseModel):
     summarizer_max_words: int = 150
     max_tool_output_chars: int = 8000
 
+    # Sink-reachability triage (Maltracker-inspired). When enabled, the static
+    # analyst runs a deterministic pre-pass over the Ghidra call graph to find
+    # the functions that reach security-sensitive sink APIs and injects a
+    # "priority functions" hint into its prompt, focusing decompilation on the
+    # malicious core. Fail-safe: any error or a stripped binary yields no hint.
+    use_sink_reachability: bool = True
+    sink_reachability_max_funcs: int = 12
+
 
 # ---------------------------------------------------------------------------
 # MCP (Model Context Protocol) Integration
