@@ -276,11 +276,15 @@ def _collect_text(
 
     if isr_reports:
         for isr in isr_reports.values():
-            for claim in isr.claims:
-                parts.append(claim.claim)
-                parts.append(claim.evidence_ref)
-                if claim.technique_id:
-                    parts.append(claim.technique_id)
+            claims = getattr(isr, "claims", None)
+            if not isinstance(claims, list):
+                continue
+            for claim in claims:
+                parts.append(str(getattr(claim, "claim", "") or ""))
+                parts.append(str(getattr(claim, "evidence_ref", "") or ""))
+                tid = getattr(claim, "technique_id", None)
+                if tid:
+                    parts.append(str(tid))
 
     return " ".join(parts).lower()
 
@@ -318,6 +322,8 @@ def infer_malware_category(
 
     for category, keywords in _CATEGORY_KEYWORDS.items():
         for keyword, weight in keywords:
+            # Substring match is intentional: the keyword table uses stems
+            # (e.g. "keylog" → keylogger, "exfiltrat" → exfiltration).
             if keyword in text:
                 scores[category] += weight
 

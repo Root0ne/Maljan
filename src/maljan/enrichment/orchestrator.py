@@ -11,6 +11,8 @@ single enrichment never floods the provider quota.
 
 from __future__ import annotations
 
+import ipaddress
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -23,6 +25,56 @@ from maljan.extractors.attribution import populate_similar_samples
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+
+# Reputation older than this is considered stale and must not drive a verdict.
+_STALE_REPUTATION_DAYS = 90
+
+
+def _has_successful_rep(obj: dict[str, Any]) -> bool:
+    """True only when a *successful* reputation lookup is already recorded.
+
+    A bare-truthy ``reputation`` (e.g. an empty/failed shell) must NOT short-
+    circuit a retry — only a dict carrying a provider ``source`` counts as done.
+    """
+    rep = obj.get("reputation")
+    return isinstance(rep, dict) and bool(rep.get("source"))
+
+
+def _annotate_reputation_age(rep: dict[str, Any]) -> None:
+    """Add ``age_days`` (and ``stale``) from a VT ``last_analysis_date_unix``."""
+    ts = rep.get("last_analysis_date_unix")
+    if isinstance(ts, int) and ts > 0:
+        age_days = (time.time() - ts) / 86400.0
+        rep["age_days"] = round(age_days, 1)
+        if age_days > _STALE_REPUTATION_DAYS:
+            rep["stale"] = True
+
+
+def _reputation_is_malicious(rep: dict[str, Any] | None) -> bool:
+    """Whether a fresh reputation result indicates a malicious indicator."""
+    if not isinstance(rep, dict) or rep.get("stale"):
+        return False
+    source = rep.get("source")
+    if source == "virustotal":
+        return int(rep.get("malicious") or 0) > 0 or int(rep.get("suspicious") or 0) >= 3
+    if source == "abuseipdb":
+        return int(rep.get("abuse_confidence") or 0) >= 50
+    return False
+
+
+def _is_public_ip(address: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return not (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_link_local
+        or addr.is_unspecified
+    )
 
 
 async def enrich_malware_report(
@@ -97,14 +149,19 @@ async def _enrich_domains(
     if vt is None:
         return
     for dom in domains[:cap]:
-        if dom.get("reputation"):
+        if _has_successful_rep(dom):
             continue
         fqdn = dom.get("fqdn")
         if not isinstance(fqdn, str) or not fqdn:
             continue
         rep = await vt.domain_reputation(fqdn)
         if rep is not None:
+            _annotate_reputation_age(rep)
             dom["reputation"] = rep
+            # Feed verified reputation back into the heuristic suspicion flag so
+            # an enriched-malicious domain is not stuck at is_suspicious=False.
+            if _reputation_is_malicious(rep):
+                dom["is_suspicious"] = True
 
 
 async def _enrich_ips(
@@ -119,14 +176,21 @@ async def _enrich_ips(
         address = ip.get("address")
         if not isinstance(address, str) or not address:
             continue
-        if not ip.get("reputation"):
+        # Pre-filter private/reserved IPs: external providers reject them and
+        # they are not real infrastructure — saves API budget and avoids noise.
+        if not _is_public_ip(address):
+            continue
+        if not _has_successful_rep(ip):
             rep: dict[str, Any] | None = None
             if vt is not None:
                 rep = await vt.ip_reputation(address)
             if rep is None and abuse is not None:
                 rep = await abuse.ip_check(address)
             if rep is not None:
+                _annotate_reputation_age(rep)
                 ip["reputation"] = rep
+                if _reputation_is_malicious(rep):
+                    ip["is_suspicious"] = True
         if not ip.get("asn"):
             asn = await whois.asn_lookup(address)
             if asn:

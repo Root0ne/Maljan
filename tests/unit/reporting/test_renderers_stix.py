@@ -178,7 +178,9 @@ class TestTotalIndicatorCap:
 
         sandbox = {
             "network": {
-                "dns": [{"request": f"d{i}.evil.test", "answers": []} for i in range(20)],
+                # Use a non-reserved TLD: ``.test`` is RFC 6761 reserved and is
+                # now (correctly) dropped by the network extractor's IOC filter.
+                "dns": [{"request": f"d{i}.evilc2.net", "answers": []} for i in range(20)],
             }
         }
         report = _build(sandbox_report=sandbox)

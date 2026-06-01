@@ -318,10 +318,12 @@ class PersistenceMechanism(BaseModel):
         "winlogon_helper",
         # ── Linux (ELF) — Wave 9 ─────────────────────────────
         "systemd_service",
+        "systemd_timer",
         "cron_job",
         "init_d",
         "rc_local",
         "ld_preload",
+        "xdg_autostart",
         # ── Fallback ─────────────────────────────────────────
         "other",
     ]

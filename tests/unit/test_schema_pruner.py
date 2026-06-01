@@ -33,6 +33,24 @@ class TestMalwareCategory:
         actual = {cat.value for cat in MalwareCategory}
         assert actual == expected
 
+
+class TestMalformedIsrRobustness:
+    """Signal-quality §2.4: a malformed ISR value must not crash inference."""
+
+    def test_isr_value_without_claims_is_skipped(self) -> None:
+        # object lacking a list ``claims`` attribute (None / wrong type)
+        bad = type("X", (), {"claims": None})()
+        result = infer_malware_category(
+            {"static": "ransomware encrypts files with AES for impact"},
+            {"static": bad},  # type: ignore[dict-item]
+        )
+        assert result == MalwareCategory.RANSOMWARE
+
+    def test_isr_claims_wrong_type_is_skipped(self) -> None:
+        bad = type("X", (), {"claims": {"not": "a list"}})()
+        result = infer_malware_category({}, {"static": bad})  # type: ignore[dict-item]
+        assert result == MalwareCategory.UNKNOWN
+
     def test_unknown_is_fallback(self) -> None:
         assert MalwareCategory.UNKNOWN.value == "unknown"
 

@@ -11,6 +11,25 @@ from maljan.extractors.attribution import _build_query, populate_similar_samples
 from maljan.memory.long_term_memory import StoredCase
 
 
+def test_build_query_includes_suspicious_network_iocs() -> None:
+    report = {
+        "malware_category": "botnet",
+        "network": {
+            "domains": [
+                {"fqdn": "evil-c2.net", "is_suspicious": True},
+                {"fqdn": "benign.example.org", "is_suspicious": False},
+            ],
+            "ips": [{"address": "185.220.101.47", "is_suspicious": True}],
+        },
+    }
+    query = _build_query(report)
+    assert "Infrastructure:" in query
+    assert "evil-c2.net" in query
+    assert "185.220.101.47" in query
+    # Non-suspicious infra is not used to link samples.
+    assert "benign.example.org" not in query
+
+
 class _StubStore:
     """Minimal MemoryStore stand-in — duck-typed against the Protocol."""
 

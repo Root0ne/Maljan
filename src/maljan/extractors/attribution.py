@@ -132,6 +132,19 @@ def _build_query(malware_report: dict[str, Any]) -> str:
     if sig_names:
         parts.append("Signatures: " + ", ".join(sig_names))
 
+    # Suspicious network infrastructure: links samples that share C2 even when
+    # behaviour differs. Prefer suspicious entries; cap to keep the query tight.
+    network = malware_report.get("network") or {}
+    iocs: list[str] = []
+    for dom in (network.get("domains") or [])[:20]:
+        if isinstance(dom, dict) and dom.get("is_suspicious") and isinstance(dom.get("fqdn"), str):
+            iocs.append(dom["fqdn"])
+    for ip in (network.get("ips") or [])[:20]:
+        if isinstance(ip, dict) and ip.get("is_suspicious") and isinstance(ip.get("address"), str):
+            iocs.append(ip["address"])
+    if iocs:
+        parts.append("Infrastructure: " + ", ".join(iocs[:8]))
+
     return ". ".join(parts)
 
 

@@ -34,8 +34,30 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
         "cloudfront.net",
         "akamai.net",
         "akamaiedge.net",
+        # CDN / cloud / infra commonly seen in benign traffic (FP sources).
+        "fastly.net",
+        "cloudflare.com",
+        "amazonaws.com",
+        "jsdelivr.net",
+        "gvt1.com",
+        "ntp.org",
+        "pool.ntp.org",
+        "debian.org",
+        "ubuntu.com",
+        "archlinux.org",
     }
 )
+
+# RFC 6761/6762 reserved suffixes that must never be emitted as network IOCs.
+_RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    ".local",
+    ".localhost",
+    ".test",
+    ".example",
+    ".invalid",
+    ".arpa",
+)
+_RESERVED_DOMAIN_NAMES: frozenset[str] = frozenset({"localhost", "localhost.localdomain"})
 
 # Substrings that strongly suggest C2 / commodity-malware infra.
 _SUSPICIOUS_DOMAIN_TOKENS: tuple[str, ...] = (
@@ -128,11 +150,12 @@ def _extract_domains(raw: dict[str, Any]) -> list[NetworkDomain]:
         elif isinstance(d, dict) and d.get("domain"):
             _get_or_create_domain(by_fqdn, str(d["domain"]).strip())
 
-    # Suspicion scoring
-    for node in by_fqdn.values():
+    # Drop reserved / local / single-label names, then score suspicion.
+    emittable = [n for n in by_fqdn.values() if _is_emittable_domain(n.fqdn)]
+    for node in emittable:
         node.is_suspicious, node.reason = _domain_suspicious(node.fqdn)
 
-    return sorted(by_fqdn.values(), key=lambda d: (not d.is_suspicious, d.fqdn))
+    return sorted(emittable, key=lambda d: (not d.is_suspicious, d.fqdn))
 
 
 def _get_or_create_domain(table: dict[str, NetworkDomain], fqdn: str) -> NetworkDomain:
@@ -183,7 +206,7 @@ def _extract_ips(raw: dict[str, Any]) -> list[NetworkIP]:
     seen: dict[tuple[str, int | None, str | None], NetworkIP] = {}
 
     def _add(address: str, port: int | None, transport: str | None) -> None:
-        if not _is_valid_ip(address):
+        if not _is_valid_ip(address) or not _is_emittable_ip(address):
             return
         key = (address, port, transport)
         if key in seen:
@@ -224,6 +247,8 @@ def _read_flow(entry: Any, transport: str, add: Any) -> None:
             port_int = int(port) if port is not None else None
         except (TypeError, ValueError):
             port_int = None
+        if port_int is not None and not (1 <= port_int <= 65535):
+            port_int = None
         add(str(dst), port_int, transport)
 
 
@@ -247,6 +272,44 @@ def _ip_suspicious(ip: str) -> tuple[bool, str | None]:
     return False, "public_address"
 
 
+def _is_emittable_ip(ip: str) -> bool:
+    """True only for routable public addresses worth emitting as an IOC.
+
+    Drops private / loopback / multicast / reserved / link-local / unspecified /
+    broadcast — these are sandbox/test noise, never malware infrastructure, and
+    pollute CTI feeds + waste threat-intel API budget.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_link_local
+        or addr.is_unspecified
+    ):
+        return False
+    return str(addr) != "255.255.255.255"
+
+
+def _is_emittable_domain(fqdn: str) -> bool:
+    """True only for FQDNs worth emitting as an IOC.
+
+    Drops RFC 6761/6762 reserved names/suffixes (localhost, *.local, *.test,
+    *.example, *.invalid, *.arpa) and single-label hostnames (no dot) which are
+    local resolutions, not external infrastructure.
+    """
+    lower = fqdn.lower().strip().rstrip(".")
+    if not lower or "." not in lower:
+        return False
+    if lower in _RESERVED_DOMAIN_NAMES:
+        return False
+    return not any(lower.endswith(suffix) for suffix in _RESERVED_DOMAIN_SUFFIXES)
+
+
 # ---------------------------------------------------------------------------
 # URLs / UAs / JA3
 # ---------------------------------------------------------------------------
@@ -258,11 +321,18 @@ def _extract_urls(raw: dict[str, Any]) -> list[NetworkURL]:
     for entry in raw.get("http") or []:
         if not isinstance(entry, dict):
             continue
-        host = (entry.get("host") or "").strip()
+        # Host is case-insensitive (RFC 3986) — lowercase so casing variants
+        # dedupe to one URL.
+        host = (entry.get("host") or "").strip().lower()
         path = (entry.get("uri") or entry.get("path") or "/").strip()
         if not host:
             continue
-        scheme = "https" if entry.get("port") in (443, "443") else "http"
+        is_https = (
+            entry.get("port") in (443, "443", 8443, "8443")
+            or bool(entry.get("encrypted"))
+            or bool(entry.get("ssl"))
+        )
+        scheme = "https" if is_https else "http"
         url = f"{scheme}://{host}{path if path.startswith('/') else '/' + path}"
         if url in seen:
             continue
@@ -271,6 +341,8 @@ def _extract_urls(raw: dict[str, Any]) -> list[NetworkURL]:
         try:
             status = int(raw_status) if raw_status is not None else None
         except (TypeError, ValueError):
+            status = None
+        if status is not None and not (100 <= status <= 599):
             status = None
         out.append(
             NetworkURL(
@@ -289,10 +361,10 @@ def _extract_user_agents(raw: dict[str, Any]) -> list[str]:
     for entry in raw.get("http") or []:
         if not isinstance(entry, dict):
             continue
-        ua = entry.get("user_agent") or entry.get("ua")
+        ua = str(entry.get("user_agent") or entry.get("ua") or "").strip()
         if ua and ua not in seen:
             seen.add(ua)
-            out.append(str(ua))
+            out.append(ua)
     return out
 
 
@@ -366,25 +438,22 @@ def merge_sandbox_cti_network(
 
     new_domains = list(base.domains)
     for fqdn in cti_domains_raw:
-        key = fqdn.lower()
-        if key in seen_fqdn:
+        key = fqdn.lower().rstrip(".")
+        if key in seen_fqdn or not _is_emittable_domain(fqdn):
             continue
         seen_fqdn.add(key)
+        suspicious = _domain_is_suspicious(fqdn)
         new_domains.append(
             NetworkDomain(
-                fqdn=fqdn,
-                is_suspicious=_domain_is_suspicious(fqdn),
-                reason="From Triage SandboxCTI" if _domain_is_suspicious(fqdn) else None,
+                fqdn=key,
+                is_suspicious=suspicious,
+                reason="From Triage SandboxCTI" if suspicious else None,
             )
         )
 
     new_ips = list(base.ips)
     for addr in cti_ips_raw:
-        if addr in seen_addr:
-            continue
-        try:
-            ipaddress.ip_address(addr)
-        except ValueError:
+        if addr in seen_addr or not _is_emittable_ip(addr):
             continue
         seen_addr.add(addr)
         new_ips.append(NetworkIP(address=addr))
@@ -448,8 +517,6 @@ def _gather_strings(*sources: Any) -> list[str]:
 
 
 def _domain_is_suspicious(fqdn: str) -> bool:
-    lower = fqdn.lower()
-    for token in _SUSPICIOUS_DOMAIN_TOKENS:
-        if token in lower:
-            return True
-    return False
+    # Single source of truth: reuse the CAPE-path scorer (benign allowlist +
+    # tokens + DGA) so CTI-sourced domains are judged identically.
+    return _domain_suspicious(fqdn)[0]

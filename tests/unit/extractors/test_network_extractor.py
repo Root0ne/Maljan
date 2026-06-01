@@ -131,3 +131,103 @@ def test_merge_sandbox_cti_returns_input_when_cti_network_empty() -> None:
     """A SandboxCTI dict whose ``network`` block is entirely empty must
     not cause an empty-but-non-None NetworkIOCs to be created."""
     assert merge_sandbox_cti_network(None, {"network": {"ips": []}}) is None
+
+
+# ---------------------------------------------------------------------------
+# Signal-quality hardening (FP reduction + validation)
+# ---------------------------------------------------------------------------
+
+
+def test_drops_reserved_and_private_ips() -> None:
+    report = {
+        "network": {
+            "tcp": [
+                {"dst": "8.8.8.8", "dport": 443},
+                {"dst": "127.0.0.1"},
+                {"dst": "10.0.0.5"},
+                {"dst": "169.254.1.1"},
+                {"dst": "0.0.0.0"},
+                {"dst": "255.255.255.255"},
+            ]
+        }
+    }
+    result = build_network_iocs(report)
+    assert result is not None
+    assert {ip.address for ip in result.ips} == {"8.8.8.8"}
+
+
+def test_drops_reserved_and_single_label_domains() -> None:
+    report = {
+        "network": {
+            "dns": [
+                {"request": "evilsite.com"},
+                {"request": "localhost"},
+                {"request": "printer.local"},
+                {"request": "server"},  # single label
+                {"request": "doc.example"},  # reserved suffix
+            ]
+        }
+    }
+    result = build_network_iocs(report)
+    assert result is not None
+    assert {d.fqdn for d in result.domains} == {"evilsite.com"}
+
+
+def test_cti_path_drops_reserved_ips() -> None:
+    cti = {"network": {"ips": ["8.8.8.8", "127.0.0.1", "192.168.1.1"]}}
+    result = merge_sandbox_cti_network(None, cti)
+    assert result is not None
+    assert {ip.address for ip in result.ips} == {"8.8.8.8"}
+
+
+def test_url_host_lowercased_and_deduped() -> None:
+    report = {
+        "network": {
+            "http": [
+                {"host": "Example.COM", "uri": "/a"},
+                {"host": "example.com", "uri": "/a"},
+            ]
+        }
+    }
+    result = build_network_iocs(report)
+    assert result is not None
+    assert [u.url for u in result.urls] == ["http://example.com/a"]
+
+
+def test_url_https_scheme_inference_and_status_validation() -> None:
+    report = {
+        "network": {
+            "http": [
+                {"host": "a.com", "uri": "/", "port": 8443, "status": 999},
+                {"host": "b.com", "uri": "/", "encrypted": True},
+            ]
+        }
+    }
+    result = build_network_iocs(report)
+    assert result is not None
+    urls = {u.url for u in result.urls}
+    assert urls == {"https://a.com/", "https://b.com/"}
+    a = next(u for u in result.urls if u.url == "https://a.com/")
+    assert a.status is None  # 999 is out of range -> dropped
+
+
+def test_invalid_port_dropped_ip_kept() -> None:
+    report = {"network": {"tcp": [{"dst": "8.8.8.8", "dport": 99999}]}}
+    result = build_network_iocs(report)
+    assert result is not None
+    assert result.ips[0].address == "8.8.8.8"
+    assert result.ips[0].port is None
+
+
+def test_user_agent_stripped_and_deduped() -> None:
+    report = {
+        "network": {
+            "http": [
+                {"host": "a.com", "user_agent": "  Evil/1.0  "},
+                {"host": "b.com", "user_agent": "Evil/1.0"},
+            ]
+        }
+    }
+    result = build_network_iocs(report)
+    assert result is not None
+    assert result.user_agents == ["Evil/1.0"]

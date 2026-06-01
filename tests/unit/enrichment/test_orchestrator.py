@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from maljan.enrichment.orchestrator import enrich_malware_report
+from maljan.enrichment.orchestrator import (
+    _annotate_reputation_age,
+    _has_successful_rep,
+    _is_public_ip,
+    _reputation_is_malicious,
+    enrich_malware_report,
+)
 
 
 def _mr(domains: list[dict] | None = None, ips: list[dict] | None = None) -> dict:
@@ -168,6 +175,75 @@ class TestIPEnrichment:
         ip = mr["network"]["ips"][0]
         assert ip["asn"] == "AS15169 GOOGLE"
         assert ip["geo"] == "US"
+
+
+class TestReputationHelpers:
+    def test_has_successful_rep(self) -> None:
+        assert _has_successful_rep({"reputation": {"source": "virustotal"}}) is True
+        assert _has_successful_rep({"reputation": {"malicious": 0}}) is False  # no source
+        assert _has_successful_rep({"reputation": {}}) is False
+        assert _has_successful_rep({}) is False
+
+    def test_is_public_ip(self) -> None:
+        assert _is_public_ip("8.8.8.8") is True
+        assert _is_public_ip("10.0.0.5") is False
+        assert _is_public_ip("127.0.0.1") is False
+        assert _is_public_ip("169.254.1.1") is False
+        assert _is_public_ip("not-an-ip") is False
+
+    def test_reputation_is_malicious(self) -> None:
+        assert _reputation_is_malicious({"source": "virustotal", "malicious": 3}) is True
+        assert _reputation_is_malicious({"source": "virustotal", "malicious": 0}) is False
+        assert _reputation_is_malicious({"source": "abuseipdb", "abuse_confidence": 80}) is True
+        assert _reputation_is_malicious({"source": "abuseipdb", "abuse_confidence": 10}) is False
+        # Stale reputation never drives a verdict.
+        assert (
+            _reputation_is_malicious({"source": "virustotal", "malicious": 9, "stale": True})
+            is False
+        )
+
+    def test_annotate_age_marks_stale(self) -> None:
+        old = {"source": "virustotal", "last_analysis_date_unix": 1_000_000_000}  # 2001
+        _annotate_reputation_age(old)
+        assert old.get("stale") is True
+        assert old["age_days"] > 90
+
+        fresh = {"source": "virustotal", "last_analysis_date_unix": int(time.time()) - 100}
+        _annotate_reputation_age(fresh)
+        assert fresh.get("stale") is None
+        assert fresh["age_days"] >= 0
+
+
+class TestSignalQualityFeedback:
+    @pytest.mark.asyncio
+    async def test_private_ip_skipped_no_lookup(self) -> None:
+        mr = _mr(ips=[{"address": "10.0.0.5"}])
+        vt = _vt_mock(ip_rep={"source": "virustotal", "malicious": 5})
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ) as http:
+            with (
+                patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt),
+                patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()),
+            ):
+                await enrich_malware_report(
+                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
+                )
+        vt.ip_reputation.assert_not_awaited()
+        assert mr["network"]["ips"][0].get("reputation") is None
+
+    @pytest.mark.asyncio
+    async def test_malicious_reputation_sets_is_suspicious(self) -> None:
+        mr = _mr(domains=[{"fqdn": "evil.com", "is_suspicious": False}])
+        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 8})
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ) as http:
+            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
+                await enrich_malware_report(
+                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
+                )
+        assert mr["network"]["domains"][0]["is_suspicious"] is True
 
 
 class _AttribStore:

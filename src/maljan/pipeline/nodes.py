@@ -1088,6 +1088,9 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
                 degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
+                # Platform-gate persistence scanners (no Windows registry
+                # persistence on a Linux/Android sample, and vice versa).
+                sample_platform=state.get("platform"),
             )
             report = builder.build_deterministic()
             # Thread the judge node's exact opcode-hash family overlap into the

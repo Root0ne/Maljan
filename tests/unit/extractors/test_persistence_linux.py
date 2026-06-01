@@ -84,14 +84,44 @@ class TestCronJob:
         out = build_persistence_list(_sandbox_with_path(path))
         assert any(m.kind == "cron_job" for m in out)
 
-    def test_crontab_edit_command(self) -> None:
+    def test_crontab_edit_command_requires_corroboration(self) -> None:
+        # Signal-quality §2.4: a bare ``crontab -e`` (interactive, no confirmed
+        # write) is read-only-ish noise and must NOT be flagged on its own.
         out = build_persistence_list(_sandbox_with_process("crontab -e"))
+        assert not any(m.kind == "cron_job" for m in out)
+
+    def test_crontab_edit_command_with_cron_write_is_flagged(self) -> None:
+        # When a cron-path write corroborates the ``crontab -e`` command, it is
+        # genuine persistence.
+        report = {
+            "behavior": {
+                "summary": {"files": ["/var/spool/cron/root"]},
+                "processes": [{"command_line": "crontab -e", "pid": 100, "ppid": 1, "name": "sh"}],
+            }
+        }
+        out = build_persistence_list(report)
         assert any(m.kind == "cron_job" for m in out)
 
 
 # ---------------------------------------------------------------------------
 # init_d
 # ---------------------------------------------------------------------------
+
+
+class TestXdgAndTimer:
+    def test_xdg_autostart_path(self) -> None:
+        out = build_persistence_list(_sandbox_with_path("/home/u/.config/autostart/mal.desktop"))
+        assert any(m.kind == "xdg_autostart" for m in out)
+
+    def test_etc_xdg_autostart_path(self) -> None:
+        out = build_persistence_list(_sandbox_with_path("/etc/xdg/autostart/mal.desktop"))
+        assert any(m.kind == "xdg_autostart" for m in out)
+
+    def test_systemd_timer_classified_separately(self) -> None:
+        out = build_persistence_list(_sandbox_with_path("/etc/systemd/system/mal.timer"))
+        kinds = [m.kind for m in out]
+        assert "systemd_timer" in kinds
+        assert "systemd_service" not in kinds
 
 
 class TestInitD:

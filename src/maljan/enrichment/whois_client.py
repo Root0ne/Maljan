@@ -66,8 +66,12 @@ class WhoisClient:
         except ImportError:
             return None
         try:
-            # Default Maxmind reader path; deployments mount the .mmdb here.
-            reader = geoip2.database.Reader("/var/lib/GeoIP/GeoLite2-Country.mmdb")
+            # MaxMind reader path: ``GEO_IP_DB_PATH`` env override, else the
+            # conventional mount point. Lets dev/CI point at a local .mmdb.
+            import os
+
+            db_path = os.environ.get("GEO_IP_DB_PATH") or "/var/lib/GeoIP/GeoLite2-Country.mmdb"
+            reader = geoip2.database.Reader(db_path)
         except Exception:  # noqa: BLE001
             return None
         try:

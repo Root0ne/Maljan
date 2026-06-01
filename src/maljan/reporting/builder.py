@@ -73,6 +73,7 @@ class MalwareReportBuilder:
         sandbox_cti: dict[str, Any] | None = None,
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
+        sample_platform: str | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -90,6 +91,7 @@ class MalwareReportBuilder:
         self.sandbox_cti = sandbox_cti
         self.degraded_mode = degraded_mode
         self.degradation_reasons = degradation_reasons or []
+        self.sample_platform = sample_platform
 
     # ------------------------------------------------------------------
     # Deterministic build
@@ -111,7 +113,7 @@ class MalwareReportBuilder:
         # When the sandbox report is empty (Android Triage path) this is
         # the only source of typed network indicators.
         network = merge_sandbox_cti_network(network, self.sandbox_cti)
-        persistence = build_persistence_list(self.sandbox_report)
+        persistence = build_persistence_list(self.sandbox_report, self.sample_platform)
         cells, mappings = build_capability_matrix(
             cascade_summary=self.cascade_summary,
             isr_reports=self.isr_reports,

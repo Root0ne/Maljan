@@ -81,6 +81,13 @@ def build_capability_matrix(
         confidence = float(info.get("confidence") or 0.0)
         layers = info.get("layers") or []
 
+        # Signal-quality §2.4: never emit a zero-confidence cell with no
+        # evidence and no contributing layer — it is an empty claim the UI
+        # would render as a "verified" capability and the narrative agent
+        # would expand into fabricated prose.
+        if confidence <= 0.0 and not evidence and not layers:
+            continue
+
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
         cells.append(
             CapabilityCell(

@@ -102,6 +102,59 @@ def build_dynamic_behavior(
 # ---------------------------------------------------------------------------
 
 
+# OS-normal processes that legitimately call the "injection" APIs
+# (CreateRemoteThread / WriteProcessMemory / VirtualAllocEx). Matched on the
+# basename so a real injector isn't drowned by benign system noise.
+_BENIGN_INJECTORS: frozenset[str] = frozenset(
+    {
+        "svchost.exe",
+        "services.exe",
+        "lsass.exe",
+        "csrss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "conhost.exe",
+        "explorer.exe",
+        "searchindexer.exe",
+        "taskhostw.exe",
+        "dllhost.exe",
+        "sihost.exe",
+        "runtimebroker.exe",
+        "ctfmon.exe",
+    }
+)
+
+_MAX_TREE_DEPTH = 64
+
+
+def _proc_basename(name: str) -> str:
+    return name.replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+
+
+def _would_cycle(child_pid: int, parent_pid: int, parent_of: dict[int, int]) -> bool:
+    """True if making ``parent_pid`` the parent of ``child_pid`` forms a cycle."""
+    seen: set[int] = set()
+    cur: int | None = parent_pid
+    while cur is not None and cur not in seen:
+        if cur == child_pid:
+            return True
+        seen.add(cur)
+        cur = parent_of.get(cur)
+    return False
+
+
+def _prune_depth(roots: list[ProcessNode], max_depth: int = _MAX_TREE_DEPTH) -> None:
+    """Drop children beyond ``max_depth`` to bound renderer recursion (defensive)."""
+    stack: list[tuple[ProcessNode, int]] = [(r, 1) for r in roots]
+    while stack:
+        node, depth = stack.pop()
+        if depth >= max_depth:
+            node.children = []
+            continue
+        for child in node.children:
+            stack.append((child, depth + 1))
+
+
 def _build_process_tree(processes: list[dict[str, Any]]) -> list[ProcessNode]:
     """Reconstruct parent→children relationships from a flat process list."""
     if not processes:
@@ -120,7 +173,9 @@ def _build_process_tree(processes: list[dict[str, Any]]) -> list[ProcessNode]:
             ppid = 0
         name = str(p.get("process_name") or p.get("name") or "")
         cmd = str(p.get("command_line") or p.get("cmd") or "")
-        if pid == 0:
+        if pid == 0 or pid in nodes:
+            # Skip pid 0 and keep the FIRST entry for a duplicate PID rather
+            # than overwriting (which would lose its command line / calls).
             continue
         nodes[pid] = ProcessNode(pid=pid, ppid=ppid, name=name, command_line=cmd)
         if ppid:
@@ -129,13 +184,23 @@ def _build_process_tree(processes: list[dict[str, Any]]) -> list[ProcessNode]:
     roots: list[ProcessNode] = []
     for pid, node in nodes.items():
         parent_pid = parent_of.get(pid)
-        if parent_pid and parent_pid in nodes and parent_pid != pid:
+        if (
+            parent_pid
+            and parent_pid in nodes
+            and parent_pid != pid
+            and not _would_cycle(pid, parent_pid, parent_of)
+        ):
             nodes[parent_pid].children.append(node)
         else:
             roots.append(node)
 
-    # Detect CreateRemoteThread / VirtualAllocEx targets as injection
+    _prune_depth(roots)
+
+    # Detect CreateRemoteThread / VirtualAllocEx targets as injection — but skip
+    # OS-normal processes that legitimately use these APIs (FP reduction).
     for p in processes:
+        if _proc_basename(str(p.get("process_name") or p.get("name") or "")) in _BENIGN_INJECTORS:
+            continue
         for call in p.get("calls") or []:
             api = (call.get("api") or "").strip()
             if api in {"CreateRemoteThread", "WriteProcessMemory", "VirtualAllocEx"}:
@@ -203,6 +268,11 @@ def _extract_registry_mods(calls: list[dict[str, Any]]) -> list[RegistryMod]:
             if "Create" in api
             else "modify"
         )
+        # Read-only queries are not modifications — they are pure noise in a
+        # "registry modifications" list (every tool constantly reads the
+        # registry). Keep only create/modify/delete signal.
+        if op == "query":
+            continue
         hive = _classify_hive(key_str)
         dedup_key = (hive, key_str.lower(), op)
         if dedup_key in seen:

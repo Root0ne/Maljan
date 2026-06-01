@@ -65,27 +65,49 @@ _SIGNATURE_HINTS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+_NON_WINDOWS_PLATFORMS: frozenset[str] = frozenset({"linux", "android", "macos", "darwin", "ios"})
+
+
 def build_persistence_list(
     sandbox_report: dict[str, Any] | None,
+    sample_platform: str | None = None,
 ) -> list[PersistenceMechanism]:
-    """Return a deduplicated list of persistence mechanisms."""
+    """Return a deduplicated list of persistence mechanisms.
+
+    ``sample_platform`` gates platform-specific scanners so a Linux/Android
+    sample is not flagged with Windows registry-run persistence (and vice
+    versa). The Windows scanners run unless the platform is an explicit
+    non-Windows one; the Linux scanner runs unless the platform is Windows.
+    Signature-based detection is platform-agnostic and always runs. When the
+    platform is unknown/None, all scanners run (backward-compatible).
+    """
     if not sandbox_report:
         return []
+
+    plat = (sample_platform or "").strip().lower()
+    run_windows = plat not in _NON_WINDOWS_PLATFORMS
+    run_linux = plat != "windows"
 
     found: dict[tuple[str, str], PersistenceMechanism] = {}
 
     _scan_signatures(sandbox_report, found)
-    _scan_registry_calls(sandbox_report, found)
-    _scan_service_apis(sandbox_report, found)
-    _scan_scheduled_task_apis(sandbox_report, found)
-    # Wave 9 (2026-05-29): Linux ELF persistence detection. Driven from
-    # ``dynamic.file_operations`` paths + ``notable_apis`` execve calls so
-    # ELF samples (e.g. the 2026-05-29 Mirai audit) surface real
-    # persistence instead of an empty tab.
-    _scan_linux_persistence(sandbox_report, found)
+    if run_windows:
+        _scan_registry_calls(sandbox_report, found)
+        _scan_service_apis(sandbox_report, found)
+        _scan_scheduled_task_apis(sandbox_report, found)
+    if run_linux:
+        # Wave 9 (2026-05-29): Linux ELF persistence detection. Driven from
+        # ``dynamic.file_operations`` paths + ``notable_apis`` execve calls so
+        # ELF samples (e.g. the 2026-05-29 Mirai audit) surface real
+        # persistence instead of an empty tab.
+        _scan_linux_persistence(sandbox_report, found)
 
     out = list(found.values())
-    logger.info("persistence_extractor: extracted %d mechanism(s)", len(out))
+    logger.info(
+        "persistence_extractor: extracted %d mechanism(s) (platform=%s)",
+        len(out),
+        plat or "unknown",
+    )
     return out
 
 
@@ -93,6 +115,8 @@ def build_persistence_list(
 # Order matters — first match wins so cron variants are picked over the
 # generic ``/etc/`` heuristics.
 _LINUX_PATH_RULES: tuple[tuple[str, str, str], ...] = (
+    ("/.config/autostart/", "xdg_autostart", "T1547.001"),
+    ("/etc/xdg/autostart/", "xdg_autostart", "T1547.001"),
     ("/etc/systemd/system/", "systemd_service", "T1543.002"),
     ("/lib/systemd/system/", "systemd_service", "T1543.002"),
     ("/usr/lib/systemd/system/", "systemd_service", "T1543.002"),
@@ -148,8 +172,25 @@ def _scan_linux_persistence(
         if isinstance(seq, list):
             candidate_paths.extend(str(p) for p in seq if isinstance(p, str))
 
+    has_cron_path_write = any(
+        ("/cron" in p.lower() or "/var/spool/cron" in p.lower()) for p in candidate_paths
+    )
+
     for path in candidate_paths:
         lower = path.lower()
+        # systemd ``.timer`` units are scheduled jobs (T1053.003), distinct
+        # from plain services — classify them before the generic dir rules.
+        if lower.endswith(".timer"):
+            key_pair = ("systemd_timer", lower)
+            if key_pair not in found:
+                found[key_pair] = PersistenceMechanism(
+                    kind="systemd_timer",
+                    target=path,
+                    payload="",
+                    technique_id="T1053.003",
+                    evidence_ref=f"file_write:{path}",
+                )
+            continue
         for fragment, kind, tid in _LINUX_PATH_RULES:
             if fragment in lower:
                 key_pair = (kind, lower)
@@ -174,7 +215,11 @@ def _scan_linux_persistence(
             if not cmd:
                 continue
             lower = cmd.lower()
-            if "crontab" in lower and ("-e" in lower or "-l" not in lower):
+            # Crontab command is only persistence when it edits (-e) AND a cron
+            # path write corroborates it — a bare ``crontab -l``/``crontab``
+            # invocation with no file change is read-only noise (precision over
+            # recall; see signal-quality §2.4).
+            if "crontab" in lower and "-e" in lower and has_cron_path_write:
                 key_pair = ("cron_job", cmd.lower())
                 if key_pair not in found:
                     found[key_pair] = PersistenceMechanism(
