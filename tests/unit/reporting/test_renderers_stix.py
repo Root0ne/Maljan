@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.models import MalwareReport, StaticAnalysis, StringIOC
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 from maljan.schemas.stix_models import (
     Bundle,
@@ -46,6 +46,22 @@ def _build(**kwargs: Any) -> MalwareReport:
 
 def _types(bundle: Bundle) -> list[str]:
     return [getattr(obj, "type", "?") for obj in bundle.objects]
+
+
+class TestIndicatorTypes:
+    def test_file_name_anomalous_hash_malicious(self) -> None:
+        report = _build()
+        if report.static is None:
+            report.static = StaticAnalysis()
+        report.static.interesting_strings = [
+            StringIOC(kind="path", value="/data/local/tmp/payload.so")
+        ]
+        bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
+        inds = [o for o in bundle.objects if isinstance(o, Indicator)]
+        file_name = [i for i in inds if i.pattern.lstrip().startswith("[file:name")]
+        hashes = [i for i in inds if "hashes" in i.pattern]
+        assert file_name and file_name[0].indicator_types == ["anomalous-activity"]
+        assert hashes and hashes[0].indicator_types == ["malicious-activity"]
 
 
 class TestEmptyBaseBundle:

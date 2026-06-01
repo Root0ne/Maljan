@@ -1084,6 +1084,10 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # sandbox_report has no ``network`` block (the common
                 # case for the Triage-only Android flow).
                 sandbox_cti=state.get("sandbox_cti"),
+                # Degraded-run signalling: surfaced as a banner so a numerically
+                # high verdict/severity on a low-data run is not read as authoritative.
+                degraded_mode=bool(state.get("degraded_mode")),
+                degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
             )
             report = builder.build_deterministic()
             # Thread the judge node's exact opcode-hash family overlap into the

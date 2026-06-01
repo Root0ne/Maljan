@@ -106,6 +106,15 @@ class ATTCKValidator:
         return cls._instance
 
     @classmethod
+    def current_instance(cls) -> ATTCKValidator | None:
+        """Return the built singleton if one exists, else None (never builds).
+
+        Lets best-effort consumers (e.g. STIX technique-name back-fill) reuse the
+        already-loaded index without forcing an expensive build when it is absent.
+        """
+        return cls._instance
+
+    @classmethod
     def reset(cls) -> None:
         """Drop the cached singleton (intended for test isolation)."""
         with cls._lock:

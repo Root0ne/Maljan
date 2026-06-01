@@ -75,6 +75,26 @@ _MITRE_LOOKUP: dict[str, tuple[str, str]] = {
 _PATTERN_LITERAL_RE = re.compile(r"'([^']+)'")
 
 
+def _technique_display_name(tid: str) -> str | None:
+    """Friendly ATT&CK technique name from the already-built index, else None.
+
+    Reuses the ATTCKValidator singleton ONLY when it is already initialized —
+    never forces an index build, so unit tests stay offline/fast. Fail-safe.
+    Lets REP-01 give correct names for all ~700 techniques, not just the curated
+    fallback table below.
+    """
+    try:
+        from maljan.memory.attck_validator import ATTCKValidator
+
+        validator = ATTCKValidator.current_instance()
+        if validator is None:
+            return None
+        tech = validator.get_technique(tid)
+        return tech.name if tech is not None else None
+    except Exception:  # noqa: BLE001 — best-effort cosmetic back-fill
+        return None
+
+
 def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
     evidence_corpus: set[str] | None = None,
@@ -227,19 +247,30 @@ def postprocess_judge_bundle(
         # MITRE reference that links to a non-existent technique page.
         if not tid or tid in _CURATED_PLACEHOLDERS or not _VALID_TID_RE_LOCAL.match(tid):
             continue
-        name, url = _MITRE_LOOKUP.get(
-            tid,
-            (
-                obj.get("name") or tid,
-                f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
-            ),
-        )
+        if tid in _MITRE_LOOKUP:
+            name, url = _MITRE_LOOKUP[tid]
+        else:
+            # Beyond the curated table, pull the real name from the live ATT&CK
+            # index when it's loaded; fall back to the LLM name / bare ID.
+            name = _technique_display_name(tid) or obj.get("name") or tid
+            url = f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
         obj["external_references"] = [
             {"source_name": "mitre-attack", "external_id": tid, "url": url},
         ]
         # Promote a friendlier name when LLM left it as the bare ID.
         if not obj.get("name") or obj.get("name") == tid:
             obj["name"] = name
+
+    # ── Final integrity pass: empty-pattern drop, dedup, dangling-ref sweep ──
+    before = len(objects)
+    objects = enforce_bundle_integrity(objects)
+    bundle_dict["objects"] = objects
+    if len(objects) != before:
+        logger.info(
+            "judge_postprocess: integrity pass kept %d/%d objects (dropped empty/dup/dangling).",
+            len(objects),
+            before,
+        )
 
     return bundle_dict
 
@@ -412,6 +443,144 @@ def _rewrite_references(objects: list[Any], id_remap: dict[str, str]) -> None:
         refs = obj.get("object_refs")
         if isinstance(refs, list):
             obj["object_refs"] = [id_remap.get(r, r) for r in refs]
+
+
+def _oid(o: Any) -> Any:
+    return o.get("id") if isinstance(o, dict) else getattr(o, "id", None)
+
+
+def _otype(o: Any) -> Any:
+    return o.get("type") if isinstance(o, dict) else getattr(o, "type", None)
+
+
+def _oget(o: Any, key: str, default: Any = None) -> Any:
+    return o.get(key, default) if isinstance(o, dict) else getattr(o, key, default)
+
+
+def _oset(o: Any, key: str, value: Any) -> None:
+    if isinstance(o, dict):
+        o[key] = value
+    else:
+        setattr(o, key, value)
+
+
+def _technique_id_poly(o: Any) -> str | None:
+    """Technique ID from an attack-pattern (dict or pydantic), via refs or name."""
+    for ref in _oget(o, "external_references", []) or []:
+        ext = ref.get("external_id") if isinstance(ref, dict) else getattr(ref, "external_id", None)
+        if isinstance(ext, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", ext.strip()):
+            return ext.strip()
+    name = _oget(o, "name", "") or ""
+    if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
+        return name.strip()
+    return None
+
+
+def _remap_refs_poly(objects: list[Any], remap: dict[str, str]) -> None:
+    """Rewrite source_ref/target_ref/object_refs through ``remap`` (dict or pydantic)."""
+    if not remap:
+        return
+    for o in objects:
+        for key in ("source_ref", "target_ref"):
+            v = _oget(o, key)
+            if isinstance(v, str) and v in remap:
+                _oset(o, key, remap[v])
+        refs = _oget(o, "object_refs")
+        if isinstance(refs, list):
+            _oset(o, "object_refs", [remap.get(r, r) for r in refs])
+
+
+def _is_wellformed_pattern(indicator: Any) -> bool:
+    """Conservative STIX 2.1 pattern shape check for an indicator object.
+
+    Returns True only when the pattern is a bracketed comparison expression
+    (``[ <path> <op> '<value>' ]``). Keeps all patterns Maljan emits; rejects
+    empty/whitespace and truncated/garbage LLM output (e.g. ``[file:name = 'x``).
+    """
+    pat = str(_oget(indicator, "pattern", "") or "").strip()
+    return pat.startswith("[") and pat.endswith("]") and "=" in pat
+
+
+def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
+    """Make a STIX object list internally valid and non-redundant, in place-ish.
+
+    Works on both parsed dicts (judge bundle) and pydantic SDOs (extended
+    bundle). Order-preserving. Steps:
+      1. Drop indicators with an empty/whitespace pattern (STIX 2.1 invalid).
+      2. Deduplicate attack-patterns by technique ID (keep first; remap refs).
+      3. Deduplicate indicators by (pattern_type, pattern) (keep first; remap refs).
+      4. Drop relationships whose source/target is not in the bundle, and
+         deduplicate identical relationships.
+      5. Trim object_refs (Report/Note) to objects that still exist.
+    """
+    # 1) drop indicators with an empty or syntactically malformed pattern. The
+    # shape check is deliberately conservative — a STIX comparison expression is
+    # wrapped in brackets and contains a comparator — so it keeps every pattern
+    # this codebase emits and only rejects truncated/garbage LLM output (no full
+    # grammar parser, hence no over-dropping).
+    objects = [o for o in objects if _otype(o) != "indicator" or _is_wellformed_pattern(o)]
+
+    remap: dict[str, str] = {}
+
+    # 2) attack-pattern dedup by technique ID
+    seen_tid: dict[str, str] = {}
+    kept: list[Any] = []
+    for o in objects:
+        if _otype(o) == "attack-pattern":
+            tid = _technique_id_poly(o)
+            if tid and tid in seen_tid:
+                oid = _oid(o)
+                if isinstance(oid, str):
+                    remap[oid] = seen_tid[tid]
+                continue
+            if tid and isinstance(_oid(o), str):
+                seen_tid[tid] = _oid(o)
+        kept.append(o)
+    objects = kept
+
+    # 3) indicator dedup by (pattern_type, pattern)
+    seen_pat: dict[tuple[str, str], str] = {}
+    kept = []
+    for o in objects:
+        if _otype(o) == "indicator":
+            key = (str(_oget(o, "pattern_type", "stix")), str(_oget(o, "pattern", "")))
+            if key in seen_pat:
+                oid = _oid(o)
+                if isinstance(oid, str):
+                    remap[oid] = seen_pat[key]
+                continue
+            if isinstance(_oid(o), str):
+                seen_pat[key] = _oid(o)
+        kept.append(o)
+    objects = kept
+
+    # apply remap so refs to deduped objects point at the kept ones
+    _remap_refs_poly(objects, remap)
+
+    # 4) drop dangling + duplicate relationships
+    ids = {_oid(o) for o in objects}
+    seen_rel: set[tuple[str, str, str]] = set()
+    kept = []
+    for o in objects:
+        if _otype(o) == "relationship":
+            src, tgt = _oget(o, "source_ref"), _oget(o, "target_ref")
+            if src not in ids or tgt not in ids:
+                continue
+            rkey = (str(_oget(o, "relationship_type", "")), str(src), str(tgt))
+            if rkey in seen_rel:
+                continue
+            seen_rel.add(rkey)
+        kept.append(o)
+    objects = kept
+
+    # 5) trim object_refs to surviving objects
+    ids = {_oid(o) for o in objects}
+    for o in objects:
+        refs = _oget(o, "object_refs")
+        if isinstance(refs, list):
+            _oset(o, "object_refs", [r for r in refs if r in ids])
+
+    return objects
 
 
 def build_evidence_corpus(

@@ -85,6 +85,41 @@ class TestMinimalReport:
         assert "a" * 64 in markdown
 
 
+class TestHonestySignals:
+    """Degraded-run banner + family-grounding markers (report honesty)."""
+
+    def test_defaults_are_clean(self) -> None:
+        report = _build()
+        assert report.degraded_mode is False
+        assert report.degradation_reasons == []
+        md = MarkdownRenderer().render(report)
+        assert "[DEGRADED RUN]" not in md
+
+    def test_degraded_banner_rendered(self) -> None:
+        report = _build()
+        report.degraded_mode = True
+        report.degradation_reasons = ["all LLM analysts errored", "sandbox observed nothing"]
+        md = MarkdownRenderer().render(report)
+        assert "[DEGRADED RUN]" in md
+        assert "all LLM analysts errored" in md
+
+    def test_ungrounded_family_marker(self) -> None:
+        report = _build()
+        report.attribution.family = "evilcorp"
+        report.attribution.family_confidence = 0.0
+        report.attribution.family_grounded = False
+        md = MarkdownRenderer().render(report)
+        assert "ungrounded" in md
+
+    def test_unknown_family_has_no_confidence_noise(self) -> None:
+        report = _build(malware_category=None)
+        report.attribution.family = None
+        md = MarkdownRenderer().render(report)
+        assert "not determined" in md
+        # The misleading "Family: unknown (confidence 0.00)" line must be gone.
+        assert "**Family**: unknown" not in md
+
+
 class TestRansomwareReport:
     @pytest.fixture
     def report(self) -> MalwareReport:

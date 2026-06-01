@@ -133,13 +133,19 @@ class ExtendedSTIXRenderer:
                     continue
                 if not _accept_string_ioc(ioc, pattern, file_name_kept):
                     continue
-                if pattern.lstrip().startswith("[file:name"):
+                is_file_name = pattern.lstrip().startswith("[file:name")
+                if is_file_name:
                     file_name_kept += 1
                 ind = Indicator(
                     name=f"{ioc.kind} {ioc.value[:32]}",
                     pattern=pattern,
                     pattern_type="stix",
-                    indicator_types=["malicious-activity"],
+                    # file:name string IOCs are the FP-prone kind (heavily
+                    # capped/filtered upstream); mark them anomalous-activity so
+                    # consumers can weight them below high-confidence hash/C2 IOCs.
+                    indicator_types=(
+                        ["anomalous-activity"] if is_file_name else ["malicious-activity"]
+                    ),
                 )
                 string_inds.append(ind)
 
@@ -227,7 +233,13 @@ class ExtendedSTIXRenderer:
         )
         objects.append(report_sdo)
 
-        return Bundle(objects=objects)
+        # Final referential-integrity + dedup pass over the assembled bundle —
+        # also collapses indicators duplicated across the judge base bundle and
+        # the renderer's synthesized set, and prunes any ref dangling from
+        # upstream drops. See judge_postprocess.enforce_bundle_integrity.
+        from maljan.agents.judge_postprocess import enforce_bundle_integrity
+
+        return Bundle(objects=enforce_bundle_integrity(objects))
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:

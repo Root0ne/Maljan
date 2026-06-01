@@ -219,6 +219,41 @@ positioning.
   the provably-safe sub-operation (invalid→valid), not extended to ambiguous valid→valid edits.
   Harness: `tests/evaluation/eval_autocorrect_ablation.py`.
 
+### 1.6 Deterministic STIX validity + honest reporting — `IMPLEMENTED`
+- **What.** Two deterministic output-quality passes that harden the machine-readable (STIX 2.1
+  bundle) and human-readable (Markdown report) artifacts, in the same "deterministic layer
+  disposes" spirit as the analysis contributions above.
+- **STIX integrity pass (`enforce_bundle_integrity`).** A single polymorphic pass (works on the
+  judge's parsed-dict bundle and the renderer's pydantic SDOs) applied after every drop step in
+  `judge_postprocess.py` AND at the end of `ExtendedSTIXRenderer.render()`. It (i) drops
+  empty/whitespace-pattern Indicators (STIX 2.1 requires a usable pattern), (ii) deduplicates
+  attack-patterns by technique ID and indicators by `(pattern_type, pattern)`, rewriting
+  relationship refs to the survivor, (iii) drops relationships whose source/target no longer
+  resolves and collapses duplicate relationships, and (iv) trims dangling `object_refs` on
+  Report/Note SDOs. This closes a real referential-integrity gap: the prior `REP-02` swept only
+  relationships pointing to dropped *attack-patterns*, so relationships to *indicators* dropped by
+  the J-02 hallucination filter leaked through as dangling refs.
+- **Honest reporting signals.** (i) A `family_grounded` flag (already computed by the attribution
+  guardrail) is now *surfaced*: an evidence-ungrounded family is marked `(ungrounded — no
+  YARA/deterministic corroboration)`, and a no-candidate family renders "not determined" instead of
+  the misleading "unknown (confidence 0.00)". (ii) A `DEGRADED RUN` banner is rendered when the run
+  had low/no analyst data, so a numerically high verdict/severity is not read as authoritative;
+  `degradation_reasons` are listed.
+- **Why it matters (paper).** Output validity and calibrated honesty are part of the "LLM proposes,
+  deterministic layer disposes" contribution: the deterministic layer guarantees the emitted CTI is
+  spec-valid and internally consistent, and the report never over-claims beyond the evidence it had.
+- **Artifacts.** `enforce_bundle_integrity` in `src/maljan/agents/judge_postprocess.py` (applied in
+  `stix_renderer.py`); `src/maljan/reporting/{models.py,builder.py,renderers/markdown.py}`;
+  `src/maljan/pipeline/nodes.py`. Tests in `tests/unit/test_judge_postprocess.py` (integrity) and
+  `tests/unit/reporting/test_renderers_markdown.py` (honesty signals).
+- **CTI polish (wave 2).** Three further low-risk correctness passes: (i) the integrity pass also
+  drops syntactically malformed STIX patterns (conservative bracket+comparator shape check — no
+  grammar parser, no over-dropping); (ii) attack-pattern display names are back-filled from the
+  already-loaded ATT&CK index for all ~700 techniques (not just a 14-entry curated table),
+  fail-safe when the index isn't built; (iii) FP-prone `file:name` string-IOC indicators are typed
+  `anomalous-activity` rather than `malicious-activity` so consumers can weight them below
+  high-confidence hash/C2 IOCs.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -427,7 +462,13 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   retrieval metric). Fixed by restricting autocorrect to invalid-ID replacement
   (`attck_autocorrect_swap_valid=False`, default) — re-measured: hallucination 100%→0%, +19%
   recovery retained, **correct-ID regression eliminated (→0%)**. Added §1.5.2; 56 ATT&CK tests
-  pass. All checks green (86 unit tests pass).
+  pass.
+- **2026-06-01 output quality.** Added §1.6: a deterministic STIX integrity pass
+  (`enforce_bundle_integrity` — empty-pattern drop, AP/indicator dedup, dangling-ref + duplicate
+  relationship sweep, object_refs trim) applied in judge_postprocess and the extended renderer,
+  closing the J-02 dangling-indicator-ref gap; plus honest-reporting signals (surfaced
+  `family_grounded`, "not determined" for no family, `DEGRADED RUN` banner). 135 reporting/judge
+  tests pass; ruff/mypy clean. All checks green (86 unit tests pass).
 - **2026-06-01 fix.** Implemented the §3.3 degenerate-loop fix. Added §1.5
   (deterministic ATT&CK ID assignment via the in-house TF-IDF index — made authoritative,
   not just advisory). Marked §3.3 `IMPLEMENTED` and **rejected the earlier "curated anchor

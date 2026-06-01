@@ -71,6 +71,8 @@ class MalwareReportBuilder:
         # cuckoo-like sandbox path is empty (the common case for the
         # Triage-only Android flow).
         sandbox_cti: dict[str, Any] | None = None,
+        degraded_mode: bool = False,
+        degradation_reasons: list[str] | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -86,6 +88,8 @@ class MalwareReportBuilder:
         self.cascade_summary = cascade_summary
         self.malware_category = malware_category
         self.sandbox_cti = sandbox_cti
+        self.degraded_mode = degraded_mode
+        self.degradation_reasons = degradation_reasons or []
 
     # ------------------------------------------------------------------
     # Deterministic build
@@ -154,6 +158,8 @@ class MalwareReportBuilder:
             overall_confidence=self.overall_confidence,
             malware_category=self.malware_category,
             severity=severity,
+            degraded_mode=self.degraded_mode,
+            degradation_reasons=self.degradation_reasons,
             identity=identity,
             static=static,
             dynamic=dynamic,

@@ -103,13 +103,21 @@ class MarkdownRenderer:
         badge = self._verdict_badge(report.verdict)
         sha256 = report.identity.hashes.sha256 or "unknown"
         generated = report.generated_at.isoformat()
-        return (
+        header = (
             f"# Malware Analysis Report\n\n"
             f"**Verdict**: {badge}  \n"
             f"**Sample SHA256**: `{sha256}`  \n"
             f"**Generated**: {generated}  \n"
             f"**Overall Confidence**: {report.overall_confidence:.2f}"
         )
+        if report.degraded_mode:
+            reasons = "; ".join(report.degradation_reasons) or "low analyst/sandbox data"
+            header += (
+                "\n\n> **[DEGRADED RUN]** This analysis ran with limited data, so the "
+                "verdict, confidence and severity below should be treated as tentative "
+                f"and corroborated manually.  \n> Reasons: {reasons}"
+            )
+        return header
 
     def _section_identity(self, report: MalwareReport) -> str:
         ident = report.identity
@@ -407,8 +415,20 @@ class MarkdownRenderer:
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
         lines = ["## Family Attribution", ""]
-        family = attr.family or report.malware_category or "unknown"
-        lines.append(f"**Family**: {family} (confidence {attr.family_confidence:.2f})")
+        family = attr.family or report.malware_category
+        if not family or str(family).lower() == "unknown":
+            # No family candidate at all — render plainly, without a noisy
+            # "confidence 0.00" that reads as an (un)confident verdict.
+            lines.append("**Family**: not determined")
+        else:
+            grounded_note = (
+                ""
+                if attr.family_grounded
+                else " _(ungrounded — no YARA/deterministic corroboration)_"
+            )
+            lines.append(
+                f"**Family**: {family} (confidence {attr.family_confidence:.2f}){grounded_note}"
+            )
         if attr.actor:
             lines.append(f"**Actor**: {attr.actor}")
         if attr.campaign:

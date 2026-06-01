@@ -470,6 +470,14 @@ class MalwareReport(BaseModel):
     malware_category: str | None = None
     severity: SeverityAssessment = Field(default_factory=SeverityAssessment)
 
+    # --- Degraded-run signalling ---
+    # True when the run had low/no analyst data (e.g. all LLM analysts errored,
+    # sandbox observed nothing, only Layer-0 rule matches). The report renders a
+    # prominent banner so a numerically high verdict/severity is not read as
+    # authoritative. ``degradation_reasons`` carries human-readable causes.
+    degraded_mode: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+
     # --- Identification ---
     identity: SampleIdentity
 
