@@ -140,6 +140,13 @@ positioning.
   TF-IDF `src/maljan/memory/attck_index.py`); wired in `src/maljan/pipeline/nodes.py`
   before cascade; `tests/unit/test_attck_memory.py` (6 correction tests). Config-gated
   (`use_attck_autocorrect`) and fail-safe.
+- **Real-corpus validation (2026-06-01).** Probed against the live 697-technique bundle
+  (ATT&CK v19.1): the §3.3 trigger — an invalid ID on `ptrace`/`prctl` anti-debug evidence
+  — re-grounded to **T1055.008 "Ptrace System Calls"** (alignment 0.45); a well-aligned ID
+  (0.21) and a `NONE` were left untouched. Real good-match alignments cluster at 0.20–0.45
+  vs 0.0 for unrelated, so the `min_alignment=0.08` gate separates them cleanly. Caveat
+  confirmed: TF-IDF is lexical — a C2-tagged ransomware claim swapped to a crypto-algorithm
+  technique on shared "AES/encryption" tokens rather than the impact technique.
 
 ---
 
