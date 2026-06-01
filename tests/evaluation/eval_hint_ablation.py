@@ -191,6 +191,66 @@ class SampleScore:
     hint_present: bool = False  # did the ON condition actually inject a hint?
 
 
+# ---------------------------------------------------------------------------
+# Checkpoint (JSONL) — makes the run pause/resume-able and crash-safe.
+# Each completed sample appends one record {sample_id, on, off}; on restart we
+# skip sample_ids already present. Decoding is deterministic (temp=0), so a
+# resumed run reproduces the exact same results as an uninterrupted one.
+# ---------------------------------------------------------------------------
+def _stats_to_dict(st: BundleStats) -> dict:
+    return {
+        "techniques": sorted(st.techniques),
+        "n_objects": st.n_objects,
+        "n_attack_patterns": st.n_attack_patterns,
+        "n_indicators": st.n_indicators,
+        "n_relationships": st.n_relationships,
+        "n_conf_relationships": st.n_conf_relationships,
+    }
+
+
+def _stats_from_dict(d: dict) -> BundleStats:
+    return BundleStats(
+        techniques=set(d.get("techniques", [])),
+        n_objects=d.get("n_objects", 0),
+        n_attack_patterns=d.get("n_attack_patterns", 0),
+        n_indicators=d.get("n_indicators", 0),
+        n_relationships=d.get("n_relationships", 0),
+        n_conf_relationships=d.get("n_conf_relationships", 0),
+    )
+
+
+def _score_to_dict(s: SampleScore) -> dict:
+    return {
+        "sample_id": s.sample_id,
+        "name": s.name,
+        "category": s.category,
+        "gt_n": s.gt_n,
+        "f1_exact": s.f1_exact,
+        "f1_parent": s.f1_parent,
+        "precision": s.precision,
+        "recall": s.recall,
+        "hallucinated": s.hallucinated,
+        "stats": _stats_to_dict(s.stats),
+        "hint_present": s.hint_present,
+    }
+
+
+def _score_from_dict(d: dict) -> SampleScore:
+    return SampleScore(
+        sample_id=d["sample_id"],
+        name=d["name"],
+        category=d["category"],
+        gt_n=d["gt_n"],
+        f1_exact=d["f1_exact"],
+        f1_parent=d["f1_parent"],
+        precision=d["precision"],
+        recall=d["recall"],
+        hallucinated=d["hallucinated"],
+        stats=_stats_from_dict(d["stats"]),
+        hint_present=d.get("hint_present", False),
+    )
+
+
 def _score(
     pred: BundleStats, gold: set[str], valid_ids: set[str]
 ) -> tuple[float, float, float, float, int]:
@@ -266,7 +326,7 @@ def _bootstrap_ci(deltas: list[float], iters: int = 2000) -> tuple[float, float]
     return (lo, hi)
 
 
-async def main_async(per_category: int, smoke: bool) -> None:
+async def main_async(per_category: int, smoke: bool, checkpoint: Path) -> None:
     from maljan.memory.attck_loader import ATTCK_CACHE_FILE
 
     if not ATTCK_CACHE_FILE.exists():
@@ -287,15 +347,42 @@ async def main_async(per_category: int, smoke: bool) -> None:
         f"Selected {len(chosen)} samples (per_category={per_category}, smoke={smoke}).", flush=True
     )
 
+    # Resume: seed scores from the checkpoint and skip sample_ids already done.
+    on_scores: list[SampleScore] = []
+    off_scores: list[SampleScore] = []
+    done_ids: set[str] = set()
+    if checkpoint.exists():
+        for line in checkpoint.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            done_ids.add(rec["sample_id"])
+            if rec.get("on"):
+                on_scores.append(_score_from_dict(rec["on"]))
+            if rec.get("off"):
+                off_scores.append(_score_from_dict(rec["off"]))
+        print(f"Resume: {len(done_ids)} samples already in checkpoint {checkpoint}.", flush=True)
+
     container = ServiceContainer(get_settings(), mock=False)
     llm = container.get_judge_llm()
     judge_on = JudgeAgent(llm=llm, category_backend="keyword")  # real hint
     judge_off = JudgeAgent(llm=llm, category_backend="keyword")
     judge_off._build_schema_hint = lambda *a, **k: ""  # type: ignore[method-assign]
 
-    on_scores: list[SampleScore] = []
-    off_scores: list[SampleScore] = []
+    def _mk(
+        stats: BundleStats | None, gold: set[str], s: CategorySample, hp: bool
+    ) -> SampleScore | None:
+        if stats is None:
+            return None
+        f1, f1p, prec, rec, hall = _score(stats, gold, valid_ids)
+        return SampleScore(
+            s.sample_id, s.name, s.category.value, len(gold), f1, f1p, prec, rec, hall, stats, hp
+        )
+
     for i, (s, gold) in enumerate(chosen, 1):
+        if s.sample_id in done_ids:
+            print(f"[{i}/{len(chosen)}] {s.name} — already in checkpoint, skipping.", flush=True)
+            continue
         # Whether the ON condition actually injects a hint (keyword may abstain
         # -> empty hint -> ON==OFF trivially; such pairs do not test the hint).
         hint_present = bool(judge_on._build_schema_hint({"static": s.full_text}, None))
@@ -305,30 +392,31 @@ async def main_async(per_category: int, smoke: bool) -> None:
             flush=True,
         )
         on, off = await _run_one(judge_on, judge_off, s.full_text)
-        for cond, stats, bucket in (("ON", on, on_scores), ("OFF", off, off_scores)):
-            if stats is None:
+        on_sc = _mk(on, gold, s, hint_present)
+        off_sc = _mk(off, gold, s, hint_present)
+        for cond, sc in (("ON", on_sc), ("OFF", off_sc)):
+            if sc is None:
                 continue
-            f1, f1p, prec, rec, hall = _score(stats, gold, valid_ids)
-            bucket.append(
-                SampleScore(
-                    s.sample_id,
-                    s.name,
-                    s.category.value,
-                    len(gold),
-                    f1,
-                    f1p,
-                    prec,
-                    rec,
-                    hall,
-                    stats,
-                    hint_present,
-                )
-            )
+            (on_scores if cond == "ON" else off_scores).append(sc)
+            st = sc.stats
             print(
-                f"    {cond}: F1={f1:.3f} (parent {f1p:.3f}) P={prec:.3f} R={rec:.3f} "
-                f"hall={hall} | obj={stats.n_objects} ap={stats.n_attack_patterns} "
-                f"ind={stats.n_indicators} rel={stats.n_relationships}",
+                f"    {cond}: F1={sc.f1_exact:.3f} (parent {sc.f1_parent:.3f}) "
+                f"P={sc.precision:.3f} R={sc.recall:.3f} hall={sc.hallucinated} | "
+                f"obj={st.n_objects} ap={st.n_attack_patterns} ind={st.n_indicators} "
+                f"rel={st.n_relationships}",
                 flush=True,
+            )
+        # Append this sample to the checkpoint immediately (crash/pause-safe).
+        with checkpoint.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "sample_id": s.sample_id,
+                        "on": _score_to_dict(on_sc) if on_sc else None,
+                        "off": _score_to_dict(off_sc) if off_sc else None,
+                    }
+                )
+                + "\n"
             )
 
     _report(on_scores, off_scores, chosen, per_category, smoke)
@@ -438,8 +526,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-category", type=int, default=5, help="samples per category")
     ap.add_argument("--smoke", action="store_true", help="single-sample end-to-end check")
+    ap.add_argument(
+        "--checkpoint",
+        type=str,
+        default="D:/tmp/hint_ablation_checkpoint.jsonl",
+        help="JSONL checkpoint; completed samples are skipped on resume",
+    )
     args = ap.parse_args()
-    asyncio.run(main_async(args.per_category, args.smoke))
+    asyncio.run(main_async(args.per_category, args.smoke, Path(args.checkpoint)))
 
 
 if __name__ == "__main__":
