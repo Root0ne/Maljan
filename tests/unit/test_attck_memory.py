@@ -10,6 +10,7 @@ import pytest
 from maljan.memory.attck_index import ATTCKIndex, SearchResult, _cosine_similarity
 from maljan.memory.attck_loader import ATTCKTechnique, _parse_bundle
 from maljan.memory.attck_validator import ATTCKValidator
+from maljan.memory.hybrid_attck_index import HybridATTCKIndex
 from maljan.memory.semantic_attck_index import SemanticATTCKIndex
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -456,6 +457,55 @@ class TestSemanticATTCKIndex:
         # exist in the catalog and differ from the hallucinated one.
         assert claim.technique_id != "T9999"
         assert claim.technique_id is None or semantic_index.technique_exists(claim.technique_id)
+        assert n in (0, 1)
+
+
+# ---------------------------------------------------------------------------
+# HybridATTCKIndex (semantic ranking + TF-IDF gate)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def hybrid_index() -> HybridATTCKIndex:
+    return HybridATTCKIndex.from_techniques(FIXTURE_TECHNIQUES)
+
+
+class TestHybridATTCKIndex:
+    def test_search_ranking_matches_semantic(
+        self, hybrid_index: HybridATTCKIndex, semantic_index: SemanticATTCKIndex
+    ) -> None:
+        # Hybrid inherits semantic search(), so ranking must be identical.
+        query = "process injection writes shellcode to a remote process"
+        h = [r.technique.technique_id for r in hybrid_index.search(query, top_k=5)]
+        s = [r.technique.technique_id for r in semantic_index.search(query, top_k=5)]
+        assert h == s
+
+    def test_gate_matches_tfidf_not_semantic(
+        self,
+        hybrid_index: HybridATTCKIndex,
+        index: ATTCKIndex,
+        semantic_index: SemanticATTCKIndex,
+    ) -> None:
+        # validate_and_score is the TF-IDF gate, so it must equal the TF-IDF
+        # index's score (and differ from the semantic score).
+        evidence = "AES encryption ransomware file encryption CryptoAPI impact"
+        hybrid_score = hybrid_index.validate_and_score("T1486", evidence)
+        tfidf_score = index.validate_and_score("T1486", evidence)
+        semantic_score = semantic_index.validate_and_score("T1486", evidence)
+        assert hybrid_score == pytest.approx(tfidf_score)
+        assert hybrid_score != pytest.approx(semantic_score)
+
+    def test_correct_isr_reports_via_hybrid_backend(self, hybrid_index: HybridATTCKIndex) -> None:
+        validator = ATTCKValidator.from_index(hybrid_index)
+        claim = _claim(
+            "Encrypts files for ransom",
+            "AES encryption ransomware file encryption CryptoAPI impact",
+            "T9999",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+        n = validator.correct_isr_reports(reports, min_alignment=0.08)
+        assert claim.technique_id != "T9999"
+        assert claim.technique_id is None or hybrid_index.technique_exists(claim.technique_id)
         assert n in (0, 1)
 
 

@@ -46,12 +46,20 @@ class SemanticATTCKIndex(ATTCKIndex):
     def _build(self, techniques: list[ATTCKTechnique]) -> None:
         """Embed every technique's searchable text once, in corpus order."""
         self.techniques = {t.technique_id.upper(): t for t in techniques}
+        self._build_embeddings()
+        self._built = True
+        logger.info("SemanticATTCKIndex built: %d techniques embedded.", len(self._emb))
+
+    def _build_embeddings(self) -> None:
+        """Fill ``self._emb`` from ``self.techniques`` (must already be set).
+
+        Factored out so HybridATTCKIndex can add embeddings on top of the
+        TF-IDF build without duplicating the embedding step.
+        """
         tids = list(self.techniques.keys())
         texts = [self.techniques[tid].searchable_text for tid in tids]
         vectors = embeddings.encode_batch(texts)
         self._emb = dict(zip(tids, vectors, strict=True))
-        self._built = True
-        logger.info("SemanticATTCKIndex built: %d techniques embedded.", len(self._emb))
 
     # ------------------------------------------------------------------
     # Scoring (override: cosine over dense embeddings)

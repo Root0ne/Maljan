@@ -67,22 +67,31 @@ def _embedding_backend_note() -> str:
     return f"embedding backend: {label} (related={related:.3f} vs unrelated={unrelated:.3f})"
 
 
-def _evaluate(index: ATTCKIndex, pairs: list[tuple[str, str]]) -> dict[str, float]:
+def _evaluate(
+    ranker: ATTCKIndex, gater: ATTCKIndex, pairs: list[tuple[str, str]]
+) -> dict[str, float]:
+    """Score ranking from ``ranker.search`` and the gate from ``gater.validate_and_score``.
+
+    The two are the same object for the pure backends; for the hybrid they differ
+    (semantic ranker + TF-IDF gater), which is exactly what we want to measure.
+    """
     top1 = top3 = 0
     rr_sum = 0.0
     correct_scores: list[float] = []
     wrong_top1_scores: list[float] = []
     for text, label in pairs:
-        results = index.search(text, top_k=5)
+        results = ranker.search(text, top_k=5)
         ranked = [r.technique.technique_id.upper() for r in results]
         if not ranked:
             wrong_top1_scores.append(0.0)
             continue
+        # Gate score = how the GATER aligns the chosen top-1 with the evidence.
+        gate_top1 = gater.validate_and_score(ranked[0], text)
         if ranked[0] == label:
             top1 += 1
-            correct_scores.append(results[0].score)
+            correct_scores.append(gate_top1)
         else:
-            wrong_top1_scores.append(results[0].score)
+            wrong_top1_scores.append(gate_top1)
         if label in ranked[:3]:
             top3 += 1
         if label in ranked:
@@ -104,7 +113,9 @@ def _evaluate(index: ATTCKIndex, pairs: list[tuple[str, str]]) -> dict[str, floa
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=600, help="even-stride sample size")
+    ap.add_argument(
+        "--limit", type=int, default=600, help="even-stride sample size (0 = all pairs)"
+    )
     args = ap.parse_args()
 
     print("Building TF-IDF index...", flush=True)
@@ -124,38 +135,54 @@ def main() -> None:
             pairs_all.append((text, label))
 
     # Even-stride sample to bound runtime while spanning the whole corpus.
+    # --limit 0 evaluates every valid pair.
     if args.limit and len(pairs_all) > args.limit:
         stride = len(pairs_all) / args.limit
         pairs = [pairs_all[int(i * stride)] for i in range(args.limit)]
     else:
         pairs = pairs_all
     print(
-        f"TRAM2: {len(pairs_all)} valid (sentence,label) pairs; evaluating {len(pairs)} (sampled).",
+        f"TRAM2: {len(pairs_all)} valid (sentence,label) pairs; evaluating {len(pairs)}.",
         flush=True,
     )
 
-    print("Scoring TF-IDF...", flush=True)
-    tf = _evaluate(tfidf, pairs)
-    print("Scoring semantic...", flush=True)
-    se = _evaluate(semantic, pairs)
+    # Three methods. Hybrid = semantic ranking + TF-IDF gate; its ranking is
+    # identical to semantic by construction (same search()), so we reuse the
+    # semantic ranker and only swap the gater — mathematically equal to
+    # HybridATTCKIndex (asserted separately in the unit tests).
+    print("Scoring TF-IDF (rank=tfidf, gate=tfidf)...", flush=True)
+    tf = _evaluate(tfidf, tfidf, pairs)
+    print("Scoring semantic (rank=semantic, gate=semantic)...", flush=True)
+    se = _evaluate(semantic, semantic, pairs)
+    print("Scoring hybrid (rank=semantic, gate=tfidf)...", flush=True)
+    hy = _evaluate(semantic, tfidf, pairs)
+
+    def _sep(m: dict[str, float]) -> float:
+        return m["mean_correct_score"] - m["mean_wrong_top1_score"]
 
     lines = [
-        "# Technique-mapping evaluation: TF-IDF vs semantic (TRAM2)",
+        "# Technique-mapping evaluation: TF-IDF vs semantic vs hybrid (TRAM2)",
         "",
         "- Test set: TRAM2 single_label (human-labeled threat-report sentences), "
         "independent of the ATT&CK build corpus.",
         f"- Sample: {int(tf['n'])} (sentence, technique_id) pairs.",
         f"- {_embedding_backend_note()}",
+        "- Hybrid = semantic search() ranking + TF-IDF validate_and_score() gate "
+        "(ranking equals semantic by construction).",
         "",
-        "| backend | top-1 | top-3 | MRR | mean correct-score | mean wrong-top1-score |",
-        "|---|---|---|---|---|---|",
+        "| backend | top-1 | top-3 | MRR | correct-score | wrong-top1-score | gate sep |",
+        "|---|---|---|---|---|---|---|",
         f"| TF-IDF | {tf['top1']:.3f} | {tf['top3']:.3f} | {tf['mrr']:.3f} | "
-        f"{tf['mean_correct_score']:.3f} | {tf['mean_wrong_top1_score']:.3f} |",
+        f"{tf['mean_correct_score']:.3f} | {tf['mean_wrong_top1_score']:.3f} | {_sep(tf):+.3f} |",
         f"| semantic | {se['top1']:.3f} | {se['top3']:.3f} | {se['mrr']:.3f} | "
-        f"{se['mean_correct_score']:.3f} | {se['mean_wrong_top1_score']:.3f} |",
+        f"{se['mean_correct_score']:.3f} | {se['mean_wrong_top1_score']:.3f} | {_sep(se):+.3f} |",
+        f"| hybrid | {hy['top1']:.3f} | {hy['top3']:.3f} | {hy['mrr']:.3f} | "
+        f"{hy['mean_correct_score']:.3f} | {hy['mean_wrong_top1_score']:.3f} | {_sep(hy):+.3f} |",
         "",
-        f"Delta (semantic - tfidf): top-1 {se['top1'] - tf['top1']:+.3f}, "
-        f"top-3 {se['top3'] - tf['top3']:+.3f}, MRR {se['mrr'] - tf['mrr']:+.3f}",
+        "- `gate sep` = mean correct-score minus mean wrong-top1-score; higher is a "
+        "cleaner alignment gate (better at flagging a wrong top-1).",
+        f"- Ranking delta (semantic/hybrid - tfidf): top-1 {se['top1'] - tf['top1']:+.3f}, "
+        f"top-3 {se['top3'] - tf['top3']:+.3f}, MRR {se['mrr'] - tf['mrr']:+.3f}.",
     ]
     report = "\n".join(lines)
     print("\n" + report, flush=True)

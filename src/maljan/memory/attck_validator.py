@@ -67,6 +67,11 @@ class ATTCKValidator:
 
             logger.info("ATTCKValidator: using SEMANTIC (embedding) ATT&CK index.")
             return SemanticATTCKIndex.from_loader(force_refresh=force_refresh)
+        if backend == "hybrid":
+            from maljan.memory.hybrid_attck_index import HybridATTCKIndex
+
+            logger.info("ATTCKValidator: using HYBRID (semantic rank + TF-IDF gate) index.")
+            return HybridATTCKIndex.from_loader(force_refresh=force_refresh)
         return ATTCKIndex.from_loader(force_refresh=force_refresh)
 
     @classmethod

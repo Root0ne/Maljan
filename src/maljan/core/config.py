@@ -366,15 +366,18 @@ class PreprocessingConfig(BaseModel):
     # sources (yara/sigma) are skipped — their IDs are rule-authoritative. Fail-safe.
     use_attck_autocorrect: bool = True
     attck_autocorrect_min_alignment: float = 0.08
-    # ATT&CK index backend for technique-ID grounding (§1.5). "tfidf" (default,
-    # keyword bag-of-words) or "semantic" (dense BGE-384 embeddings, captures
-    # meaning over surface tokens). The TRAM2 top-k comparison
-    # (tests/evaluation/eval_technique_mapping.py) found semantic modestly better
-    # at RANKING (+6pp top-3, +4.5pp MRR) but WORSE at thresholding — its scores
-    # cram near 0.7 for both correct and wrong matches (0.71 vs 0.69), whereas
-    # TF-IDF's near-0 score for unrelated evidence is the clean gate the
-    # low-alignment swap relies on. So default stays tfidf; semantic is opt-in.
-    attck_index_backend: str = "tfidf"
+    # ATT&CK index backend for technique-ID grounding (§1.5). One of:
+    #   "tfidf"    keyword bag-of-words (clean alignment gate, weaker ranking)
+    #   "semantic" dense BGE-384 embeddings (better ranking, poor gate)
+    #   "hybrid"   semantic ranking + TF-IDF gate — best of both (DEFAULT, §1.5.1)
+    # The TRAM2 comparison (tests/evaluation/eval_technique_mapping.py) showed the
+    # hybrid dominates both pure backends: it matches semantic's ranking (+6pp
+    # top-3 over TF-IDF) AND gives the cleanest alignment gate (correct-vs-wrong
+    # separation +0.108 vs TF-IDF +0.068 vs semantic +0.020). Its gate is TF-IDF,
+    # so the existing 0.08 threshold applies. fastembed is already loaded in
+    # production for long-term memory, so the marginal cost is one catalog embed
+    # at startup. Set to "tfidf" to skip embeddings entirely (air-gapped/minimal).
+    attck_index_backend: str = "hybrid"
     # Semantic threshold is intentionally 0.0: the eval showed absolute semantic
     # scores do not separate correct from wrong, so the absolute low-alignment
     # gate is disabled for that backend (it still fixes invalid IDs and applies
