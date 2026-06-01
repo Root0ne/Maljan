@@ -366,6 +366,20 @@ class PreprocessingConfig(BaseModel):
     # sources (yara/sigma) are skipped — their IDs are rule-authoritative. Fail-safe.
     use_attck_autocorrect: bool = True
     attck_autocorrect_min_alignment: float = 0.08
+    # ATT&CK index backend for technique-ID grounding (§1.5). "tfidf" (default,
+    # keyword bag-of-words) or "semantic" (dense BGE-384 embeddings, captures
+    # meaning over surface tokens). The TRAM2 top-k comparison
+    # (tests/evaluation/eval_technique_mapping.py) found semantic modestly better
+    # at RANKING (+6pp top-3, +4.5pp MRR) but WORSE at thresholding — its scores
+    # cram near 0.7 for both correct and wrong matches (0.71 vs 0.69), whereas
+    # TF-IDF's near-0 score for unrelated evidence is the clean gate the
+    # low-alignment swap relies on. So default stays tfidf; semantic is opt-in.
+    attck_index_backend: str = "tfidf"
+    # Semantic threshold is intentionally 0.0: the eval showed absolute semantic
+    # scores do not separate correct from wrong, so the absolute low-alignment
+    # gate is disabled for that backend (it still fixes invalid IDs and applies
+    # strictly-better relative swaps, which need no absolute threshold).
+    attck_autocorrect_min_alignment_semantic: float = 0.0
 
 
 # ---------------------------------------------------------------------------

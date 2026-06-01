@@ -148,6 +148,35 @@ positioning.
   confirmed: TF-IDF is lexical — a C2-tagged ransomware claim swapped to a crypto-algorithm
   technique on shared "AES/encryption" tokens rather than the impact technique.
 
+### 1.5.1 TF-IDF vs semantic technique mapping — `EXPERIMENTAL` (complementary strengths)
+- **Motivation.** The §1.5 TF-IDF lexical caveat suggested dense embeddings might map evidence
+  to techniques better. The project already ships a BGE-384 embedder (`embeddings.py`,
+  `fastembed`), so we added a drop-in `SemanticATTCKIndex` (same interface; embeds each
+  technique's searchable text once) and measured before changing any default.
+- **Method (honest test set).** TRAM2 `single_label` — human-labeled (sentence, technique_id)
+  pairs from real threat reports — is **independent** of the ATT&CK descriptions the index is
+  built from (scoring against those descriptions would be circular). 4,913 valid pairs; 600
+  evenly sampled; real fastembed BGE confirmed (related 0.696 vs unrelated 0.568). Metrics:
+  top-1/top-3 accuracy, MRR. Harness: `tests/evaluation/eval_technique_mapping.py`.
+- **Result.**
+
+  | backend | top-1 | top-3 | MRR | mean correct-score | mean wrong-top1-score |
+  |---|---|---|---|---|---|
+  | TF-IDF | 0.222 | 0.348 | 0.292 | 0.291 | 0.223 |
+  | semantic | 0.248 | 0.408 | 0.338 | 0.712 | 0.692 |
+
+- **Finding (the real contribution).** The two methods have **complementary** strengths.
+  Semantic ranks better (+6.0pp top-3, +4.5pp MRR; top-1 +2.7pp is within ~1.3 SE at N=600),
+  but its absolute scores **do not separate** correct from wrong matches (0.712 vs 0.692),
+  whereas TF-IDF scores ~0 for unrelated evidence. The §1.5 autocorrect's low-alignment swap
+  depends on exactly that clean gate. Both top-1 ≈ 0.22–0.25 reflects the known difficulty of
+  zero-shot single-sentence → technique on TRAM2 (no fine-tuning, 697-way retrieval).
+- **Decision.** Keep TF-IDF as the default (clean threshold gate > a modest ranking gain);
+  ship semantic as an opt-in backend (`attck_index_backend`). For the semantic backend the
+  absolute gate is disabled (threshold 0.0) since it does not discriminate; it still fixes
+  invalid IDs and applies strictly-better relative swaps. A **hybrid** (semantic ranking +
+  TF-IDF/relative gating) is the natural next thread.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -296,6 +325,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - `DONE` (§1.5, §3.3) Production-wired the technique-ID loop fix — repetition-penalty
   damper + deterministic TF-IDF ID re-grounding. Next: measure FP/throughput impact on
   real samples (how often correction fires, and correction precision vs a labelled set).
+- `HYPOTHESIS` Hybrid technique mapper (§1.5.1): semantic embedding for *ranking* the
+  candidate technique, TF-IDF (or a relative-only rule) for the *alignment gate* — combine the
+  two complementary strengths the TRAM2 eval surfaced.
 - `HYPOTHESIS` Config-gated view-decomposition pilot with **parallel** view calls; a
   lighter 2-view variant (behaviour vs artifacts) to trade completeness for cost.
 - `HYPOTHESIS` Adopt a MaLAware-style [4] multi-metric narrative-quality evaluation
@@ -338,6 +370,11 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   "~2× completeness" claim as a budget/measurement artifact; kept only fault-isolation
   + output-stability as defensible. Added §3.4 (single-run claim-count is not a valid
   instrument). Trimmed references to the 4 we directly used.
+- **2026-06-01 semantic eval.** Added a drop-in `SemanticATTCKIndex` (BGE-384) as an opt-in
+  ATT&CK backend and a TRAM2 top-k harness (`tests/evaluation/eval_technique_mapping.py`).
+  Added §1.5.1: semantic ranks modestly better (+6pp top-3) but its scores don't separate
+  correct/wrong, so TF-IDF stays the default for its clean alignment gate; semantic is opt-in.
+  Logged the hybrid thread in §4. All checks green (86 unit tests pass).
 - **2026-06-01 fix.** Implemented the §3.3 degenerate-loop fix. Added §1.5
   (deterministic ATT&CK ID assignment via the in-house TF-IDF index — made authoritative,
   not just advisory). Marked §3.3 `IMPLEMENTED` and **rejected the earlier "curated anchor

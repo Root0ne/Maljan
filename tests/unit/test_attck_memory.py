@@ -10,6 +10,7 @@ import pytest
 from maljan.memory.attck_index import ATTCKIndex, SearchResult, _cosine_similarity
 from maljan.memory.attck_loader import ATTCKTechnique, _parse_bundle
 from maljan.memory.attck_validator import ATTCKValidator
+from maljan.memory.semantic_attck_index import SemanticATTCKIndex
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # ---------------------------------------------------------------------------
@@ -391,6 +392,71 @@ class TestCorrectIsrReports:
 
         assert n == 1
         assert claim.technique_id is None
+
+
+# ---------------------------------------------------------------------------
+# SemanticATTCKIndex (drop-in embedding backend)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def semantic_index() -> SemanticATTCKIndex:
+    return SemanticATTCKIndex.from_techniques(FIXTURE_TECHNIQUES)
+
+
+class TestSemanticATTCKIndex:
+    """Smoke tests: the semantic index honours the ATTCKIndex interface.
+
+    Uses whatever embedding backend is installed (real fastembed BGE, or the
+    BoW fallback). Assertions are backend-agnostic — they check structure and
+    ordering, not absolute similarity values.
+    """
+
+    def test_size_and_inherited_lookup(self, semantic_index: SemanticATTCKIndex) -> None:
+        assert semantic_index.size == len(FIXTURE_TECHNIQUES)
+        # get_by_id / technique_exists are inherited unchanged.
+        assert semantic_index.get_by_id("T1055") is not None
+        assert semantic_index.technique_exists("T1055") is True
+        assert semantic_index.technique_exists("T9999") is False
+
+    def test_search_returns_ranked_results(self, semantic_index: SemanticATTCKIndex) -> None:
+        results = semantic_index.search("ransomware encrypts files for impact", top_k=3)
+        assert all(isinstance(r, SearchResult) for r in results)
+        assert len(results) <= 3
+        scores = [r.score for r in results]
+        assert scores == sorted(scores, reverse=True)
+        assert [r.rank for r in results] == list(range(1, len(results) + 1))
+
+    def test_validate_and_score_range(self, semantic_index: SemanticATTCKIndex) -> None:
+        score = semantic_index.validate_and_score("T1486", "encrypt files ransomware impact")
+        assert 0.0 <= score <= 1.0001
+
+    def test_validate_and_score_unknown_id(self, semantic_index: SemanticATTCKIndex) -> None:
+        assert semantic_index.validate_and_score("T9999", "any evidence") == 0.0
+
+    def test_not_built_raises(self) -> None:
+        idx = SemanticATTCKIndex()
+        with pytest.raises(RuntimeError, match="not built"):
+            idx.search("any query")
+
+    def test_correct_isr_reports_via_semantic_backend(
+        self, semantic_index: SemanticATTCKIndex
+    ) -> None:
+        # The validator's correction logic is index-agnostic; an invalid ID must
+        # still be replaced with a valid catalog ID through the semantic index.
+        validator = ATTCKValidator.from_index(semantic_index)
+        claim = _claim(
+            "Encrypts victim files for ransom",
+            "ransomware encrypts files AES impact unavailable",
+            "T9999",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+        n = validator.correct_isr_reports(reports, min_alignment=0.0)
+        # min_alignment=0.0 only forces invalid-ID replacement; the new ID must
+        # exist in the catalog and differ from the hallucinated one.
+        assert claim.technique_id != "T9999"
+        assert claim.technique_id is None or semantic_index.technique_exists(claim.technique_id)
+        assert n in (0, 1)
 
 
 # ---------------------------------------------------------------------------

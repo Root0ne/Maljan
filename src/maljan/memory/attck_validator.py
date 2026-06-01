@@ -54,9 +54,31 @@ class ATTCKValidator:
     # Singleton factory
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _build_index(backend: str | None, force_refresh: bool) -> ATTCKIndex:
+        """Build the ATT&CK index for the requested backend.
+
+        ``backend == "semantic"`` uses dense BGE embeddings; anything else
+        (default) uses the TF-IDF index. The semantic class is imported lazily
+        so the embedding model is only loaded when that backend is selected.
+        """
+        if backend == "semantic":
+            from maljan.memory.semantic_attck_index import SemanticATTCKIndex
+
+            logger.info("ATTCKValidator: using SEMANTIC (embedding) ATT&CK index.")
+            return SemanticATTCKIndex.from_loader(force_refresh=force_refresh)
+        return ATTCKIndex.from_loader(force_refresh=force_refresh)
+
     @classmethod
-    def get_instance(cls, force_refresh: bool = False) -> ATTCKValidator:
+    def get_instance(
+        cls, force_refresh: bool = False, backend: str | None = None
+    ) -> ATTCKValidator:
         """Return the shared ATTCKValidator, building the index if needed.
+
+        ``backend`` selects the index implementation ("tfidf" default, or
+        "semantic" for dense embeddings). The first caller to build the
+        singleton fixes the backend; later callers reuse it (pass
+        ``force_refresh=True`` to switch backends in tests).
 
         Thread-safety:
             ``force_refresh`` ALWAYS acquires the lock so that a refresh
@@ -68,16 +90,14 @@ class ATTCKValidator:
         if force_refresh:
             with cls._lock:
                 logger.info("Force-refreshing ATTCKValidator (rebuilding index)...")
-                index = ATTCKIndex.from_loader(force_refresh=True)
-                cls._instance = cls(index)
+                cls._instance = cls(cls._build_index(backend, force_refresh=True))
                 return cls._instance
 
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     logger.info("Initializing ATTCKValidator (loading index)...")
-                    index = ATTCKIndex.from_loader(force_refresh=False)
-                    cls._instance = cls(index)
+                    cls._instance = cls(cls._build_index(backend, force_refresh=False))
         return cls._instance
 
     @classmethod

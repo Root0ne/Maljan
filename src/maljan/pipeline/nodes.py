@@ -507,7 +507,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
             try:
                 from maljan.memory.attck_validator import ATTCKValidator
 
-                attck_validator = ATTCKValidator.get_instance()
+                attck_validator = ATTCKValidator.get_instance(
+                    backend=container.config.preprocessing.attck_index_backend
+                )
             except Exception as e:
                 logger.warning("ATTCKValidator unavailable: %s. Skipping TTP validation.", e)
 
@@ -592,14 +594,20 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 and hasattr(attck_validator, "correct_isr_reports")
             ):
                 try:
+                    # Semantic cosine scores on a different scale than TF-IDF, so
+                    # the backend selects which alignment threshold to apply.
+                    _prep = container.config.preprocessing
+                    _min_align = (
+                        _prep.attck_autocorrect_min_alignment_semantic
+                        if _prep.attck_index_backend == "semantic"
+                        else _prep.attck_autocorrect_min_alignment
+                    )
                     # Mutates claim.technique_id in place on the shared AgentISR
                     # objects, which this node already returns as "isr_reports"
                     # (below), so report_node / LTM see the corrected IDs.
                     _n_corrected = attck_validator.correct_isr_reports(
                         isr_reports,
-                        min_alignment=(
-                            container.config.preprocessing.attck_autocorrect_min_alignment
-                        ),
+                        min_alignment=_min_align,
                     )
                     if _n_corrected:
                         logger.info(

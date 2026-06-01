@@ -135,6 +135,41 @@ def encode(text: str) -> list[float]:
     return _bow_projection(text, dim=EMBED_DIM)
 
 
+def encode_batch(texts: list[str]) -> list[list[float]]:
+    """Embed many texts at once, returning one unit vector per input.
+
+    Uses fastembed's native batch path (`model.embed(list)`) which is ~10x
+    faster than calling :func:`encode` per string — important when embedding a
+    whole corpus (e.g. ~700 ATT&CK techniques) at index-build time. Falls back
+    to the per-item path (BoW when fastembed is unavailable). Empty strings map
+    to zero vectors. Output order matches input order.
+    """
+    if not texts:
+        return []
+
+    model = _try_load_fastembed()
+    if model and model is not False:
+        try:
+            # fastembed.embed() preserves order and yields one ndarray per input.
+            raw = list(model.embed(texts))  # type: ignore[attr-defined]
+            if len(raw) == len(texts):
+                out: list[list[float]] = []
+                for arr in raw:
+                    vec: list[float] = [float(v) for v in arr.tolist()]
+                    norm = math.sqrt(sum(v * v for v in vec))
+                    if norm and abs(norm - 1.0) > 1e-3:
+                        vec = [v / norm for v in vec]
+                    out.append(vec)
+                return out
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Embeddings: fastembed batch embed failed (%s). Falling back to per-item.",
+                exc,
+            )
+
+    return [encode(t) for t in texts]
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     """Return cosine similarity between two equal-length unit vectors.
 
