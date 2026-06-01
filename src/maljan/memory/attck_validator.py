@@ -271,6 +271,7 @@ class ATTCKValidator:
         isr_reports: dict[str, AgentISR],
         *,
         min_alignment: float = HALLUCINATION_SCORE_THRESHOLD,
+        swap_valid: bool = True,
         skip_agents: frozenset[str] = frozenset({"yara_layer", "sigma_layer"}),
     ) -> int:
         """Deterministically re-ground each LLM claim's technique_id in place.
@@ -279,16 +280,25 @@ class ATTCKValidator:
         ``claim.technique_id`` so the corrected ID propagates to the cascade,
         the judge's grounding, the report, and the STIX bundle. It moves the
         loop-prone ID-recall sub-task off the small model: the analyst only has
-        to describe behaviour, and the full-catalog TF-IDF index assigns the ID.
+        to describe behaviour, and the full-catalog index assigns the ID.
 
         Correction policy (per claim with a non-None technique_id):
           - Invalid ID (not in the ATT&CK catalog): replace with the top
             evidence-derived suggestion; drop to None if the search is empty
-            (a hallucinated ID is worse than no ID).
+            (a hallucinated ID is worse than no ID). ALWAYS on — provably safe
+            (a valid ID is never invalid, so correct IDs are untouched).
           - Valid but low-alignment ID (< ``min_alignment``): replace ONLY when a
-            candidate suggestion is *strictly* better aligned with the evidence —
-            never overwrite a weak-but-plausible ID with a noisier guess.
+            candidate is *strictly* better aligned AND ``swap_valid`` is True.
           - Valid, well-aligned, or None: left untouched.
+
+        ``swap_valid`` defaults True for backward compatibility, but the
+        production pipeline passes False. The TRAM2 ablation (findings-log
+        §1.5.2) showed the valid-ID swap path damages ~38% of already-correct
+        IDs (short real evidence often has weak lexical overlap with the correct
+        technique, so a wrong candidate out-scores it) — a regression that
+        cannot be cleanly tuned away because correct-but-weak and wrong-valid
+        IDs are not separable by the gate. Disabling it makes the autocorrect a
+        provably zero-regression hallucination fix.
 
         Layer-0 deterministic sources in ``skip_agents`` are skipped because
         their IDs come straight from rule matches and are authoritative.
@@ -319,6 +329,11 @@ class ATTCKValidator:
                             )
                             claim.technique_id = new_id
                             corrected += 1
+                        continue
+
+                    if not swap_valid:
+                        # Valid ID: trust it. Only invalid IDs are corrected
+                        # (zero-regression mode — see §1.5.2 ablation).
                         continue
 
                     score = self._index.validate_and_score(tid, claim.evidence_ref)

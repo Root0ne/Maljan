@@ -366,6 +366,13 @@ class PreprocessingConfig(BaseModel):
     # sources (yara/sigma) are skipped — their IDs are rule-authoritative. Fail-safe.
     use_attck_autocorrect: bool = True
     attck_autocorrect_min_alignment: float = 0.08
+    # Whether to also swap VALID-but-low-alignment technique IDs (not just fix
+    # invalid ones). The TRAM2 ablation (findings-log §1.5.2) found this path
+    # damages ~38% of already-correct IDs while recovering only ~21% of wrong
+    # ones, and the two cannot be separated by the alignment gate — net negative.
+    # Default False: autocorrect only fixes invalid/hallucinated IDs, which is a
+    # provably zero-regression operation. Enable only for offline experiments.
+    attck_autocorrect_swap_valid: bool = False
     # ATT&CK index backend for technique-ID grounding (§1.5). One of:
     #   "tfidf"    keyword bag-of-words (clean alignment gate, weaker ranking)
     #   "semantic" dense BGE-384 embeddings (better ranking, poor gate)

@@ -605,9 +605,12 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     # Mutates claim.technique_id in place on the shared AgentISR
                     # objects, which this node already returns as "isr_reports"
                     # (below), so report_node / LTM see the corrected IDs.
+                    # swap_valid defaults off (zero-regression: only fix invalid
+                    # IDs) per the §1.5.2 ablation.
                     _n_corrected = attck_validator.correct_isr_reports(
                         isr_reports,
                         min_alignment=_min_align,
+                        swap_valid=_prep.attck_autocorrect_swap_valid,
                     )
                     if _n_corrected:
                         logger.info(

@@ -185,6 +185,40 @@ positioning.
   retrieval-based label assigner; a method can win one and lose the other. Reporting both — and
   composing the winners per-axis into a hybrid — beat picking a single "best" index.
 
+### 1.5.2 Autocorrect impact ablation — `IMPLEMENTED` (a regression found and fixed)
+- **Motivation.** §1.5.1 measured retrieval quality in isolation. The decisive question is
+  whether the autocorrect's full *decision policy* improves pipeline output — and at what cost.
+- **Method.** TRAM2 (real evidence sentence + real label), production hybrid backend, server-free.
+  The small model's three error modes are simulated at 100%/scenario (rate-free): a claim's raw
+  technique_id is set to (a) an invalid ID, (b) a wrong-but-valid ID, or (c) the true label;
+  OFF = raw passes through, ON = after `correct_isr_reports`. N=800.
+- **Result.**
+
+  | scenario (input) | acc OFF→ON | hallucination OFF→ON |
+  |---|---|---|
+  | invalid ID (T9999) | 0.000 → 0.193 | 1.000 → **0.000** |
+  | wrong-valid ID | 0.000 → 0.207 | 0.000 → 0.000 |
+  | **correct ID (regression)** | 1.000 → **0.619** | 0.000 → 0.000 |
+
+- **Finding (the value of measuring end-to-end).** The invalid-ID fix is an unambiguous win
+  (eliminates 100% of hallucinations, recovers ~19%). But the valid-ID *swap* path **damaged 38%
+  of already-correct IDs**: short real evidence often has weak TF-IDF overlap with the correct
+  technique, so a wrong candidate out-scores it. Correct-but-weak and wrong-valid IDs are **not
+  separable** by the alignment gate, so the swap cannot be safely tuned — and since correct
+  inputs dominate in any usable model, the swap path is **net-negative**. This regression is
+  invisible to the §1.5.1 retrieval metric; only the end-to-end ablation surfaced it.
+- **Fix (provably zero-regression).** Restrict the autocorrect to invalid-ID replacement
+  (`attck_autocorrect_swap_valid = False`, default). A valid ID is never invalid, so correct IDs
+  are untouched *by construction*. Re-measured: invalid-ID fix retained (hallucination 100%→0%,
+  +19% recovery), **correct-ID regression eliminated (100%→100%)**; the wrong-valid recovery
+  (+20.7pp) is sacrificed — acceptable, since a wrong-but-valid ID is a far milder error than a
+  hallucinated one (still a real technique, sanity-checkable), and the §3.3 failure mode the
+  feature targets is invalid/loop, not subtle valid swaps.
+- **Takeaway (paper).** Isolated retrieval accuracy does not justify an auto-correction policy;
+  the end-to-end ablation is what exposed a 38% regression. Auto-correction should be confined to
+  the provably-safe sub-operation (invalid→valid), not extended to ambiguous valid→valid edits.
+  Harness: `tests/evaluation/eval_autocorrect_ablation.py`.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -387,7 +421,13 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   the full TRAM2 set (N=4913). It dominates both pure backends — semantic-grade ranking
   (top-3 0.392) *and* the cleanest gate (separation +0.115) — so it is now the **default**
   backend. Updated §1.5.1 to the three-method table; closed the §4 hybrid thread. All checks
-  green (54 ATT&CK + pipeline/agent tests pass). All checks green (86 unit tests pass).
+  green (54 ATT&CK + pipeline/agent tests pass).
+- **2026-06-01 ablation + fix.** Ran the end-to-end autocorrect ablation (§1.5.2, TRAM2 ground
+  truth). Found the valid-ID swap path damaged **38% of already-correct IDs** (invisible to the
+  retrieval metric). Fixed by restricting autocorrect to invalid-ID replacement
+  (`attck_autocorrect_swap_valid=False`, default) — re-measured: hallucination 100%→0%, +19%
+  recovery retained, **correct-ID regression eliminated (→0%)**. Added §1.5.2; 56 ATT&CK tests
+  pass. All checks green (86 unit tests pass).
 - **2026-06-01 fix.** Implemented the §3.3 degenerate-loop fix. Added §1.5
   (deterministic ATT&CK ID assignment via the in-house TF-IDF index — made authoritative,
   not just advisory). Marked §3.3 `IMPLEMENTED` and **rejected the earlier "curated anchor

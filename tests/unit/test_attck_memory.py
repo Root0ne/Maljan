@@ -383,6 +383,34 @@ class TestCorrectIsrReports:
         assert yara_claim.technique_id == "T9999"
         assert sigma_claim.technique_id == "T9999"
 
+    def test_swap_valid_false_preserves_low_alignment_valid_id(
+        self, validator: ATTCKValidator
+    ) -> None:
+        # Zero-regression mode (§1.5.2): a valid-but-low-alignment ID must be
+        # left untouched when swap_valid=False, even though a better candidate
+        # exists (cf. test_low_alignment_swapped_for_better_candidate).
+        claim = _claim(
+            "Encrypts data on disk",
+            "AES encryption ransomware file encryption CryptoAPI impact",
+            "T1071",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+        n = validator.correct_isr_reports(reports, min_alignment=0.05, swap_valid=False)
+        assert n == 0
+        assert claim.technique_id == "T1071"
+
+    def test_swap_valid_false_still_fixes_invalid_id(self, validator: ATTCKValidator) -> None:
+        # Invalid IDs are corrected regardless of swap_valid (the always-safe path).
+        claim = _claim(
+            "Encrypts files for ransom",
+            "AES encryption ransomware file encryption CryptoAPI impact",
+            "T9999",
+        )
+        reports = {"static": _isr("static", "static", claim)}
+        n = validator.correct_isr_reports(reports, swap_valid=False)
+        assert n == 1
+        assert claim.technique_id == "T1486"
+
     def test_invalid_id_with_no_suggestion_dropped(self, validator: ATTCKValidator) -> None:
         # Out-of-vocabulary evidence yields no TF-IDF match -> the hallucinated
         # ID is dropped to None rather than left in place.
