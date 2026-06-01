@@ -391,6 +391,28 @@ class PreprocessingConfig(BaseModel):
     # strictly-better relative swaps, which need no absolute threshold).
     attck_autocorrect_min_alignment_semantic: float = 0.0
 
+    # Backend for malware-category inference (drives the §7.1 STIX schema-pruning
+    # hint). Default "keyword" = the deterministic substring classifier
+    # (schema_pruner.infer_malware_category) — zero-dependency and, critically,
+    # it *abstains* (UNKNOWN -> no hint) rather than guessing, which is the safe
+    # failure mode for an advisory hint.
+    #
+    # The category-inference eval (tests/evaluation/eval_category_inference.py,
+    # 101 ATT&CK families labelled by self-declared type) measured:
+    #   * keyword:               full 0.792 acc / behavioral 0.327 (abstains 38%)
+    #   * semantic (zero-shot):  full 0.376 / behavioral 0.168  (NOT recommended —
+    #                            averaged technique prototypes are too blurry)
+    #   * hybrid (kw->semantic): full 0.812 / behavioral 0.386  (small lift; no
+    #                            new data, fastembed already loaded for memory)
+    # The strongest variant (keyword -> *few-shot* fallback: full 0.832 /
+    # behavioral 0.525) needs a labelled prototype corpus (e.g. LTM stored cases)
+    # and is therefore not a config-only switch. Keyword stays the default
+    # because on realistic analyst text (which names the category, ~the "full"
+    # regime) it is competitive AND safe-abstaining; the hint is advisory anyway,
+    # so the marginal category-accuracy gain has limited end-to-end effect.
+    # Set to "hybrid" to recover keyword's abstentions via the semantic fallback.
+    category_inference_backend: str = "keyword"  # "keyword" | "semantic" | "hybrid"
+
 
 # ---------------------------------------------------------------------------
 # MCP (Model Context Protocol) Integration

@@ -254,6 +254,73 @@ positioning.
   `anomalous-activity` rather than `malicious-activity` so consumers can weight them below
   high-confidence hash/C2 IOCs.
 
+### 1.7 Static keyword vs dynamic semantic category inference — `IMPLEMENTED` (knob shipped, default unchanged) / zero-shot variant `NEGATIVE`
+- **Question.** The §7.1 STIX schema-pruning hint is driven by `infer_malware_category` — a
+  static, hand-maintained keyword table (substring scoring over the analyst text + ISR claims).
+  Two honest doubts: (a) how reliable is a fixed keyword list, and how much of its accuracy is
+  just the text *literally naming* the category; (b) can a dynamic embedding classifier do better,
+  and is "dynamicizing" it even worthwhile?
+- **Method (non-circular ground truth).** ATT&CK `malware` SDO descriptions are human-written CTI
+  whose first sentence almost always declares the family's type ("EKANS is ransomware variant…",
+  "cd00r is a backdoor…"). We label each family by that *declared type* (a targeted copular-noun
+  parser — a different mechanism than the bag-of-keywords classifier under test) and then evaluate
+  in two regimes: **full** (whole description) and **behavioral** (declaring sentence removed, so
+  the classifier cannot echo the label). **101 families** pass the single-declared-type filter
+  (RAT 41 / ransomware 33 / dropper 16 / infostealer 8 / worm 3 — worm/infostealer sparse in the
+  ATT&CK corpus, so their per-class numbers are indicative). Builder
+  `tests/evaluation/category_eval_data.py`; harness `tests/evaluation/eval_category_inference.py`
+  (real BGE-384 confirmed). Methods: keyword; semantic **zero-shot** (prototypes = mean embedding
+  of each category's seed-technique descriptions); semantic **few-shot** (leave-one-out: prototype
+  = mean of the other 100 labelled descriptions); two hybrids (keyword → semantic fallback on
+  abstain); majority-class floor.
+- **Result (N=101, accuracy / macro-F1).**
+
+  | method | full | behavioral | note |
+  |---|---|---|---|
+  | keyword (default) | 0.792 / 0.771 | 0.327 / 0.389 | abstains 5.9% full → **37.6% behavioral** |
+  | semantic zero-shot | 0.376 / 0.306 | 0.168 / 0.154 | below keyword *and* near floor |
+  | semantic few-shot (LOO) | **0.851** / 0.751 | **0.505** / 0.313 | best acc; never abstains; zeros sparse classes |
+  | hybrid (kw→zero-shot) | 0.812 / **0.781** | 0.386 / 0.337 | small lift, no labelled data needed |
+  | hybrid (kw→few-shot) | 0.832 / 0.775 | 0.525 / **0.448** | best balance; needs a labelled corpus |
+  | majority floor | 0.406 / 0.115 | 0.406 / 0.115 | — |
+
+- **Finding 1 (the doubt is correct, the failure mode is safe).** Keyword accuracy is *conditional
+  on the surface naming the category*: 0.792 when the description names it, collapsing to 0.327
+  when the naming sentence is removed — and crucially it **abstains 38%** of the time there rather
+  than guessing. So a fixed keyword list is *not* always right, exactly as suspected; but its error
+  is to fall silent (UNKNOWN → no hint), which is the correct failure mode for an advisory signal.
+- **Finding 2 (`NEGATIVE`: zero-shot semantic does not work).** Prototypes averaged from ATT&CK
+  technique descriptions are too blurry — BGE-small crams all malware-behaviour text into a narrow
+  0.59–0.70 cosine band, margins are tiny, and the classifier underperforms the keyword table in
+  both regimes (and barely beats the majority floor on behavioral). "Just embed the text and
+  compare to technique prototypes" is not a viable replacement.
+- **Finding 3 (dynamic helps only when *learned* from labelled prose).** Few-shot prototypes built
+  from labelled malware descriptions beat keyword on raw accuracy in both regimes (full +5.9pp,
+  behavioral +17.8pp). But they never abstain and collapse the sparse worm/infostealer classes to
+  F1≈0 (macro-F1 0.313 behavioral), trading calibration for accuracy, and they require a labelled
+  prototype corpus. The best **balance** is the keyword→few-shot hybrid: keyword stays
+  authoritative where confident, the learned classifier fills its 38% abstentions — behavioral
+  0.525/0.448 (+19.8pp acc, +5.9pp macro-F1), full 0.832 (+4.0pp).
+- **Decision (keep the safe default; ship a measured, reversible knob).** `category_inference_backend`
+  defaults to `"keyword"` — on realistic analyst text (which, like the *full* regime, names the
+  category) keyword is competitive **and** safe-abstaining, and the hint is advisory + 400-char
+  truncated, so an intermediate-signal gain has bounded end-to-end effect. `"semantic"` and
+  `"hybrid"` are opt-in and **fail-safe to keyword** (BoW fallback / any error → keyword). The
+  deployable hybrid (kw→zero-shot) needs no new data and gives a small realistic-regime lift; the
+  stronger kw→few-shot variant needs a labelled prototype corpus — the natural source is the LTM
+  `StoredCase.malware_category` history (cold-start degrades gracefully to keyword) — and is the
+  documented upgrade path, not a config-only switch.
+- **Method notes (paper-relevant).** (i) A keyword classifier's headline accuracy is an artifact of
+  whether the input surface names the label; reporting both the *named* and *behavior-only* regimes
+  exposes the dependence that a single number hides. (ii) Zero-shot nearest-prototype over averaged
+  ATT&CK descriptions is a tempting but losing "dynamic" baseline — the win requires few-shot
+  prototypes from in-domain labelled prose. (iii) This measures the *classifier*, not downstream
+  STIX/judge quality; since the hint is advisory, the classifier delta is an **upper bound** on the
+  end-to-end effect — quantifying the latter needs an LLM-in-the-loop hint-vs-no-hint ablation
+  (server-dependent; deferred). Artifacts: `src/maljan/analysis/semantic_category.py`,
+  `core/config.py` (`category_inference_backend`), `agents/judge_agent.py` + `core/container.py`
+  wiring; `tests/unit/test_semantic_category.py`.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -288,6 +355,35 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - Tested mainline llama.cpp MTP / speculative-draft decoding against the production
   ik_llama + IQ3_K_R4 setup. **No throughput gain** on this A3B MoE; the engine swap
   regressed quality. Kept the production setup. (Recorded as a negative result.)
+
+### 2.4 Deterministic signal-quality hardening — `IMPLEMENTED`
+- **Premise.** The deterministic extractors feed both the report and the LLM analysts, so a
+  false positive or a miscalibrated confidence propagates and compounds. A four-part hardening
+  wave raised signal quality across the extractor layer without adding speculative features.
+- **(A) Network FP reduction + validation.** Drop reserved/private/link-local/broadcast IPs and
+  RFC 6761 reserved / single-label domains from IOC emission (on both the CAPE and Triage-CTI
+  paths); expand the benign CDN/infra allowlist; unify the DGA/benign suspicion scorer across
+  sources; validate port (1–65535) and HTTP-status (100–599) ranges; lowercase + dedup URL hosts;
+  fix HTTPS scheme inference (8443 / `encrypted` flag).
+- **(B) Platform-aware persistence + dynamic FP reduction.** Gate the Windows registry/service/
+  scheduled-task scanners on `sample_platform` (a Linux/Android sample is no longer flagged with
+  Windows registry-run persistence — the critical FP); whitelist OS-normal injector processes
+  (svchost/lsass/…); add XDG-autostart + systemd-timer Linux paths; harden the process tree
+  (cycle detection, depth cap, duplicate-PID keep-first); drop read-only registry queries; require
+  a cron-path write to corroborate a bare `crontab -e`.
+- **(C) Anti-false-confidence calibration.** Drop zero-confidence + zero-evidence capability cells
+  (they rendered as "verified" and seeded fabricated narrative); guard category inference against
+  malformed ISR objects; fold suspicious network infrastructure into the LTM similar-samples query.
+- **(D) Enrichment trust & freshness.** Pre-filter private/reserved IPs before paid reputation
+  lookups; fix idempotency to retry *failed* (source-less) lookups; annotate VT reputation with
+  `age_days` and treat >90-day data as stale; feed a verified-malicious reputation back into the
+  heuristic `is_suspicious` flag; make the GeoIP DB path env-configurable.
+- **Method note.** Findings came from a 3-agent code sweep; each was verified against the live
+  code before implementation, and one ("word-boundary keyword matching" for category inference)
+  was **rejected after testing** — it broke the keyword table's intentional stems
+  (`keylog`→keylogger, `exfiltrat`→exfiltration), a reminder that an FP "fix" can destroy real
+  signal. Net: deterministic FP↓ and calibration↑ with no valid-signal regression (verified by
+  the existing + new extractor/enrichment test suites).
 
 ---
 
@@ -463,6 +559,20 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   (`attck_autocorrect_swap_valid=False`, default) — re-measured: hallucination 100%→0%, +19%
   recovery retained, **correct-ID regression eliminated (→0%)**. Added §1.5.2; 56 ATT&CK tests
   pass.
+- **2026-06-02 signal quality.** Added §2.4: a four-part deterministic extractor hardening wave
+  (network FP/validation, platform-aware persistence + dynamic FP, anti-false-confidence
+  calibration, enrichment trust/freshness). Rejected a word-boundary category-keyword change after
+  it broke intentional stems. 329 extractor/enrichment/reporting/integration tests pass; mypy clean.
+- **2026-06-02 category inference (static vs dynamic).** Measured the §7.1 schema-pruning category
+  classifier against a non-circular ATT&CK ground truth (101 families labelled by self-declared
+  type; full vs behavioral-only regimes). Findings (§1.7): keyword is accurate only when the text
+  names the category (full 0.792 → behavioral 0.327, abstaining 38% — a *safe* failure mode);
+  zero-shot semantic over averaged technique prototypes is a `NEGATIVE` result (0.376/0.168);
+  dynamic helps only as *few-shot* prototypes from labelled prose (kw→few-shot hybrid: full 0.832,
+  behavioral 0.525). Shipped `category_inference_backend` (keyword|semantic|hybrid), default
+  **keyword**, fail-safe to keyword — a measured, reversible knob, not a default flip. New
+  `semantic_category.py` + dispatcher wired through `JudgeAgent`/container; new harness + dataset
+  builder + unit tests. Full unit suite (1237) + report-pipeline integration pass; ruff/mypy clean.
 - **2026-06-01 output quality.** Added §1.6: a deterministic STIX integrity pass
   (`enforce_bundle_integrity` — empty-pattern drop, AP/indicator dedup, dangling-ref + duplicate
   relationship sweep, object_refs trim) applied in judge_postprocess and the extended renderer,

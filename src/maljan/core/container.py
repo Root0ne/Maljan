@@ -271,7 +271,10 @@ class ServiceContainer:
                 from maljan.agents.judge_agent import JudgeAgent
 
                 llm = self.get_judge_llm() if role == "judge" else self.get_expert_llm()
-                cached = JudgeAgent(llm=llm)
+                cached = JudgeAgent(
+                    llm=llm,
+                    category_backend=self.config.preprocessing.category_inference_backend,
+                )
                 self._judge_agent_cache[role] = cached
             return cached
 

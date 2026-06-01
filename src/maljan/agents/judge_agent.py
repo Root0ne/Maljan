@@ -57,7 +57,8 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.analysis.schema_pruner import get_pruned_schema_hint, infer_malware_category
+from maljan.analysis.schema_pruner import get_pruned_schema_hint
+from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.pipeline.mediation_models import MediatorVerdict
@@ -82,9 +83,13 @@ class JudgeAgent:
         bundle = judge.give_verdict(reports, history, attck_validator=validator)
     """
 
-    def __init__(self, llm: BaseChatModel) -> None:
+    def __init__(self, llm: BaseChatModel, category_backend: str = "keyword") -> None:
         self.llm = llm
         self.logger = logger.getChild("judge")
+        # Backend for the §7.1 schema-pruning category inference. Default
+        # "keyword" keeps the deterministic substring path (zero behaviour
+        # change); "semantic"/"hybrid" route through the embedding classifier.
+        self.category_backend = category_backend
 
     async def _initialize_mcp_client(self) -> None:
         if getattr(self, "tools", None):
@@ -957,10 +962,14 @@ class JudgeAgent:
             Prompt-ready schema pruning block, or empty string.
         """
         try:
-            category = infer_malware_category(reports, isr_reports)
+            category = infer_category(reports, isr_reports, backend=self.category_backend)
             hint = get_pruned_schema_hint(category)
             if hint:
-                self.logger.info("Schema pruning: inferred category '%s'.", category.value)
+                self.logger.info(
+                    "Schema pruning: inferred category '%s' (backend=%s).",
+                    category.value,
+                    self.category_backend,
+                )
             else:
                 self.logger.debug("Schema pruning: category UNKNOWN, no pruning applied.")
             return hint
