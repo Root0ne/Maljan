@@ -365,6 +365,15 @@ positioning.
   supplies a hint ~94 % of the time on realistic text, so it already delivers this completion benefit;
   no backend change is warranted on this evidence. Artifacts: `tests/evaluation/eval_hint_ablation.py`,
   report `D:/tmp/hint_ablation.md`.
+- **Mitigation shipped (follow-up).** The ablation incidentally exposed that the judge had **no
+  output bound** — only the 600 s wall-clock — so a degenerate decode burns the whole budget before
+  falling back to an empty bundle. Added `LLMConfig.judge_max_tokens` (default **8192**), wired in
+  `container.get_judge_llm()`, bounding a runaway verdict to ~205 s at ~40 tok/s, well under the
+  timeout. Verified non-truncating: MiniDuke and Emotet (obj=13/ap=4 uncapped) reproduce **obj=13,
+  ap=4** capped — the bound has wide headroom over a real verdict bundle. This is a worst-case-latency
+  guard (kin to the §3.3 damper), not a quality fix; focus still comes from the hint. `max_tokens` is
+  a core OpenAI param ik_llama honors (unlike the silently-ignored `repetition_penalty`, §3.3). Full
+  unit suite (1227) green; ruff/mypy clean.
 
 ---
 
@@ -626,6 +635,11 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   (95% CI [-0.001, +0.072], crosses 0). An operational, timeout-mediated benefit specific to the
   slow local model — reaffirms the keyword default and that §7.1 schema-pruning earns its place.
   New harness `tests/evaluation/eval_hint_ablation.py`.
+- **2026-06-02 judge output cap.** Follow-up to §1.7.1: the judge had no output bound (only the
+  600 s wall-clock), so a degenerate decode burned the full budget. Added `LLMConfig.judge_max_tokens`
+  (default 8192) wired in `container.get_judge_llm()` — bounds a runaway verdict to ~205 s at
+  ~40 tok/s. Verified non-truncating (MiniDuke/Emotet reproduce obj=13/ap=4 capped). Worst-case-latency
+  guard, not a quality fix. 1227 unit tests green; ruff/mypy clean.
 - **2026-06-01 output quality.** Added §1.6: a deterministic STIX integrity pass
   (`enforce_bundle_integrity` — empty-pattern drop, AP/indicator dedup, dangling-ref + duplicate
   relationship sweep, object_refs trim) applied in judge_postprocess and the extended renderer,

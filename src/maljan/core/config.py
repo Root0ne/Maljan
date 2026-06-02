@@ -108,6 +108,18 @@ class LLMConfig(BaseModel):
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
 
+    # Hard output cap for the judge verdict generation (max_tokens). The judge
+    # otherwise has no output bound — only the 600 s wall-clock timeout — so a
+    # degenerate/rambling decode on the slow local model burns the full budget
+    # and falls back to an empty bundle (the §1.7.1 ablation measured this:
+    # without focus the judge hit the 600 s timeout 6/17 vs 1/17). A verdict
+    # STIX bundle is small (observed obj<=13, ~2-4k tokens); 8192 leaves wide
+    # headroom for legitimate output yet bounds a runaway decode to ~205 s at
+    # ~40 tok/s, well under the timeout. This is a worst-case-latency/robustness
+    # guard (in the spirit of the §3.3 degenerate-loop damper), not a quality
+    # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
+    judge_max_tokens: int = 8192
+
     # Wave 7 THROUGHPUT-01 (2026-05-28): when True (default), analysts run
     # in parallel — correct for hosted multi-slot LLMs. When False, the
     # pipeline runs analysts sequentially so a single-slot local

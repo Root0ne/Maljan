@@ -127,7 +127,13 @@ class ServiceContainer:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         with self._lock:
             if self._judge_llm_cache is None:
-                self._judge_llm_cache = self._llm_registry.build_model(role="judge")
+                # Bound the verdict generation so a degenerate decode can't
+                # consume the full wall-clock timeout (see LLMConfig.judge_max_tokens).
+                extra: dict[str, int] = {}
+                cap = self.config.llm.judge_max_tokens
+                if cap and cap > 0:
+                    extra["max_tokens"] = cap
+                self._judge_llm_cache = self._llm_registry.build_model(role="judge", **extra)
             return self._judge_llm_cache
 
     def get_agent_llm(self, agent_name: str) -> BaseChatModel:
