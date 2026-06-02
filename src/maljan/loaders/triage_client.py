@@ -68,18 +68,18 @@ _TRIAGE_VIEW_URL = "https://tria.ge/{sample_id}"
 # extension is unknown we fall back to ``os:windows10-2004-x64`` because
 # the Windows sandbox accepts a far wider range of payloads (PowerShell,
 # scripts, generic archives) than the platform-specific ones.
+#
+# OS-support scope (2026-06-02): Windows + Linux only. The former macOS
+# (.dmg/.pkg/.app/.scpt) and Android (.apk/.dex) rows were removed — those
+# samples are now rejected at the pipeline entry (``app.arun`` raises
+# ``UnsupportedSampleError``) and never reach submission, so routing them to a
+# foreign sandbox profile is dead code.
 _EXT_TO_OS_TAG: dict[str, str] = {
-    ".apk": "os:android-13-x64",
-    ".dex": "os:android-13-x64",
     ".elf": "os:ubuntu-22.04-amd64",
     ".so": "os:ubuntu-22.04-amd64",
     ".sh": "os:ubuntu-22.04-amd64",
     ".deb": "os:ubuntu-22.04-amd64",
     ".bin": "os:ubuntu-22.04-amd64",
-    ".dmg": "os:macos-10.15-amd64",
-    ".pkg": "os:macos-10.15-amd64",
-    ".app": "os:macos-10.15-amd64",
-    ".scpt": "os:macos-10.15-amd64",
     # Everything else -> Windows. Triage's Windows profile is the default
     # for PE family + scripts + most documents.
 }

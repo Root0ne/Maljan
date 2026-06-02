@@ -265,24 +265,24 @@ class TestPlatformCompatibility:
         assert _is_rule_compatible(None, None) is True
 
     def test_generic_rule_always_compatible(self) -> None:
-        for sp in (None, "windows", "android", "unknown", "cloud"):
+        for sp in (None, "windows", "linux", "unknown"):
             assert _is_rule_compatible(None, sp) is True
             assert _is_rule_compatible("", sp) is True
 
-    def test_windows_rule_dropped_for_android(self) -> None:
-        # The kingpin: T1059.001 PowerShell on an APK.
-        assert _is_rule_compatible("windows", "android") is False
+    def test_windows_rule_dropped_for_linux(self) -> None:
+        # Foreign-OS rule dropped: a Windows PowerShell rule on a Linux sample.
+        assert _is_rule_compatible("windows", "linux") is False
 
     def test_windows_rule_kept_for_windows(self) -> None:
         assert _is_rule_compatible("windows", "windows") is True
 
-    def test_macos_rule_dropped_for_android(self) -> None:
-        # T1036.006 Space-after-Filename - macOS on an APK.
-        assert _is_rule_compatible("macos", "android") is False
+    def test_macos_rule_dropped_for_supported_sample(self) -> None:
+        # A macOS (out-of-scope OS) rule is dropped for a Win/Linux sample.
+        assert _is_rule_compatible("macos", "linux") is False
+        assert _is_rule_compatible("macos", "windows") is False
 
     def test_cloud_rule_dropped_for_binary(self) -> None:
-        # T1078.004 Cloud Accounts azure rule on an APK / PE / ELF.
-        assert _is_rule_compatible("azure", "android") is False
+        # T1078.004 Cloud Accounts azure/aws/gcp rules on a PE / ELF sample.
         assert _is_rule_compatible("aws", "windows") is False
         assert _is_rule_compatible("gcp", "linux") is False
 
@@ -306,14 +306,15 @@ class TestPlatformCompatibility:
 class TestScanWithPlatformFilter:
     """End-to-end: full scan loop should skip platform-incompatible rules."""
 
-    def test_filters_windows_rule_for_android(self, tmp_rules_dir: Path) -> None:
-        # zararli.apk scenario distilled to one rule.
+    def test_filters_windows_rule_for_linux(self, tmp_rules_dir: Path) -> None:
+        # Foreign-OS rule dropped end-to-end: a Windows PowerShell rule must not
+        # fire on a Linux sample.
         _write_rule(tmp_rules_dir, "ps.yml", POWERSHELL_RULE_CONTENT)
         layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
         log_lines = ["CommandLine: powershell.exe -EncodedCommand aGVsbG8="]
 
         layer.reset_filter_stats()
-        matches = layer.scan_log_lines(log_lines, sample_platform="android")
+        matches = layer.scan_log_lines(log_lines, sample_platform="linux")
 
         assert matches == []
         assert layer.last_filtered_count == 1

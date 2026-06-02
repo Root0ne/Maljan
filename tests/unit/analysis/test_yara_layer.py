@@ -320,13 +320,13 @@ class TestYaraPlatformFiltering:
             ),
         ]
 
-    def test_drops_windows_rule_for_android(self, mixed_rules: list[YaraTTPRule]) -> None:
+    def test_drops_windows_rule_for_linux(self, mixed_rules: list[YaraTTPRule]) -> None:
         layer = YaraLayer(mixed_rules)
         text = "powershell.exe ransom"
         layer.reset_filter_stats()
-        matches = layer.scan(text, sample_platform="android")
+        matches = layer.scan(text, sample_platform="linux")
         triggered = {m.rule_id for m in matches}
-        # Windows-only rule dropped; cross-platform rule survives.
+        # Foreign-OS (Windows-only) rule dropped; cross-platform rule survives.
         assert "powershell_only" not in triggered
         assert "ransomware_anywhere" in triggered
         assert layer.last_filtered_count == 1
@@ -341,18 +341,14 @@ class TestYaraPlatformFiltering:
         assert "ransomware_anywhere" in triggered
         assert layer.last_filtered_count == 0
 
-    def test_keeps_t1497_sandbox_evasion_on_apk(self) -> None:
-        """The T1497 paradox: YARA sandbox_evasion is platform=any so it
-        survives on Android even though MITRE Enterprise's T1497.platforms
-        omits Android. This is the kingpin TP we must preserve."""
+    def test_keeps_any_platform_rule_on_linux(self) -> None:
+        """A YARA rule declared platform=any (e.g. sandbox_evasion) must survive
+        platform-aware filtering on a supported sample — only OS-specific rules
+        whose declared platform mismatches the sample are dropped."""
         layer = YaraLayer.from_default_rules()
         if layer.rule_count == 0:
             pytest.skip("Default rules file not found")
-        # zararli.apk's Triage signature contained "sandbox" in the
-        # signature name; that string is one of the sandbox_evasion rule's
-        # patterns. With platform-aware filtering, the rule must still fire
-        # on an android sample.
-        matches = layer.scan("Listens for sandbox detection", sample_platform="android")
+        matches = layer.scan("Listens for sandbox detection", sample_platform="linux")
         triggered = {m.rule_id for m in matches}
         assert "sandbox_evasion" in triggered
 

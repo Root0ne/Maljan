@@ -400,8 +400,8 @@ class TestInteractiveFlow:
 
     def test_submit_embeds_extension_derived_os_tag(self, tmp_path: Path) -> None:
         captured: dict[str, Any] = {}
-        apk = tmp_path / "evil.apk"
-        apk.write_bytes(b"PK\x03\x04dummy")
+        elf = tmp_path / "evil.elf"
+        elf.write_bytes(b"\x7fELFdummy")
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured["body"] = request.content
@@ -410,14 +410,15 @@ class TestInteractiveFlow:
         client = TriageClient()
         self._install_mock_transport(client, handler)
         try:
-            client.submit(apk)
+            client.submit(elf)
         finally:
             client.close()
         body = captured["body"].decode("utf-8", errors="ignore")
-        # Default is embedded profile (interactive=false) with Android tag
-        # for .apk samples + a behavioral defaults block.
+        # Default is embedded profile (interactive=false) with the Linux tag
+        # for .elf samples + a behavioral defaults block. (OS-support scope:
+        # Windows + Linux only.)
         assert '"interactive": false' in body
-        assert '"os:android-13-x64"' in body
+        assert '"os:ubuntu-22.04-amd64"' in body
         assert '"defaults"' in body
         assert '"network": "internet"' in body
 
@@ -613,17 +614,19 @@ class TestApplyOverviewErrors:
 
 
 class TestPickProfileTag:
-    def test_apk_maps_to_android(self, tmp_path: Path) -> None:
-        assert _pick_profile_tag(tmp_path / "evil.apk") == "os:android-13-x64"
-
     def test_elf_maps_to_ubuntu(self, tmp_path: Path) -> None:
         assert _pick_profile_tag(tmp_path / "evil.elf") == "os:ubuntu-22.04-amd64"
 
-    def test_dmg_maps_to_macos(self, tmp_path: Path) -> None:
-        assert _pick_profile_tag(tmp_path / "evil.dmg") == "os:macos-10.15-amd64"
-
     def test_unknown_extension_falls_back_to_windows(self, tmp_path: Path) -> None:
         assert _pick_profile_tag(tmp_path / "evil.foobar") == "os:windows10-2004-x64"
+
+    def test_foreign_os_extensions_fall_back_to_windows(self, tmp_path: Path) -> None:
+        # OS-support scope (2026-06-02): the macOS/Android rows were removed from
+        # _EXT_TO_OS_TAG — those samples are rejected at the pipeline entry
+        # (UnsupportedSampleError) and never reach submission. Any residual call
+        # defaults to the Windows profile, not a foreign sandbox.
+        for name in ("evil.apk", "evil.dex", "evil.dmg", "evil.pkg", "evil.app"):
+            assert _pick_profile_tag(tmp_path / name) == "os:windows10-2004-x64"
 
     def test_force_tag_overrides_extension(self, tmp_path: Path) -> None:
         assert (

@@ -126,3 +126,29 @@ class TestInitialState:
         app = MaljanApp(mock=True)
         result = app.run("hash")
         assert result["iteration_count"] > 0
+
+
+class TestUnsupportedSampleRejection:
+    """OS-support scope (2026-06-02): Windows + Linux only — arun rejects a
+    definitely-foreign sample up front, before the pipeline runs."""
+
+    def test_arun_rejects_foreign_sample(self, tmp_path):
+        from pathlib import Path
+
+        from maljan.core.exceptions import UnsupportedSampleError
+
+        macho = Path(tmp_path) / "evil.bin"
+        macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 64)  # Mach-O magic
+        app = MaljanApp(mock=True)
+        with pytest.raises(UnsupportedSampleError):
+            app.run("deadbeef", file_name="evil.bin", sample_path=str(macho))
+
+    def test_arun_accepts_windows_sample(self, tmp_path):
+        # A PE sample is not rejected by the guard (pipeline proceeds in mock mode).
+        from pathlib import Path
+
+        pe = Path(tmp_path) / "evil.exe"
+        pe.write_bytes(b"MZ" + b"\x00" * 64)
+        app = MaljanApp(mock=True)
+        result = app.run("deadbeef", file_name="evil.exe", sample_path=str(pe))
+        assert result["iteration_count"] > 0

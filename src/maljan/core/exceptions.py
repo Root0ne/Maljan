@@ -40,3 +40,13 @@ class ProjectRootNotFoundError(MaljanError):
 
 class UnsafePathError(MaljanError):
     """Raised when a caller-provided path/identifier fails safety validation."""
+
+
+class UnsupportedSampleError(MaljanError):
+    """Raised when a sample targets an OS outside the supported set.
+
+    OS-support scope (2026-06-02): Windows and Linux only. A sample whose
+    magic bytes / extension identify a non-Win/Linux target (Mach-O / macOS
+    installer, Android APK/DEX, iOS IPA) is rejected at the pipeline entry
+    rather than routed to an unsupported sandbox.
+    """

@@ -398,6 +398,19 @@ positioning.
 - **Verification.** `mypy` clean (99 source files); 1226 unit tests pass (platform tests updated:
   non-Win/Linux file types → `unknown`, obsolete android-gating test removed, fp-linter C3 cases
   re-pointed to Linux); web `tsc --noEmit` clean + ESLint 0 errors.
+- **Follow-up — reject at the entry, not just relabel.** A later pass closed the last *live*
+  remnant: `loaders/triage_client.py` still routed `.apk/.dex`→Android and `.dmg/.pkg/.app/.scpt`→
+  macOS Triage profiles. Per an explicit scope decision we now **reject** non-Win/Linux samples
+  rather than silently route them: a magic-byte-first detector
+  (`sample_identity.unsupported_os_reason` — header magic for Mach-O/APK/IPA + an extension fallback
+  for `.dex/.dmg/.pkg/.app/.scpt`) runs in `app.arun` **before** sandbox submission and raises the
+  new `UnsupportedSampleError`; the worker's existing job-level handler surfaces it as a clean
+  "failed: Unsupported sample OS …". The guard is deliberately conservative — only *definitely-foreign*
+  files trip it, so an obscure/unknown Windows sample is never blocked — and backend-agnostic (covers
+  Triage + CAPE + CLI). The Android FP denylists remain untouched (verified). The foreign-rule-drop
+  tests (sigma/yara/cascade) were reframed to use a supported Win/Linux *sample* with a foreign
+  *rule*, preserving every quality assertion without a non-Win/Linux sample platform. 1242 unit +
+  report-pipeline tests pass; mypy/ruff clean.
 
 ---
 
@@ -671,6 +684,13 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   ATT&CK matrix (`mitre-mobile.ts`, capabilities → Enterprise-only) and narrowed the `SamplePlatform`
   TS type. Kept the Android FP-denylists (defensive, not OS support). Dropped the Android-persistence
   backlog item. mypy clean (99 files); 1226 unit tests pass; web tsc clean + ESLint 0 errors.
+- **2026-06-03 reject non-Win/Linux at entry.** Closed the last live remnant (Triage
+  `_EXT_TO_OS_TAG` still routed `.apk/.dex`→Android, `.dmg/...`→macOS). Added
+  `UnsupportedSampleError` + `sample_identity.unsupported_os_reason` (magic-byte-first foreign
+  detector); `app.arun` now rejects definitely-foreign samples before any sandbox submission
+  (backend-agnostic), and the Triage map's macOS/Android rows were removed. Foreign-rule-drop tests
+  reframed to a Win/Linux sample + foreign rule (quality assertions preserved). Android FP denylists
+  untouched. §1.8 extended. 1242 unit + report-pipeline tests pass; ruff/mypy clean.
 - **2026-06-01 output quality.** Added §1.6: a deterministic STIX integrity pass
   (`enforce_bundle_integrity` — empty-pattern drop, AP/indicator dedup, dangling-ref + duplicate
   relationship sweep, object_refs trim) applied in judge_postprocess and the extended renderer,

@@ -201,6 +201,21 @@ class MaljanApp:
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
 
+        # OS-support scope (2026-06-02): Windows + Linux only. Reject a
+        # definitely-foreign sample (Mach-O/macOS, Android APK/DEX, iOS IPA)
+        # up front — before any sandbox submission, so no run is wasted —
+        # rather than routing it to an unsupported sandbox. Magic-byte based,
+        # so a legitimate Win/Linux sample is never blocked.
+        from maljan.core.exceptions import UnsupportedSampleError
+        from maljan.extractors.sample_identity import unsupported_os_reason
+
+        unsupported = unsupported_os_reason(sample_path)
+        if unsupported:
+            logger.warning("Rejecting unsupported-OS sample (%s): %s", unsupported, sample_path)
+            raise UnsupportedSampleError(
+                f"Unsupported sample OS: {unsupported}. Only Windows and Linux are supported."
+            )
+
         # Phase 2: Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 

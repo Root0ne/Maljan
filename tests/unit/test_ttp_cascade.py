@@ -398,8 +398,8 @@ class TestPlatformAwareCascade:
         assert summary.total_techniques == 1
         assert summary.dropped_by_platform == []
 
-    def test_drops_windows_sigma_claim_for_android(self, engine: TTPCascadeEngine) -> None:
-        # The zararli.apk regression: Sigma's PowerShell rule fired on an APK.
+    def test_drops_windows_sigma_claim_for_linux(self, engine: TTPCascadeEngine) -> None:
+        # Foreign-OS rule dropped: a Sigma Windows PowerShell claim on a Linux sample.
         isrs = {
             "sig": _make_isr(
                 "sigma",
@@ -407,17 +407,17 @@ class TestPlatformAwareCascade:
                 [_claim_with_platforms("T1059.001", 0.8, ["windows"])],
             ),
         }
-        summary = engine.compute(isrs, sample_platform="android")
+        summary = engine.compute(isrs, sample_platform="linux")
         assert summary.total_techniques == 0
         assert len(summary.dropped_by_platform) == 1
         dropped = summary.dropped_by_platform[0]
         assert dropped.technique_id == "T1059.001"
         assert dropped.source_layer == "sigma"
         assert dropped.rule_platforms == ["windows"]
-        assert dropped.sample_platform == "android"
+        assert dropped.sample_platform == "linux"
 
-    def test_keeps_any_platform_yara_claim_on_android(self, engine: TTPCascadeEngine) -> None:
-        # The T1497 paradox: source layer says "any" → keep regardless of MITRE.
+    def test_keeps_any_platform_yara_claim_on_linux(self, engine: TTPCascadeEngine) -> None:
+        # Source layer says "any" → keep regardless of MITRE catalog platforms.
         isrs = {
             "yara": _make_isr(
                 "yara",
@@ -425,20 +425,10 @@ class TestPlatformAwareCascade:
                 [_claim_with_platforms("T1497", 0.85, ["any"])],
             ),
         }
-        summary = engine.compute(isrs, sample_platform="android")
+        summary = engine.compute(isrs, sample_platform="linux")
         assert summary.total_techniques == 1
         assert summary.results[0].technique_id == "T1497"
         assert summary.dropped_by_platform == []
-
-    def test_mobile_enterprise_overlap_allows_analyst_claim(self, engine: TTPCascadeEngine) -> None:
-        # Analyst LLM claim (no rule_platforms) for T1497 on Android.
-        # MITRE Enterprise lists [Windows, Linux, macOS] — without the overlap
-        # allowlist this would drop our one TP.
-        isrs = {
-            "dyn": _make_isr("dynamic", "dynamic", [_claim("T1497", 0.7)]),
-        }
-        summary = engine.compute(isrs, sample_platform="android")
-        assert summary.total_techniques == 1
 
     def test_keeps_windows_claim_for_windows_sample(self, engine: TTPCascadeEngine) -> None:
         isrs = {

@@ -189,6 +189,53 @@ def _detect_file_type(path: Path, blob: bytes) -> str:
     return "unknown"
 
 
+# OS-support scope (2026-06-02): Windows + Linux only. A sample whose magic bytes
+# or extension identify a non-Win/Linux target is rejected at the pipeline entry
+# (see ``app.arun`` / ``UnsupportedSampleError``) rather than routed to an
+# unsupported sandbox. Magic bytes are authoritative; the extension set is the
+# fallback for foreign types without a distinctive header (.dex/.dmg/.pkg/...).
+_FOREIGN_FILE_TYPES: dict[str, str] = {
+    "mach-o": "macOS Mach-O",
+    "zip/apk": "Android APK",
+    "zip/ipa": "iOS IPA",
+}
+_FOREIGN_EXTENSIONS: dict[str, str] = {
+    ".apk": "Android APK",
+    ".dex": "Android DEX",
+    ".ipa": "iOS IPA",
+    ".dmg": "macOS disk image",
+    ".pkg": "macOS installer package",
+    ".app": "macOS application bundle",
+    ".scpt": "macOS AppleScript",
+}
+
+
+def unsupported_os_reason(sample_path: str | Path | None) -> str | None:
+    """Return a human reason when the sample targets an unsupported OS, else None.
+
+    Windows + Linux are the only supported targets. Magic bytes are checked first
+    (authoritative — only the 16-byte header is read, never the whole file); the
+    extension set is a fallback for foreign types that lack a distinctive header
+    (.dex/.dmg/.pkg/.app/.scpt). Only *definitely-foreign* samples trip this — a
+    renamed or obscure Windows file (unknown magic + non-foreign extension) is
+    NOT rejected, so legitimate Win/Linux analysis is never blocked.
+    """
+    if not sample_path:
+        return None
+    path = Path(sample_path)
+    try:
+        if not path.is_file():
+            return None  # phantom path -> nothing to reject; metadata-only path handles it
+        with path.open("rb") as fh:
+            header = fh.read(16)
+    except OSError:
+        return None
+    reason = _FOREIGN_FILE_TYPES.get(_detect_file_type(path, header).lower())
+    if reason:
+        return reason
+    return _FOREIGN_EXTENSIONS.get(path.suffix.lower())
+
+
 def _guess_mime(path: Path) -> str | None:
     """Use ``filetype`` if available, otherwise rough suffix-based mapping."""
     try:
