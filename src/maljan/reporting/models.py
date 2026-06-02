@@ -69,7 +69,7 @@ class FileHashes(BaseModel):
 
 
 class SignatureInfo(BaseModel):
-    """Digital-signing metadata extracted from PE / Mach-O / etc."""
+    """Digital-signing metadata extracted from PE / ELF / etc."""
 
     model_config = _STRICT_CONFIG
 
@@ -86,8 +86,8 @@ class SignatureInfo(BaseModel):
 # and the sandbox couldn't disambiguate either.
 # OS-support scope (2026-06-02): the pipeline supports Windows and Linux only —
 # the CAPEv2 sandbox produces dynamic reports for those two guests, and the
-# ATT&CK mapping / static identity layers were narrowed to match. Non-Win/Linux
-# samples resolve to "unknown" (no macOS/Android/iOS/cloud taxonomy).
+# ATT&CK mapping / static identity layers were narrowed to match. Foreign
+# (non-Win/Linux) samples resolve to "unknown" — there is no broader taxonomy.
 Platform = Literal[
     "windows",
     "linux",
@@ -299,9 +299,9 @@ class PersistenceMechanism(BaseModel):
 
     model_config = _STRICT_CONFIG
 
-    # Wave 9 (2026-05-29): Linux ELF / Mach-O persistence kinds added so
-    # the 2026-05-29 Mirai ELF audit's PERSISTENCE tab renders real
-    # signal instead of empty. Windows kinds remain canonical for PE.
+    # Wave 9 (2026-05-29): Linux ELF persistence kinds added so the
+    # 2026-05-29 Mirai ELF audit's PERSISTENCE tab renders real signal
+    # instead of empty. Windows kinds remain canonical for PE.
     kind: Literal[
         # ── Windows (PE) ─────────────────────────────────────
         "registry_run",

@@ -76,10 +76,10 @@ def build_persistence_list(
 ) -> list[PersistenceMechanism]:
     """Return a deduplicated list of persistence mechanisms.
 
-    ``sample_platform`` gates platform-specific scanners so a Linux/Android
-    sample is not flagged with Windows registry-run persistence (and vice
-    versa). The Windows scanners run unless the platform is an explicit
-    non-Windows one; the Linux scanner runs unless the platform is Windows.
+    ``sample_platform`` gates platform-specific scanners so a Linux sample
+    is not flagged with Windows registry-run persistence (and vice versa).
+    The Windows scanners run unless the platform is an explicit non-Windows
+    one; the Linux scanner runs unless the platform is Windows.
     Signature-based detection is platform-agnostic and always runs. When the
     platform is unknown/None, all scanners run (backward-compatible).
     """

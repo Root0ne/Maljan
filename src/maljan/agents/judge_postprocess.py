@@ -23,8 +23,8 @@ import uuid
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
-    ANDROID_CLASS_REF_RE,
     COMPILE_ARTIFACT_RE,
+    FOREIGN_CLASS_REF_RE,
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
     MAX_FILE_NAME_INDICATORS,
@@ -291,8 +291,8 @@ def _admit_indicator(
     """Return ``"keep"`` or a short reason string for J-02 logging.
 
     Acceptance-based filter for ``file:name`` indicators (tightened in
-    Wave 4 after the zararli.apk audit found ~45 noisy SDOs); falls back
-    to the original "any-literal-in-corpus" check for every other kind.
+    Wave 4 after a noise audit found ~45 noisy SDOs); falls back to the
+    original "any-literal-in-corpus" check for every other kind.
     """
     if not pattern:
         return "empty_pattern"
@@ -323,8 +323,8 @@ def _admit_indicator(
         for lit in literals:
             if COMPILE_ARTIFACT_RE.search(lit):
                 return "file_name_compile_artifact"
-            if ANDROID_CLASS_REF_RE.match(lit):
-                return "file_name_android_class_ref"
+            if FOREIGN_CLASS_REF_RE.match(lit):
+                return "file_name_foreign_class_ref"
 
         for lit in literals:
             if _looks_like_real_file_path(lit, runtime_paths):

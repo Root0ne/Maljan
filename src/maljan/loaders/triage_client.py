@@ -69,11 +69,10 @@ _TRIAGE_VIEW_URL = "https://tria.ge/{sample_id}"
 # the Windows sandbox accepts a far wider range of payloads (PowerShell,
 # scripts, generic archives) than the platform-specific ones.
 #
-# OS-support scope (2026-06-02): Windows + Linux only. The former macOS
-# (.dmg/.pkg/.app/.scpt) and Android (.apk/.dex) rows were removed — those
-# samples are now rejected at the pipeline entry (``app.arun`` raises
-# ``UnsupportedSampleError``) and never reach submission, so routing them to a
-# foreign sandbox profile is dead code.
+# OS-support scope (2026-06-02): Windows + Linux only. Foreign (non-Win/Linux)
+# formats are rejected at the pipeline entry (``app.arun`` raises
+# ``UnsupportedSampleError``) and never reach submission, so this map only ever
+# routes Linux extensions to Ubuntu and defaults everything else to Windows.
 _EXT_TO_OS_TAG: dict[str, str] = {
     ".elf": "os:ubuntu-22.04-amd64",
     ".so": "os:ubuntu-22.04-amd64",
@@ -1298,7 +1297,7 @@ def _apply_overview(
             normalized.setdefault("families", []).extend(
                 [f for f in analysis["family"] if isinstance(f, str)]
             )
-        # Triage often puts platform / behavior bands ("android",
+        # Triage often puts platform / behavior bands ("windows",
         # "defense_evasion", etc.) under analysis.tags. Promote them to
         # attack_tags so the CTI block surfaces them.
         if isinstance(analysis.get("tags"), list):
@@ -1812,7 +1811,7 @@ def _resolve_sample_name(triage_data: dict[str, Any], task_id: str) -> str:
     When none yield a usable filename we substitute a visible placeholder so
     static analyst prompts do not silently treat the task id as a binary
     filename (a Ghidra-load failure mode observed in the 2026-05-19 audit,
-    fix APK-SAND-01).
+    fix SAND-01).
     """
     top_target = triage_data.get("target")
     if isinstance(top_target, str) and top_target:

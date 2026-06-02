@@ -11,8 +11,8 @@ import { api } from "@/lib/api";
    stay matrix-accurate as the bundle updates.
 
    OS-support scope (2026-06-02): the pipeline supports Windows + Linux only, so
-   the capabilities view renders the Enterprise matrix exclusively (Mobile / ICS
-   matrices were removed alongside the Android/macOS taxonomy).
+   the capabilities view renders the Enterprise matrix exclusively (the Mobile /
+   ICS matrices were removed alongside the non-Win/Linux taxonomy).
 
    NOTE: this is the interim STATIC catalogue. The MITRE auto-update work
    (runtime-refreshed STIX bundle + dynamic taxonomy) replaces it with the live

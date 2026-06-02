@@ -1,11 +1,11 @@
 """Post-pipeline false-positive linter (Wave 4, 2026-05-28).
 
-The 2026-05-23 zararli.apk audit found that the pipeline's deterministic
-layers + LLM narratives could agree on a confidently-wrong story (six
-Windows / macOS / cloud TTPs on an APK, defensive recommendations to
-"block PowerShell"). Wave 4's structural fixes (Sigma/YARA platform
-filters, cascade source-layer override, indicator denylists) close the
-direct path, but every refactor can regress.
+A 2026-05-23 audit found that the pipeline's deterministic layers + LLM
+narratives could agree on a confidently-wrong story (TTPs from the wrong
+platform attached to a sample, defensive recommendations to "block
+PowerShell" that didn't apply). Wave 4's structural fixes (Sigma/YARA
+platform filters, cascade source-layer override, indicator denylists)
+close the direct path, but every refactor can regress.
 
 The FP linter is the belt-and-braces safety net. It runs after the
 cascade + NarrativeAgent have populated the MalwareReport and emits one
@@ -159,8 +159,8 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                             f"NarrativeAgent emitted a platform-specific "
                             f"concept ('{term}') that cannot apply to a {sp} "
                             f"sample. This was the failure mode of the "
-                            f"2026-05-23 zararli.apk audit; treat the entire "
-                            f"executive summary sentence with skepticism and "
+                            f"2026-05-23 cross-platform narrative audit; treat the "
+                            f"entire executive summary sentence with skepticism and "
                             f"prefer the deterministic capability_matrix."
                         ),
                     )

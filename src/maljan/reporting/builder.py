@@ -69,7 +69,7 @@ class MalwareReportBuilder:
         # through the same ``build_network_iocs`` pipeline keeps the
         # NETWORK tab + SUMMARY snapshot card populated even when the
         # cuckoo-like sandbox path is empty (the common case for the
-        # Triage-only Android flow).
+        # Triage-only CTI flow).
         sandbox_cti: dict[str, Any] | None = None,
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
@@ -110,7 +110,7 @@ class MalwareReportBuilder:
         network = build_network_iocs(self.sandbox_report)
         # Wave 10 W10-NET-01 (2026-05-30): fold the Triage SandboxCTI
         # network IOCs onto whatever the CAPE-style extractor produced.
-        # When the sandbox report is empty (Android Triage path) this is
+        # When the sandbox report is empty (Triage-only CTI path) this is
         # the only source of typed network indicators.
         network = merge_sandbox_cti_network(network, self.sandbox_cti)
         persistence = build_persistence_list(self.sandbox_report, self.sample_platform)
@@ -281,8 +281,8 @@ class MalwareReportBuilder:
         """Return True when ``family`` is corroborated by deterministic evidence.
 
         D11 fix: in the 2026-05-23 E2E run the judge fallback path emitted
-        ``attribution.family = "rat"`` for zararli.apk despite Triage
-        returning an empty ``families[]`` and no analyst claim ever
+        ``attribution.family = "rat"`` despite Triage returning an empty
+        ``families[]`` and no analyst claim ever
         naming the family. The previous builder copied the value through
         unconditionally with the global ``overall_confidence`` as
         ``family_confidence`` — UI consumers had no way to tell which

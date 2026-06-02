@@ -9,8 +9,8 @@ import pytest
 from maljan.extractors.sample_identity import _infer_platform, unsupported_os_reason
 
 
-# OS-support scope (2026-06-02): Windows + Linux only. Every other target
-# (Mach-O, APK/DEX, IPA, jar) resolves to "unknown".
+# OS-support scope (2026-06-02): Windows + Linux only. Every other executable
+# format (Mach-O, APK/DEX, IPA, jar) resolves to "unknown".
 @pytest.mark.parametrize(
     ("file_type", "expected"),
     [
@@ -36,8 +36,8 @@ def test_infer_platform_sandbox_fallback_windows() -> None:
     assert _infer_platform("unknown", None, sb) == "windows"
 
 
-def test_infer_platform_sandbox_android_is_unknown() -> None:
-    # Android is out of scope — an android sandbox hint resolves to unknown.
+def test_infer_platform_foreign_sandbox_hint_is_unknown() -> None:
+    # A foreign (non-Win/Linux) sandbox hint resolves to unknown / out of scope.
     sb = {"target": {"platform": "android-11"}}
     assert _infer_platform("unknown", None, sb) == "unknown"
 
@@ -70,21 +70,21 @@ class TestUnsupportedOsReason:
 
     def test_mach_o_magic_rejected(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, "evil.bin", b"\xcf\xfa\xed\xfe")
-        assert unsupported_os_reason(p) == "macOS Mach-O"
+        assert unsupported_os_reason(p) == "unsupported format (Mach-O)"
 
     def test_apk_magic_rejected(self, tmp_path: Path) -> None:
         # PK zip magic + .apk suffix -> ZIP/APK.
         p = self._write(tmp_path, "evil.apk", b"PK\x03\x04")
-        assert unsupported_os_reason(p) == "Android APK"
+        assert unsupported_os_reason(p) == "unsupported format (APK)"
 
     def test_dmg_by_extension_rejected(self, tmp_path: Path) -> None:
         # No distinctive header -> extension fallback.
         p = self._write(tmp_path, "evil.dmg", b"\x00\x01\x02\x03")
-        assert unsupported_os_reason(p) == "macOS disk image"
+        assert unsupported_os_reason(p) == "unsupported format (.dmg)"
 
     def test_dex_by_extension_rejected(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, "evil.dex", b"dex\n")
-        assert unsupported_os_reason(p) == "Android DEX"
+        assert unsupported_os_reason(p) == "unsupported format (.dex)"
 
     def test_pe_accepted(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, "evil.exe", b"MZ")

@@ -49,7 +49,7 @@ class TestFileNameAcceptance:
         assert len([o for o in result["objects"] if o.get("type") == "indicator"]) == 1
 
     def test_rejects_compile_artefact_path(self) -> None:
-        # NDK build path — zararli.apk's #1 noise source.
+        # NDK build path — the noise audit's #1 source.
         ndk_path = (
             "/buildbot/src/android/ndk-r25-release/toolchain/llvm-project/libcxx/include/string"
         )
@@ -60,8 +60,8 @@ class TestFileNameAcceptance:
         )
         assert [o for o in result["objects"] if o.get("type") == "indicator"] == []
 
-    def test_rejects_android_class_ref(self) -> None:
-        # `/lang/ClassCastException` etc. surfaced from .dex strings.
+    def test_rejects_foreign_class_ref(self) -> None:
+        # `/lang/ClassCastException` etc. surfaced from bundled bytecode strings.
         bundle = _bundle_with(
             [_indicator("class-cast", "[file:name = '/lang/ClassCastException']")]
         )

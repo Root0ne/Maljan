@@ -566,7 +566,7 @@ class Settings(BaseSettings):
             # analyze → behaviour scan → decompile). On the local 35B Qwen
             # at ~4.6 tok/s output the previous 600s ceiling fired
             # *during* Ghidra auto-analysis (live trace job 3450f9cd
-            # 2026-05-28 — Ghidra logged ``Loaded program: classes.dex``
+            # 2026-05-28 — Ghidra logged ``Loaded program`` for the target
             # before the budget expired). 1200s covers a cold-cache cycle
             # end-to-end while still leaving headroom under the arq
             # 3600s job timeout once we add dynamic (600s) + network

@@ -1,7 +1,7 @@
 """Curated denylists / allowlists for indicator filtering (Wave 4).
 
-The 2026-05-28 zararli.apk audit surfaced ~50 hallucinated indicator
-SDOs whose pattern values were NDK build paths, Android resource refs,
+A 2026-05-28 noise audit surfaced ~50 hallucinated indicator SDOs whose
+pattern values were toolchain/build paths, bundled bytecode class refs,
 or random extracted short strings (``/I FyD``, ``/urLU4b``, etc.) — all
 substrings of the analyst report so J-02's corpus-presence check passed
 them through.
@@ -71,8 +71,8 @@ IOC_FILE_EXTENSIONS: frozenset[str] = frozenset(
 )
 
 # OS-resource prefixes. A path starting with any of these is anchored
-# into a real filesystem location (registry hive / Android partition /
-# Unix mount). Random extracted strings rarely look like this.
+# into a real filesystem location (Windows registry hive / Unix mount).
+# Random extracted strings rarely look like this.
 IOC_OS_RESOURCE_PREFIXES: tuple[str, ...] = (
     "/data/",
     "/sdcard/",
@@ -102,8 +102,8 @@ IOC_OS_RESOURCE_PREFIXES: tuple[str, ...] = (
 
 
 # Compile-artefact regex — matches NDK / LLVM / toolchain paths embedded
-# in shipped binaries. These leak into static extractor's
-# interesting_strings list when scanning ELF .so files inside an APK and
+# in shipped binaries. These leak into the static extractor's
+# interesting_strings list when scanning bundled native libraries and
 # would otherwise pass J-02's corpus check (they ARE in the corpus, but
 # they aren't IOCs).
 COMPILE_ARTIFACT_RE: re.Pattern[str] = re.compile(
@@ -124,20 +124,19 @@ COMPILE_ARTIFACT_RE: re.Pattern[str] = re.compile(
 )
 
 
-# Android internal class refs (e.g. ``/lang/ClassCastException``,
-# ``/io/IOException``, ``/util/HashMap``). These are JVM/Android class
-# namespace paths surfaced by string extraction over .dex files — not
-# malicious file paths.
-ANDROID_CLASS_REF_RE: re.Pattern[str] = re.compile(
+# JVM/bytecode class-namespace refs (e.g. ``/lang/ClassCastException``,
+# ``/io/IOException``, ``/util/HashMap``). These class-namespace paths are
+# surfaced by string extraction over bundled bytecode — not malicious file
+# paths.
+FOREIGN_CLASS_REF_RE: re.Pattern[str] = re.compile(
     r"^/(?:lang|util|io|net|awt|nio|sql|text|reflect|math|security)"
     r"/[A-Z][A-Za-z]+(?:Exception|Error)?$"
 )
 
 
 # URL denylist — developer / build / SDK hosts. Indicators pointing at
-# these are almost certainly extracted from compile artefacts (e.g.
-# ``https://android.googlesource.com/toolchain/llvm-project`` in
-# zararli.apk's NDK header).
+# these are almost certainly extracted from compile artefacts (e.g. a
+# ``toolchain/llvm-project`` NDK header URL baked into a shipped binary).
 URL_DENY_HOSTS: tuple[str, ...] = (
     "android.googlesource.com",
     "developer.android.com",

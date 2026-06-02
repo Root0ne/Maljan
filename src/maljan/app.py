@@ -202,10 +202,10 @@ class MaljanApp:
         logger.info("-" * 60)
 
         # OS-support scope (2026-06-02): Windows + Linux only. Reject a
-        # definitely-foreign sample (Mach-O/macOS, Android APK/DEX, iOS IPA)
-        # up front — before any sandbox submission, so no run is wasted —
-        # rather than routing it to an unsupported sandbox. Magic-byte based,
-        # so a legitimate Win/Linux sample is never blocked.
+        # definitely-foreign sample (a non-Win/Linux executable format) up
+        # front — before any sandbox submission, so no run is wasted — rather
+        # than routing it to an unsupported sandbox. Magic-byte based, so a
+        # legitimate Win/Linux sample is never blocked.
         from maljan.core.exceptions import UnsupportedSampleError
         from maljan.extractors.sample_identity import unsupported_os_reason
 
@@ -221,12 +221,12 @@ class MaljanApp:
 
         # Wave 4 (2026-05-28): compute file_type + canonical platform up
         # front so the judge node's Sigma/YARA scanners + TTP cascade can
-        # filter platform-incompatible rules. Without this the pipeline
-        # is platform-blind and yields cross-OS FPs (the 2026-05-28 audit
-        # found 6/7 ATT&CK techniques on an APK were Windows/macOS/cloud
-        # rules). The detector is deterministic + cheap so we just run it
-        # here, even on samples we couldn't read off disk (platform stays
-        # "unknown" in that case, which the cascade treats as fall-open).
+        # filter platform-incompatible rules. Without this the pipeline is
+        # platform-blind and yields cross-OS FPs (e.g. a Windows-only rule
+        # firing against a Linux sample). The detector is deterministic +
+        # cheap so we just run it here, even on samples we couldn't read off
+        # disk (platform stays "unknown", which the cascade treats as
+        # fall-open).
         file_type, platform = self._infer_sample_platform(sample_path, sandbox_report)
         logger.info("Sample platform inferred: file_type=%s platform=%s", file_type, platform)
 

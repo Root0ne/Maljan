@@ -517,8 +517,8 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             # Wave 4: pick up the platform the bootstrap inferred. The
             # rule layers + cascade use this to drop platform-mismatched
-            # signals (the 2026-05-28 audit found 6/7 sigma matches on
-            # an APK were Windows/macOS/cloud rules).
+            # signals (e.g. a Windows-only Sigma rule firing against a
+            # Linux sample).
             sample_platform = state.get("platform") or "unknown"
 
             async def _run_yara_scan() -> AgentISR | None:
@@ -1082,14 +1082,14 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # so the network extractor can populate
                 # ``MalwareReport.network`` even when the CAPE-style
                 # sandbox_report has no ``network`` block (the common
-                # case for the Triage-only Android flow).
+                # case for the Triage-only CTI flow).
                 sandbox_cti=state.get("sandbox_cti"),
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
                 degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
                 # Platform-gate persistence scanners (no Windows registry
-                # persistence on a Linux/Android sample, and vice versa).
+                # persistence on a Linux sample, and vice versa).
                 sample_platform=state.get("platform"),
             )
             report = builder.build_deterministic()

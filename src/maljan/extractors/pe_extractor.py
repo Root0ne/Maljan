@@ -1,11 +1,11 @@
 """Extract the StaticAnalysis section of the report from binary bytes.
 
-Despite the name, this module handles **PE, ELF, Mach-O and unknown
-binaries** — the entry point is ``build_static_analysis()`` which dispatches
-to the right parser based on the file's magic bytes. PE samples get the
-richest output (sections, imports, exports, embedded resources); other
-formats currently fall back to a strings + magic header extraction so the
-report still surfaces some signal.
+Despite the name, this module handles **PE, ELF and unknown binaries** —
+the entry point is ``build_static_analysis()`` which dispatches to the right
+parser based on the file's magic bytes. PE samples get the richest output
+(sections, imports, exports, embedded resources); other formats currently
+fall back to a strings + magic header extraction so the report still
+surfaces some signal.
 
 Suspicious flagging is rule-based (no LLM) — see ``_SUSPICIOUS_IMPORTS`` and
 ``_HIGH_ENTROPY_THRESHOLD``. The flags are advisory; the narrative agent
@@ -693,15 +693,15 @@ _NON_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".cc",
     ".hpp",
     ".java",
-    # Android / mobile artefacts (zararli.apk dropped resources.arsc,
-    # classes.dex, etc. as DOMAIN matches before this list expanded)
+    # Bundled bytecode / archive build artefacts that otherwise surface as
+    # bogus DOMAIN matches (resources.arsc, classes.dex, etc.) — deny them.
     ".apk",
     ".aab",
     ".arsc",
     ".dex",
     ".smali",
     ".kotlin_module",
-    # Bundled assets shipped inside archives + APKs
+    # Bundled assets shipped inside archives
     ".png",
     ".jpg",
     ".jpeg",

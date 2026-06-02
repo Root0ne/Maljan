@@ -20,7 +20,7 @@ class DynamicParser(BaseParser):
         # DYN-SAND-01 (2026-05-19 audit): when the sandbox reports completion
         # but produced zero behavioral events AND zero network indicators,
         # this is itself a strong signal — likely T1497 anti-sandbox evasion,
-        # a platform mismatch (APK in Linux VM), or a zero-byte sample. The
+        # a platform mismatch (an ELF in a Windows VM), or a zero-byte sample. The
         # analyst LLM previously saw an empty-rows table and emitted a
         # meta-claim ("no dynamic data available") which the judge then
         # treated as a 1.0-confidence claim. Surfacing this structured hint
@@ -42,8 +42,8 @@ class DynamicParser(BaseParser):
                 "successful completion strongly suggests one of:\n\n"
                 "- **T1497 Virtualization/Sandbox Evasion** — the sample "
                 "detected the sandbox and aborted.\n"
-                "- **Platform mismatch** — e.g. an Android APK submitted to "
-                "a Linux/Windows VM that cannot execute it.\n"
+                "- **Platform mismatch** — e.g. a Linux ELF submitted to a "
+                "Windows VM (or vice versa) that cannot execute it.\n"
                 "- **Zero-byte / corrupted sample** — nothing to run.\n\n"
                 "You SHOULD emit at least one structured claim covering "
                 "this observation (typical confidence 0.30-0.50) rather "

@@ -75,10 +75,10 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
       and always safe to ship. The rule name still gets de-familied when
       the family is ungrounded.
     * **Sigma** is platform-shaped (logsource.product, event fields). The
-      2026-05-23 audit found ``Maljan_AutoGen_Sigma_rat`` for zararli.apk
-      — Windows event-log schema attached to an APK and named after an
-      LLM-hallucinated family. We refuse Sigma generation when EITHER
-      the family is ungrounded OR the sample platform is unknown.
+      2026-05-23 audit found ``Maljan_AutoGen_Sigma_rat`` — a Windows
+      event-log schema attached to a sample whose family was an LLM
+      hallucination. We refuse Sigma generation when EITHER the family is
+      ungrounded OR the sample platform is unknown.
     * **Suricata** is network-fokus; the rule body fires on PCAP IOCs
       regardless of host OS, so it's safe to ship.
     """
@@ -142,7 +142,7 @@ def _family_grounded_reason(report: MalwareReport) -> str | None:
 
 def _sigma_gate_reason(report: MalwareReport) -> str | None:
     """Wave 4 Sigma gate — block when the rule would embed an unverified
-    family name in its title (the 2026-05-23 zararli.apk FP).
+    family name in its title (the 2026-05-23 ungrounded-family FP).
 
     Originally also blocked on ``platform == "unknown"``, but that broke
     legitimate test scenarios where the sample bytes aren't reachable

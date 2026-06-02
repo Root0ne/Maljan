@@ -45,9 +45,9 @@ class ClaimEvidence(BaseModel):
     # ``logsource.product=windows``, ["any"] for a YARA rule annotated
     # cross-platform). Cascade engine prefers this over the MITRE catalog
     # for the platform-compatibility check — that way a YARA rule
-    # explicitly marked cross-platform can still fire on an Android
+    # explicitly marked cross-platform can still fire on a Linux
     # sample even when MITRE Enterprise says T1497 only targets
-    # Windows/Linux/macOS. ``None`` means the producing layer didn't
+    # Windows. ``None`` means the producing layer didn't
     # declare anything (analyst LLM claim or legacy rule); cascade then
     # falls back to MITRE platforms.
     rule_platforms: list[str] | None = Field(

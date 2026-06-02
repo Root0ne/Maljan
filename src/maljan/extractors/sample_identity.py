@@ -103,8 +103,8 @@ def _infer_platform(
     A misrouted sandbox therefore can't poison the inference — magic bytes win.
 
     OS-support scope (2026-06-02): only ``windows`` and ``linux`` are recognized;
-    every other target (Mach-O, APK/DEX, IPA, jar, cloud) resolves to
-    ``unknown`` — the pipeline does not support those platforms.
+    every other executable format resolves to ``unknown`` — the pipeline does
+    not support those platforms.
     """
     ft = (file_type or "").lower()
     if ft == "pe":
@@ -190,23 +190,24 @@ def _detect_file_type(path: Path, blob: bytes) -> str:
 
 
 # OS-support scope (2026-06-02): Windows + Linux only. A sample whose magic bytes
-# or extension identify a non-Win/Linux target is rejected at the pipeline entry
-# (see ``app.arun`` / ``UnsupportedSampleError``) rather than routed to an
-# unsupported sandbox. Magic bytes are authoritative; the extension set is the
-# fallback for foreign types without a distinctive header (.dex/.dmg/.pkg/...).
+# or extension identify a foreign (non-Win/Linux) executable format is rejected at
+# the pipeline entry (see ``app.arun`` / ``UnsupportedSampleError``) rather than
+# routed to an unsupported sandbox. Magic bytes are authoritative; the extension
+# set is the fallback for foreign formats without a distinctive header. Reasons
+# name the file FORMAT, not the OS, so the rejection stays diagnostic.
 _FOREIGN_FILE_TYPES: dict[str, str] = {
-    "mach-o": "macOS Mach-O",
-    "zip/apk": "Android APK",
-    "zip/ipa": "iOS IPA",
+    "mach-o": "unsupported format (Mach-O)",
+    "zip/apk": "unsupported format (APK)",
+    "zip/ipa": "unsupported format (IPA)",
 }
 _FOREIGN_EXTENSIONS: dict[str, str] = {
-    ".apk": "Android APK",
-    ".dex": "Android DEX",
-    ".ipa": "iOS IPA",
-    ".dmg": "macOS disk image",
-    ".pkg": "macOS installer package",
-    ".app": "macOS application bundle",
-    ".scpt": "macOS AppleScript",
+    ".apk": "unsupported format (.apk)",
+    ".dex": "unsupported format (.dex)",
+    ".ipa": "unsupported format (.ipa)",
+    ".dmg": "unsupported format (.dmg)",
+    ".pkg": "unsupported format (.pkg)",
+    ".app": "unsupported format (.app)",
+    ".scpt": "unsupported format (.scpt)",
 }
 
 

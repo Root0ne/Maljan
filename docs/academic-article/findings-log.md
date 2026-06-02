@@ -684,6 +684,18 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   ATT&CK matrix (`mitre-mobile.ts`, capabilities → Enterprise-only) and narrowed the `SamplePlatform`
   TS type. Kept the Android FP-denylists (defensive, not OS support). Dropped the Android-persistence
   backlog item. mypy clean (99 files); 1226 unit tests pass; web tsc clean + ESLint 0 errors.
+- **2026-06-03 Win/Linux-only naming sweep (behavior-preserving).** Per the "only Windows/Linux"
+  scope, neutralized all incidental Android/macOS/iOS naming while keeping every noise/quality
+  filter's behavior identical: renamed `ANDROID_CLASS_REF_RE`->`FOREIGN_CLASS_REF_RE` (+ J-02 reason
+  `file_name_android_class_ref`->`file_name_foreign_class_ref`); rejection reasons in
+  `unsupported_os_reason` now name the FORMAT, not the OS (`"unsupported format (Mach-O/APK/.dmg/...)"`);
+  reworded stale comments/docstrings across ~15 src + 3 web files; deleted the always-dropped
+  `data/sigma_rules/macos/` corpus (69 rules — filtered out for every reachable sample, so zero
+  detection-quality change). Deliberately KEPT (functional match-targets / measurement data, removing
+  them would change behavior): the FP-filter vocabularies (`_PLATFORM_INCOMPATIBLE_TERMS` macos/azure,
+  URL_DENY_HOSTS `*.android.com`, `apple.com` benign-domain allowlist, the APK/.dex DOMAIN denylist)
+  and the TRAM2/ATT&CK evaluation ground-truth about macOS/cloud malware. `data/sigma_rules/cloud/`
+  left pending an explicit user call. 1244 unit + report-pipeline tests pass; ruff/mypy clean; web tsc 0.
 - **2026-06-03 reject non-Win/Linux at entry.** Closed the last live remnant (Triage
   `_EXT_TO_OS_TAG` still routed `.apk/.dex`→Android, `.dmg/...`→macOS). Added
   `UnsupportedSampleError` + `sample_identity.unsupported_os_reason` (magic-byte-first foreign

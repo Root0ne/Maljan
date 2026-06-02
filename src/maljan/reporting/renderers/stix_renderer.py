@@ -22,8 +22,8 @@ import re
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
-    ANDROID_CLASS_REF_RE,
     COMPILE_ARTIFACT_RE,
+    FOREIGN_CLASS_REF_RE,
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
     MAX_FILE_NAME_INDICATORS,
@@ -121,10 +121,10 @@ class ExtendedSTIXRenderer:
         #
         # Wave 4 Step 5 (2026-05-28): apply the same acceptance-based filter
         # used by the judge bundle postprocess (J-02) so deterministic
-        # interesting_strings can't smuggle noise (NDK build paths, Android
-        # class refs, random short strings) into the public STIX bundle.
-        # Without this, the 2026-05-23 zararli.apk audit's 49-noisy-paths
-        # FP reappears for every APK that compiles with the NDK.
+        # interesting_strings can't smuggle noise (NDK build paths, bundled
+        # bytecode class refs, random short strings) into the public STIX
+        # bundle. Without this, the 2026-05-23 noise audit's 49-noisy-paths
+        # FP reappears for every sample that bundles NDK-compiled libraries.
         if report.static is not None:
             file_name_kept = 0
             for ioc in report.static.interesting_strings[:50]:
@@ -286,7 +286,7 @@ def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> boo
     Mirrors :func:`maljan.agents.judge_postprocess._admit_indicator` so the
     extended renderer can't bypass the J-02 noise floor. Mocking out the
     LLM (or any judge bundle path) no longer means the bundle ships with
-    NDK build paths / Android class refs / random short strings.
+    NDK build paths / bundled bytecode class refs / random short strings.
     """
     stripped = pattern.lstrip()
     value = (ioc.value or "").strip()
@@ -306,7 +306,7 @@ def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> boo
             return False
         if COMPILE_ARTIFACT_RE.search(value):
             return False
-        if ANDROID_CLASS_REF_RE.match(value):
+        if FOREIGN_CLASS_REF_RE.match(value):
             return False
         return _looks_like_real_path(value)
 
