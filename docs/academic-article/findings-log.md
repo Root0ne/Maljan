@@ -321,6 +321,51 @@ positioning.
   `core/config.py` (`category_inference_backend`), `agents/judge_agent.py` + `core/container.py`
   wiring; `tests/unit/test_semantic_category.py`.
 
+### 1.7.1 End-to-end hint ablation: the benefit is *completion*, not mapping accuracy — `IMPLEMENTED` / `OBSERVED`
+- **What §1.7 deferred.** Whether the advisory schema-pruning hint actually improves the judge's
+  final STIX bundle (not just the intermediate category). Ran the LLM-in-the-loop ablation against
+  the live judge LLM (Qwen3.6-35B-A3B, **temp=0 — deterministic**, so any ON-vs-OFF difference is
+  the hint's, not sampling noise). Each family is judged twice with identical inputs except the hint
+  is forced empty in the OFF arm. Ground truth = the family's ATT&CK `uses` techniques; text = the
+  family description. **17 paired families** had a hint (keyword non-UNKNOWN); 2 (wipers keyword
+  can't name) were correctly excluded. Harness: `tests/evaluation/eval_hint_ablation.py`
+  (checkpointed/resumable; the run was paused and resumed across a day with no loss).
+- **Result (n=17 paired).**
+
+  | metric | ON (hint) | OFF (no hint) | delta |
+  |---|---|---|---|
+  | empty/fallback bundles | **1 / 17** | **6 / 17** | the headline |
+  | objects (mean) | 8.18 | 4.18 | +4.00 |
+  | attack-patterns (mean) | 3.18 | 1.41 | +1.76 |
+  | relationships (mean) | 3.59 | 1.59 | +2.00 |
+  | TTP F1 exact (mean) | 0.032 | 0.003 | +0.029 |
+  | TTP F1 parent (mean) | 0.126 | 0.051 | +0.075 |
+  | precision (mean) | 0.093 | 0.015 | +0.078 |
+  | hallucinated techniques | 0.0 | 0.0 | 0.0 |
+
+  Paired TTP-F1(exact) mean delta **+0.029, 95% bootstrap CI [-0.001, +0.072]** (just crosses 0);
+  sign test ON 4 / OFF 1 / 12 ties.
+- **Finding (the real, somewhat unexpected effect).** The hint's measurable benefit is **not** better
+  technique *selection* — the exact-F1 gain is small and its CI includes 0. The dominant, clear
+  effect is **completion under the operational time budget**: without the hint the local model
+  rambles past the 600 s judge timeout and falls back to an empty bundle **6×** as often (6/17 vs
+  1/17), so ON yields roughly double the objects / attack-patterns / relationships and a modestly
+  higher precision as a downstream consequence. The hint focuses and *bounds* generation so it
+  finishes. (One sample inverted — ON timed out, OFF did not — so the asymmetry is strong but noisy.)
+- **Honest scope of the claim.** This is an **operational, timeout-mediated** benefit specific to a
+  slow local model under a fixed 600 s ceiling — not evidence of intrinsically better mapping. With a
+  faster model or no timeout the OFF arm would more often complete and the gap would shrink. Absolute
+  F1 is tiny by construction: GT is each family's *full-lifetime* ATT&CK set (24–55 techniques) vs a
+  one-paragraph single verdict, so recall is floored; only the paired delta is meaningful.
+- **Takeaways (paper + product).** (i) An "advisory, low-impact" prompt addition can have a
+  first-order effect through an *unmeasured channel* (completion/latency), invisible to a pure
+  mapping-quality metric — measure bundle shape and completion, not just F1. (ii) The §7.1
+  schema-pruning feature earns its place: disabling it ~halves bundle completeness and 6×'s the
+  empty-fallback rate on this deployment. (iii) The §1.7 default (keyword) is reaffirmed — keyword
+  supplies a hint ~94 % of the time on realistic text, so it already delivers this completion benefit;
+  no backend change is warranted on this evidence. Artifacts: `tests/evaluation/eval_hint_ablation.py`,
+  report `D:/tmp/hint_ablation.md`.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -573,6 +618,14 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   **keyword**, fail-safe to keyword — a measured, reversible knob, not a default flip. New
   `semantic_category.py` + dispatcher wired through `JudgeAgent`/container; new harness + dataset
   builder + unit tests. Full unit suite (1237) + report-pipeline integration pass; ruff/mypy clean.
+- **2026-06-02 hint ablation (LLM-in-the-loop).** Closed the §1.7 deferral with a paired ON/OFF
+  judge ablation (live Qwen3.6-35B, temp=0, 17 hint-present families; checkpointed/resumable run,
+  paused+resumed across a day). Finding (§1.7.1): the hint's effect is **completion, not mapping
+  accuracy** — without it the judge hits the 600 s timeout and falls back to an empty bundle 6/17
+  vs 1/17 with it, roughly doubling objects/attack-patterns/relationships; exact-F1 delta +0.029
+  (95% CI [-0.001, +0.072], crosses 0). An operational, timeout-mediated benefit specific to the
+  slow local model — reaffirms the keyword default and that §7.1 schema-pruning earns its place.
+  New harness `tests/evaluation/eval_hint_ablation.py`.
 - **2026-06-01 output quality.** Added §1.6: a deterministic STIX integrity pass
   (`enforce_bundle_integrity` — empty-pattern drop, AP/indicator dedup, dangling-ref + duplicate
   relationship sweep, object_refs trim) applied in judge_postprocess and the extended renderer,
