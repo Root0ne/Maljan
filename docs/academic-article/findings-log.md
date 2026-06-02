@@ -693,9 +693,13 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   `data/sigma_rules/macos/` corpus (69 rules — filtered out for every reachable sample, so zero
   detection-quality change). Deliberately KEPT (functional match-targets / measurement data, removing
   them would change behavior): the FP-filter vocabularies (`_PLATFORM_INCOMPATIBLE_TERMS` macos/azure,
-  URL_DENY_HOSTS `*.android.com`, `apple.com` benign-domain allowlist, the APK/.dex DOMAIN denylist)
-  and the TRAM2/ATT&CK evaluation ground-truth about macOS/cloud malware. `data/sigma_rules/cloud/`
-  left pending an explicit user call. 1244 unit + report-pipeline tests pass; ruff/mypy clean; web tsc 0.
+  URL_DENY_HOSTS `*.android.com`, `apple.com`/`cloudflare.com`/`icloud.com` benign-domain allowlist,
+  the APK/.dex DOMAIN denylist), the `T1078.004 Cloud Accounts` Enterprise ATT&CK technique label, the
+  Triage public-cloud submission service, the CSS system-font-stack (`-apple-system`/`Segoe UI`/`Roboto`
+  — browser rendering, not malware-OS), and the TRAM2/ATT&CK evaluation ground-truth about macOS/cloud
+  malware. Also deleted `data/sigma_rules/cloud/` (226 rules) and the dead `_CLOUD_PRODUCTS` compat
+  branch (cloud was an unreachable sample platform → always dropped, so zero detection-quality change).
+  1243 unit + report-pipeline tests pass; ruff/mypy clean; web tsc 0.
 - **2026-06-03 reject non-Win/Linux at entry.** Closed the last live remnant (Triage
   `_EXT_TO_OS_TAG` still routed `.apk/.dex`→Android, `.dmg/...`→macOS). Added
   `UnsupportedSampleError` + `sample_identity.unsupported_os_reason` (magic-byte-first foreign

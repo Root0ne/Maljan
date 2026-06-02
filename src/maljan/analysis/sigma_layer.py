@@ -234,27 +234,6 @@ def _classify_log_source(log_source: str, product: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-# Cloud-y / SaaS Sigma products. Their rules only fire meaningfully on
-# cloud signin / audit logs; on binary samples they produce vacuous-truth
-# matches via negation-only conditions (the T1078.004 / T1110 zararli.apk
-# FP). For binary-sample analysis we drop them entirely until a cloud-log
-# analyst layer ships.
-_CLOUD_PRODUCTS = frozenset(
-    {
-        "azure",
-        "aws",
-        "gcp",
-        "m365",
-        "okta",
-        "google_workspace",
-        "googleworkspace",
-        "kubernetes",
-        "onelogin",
-        "bitbucket",
-        "github",
-    }
-)
-
 # Network-log products: same story — they expect Zeek/Suricata-style
 # structured events, not text scans of analyst report blobs.
 _NETWORK_LOG_PRODUCTS = frozenset(
@@ -300,9 +279,9 @@ def _is_rule_compatible(rule_product: str | None, sample_platform: str | None) -
       1. rule_product empty → generic; compatible with every sample.
       2. rule_product in network-log set → drop (no network-log layer
          today).
-      3. rule_product in cloud set → keep only when sample is cloud.
-      4. rule_product in OS set → keep only when sample matches.
-      5. anything else (unmapped product) → drop conservatively.
+      3. rule_product in OS set → keep only when sample matches.
+      4. anything else (unmapped product — incl. cloud/SaaS/macOS rules) →
+         drop conservatively. OS-support scope is Windows + Linux only.
     """
     product = _normalise_product(rule_product)
     if sample_platform is None:
@@ -314,8 +293,6 @@ def _is_rule_compatible(rule_product: str | None, sample_platform: str | None) -
     sp = sample_platform.strip().lower()
     if sp == "" or sp == "unknown":
         return False  # explicit unknown → drop non-generic rules
-    if product in _CLOUD_PRODUCTS:
-        return sp == "cloud"
     if product in _OS_PRODUCTS:
         return product == sp
     return False

@@ -281,13 +281,12 @@ class TestPlatformCompatibility:
         assert _is_rule_compatible("macos", "linux") is False
         assert _is_rule_compatible("macos", "windows") is False
 
-    def test_cloud_rule_dropped_for_binary(self) -> None:
-        # T1078.004 Cloud Accounts azure/aws/gcp rules on a PE / ELF sample.
+    def test_cloud_rule_dropped_for_supported_sample(self) -> None:
+        # Cloud/SaaS products are out of scope (Win/Linux only) — an azure/aws/gcp
+        # rule is an unmapped product and dropped for every supported sample.
         assert _is_rule_compatible("aws", "windows") is False
         assert _is_rule_compatible("gcp", "linux") is False
-
-    def test_cloud_rule_kept_for_cloud_sample(self) -> None:
-        assert _is_rule_compatible("azure", "cloud") is True
+        assert _is_rule_compatible("azure", "windows") is False
 
     def test_network_log_product_always_dropped(self) -> None:
         # T1095 DNS Z Flag (zeek product) — no network-log layer yet.
