@@ -422,29 +422,6 @@ class TTPCascadeEngine:
 # ---------------------------------------------------------------------------
 
 
-# Mobile Enterprise overlap: Enterprise ATT&CK technique IDs whose
-# conceptual coverage extends to mobile platforms (Android / iOS) even
-# though MITRE Enterprise's ``x_mitre_platforms`` doesn't list them.
-# Used as path 2 (analyst LLM claim with no rule_platforms) for mobile
-# samples. The set is intentionally small and curated — defense evasion,
-# obfuscation, masquerading, sandbox checks.
-MOBILE_ENTERPRISE_OVERLAP: frozenset[str] = frozenset(
-    {
-        "T1497",  # Virtualization/Sandbox Evasion
-        "T1497.001",  # System Checks
-        "T1497.002",  # User Activity Based Checks
-        "T1497.003",  # Time Based Evasion
-        "T1027",  # Obfuscated Files or Information
-        "T1027.002",  # Software Packing
-        "T1622",  # Debugger Evasion
-        "T1055",  # Process Injection (rare on Android via Frida but possible)
-        "T1036",  # Masquerading
-        "T1486",  # Data Encrypted for Impact (Android ransomware)
-        "T1071.001",  # Application Layer Protocol: Web (cross-platform C2)
-    }
-)
-
-
 def _is_claim_platform_compatible(
     claim_platforms: list[str] | None,
     sample_platform: str | None,
@@ -461,8 +438,7 @@ def _is_claim_platform_compatible(
          keep iff ``"any" in claim_platforms`` or the sample's platform
          is in the list.
       4. No ``claim_platforms`` (analyst LLM claim or legacy rule):
-         consult the MITRE catalog. For mobile samples, also keep
-         techniques in ``MOBILE_ENTERPRISE_OVERLAP``.
+         consult the MITRE catalog (Windows / Linux).
     """
     if sample_platform is None:
         return True
@@ -490,30 +466,14 @@ def _is_claim_platform_compatible(
     if any(p in catalog_platforms for p in mitre_sp):
         return True
 
-    # Mobile-Enterprise overlap fallback.
-    if sp in ("android", "ios") and technique_id in MOBILE_ENTERPRISE_OVERLAP:
-        return True
-
     return False
 
 
 # Map our canonical Platform taxonomy to MITRE's x_mitre_platforms strings.
+# OS-support scope (2026-06-02): Windows + Linux only.
 _MITRE_PLATFORM_MAP: dict[str, tuple[str, ...]] = {
     "windows": ("Windows",),
     "linux": ("Linux",),
-    "macos": ("macOS",),
-    "android": ("Android",),
-    "ios": ("iOS",),
-    "cloud": (
-        "IaaS",
-        "SaaS",
-        "Office 365",
-        "Azure AD",
-        "Google Workspace",
-        "Identity Provider",
-        "Containers",
-    ),
-    "crossplatform": ("Windows", "Linux", "macOS"),
 }
 
 

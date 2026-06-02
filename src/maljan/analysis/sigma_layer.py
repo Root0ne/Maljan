@@ -271,7 +271,8 @@ _NETWORK_LOG_PRODUCTS = frozenset(
 )
 
 # Direct one-to-one match with our canonical SampleIdentity.platform values.
-_OS_PRODUCTS = frozenset({"windows", "linux", "macos", "android", "ios"})
+# OS-support scope (2026-06-02): Windows + Linux only.
+_OS_PRODUCTS = frozenset({"windows", "linux"})
 
 
 def _normalise_product(product: str | None) -> str:

@@ -65,7 +65,9 @@ _SIGNATURE_HINTS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-_NON_WINDOWS_PLATFORMS: frozenset[str] = frozenset({"linux", "android", "macos", "darwin", "ios"})
+# OS-support scope (2026-06-02): Windows + Linux only; "linux" is the sole
+# non-Windows platform that gates off the Windows registry/service/task scan.
+_NON_WINDOWS_PLATFORMS: frozenset[str] = frozenset({"linux"})
 
 
 def build_persistence_list(

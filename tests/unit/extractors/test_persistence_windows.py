@@ -45,11 +45,6 @@ def test_registry_run_suppressed_on_linux() -> None:
     assert not any(m.kind == "registry_run" for m in out)
 
 
-def test_registry_run_suppressed_on_android() -> None:
-    out = build_persistence_list(_windows_registry_run_report(), sample_platform="android")
-    assert out == []
-
-
 def test_linux_path_suppressed_on_windows() -> None:
     # Symmetric gate: Linux persistence scanner skipped on a Windows sample.
     report = {"behavior": {"summary": {"files": ["/etc/systemd/system/mal.service"]}}}

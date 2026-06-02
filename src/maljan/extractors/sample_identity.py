@@ -100,22 +100,17 @@ def _infer_platform(
 
     Strategy: file_type FIRST (magic-byte-derived, deterministic), then a
     best-effort sandbox-hint fallback when file_type didn't disambiguate.
-    A misrouted sandbox (e.g. APK accidentally run in a Windows profile)
-    therefore can't poison the inference — magic bytes win.
+    A misrouted sandbox therefore can't poison the inference — magic bytes win.
+
+    OS-support scope (2026-06-02): only ``windows`` and ``linux`` are recognized;
+    every other target (Mach-O, APK/DEX, IPA, jar, cloud) resolves to
+    ``unknown`` — the pipeline does not support those platforms.
     """
     ft = (file_type or "").lower()
     if ft == "pe":
         return "windows"
     if ft == "elf":
         return "linux"
-    if ft == "mach-o":
-        return "macos"
-    if ft == "zip/apk":
-        return "android"
-    if ft == "zip/ipa":
-        return "ios"
-    if ft == "zip/jar":
-        return "crossplatform"
 
     # Sandbox fallback when file_type is "unknown" or generic "zip".
     target = (sandbox_report or {}).get("target", {})
@@ -123,23 +118,13 @@ def _infer_platform(
         sandbox_os = str(target.get("os") or target.get("platform") or "").lower()
         if "windows" in sandbox_os or sandbox_os.startswith("win"):
             return "windows"
-        if "android" in sandbox_os:
-            return "android"
         if "linux" in sandbox_os or "ubuntu" in sandbox_os or "debian" in sandbox_os:
             return "linux"
-        if "macos" in sandbox_os or "osx" in sandbox_os or "darwin" in sandbox_os:
-            return "macos"
-        if "ios" in sandbox_os and "rios" not in sandbox_os:  # avoid matching "armios"
-            return "ios"
 
     # MIME hint as last resort.
     mime = (mime_type or "").lower()
-    if "android" in mime:
-        return "android"
     if "msdownload" in mime or "x-msdos-program" in mime:
         return "windows"
-    if "x-mach-binary" in mime:
-        return "macos"
 
     return "unknown"
 

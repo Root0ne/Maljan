@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
-import { classifyMatrix, resolveMobileTactic } from "@/lib/mitre-mobile";
 
 /* Canonical MITRE Enterprise tactic catalogue in kill-chain (matrix) column
    order, with display names. TA0005 (Defense Evasion / Stealth in ATT&CK v19)
    and TA0112 (Defense Impairment, added in v19) are both listed so the columns
    stay matrix-accurate as the bundle updates.
+
+   OS-support scope (2026-06-02): the pipeline supports Windows + Linux only, so
+   the capabilities view renders the Enterprise matrix exclusively (Mobile / ICS
+   matrices were removed alongside the Android/macOS taxonomy).
 
    NOTE: this is the interim STATIC catalogue. The MITRE auto-update work
    (runtime-refreshed STIX bundle + dynamic taxonomy) replaces it with the live
@@ -40,8 +43,8 @@ const ENTERPRISE_ORDER_BY_ID: Record<string, number> = Object.fromEntries(
   ENTERPRISE_TACTICS.map((t, i) => [t.id, i]),
 );
 
-// Sort key: canonical Enterprise order first, then any other matrix (Mobile /
-// ICS) after Enterprise by numeric TA-id so columns stay deterministic.
+// Sort key: canonical Enterprise order first, then any unrecognized tactic id
+// after Enterprise by numeric TA-id so columns stay deterministic.
 function tacticOrder(id: string): number {
   if (id in ENTERPRISE_ORDER_BY_ID) return ENTERPRISE_ORDER_BY_ID[id];
   const n = parseInt(id.replace(/\D/g, ""), 10);
@@ -60,7 +63,6 @@ interface Tactic {
   name: string;
   technique_count: number;
   techniques: Technique[];
-  matrix: "enterprise" | "mobile" | "ics" | "unknown";
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -81,22 +83,11 @@ function parseTechniques(raw: unknown[]): Tactic[] {
 
     const techId = String(t.technique_id ?? t.id ?? "");
     const techName = String(t.technique_name ?? t.name ?? techId);
-    let tacticId = String(t.tactic_id ?? t.tactic ?? "TA0000");
+    const tacticId = String(t.tactic_id ?? t.tactic ?? "TA0000");
     let tacticName = String(t.tactic_name ?? "");
     const sources = Array.isArray(t.sources) ? (t.sources as string[]) : [];
     const matches = Number(t.matches ?? t.match_count ?? 1);
 
-    const matrix = classifyMatrix(techId);
-    // Mobile ATT&CK fallback: the cascade / sandbox-CTI sources frequently
-    // leave the tactic blank for Mobile techniques — resolve from the parent
-    // technique ID against the curated Mobile map.
-    if (!tacticId || tacticId === "TA0000" || tacticName === "" || tacticName === "Unknown Tactic") {
-      const mobile = resolveMobileTactic(techId);
-      if (mobile) {
-        tacticId = mobile.id;
-        tacticName = mobile.name;
-      }
-    }
     // Enterprise display name from the canonical catalogue when the mapping
     // only carried the TA-id (TTPMapping has no tactic_name field, so columns
     // would otherwise read "TA0005" instead of "Defense Evasion").
@@ -111,7 +102,6 @@ function parseTechniques(raw: unknown[]): Tactic[] {
         name: tacticName,
         technique_count: 0,
         techniques: [],
-        matrix,
       });
     }
 
@@ -133,9 +123,6 @@ export default function AttackTab() {
   const { report, job, loading } = useReport();
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
-  const [activeMatrix, setActiveMatrix] = useState<"enterprise" | "mobile" | "ics">(
-    "enterprise",
-  );
 
   // Prefer ttp_mappings from the cached MalwareReport; fall back to the /mitre
   // endpoint only for legacy rows that predate the rich report payload.
@@ -169,26 +156,8 @@ export default function AttackTab() {
     : []);
   const tactics = parseTechniques(rawTechniques);
 
-  // Split by matrix so Enterprise / Mobile / ICS are distinct views (matching
-  // the official ATT&CK site, which keeps one matrix per domain).
-  const tacticsByMatrix = {
-    enterprise: tactics.filter((t) => t.matrix === "enterprise" || t.matrix === "unknown"),
-    mobile: tactics.filter((t) => t.matrix === "mobile"),
-    ics: tactics.filter((t) => t.matrix === "ics"),
-  };
-  const matrixOrder = ["enterprise", "mobile", "ics"] as const;
-  const effectiveMatrix =
-    tacticsByMatrix[activeMatrix].length > 0
-      ? activeMatrix
-      : matrixOrder.find((m) => tacticsByMatrix[m].length > 0) ?? activeMatrix;
-  // Columns in canonical matrix order.
-  const activeTactics = [...tacticsByMatrix[effectiveMatrix]].sort(
-    (a, b) => tacticOrder(a.id) - tacticOrder(b.id),
-  );
-
-  const totalEnterprise = tacticsByMatrix.enterprise.reduce((s, t) => s + t.techniques.length, 0);
-  const totalMobile = tacticsByMatrix.mobile.reduce((s, t) => s + t.techniques.length, 0);
-  const totalICS = tacticsByMatrix.ics.reduce((s, t) => s + t.techniques.length, 0);
+  // Columns in canonical Enterprise matrix order.
+  const activeTactics = [...tactics].sort((a, b) => tacticOrder(a.id) - tacticOrder(b.id));
 
   const filteredTactics = activeTactics
     .map((tactic) => ({
@@ -214,40 +183,15 @@ export default function AttackTab() {
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-          MITRE ATT&amp;CK Matrix
+          MITRE ATT&amp;CK Matrix (Enterprise)
         </h2>
-        <div className="flex items-center gap-3">
-          <div className="flex border border-border rounded overflow-hidden">
-            {(
-              [
-                ["enterprise", "Enterprise", totalEnterprise],
-                ["mobile", "Mobile", totalMobile],
-                ["ics", "ICS", totalICS],
-              ] as const
-            )
-              .filter(([, , count]) => count > 0)
-              .map(([key, label, count], i, arr) => (
-                <button
-                  key={key}
-                  onClick={() => setActiveMatrix(key)}
-                  className={`px-3 py-1.5 text-xs ${
-                    effectiveMatrix === key
-                      ? "bg-bg-active text-text-primary"
-                      : "bg-bg-surface text-text-secondary hover:text-text-primary"
-                  } ${i < arr.length - 1 ? "border-r border-border" : ""}`}
-                >
-                  {label} ({count})
-                </button>
-              ))}
-          </div>
-          <input
-            type="text"
-            placeholder="Search for technique or subtechnique"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-7 px-3 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none w-64"
-          />
-        </div>
+        <input
+          type="text"
+          placeholder="Search for technique or subtechnique"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-7 px-3 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none w-64"
+        />
       </div>
 
       <div className="p-4">

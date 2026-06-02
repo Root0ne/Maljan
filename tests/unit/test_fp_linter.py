@@ -62,7 +62,7 @@ class TestRuleC2:
                 _ns(action="Block PowerShell (T1059.001)", rationale="x", category="y"),
             ],
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         c2 = [w for w in warns if w.rule == "C2"]
         assert len(c2) == 1
         assert "T1059.001" in c2[0].message
@@ -74,7 +74,7 @@ class TestRuleC2:
                 _ns(action="Anti-emulation telemetry (T1497)", rationale="r", category="c"),
             ],
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         assert not any(w.rule == "C2" for w in warns)
 
 
@@ -84,19 +84,21 @@ class TestRuleC2:
 
 
 class TestRuleC3:
-    def test_apk_with_powershell_mention(self) -> None:
+    def test_linux_with_powershell_mention(self) -> None:
+        # PowerShell is implausible on a Linux sample -> C3.
         report = _stub_report(
             executive_summary="The sample uses powershell to escalate privileges.",
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         rules = {w.rule for w in warns}
         assert "C3" in rules
 
-    def test_apk_with_rdp_mention(self) -> None:
+    def test_linux_with_azure_mention(self) -> None:
+        # Cloud (Azure) concepts are implausible on a Linux endpoint sample -> C3.
         report = _stub_report(
-            executive_summary="Establishes RDP session to attacker.",
+            executive_summary="Authenticates to Azure to exfiltrate data.",
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         assert any(w.rule == "C3" for w in warns)
 
     def test_windows_with_powershell_mention_not_flagged(self) -> None:
@@ -117,13 +119,13 @@ class TestRuleC4:
         # 11 file:name indicators (cap is 10).
         objs = [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(11)]
         report = _stub_report(stix_bundle_extended={"objects": objs})
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         assert any(w.rule == "C4" for w in warns)
 
     def test_at_threshold_not_flagged(self) -> None:
         objs = [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(10)]
         report = _stub_report(stix_bundle_extended={"objects": objs})
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         assert not any(w.rule == "C4" for w in warns)
 
 
@@ -137,7 +139,7 @@ class TestRuleC5:
         report = _stub_report(
             attribution=_ns(family="rat", family_grounded=False),
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         c5 = [w for w in warns if w.rule == "C5"]
         assert len(c5) == 1
         assert "rat" in c5[0].message
@@ -146,14 +148,14 @@ class TestRuleC5:
         report = _stub_report(
             attribution=_ns(family="emotet", family_grounded=True),
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         assert not any(w.rule == "C5" for w in warns)
 
     def test_no_family_no_warning(self) -> None:
         report = _stub_report(
             attribution=_ns(family=None, family_grounded=True),
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         assert not any(w.rule == "C5" for w in warns)
 
 
@@ -172,7 +174,7 @@ class TestExplanationField:
                 _ns(action="Block PowerShell (T1059.001)", rationale="x", category="y"),
             ],
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         c2 = [w for w in warns if w.rule == "C2"]
         assert c2 and all(w.explanation for w in c2)
 
@@ -180,20 +182,20 @@ class TestExplanationField:
         report = _stub_report(
             executive_summary="The sample uses powershell to escalate.",
         )
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         c3 = [w for w in warns if w.rule == "C3"]
         assert c3 and all(w.explanation for w in c3)
 
     def test_c4_includes_explanation(self) -> None:
         objs = [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(11)]
         report = _stub_report(stix_bundle_extended={"objects": objs})
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         c4 = [w for w in warns if w.rule == "C4"]
         assert c4 and all(w.explanation for w in c4)
 
     def test_c5_includes_explanation(self) -> None:
         report = _stub_report(attribution=_ns(family="rat", family_grounded=False))
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         c5 = [w for w in warns if w.rule == "C5"]
         assert len(c5) == 1
         assert c5[0].explanation
@@ -216,7 +218,7 @@ class TestRuleC4Total:
         ]
         objs += [{"type": "indicator", "pattern": f"[file:name = 'p{i}.exe']"} for i in range(10)]
         report = _stub_report(stix_bundle_extended={"objects": objs})
-        warns = lint_report(report, "android")
+        warns = lint_report(report, "linux")
         # Expect a C4 with the "total" wording (and the file:name C4 may also fire at >10).
         total_msgs = [w for w in warns if w.rule == "C4" and "total" in w.message]
         assert total_msgs, "expected total-indicator C4 warning"

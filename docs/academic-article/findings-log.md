@@ -375,6 +375,30 @@ positioning.
   a core OpenAI param ik_llama honors (unlike the silently-ignored `repetition_penalty`, §3.3). Full
   unit suite (1227) green; ruff/mypy clean.
 
+### 1.8 OS-support scope: Windows + Linux only — `IMPLEMENTED` (deliberate narrowing)
+- **Decision.** The pipeline officially supports **Windows and Linux** samples only. Driver: the
+  dynamic sandbox (CAPEv2) produces reports for Windows (flagship, full API-hook/payload/config
+  extraction) and Linux (supported); it has **no Android** support (Android dynamic analysis in the
+  Cuckoo lineage was the separate, abandoned CuckooDroid) and only legacy/limited macOS. The earlier
+  multi-platform taxonomy (macOS/Android/iOS/cloud/crossplatform) + Mobile ATT&CK frontend was
+  speculative breadth with no end-to-end data source behind it.
+- **What changed.** Backend: `reporting.models.Platform` Literal → `{windows, linux, unknown}`;
+  `sample_identity._infer_platform` maps Mach-O/APK/IPA/jar and macOS/Android/iOS sandbox+MIME hints
+  to `unknown`; `ttp_cascade._MITRE_PLATFORM_MAP` → Windows/Linux only and `MOBILE_ENTERPRISE_OVERLAP`
+  (+ its android/ios fallback) removed; `fp_linter._PLATFORM_INCOMPATIBLE_TERMS`, `sigma._OS_PRODUCTS`,
+  and `persistence._NON_WINDOWS_PLATFORMS` trimmed to Windows/Linux. Frontend: deleted
+  `lib/mitre-mobile.ts`, collapsed the capabilities Mobile/Enterprise/ICS matrix selector to
+  **Enterprise-only**, narrowed the `SamplePlatform` TS type.
+- **Deliberately kept.** The Android *false-positive* denylists (`ANDROID_CLASS_REF_RE`,
+  `_indicator_denylists`, the STIX-renderer noise filter) stay — they suppress garbage indicators when
+  a sample *contains* Android-ish strings (NDK paths, JVM class refs); they are defensive FP hygiene,
+  not OS support, and removing them would regress the §1.6/§2.4 indicator quality.
+- **Consequence.** The previously-deferred "Android persistence (manifest/receiver) parser" backlog
+  item is **dropped** — there is no Android data source in scope.
+- **Verification.** `mypy` clean (99 source files); 1226 unit tests pass (platform tests updated:
+  non-Win/Linux file types → `unknown`, obsolete android-gating test removed, fp-linter C3 cases
+  re-pointed to Linux); web `tsc --noEmit` clean + ESLint 0 errors.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -640,6 +664,13 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   (default 8192) wired in `container.get_judge_llm()` — bounds a runaway verdict to ~205 s at
   ~40 tok/s. Verified non-truncating (MiniDuke/Emotet reproduce obj=13/ap=4 capped). Worst-case-latency
   guard, not a quality fix. 1227 unit tests green; ruff/mypy clean.
+- **2026-06-02 OS-scope = Win+Linux.** Established that CAPEv2 supports only Windows + Linux guests
+  (no Android — that was CuckooDroid; macOS legacy). Narrowed the whole platform surface to match
+  (§1.8): `Platform` Literal + `_infer_platform` + `_MITRE_PLATFORM_MAP` + fp_linter/sigma/persistence
+  gating → Windows/Linux/unknown; removed `MOBILE_ENTERPRISE_OVERLAP`; deleted the frontend Mobile
+  ATT&CK matrix (`mitre-mobile.ts`, capabilities → Enterprise-only) and narrowed the `SamplePlatform`
+  TS type. Kept the Android FP-denylists (defensive, not OS support). Dropped the Android-persistence
+  backlog item. mypy clean (99 files); 1226 unit tests pass; web tsc clean + ESLint 0 errors.
 - **2026-06-01 output quality.** Added §1.6: a deterministic STIX integrity pass
   (`enforce_bundle_integrity` — empty-pattern drop, AP/indicator dedup, dangling-ref + duplicate
   relationship sweep, object_refs trim) applied in judge_postprocess and the extended renderer,

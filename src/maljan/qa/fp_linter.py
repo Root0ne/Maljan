@@ -64,11 +64,10 @@ class FPWarning:
 # Heuristic: only flag executive-summary mentions of these concepts on
 # samples that genuinely can't host them. Per-platform dicts so a
 # Windows sample's exec summary mentioning PowerShell stays unflagged.
+# OS-support scope (2026-06-02): Windows + Linux only. The values still name
+# foreign-platform concepts (macOS / cloud) as implausible-on-this-sample terms.
 _PLATFORM_INCOMPATIBLE_TERMS: dict[str, frozenset[str]] = {
-    "android": frozenset({"powershell", "rdp", "raw disk", "macos", "cloud auth", "azure"}),
-    "ios": frozenset({"powershell", "rdp", "raw disk", "macos", "cloud auth", "azure"}),
     "linux": frozenset({"powershell", "macos", "cloud auth", "azure"}),
-    "macos": frozenset({"powershell", "rdp", "cloud auth", "azure"}),
     "windows": frozenset({"macos", "cloud auth", "azure"}),
 }
 

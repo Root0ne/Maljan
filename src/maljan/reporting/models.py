@@ -84,14 +84,13 @@ class SignatureInfo(BaseModel):
 # is for samples that don't bind to one OS (e.g. JAR). "unknown" is
 # the conservative default when magic bytes don't identify the format
 # and the sandbox couldn't disambiguate either.
+# OS-support scope (2026-06-02): the pipeline supports Windows and Linux only —
+# the CAPEv2 sandbox produces dynamic reports for those two guests, and the
+# ATT&CK mapping / static identity layers were narrowed to match. Non-Win/Linux
+# samples resolve to "unknown" (no macOS/Android/iOS/cloud taxonomy).
 Platform = Literal[
     "windows",
-    "android",
     "linux",
-    "macos",
-    "ios",
-    "cloud",
-    "crossplatform",
     "unknown",
 ]
 
