@@ -582,6 +582,28 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   intervals. We surface this as a cautionary methodology result for LLM-for-malware
   evaluation — easy to get wrong, and wrong in a way that silently inverts rankings.
 
+### 3.5 MaLAware-style narrative-quality harness — `IMPLEMENTED`
+- **Question.** MaLAware [4] scores LLM-generated malware narratives and argues small
+  local models suffice for the narration task. Does Maljan's NarrativeAgent produce a
+  *faithful* narrative, and does it beat the deterministic fallback template?
+- **Method.** `tests/evaluation/eval_narrative_quality.py` — a paired A/B harness built
+  to the §3.4 bar. Each fixture family (rat/ransomware/dropper/worm/infostealer) becomes
+  a **fixed evidence bundle** (a synthesized `MalwareReport` whose `ttp_mappings` carry the
+  fixture's technique ids); both arms narrate the *same* bundle. **LLM arm** =
+  `NarrativeAgent.generate` (repeated K× for N≫1 + decoding-variance CI, pinned `max_tokens`
+  budget); **fallback arm** = `apply_fallback_narrative` (deterministic).
+- **Quality, operationalised without human reference prose** (the repo vendors only
+  technique-id ground truth, not narratives): **grounding precision** (cited techniques
+  present in the evidence — the prompt's "do not invent" rule), **coverage recall**
+  (evidence techniques surfaced), **structural compliance** (length / paragraph count /
+  parenthesised-ID format), and **fp_linter clean-rate** (no C2 recommendation-cites-absent
+  -technique / C3 exec-summary platform mismatch). Reported as mean ± 95% bootstrap CI;
+  the paired LLM−fallback F1 delta gets a bootstrap CI + sign test. All scoring is
+  deterministic and CI-covered by `tests/evaluation/test_narrative_quality_scoring.py`
+  (no live LLM); the LLM arm runs against a llama-server.
+- **Status.** Harness + scoring unit tests shipped; the live-LLM numbers are produced by
+  running it (`--smoke` for a single end-to-end sample).
+
 ---
 
 ## 4. Open threads / planned experiments
@@ -594,8 +616,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   backends on the TRAM2 eval (semantic-grade ranking + the cleanest gate).
 - `HYPOTHESIS` Config-gated view-decomposition pilot with **parallel** view calls; a
   lighter 2-view variant (behaviour vs artifacts) to trade completeness for cost.
-- `HYPOTHESIS` Adopt a MaLAware-style [4] multi-metric narrative-quality evaluation
-  harness for the report/NarrativeAgent.
+- `DONE` (§3.5) Adopted a MaLAware-style [4] multi-metric narrative-quality evaluation
+  harness for the report/NarrativeAgent (`tests/evaluation/eval_narrative_quality.py`).
+  Next: run it against the local llama-server to report the LLM-vs-fallback paired deltas.
 - Leads to evaluate (likely high transfer — "LLM-as-analyst" paradigm):
   MARD (multi-agent, arXiv:2604.25264), TraceRAG (RAG + explainable, arXiv:2509.08865),
   LAMD (arXiv:2502.13055).
@@ -624,6 +647,18 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-03 MaLAware-style narrative-quality harness (§3.5, backlog item).** Shipped
+  `tests/evaluation/eval_narrative_quality.py` — a paired A/B (NarrativeAgent vs the
+  deterministic fallback template) built to the §3.4 methodology bar (forced output, N≫1
+  via K repeats, mean ± bootstrap CI, sign test). Since the repo vendors no human-written
+  reference prose, "quality" is operationalised as faithfulness (no invented techniques),
+  coverage, structural compliance, and fp_linter cleanliness — all deterministic, no new
+  dependency. Each fixture family becomes a fixed synthesized-evidence `MalwareReport` so
+  both arms narrate the same bundle. Eval-only: no production code touched. The pure scoring
+  core is CI-covered by `test_narrative_quality_scoring.py` (16 tests, no live LLM); the
+  live numbers come from running the harness against a llama-server. Flipped the standing
+  MaLAware `HYPOTHESIS` to `DONE`/`IMPLEMENTED`. 1262 unit + 16 eval-scoring tests pass;
+  ruff/mypy clean.
 - **2026-06-03 attribution consolidation + apps/api format alignment.** (i) **Refactor
   (behaviour-preserving):** family/threat-actor attribution grounding was a private
   method on the report builder (`MalwareReportBuilder._is_family_grounded`) with the
