@@ -55,6 +55,112 @@ def _extract_technique_ids(text: str) -> list[str]:
     return list(dict.fromkeys(t for t in candidates if _technique_id_is_valid(t)))
 
 
+# ---------------------------------------------------------------------------
+# View-decomposition (findings-log §3.6) — text-path only.
+# Each "view" is a focused sub-prompt over the SAME evidence (AppPoet-style),
+# not a content split. Views run concurrently and merge via merge_chunk_isrs.
+# ---------------------------------------------------------------------------
+
+# Generic, tools-free system prompt for a single view. Reproduces the analysts'
+# forced CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE format so _text_to_isr can parse it,
+# and carries the "cite an artifact, do not invent" rule the §3.2 study needs.
+_VIEW_SYSTEM = (
+    "You are an expert malware analyst examining one focused facet of a sample. "
+    "Analyse ONLY the aspect named in the instruction; ignore everything else. "
+    "For EVERY claim you MUST cite a concrete artifact (API/import, string, path, "
+    "registry key, host/domain). DO NOT invent capabilities or technique IDs — if "
+    "the evidence does not support a claim, omit it. Cite MITRE ATT&CK technique "
+    "IDs in the form Txxxx or Txxxx.yyy only when the evidence supports them.\n"
+    "Return each finding as:\nCLAIM: <text>\nEVIDENCE: <artifact>\n"
+    "CONFIDENCE: <0.0-1.0>\nTECHNIQUE: <T-ID or NONE>\n---"
+)
+
+# Per-domain ordered facets. ``_view_specs`` returns the first N (N=2 -> the first
+# two; N=4 -> all four). Each entry: (key, focused instruction).
+_DOMAIN_FACETS: dict[str, list[tuple[str, str]]] = {
+    "static": [
+        (
+            "code",
+            "Focus only on executable behaviour: imported APIs, suspicious "
+            "call sequences, and control-flow (e.g. injection, native API use).",
+        ),
+        (
+            "artifacts",
+            "Focus only on static artifacts: hardcoded strings, embedded "
+            "resources, configuration blobs, and file/path indicators.",
+        ),
+        (
+            "crypto",
+            "Focus only on cryptography and obfuscation: crypto constants, "
+            "packing/entropy signs, and de/obfuscation routines.",
+        ),
+        (
+            "evasion",
+            "Focus only on anti-analysis and evasion: anti-debug, anti-VM, "
+            "timing checks, and sandbox-detection logic.",
+        ),
+    ],
+    "dynamic": [
+        (
+            "behaviour",
+            "Focus only on runtime behaviour: API call sequences, process "
+            "creation/injection, and command execution.",
+        ),
+        (
+            "artifacts",
+            "Focus only on dropped artifacts: files written, registry keys "
+            "set, mutexes, and configuration/IOCs.",
+        ),
+        (
+            "persistence",
+            "Focus only on persistence: autostart, services, scheduled "
+            "tasks, WMI, and COM/registry run keys.",
+        ),
+        (
+            "network",
+            "Focus only on network/C2 behaviour observed at runtime: "
+            "connections, beaconing, and exfiltration.",
+        ),
+    ],
+    "network": [
+        (
+            "dns",
+            "Focus only on DNS and beaconing: queries, DGA-like domains, and "
+            "periodic callback patterns.",
+        ),
+        (
+            "web",
+            "Focus only on HTTP/TLS: request patterns, headers, SNI, and certificate anomalies.",
+        ),
+        (
+            "tunnel",
+            "Focus only on tunneling and non-standard channels: unusual "
+            "ports, protocol mismatches, and covert transport.",
+        ),
+        (
+            "exfil",
+            "Focus only on exfiltration: large/odd outbound transfers and "
+            "data-staging destinations.",
+        ),
+    ],
+}
+
+
+def _view_specs(domain: str, n_views: int) -> list[tuple[str, str]]:
+    """Return ``n_views`` focused (key, instruction) facets for ``domain``.
+
+    Draws from the per-domain ordered facet list; for N beyond the table it
+    pads with generic numbered facets so the eval harness can try any N>=2.
+    """
+    facets = _DOMAIN_FACETS.get(domain, _DOMAIN_FACETS["static"])
+    if n_views <= len(facets):
+        return facets[:n_views]
+    out = list(facets)
+    for i in range(len(facets), n_views):
+        out.append((f"facet{i}", f"Focus only on analysis facet #{i + 1} of the evidence."))
+    return out
+
+
 # Strip control characters except whitespace (\t \n \r) before sending
 # untrusted data into a prompt. This neutralises common prompt-injection
 # tricks such as embedded ANSI escape sequences or rogue BOMs.
@@ -523,6 +629,114 @@ class BaseAnalyst(ABC):
             )
 
         return merge_chunk_isrs(chunk_isrs)
+
+    # ------------------------------------------------------------------
+    # View-decomposition (findings-log §3.6) — text path only
+    # ------------------------------------------------------------------
+
+    def _invoke_view(self, instruction: str, data: str, max_tokens: int | None) -> str:
+        """One tools-free, focused LLM call for a single view. Returns raw text.
+
+        ``max_tokens`` (the equal-budget per-view cap) is bound onto the model
+        when set; binding failures degrade to an unbound call so a provider that
+        rejects the kwarg never breaks the pilot.
+        """
+        from typing import Any
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        messages = [
+            SystemMessage(content=_VIEW_SYSTEM),
+            HumanMessage(content=f"{instruction}\n\n{data}"),
+        ]
+        # ``bind`` returns a Runnable, not a BaseChatModel; widen to Any so the
+        # equal-budget cap can be attached without a type clash.
+        llm: Any = self.llm
+        if max_tokens and max_tokens > 0:
+            try:
+                llm = self.llm.bind(max_tokens=max_tokens)
+            except Exception:  # noqa: BLE001 — provider may not accept the kwarg
+                llm = self.llm
+        return str(llm.invoke(messages).content)
+
+    def analyze_isr_views(
+        self,
+        data: str,
+        n_views: int,
+        *,
+        total_max_tokens: int | None = None,
+    ) -> AgentISR:
+        """View-decomposition: run ``n_views`` focused sub-prompts over the SAME
+        evidence concurrently, then merge the per-view ISRs.
+
+        Equal-budget (the control §3.2 lacked): each view is capped at
+        ``total_max_tokens // n_views`` so total generation budget matches the
+        monolithic arm. A view that errors is dropped (fault isolation), as in
+        ``safe_analyze_isr_chunked``. Tools-free text path only.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from maljan.analysis.chunk_merger import merge_chunk_isrs
+
+        if n_views < 2:
+            return self.analyze_isr(data)
+
+        domain = self._infer_domain()
+        specs = _view_specs(domain, n_views)
+        per_view_budget = (total_max_tokens // n_views) if total_max_tokens else None
+
+        view_isrs: list[AgentISR] = []
+        errors: list[str] = []
+
+        def _run(spec: tuple[str, str]) -> AgentISR:
+            text = self._invoke_view(spec[1], data, per_view_budget)
+            return self._text_to_isr(text, revision_round=0)
+
+        with ThreadPoolExecutor(max_workers=len(specs)) as pool:
+            futures = {pool.submit(_run, spec): spec[0] for spec in specs}
+            for fut in as_completed(futures):
+                key = futures[fut]
+                try:
+                    view_isrs.append(fut.result())
+                except Exception as exc:  # noqa: BLE001 — fault isolation
+                    errors.append(f"view '{key}': {exc}")
+                    self.logger.warning("View '%s' failed: %s.", key, exc)
+
+        if not view_isrs:
+            raise AnalystError(
+                f"{self.name} view-decomposition failed on all {n_views} views: {'; '.join(errors)}"
+            )
+        if errors:
+            self.logger.warning(
+                "%d/%d views failed for '%s'; merging %d successful view(s).",
+                len(errors),
+                n_views,
+                self.name,
+                len(view_isrs),
+            )
+        self.logger.info(
+            "View-decomposition: %d views -> merged ISR for agent='%s'.",
+            len(view_isrs),
+            self.name,
+        )
+        return merge_chunk_isrs(view_isrs)
+
+    def safe_analyze_isr_views(
+        self,
+        data: str,
+        n_views: int,
+        *,
+        total_max_tokens: int | None = None,
+    ) -> AgentISR:
+        """Wrapper around ``analyze_isr_views`` with truncation + error handling."""
+        try:
+            truncated = self._truncate_input(data)
+            return self.analyze_isr_views(truncated, n_views, total_max_tokens=total_max_tokens)
+        except AnalystError:
+            raise
+        except Exception as e:
+            self.logger.error("View-decomposition ISR analysis failed: %s", e)
+            raise AnalystError(f"{self.name} view-decomposition failed: {e}") from e
 
     def safe_revise_isr(
         self,

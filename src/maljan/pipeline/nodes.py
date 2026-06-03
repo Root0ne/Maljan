@@ -196,7 +196,19 @@ def make_analyst_node(
                 }
 
             if len(chunks) == 1:
-                isr = agent.safe_analyze_isr(chunks[0].content)
+                # View-decomposition pilot (findings-log §3.6): when enabled,
+                # split the single text bundle into N focused, equal-budget
+                # sub-prompts and merge. Default 0 keeps the monolithic path.
+                _views = int(getattr(container.config.llm, "view_decomposition_views", 0) or 0)
+                if _views >= 2:
+                    _budget = int(getattr(container.config.llm, "expert_max_tokens", 0) or 0)
+                    isr = agent.safe_analyze_isr_views(
+                        chunks[0].content,
+                        _views,
+                        total_max_tokens=_budget or None,
+                    )
+                else:
+                    isr = agent.safe_analyze_isr(chunks[0].content)
                 fallback_text = chunks[0].content
             else:
                 logger.info(

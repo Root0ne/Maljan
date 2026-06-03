@@ -604,6 +604,29 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - **Status.** Harness + scoring unit tests shipped; the live-LLM numbers are produced by
   running it (`--smoke` for a single end-to-end sample).
 
+### 3.6 View-decomposition — config-gated mechanism + a valid (equal-budget) study — `IMPLEMENTED`
+- **Question.** §3.2 left this `INCONCLUSIVE`: does splitting an analyst's evidence into N
+  focused views beat one monolithic prompt? The prior probe's apparent win was a budget
+  artifact (a 4-view run got ~5× the tokens) and it scored claim-count, not correctness.
+- **Mechanism (config-gated, off by default).** `LLMConfig.view_decomposition_views` (0 = the
+  current single monolithic call). When N>0, `BaseAnalyst.analyze_isr_views`
+  ([base_agent.py](../../src/maljan/agents/base_agent.py)) runs N focused, **tools-free**
+  sub-prompts over the *same* evidence concurrently (`ThreadPoolExecutor`), each capped at
+  `expert_max_tokens // N` so the **total generation budget equals the monolithic arm** — the
+  control §3.2 lacked — then merges per-view ISRs via the existing `merge_chunk_isrs`. A
+  derailed view is dropped (fault isolation). Text path only (the Ghidra/CAPE ReAct loop is
+  untouched); gated in `make_analyst_node` on the single-chunk path so the default leaves
+  today's behaviour byte-for-byte.
+- **Valid study.** `tests/evaluation/eval_view_decomposition.py` A/Bs monolithic vs 2-view vs
+  4-view at **equal total budget**, N≫1 repeats, scoring the **invalid technique-id rate**
+  (the §3.2 T1000 failure mode, via the production `ATTCKValidator`), grounding rate, and
+  claim-count **stability** (the budget-independent property §3.2 found defensible) — mean ±
+  bootstrap CI per arm. Pure scoring helpers are CI-covered
+  (`test_view_decomposition_scoring.py`); the mechanism is unit-tested
+  (`tests/unit/agents/test_view_decomposition.py`) without a live LLM.
+- **Status.** Mechanism + harness + unit tests shipped (off by default). The verdict on whether
+  decomposition helps at equal budget is produced by running the harness against a llama-server.
+
 ---
 
 ## 4. Open threads / planned experiments
@@ -614,8 +637,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - `DONE` (§1.5.1) Hybrid technique mapper — semantic embedding for *ranking* + TF-IDF for the
   *alignment gate*. Implemented (`HybridATTCKIndex`) and made the default; dominates both pure
   backends on the TRAM2 eval (semantic-grade ranking + the cleanest gate).
-- `HYPOTHESIS` Config-gated view-decomposition pilot with **parallel** view calls; a
-  lighter 2-view variant (behaviour vs artifacts) to trade completeness for cost.
+- `DONE` (§3.6) Config-gated view-decomposition pilot with **concurrent** view calls
+  (`LLMConfig.view_decomposition_views`, off by default) + an equal-budget A/B harness.
+  Next: run the harness against the llama-server to settle the §3.2 question.
 - `DONE` (§3.5) Adopted a MaLAware-style [4] multi-metric narrative-quality evaluation
   harness for the report/NarrativeAgent (`tests/evaluation/eval_narrative_quality.py`).
   Next: run it against the local llama-server to report the LLM-vs-fallback paired deltas.
@@ -647,6 +671,20 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-03 view-decomposition: config-gated mechanism + equal-budget A/B (§3.6, last
+  backlog item).** Settled the §3.2 `INCONCLUSIVE` properly. (i) **Mechanism:**
+  `LLMConfig.view_decomposition_views` (default 0 = unchanged) gates a new
+  `BaseAnalyst.analyze_isr_views` that runs N focused tools-free sub-prompts over the same
+  evidence concurrently (`ThreadPoolExecutor`), each capped at `expert_max_tokens // N` so the
+  total budget matches the monolithic arm — the control §3.2 lacked — merged via the existing
+  `merge_chunk_isrs`; a derailed view is dropped (fault isolation). Text path only; gated in
+  `make_analyst_node`, so the default leaves the analyst path byte-for-byte. (ii) **Valid
+  study:** `tests/evaluation/eval_view_decomposition.py` A/Bs monolithic vs 2/4-view at equal
+  total budget, N≫1, scoring invalid-technique-id rate (the §3.2 T1000 failure mode, via
+  `ATTCKValidator`), grounding, and claim-count stability — mean ± bootstrap CI. Unit-tested
+  without a live LLM (`tests/unit/agents/test_view_decomposition.py`,
+  `tests/evaluation/test_view_decomposition_scoring.py`). Flipped the §4 `HYPOTHESIS` to
+  `DONE`/`IMPLEMENTED` (§3.6). 1271 unit + 20 new tests pass; ruff/mypy clean.
 - **2026-06-03 MaLAware-style narrative-quality harness (§3.5, backlog item).** Shipped
   `tests/evaluation/eval_narrative_quality.py` — a paired A/B (NarrativeAgent vs the
   deterministic fallback template) built to the §3.4 methodology bar (forced output, N≫1

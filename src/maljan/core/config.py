@@ -129,6 +129,19 @@ class LLMConfig(BaseModel):
     # local llama.cpp / ollama deployments without ``--parallel N``.
     parallel_analysts: bool = True
 
+    # View-decomposition pilot (findings-log §3.6). 0 = off (today's single
+    # monolithic analyst call). N > 0 splits the analyst's text-evidence into N
+    # focused sub-prompts run concurrently and merged, each capped at
+    # ``expert_max_tokens // N`` so the total generation budget matches the
+    # monolithic arm (the equal-budget control §3.2 lacked). Text path only;
+    # the tool-using Ghidra/CAPE ReAct loop is unaffected. Stays off until the
+    # §3.6 eval justifies it. Set ``LLM__VIEW_DECOMPOSITION_VIEWS=2`` to pilot.
+    view_decomposition_views: int = 0
+
+    # Per-call output budget for the analyst LLM. Used to size the equal-budget
+    # split when ``view_decomposition_views > 0`` (0 = provider/server default).
+    expert_max_tokens: int = 0
+
     @property
     def expert_model(self) -> str:
         """Returns the expert model name for the currently selected provider."""
