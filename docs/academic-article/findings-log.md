@@ -684,11 +684,37 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   structured (`_parse_claim_blocks`) and text-fallback (`_text_to_isr`) claim shapes are gated.
   Config-gated `PreprocessingConfig.use_claim_consistency_gate` (off = every parsed claim kept);
   fail-safe (any gate error leaves the ISR untouched).
-- `PLANNED` (Item 5, MARD) Concept-drift eval across year-cohorts — **blocked on a dated
-  dataset**: current ground truth carries no first-seen/year signal (the ATT&CK loader even
-  ignores the bundle's `created`/`modified` dates). Needs a curated MalwareBazaar `first_seen`
-  manifest before the harness (`eval_temporal_drift.py`, per-cohort precision/recall/F1 +
-  bootstrap CI) is meaningful.
+- `IMPLEMENTED` (code) / `PENDING` (live numbers) (Item 5, MARD) Concept-drift eval across
+  first-seen year cohorts. The earlier data gate is now resolved end-to-end:
+  - **Dated-manifest collector** `tests/evaluation/collect_temporal_manifest.py` — pulls
+    metadata-only sample records (sha256 + `first_seen` + family + file_type) from MalwareBazaar
+    (`get_siginfo` per family, Auth-Key via `$MALWAREBAZAAR_AUTH_KEY`, or a local full-dump CSV),
+    filters to the Windows/Linux scope (§1.8), buckets by year, balance-samples each cohort, and
+    writes a manifest. Verified live: a 160-sample, 7-cohort (2020–2026) manifest was collected
+    (Emotet, CobaltStrike, AgentTesla, njRAT, RedLineStealer, …). No binaries are downloaded.
+  - **Drift harness** `tests/evaluation/eval_temporal_drift.py` — loads the manifest, resolves
+    each family to its in-repo ATT&CK ground-truth fixture
+    (`tests/evaluation/ground_truth/attck_malware/<slug>.json`, 700+ families, MITRE `uses`
+    relationships), runs the pipeline per present binary, and reports per-cohort precision /
+    recall / F1 (mean + 95% bootstrap CI via `TTPAccuracyMetrics`) plus the earliest→latest F1
+    drift delta. `--dry-run` validates the manifest/ground-truth wiring offline (verified: 149/160
+    samples resolve to ground truth; the 11 Formbook samples correctly flagged `no_ground_truth`).
+  - **Methodology caveat (recall ceiling -> read drift as a delta).** Family-level ATT&CK `uses`
+    sets are a *coarse* per-sample ground truth: a single Emotet binary need not exhibit all ~47
+    catalogued Emotet techniques, and a stripped/packed sample exposes fewer still — so absolute
+    recall carries a structural ceiling and precision some noise. This bias is, however,
+    **constant per family across years**, so the defensible reading is the *relative* drift —
+    the earliest->latest F1 **delta** within a family/cohort — not the absolute level. The
+    harness reports both; the paper claim rests on the delta.
+  - **Cohort balance.** `get_siginfo` returns "most recent N per family", so older years are
+    thin (the live manifest had 2021:7, 2022:3). For publishable CIs, balance via the CSV
+    full-dump (`--source csv`, full history, no rate limit) or collapse to era-buckets; n<~15
+    cohorts should be reported as indicative only.
+  - **Remaining (operator-side, not code):** download the binaries into `data/samples/<sha256>.<ext>`
+    (isolated env; `collect_temporal_manifest.py --download` automates this via MalwareBazaar
+    `get_file`) and run with a live llama-server. The harness scores whatever is present
+    (`--max-per-cohort N` for a cheap first pass) and reports the rest as `pending_binary` —
+    never silently dropped.
 
 ---
 
@@ -714,6 +740,20 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-04 concept-drift eval data engine + harness (Roadmap Item 5, MARD).** Resolved the
+  Item 5 data gate. New `tests/evaluation/collect_temporal_manifest.py`: a metadata-only dated
+  manifest collector (MalwareBazaar `get_siginfo` API with `$MALWAREBAZAAR_AUTH_KEY`, or a
+  local full-dump CSV; offline `--selftest`), scoping to Windows/Linux (§1.8), year-cohort
+  bucketing + deterministic balance-sampling. Verified live: 160 samples / 7 cohorts (2020–2026).
+  New `tests/evaluation/eval_temporal_drift.py`: loads the manifest, maps each MalwareBazaar
+  family to its in-repo ATT&CK ground-truth fixture (alias map + slug/CamelCase fallbacks), runs
+  the pipeline per present binary, and reports per-cohort precision/recall/F1 (`TTPAccuracyMetrics`
+  + deterministic bootstrap CI) and the earliest→latest drift delta; `--dry-run` proves the wiring
+  offline (149/160 ground-truth-resolved on the live manifest, 0 binaries present → all
+  `pending_binary`, nothing fabricated). New `tests/evaluation/test_temporal_drift_scoring.py`
+  (13 pure-function tests). No binaries committed; live drift numbers await operator-supplied
+  binaries + a live llama-server. Flipped §4 Item 5 to `IMPLEMENTED` (code) / `PENDING` (numbers).
+  ruff clean; 151 eval-scoring tests pass.
 - **2026-06-03 tier-wise reasoning + consistency gate (Roadmap Items 3 & 4, LAMD).**
   *Item 3:* `BaseAnalyst.analyze_isr_tiered` / `safe_analyze_isr_tiered` plus the
   `_TIER_SPECS` (facts → behaviour → ATT&CK semantics) ladder add LAMD-style **vertical**
