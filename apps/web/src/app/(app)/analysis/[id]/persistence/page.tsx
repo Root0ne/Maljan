@@ -9,6 +9,7 @@ const KIND_LABELS: Record<PersistenceKind, string> = {
   scheduled_task: "Scheduled Task",
   service: "Windows Service",
   wmi_subscription: "WMI Event Subscription",
+  com_hijacking: "COM Hijacking",
   startup_folder: "Startup Folder",
   dll_search_hijacking: "DLL Search Hijacking",
   driver: "Kernel Driver",
@@ -18,10 +19,12 @@ const KIND_LABELS: Record<PersistenceKind, string> = {
   winlogon_helper: "Winlogon Helper",
   // Linux (ELF) — Wave 9 (2026-05-29)
   systemd_service: "Systemd Service",
+  systemd_timer: "Systemd Timer",
   cron_job: "Cron Job",
   init_d: "init.d Script",
   rc_local: "rc.local Modification",
   ld_preload: "LD_PRELOAD Hijack",
+  xdg_autostart: "XDG Autostart",
   // Fallback
   other: "Other",
 };
@@ -31,6 +34,7 @@ const KIND_COLORS: Record<PersistenceKind, string> = {
   scheduled_task: "text-status-blue bg-status-blue/10",
   service: "text-status-red bg-status-red/10",
   wmi_subscription: "text-status-red bg-status-red/10",
+  com_hijacking: "text-status-red bg-status-red/10",
   startup_folder: "text-status-orange bg-status-orange/10",
   dll_search_hijacking: "text-status-red bg-status-red/10",
   driver: "text-status-red bg-status-red/10",
@@ -39,10 +43,12 @@ const KIND_COLORS: Record<PersistenceKind, string> = {
   lsa_provider: "text-status-red bg-status-red/10",
   winlogon_helper: "text-status-red bg-status-red/10",
   systemd_service: "text-status-red bg-status-red/10",
+  systemd_timer: "text-status-red bg-status-red/10",
   cron_job: "text-status-orange bg-status-orange/10",
   init_d: "text-status-red bg-status-red/10",
   rc_local: "text-status-red bg-status-red/10",
   ld_preload: "text-status-red bg-status-red/10",
+  xdg_autostart: "text-status-orange bg-status-orange/10",
   other: "text-text-secondary bg-bg-active",
 };
 

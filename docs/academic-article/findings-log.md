@@ -624,6 +624,43 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-03 deterministic technique surfacing (3 deferred follow-ups).** Addressed the items the
+  prior round deferred. (i) **DGA -> T1568.002**: a new `build_dga_isr` turns high-confidence DGA
+  domains into a deterministic ATT&CK claim (mirrors Sigma/YARA `to_isr`), injected in the judge node
+  before the cascade. Two-tier design: suspicion flag at 0.55, *technique claim* at a higher 0.65 bar;
+  confidence = `min(dga_score, 0.75)` so a lone heuristic can't drive the verdict (cascade boosts only
+  on cross-layer corroboration). Homographs deliberately not mapped (no clean enterprise technique).
+  (ii) **LOLBin -> T1218.010/.011/.005**: new `analysis/lolbin_layer.py` flags *suspicious* (not mere
+  presence) regsvr32/rundll32/mshta from `behavior.processes[].command_line` (squiblydoo `/i:`,
+  scriptlet, remote URL, script protocol, ordinal export, user-writable payload path); `domain="dynamic"`,
+  `rule_platforms=["windows"]` so the cascade drops them on Linux. This *reframed* the deferred
+  "COM-registration API scanner", which was **declined** — `CoCreateInstance`/`CoRegisterClassObject`
+  aren't in CAPE's parsed `behavior.calls` (no data); LOLBins are the COM-payload execution counterpart
+  to the existing T1546.015 persistence. (iii) **Legacy unify**: `NetworkParser._is_suspicious_dns`
+  (old `len>25` PoC) now delegates to the canonical `_assess_domain`, so the network-analyst LLM
+  prompt's `[Suspicious]` flags match the structured report. Both deterministic producers added to the
+  ATT&CK-autocorrect `skip_agents` (rule/heuristic-authoritative). 1264 unit + report-pipeline pass
+  (9 skipped); ruff/mypy clean (100 src files); fp_linter unaffected; web tsc 0.
+- **2026-06-03 DGA scoring + COM-hijacking persistence (2 backlog items).**
+  (i) Replaced the consonant-ratio `_looks_like_dga` with a deterministic composite
+  `_dga_score` (normalised Shannon entropy + common-bigram rarity + digit ratio / consonant-run /
+  legacy ratio; threshold 0.55, min label len 10 to avoid short-brand FPs). Verified separation:
+  random labels 0.88-0.91 vs dictionary-ish `salesforce`/`documentation`/`stackoverflow` 0.34-0.46.
+  Added IDN/punycode homograph detection (`_idn_assessment`: `xn--` decode + Latin/Cyrillic mixed-script
+  + confusable->ASCII brand skeleton; flags all-confusable brand spoofs but not legitimate single-script
+  IDNs). Both DGA and homograph checks scan *every* non-TLD label, so subdomain look-alikes
+  (`login.pаypal.com`) and DGAs under multi-level public suffixes (`*.co.uk`) are caught. New structured
+  `NetworkDomain` fields `dga_score`/`is_punycode`/
+  `homograph_target` (+ TS mirror). Fixed a real bug: `merge_sandbox_cti_network` overwrote the true
+  suspicion reason with `"From Triage SandboxCTI"` — now preserves the reason + scores via a single
+  `_DomainVerdict` source of truth (provenance kept as a `[Triage CTI]` suffix).
+  (ii) Added COM-hijacking persistence (MITRE T1546.015): `_scan_com_hijack_calls` flags
+  `CLSID\{guid}\InprocServer32`/`LocalServer32`/`TreatAs` registry writes, plus `com_hijack` signature
+  hints; new `com_hijacking` kind (Python Literal + TS `PersistenceKind` + persistence-page label/colour;
+  also fixed pre-existing TS drift — `systemd_timer`/`xdg_autostart` were missing). T1546.015's name
+  resolves from the live ATT&CK bundle (no map edit). Out of scope (noted): T1568.002 cascade
+  auto-mapping; a COM-registration API scanner. 1247 unit + report-pipeline pass (9 skipped);
+  ruff/mypy clean; web tsc 0.
 - **2026-05/06 session.** Created this log. Added: §1.1 sink-reachability, §1.2
   function-hash attribution (implemented this session), §1.3 verification discipline,
   §1.4 curated allowlist; §2.1 KV-cache measurement + 262k deployment, §2.2 tool-scale

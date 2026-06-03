@@ -248,6 +248,12 @@ class NetworkDomain(BaseModel):
     resolved_ips: list[str] = Field(default_factory=list)
     is_suspicious: bool = False
     reason: str | None = None
+    # DGA likelihood in [0,1] (Shannon entropy + bigram rarity + supporting
+    # signals); None when the label was too short to score.
+    dga_score: float | None = None
+    # IDN/punycode homograph signals.
+    is_punycode: bool = False
+    homograph_target: str | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
 
@@ -308,6 +314,7 @@ class PersistenceMechanism(BaseModel):
         "scheduled_task",
         "service",
         "wmi_subscription",
+        "com_hijacking",
         "startup_folder",
         "dll_search_hijacking",
         "driver",

@@ -171,14 +171,19 @@ class TestNetworkParser:
         assert "malware-c2.example" in result
         assert "185.199.110.153" in result
 
-    def test_dga_detection_long_domain(self) -> None:
+    def test_dga_detection_flags_algorithmic_domain(self) -> None:
+        # Unified with network_extractor._assess_domain (entropy + bigram scorer),
+        # replacing the old len>25 proof-of-concept heuristic.
         parser = NetworkParser()
-        assert parser._is_suspicious_dns("a" * 26) is True
+        assert parser._is_suspicious_dns("kq3x9zjptlvbq.top") is True
         assert parser._is_suspicious_dns("google.com") is False
 
-    def test_dga_detection_example_domain(self) -> None:
+    def test_suspicious_dns_covers_homograph(self) -> None:
+        # The unified scorer also catches punycode/IDN homographs and C2 tokens.
         parser = NetworkParser()
-        assert parser._is_suspicious_dns("test.example") is True
+        assert parser._is_suspicious_dns("xn--pypal-4ve.com") is True
+        assert parser._is_suspicious_dns("evil.duckdns.org") is True
+        assert parser._is_suspicious_dns("example.com") is False
 
     def test_suspicious_flag_in_output(self) -> None:
         data = [
@@ -186,7 +191,7 @@ class TestNetworkParser:
                 "service": "dns",
                 "id.resp_h": "9.9.9.9",
                 "id.resp_p": 53,
-                "query": "very-long-suspicious-domain-name-that-looks-like-dga.com",
+                "query": "kq3x9zjptlvbq.top",
             }
         ]
         result = self.parser.parse(data)

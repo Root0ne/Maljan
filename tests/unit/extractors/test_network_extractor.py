@@ -9,6 +9,11 @@ snapshot card render Triage-sourced indicators on the Android flow.
 from __future__ import annotations
 
 from maljan.extractors.network_extractor import (
+    _DGA_CLAIM_THRESHOLD,
+    _DGA_SCORE_THRESHOLD,
+    _assess_domain,
+    _dga_score,
+    build_dga_isr,
     build_network_iocs,
     merge_sandbox_cti_network,
 )
@@ -117,13 +122,14 @@ def test_merge_sandbox_cti_skips_invalid_ip_strings() -> None:
 def test_merge_sandbox_cti_flags_suspicious_domains() -> None:
     """The C2/commodity-infra heuristic still applies to CTI-sourced
     domains so the NETWORK tab marks shady FQDNs without waiting for
-    threat-intel enrichment."""
+    threat-intel enrichment. The *real* reason is preserved (with a CTI
+    provenance suffix) rather than overwritten with a generic string."""
     cti = {"network": {"domains": ["evil.duckdns.org", "cdn.fastly.net"]}}
     result = merge_sandbox_cti_network(None, cti)
     assert result is not None
     by_fqdn = {d.fqdn: d for d in result.domains}
     assert by_fqdn["evil.duckdns.org"].is_suspicious is True
-    assert by_fqdn["evil.duckdns.org"].reason == "From Triage SandboxCTI"
+    assert by_fqdn["evil.duckdns.org"].reason == "contains 'duckdns' [Triage CTI]"
     assert by_fqdn["cdn.fastly.net"].is_suspicious is False
 
 
@@ -131,6 +137,151 @@ def test_merge_sandbox_cti_returns_input_when_cti_network_empty() -> None:
     """A SandboxCTI dict whose ``network`` block is entirely empty must
     not cause an empty-but-non-None NetworkIOCs to be created."""
     assert merge_sandbox_cti_network(None, {"network": {"ips": []}}) is None
+
+
+def test_merge_sandbox_cti_preserves_dga_score_and_reason() -> None:
+    """CTI-sourced DGA domains carry the real reason + structured score
+    through the merge (with a provenance suffix), not a generic string."""
+    cti = {"network": {"domains": ["kq3x9zjptlvbq.top"]}}
+    result = merge_sandbox_cti_network(None, cti)
+    assert result is not None
+    dom = result.domains[0]
+    assert dom.is_suspicious is True
+    assert dom.dga_score is not None and dom.dga_score >= _DGA_SCORE_THRESHOLD
+    assert dom.reason is not None
+    assert dom.reason.startswith("DGA-like")
+    assert dom.reason.endswith("[Triage CTI]")
+
+
+# ---------------------------------------------------------------------------
+# DGA scoring (Shannon entropy + bigram rarity composite)
+# ---------------------------------------------------------------------------
+
+
+def test_dga_score_separates_random_from_dictionary() -> None:
+    """Random/algorithmic labels score above threshold; real dictionary-ish
+    labels score below it."""
+    random_labels = ["kq3x9zjptlvbq", "xkzqwvbptlmn", "zxqwvbnmlkjh"]
+    benign_labels = ["salesforce", "documentation", "stackoverflow", "newsletter"]
+    for label in random_labels:
+        assert _dga_score(label) >= _DGA_SCORE_THRESHOLD, label
+    for label in benign_labels:
+        assert _dga_score(label) < _DGA_SCORE_THRESHOLD, label
+
+
+def test_dga_score_ignores_short_labels() -> None:
+    """Labels shorter than the floor are never scored (avoids brand FPs like
+    'facebook' / 'telegram')."""
+    assert _dga_score("facebook") == 0.0
+    assert _dga_score("google") == 0.0
+
+
+def test_dga_legacy_consonant_heavy_still_flagged() -> None:
+    """The pre-existing consonant-heavy case the old heuristic caught must
+    still be flagged by the composite scorer."""
+    assert _dga_score("wmplkvbxqdz") >= _DGA_SCORE_THRESHOLD
+
+
+def test_build_flags_dga_domain_with_structured_fields() -> None:
+    report = {"network": {"domains": ["kq3x9zjptlvbq.top", "google.com"]}}
+    result = build_network_iocs(report)
+    assert result is not None
+    by_fqdn = {d.fqdn: d for d in result.domains}
+    dga = by_fqdn["kq3x9zjptlvbq.top"]
+    assert dga.is_suspicious is True
+    assert dga.dga_score is not None and dga.dga_score >= _DGA_SCORE_THRESHOLD
+    assert dga.reason is not None and dga.reason.startswith("DGA-like")
+    # Benign allowlisted domain is untouched.
+    assert by_fqdn["google.com"].is_suspicious is False
+
+
+# ---------------------------------------------------------------------------
+# IDN / punycode homograph
+# ---------------------------------------------------------------------------
+
+
+def test_punycode_brand_homograph_flagged() -> None:
+    """A punycode label that decodes to a brand look-alike is flagged with the
+    target brand and ``is_punycode``."""
+    report = {"network": {"domains": ["xn--pypal-4ve.com"]}}
+    result = build_network_iocs(report)
+    assert result is not None
+    dom = result.domains[0]
+    assert dom.is_suspicious is True
+    assert dom.is_punycode is True
+    assert dom.homograph_target == "paypal"
+    assert dom.reason is not None and "homograph" in dom.reason
+
+
+def test_mixed_script_homograph_flagged() -> None:
+    """A raw-unicode label mixing Latin + Cyrillic that skeletonises onto a
+    brand is flagged (no punycode prefix)."""
+    verdict = _assess_domain("pаypal.com")  # Cyrillic 'a' (U+0430)
+    assert verdict.suspicious is True
+    assert verdict.is_punycode is False
+    assert verdict.homograph_target == "paypal"
+
+
+def test_plain_ascii_domain_not_homograph() -> None:
+    verdict = _assess_domain("example.com")
+    assert verdict.is_punycode is False
+    assert verdict.homograph_target is None
+
+
+def test_subdomain_homograph_flagged() -> None:
+    """A homograph in a non-leftmost label (the registrable brand under a
+    benign-looking subdomain) is still caught."""
+    verdict = _assess_domain("login.pаypal.com")  # Cyrillic 'a' in 'paypal'
+    assert verdict.suspicious is True
+    assert verdict.homograph_target == "paypal"
+
+
+def test_dga_under_multilevel_tld_flagged() -> None:
+    """DGA scanning inspects every non-TLD label, so an algorithmic label
+    under a multi-level public suffix (.co.uk) is not missed."""
+    verdict = _assess_domain("cdn.kq3x9zjptlvbq.co.uk")
+    assert verdict.suspicious is True
+    assert verdict.dga_score is not None and verdict.dga_score >= _DGA_SCORE_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# build_dga_isr — deterministic T1568.002 claim producer
+# ---------------------------------------------------------------------------
+
+
+def test_build_dga_isr_emits_t1568_002_for_high_score() -> None:
+    iocs = build_network_iocs({"network": {"domains": ["kq3x9zjptlvbq.top"]}})
+    isr = build_dga_isr(iocs)
+    assert isr is not None
+    assert isr.domain == "network"
+    assert isr.agent_id == "network_dga"
+    assert len(isr.claims) == 1
+    claim = isr.claims[0]
+    assert claim.technique_id == "T1568.002"
+    assert claim.rule_platforms == ["any"]
+    # Confidence is capped at 0.75 so a lone heuristic can't dominate the verdict.
+    assert 0.0 < claim.confidence <= 0.75
+    assert "kq3x9zjptlvbq.top" in claim.evidence_ref
+
+
+def test_build_dga_isr_skips_borderline_below_claim_threshold() -> None:
+    """A domain suspicious enough to flag (>=0.55) but below the higher claim
+    bar (0.65) must NOT assert a technique."""
+    iocs = NetworkIOCs(
+        domains=[
+            NetworkDomain(fqdn="borderline.example", is_suspicious=True, dga_score=0.60),
+        ]
+    )
+    assert build_dga_isr(iocs) is None
+    # Sanity: the constant ordering the two-tier design depends on.
+    assert _DGA_CLAIM_THRESHOLD > _DGA_SCORE_THRESHOLD
+
+
+def test_build_dga_isr_none_for_empty_or_clean() -> None:
+    assert build_dga_isr(None) is None
+    assert build_dga_isr(NetworkIOCs()) is None
+    clean = build_network_iocs({"network": {"domains": ["google.com"]}})
+    assert build_dga_isr(clean) is None
 
 
 # ---------------------------------------------------------------------------

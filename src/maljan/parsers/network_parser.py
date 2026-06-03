@@ -112,10 +112,13 @@ class NetworkParser(BaseParser):
         )
 
     def _is_suspicious_dns(self, query: str) -> bool:
-        """Heuristic check for long, random-looking domains (DGA)."""
-        # Simplistic heuristic for PoC
-        if len(query) > 25:
-            return True
-        if ".example" in query:  # Demo purposes
-            return True
-        return False
+        """Flag suspicious domains (DGA / homograph / C2-infra tokens).
+
+        Delegates to the canonical scorer in ``network_extractor`` so the
+        ``[Suspicious]`` markers in this LLM-facing text summary agree with the
+        structured ``MalwareReport.network`` verdicts (single source of truth),
+        instead of the old ``len > 25`` proof-of-concept heuristic.
+        """
+        from maljan.extractors.network_extractor import _assess_domain
+
+        return _assess_domain(query).suspicious

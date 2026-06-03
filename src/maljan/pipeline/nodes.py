@@ -12,12 +12,18 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.analysis.lolbin_layer import build_lolbin_isr
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.analysis.schema_pruner import infer_malware_category
 from maljan.analysis.ttp_cascade import TTPCascadeEngine
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
+from maljan.extractors.network_extractor import (
+    build_dga_isr,
+    build_network_iocs,
+    merge_sandbox_cti_network,
+)
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
@@ -581,6 +587,34 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 isr_reports["yara_layer"] = yara_result
             if sigma_result is not None:
                 isr_reports["sigma_layer"] = sigma_result
+
+            # Deterministic network / command-line heuristic Layer 0 (2026-06-03):
+            # surface DGA domains as T1568.002 and suspicious LOLBin execution as
+            # T1218.x, mirroring the Sigma/YARA layers. Confidence is capped and
+            # evidence-cited so a lone heuristic can't drive the verdict — the
+            # cascade only boosts it on cross-layer corroboration. Both fail-safe.
+            _sandbox_report = state.get("sandbox_report")
+            _sandbox_report = _sandbox_report if isinstance(_sandbox_report, dict) else None
+            try:
+                dga_isr = build_dga_isr(
+                    merge_sandbox_cti_network(
+                        build_network_iocs(_sandbox_report), state.get("sandbox_cti")
+                    )
+                )
+                if dga_isr is not None:
+                    isr_reports["network_dga"] = dga_isr
+                    logger.info(
+                        "Network DGA Layer 0: %d T1568.002 claim(s) -> cascade domain='network'.",
+                        len(dga_isr.claims),
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Network DGA Layer 0 failed: %s. Skipping.", e)
+            try:
+                lolbin_isr = build_lolbin_isr(_sandbox_report)
+                if lolbin_isr is not None:
+                    isr_reports["lolbin"] = lolbin_isr
+            except Exception as e:  # noqa: BLE001
+                logger.warning("LOLBin Layer 0 failed: %s. Skipping.", e)
 
             # Deterministic ATT&CK technique-ID correction (2026-06-01). Run
             # BEFORE the cascade so corrected IDs flow into corroboration, the

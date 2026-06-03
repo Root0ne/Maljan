@@ -281,7 +281,9 @@ class ATTCKValidator:
         *,
         min_alignment: float = HALLUCINATION_SCORE_THRESHOLD,
         swap_valid: bool = True,
-        skip_agents: frozenset[str] = frozenset({"yara_layer", "sigma_layer"}),
+        skip_agents: frozenset[str] = frozenset(
+            {"yara_layer", "sigma_layer", "network_dga", "lolbin"}
+        ),
     ) -> int:
         """Deterministically re-ground each LLM claim's technique_id in place.
 

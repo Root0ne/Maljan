@@ -44,6 +44,18 @@ _AUTORUN_REGISTRY_PATHS: tuple[tuple[str, str], ...] = (
     ("currentversion\\explorer\\shell folders\\startup", "T1547.001"),
 )
 
+# COM hijacking (T1546.015): a write under a ``CLSID\{guid}\`` server subkey
+# repoints a registered COM object to attacker-controlled code. Detected
+# separately from _AUTORUN_REGISTRY_PATHS so the mechanism is labelled
+# ``com_hijacking`` rather than ``registry_run``.
+_COM_HIJACK_SUBKEYS: tuple[str, ...] = (
+    "\\inprocserver32",
+    "\\inprocserver",
+    "\\localserver32",
+    "\\localserver",
+    "\\treatas",
+)
+
 # Sandbox signature name fragments → (kind, ATT&CK ID)
 _SIGNATURE_HINTS: tuple[tuple[str, str, str], ...] = (
     ("installsautorun", "registry_run", "T1547.001"),
@@ -55,6 +67,8 @@ _SIGNATURE_HINTS: tuple[tuple[str, str, str], ...] = (
     ("creates_service", "service", "T1543.003"),
     ("wmi_persistence", "wmi_subscription", "T1546.003"),
     ("wmi_event", "wmi_subscription", "T1546.003"),
+    ("com_hijack", "com_hijacking", "T1546.015"),
+    ("comhijack", "com_hijacking", "T1546.015"),
     ("startup_folder", "startup_folder", "T1547.001"),
     ("dll_hijack", "dll_search_hijacking", "T1574.001"),
     ("driver_load", "driver", "T1547.006"),
@@ -95,6 +109,7 @@ def build_persistence_list(
     _scan_signatures(sandbox_report, found)
     if run_windows:
         _scan_registry_calls(sandbox_report, found)
+        _scan_com_hijack_calls(sandbox_report, found)
         _scan_service_apis(sandbox_report, found)
         _scan_scheduled_task_apis(sandbox_report, found)
     if run_linux:
@@ -359,6 +374,46 @@ def _scan_registry_calls(
                     evidence_ref=f"api:{api}",
                 )
                 break
+
+
+def _scan_com_hijack_calls(
+    sandbox_report: dict[str, Any],
+    found: dict[tuple[str, str], PersistenceMechanism],
+) -> None:
+    """Detect COM hijacking (T1546.015): a registry write under a
+    ``CLSID\\{guid}\\InprocServer32`` / ``LocalServer32`` / ``TreatAs`` subkey
+    repoints a registered COM object at attacker code. Mirrors
+    :func:`_scan_registry_calls`; the CLSID subkeys never match
+    ``_AUTORUN_REGISTRY_PATHS`` so there is no double-count.
+    """
+    behavior = sandbox_report.get("behavior") or {}
+    calls = behavior.get("calls") if isinstance(behavior, dict) else None
+    if not isinstance(calls, list):
+        return
+    for call in calls:
+        api = (call.get("api") or "").strip()
+        if api not in {"RegSetValueExA", "RegSetValueExW", "RegCreateKeyExA", "RegCreateKeyExW"}:
+            continue
+        args = call.get("arguments") or []
+        key_str = _arg_value(args, ("FullName", "Key", "lpSubKey", "key"))
+        if not key_str:
+            continue
+        lower = key_str.lower()
+        if "clsid\\" not in lower:
+            continue
+        if not any(sub in lower for sub in _COM_HIJACK_SUBKEYS):
+            continue
+        value = _arg_value(args, ("Buffer", "Value", "lpData"))
+        key = ("com_hijacking", lower)
+        if key in found:
+            continue
+        found[key] = PersistenceMechanism(
+            kind="com_hijacking",
+            target=key_str,
+            payload=value or "",
+            technique_id="T1546.015",
+            evidence_ref=f"api:{api}",
+        )
 
 
 def _scan_service_apis(
