@@ -19,7 +19,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -141,6 +141,15 @@ class LLMConfig(BaseModel):
     # Per-call output budget for the analyst LLM. Used to size the equal-budget
     # split when ``view_decomposition_views > 0`` (0 = provider/server default).
     expert_max_tokens: int = 0
+
+    # View-decomposition strategy when ``view_decomposition_views >= 2``
+    # (findings-log §4 Item 3, LAMD). "facet" = horizontal, AppPoet-style
+    # independent facets over the same evidence (the §3.6 default). "tier" =
+    # LAMD-style vertical reasoning — facts -> behaviour -> ATT&CK semantics,
+    # each tier sequentially consuming the previous tier's findings (canonical
+    # N=3). Both strategies share the equal-budget ``expert_max_tokens // N``
+    # split and the tools-free text path. Ignored when decomposition is off.
+    view_decomposition_mode: Literal["facet", "tier"] = "facet"
 
     @property
     def expert_model(self) -> str:
@@ -367,6 +376,24 @@ class PreprocessingConfig(BaseModel):
     # malicious core. Fail-safe: any error or a stripped binary yields no hint.
     use_sink_reachability: bool = True
     sink_reachability_max_funcs: int = 12
+
+    # TraceRAG-style function-level retrieval for the static analyst (§4 Item 2).
+    # 0 = off (linear chunking — every function chunk fed to the LLM). N > 0: for
+    # large binaries, retrieve the top-N function chunks per behavior query (see
+    # function_index.BEHAVIOR_QUERIES) and feed only their union, focusing the
+    # analyst on the malicious core. Engages only when the static chunk count
+    # exceeds ``static_function_rag_min_chunks`` (small binaries keep the full
+    # path). Fail-safe: retrieval that matches nothing falls back to all chunks.
+    static_function_rag_top_k: int = 0
+    static_function_rag_min_chunks: int = 6
+
+    # LAMD-style inline foundational-tier consistency gate (§4 Item 4). When
+    # True, the analyst safe_* wrappers drop claims whose cited artifact /
+    # technique does not appear in the source evidence text — catching
+    # hallucinated claims at parse time, complementing the post-hoc, structural
+    # fp_linter. Off by default (today's behaviour: every parsed claim kept).
+    # Fail-safe: any gate error leaves the ISR untouched.
+    use_claim_consistency_gate: bool = False
 
     # Function-hash attribution tier. When enabled, the static analyst runs a
     # deterministic pre-pass that computes per-function normalized-opcode hashes

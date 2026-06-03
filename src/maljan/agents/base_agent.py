@@ -171,6 +171,169 @@ def _view_specs(domain: str, n_views: int) -> list[tuple[str, str]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Tier-wise (vertical) reasoning (findings-log §4 Item 3, LAMD). Where view
+# decomposition is *horizontal* (independent facets over the SAME evidence, run
+# concurrently), tier reasoning is *vertical*: foundational facts -> behaviour
+# synthesis -> ATT&CK semantics, each tier consuming the previous tier's
+# findings as added context. Tiers run SEQUENTIALLY and share the §3.6
+# equal-budget split and the tools-free ``_invoke_view`` text path.
+# ---------------------------------------------------------------------------
+
+_TIER_SPECS: list[tuple[str, str]] = [
+    (
+        "facts",
+        "Reasoning tier 1 of 3 (foundational facts). Extract ONLY concrete, "
+        "low-level artifacts present in the evidence: specific imported APIs, "
+        "strings, file paths, registry keys, mutexes, hosts/domains/IPs. Do NOT "
+        "interpret intent or assign technique IDs yet — just enumerate what is "
+        "verifiably present, each with its artifact citation.",
+    ),
+    (
+        "behaviour",
+        "Reasoning tier 2 of 3 (behaviour synthesis). Using ONLY the foundational "
+        "facts established by the previous tier, synthesize the concrete "
+        "behaviours they implement (e.g. process injection, persistence, C2 "
+        "beaconing, credential theft, file encryption). Cite the specific "
+        "artifact supporting each behaviour; do NOT introduce artifacts the "
+        "previous tier did not establish.",
+    ),
+    (
+        "semantics",
+        "Reasoning tier 3 of 3 (ATT&CK semantics). Using ONLY the behaviours "
+        "established by the previous tier, map each to its MITRE ATT&CK technique "
+        "and assess overall malicious intent. Cite the supporting behaviour and "
+        "artifact for every technique; omit any technique the evidence does not "
+        "support.",
+    ),
+]
+
+
+def _tier_specs(n_tiers: int) -> list[tuple[str, str]]:
+    """Return ``n_tiers`` ordered (key, instruction) reasoning tiers.
+
+    Draws from the fixed LAMD-style facts->behaviour->semantics ladder (the
+    canonical depth is 3); for N beyond the table it pads with generic numbered
+    tiers so the eval harness can probe any N>=2.
+    """
+    if n_tiers <= len(_TIER_SPECS):
+        return _TIER_SPECS[:n_tiers]
+    out = list(_TIER_SPECS)
+    for i in range(len(_TIER_SPECS), n_tiers):
+        out.append(
+            (
+                f"tier{i}",
+                f"Reasoning tier {i + 1}: build further on the findings of the "
+                "previous tier, adding only what the evidence supports.",
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Inline consistency gate (findings-log §4 Item 4, LAMD). LAMD verifies factual
+# consistency at the foundational tier *before* claims propagate; Maljan's
+# fp_linter is post-hoc/structural. This adds an optional, claim-level grounding
+# filter (applied in the analyst safe_* wrappers): a claim survives only when
+# the artifact / technique it cites actually appears in the source evidence.
+# Gated off by default (PreprocessingConfig.use_claim_consistency_gate).
+# ---------------------------------------------------------------------------
+
+# Generic words that must not, on their own, make a claim look "grounded".
+_GROUNDING_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "this",
+        "that",
+        "with",
+        "from",
+        "uses",
+        "using",
+        "which",
+        "their",
+        "there",
+        "into",
+        "when",
+        "then",
+        "also",
+        "does",
+        "while",
+        "these",
+        "those",
+        "such",
+        "have",
+        "been",
+        "will",
+        "would",
+        "could",
+        "should",
+        "about",
+        "they",
+        "them",
+        "between",
+        "across",
+        "through",
+        "based",
+        "appears",
+        "likely",
+        "suggests",
+        "indicates",
+        "behaviour",
+        "behavior",
+        "sample",
+        "malware",
+        "analysis",
+        "report",
+        "finding",
+        "claim",
+    }
+)
+
+# Minimum fraction of a claim's substantive tokens that must overlap the source
+# evidence for the claim to count as grounded (the text-fallback path).
+_GROUNDING_MIN_OVERLAP: float = 0.34
+
+# The synthetic evidence_ref ``_text_to_isr`` emits — must never be treated as a
+# real, auto-grounding artifact reference.
+_SYNTHETIC_REF_PREFIX = "text-extracted"
+
+
+def _significant_tokens(text: str) -> list[str]:
+    """Lowercase alphanumeric tokens of length>=4 that are not generic filler."""
+    return [
+        t
+        for t in re.split(r"[^a-z0-9]+", text.lower())
+        if len(t) >= 4 and t not in _GROUNDING_STOPWORDS
+    ]
+
+
+def _claim_grounded_in_evidence(
+    claim_text: str, evidence_ref: str, technique_id: str | None, evidence: str
+) -> bool:
+    """Return True when a claim is supported by the source evidence.
+
+    Grounded when (a) the cited technique id literally appears in the evidence,
+    (b) the claim carries a *real* artifact reference (not the synthetic
+    text-extraction placeholder) whose substantive token appears in the
+    evidence, or (c) a sufficient fraction of the claim text's substantive
+    tokens overlap the evidence. Extends the grounding idiom from
+    ``eval_view_decomposition._grounding_rate`` to the production claim shapes
+    (structured real refs + text-fallback claims).
+    """
+    ev_lower = evidence.lower()
+    tid = (technique_id or "").upper().strip()
+    if tid and tid in evidence.upper():
+        return True
+    ref = evidence_ref or ""
+    if ref and not ref.lower().startswith(_SYNTHETIC_REF_PREFIX):
+        if any(t in ev_lower for t in _significant_tokens(ref)):
+            return True
+    claim_tokens = set(_significant_tokens(claim_text))
+    if not claim_tokens:
+        return False
+    hits = sum(1 for t in claim_tokens if t in ev_lower)
+    return hits / len(claim_tokens) >= _GROUNDING_MIN_OVERLAP
+
+
 # Strip control characters except whitespace (\t \n \r) before sending
 # untrusted data into a prompt. This neutralises common prompt-injection
 # tricks such as embedded ANSI escape sequences or rogue BOMs.
@@ -587,7 +750,8 @@ class BaseAnalyst(ABC):
         """Wrapper around analyze_isr() with error handling and token protection."""
         try:
             truncated = self._truncate_input(data)
-            return self.analyze_isr(truncated)
+            isr = self.analyze_isr(truncated)
+            return self._apply_consistency_gate(isr, truncated)
         except AnalystError:
             raise
         except Exception as e:
@@ -644,7 +808,12 @@ class BaseAnalyst(ABC):
                 len(chunk_isrs),
             )
 
-        return merge_chunk_isrs(chunk_isrs)
+        merged = merge_chunk_isrs(chunk_isrs)
+        # Item 4 consistency gate: ground the merged claims against the full
+        # multi-chunk evidence (a claim from one chunk grounded by another is
+        # still grounded in the sample). No-op when the gate is off.
+        evidence = "\n".join(c.content for c in chunks)
+        return self._apply_consistency_gate(merged, evidence)
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -749,12 +918,141 @@ class BaseAnalyst(ABC):
         """Wrapper around ``analyze_isr_views`` with truncation + error handling."""
         try:
             truncated = self._truncate_input(data)
-            return self.analyze_isr_views(truncated, n_views, total_max_tokens=total_max_tokens)
+            isr = self.analyze_isr_views(truncated, n_views, total_max_tokens=total_max_tokens)
+            return self._apply_consistency_gate(isr, truncated)
         except AnalystError:
             raise
         except Exception as e:
             self.logger.error("View-decomposition ISR analysis failed: %s", e)
             raise AnalystError(f"{self.name} view-decomposition failed: {e}") from e
+
+    # ------------------------------------------------------------------
+    # Tier-wise (vertical) reasoning (findings-log §4 Item 3) — text path
+    # ------------------------------------------------------------------
+
+    def analyze_isr_tiered(
+        self,
+        data: str,
+        n_tiers: int,
+        *,
+        total_max_tokens: int | None = None,
+    ) -> AgentISR:
+        """Tier-wise (vertical) reasoning (findings-log §4 Item 3, LAMD).
+
+        Runs ``n_tiers`` SEQUENTIAL focused sub-prompts over the same evidence,
+        each tier receiving the previous tier's findings as added context
+        (facts -> behaviour -> ATT&CK semantics). Equal-budget: each tier is
+        capped at ``total_max_tokens // n_tiers`` so total generation budget
+        matches the monolithic arm. A tier that errors is skipped and the chain
+        continues from the last good context (fault isolation). Per-tier ISRs
+        are merged (``merge_chunk_isrs`` dedups the claims tiers naturally
+        repeat). Tools-free text path only.
+        """
+        from maljan.analysis.chunk_merger import merge_chunk_isrs
+
+        if n_tiers < 2:
+            return self.analyze_isr(data)
+
+        specs = _tier_specs(n_tiers)
+        per_tier_budget = (total_max_tokens // n_tiers) if total_max_tokens else None
+
+        tier_isrs: list[AgentISR] = []
+        errors: list[str] = []
+        prior_text = ""
+
+        for key, instruction in specs:
+            if prior_text:
+                tier_input = (
+                    f"{data}\n\n"
+                    "--- Findings established by the previous reasoning tier "
+                    "(build on these; do not contradict or ignore them) ---\n"
+                    f"{prior_text}"
+                )
+            else:
+                tier_input = data
+            try:
+                text = self._invoke_view(instruction, tier_input, per_tier_budget)
+            except Exception as exc:  # noqa: BLE001 — fault isolation
+                errors.append(f"tier '{key}': {exc}")
+                self.logger.warning("Reasoning tier '%s' failed: %s.", key, exc)
+                continue
+            prior_text = text
+            tier_isrs.append(self._text_to_isr(text, revision_round=0))
+
+        if not tier_isrs:
+            raise AnalystError(
+                f"{self.name} tier-wise reasoning failed on all {n_tiers} tiers: "
+                f"{'; '.join(errors)}"
+            )
+        if errors:
+            self.logger.warning(
+                "%d/%d reasoning tiers failed for '%s'; merging %d successful tier(s).",
+                len(errors),
+                n_tiers,
+                self.name,
+                len(tier_isrs),
+            )
+        self.logger.info(
+            "Tier-wise reasoning: %d tiers -> merged ISR for agent='%s'.",
+            len(tier_isrs),
+            self.name,
+        )
+        return merge_chunk_isrs(tier_isrs)
+
+    def safe_analyze_isr_tiered(
+        self,
+        data: str,
+        n_tiers: int,
+        *,
+        total_max_tokens: int | None = None,
+    ) -> AgentISR:
+        """Wrapper around ``analyze_isr_tiered`` with truncation + error handling."""
+        try:
+            truncated = self._truncate_input(data)
+            isr = self.analyze_isr_tiered(truncated, n_tiers, total_max_tokens=total_max_tokens)
+            return self._apply_consistency_gate(isr, truncated)
+        except AnalystError:
+            raise
+        except Exception as e:
+            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", e)
+            raise AnalystError(f"{self.name} tier-wise reasoning failed: {e}") from e
+
+    # ------------------------------------------------------------------
+    # Inline consistency gate (findings-log §4 Item 4)
+    # ------------------------------------------------------------------
+
+    def _apply_consistency_gate(self, isr: AgentISR, evidence: str) -> AgentISR:
+        """LAMD foundational-tier consistency gate (findings-log §4 Item 4).
+
+        When ``PreprocessingConfig.use_claim_consistency_gate`` is on, drop
+        claims whose cited artifact / technique is absent from the source
+        evidence — catching hallucinated claims at parse time, complementing the
+        post-hoc fp_linter. No-op when the gate is off, the ISR has no claims,
+        or no evidence is available. Never raises (a gate failure must not lose
+        the run).
+        """
+        try:
+            if not get_settings().preprocessing.use_claim_consistency_gate:
+                return isr
+            if not isr.claims or not evidence:
+                return isr
+            kept = [
+                c
+                for c in isr.claims
+                if _claim_grounded_in_evidence(c.claim, c.evidence_ref, c.technique_id, evidence)
+            ]
+            dropped = len(isr.claims) - len(kept)
+            if dropped:
+                self.logger.info(
+                    "Consistency gate dropped %d/%d ungrounded claim(s) for '%s'.",
+                    dropped,
+                    len(isr.claims),
+                    self.name,
+                )
+            return isr.model_copy(update={"claims": kept})
+        except Exception as exc:  # noqa: BLE001 — gate must never break the run
+            self.logger.warning("Consistency gate skipped (%s).", exc)
+            return isr
 
     def safe_revise_isr(
         self,

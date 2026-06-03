@@ -202,15 +202,44 @@ def make_analyst_node(
                 _views = int(getattr(container.config.llm, "view_decomposition_views", 0) or 0)
                 if _views >= 2:
                     _budget = int(getattr(container.config.llm, "expert_max_tokens", 0) or 0)
-                    isr = agent.safe_analyze_isr_views(
-                        chunks[0].content,
-                        _views,
-                        total_max_tokens=_budget or None,
+                    # Item 3 (LAMD): "tier" reinterprets the N knob as sequential
+                    # vertical reasoning tiers; "facet" (default) keeps the §3.6
+                    # horizontal concurrent views. Both share the equal budget.
+                    _mode = str(
+                        getattr(container.config.llm, "view_decomposition_mode", "facet") or "facet"
                     )
+                    if _mode == "tier":
+                        isr = agent.safe_analyze_isr_tiered(
+                            chunks[0].content,
+                            _views,
+                            total_max_tokens=_budget or None,
+                        )
+                    else:
+                        isr = agent.safe_analyze_isr_views(
+                            chunks[0].content,
+                            _views,
+                            total_max_tokens=_budget or None,
+                        )
                 else:
                     isr = agent.safe_analyze_isr(chunks[0].content)
                 fallback_text = chunks[0].content
             else:
+                # TraceRAG function-level retrieval (findings-log §4 Item 2):
+                # for large static binaries, feed only the behavior-relevant
+                # function chunks instead of every chunk. Default top_k=0 keeps
+                # the full linear path (zero behaviour change).
+                if agent_name == "static":
+                    _rag_k = int(
+                        getattr(container.config.preprocessing, "static_function_rag_top_k", 0) or 0
+                    )
+                    _rag_min = int(
+                        getattr(container.config.preprocessing, "static_function_rag_min_chunks", 6)
+                        or 6
+                    )
+                    if _rag_k > 0 and len(chunks) > _rag_min:
+                        from maljan.memory.function_index import select_relevant_chunks
+
+                        chunks = select_relevant_chunks(chunks, _rag_k)
                 logger.info(
                     "Agent '%s': processing %d chunks for sample '%s'.",
                     agent_name,

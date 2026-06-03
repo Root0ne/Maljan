@@ -656,17 +656,34 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   when the local llama-server omits it); the judge node snapshots it into a `TokenUsageMetrics`
   block rendered in `RunSummary`. Gives a MARD-style per-sample cost figure and instruments the
   cost/benefit of the decomposition + RAG experiments below.
-- `PLANNED` (Item 2, TraceRAG) Function-level RAG retrieval for the static analyst — an
-  ephemeral per-sample in-memory function index (`embeddings.encode_batch` + `cosine` over the
-  chunker's `FUNCTION_BOUNDARY` chunks); behavior-focused NL queries retrieve the most relevant
-  functions instead of linear chunking. Config-gated `static_function_rag_top_k` (0 = today's
-  path). The highest-value item — it targets the static path's weakest point.
-- `PLANNED` (Item 3, LAMD) Tier-wise *vertical* reasoning mode (instructions → behaviour →
-  ATT&CK semantics, each tier consuming the previous) as a sibling to the §3.6 *horizontal*
-  view-decomposition; equal-budget sequential tiers, gated alongside §3.6.
-- `PLANNED` (Item 4, LAMD) Inline foundational-tier claim-consistency gate — drop ungrounded
-  claims at parse time (claim's cited artifact absent from the source evidence), complementing
-  the post-hoc `fp_linter`. Config-gated `use_claim_consistency_gate`.
+- `IMPLEMENTED` (Item 2, TraceRAG) Function-level RAG retrieval for the static analyst — an
+  ephemeral per-sample in-memory function index
+  ([memory/function_index.py](../../src/maljan/memory/function_index.py): `encode_batch` +
+  `cosine` over the chunker's `FUNCTION_BOUNDARY` chunks). A fixed set of behavior-focused NL
+  queries (`BEHAVIOR_QUERIES`) retrieves the top-k relevant functions per query (union), fed to
+  the analyst instead of every chunk. Config-gated `static_function_rag_top_k` (0 = linear
+  path), engages only above `static_function_rag_min_chunks`; fail-safe to the full set. The
+  offline retrieval eval (`tests/evaluation/eval_function_rag.py`) shows recall 1.0 of the
+  seeded malicious core at **~75% input-token reduction** on a 36-function corpus.
+- `IMPLEMENTED` (Item 3, LAMD) Tier-wise *vertical* reasoning mode (facts → behaviour →
+  ATT&CK semantics, each tier consuming the previous tier's findings) as a sibling to the §3.6
+  *horizontal* view-decomposition. `BaseAnalyst.analyze_isr_tiered`
+  ([agents/base_agent.py](../../src/maljan/agents/base_agent.py): `_TIER_SPECS`/`_tier_specs`
+  ladder) runs N **sequential** tools-free `_invoke_view` calls, each fed the original evidence
+  plus the prior tier's output, at the same equal-budget `expert_max_tokens // N` split as §3.6;
+  per-tier ISRs merge (dedup) via `merge_chunk_isrs`, with per-tier fault isolation. Gated by
+  `LLMConfig.view_decomposition_mode` (`"facet"` default = §3.6 concurrent facets; `"tier"`
+  reinterprets the N knob as reasoning depth, canonical N=3), dispatched in `make_analyst_node`.
+  A `{n}-tier` arm was added to `eval_view_decomposition.py` alongside the facet arms.
+- `IMPLEMENTED` (Item 4, LAMD) Inline foundational-tier claim-consistency gate — drop ungrounded
+  claims at parse time (the claim's cited artifact / technique absent from the source evidence),
+  complementing the post-hoc, structural `fp_linter`. `BaseAnalyst._apply_consistency_gate` +
+  the pure helper `_claim_grounded_in_evidence` (technique-id-in-evidence, real-artifact-ref
+  token, or claim-text substantive-token overlap ≥34%, ignoring filler stop-words) run in the
+  analyst safe_* wrappers (`safe_analyze_isr`, `_chunked`, `_views`, `_tiered`), so both the
+  structured (`_parse_claim_blocks`) and text-fallback (`_text_to_isr`) claim shapes are gated.
+  Config-gated `PreprocessingConfig.use_claim_consistency_gate` (off = every parsed claim kept);
+  fail-safe (any gate error leaves the ISR untouched).
 - `PLANNED` (Item 5, MARD) Concept-drift eval across year-cohorts — **blocked on a dated
   dataset**: current ground truth carries no first-seen/year signal (the ATT&CK loader even
   ignores the bundle's `created`/`modified` dates). Needs a curated MalwareBazaar `first_seen`
@@ -697,6 +714,31 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-03 tier-wise reasoning + consistency gate (Roadmap Items 3 & 4, LAMD).**
+  *Item 3:* `BaseAnalyst.analyze_isr_tiered` / `safe_analyze_isr_tiered` plus the
+  `_TIER_SPECS` (facts → behaviour → ATT&CK semantics) ladder add LAMD-style **vertical**
+  reasoning — N sequential tools-free `_invoke_view` calls, each receiving the original evidence
+  and the prior tier's output, at the §3.6 equal-budget `expert_max_tokens // N` split; per-tier
+  ISRs merge (dedup) via `merge_chunk_isrs` with per-tier fault isolation. Gated by
+  `LLMConfig.view_decomposition_mode` (`"facet"` default vs `"tier"`), dispatched in
+  `make_analyst_node`'s single-chunk branch; `{n}-tier` arm added to `eval_view_decomposition.py`.
+  *Item 4:* `_apply_consistency_gate` + the pure `_claim_grounded_in_evidence` helper drop claims
+  whose cited artifact / technique is absent from the source evidence, run in the analyst safe_*
+  wrappers (so both `_parse_claim_blocks` structured and `_text_to_isr` fallback claims are
+  gated). Config-gated `PreprocessingConfig.use_claim_consistency_gate` (off by default,
+  fail-safe). Both gates default to today's behaviour (no regression). New tests:
+  `tests/unit/agents/test_view_decomposition.py` (tier cases) + `test_consistency_gate.py`.
+  Flipped §4 Items 3 & 4 PLANNED → IMPLEMENTED.
+- **2026-06-03 function-level RAG retrieval (Roadmap Item 2, TraceRAG).** New
+  `src/maljan/memory/function_index.py`: an ephemeral per-sample in-memory cosine index over
+  the static analyst's `FUNCTION_BOUNDARY` chunks (reusing `embeddings.encode_batch`/`cosine`).
+  A fixed `BEHAVIOR_QUERIES` set retrieves the top-k relevant functions per query (union, deduped,
+  original order); wired into the static multi-chunk branch of `make_analyst_node` behind
+  `PreprocessingConfig.static_function_rag_top_k` (0 = linear path, default) and engaging only
+  above `static_function_rag_min_chunks` — fail-safe to the full set when retrieval matches
+  nothing. Offline eval `tests/evaluation/eval_function_rag.py`: recall 1.0 of the seeded
+  malicious functions at ~75% token reduction (36-function corpus). Flipped §4 Item 2 PLANNED →
+  IMPLEMENTED. 1294 unit pass (+ `tests/unit/memory/test_function_index.py`); ruff/mypy clean.
 - **2026-06-03 token/cost telemetry (Roadmap Item 1, MARD).** Added a thread-safe
   `TokenLedger` (`src/maljan/core/token_ledger.py`) on the `ServiceContainer`; analyst
   (`base_agent` no-tools + view paths) and judge LLM invokes call `record_response_usage`,

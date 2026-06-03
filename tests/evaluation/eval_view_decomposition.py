@@ -211,6 +211,11 @@ def _run_nview(agent: Any, bundle: str, n: int, budget: int) -> Any:
     return agent.analyze_isr_views(bundle, n, total_max_tokens=budget or None)
 
 
+def _run_tiered(agent: Any, bundle: str, n: int, budget: int) -> Any:
+    """N equal-budget (B/N) SEQUENTIAL reasoning tiers (LAMD, §4 Item 3), merged."""
+    return agent.analyze_isr_tiered(bundle, n, total_max_tokens=budget or None)
+
+
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
@@ -251,7 +256,14 @@ def _arm_block(arm: str, scores: list[ArmScore], budget: int, n_calls: int) -> l
 # ---------------------------------------------------------------------------
 
 
-def main_async(repeats: int, budget: int, views: list[int], smoke: bool, checkpoint: Path) -> None:
+def main_async(
+    repeats: int,
+    budget: int,
+    views: list[int],
+    tiers: list[int],
+    smoke: bool,
+    checkpoint: Path,
+) -> None:
     from maljan.memory.attck_validator import ATTCKValidator
 
     bundles = _load_bundles()
@@ -259,6 +271,7 @@ def main_async(repeats: int, budget: int, views: list[int], smoke: bool, checkpo
         bundles = bundles[:1]
         repeats = 1
         views = views[:1]
+        tiers = tiers[:1]
     if not bundles:
         print("No fixtures found — aborting.", flush=True)
         return
@@ -272,7 +285,7 @@ def main_async(repeats: int, budget: int, views: list[int], smoke: bool, checkpo
         def is_valid(_tid: str) -> bool:
             return True
 
-    arms = ["monolithic"] + [f"{n}-view" for n in views]
+    arms = ["monolithic"] + [f"{n}-view" for n in views] + [f"{n}-tier" for n in tiers]
     print(f"{len(bundles)} sample(s), arms={arms}, repeats={repeats}, budget={budget}.", flush=True)
 
     scores: list[ArmScore] = []
@@ -312,6 +325,9 @@ def main_async(repeats: int, budget: int, views: list[int], smoke: bool, checkpo
             for n in views:
                 if f"{n}-view:{sid}:{r}" not in done:
                     _record(f"{n}-view", sid, r, _run_nview(agent, bundle, n, budget), bundle)
+            for n in tiers:
+                if f"{n}-tier:{sid}:{r}" not in done:
+                    _record(f"{n}-tier", sid, r, _run_tiered(agent, bundle, n, budget), bundle)
 
     lines = [
         "# View-decomposition A/B (equal total budget, §3.4-compliant)",
@@ -324,6 +340,8 @@ def main_async(repeats: int, budget: int, views: list[int], smoke: bool, checkpo
     lines += _arm_block("monolithic", [s for s in scores if s.arm == "monolithic"], budget, 1)
     for n in views:
         lines += _arm_block(f"{n}-view", [s for s in scores if s.arm == f"{n}-view"], budget, n)
+    for n in tiers:
+        lines += _arm_block(f"{n}-tier", [s for s in scores if s.arm == f"{n}-tier"], budget, n)
     report = "\n".join(lines)
     print("\n" + report, flush=True)
     try:
@@ -337,12 +355,19 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="View-decomposition equal-budget A/B.")
     ap.add_argument("--repeats", type=int, default=3, help="Generations per (sample, arm).")
     ap.add_argument("--budget", type=int, default=_DEFAULT_BUDGET, help="Total output budget B.")
-    ap.add_argument("--views", type=str, default="2,4", help="Comma list of view counts.")
+    ap.add_argument("--views", type=str, default="2,4", help="Comma list of facet view counts.")
+    ap.add_argument(
+        "--tiers",
+        type=str,
+        default="3",
+        help="Comma list of sequential reasoning-tier counts (LAMD, §4 Item 3).",
+    )
     ap.add_argument("--smoke", action="store_true", help="1 sample x 1 repeat x first arm.")
     ap.add_argument("--checkpoint", type=str, default=str(_DEFAULT_CHECKPOINT))
     args = ap.parse_args()
     views = [int(x) for x in str(args.views).split(",") if x.strip()]
-    main_async(args.repeats, args.budget, views, args.smoke, Path(args.checkpoint))
+    tiers = [int(x) for x in str(args.tiers).split(",") if x.strip()]
+    main_async(args.repeats, args.budget, views, tiers, args.smoke, Path(args.checkpoint))
 
 
 if __name__ == "__main__":

@@ -271,6 +271,9 @@ class TestSafeAnalyzeISRChunked:
         from maljan.agents.base_agent import BaseAnalyst
 
         safe_analyze_isr_chunked = BaseAnalyst.safe_analyze_isr_chunked
+        # The wrapper now runs the §4 Item 4 consistency gate (off by default =
+        # no-op); borrow it too so this duck-typed stub stays compatible.
+        _apply_consistency_gate = BaseAnalyst._apply_consistency_gate
 
     @pytest.fixture
     def analyst(self) -> _ConcreteAnalyst:
