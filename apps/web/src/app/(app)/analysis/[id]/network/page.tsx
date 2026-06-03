@@ -181,6 +181,30 @@ export default function NetworkTab() {
           </ul>
         )}
       </div>
+
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            JA3S Fingerprints ({net.ja3s_fingerprints.length})
+          </h2>
+        </div>
+        {net.ja3s_fingerprints.length === 0 ? (
+          <div className="p-8 text-center text-sm text-text-muted">
+            No TLS JA3S fingerprints observed.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border-light">
+            {net.ja3s_fingerprints.map((j, i) => (
+              <li
+                key={i}
+                className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover transition-colors"
+              >
+                {typeof j === "string" ? j : JSON.stringify(j)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

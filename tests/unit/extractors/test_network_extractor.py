@@ -30,6 +30,32 @@ def test_build_network_iocs_returns_none_for_empty_report() -> None:
     assert build_network_iocs({"network": {}}) is None
 
 
+def test_build_network_iocs_extracts_ja3_and_ja3s_from_tls() -> None:
+    """The CAPE-style ``network.tls[]`` entries carry both the client (ja3)
+    and server (ja3s) fingerprints; both surface on the typed model."""
+    report = {
+        "network": {
+            "tls": [
+                {"ja3": "client-fp-1", "ja3s": "server-fp-1"},
+                {"ja3_hash": "client-fp-2", "ja3s_hash": "server-fp-2"},
+                {"ja3": "client-fp-1", "ja3s": "server-fp-1"},  # duplicate, dropped
+            ]
+        }
+    }
+    result = build_network_iocs(report)
+    assert result is not None
+    assert result.ja3_fingerprints == ["client-fp-1", "client-fp-2"]
+    assert result.ja3s_fingerprints == ["server-fp-1", "server-fp-2"]
+
+
+def test_build_network_iocs_returns_iocs_for_ja3s_only_report() -> None:
+    """A report carrying only a server fingerprint is still non-empty."""
+    result = build_network_iocs({"network": {"tls": [{"ja3s": "server-fp-1"}]}})
+    assert result is not None
+    assert result.ja3s_fingerprints == ["server-fp-1"]
+    assert result.ja3_fingerprints == []
+
+
 # ---------------------------------------------------------------------------
 # merge_sandbox_cti_network
 # ---------------------------------------------------------------------------
@@ -55,6 +81,7 @@ def test_merge_sandbox_cti_builds_fresh_when_no_existing() -> None:
             "ips": ["1.1.1.1", "216.239.38.133"],
             "http_urls": ["http://nwp.t-mobile.com/getcpid"],
             "tls_ja3": ["abc123"],
+            "tls_ja3s": ["srvfp1"],
             "tls_sni": ["api.example.com"],
             "dns_queries": ["dl.google.com"],
         }
@@ -74,6 +101,7 @@ def test_merge_sandbox_cti_builds_fresh_when_no_existing() -> None:
     urls = {u.url for u in result.urls}
     assert urls == {"http://nwp.t-mobile.com/getcpid"}
     assert result.ja3_fingerprints == ["abc123"]
+    assert result.ja3s_fingerprints == ["srvfp1"]
 
 
 def test_merge_sandbox_cti_dedupes_against_existing() -> None:
@@ -84,6 +112,7 @@ def test_merge_sandbox_cti_dedupes_against_existing() -> None:
         ips=[NetworkIP(address="1.1.1.1")],
         urls=[NetworkURL(url="http://nwp.t-mobile.com/getcpid")],
         ja3_fingerprints=["abc123"],
+        ja3s_fingerprints=["srvfp1"],
     )
     cti = {
         "network": {
@@ -94,6 +123,7 @@ def test_merge_sandbox_cti_dedupes_against_existing() -> None:
                 "http://fresh.example.com/x",
             ],
             "tls_ja3": ["abc123", "def456"],
+            "tls_ja3s": ["srvfp1", "srvfp2"],
         }
     }
     result = merge_sandbox_cti_network(existing, cti)
@@ -108,6 +138,7 @@ def test_merge_sandbox_cti_dedupes_against_existing() -> None:
         "http://fresh.example.com/x",
     }
     assert set(result.ja3_fingerprints) == {"abc123", "def456"}
+    assert set(result.ja3s_fingerprints) == {"srvfp1", "srvfp2"}
 
 
 def test_merge_sandbox_cti_skips_invalid_ip_strings() -> None:

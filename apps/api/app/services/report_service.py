@@ -201,7 +201,7 @@ class ReportService:
         """Flatten the typed IOC collections into a single list.
 
         ``kind`` filter accepts ``domain`` / ``ip`` / ``url`` / ``user_agent`` /
-        ``ja3`` / ``hash``. None returns every kind.
+        ``ja3`` / ``ja3s`` / ``hash``. None returns every kind.
         """
         mr = await self.get_malware_report(report_id, user)
         if not mr:
@@ -242,6 +242,9 @@ class ReportService:
         if not kind or kind == "ja3":
             for ja3 in network.get("ja3_fingerprints") or []:
                 out.append({"kind": "ja3", "value": ja3})
+        if not kind or kind == "ja3s":
+            for ja3s in network.get("ja3s_fingerprints") or []:
+                out.append({"kind": "ja3s", "value": ja3s})
         return [row for row in out if row.get("value")]
 
     async def get_malware_report_signature(

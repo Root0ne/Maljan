@@ -1506,6 +1506,7 @@ def _synthesize_cti(normalized: dict[str, Any]) -> dict[str, Any]:
             "domains": [],
             "ips": [],
             "tls_ja3": [],
+            "tls_ja3s": [],
             "tls_sni": [],
         },
         "indicators": [],
@@ -1624,6 +1625,8 @@ def _synthesize_cti(normalized: dict[str, Any]) -> dict[str, Any]:
                     cti["network"]["tls_sni"].append(item["tls_sni"])
                 if item.get("tls_ja3"):
                     cti["network"]["tls_ja3"].append(item["tls_ja3"])
+                if item.get("tls_ja3s"):
+                    cti["network"]["tls_ja3s"].append(item["tls_ja3s"])
                 if item.get("dst"):
                     host = item["dst"].split(":", 1)[0] if ":" in item["dst"] else item["dst"]
                     if host:

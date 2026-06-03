@@ -187,9 +187,7 @@ async def revoke_api_key(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Revoke (deactivate) an API key."""
-    result = await db.execute(
-        select(APIKey).where(APIKey.id == key_id, APIKey.user_id == user.id)
-    )
+    result = await db.execute(select(APIKey).where(APIKey.id == key_id, APIKey.user_id == user.id))
     api_key = result.scalar_one_or_none()
     if not api_key:
         raise HTTPException(

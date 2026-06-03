@@ -300,16 +300,18 @@ def build_network_iocs(
     urls = _extract_urls(raw)
     user_agents = _extract_user_agents(raw)
     ja3 = _extract_ja3(raw)
+    ja3s = _extract_ja3s(raw)
 
-    if not (domains or ips or urls or user_agents or ja3):
+    if not (domains or ips or urls or user_agents or ja3 or ja3s):
         return None
 
     logger.info(
-        "network_extractor: domains=%d ips=%d urls=%d ja3=%d",
+        "network_extractor: domains=%d ips=%d urls=%d ja3=%d ja3s=%d",
         len(domains),
         len(ips),
         len(urls),
         len(ja3),
+        len(ja3s),
     )
     return NetworkIOCs(
         domains=domains,
@@ -317,6 +319,7 @@ def build_network_iocs(
         urls=urls,
         user_agents=user_agents,
         ja3_fingerprints=ja3,
+        ja3s_fingerprints=ja3s,
     )
 
 
@@ -812,6 +815,19 @@ def _extract_ja3(raw: dict[str, Any]) -> list[str]:
     return out
 
 
+def _extract_ja3s(raw: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in raw.get("tls") or []:
+        if not isinstance(entry, dict):
+            continue
+        ja3s = entry.get("ja3s") or entry.get("ja3s_hash")
+        if ja3s and ja3s not in seen:
+            seen.add(str(ja3s))
+            out.append(str(ja3s))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Wave 10 W10-NET-01 (2026-05-30) — fold Triage SandboxCTI.network into the
 # typed NetworkIOCs. The 2026-05-30 UI walk found that
@@ -835,6 +851,7 @@ def merge_sandbox_cti_network(
             "domains":     [str],
             "http_urls":   [str],
             "tls_ja3":     [str],
+            "tls_ja3s":    [str],
             "tls_sni":     [str],   # treated as additional FQDNs
             "dns_queries": [str],   # treated as additional FQDNs
           },
@@ -857,8 +874,9 @@ def merge_sandbox_cti_network(
     cti_ips_raw = _gather_strings(cti_net.get("ips"))
     cti_urls_raw = _gather_strings(cti_net.get("http_urls"), cti_net.get("urls"))
     cti_ja3_raw = _gather_strings(cti_net.get("tls_ja3"))
+    cti_ja3s_raw = _gather_strings(cti_net.get("tls_ja3s"))
 
-    if not (cti_domains_raw or cti_ips_raw or cti_urls_raw or cti_ja3_raw):
+    if not (cti_domains_raw or cti_ips_raw or cti_urls_raw or cti_ja3_raw or cti_ja3s_raw):
         return network_iocs
 
     base = network_iocs or NetworkIOCs()
@@ -866,6 +884,7 @@ def merge_sandbox_cti_network(
     seen_addr = {ip.address for ip in base.ips}
     seen_url = {u.url for u in base.urls}
     seen_ja3 = set(base.ja3_fingerprints)
+    seen_ja3s = set(base.ja3s_fingerprints)
 
     new_domains = list(base.domains)
     for fqdn in cti_domains_raw:
@@ -912,21 +931,30 @@ def merge_sandbox_cti_network(
         seen_ja3.add(ja3)
         new_ja3.append(ja3)
 
+    new_ja3s = list(base.ja3s_fingerprints)
+    for ja3s in cti_ja3s_raw:
+        if ja3s in seen_ja3s:
+            continue
+        seen_ja3s.add(ja3s)
+        new_ja3s.append(ja3s)
+
     added = (
         (len(new_domains) - len(base.domains))
         + (len(new_ips) - len(base.ips))
         + (len(new_urls) - len(base.urls))
         + (len(new_ja3) - len(base.ja3_fingerprints))
+        + (len(new_ja3s) - len(base.ja3s_fingerprints))
     )
     if added:
         logger.info(
             "network_extractor: merged %d SandboxCTI entries "
-            "(domains+%d, ips+%d, urls+%d, ja3+%d).",
+            "(domains+%d, ips+%d, urls+%d, ja3+%d, ja3s+%d).",
             added,
             len(new_domains) - len(base.domains),
             len(new_ips) - len(base.ips),
             len(new_urls) - len(base.urls),
             len(new_ja3) - len(base.ja3_fingerprints),
+            len(new_ja3s) - len(base.ja3s_fingerprints),
         )
 
     return NetworkIOCs(
@@ -935,6 +963,7 @@ def merge_sandbox_cti_network(
         urls=new_urls,
         user_agents=list(base.user_agents),
         ja3_fingerprints=new_ja3,
+        ja3s_fingerprints=new_ja3s,
     )
 
 

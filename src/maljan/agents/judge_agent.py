@@ -1133,6 +1133,7 @@ def _build_cti_block(cti: dict[str, Any] | None) -> str:
     net_urls = _head(net.get("http_urls"), n=5)
     sni = _head(net.get("tls_sni"), n=4)
     ja3 = _head(net.get("tls_ja3"), n=3)
+    ja3s = _head(net.get("tls_ja3s"), n=3)
     indicators = _head(cti.get("indicators"), n=5)
     yara_rules = _head(cti.get("yara_rules"), n=5)
     score = cti.get("score")
@@ -1210,6 +1211,8 @@ def _build_cti_block(cti: dict[str, Any] | None) -> str:
         lines.append(f"tls_sni: {sni}")
     if ja3:
         lines.append(f"tls_ja3: {ja3}")
+    if ja3s:
+        lines.append(f"tls_ja3s: {ja3s}")
     if indicators:
         ind_short = [i.get("ioc", "") for i in indicators if isinstance(i, dict) and i.get("ioc")]
         if ind_short:

@@ -293,6 +293,7 @@ class NetworkIOCs(BaseModel):
     urls: list[NetworkURL] = Field(default_factory=list)
     user_agents: list[str] = Field(default_factory=list)
     ja3_fingerprints: list[str] = Field(default_factory=list)
+    ja3s_fingerprints: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

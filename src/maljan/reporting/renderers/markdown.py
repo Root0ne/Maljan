@@ -361,6 +361,13 @@ class MarkdownRenderer:
                 lines.append(f"- `{ja3}`")
             lines.append("")
 
+        if net.ja3s_fingerprints:
+            lines.append("### JA3S Fingerprints")
+            lines.append("")
+            for ja3s in net.ja3s_fingerprints[:20]:
+                lines.append(f"- `{ja3s}`")
+            lines.append("")
+
         return "\n".join(lines).rstrip()
 
     def _section_persistence(self, mechanisms: list[PersistenceMechanism]) -> str:

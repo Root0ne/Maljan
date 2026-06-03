@@ -117,7 +117,7 @@ class ReportDetailResponse(BaseModel):
 class IOCEntry(BaseModel):
     """One flattened IOC row used by the ``/iocs`` endpoint."""
 
-    kind: str  # "domain" | "ip" | "url" | "user_agent" | "ja3" | "hash"
+    kind: str  # "domain" | "ip" | "url" | "user_agent" | "ja3" | "ja3s" | "hash"
     value: str
     is_suspicious: bool = False
     notes: str | None = None

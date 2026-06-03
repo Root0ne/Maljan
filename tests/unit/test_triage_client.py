@@ -758,7 +758,13 @@ class TestSynthesizeCTI:
         normalized["network"]["http"].append({"url": "http://evil.com/payload"})
         normalized["network"]["domains"].append("evil.com")
         normalized["network"]["tcp"].append(
-            {"dst": "1.2.3.4:443", "domain": "evil.com", "tls_sni": "evil.com", "tls_ja3": "abc"}
+            {
+                "dst": "1.2.3.4:443",
+                "domain": "evil.com",
+                "tls_sni": "evil.com",
+                "tls_ja3": "abc",
+                "tls_ja3s": "srv-abc",
+            }
         )
         normalized["dumped"] = [{"name": "d.bin", "sha256": "f" * 64}]
         normalized["signatures"] = [
@@ -774,6 +780,7 @@ class TestSynthesizeCTI:
         assert "1.2.3.4" in cti["network"]["ips"]
         assert "evil.com" in cti["network"]["tls_sni"]
         assert "abc" in cti["network"]["tls_ja3"]
+        assert "srv-abc" in cti["network"]["tls_ja3s"]
         assert cti["dropped_files"][0]["sha256"] == "f" * 64
         assert "evil_rule" in cti["yara_rules"]
         assert cti["indicators"][0]["ioc"] == "evil.com"

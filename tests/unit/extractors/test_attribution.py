@@ -1,4 +1,9 @@
-"""Unit tests for :func:`maljan.extractors.attribution.populate_similar_samples`."""
+"""Unit tests for :mod:`maljan.extractors.attribution`.
+
+Covers both attribution concerns the module owns: ``build_family_attribution``
+(deterministic D11 grounding guardrail) and ``populate_similar_samples`` (LTM
+nearest-neighbour enrichment).
+"""
 
 from __future__ import annotations
 
@@ -7,8 +12,87 @@ from typing import Any
 
 import pytest
 
-from maljan.extractors.attribution import _build_query, populate_similar_samples
+from maljan.extractors.attribution import (
+    _build_query,
+    build_family_attribution,
+    populate_similar_samples,
+)
 from maljan.memory.long_term_memory import StoredCase
+from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+
+class TestBuildFamilyAttribution:
+    """Mirror of ``test_builder.py::TestAttributionGrounding`` at the unit level —
+    these exercise the moved logic directly rather than through the builder."""
+
+    def test_none_family_is_grounded_with_zero_confidence(self) -> None:
+        attr = build_family_attribution(
+            malware_category=None,
+            sandbox_report=None,
+            isr_reports=None,
+            overall_confidence=0.9,
+        )
+        assert attr.family is None
+        # No family hypothesis => legacy "no claim made" default, not a guardrail trip.
+        assert attr.family_grounded is True
+        # Preserved legacy behaviour: with no family to gate, the empty-family
+        # branch is "grounded", so confidence passes through unchanged.
+        assert attr.family_confidence == 0.9
+
+    def test_ungrounded_family_zeroes_confidence(self) -> None:
+        attr = build_family_attribution(
+            malware_category="rat",
+            sandbox_report={},
+            isr_reports={},
+            overall_confidence=0.6,
+        )
+        assert attr.family == "rat"
+        assert attr.family_grounded is False
+        assert attr.family_confidence == 0.0
+
+    def test_grounded_via_triage_cti(self) -> None:
+        attr = build_family_attribution(
+            malware_category="rat",
+            sandbox_report={"cti": {"family": ["Trojan/RAT"]}},
+            isr_reports={},
+            overall_confidence=0.6,
+        )
+        assert attr.family_grounded is True
+        assert attr.family_confidence == 0.6
+
+    def test_grounded_via_signature_name(self) -> None:
+        attr = build_family_attribution(
+            malware_category="lockbit",
+            sandbox_report={"signatures": [{"name": "LockBit ransomware payload"}]},
+            isr_reports={},
+            overall_confidence=0.8,
+        )
+        assert attr.family_grounded is True
+        assert attr.family_confidence == 0.8
+
+    def test_grounded_via_isr_claim(self) -> None:
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(
+                    claim="Sample matches Cobalt Strike beacon pattern",
+                    evidence_ref="strings: cobaltstrike-beacon-config",
+                    confidence=0.7,
+                    technique_id="T1059",
+                )
+            ],
+            dissent_items=[],
+            revision_round=0,
+        )
+        attr = build_family_attribution(
+            malware_category="cobaltstrike",
+            sandbox_report={},
+            isr_reports={"static": isr},
+            overall_confidence=0.7,
+        )
+        assert attr.family_grounded is True
+        assert attr.family_confidence == 0.7
 
 
 def test_build_query_includes_suspicious_network_iocs() -> None:

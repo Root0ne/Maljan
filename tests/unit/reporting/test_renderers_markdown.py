@@ -153,6 +153,7 @@ class TestRansomwareReport:
             "network": {
                 "dns": [{"request": "evil-c2.duckdns.org", "answers": []}],
                 "tcp": [{"dst": "1.2.3.4", "dport": 443}],
+                "tls": [{"ja3": "client-fp-1", "ja3s": "server-fp-1"}],
             },
             "signatures": [
                 {
@@ -174,6 +175,13 @@ class TestRansomwareReport:
         markdown = MarkdownRenderer().render(report)
         assert "evil-c2.duckdns.org" in markdown
         assert "1.2.3.4" in markdown
+
+    def test_ja3_and_ja3s_fingerprints_rendered(self, report: MalwareReport) -> None:
+        markdown = MarkdownRenderer().render(report)
+        assert "### JA3 Fingerprints" in markdown
+        assert "client-fp-1" in markdown
+        assert "### JA3S Fingerprints" in markdown
+        assert "server-fp-1" in markdown
 
     def test_persistence_table_present(self, report: MalwareReport) -> None:
         markdown = MarkdownRenderer().render(report)

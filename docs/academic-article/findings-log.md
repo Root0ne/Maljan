@@ -624,6 +624,33 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-03 attribution consolidation + apps/api format alignment.** (i) **Refactor
+  (behaviour-preserving):** family/threat-actor attribution grounding was a private
+  method on the report builder (`MalwareReportBuilder._is_family_grounded`) with the
+  `FamilyAttribution` construction + D11 guardrail log inlined in `build_deterministic`,
+  while the sibling concern (`similar_samples`) already lived in
+  [extractors/attribution.py](../../src/maljan/extractors/attribution.py). Moved the
+  grounding + construction into that module as `build_family_attribution(...)` (a pure
+  function called like the other `build_*` extractors), giving attribution one home and
+  matching the `build_sample_identity` / `build_network_iocs` pattern. The builder now
+  delegates; the `TestAttributionGrounding` suite (exercised through the builder) stayed
+  green unchanged as the regression guard, and direct unit tests were added for the moved
+  function (1262 unit pass, +5). (ii) **Cosmetic:** ran `ruff format` on two long-drifted
+  `apps/api` files (`audit.py`, the initial alembic migration) — line-wrapping only, no
+  logic change; pre-commit's staged-files-only formatter had never re-touched them.
+  ruff/mypy clean (100 src files); 241 files all-formatted.
+- **2026-06-03 JA3S server-side TLS fingerprint surfaced end-to-end (1 backlog item).** The Triage
+  loader already parsed the server-side TLS fingerprint (`tls_ja3s`) off every flow
+  ([triage_client.py:1394](../../src/maljan/loaders/triage_client.py)) but then **silently discarded
+  it** — the SandboxCTI `network` block had no `tls_ja3s` key and the synthesis loop only forwarded
+  `tls_ja3`. JA3S is a distinct C2/infrastructure-clustering pivot, so it was threaded through the
+  exact path the client `ja3_fingerprints` already travels, mirroring it field-for-field: new
+  `NetworkIOCs.ja3s_fingerprints`; `_extract_ja3s` over `network.tls[]` (keys `ja3s`/`ja3s_hash`) in
+  the CAPE raw path; `tls_ja3s` forwarded in the Triage CTI synthesis and folded (deduped) by
+  `merge_sandbox_cti_network`; rendered as a `### JA3S Fingerprints` markdown section; emitted as a
+  new `ja3s` IOC kind by the `/iocs` API; added to the judge's CTI summary so the verdict LLM sees
+  server fingerprints. No new heuristic, no new data source — pure plumbing of an already-captured
+  value. 1257 unit pass (9 skipped); ruff/mypy clean (100 src files); web tsc 0.
 - **2026-06-03 deterministic technique surfacing (3 deferred follow-ups).** Addressed the items the
   prior round deferred. (i) **DGA -> T1568.002**: a new `build_dga_isr` turns high-confidence DGA
   domains into a deterministic ATT&CK claim (mirrors Sigma/YARA `to_isr`), injected in the judge node
