@@ -61,6 +61,7 @@ from maljan.analysis.schema_pruner import get_pruned_schema_hint
 from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
+from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
 from maljan.schemas.isr_models import AgentISR
@@ -90,6 +91,9 @@ class JudgeAgent:
         # "keyword" keeps the deterministic substring path (zero behaviour
         # change); "semantic"/"hybrid" route through the embedding classifier.
         self.category_backend = category_backend
+        # Per-run token ledger (findings-log §4 Item 1); attached by the
+        # container in get_judge_agent(). None when run standalone.
+        self.token_ledger: TokenLedger | None = None
 
     async def _initialize_mcp_client(self) -> None:
         if getattr(self, "tools", None):
@@ -146,6 +150,7 @@ class JudgeAgent:
                 self.llm.ainvoke(messages_pre),
                 timeout=float(no_tools_timeout),
             )
+            record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
             return str(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))

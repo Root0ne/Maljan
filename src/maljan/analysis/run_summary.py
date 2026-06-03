@@ -86,6 +86,22 @@ class ValidationMetrics:
 
 
 @dataclass
+class TokenUsageMetrics:
+    """Per-run LLM token usage (findings-log §4 Item 1, MARD-style cost).
+
+    ``estimated_calls`` counts invocations where the provider omitted
+    ``usage_metadata`` and a character-based estimate was used instead, so a
+    reader can gauge how much of the figure is exact vs approximate.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    llm_calls: int
+    estimated_calls: int
+
+
+@dataclass
 class CascadeMetrics:
     """Summary of three-layer TTP cascade results."""
 
@@ -151,6 +167,7 @@ class RunSummary:
     validation: ValidationMetrics | None
     cascade: CascadeMetrics | None
     elapsed_seconds: float
+    tokens: TokenUsageMetrics | None = None
     timestamp: float = field(default_factory=time.time)
     degraded_mode: bool = False
     degradation_reasons: list[str] = field(default_factory=list)
@@ -297,6 +314,24 @@ class RunSummary:
         else:
             lines += ["## ATT&CK TTP Validation", "", "*Validation skipped (cache not built).*", ""]
 
+        # Token / cost usage (findings-log §4 Item 1).
+        if self.tokens:
+            tok = self.tokens
+            est = ""
+            if tok.estimated_calls:
+                est = f" ({tok.estimated_calls}/{tok.llm_calls} estimated)"
+            lines += [
+                "## Token Usage",
+                "",
+                "| Metric | Value |",
+                "|---|---|",
+                f"| LLM calls | {tok.llm_calls}{est} |",
+                f"| Input tokens | {tok.input_tokens} |",
+                f"| Output tokens | {tok.output_tokens} |",
+                f"| Total tokens | {tok.total_tokens} |",
+                "",
+            ]
+
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
@@ -332,6 +367,7 @@ class RunSummary:
             ],
             "cascade": None,
             "validation": None,
+            "tokens": None,
             "degraded_mode": self.degraded_mode,
             "degradation_reasons": list(self.degradation_reasons),
             "failed_analysts": list(self.failed_analysts),
@@ -355,6 +391,15 @@ class RunSummary:
                 "invalid_ids": self.validation.invalid_ids,
                 "low_alignment": self.validation.low_alignment,
                 "hallucination_rate": round(self.validation.hallucination_rate, 4),
+            }
+
+        if self.tokens:
+            result["tokens"] = {
+                "input_tokens": self.tokens.input_tokens,
+                "output_tokens": self.tokens.output_tokens,
+                "total_tokens": self.tokens.total_tokens,
+                "llm_calls": self.tokens.llm_calls,
+                "estimated_calls": self.tokens.estimated_calls,
             }
 
         return result
@@ -396,6 +441,7 @@ class RunSummaryBuilder:
         self._degradation_reasons: list[str] = []
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
+        self._tokens: TokenUsageMetrics | None = None
 
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
@@ -406,6 +452,23 @@ class RunSummaryBuilder:
         """
         self._degraded_mode = bool(degraded)
         self._degradation_reasons = list(reasons or [])
+        return self
+
+    def set_token_usage(self, snapshot: dict[str, int] | None) -> RunSummaryBuilder:
+        """Record per-run LLM token usage from a ``TokenLedger.snapshot()``.
+
+        Findings-log §4 Item 1. A None / empty snapshot leaves ``tokens`` unset
+        (mock runs and zero-call runs render no Token Usage section).
+        """
+        if not snapshot or not snapshot.get("llm_calls"):
+            return self
+        self._tokens = TokenUsageMetrics(
+            input_tokens=int(snapshot.get("input_tokens", 0)),
+            output_tokens=int(snapshot.get("output_tokens", 0)),
+            total_tokens=int(snapshot.get("total_tokens", 0)),
+            llm_calls=int(snapshot.get("llm_calls", 0)),
+            estimated_calls=int(snapshot.get("estimated_calls", 0)),
+        )
         return self
 
     def set_failed_analysts(self, names: list[str]) -> RunSummaryBuilder:
@@ -618,6 +681,7 @@ class RunSummaryBuilder:
             validation=self._validation,
             cascade=self._cascade,
             elapsed_seconds=time.time() - self._start_time,
+            tokens=self._tokens,
             degraded_mode=self._degraded_mode,
             degradation_reasons=self._degradation_reasons,
             failed_analysts=self._failed_analysts,

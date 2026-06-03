@@ -36,6 +36,7 @@ from maljan.agents.registry import AgentRegistry
 from maljan.core.config import Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
+from maljan.core.token_ledger import TokenLedger
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
@@ -96,6 +97,10 @@ class ServiceContainer:
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
         self._samples_dir = str(resolve_data(samples_dir))
+
+        # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
+        # judge add each call's usage; the judge node snapshots it into RunSummary.
+        self._token_ledger = TokenLedger()
 
         logger.info(
             "ServiceContainer initialized (mock=%s, agents=%s, parsers=%s)",
@@ -262,11 +267,17 @@ class ServiceContainer:
                 )
             return self._sandbox_client_cache
 
+    def get_token_ledger(self) -> TokenLedger:
+        """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
+        return self._token_ledger
+
     def get_agent(self, name: str) -> BaseAnalyst:
         with self._lock:
             cached = self._agent_cache.get(name)
             if cached is None:
                 cached = self.agent_registry.create(name, self.get_agent_llm(name))
+                # Wire the per-run token ledger so the agent's LLM calls are tallied.
+                cached.token_ledger = getattr(self, "_token_ledger", None)
                 self._agent_cache[name] = cached
             return cached
 
@@ -281,6 +292,7 @@ class ServiceContainer:
                     llm=llm,
                     category_backend=self.config.preprocessing.category_inference_backend,
                 )
+                cached.token_ledger = getattr(self, "_token_ledger", None)
                 self._judge_agent_cache[role] = cached
             return cached
 

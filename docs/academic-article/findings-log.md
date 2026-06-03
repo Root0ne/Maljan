@@ -643,9 +643,35 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - `DONE` (§3.5) Adopted a MaLAware-style [4] multi-metric narrative-quality evaluation
   harness for the report/NarrativeAgent (`tests/evaluation/eval_narrative_quality.py`).
   Next: run it against the local llama-server to report the LLM-vs-fallback paired deltas.
-- Leads to evaluate (likely high transfer — "LLM-as-analyst" paradigm):
-  MARD (multi-agent, arXiv:2604.25264), TraceRAG (RAG + explainable, arXiv:2509.08865),
-  LAMD (arXiv:2502.13055).
+- Reviewed (the "LLM-as-analyst" leads): MARD (multi-agent, arXiv:2604.25264), TraceRAG
+  (RAG + explainable, arXiv:2509.08865), LAMD (arXiv:2502.13055). All three are Android,
+  but their techniques are platform-agnostic. **Convergent validation:** MARD's
+  ReAct-orchestrator + deterministic-engines-as-tools + interpretable evidence chain, and
+  LAMD's security-critical context extraction, are already realised in Maljan
+  (`execute_tool_loop` + Layer-0/cascade + ISR evidence chain; sink-reachability §1.1). Five
+  **net-new** transferable items remain, sequenced by value/effort:
+- `IMPLEMENTED` (Item 1, MARD) Per-run token/cost telemetry in `RunSummary` — a thread-safe
+  `TokenLedger` ([core/token_ledger.py](../../src/maljan/core/token_ledger.py)) on the container
+  tallies each analyst/judge LLM call's `usage_metadata` (char-based estimate fallback, flagged,
+  when the local llama-server omits it); the judge node snapshots it into a `TokenUsageMetrics`
+  block rendered in `RunSummary`. Gives a MARD-style per-sample cost figure and instruments the
+  cost/benefit of the decomposition + RAG experiments below.
+- `PLANNED` (Item 2, TraceRAG) Function-level RAG retrieval for the static analyst — an
+  ephemeral per-sample in-memory function index (`embeddings.encode_batch` + `cosine` over the
+  chunker's `FUNCTION_BOUNDARY` chunks); behavior-focused NL queries retrieve the most relevant
+  functions instead of linear chunking. Config-gated `static_function_rag_top_k` (0 = today's
+  path). The highest-value item — it targets the static path's weakest point.
+- `PLANNED` (Item 3, LAMD) Tier-wise *vertical* reasoning mode (instructions → behaviour →
+  ATT&CK semantics, each tier consuming the previous) as a sibling to the §3.6 *horizontal*
+  view-decomposition; equal-budget sequential tiers, gated alongside §3.6.
+- `PLANNED` (Item 4, LAMD) Inline foundational-tier claim-consistency gate — drop ungrounded
+  claims at parse time (claim's cited artifact absent from the source evidence), complementing
+  the post-hoc `fp_linter`. Config-gated `use_claim_consistency_gate`.
+- `PLANNED` (Item 5, MARD) Concept-drift eval across year-cohorts — **blocked on a dated
+  dataset**: current ground truth carries no first-seen/year signal (the ATT&CK loader even
+  ignores the bundle's `created`/`modified` dates). Needs a curated MalwareBazaar `first_seen`
+  manifest before the harness (`eval_temporal_drift.py`, per-cohort precision/recall/F1 +
+  bootstrap CI) is meaningful.
 
 ---
 
@@ -671,6 +697,18 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-03 token/cost telemetry (Roadmap Item 1, MARD).** Added a thread-safe
+  `TokenLedger` (`src/maljan/core/token_ledger.py`) on the `ServiceContainer`; analyst
+  (`base_agent` no-tools + view paths) and judge LLM invokes call `record_response_usage`,
+  which prefers langchain `usage_metadata` and falls back to a flagged char-based estimate
+  (~chars/4) when the local llama-server omits it. The judge node snapshots the ledger into a
+  new `TokenUsageMetrics` block on `RunSummary` (rendered in `to_dict`/`to_markdown`). Telemetry
+  never raises; mock/zero-call runs render no token section. Flipped §4 Item 1 PLANNED →
+  IMPLEMENTED. 1283 unit pass (+ new `tests/unit/core/test_token_ledger.py`); ruff/mypy clean.
+- **2026-06-03 reviewed MARD/TraceRAG/LAMD → roadmap (§4).** Recorded five net-new transferable
+  items (token telemetry, function-RAG retrieval, tier-wise reasoning, claim-consistency gate,
+  concept-drift eval) under Open threads, sequenced by value/effort; noted convergent validation
+  (Maljan already realises the papers' core LLM-orchestrator + deterministic-tools paradigm).
 - **2026-06-03 view-decomposition: config-gated mechanism + equal-budget A/B (§3.6, last
   backlog item).** Settled the §3.2 `INCONCLUSIVE` properly. (i) **Mechanism:**
   `LLMConfig.view_decomposition_views` (default 0 = unchanged) gates a new

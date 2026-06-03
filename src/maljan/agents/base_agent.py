@@ -24,6 +24,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AnalystError
 from maljan.core.logger import logger
+from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
@@ -53,6 +54,15 @@ def _extract_technique_ids(text: str) -> list[str]:
     """Extract all unique valid MITRE ATT&CK technique IDs mentioned in text."""
     candidates = _TECHNIQUE_RE.findall(text)
     return list(dict.fromkeys(t for t in candidates if _technique_id_is_valid(t)))
+
+
+def _messages_text(messages: list) -> str:
+    """Join message contents into a prompt string (for token estimation)."""
+    parts: list[str] = []
+    for m in messages:
+        content = getattr(m, "content", m)
+        parts.append(content if isinstance(content, str) else str(content))
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +202,9 @@ class BaseAnalyst(ABC):
         self.name = name
         self.tools = tools or []
         self.logger = logger.getChild(self.name.lower())
+        # Per-run token ledger (findings-log §4 Item 1). The container attaches
+        # the shared ledger in get_agent(); None when an agent runs standalone.
+        self.token_ledger: TokenLedger | None = None
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -437,6 +450,9 @@ class BaseAnalyst(ABC):
                         asyncio.to_thread(self.llm.invoke, messages),
                         timeout=float(timeout),
                     )
+                    record_response_usage(
+                        self.token_ledger, response, prompt_text=_messages_text(messages)
+                    )
                     return str(response.content)
 
                 thread_result["content"] = loop.run_until_complete(_invoke())
@@ -657,7 +673,9 @@ class BaseAnalyst(ABC):
                 llm = self.llm.bind(max_tokens=max_tokens)
             except Exception:  # noqa: BLE001 — provider may not accept the kwarg
                 llm = self.llm
-        return str(llm.invoke(messages).content)
+        response = llm.invoke(messages)
+        record_response_usage(self.token_ledger, response, prompt_text=f"{instruction}\n\n{data}")
+        return str(response.content)
 
     def analyze_isr_views(
         self,

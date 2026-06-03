@@ -836,6 +836,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     )
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
+                    .set_token_usage(container.get_token_ledger().snapshot())
                     .build()
                 )
                 run_summary_dict = summary.to_dict()
