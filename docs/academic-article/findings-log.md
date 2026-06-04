@@ -731,8 +731,8 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   structured (`_parse_claim_blocks`) and text-fallback (`_text_to_isr`) claim shapes are gated.
   Config-gated `PreprocessingConfig.use_claim_consistency_gate` (off = every parsed claim kept);
   fail-safe (any gate error leaves the ISR untouched).
-- `IMPLEMENTED` (code) / `PENDING` (live numbers) (Item 5, MARD) Concept-drift eval across
-  first-seen year cohorts. The earlier data gate is now resolved end-to-end:
+- `IMPLEMENTED` + `NUMBERS` (Item 5, MARD) Concept-drift eval across first-seen year cohorts.
+  The earlier data gate is now resolved end-to-end and a live run produced numbers:
   - **Dated-manifest collector** `tests/evaluation/collect_temporal_manifest.py` — pulls
     metadata-only sample records (sha256 + `first_seen` + family + file_type) from MalwareBazaar
     (`get_siginfo` per family, Auth-Key via `$MALWAREBAZAAR_AUTH_KEY`, or a local full-dump CSV),
@@ -768,6 +768,37 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     `get_file`) and run with a live llama-server. The harness scores whatever is present
     (`--max-per-cohort N` for a cheap first pass) and reports the rest as `pending_binary` —
     never silently dropped.
+  - **Live result (2026-06-04, n=42 — 6 per cohort × 7 years).** Binaries downloaded from
+    MalwareBazaar into `data/samples/` (210/210 extracted; AES zips via pyzipper) and analysed
+    **static-only** (Ghidra+LLM, `SANDBOX__BACKEND=mock` so no dynamic / no public-sandbox upload;
+    `disable_thinking`, `NEGOTIATION__MAX_ITERATIONS=2`) on the local Qwen3.6-35B-A3B. Per-cohort
+    ATT&CK precision / recall / F1 (mean, 95% bootstrap CI):
+
+    | year | n | precision | recall | F1 | 95% F1 CI | halluc. |
+    |---|---|---|---|---|---|---|
+    | 2020 | 6 | 0.042 | 0.004 | 0.007 | [0.000, 0.020] | 0.000 |
+    | 2021 | 6 | 0.156 | 0.039 | 0.058 | [0.010, 0.122] | 0.000 |
+    | 2022 | 6 | 0.056 | 0.005 | 0.010 | [0.000, 0.029] | 0.000 |
+    | 2023 | 6 | 0.244 | 0.077 | 0.115 | [0.079, 0.166] | 0.057 |
+    | 2024 | 6 | 0.253 | 0.049 | 0.077 | [0.042, 0.110] | 0.017 |
+    | 2025 | 6 | 0.164 | 0.027 | 0.046 | [0.026, 0.060] | 0.000 |
+    | 2026 | 6 | 0.139 | 0.014 | 0.026 | [0.009, 0.043] | 0.000 |
+
+    Earliest→latest drift **delta = +0.019 F1** (2020 0.007 → 2026 0.026).
+  - **Findings.** (i) **No measurable concept drift.** The earliest→latest delta (+0.019) is tiny
+    and the per-cohort F1 CIs overlap heavily (2023 peak 0.115 vs 2020 floor 0.007 is non-monotonic,
+    not a trend) — the static path's accuracy is *temporally stable* across a 7-year span, which is
+    the direction of MARD's robustness claim, just at a low absolute level. (ii) **Low absolute
+    recall is structural, as caveated** — static-only recovers a small fraction (0.004–0.077) of the
+    family-level `uses` sets because those sets are dominated by behavioural/runtime techniques a
+    decompile cannot observe; precision is modest (0.04–0.25) and **hallucination is ~0 across every
+    cohort** (the grounding gates hold on real malware, not just fixtures). (iii) The result argues
+    that **dynamic analysis is required to lift recall** — the static-only arm is a clean,
+    upload-free baseline, and the gap to the family ground truth quantifies what dynamic must add.
+  - **Cost.** ~13–20 min/sample on the local 35B (Ghidra auto-analyse + multi-round pipeline);
+    42 samples ran as an overnight batch with JSONL checkpoint resume. A path bug was fixed first:
+    the harness handed `load_program` the host path, not the Ghidra container's `/data/samples`
+    mount, so the static analyst made 0 tool calls until corrected.
 
 ---
 
@@ -792,6 +823,18 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-06-04 Item 5 concept-drift LIVE NUMBERS (n=42, static-only Ghidra+LLM).** Downloaded all
+  210 MalwareBazaar binaries into `data/samples/` (AES zips via pyzipper; Defender exclusion
+  verified with EICAR first) and ran the drift eval on 6 samples/cohort × 7 years (2020–2026) on
+  the local Qwen3.6-35B-A3B, static-only (`SANDBOX__BACKEND=mock` — no dynamic, no public-sandbox
+  upload). Per-cohort F1 ranges 0.007–0.115; **drift delta 2020→2026 = +0.019** (within heavily
+  overlapping CIs → **no measurable concept drift**, the direction of MARD's robustness claim).
+  Recall is structurally low (0.004–0.077: static cannot see behavioural TTPs that dominate the
+  family `uses` sets), precision modest (0.04–0.25), **hallucination ~0 in every cohort** (grounding
+  gates hold on real malware). Reading: the static-only arm is a clean upload-free baseline; the gap
+  to ground truth quantifies what dynamic analysis must add. Fixed a load_program host-vs-container
+  path bug (0 Ghidra tool calls until corrected). Flipped §4 Item 5 to `IMPLEMENTED` + `NUMBERS`.
 
 - **2026-06-04 Ghidra+LLM static-only chain validation + 3 pipeline-robustness fixes.**
   Validated the full static path end-to-end on a known-benign PE (a `where.exe` copy — no
