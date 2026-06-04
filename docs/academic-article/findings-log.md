@@ -601,8 +601,27 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   the paired LLM−fallback F1 delta gets a bootstrap CI + sign test. All scoring is
   deterministic and CI-covered by `tests/evaluation/test_narrative_quality_scoring.py`
   (no live LLM); the LLM arm runs against a llama-server.
-- **Status.** Harness + scoring unit tests shipped; the live-LLM numbers are produced by
-  running it (`--smoke` for a single end-to-end sample).
+- **Status.** Harness + scoring unit tests shipped. **Live run** (2026-06-04, Qwen3.6-35B-A3B,
+  5 fixtures × 3 repeats = n=15, `enable_thinking=false`). Mean [95% bootstrap CI]:
+
+  | metric | LLM narrative | deterministic fallback |
+  |---|---|---|
+  | grounding precision (faithfulness) | 1.000 | 1.000 |
+  | coverage recall | 0.853 [0.71, 0.95] | 1.000 |
+  | F1 | 0.889 [0.75, 0.97] | **1.000** |
+  | structural pass-rate | **0.733 [0.53, 0.93]** | 0.000 |
+  | hallucinated techniques | 0.000 | 0.000 |
+
+  Paired LLM−fallback **F1 delta = −0.111 [−0.252, −0.030]** (CI excludes 0; sign test: fallback
+  wins 7, ties 8, LLM wins 0). **Finding:** both arms are perfectly *faithful* (precision 1.0,
+  zero hallucination) — the MaLAware premise that a small local model narrates without inventing
+  capabilities **holds**. But on the faithfulness+coverage F1 the **deterministic template is the
+  stronger baseline** (it covers every evidence technique by construction → recall 1.0; the LLM
+  omits some → 0.853). The LLM's *only* edge is **structural/readability compliance (0.73 vs
+  0.00)** — i.e. the justification for the LLM narrator is human-readable prose, **not** accuracy
+  or coverage, where the deterministic template is at least as good. A useful negative-ish result:
+  don't pay for an LLM narrative on faithfulness grounds; pay for it only if readable prose is the
+  product. (This supersedes the earlier n=1 smoke, which was an uninformative tie.)
 
 ### 3.6 View-decomposition — config-gated mechanism + a valid (equal-budget) study — `IMPLEMENTED`
 - **Question.** §3.2 left this `INCONCLUSIVE`: does splitting an analyst's evidence into N
@@ -624,8 +643,36 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   bootstrap CI per arm. Pure scoring helpers are CI-covered
   (`test_view_decomposition_scoring.py`); the mechanism is unit-tested
   (`tests/unit/agents/test_view_decomposition.py`) without a live LLM.
-- **Status.** Mechanism + harness + unit tests shipped (off by default). The verdict on whether
-  decomposition helps at equal budget is produced by running the harness against a llama-server.
+- **Status.** Mechanism + harness + unit tests shipped (off by default). **Live partial run**
+  (2026-06-04, Qwen3.6-35B-A3B, equal budget B=2000, 3 fixtures × 3 repeats = n≈8–9/arm; the
+  full 5×3 run was cut short by a hardware stall, see below). Mean [95% bootstrap CI]:
+
+  | arm | n | claim count | invalid-id rate | grounding rate | claim stability (σ) |
+  |---|---|---|---|---|---|
+  | monolithic | 9 | 7.0 [6.1, 8.2] | 0.00 | **0.334 [0.11, 0.58]** | 1.20 |
+  | 2-view | 9 | 13.0 [10.7, 15.6] | 0.00 | 0.238 [0.11, 0.36] | 3.10 |
+  | 4-view | 8 | 17.6 [14.9, 19.6] | 0.042 [0, 0.13] | 0.142 [0.07, 0.21] | 2.16 |
+  | 3-tier | 8 | 13.8 [12.4, 15.8] | 0.00 | 0.070 [0.02, 0.11] | 1.58 |
+
+  **Finding (this corrects the misleading n=1 smoke, which had shown 2-view > monolithic).** At
+  equal budget, decomposition trades **grounding for volume**: claim count rises with
+  decomposition depth (mono 7 → 2-view 13 → 4-view 18) while grounding falls monotonically
+  (0.334 → 0.238 → 0.142), and **tier reasoning is the *least* grounded (0.070)** — the sequential
+  synthesis tiers drift toward interpretation that cites less concrete evidence. **Monolithic is
+  both the most grounded and the most stable** (σ 1.20). The §3.2 hallucination failure mode does
+  **not** recur in any arm (invalid-id ≈ 0; 4-view's 0.042 CI includes 0). Caveats: partial
+  (3/5 fixtures), high per-sample variance (monolithic grounding 0.83 on ransomware vs ~0 on
+  infostealer), and mono-vs-2-view CIs overlap (not separable at this n); mono > 3-tier is the
+  one near-clean separation.
+  *Two methodology fixes landed during this run:* (i) the analyst's chain-of-thought is disabled
+  for the eval (`chat_template_kwargs.enable_thinking=false`) — the reasoning model otherwise
+  spends the whole token budget inside `<think>` (stripped by the server → empty CLAIM output);
+  (ii) `_bootstrap_ci` now samples the LCG's **high** bits — `seed % n` collapsed the CI whenever
+  n was a power of two (the low LCG bits have a short period), which had hidden the n=8 spread.
+  *Hardware note:* the 4-view arm fires 4 concurrent sub-calls; on the single-GPU CPU-MoE local
+  server those contend and stall (each ~4× slower, past the 180 s skip), which capped the run at
+  34/60. The fix for a full clean run is `llama-server --parallel N` *with* the views run
+  sequentially, or a faster decode host — recorded for the eventual complete-corpus run.
 
 ---
 
@@ -691,9 +738,10 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     (`get_siginfo` per family, Auth-Key via `$MALWAREBAZAAR_AUTH_KEY`, or a local full-dump CSV),
     filters to the Windows/Linux scope (§1.8), buckets by year, balance-samples each cohort, and
     writes a manifest. Verified live: a **balanced 210-sample manifest — 7 cohorts (2020–2026),
-    exactly 30 each** — collected by union-ing ~24 multi-year families (Emotet, TrickBot, Dridex,
-    Ursnif, AZORult, RaccoonStealer, IcedID, NanoCore, CobaltStrike, AgentTesla, LummaStealer,
-    DarkGate, …). No binaries are downloaded.
+    exactly 30 each, 27 distinct families** — collected by union-ing multi-year families (Emotet,
+    TrickBot, Dridex, Ursnif, DarkComet, Pony, RaccoonStealer, IcedID, CobaltStrike, Gh0stRAT,
+    Sliver, LummaStealer, …). No binaries are downloaded. The manifest is vendored (metadata only,
+    no binaries) at `tests/evaluation/temporal_manifest.json` so the eval is reproducible.
   - **Drift harness** `tests/evaluation/eval_temporal_drift.py` — loads the manifest, resolves
     each family to its in-repo ATT&CK ground-truth fixture
     (`tests/evaluation/ground_truth/attck_malware/<slug>.json`, 700+ families, MITRE `uses`
@@ -701,7 +749,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     recall / F1 (mean + 95% bootstrap CI via `TTPAccuracyMetrics`) plus the earliest→latest F1
     drift delta. `--dry-run` validates the manifest/ground-truth wiring offline (verified: **all
     210 samples resolve to ground truth, 30/30 per cohort** — the alias map + CamelCase-split
-    fallback maps every MalwareBazaar signature, e.g. RaccoonStealer→raccoon_stealer).
+    fallback maps every MalwareBazaar signature, e.g. RaccoonStealer→raccoon_stealer,
+    Gh0stRAT→gh0st_rat, Heodo→emotet). `scan_manifest` (coverage + analyzable list) is unit-tested
+    with tmp dirs; the pure scoring/resolver helpers in `test_temporal_drift_scoring.py` (15 tests).
   - **Methodology caveat (recall ceiling -> read drift as a delta).** Family-level ATT&CK `uses`
     sets are a *coarse* per-sample ground truth: a single Emotet binary need not exhibit all ~47
     catalogued Emotet techniques, and a stripped/packed sample exposes fewer still — so absolute
@@ -709,10 +759,10 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     **constant per family across years**, so the defensible reading is the *relative* drift —
     the earliest->latest F1 **delta** within a family/cohort — not the absolute level. The
     harness reports both; the paper claim rests on the delta.
-  - **Cohort balance.** `get_siginfo` is recency-biased per family, but union-ing ~24 families
+  - **Cohort balance.** `get_siginfo` is recency-biased per family, but union-ing ~30 families
     whose active years overlap different periods yields a fully balanced manifest (the delivered
-    one is 30/cohort across 2020–2026). The CSV full-dump (`--source csv`, full history, no rate
-    limit) is the alternative when even-wider coverage or specific years are needed.
+    one is 30/cohort × 7 years, 27 distinct families). The CSV full-dump (`--source csv`, full
+    history, no rate limit) is the alternative when even-wider coverage or specific years are needed.
   - **Remaining (operator-side, not code):** download the binaries into `data/samples/<sha256>.<ext>`
     (isolated env; `collect_temporal_manifest.py --download` automates this via MalwareBazaar
     `get_file`) and run with a live llama-server. The harness scores whatever is present
@@ -743,12 +793,68 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-04 Ghidra+LLM static-only chain validation + 3 pipeline-robustness fixes.**
+  Validated the full static path end-to-end on a known-benign PE (a `where.exe` copy — no
+  malware, no public upload) against the live Ghidra MCP container (v5.6.0, 165 tools ->
+  20 via allowlist) + local 35B llama-server. **Outcome: PASS** — static analyst engages
+  Ghidra (load_program + 4 tool calls), the pipeline completes and returns scoreable output
+  (5 ISR agents, 5 predicted ATT&CK techniques, final verdict + run summary). Three live
+  failures were found and fixed before they could corrupt a batch eval: (1) the negotiation
+  node only caught `(AnalystError, LLMError)`, so a bare `asyncio.TimeoutError` re-raised by
+  `judge_agent.execute_tool_loop` — and a transient openai `APIConnectionError` under
+  concurrent analyst load — **crashed the whole graph** (in a batch, silently dropping the
+  sample); both `make_negotiation_node` and `make_judge_node` now isolate *any* mediation
+  failure and degrade to "no consensus" / conservative verdict, carrying the populated ISRs
+  forward (new `tests/unit/pipeline/test_negotiation_fault_isolation.py`, 5 cases). (2) New
+  off-by-default `LLMConfig.openai.disable_thinking` flag forwards
+  `chat_template_kwargs.enable_thinking=false` via extra_body for local reasoning models —
+  **~10x speedup** observed (static ReAct 154.8s -> 16.5s) because the model no longer burns
+  the decode budget inside `<think>`. **Static-only recipe** (Ghidra+LLM, no dynamic, no
+  public upload): `SANDBOX__BACKEND=mock` (the `.env` default is `triage`, which *uploads to
+  the public tria.ge sandbox* — confirmed live) + `LLM__OPENAI__DISABLE_THINKING=true`; for a
+  large eval also `NEGOTIATION__MAX_ITERATIONS=2` (benign sample ran the full 5 rounds =
+  ~688s; 210 samples at 5 rounds ~= 40h). Per Maljan OS scope, the path stays Windows/Linux.
+  1330 unit tests green; ruff + mypy clean. Item 5 live numbers still await operator-supplied
+  binaries + an admin Defender exclusion on `data/samples` (real malware is quarantined on
+  write otherwise) — the collector warns it is for an isolated VM, not this workstation.
+
+- **2026-06-04 narrative-quality live run (§3.5, MaLAware), n=15.** 5 fixtures × 3 repeats on
+  Qwen3.6-35B-A3B (`enable_thinking=false`). Both LLM and deterministic-fallback narratives are
+  perfectly faithful (grounding precision 1.0, 0 hallucinated techniques) — MaLAware's premise
+  holds. But on faithfulness+coverage **F1 the deterministic template wins** (1.0 vs LLM 0.889;
+  paired delta −0.111, CI [−0.252, −0.030], excludes 0): the template covers every evidence
+  technique by construction (recall 1.0) while the LLM omits some (0.853). The LLM's only edge is
+  **structural/readability compliance (0.73 vs 0.0)** — the LLM narrator is justified by readable
+  prose, not accuracy. Recorded under §3.5 Status.
+- **2026-06-04 live partial view-decomposition run + two methodology fixes (§3.6, Item 3).**
+  Ran the equal-budget A/B on Qwen3.6-35B-A3B over 3 fixtures × 3 repeats (n≈8–9/arm, 34/60
+  generations; full run capped by a 4-view concurrency stall). Result **corrects the n=1 smoke**:
+  at equal budget, decomposition trades grounding for volume — claim count rises (mono 7 → 4-view
+  18) while grounding falls monotonically (mono **0.334** > 2-view 0.238 > 4-view 0.142 > 3-tier
+  **0.070**); monolithic is most grounded + most stable; no arm hallucinates technique IDs. Full
+  table under §3.6 Status. Fixes: (i) eval disables analyst chain-of-thought via
+  `chat_template_kwargs.enable_thinking=false` (the reasoning model was spending the whole budget
+  in `<think>`, which the server strips → empty CLAIM output + timeouts); (ii) `_bootstrap_ci`
+  (all three eval harnesses) now samples the LCG **high** bits — `seed % n` collapsed the CI for
+  power-of-two n. ruff clean; 42 eval-scoring tests pass.
+- **2026-06-04 first live-LLM eval smokes (§3.5, §3.6, Item 3) on Qwen3.6-35B-A3B.** Brought the
+  local llama-server up and ran the two server-only harnesses end-to-end (n=1 `--smoke`).
+  *Fix:* `eval_view_decomposition.py` and `eval_narrative_quality.py` had the single-path sys.path
+  bootstrap (`_REPO_ROOT` only) and so couldn't import `maljan` as standalone scripts (src-layout)
+  — both now insert `_REPO_ROOT/"src"` too (matching `eval_function_rag.py`). *View-decomposition
+  smoke* (equal budget B=2000): grounding monolithic 0.143 / 2-facet 0.500 / 3-tier 0.083, invalid
+  technique-id 0.0 across all arms, claim count 7/8/12 — 2-facet lifts grounding ~3.5×, tier
+  maximises claims but minimises grounding (directional, n=1). *Narrative-quality smoke*: LLM and
+  fallback both perfect faithfulness (F1=1.0, 0 hallucinated); the LLM's edge is structural
+  (1.0 vs 0.0), paired F1 delta +0.000 (tie at n=1). Recorded both under §3.6/§3.5 Status as the
+  first live signal; full mean±CI verdicts need a multi-repeat run over all fixtures.
 - **2026-06-04 concept-drift eval data engine + harness (Roadmap Item 5, MARD).** Resolved the
   Item 5 data gate. New `tests/evaluation/collect_temporal_manifest.py`: a metadata-only dated
   manifest collector (MalwareBazaar `get_siginfo` API with `$MALWAREBAZAAR_AUTH_KEY`, or a
   local full-dump CSV; offline `--selftest`), scoping to Windows/Linux (§1.8), year-cohort
   bucketing + deterministic balance-sampling. Verified live: a **balanced 210-sample manifest,
-  7 cohorts (2020–2026) x 30 each**, from ~24 multi-year families.
+  7 cohorts (2020–2026) x 30 each, 27 distinct families**, vendored (metadata only) at
+  `tests/evaluation/temporal_manifest.json`.
   New `tests/evaluation/eval_temporal_drift.py`: loads the manifest, maps each MalwareBazaar
   family to its in-repo ATT&CK ground-truth fixture (alias map + slug/CamelCase fallbacks), runs
   the pipeline per present binary, and reports per-cohort precision/recall/F1 (`TTPAccuracyMetrics`
