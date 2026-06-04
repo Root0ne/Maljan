@@ -51,9 +51,17 @@ from tests.evaluation.metrics import TTPAccuracyMetrics
 
 _OUT_FILE = Path("D:/tmp/temporal_drift.md")
 _DEFAULT_CHECKPOINT = Path("D:/tmp/temporal_drift_checkpoint.jsonl")
-_DEFAULT_MANIFEST = Path("D:/tmp/temporal_manifest_live.json")
+# Default to the vendored, reproducible manifest (metadata only — no binaries);
+# a fresh local collection can be pointed at with --manifest.
+_VENDORED_MANIFEST = _REPO_ROOT / "tests" / "evaluation" / "temporal_manifest.json"
+_LOCAL_MANIFEST = Path("D:/tmp/temporal_manifest_live.json")
+_DEFAULT_MANIFEST = _VENDORED_MANIFEST if _VENDORED_MANIFEST.exists() else _LOCAL_MANIFEST
 _GROUND_TRUTH_DIR = _REPO_ROOT / "tests" / "evaluation" / "ground_truth" / "attck_malware"
 _SAMPLES_DIR = _REPO_ROOT / "data" / "samples"
+# Container-visible mount of _SAMPLES_DIR inside the Ghidra MCP container
+# (docker-compose maps ``../data/samples:/data/samples:ro``). The static analyst
+# hands this to ``load_program``, which executes inside that container.
+_CONTAINER_SAMPLES_DIR = "/data/samples"
 
 # MalwareBazaar family signatures concatenate words ("AgentTesla"); the ATT&CK
 # fixture slug spaces+underscores them ("agent_tesla"). The slug fallbacks below
@@ -72,6 +80,16 @@ _FAMILY_ALIASES: dict[str, str] = {
     "quasarrat": "quasarrat",
     "asyncrat": "asyncrat",
     "nanocore": "nanocore",
+    "bruteratel": "brute_ratel_c4",
+    "remcosrat": "remcos",
+    "warzonerat": "warzonerat",
+    # MalwareBazaar uses alternate names for a few ATT&CK families.
+    "heodo": "emotet",
+    "isfb": "ursnif",
+    "gozi": "ursnif",
+    "quakbot": "qakbot",
+    "pikabot": "pikabot",
+    "gh0strat": "gh0st_rat",
 }
 
 
@@ -186,7 +204,9 @@ def _bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]
         acc = 0.0
         for _ in range(n):
             seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            acc += values[seed % n]
+            # High bits only: the LCG's low bits have a short period, so
+            # ``seed % n`` collapses the CI when n is a power of two.
+            acc += values[(seed >> 16) % n]
         means.append(acc / n)
     means.sort()
     return (means[int(0.025 * iters)], means[int(0.975 * iters)])
@@ -285,17 +305,61 @@ def load_manifest(path: Path) -> OrderedDict[str, list[dict[str, str]]]:
     return OrderedDict(sorted(cohorts.items()))
 
 
+def scan_manifest(
+    manifest: OrderedDict[str, list[dict[str, str]]],
+    available: set[str],
+    samples_dir: Path,
+    done: frozenset[str] = frozenset(),
+) -> tuple[OrderedDict[str, dict[str, int]], list[tuple[str, str, str, str, Path, str]]]:
+    """Compute per-cohort coverage and the analyzable-sample list.
+
+    Coverage counts the FULL manifest (manifest / ground-truth-resolved /
+    binary-present / already-scored), independent of any run cap. The second
+    return value is the list of (year, sha, family, slug, binary, file_name)
+    tuples for samples that resolve to ground truth, have a binary on disk, and
+    are not already scored — the candidates a run would analyse. Pure except for
+    the filesystem probe in ``locate_binary``; unit-tested with tmp dirs.
+    """
+    coverage: OrderedDict[str, dict[str, int]] = OrderedDict()
+    analyzable: list[tuple[str, str, str, str, Path, str]] = []
+    for year, samples in manifest.items():
+        cov = {"manifest": len(samples), "gt_resolved": 0, "binary_present": 0, "scored": 0}
+        for s in samples:
+            sha = s["sha256"]
+            family = s.get("signature", "")
+            slug = resolve_fixture_slug(family, available)
+            if slug is None:
+                continue
+            cov["gt_resolved"] += 1
+            binary = locate_binary(sha, samples_dir)
+            if binary is None:
+                continue
+            cov["binary_present"] += 1
+            if f"{year}:{sha}" in done:
+                cov["scored"] += 1
+                continue
+            analyzable.append((year, sha, family, slug, binary, s.get("file_type", sha)))
+        coverage[year] = cov
+    return coverage, analyzable
+
+
 def _run_pipeline_on(sha256: str, binary_path: Path, file_name: str) -> set[str]:
     """Run the full Maljan pipeline on one binary; return predicted technique IDs."""
     from maljan.app import MaljanApp
     from maljan.core.config import get_settings
 
     app = MaljanApp(config=get_settings(), mock=False, samples_dir=str(_SAMPLES_DIR))
+    # The Ghidra MCP runs in a container that mounts host ``data/samples`` at
+    # ``/data/samples`` (docker-compose). ``load_program`` runs *inside* that
+    # container, so the static analyst must receive the CONTAINER-visible path,
+    # not the host path — otherwise load_program 404s, the ReAct loop makes 0
+    # tool calls, and the "static" analysis silently degrades to no Ghidra at all.
+    container_static_path = f"{_CONTAINER_SAMPLES_DIR}/{binary_path.name}"
     result = app.run(
         file_hash=sha256,
         file_name=file_name,
         sample_path=str(binary_path),
-        static_sample_path=str(binary_path),
+        static_sample_path=container_static_path,
     )
     return extract_predicted_tids(result)
 
@@ -407,37 +471,22 @@ def main() -> int:
                 scores.append(SampleScore(**{k: v for k, v in rec.items() if k != "key"}))
         print(f"Resume: {len(done)} samples already scored in {checkpoint}.", flush=True)
 
-    # Pass 1: coverage accounting + the list of samples to actually run this
-    # invocation (respecting --max-per-cohort and --smoke). Coverage counts the
-    # full manifest regardless of the run cap.
-    coverage: OrderedDict[str, dict[str, int]] = OrderedDict()
+    # Pass 1: coverage accounting + the analyzable-sample list (full manifest;
+    # cap/smoke are applied below, not here).
+    coverage, analyzable = scan_manifest(manifest, available, _SAMPLES_DIR, frozenset(done))
+
+    # Apply --max-per-cohort and --smoke to pick which analyzable samples to run.
     tasks: list[tuple[str, str, str, str, Path, str]] = []
     new_per_year: dict[str, int] = {}
-    for year, samples in manifest.items():
-        cov = {"manifest": len(samples), "gt_resolved": 0, "binary_present": 0, "scored": 0}
-        for s in samples:
-            sha = s["sha256"]
-            family = s.get("signature", "")
-            slug = resolve_fixture_slug(family, available)
-            if slug is None:
-                continue
-            cov["gt_resolved"] += 1
-            binary = locate_binary(sha, _SAMPLES_DIR)
-            if binary is None:
-                continue
-            cov["binary_present"] += 1
-            if f"{year}:{sha}" in done:
-                cov["scored"] += 1
-                continue
-            if args.dry_run:
-                continue
+    if not args.dry_run:
+        for t in analyzable:
+            year = t[0]
             if args.max_per_cohort and new_per_year.get(year, 0) >= args.max_per_cohort:
                 continue
             if args.smoke and sum(new_per_year.values()) >= 1:
                 continue
             new_per_year[year] = new_per_year.get(year, 0) + 1
-            tasks.append((year, sha, family, slug, binary, s.get("file_type", sha)))
-        coverage[year] = cov
+            tasks.append(t)
 
     # Pass 2: run the pipeline on each task (optionally concurrent). One bad
     # sample is logged and skipped, never aborting the run.

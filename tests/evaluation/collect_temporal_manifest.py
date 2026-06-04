@@ -217,7 +217,9 @@ def records_from_api(families: list[str], auth_key: str, limit: int = 1000) -> l
             headers={"Auth-Key": auth_key, "User-Agent": _MB_UA},
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 — fixed host
+            # req targets the fixed _MB_API host constant (no user-controlled
+            # scheme/host) — not an SSRF; both linters' URL warnings are moot.
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosemgrep
                 doc = json.loads(resp.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as exc:
             # abuse.ch encodes the reason in the JSON body even on a 4xx (e.g.
@@ -255,6 +257,32 @@ def records_from_api(families: list[str], auth_key: str, limit: int = 1000) -> l
     return out
 
 
+def _extract_password_zip(zpath: Path, dest_dir: Path) -> str:
+    """Extract the first file member of a MalwareBazaar password zip to dest_dir.
+
+    MalwareBazaar ships WinZip-AES archives that the stdlib ``zipfile`` cannot
+    decrypt ("That compression method is not supported"); fall back to
+    ``pyzipper`` (AES-capable) when the stdlib path fails. Returns the extracted
+    member's path; raises on a genuinely undecryptable / empty archive.
+    """
+    import zipfile
+
+    def _first_member(names: list[str]) -> str:
+        members = [m for m in names if not m.endswith("/")]
+        if not members:
+            raise zipfile.BadZipFile("empty archive")
+        return members[0]
+
+    try:  # plain Deflate zips open with the stdlib
+        with zipfile.ZipFile(zpath) as zf:
+            return zf.extract(_first_member(zf.namelist()), path=dest_dir, pwd=_ZIP_PASSWORD)
+    except (RuntimeError, NotImplementedError, zipfile.BadZipFile, OSError):
+        import pyzipper  # AES-encrypted MalwareBazaar archives
+
+        with pyzipper.AESZipFile(zpath) as zf:
+            return zf.extract(_first_member(zf.namelist()), path=dest_dir, pwd=_ZIP_PASSWORD)
+
+
 def download_samples(
     manifest_path: Path, dest_dir: Path, auth_key: str, *, limit: int = 0
 ) -> tuple[int, int, int]:
@@ -284,41 +312,41 @@ def download_samples(
         if target.exists():
             extracted += 1
             continue
-        payload = urllib.parse.urlencode({"query": "get_file", "sha256_hash": sha}).encode()
-        req = urllib.request.Request(
-            _MB_API, data=payload, headers={"Auth-Key": auth_key, "User-Agent": _MB_UA}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — fixed host
-                blob = resp.read()
-        except (urllib.error.URLError, TimeoutError, urllib.error.HTTPError) as exc:
-            print(f"  [dl] {sha[:12]} request failed: {exc}", flush=True)
-            failed += 1
-            continue
-        # abuse.ch returns a JSON status (not a zip) on not-found / auth failure.
-        if blob[:1] in (b"{", b"["):
-            try:
-                status = json.loads(blob.decode("utf-8", "replace")).get("query_status", "?")
-            except ValueError:
-                status = "?"
-            print(f"  [dl] {sha[:12]}: {status}", flush=True)
-            failed += 1
-            if status == "unknown_auth_key":
-                break
-            continue
         zpath = dest_dir / f"{sha}.zip"
-        zpath.write_bytes(blob)
+        # Resume: reuse a zip left by a prior interrupted run instead of
+        # re-fetching it (saves the API quota + bandwidth).
+        if not zpath.exists():
+            payload = urllib.parse.urlencode({"query": "get_file", "sha256_hash": sha}).encode()
+            req = urllib.request.Request(
+                _MB_API, data=payload, headers={"Auth-Key": auth_key, "User-Agent": _MB_UA}
+            )
+            try:
+                # req targets the fixed _MB_API host constant — not an SSRF.
+                with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310  # nosemgrep
+                    blob = resp.read()
+            except (urllib.error.URLError, TimeoutError, urllib.error.HTTPError) as exc:
+                print(f"  [dl] {sha[:12]} request failed: {exc}", flush=True)
+                failed += 1
+                continue
+            # abuse.ch returns a JSON status (not a zip) on not-found / auth failure.
+            if blob[:1] in (b"{", b"["):
+                try:
+                    status = json.loads(blob.decode("utf-8", "replace")).get("query_status", "?")
+                except ValueError:
+                    status = "?"
+                print(f"  [dl] {sha[:12]}: {status}", flush=True)
+                failed += 1
+                if status == "unknown_auth_key":
+                    break
+                continue
+            zpath.write_bytes(blob)
         try:
-            with zipfile.ZipFile(zpath) as zf:
-                members = [m for m in zf.namelist() if not m.endswith("/")]
-                if not members:
-                    raise zipfile.BadZipFile("empty archive")
-                got = zf.extract(members[0], path=dest_dir, pwd=_ZIP_PASSWORD)
+            got = _extract_password_zip(zpath, dest_dir)
             Path(got).replace(target)
             zpath.unlink()
             extracted += 1
             print(f"  [dl] {sha[:12]} -> {target.name}", flush=True)
-        except (RuntimeError, NotImplementedError, zipfile.BadZipFile, OSError) as exc:
+        except (RuntimeError, NotImplementedError, zipfile.BadZipFile, OSError, ValueError) as exc:
             print(
                 f"  [dl] {sha[:12]} saved encrypted zip "
                 f"(extract manually, password 'infected'): {exc}",
