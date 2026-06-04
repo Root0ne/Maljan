@@ -46,6 +46,13 @@ class OpenAIConfig(BaseModel):
     # ID-recall loops observed in live runs. Only applied when base_url is
     # set, so vanilla OpenAI (which would 400 on the param) stays untouched.
     repetition_penalty: float = 1.0
+    # Disable a local reasoning model's chain-of-thought (Qwen3 ``<think>``)
+    # by forwarding ``chat_template_kwargs.enable_thinking=false`` via extra_body.
+    # On constrained hosts the reasoning model otherwise spends the whole decode
+    # budget inside ``<think>`` (which the server strips into reasoning_content,
+    # leaving an empty answer + frequent timeouts). Off by default; only applied
+    # when base_url is set, so vanilla OpenAI stays untouched.
+    disable_thinking: bool = False
 
 
 class AnthropicConfig(BaseModel):

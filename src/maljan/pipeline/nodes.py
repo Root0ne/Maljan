@@ -430,8 +430,17 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 "confidence_history": [mean_conf],
                 "discussion_history": [argument],
             }
-        except (AnalystError, LLMError) as e:
-            logger.error("Negotiation failed: %s", e)
+        except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
+            # The mediation step calls the LLM; on a constrained / local host that
+            # call can fail in many ways (AnalystError, LLMError, a bare asyncio
+            # TimeoutError re-raised by judge_agent.execute_tool_loop, or a transient
+            # openai APIConnectionError under concurrent analyst load). A single
+            # failed mediation round must NOT crash the whole graph — degrade
+            # gracefully to "no consensus" and carry the current ISRs forward (they
+            # are already populated by the analyst nodes), so the run still returns a
+            # scoreable result instead of aborting an entire batch on one blip.
+            label = "timed out" if isinstance(e, TimeoutError) else "failed"
+            logger.error("Negotiation %s: %s", label, e or type(e).__name__)
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": False,
@@ -440,7 +449,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 "discussion_history": [
                     AgentArgument(
                         agent_name="Mediator",
-                        finding=f"[ERROR] Mediation failed: {e}",
+                        finding=f"[ERROR] Mediation {label}: {e or type(e).__name__}",
                         confidence_score=0.0,
                     )
                 ],
@@ -1006,11 +1015,16 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # can render the full deterministic threat-intel snapshot.
                 "sandbox_cti": _cti_block,
             }
-        except (AnalystError, LLMError) as e:
-            logger.error("Judge verdict failed: %s", e)
+        except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
+            # give_verdict() drives the LLM; on a constrained / local host it can
+            # fail with a bare asyncio TimeoutError or a transient openai
+            # APIConnectionError as well as AnalystError / LLMError. A failed final
+            # verdict must degrade to a conservative "Suspicious" result, not abort
+            # the run (and, in a batch eval, drop the whole sample).
+            logger.error("Judge verdict %s: %s", type(e).__name__, e or "")
             return {
                 "final_decision": "Suspicious",
-                "judge_report": f"[ERROR] Judge failed: {e}",
+                "judge_report": f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}",
                 "stix_output": {},
             }
 

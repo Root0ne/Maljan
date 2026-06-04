@@ -62,6 +62,18 @@ class OpenAIProvider:
             extra.setdefault("repetition_penalty", rp)
             build_kwargs["extra_body"] = extra
 
+        # Disable the local reasoning model's chain-of-thought when configured
+        # (Qwen3 ``enable_thinking``). On a constrained host the model otherwise
+        # spends its whole decode budget inside ``<think>`` — empty answers +
+        # timeouts. Only for local OpenAI-compatible servers (base_url set);
+        # vanilla OpenAI would reject the unknown chat_template_kwargs param.
+        if base_url and self._config.llm.openai.disable_thinking:
+            extra = dict(build_kwargs.get("extra_body") or {})
+            ctk = dict(extra.get("chat_template_kwargs") or {})
+            ctk.setdefault("enable_thinking", False)
+            extra["chat_template_kwargs"] = ctk
+            build_kwargs["extra_body"] = extra
+
         # Wave 5 HANG-01 + Wave 7 THROUGHPUT-01 (2026-05-28): explicit
         # ``request_timeout`` and ``max_retries`` so the openai SDK can't
         # silently retry a stalled request three times (3 x default 600s
