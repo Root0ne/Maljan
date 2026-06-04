@@ -12,6 +12,7 @@ from tests.evaluation.eval_temporal_drift import (
     drift_delta,
     extract_predicted_tids,
     resolve_fixture_slug,
+    scan_manifest,
     score_sample,
 )
 
@@ -120,3 +121,53 @@ class TestAggregateAndDrift:
         agg: OrderedDict[str, dict] = OrderedDict()
         agg["2020"] = {"f1": 0.9, "n": 5}
         assert drift_delta(agg) is None
+
+
+class TestScanManifest:
+    def _samples_dir(self, tmp_path, present: list[tuple[str, str]]):
+        d = tmp_path / "samples"
+        d.mkdir()
+        for sha, ext in present:
+            (d / f"{sha}.{ext}").write_bytes(b"\x00")
+        return d
+
+    def test_coverage_counts(self, tmp_path) -> None:
+        a, b, c, e = ("a" * 64, "b" * 64, "c" * 64, "e" * 64)
+        manifest = OrderedDict(
+            {
+                "2020": [
+                    {"sha256": a, "signature": "Emotet", "file_type": "exe"},
+                    {"sha256": b, "signature": "AgentTesla", "file_type": "exe"},
+                    {"sha256": c, "signature": "Formbook", "file_type": "exe"},  # no fixture
+                ],
+                "2021": [{"sha256": e, "signature": "Emotet", "file_type": "elf"}],
+            }
+        )
+        available = {"emotet", "agent_tesla"}
+        # Binaries present for a (resolved) and c (unresolved); b and e absent.
+        samples = self._samples_dir(tmp_path, [(a, "exe"), (c, "exe")])
+
+        coverage, analyzable = scan_manifest(manifest, available, samples)
+
+        assert coverage["2020"]["manifest"] == 3
+        assert coverage["2020"]["gt_resolved"] == 2  # Formbook unresolved
+        assert coverage["2020"]["binary_present"] == 1  # only a (c is unresolved)
+        assert coverage["2020"]["scored"] == 0
+        assert coverage["2021"]["gt_resolved"] == 1
+        assert coverage["2021"]["binary_present"] == 0  # e binary absent
+        # Only the resolved+present+not-done sample is analyzable.
+        assert len(analyzable) == 1
+        assert analyzable[0][0] == "2020"
+        assert analyzable[0][1] == a
+        assert analyzable[0][3] == "emotet"  # resolved slug
+
+    def test_done_samples_count_scored_not_analyzable(self, tmp_path) -> None:
+        a = "a" * 64
+        manifest = OrderedDict({"2020": [{"sha256": a, "signature": "Emotet", "file_type": "exe"}]})
+        samples = self._samples_dir(tmp_path, [(a, "exe")])
+        coverage, analyzable = scan_manifest(
+            manifest, {"emotet"}, samples, frozenset({f"2020:{a}"})
+        )
+        assert coverage["2020"]["binary_present"] == 1
+        assert coverage["2020"]["scored"] == 1
+        assert analyzable == []  # already scored -> not re-run

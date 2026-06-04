@@ -49,8 +49,9 @@ from pathlib import Path
 from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
@@ -311,7 +312,9 @@ def _bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]
         acc = 0.0
         for _ in range(n):
             seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            acc += values[seed % n]
+            # High bits only: the LCG's low bits have a short period, so
+            # ``seed % n`` collapses the CI when n is a power of two.
+            acc += values[(seed >> 16) % n]
         means.append(acc / n)
     means.sort()
     return (means[int(0.025 * iters)], means[int(0.975 * iters)])
@@ -462,6 +465,19 @@ async def main_async(limit: int, repeats: int, smoke: bool, checkpoint: Path) ->
     narrative_agent = container.get_narrative_agent()
     if narrative_agent is None:
         print("Narrative agent unavailable (mock mode / no LLM) — LLM arm skipped.", flush=True)
+    else:
+        # Eval-only: disable the local reasoning model's chain-of-thought so it
+        # emits the narrative directly instead of spending the budget inside
+        # <think> (stripped by the server -> empty output + timeouts). Set on the
+        # ChatOpenAI field directly (not .bind) so with_structured_output still
+        # works. Fail-safe if the provider doesn't expose the field.
+        try:
+            narrative_agent.llm.extra_body = {  # type: ignore[attr-defined]
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
+            narrative_agent.llm.request_timeout = 180  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            pass
 
     for fixture in fixtures:
         sid = str(fixture.get("sample_id", "synthetic"))

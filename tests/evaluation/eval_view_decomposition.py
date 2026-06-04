@@ -38,8 +38,9 @@ from pathlib import Path
 from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
@@ -165,7 +166,10 @@ def _bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]
         acc = 0.0
         for _ in range(n):
             seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            acc += values[seed % n]
+            # Use the LCG's high bits: the low bits have a short period, so
+            # ``seed % n`` degenerates when n shares factors with 2**31 (e.g.
+            # n a power of two -> the same indices repeat -> a collapsed CI).
+            acc += values[(seed >> 16) % n]
         means.append(acc / n)
     means.sort()
     return (means[int(0.025 * iters)], means[int(0.975 * iters)])
@@ -300,6 +304,24 @@ def main_async(
 
     container = ServiceContainer(get_settings(), mock=False)
     agent = container.get_agent("static")
+    # Eval-only: the production request_timeout (900s) is sized for the static
+    # ReAct budget; here a single degenerate/stuck text decode would stall the
+    # whole batch for 15 min. Fail it fast so the run keeps moving.
+    try:
+        agent.llm.request_timeout = 180  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        pass
+    # Eval-only: disable the local reasoning model's chain-of-thought so it
+    # emits the CLAIM block directly instead of spending the whole token budget
+    # inside <think> (which the server strips into reasoning_content, leaving an
+    # empty answer + frequent timeouts). Applied identically to every arm, so
+    # the equal-budget A/B stays fair; it just makes the model usable here.
+    try:
+        agent.llm = agent.llm.bind(  # type: ignore[attr-defined]
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
     def _record(arm: str, sid: str, r: int, isr: Any, bundle: str) -> None:
         tids = _cited_tids(isr.claims)
@@ -318,16 +340,31 @@ def main_async(
             f"  {arm}:{sid}:{r} claims={sc.claim_count} inval={sc.invalid_id_rate:.2f}", flush=True
         )
 
+    def _run_arm(arm: str, sid: str, r: int, bundle: str) -> None:
+        """Run one (arm, sample, repeat) generation; skip-and-log on failure.
+
+        A single timed-out / degenerate decode must not abort the multi-hour
+        batch — the checkpoint preserves everything already done, so a skipped
+        generation just lowers that arm's n for this run.
+        """
+        if f"{arm}:{sid}:{r}" in done:
+            return
+        try:
+            if arm == "monolithic":
+                isr = _run_monolithic(agent, bundle, budget)
+            elif arm.endswith("-view"):
+                isr = _run_nview(agent, bundle, int(arm.split("-")[0]), budget)
+            else:  # "-tier"
+                isr = _run_tiered(agent, bundle, int(arm.split("-")[0]), budget)
+        except Exception as exc:  # noqa: BLE001 — one bad decode must not kill the batch
+            print(f"  SKIP {arm}:{sid}:{r}: {type(exc).__name__}: {exc}", flush=True)
+            return
+        _record(arm, sid, r, isr, bundle)
+
     for sid, bundle in bundles:
         for r in range(repeats):
-            if f"monolithic:{sid}:{r}" not in done:
-                _record("monolithic", sid, r, _run_monolithic(agent, bundle, budget), bundle)
-            for n in views:
-                if f"{n}-view:{sid}:{r}" not in done:
-                    _record(f"{n}-view", sid, r, _run_nview(agent, bundle, n, budget), bundle)
-            for n in tiers:
-                if f"{n}-tier:{sid}:{r}" not in done:
-                    _record(f"{n}-tier", sid, r, _run_tiered(agent, bundle, n, budget), bundle)
+            for arm in arms:
+                _run_arm(arm, sid, r, bundle)
 
     lines = [
         "# View-decomposition A/B (equal total budget, §3.4-compliant)",
