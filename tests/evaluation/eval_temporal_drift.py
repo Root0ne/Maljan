@@ -343,6 +343,49 @@ def scan_manifest(
     return coverage, analyzable
 
 
+def _llm_health_url() -> str:
+    """Derive the llama-server /health URL from the configured OpenAI base_url."""
+    from maljan.core.config import get_settings
+
+    base = (get_settings().llm.openai.base_url or "http://127.0.0.1:8080/v1").rstrip("/")
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]
+    return base + "/health"
+
+
+def _ensure_llm_healthy(max_wait_s: int = 1800, poll_s: int = 15) -> None:
+    """Block until the llama-server /health reports ok, or raise after max_wait_s.
+
+    Guards against scoring a sample while the LLM endpoint is down: a crashed
+    server makes every analyst fail with a connection error, the pipeline still
+    returns a (Layer-0-only) result, and the harness would checkpoint a
+    meaningless LLM-less F1=0 — silently corrupting the run (observed 2026-06-05:
+    a mid-run server crash produced 15 garbage samples before it was caught).
+    During an outage the operator/monitor restarts the server; this waits it out.
+    """
+    import time
+    import urllib.request
+
+    url = _llm_health_url()
+    deadline = time.time() + max_wait_s
+    waited = False
+    while True:
+        try:
+            # nosemgrep -- fixed local llama-server health URL, no user input
+            with urllib.request.urlopen(url, timeout=8) as resp:  # noqa: S310
+                if resp.status == 200 and b'"status"' in resp.read():
+                    if waited:
+                        print("  [llm] endpoint healthy again — resuming.", flush=True)
+                    return
+        except Exception:  # noqa: BLE001 — endpoint down / unreachable
+            pass
+        if time.time() >= deadline:
+            raise RuntimeError(f"LLM endpoint {url} unavailable > {max_wait_s}s")
+        waited = True
+        print(f"  [llm] endpoint down — waiting {poll_s}s for recovery...", flush=True)
+        time.sleep(poll_s)
+
+
 def _run_pipeline_on(sha256: str, binary_path: Path, file_name: str) -> set[str]:
     """Run the full Maljan pipeline on one binary; return predicted technique IDs."""
     from maljan.app import MaljanApp
@@ -500,6 +543,9 @@ def main() -> int:
             year, sha, family, slug, binary, fname = task
             gt, valid = load_ground_truth(slug, _GROUND_TRUTH_DIR)
             try:
+                # Never score a sample while the LLM is unreachable — a crashed
+                # server would yield a meaningless LLM-less result. Wait it out.
+                _ensure_llm_healthy()
                 predicted = _run_pipeline_on(sha, binary, fname)
             except Exception as exc:  # noqa: BLE001 — isolate per-sample failure
                 print(f"  [{year}] {sha[:12]} pipeline failed: {exc}", flush=True)
