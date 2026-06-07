@@ -447,6 +447,67 @@ class StaticAnalyst(BaseAnalyst):
             )
             return ""
 
+    def _compute_attck_case_hint(self, file_path: str) -> str:
+        """Pre-pass: surface ATT&CK techniques recurring in similar prior cases (§4 U2).
+
+        Builds the same deterministic static-feature profile as the family RAG and
+        retrieves the behaviourally-similar prior cases mined from our own long-term
+        memory; their attributed technique_ids are aggregated into ranked CANDIDATE
+        techniques for the LLM to corroborate. LLM-centric — retrieval surfaces
+        prior-art TTPs; the analyst decides which apply. Fail-safe: gated OFF by
+        default, returns '' when the corpus/profile is absent or empty.
+        """
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        if not cfg.preprocessing.use_attck_case_rag:
+            return ""
+        try:
+            from maljan.analysis.attck_case_rag import (
+                build_attck_case_hint,
+                retrieve_techniques,
+            )
+            from maljan.analysis.family_feature_rag import build_sample_profile_text
+            from maljan.extractors.pe_extractor import build_static_analysis
+            from maljan.memory.attck_case_index import load_attck_case_index
+
+            static = build_static_analysis(sample_path=file_path)
+            if static is None:
+                return ""
+            profile = build_sample_profile_text(static)
+            if not profile:
+                return ""
+            index = load_attck_case_index(cfg.preprocessing.attck_case_corpus_path)
+            if index is None:
+                return ""  # corpus absent — already logged once at load
+            candidates = retrieve_techniques(
+                profile,
+                index,
+                top_k=cfg.preprocessing.attck_case_rag_top_k,
+                min_score=cfg.preprocessing.attck_case_rag_min_score,
+                max_techniques=cfg.preprocessing.attck_case_rag_max_techniques,
+            )
+            hint = build_attck_case_hint(candidates)
+            if hint:
+                self.logger.info(
+                    "ATT&CK-case-RAG pre-pass: %d candidate technique(s) for '%s' (top=%s).",
+                    len(candidates),
+                    file_path,
+                    f"{candidates[0].technique_id}~{candidates[0].score:.2f}"
+                    if candidates
+                    else "-",
+                )
+            else:
+                self.logger.info("ATT&CK-case-RAG pre-pass: no technique above the floor.")
+            return hint
+        except Exception as exc:  # fail-safe: never break analysis over a hint
+            self.logger.warning(
+                "ATT&CK-case-RAG pre-pass failed (%s: %s); continuing without candidates.",
+                type(exc).__name__,
+                exc,
+            )
+            return ""
+
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
@@ -600,6 +661,7 @@ class StaticAnalyst(BaseAnalyst):
         sink_hint = ""
         attr_hint = ""
         rag_hint = ""
+        attck_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
             sink_hint = self._compute_sink_priority_hint(analysis_path)
@@ -617,6 +679,10 @@ class StaticAnalyst(BaseAnalyst):
         host_path = _extract_host_path(data)
         if host_path:
             rag_hint = self._compute_family_rag_hint(host_path)
+            # ATT&CK case-prior RAG (§4 U2): cross-sample TTP grounding mined from our
+            # own long-term memory. Same host profile as the family RAG, different KB
+            # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
+            attck_hint = self._compute_attck_case_hint(host_path)
 
         prompt_messages = [
             ("system", _ISR_SYSTEM),
@@ -633,7 +699,7 @@ class StaticAnalyst(BaseAnalyst):
                 "CONFIDENCE: <float>\n"
                 "TECHNIQUE: <T-ID or NONE>\n"
                 "---\n\n"
-                f"{rag_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
+                f"{rag_hint}{attck_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]
 

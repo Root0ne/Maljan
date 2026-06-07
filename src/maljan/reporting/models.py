@@ -410,6 +410,13 @@ class FamilyAttribution(BaseModel):
     # node from the judge node's RAG pass (empty unless the RAG is enabled and a
     # fingerprint catalog is present).
     family_rag_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    # ATT&CK case-prior RAG candidates (§4 U2) — ATT&CK techniques that recur in
+    # behaviourally-similar prior cases mined from our own long-term memory, surfaced
+    # as advisory evidence the analyst weighed (sibling of family_rag_candidates). Each
+    # row: technique_id, support, similarity, match_method, source. Populated by the
+    # report node from the judge node's ATT&CK-case RAG pass (empty unless the RAG is
+    # enabled and a case corpus is present).
+    attck_case_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

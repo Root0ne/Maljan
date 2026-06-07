@@ -431,6 +431,24 @@ class PreprocessingConfig(BaseModel):
     family_rag_top_k: int = 5
     family_rag_min_score: float = 0.3
 
+    # ATT&CK case-prior RAG (§4 U2 — LLM-centric, cross-sample TTP grounding).
+    # The per-sample function RAG retrieves over THIS sample's own functions only;
+    # this fills the cross-sample gap. When enabled AND a vendored case corpus exists
+    # at ``attck_case_corpus_path``, the static analyst's sample profile retrieves the
+    # behaviourally-similar prior cases mined from our OWN long-term memory (Qdrant
+    # StoredCase: summary_text + attributed technique_ids), and their technique_ids are
+    # aggregated into a ranked ATT&CK CANDIDATE list injected as evidence — the LLM
+    # decides which TTPs apply. Raises static-only TTP precision without a second
+    # statistical brain (nothing trained; adding a case is a new corpus row). Reuses
+    # the fastembed BGE-384 embedder already loaded for LTM — zero new deps. OFF by
+    # default: absent a corpus it degrades to a no-op (fail-safe). Build the corpus
+    # with scripts/build_attck_case_kb.py.
+    use_attck_case_rag: bool = False
+    attck_case_corpus_path: str = "data/attck_case_corpus_v1.json"
+    attck_case_rag_top_k: int = 5
+    attck_case_rag_min_score: float = 0.35
+    attck_case_rag_max_techniques: int = 8
+
     # Deterministic ATT&CK technique-ID correction. When enabled, the judge node
     # runs a pre-cascade pass that re-grounds each LLM analyst claim's technique_id
     # against the in-memory TF-IDF ATT&CK index: invalid IDs are replaced with the

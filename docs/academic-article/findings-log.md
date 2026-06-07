@@ -803,7 +803,7 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     auto-resumed without rescoring). A path bug was fixed first: the harness handed `load_program`
     the host path, not the Ghidra container's `/data/samples` mount, so the static analyst made 0
     tool calls until corrected.
-- `PLANNED` (RAG corpus sourcing, Item 2 follow-up) The function-level RAG (Item 2) retrieves over
+- `IMPLEMENTED` (ATT&CK case-prior RAG — LLM-centric U2) The function-level RAG (Item 2) retrieves over
   *this sample's own* decompiled functions; it has no external knowledge corpus. To raise precision
   (n=210 static-only precision is only 0.09–0.21) the right next input is a corpus of
   **decompiled-function text or NL behavioural descriptions already mapped to ATT&CK** — retrieve
@@ -817,6 +817,32 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   does not exist off-the-shelf; building one from our own growing LTM (Qdrant `StoredCase` already
   holds `technique_ids` + `summary_text`) is the more promising path — i.e. mine our own analysed
   history into an ATT&CK-labelled retrieval index rather than importing an external dataset.
+  **Implemented (2026-06-07):** built exactly that, mirroring the U3 family-feature RAG shape and fully
+  LLM-centric. New `memory/attck_case_index.py` (in-memory cosine `AttckCaseIndex`: embeds each prior
+  case's `summary_text` at load like `semantic_attck_index`, `search` ranks behaviourally-similar
+  neighbours, `recommend_techniques` **aggregates** their attributed `technique_ids` into a ranked
+  candidate list — support = neighbour recurrence, score = best similarity) +
+  `analysis/attck_case_rag.py` (fail-safe `retrieve_techniques`, `build_attck_case_hint` →
+  "CANDIDATE ATT&CK TECHNIQUES … evidence to weigh, NOT a verdict", `to_report_dicts`). The query
+  reuses U3's `build_sample_profile_text`, so U2/U3 share one embedding vocabulary; the static analyst
+  now gets the hint in the same prompt slot as the family-RAG hint (and the judge node records the
+  candidates into `FamilyAttribution.attck_case_candidates`). Offline builder
+  `scripts/build_attck_case_kb.py` mines our OWN long-term memory — `--qdrant-url` scrolls the live
+  LTM collection, or `--cases-jsonl` reads an export — into the vendored `data/attck_case_corpus_v1.json`
+  (stores case TEXT only; the index embeds at load → parity, zero new deps, reuses the fastembed
+  BGE-384 already loaded for LTM). Gated OFF by default (`PreprocessingConfig.use_attck_case_rag`);
+  fail-safe (no corpus → no-op). Distinct from the judge's existing `_build_memory_context` retrieval:
+  that surfaces *raw* prior cases to the **judge** at negotiation time keyed by final ISR claims; U2
+  surfaces an *aggregated* ATT&CK candidate list to the **static analyst** at proposal time (the stated
+  precision target), raising first-pass TTP grounding rather than only corroborating at the end.
+  Drift-robust and LLM-centric: nothing is trained, adding a case is one corpus row, and stale
+  candidates are harmless because the LLM corroborates against the decompiled logic. **Caveat (honest):**
+  the LTM corpus stores *behavioural* `summary_text` while the static-stage query is a *static-feature*
+  profile, so matching is coarse (vocabulary mismatch) — which is exactly why the candidates are advisory
+  and the LLM decides; the index exposes a generic `search(query_text, …)` so the judge (which has full
+  behavioural claim text) can adopt the same aggregation later for a tighter match. No live corpus is
+  vendored yet (the n=210 drift run wrote to the LTM only when `MEMORY__BACKEND=qdrant`; the operator
+  builds the corpus from a populated store via the builder).
 - `PLANNED` (static-feature family classifier — candidate new workstream, NOT in the Items 1–5
   roadmap) A deterministic ML classifier that predicts a malware **family** from static features
   (imports, PE-header fields, per-section entropy, opcode histogram, packer + YARA capabilities) to
@@ -897,7 +923,9 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   TTP labels (U4)** — our family→ATT&CK `uses` mapping stays the only ground truth — and **none
   provides a decompiled-code↔ATT&CK corpus (U2)**, confirming the "mine our own Qdrant LTM" note
   above. Actionable residue: U1 (Ultimate-RAT-Collection → deeper per-family sampling on ATT&CK-known
-  families, NOT drift) and U3 (MABEL/EMBER classifier) are the only two viable integrations.
+  families, NOT drift) and U3 (MABEL/EMBER classifier) are the only two viable *external* integrations;
+  **U2 was instead built internally** by mining our own LTM into an ATT&CK case-prior RAG (see the
+  `IMPLEMENTED` note above), since no external source supplies the decompiled-code↔ATT&CK shape.
 
 ---
 
@@ -923,6 +951,25 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-07 U2 implemented: ATT&CK case-prior RAG (LLM-centric, mines our own LTM).** Built the §4
+  U2 follow-up — the function-level RAG's missing *cross-sample* knowledge corpus — without importing
+  an external dataset. New `memory/attck_case_index.py` (`AttckCaseIndex`: embeds prior cases'
+  `summary_text` at load, `search` ranks behaviourally-similar neighbours, `recommend_techniques`
+  aggregates their attributed `technique_ids` into ranked candidates) + `analysis/attck_case_rag.py`
+  (`retrieve_techniques` / `build_attck_case_hint` / `to_report_dicts`). Wired into the static analyst
+  (new `_compute_attck_case_hint`, prompt slot beside the family-RAG hint) and the judge node
+  (→ `FamilyAttribution.attck_case_candidates`). Offline builder `scripts/build_attck_case_kb.py`
+  scrolls the live Qdrant LTM (`--qdrant-url`) or reads a JSONL export (`--cases-jsonl`) into the
+  vendored `data/attck_case_corpus_v1.json` (TEXT only; index embeds at load → parity, zero new deps).
+  Config flags `use_attck_case_rag` (OFF) + `attck_case_corpus_path` + top_k/min_score/max_techniques.
+  Mirrors the U3 family-feature RAG exactly; reuses U3's `build_sample_profile_text` query so both
+  RAGs share one embedding vocabulary. Complements (does not duplicate) the judge's existing
+  `_build_memory_context`: U2 surfaces *aggregated* ATT&CK candidates to the *analyst* at proposal time
+  (the static-only precision target), vs raw cases to the *judge* at negotiation time. 22 new unit
+  tests (index build/search/aggregate, hint/dicts/fail-safe). Verified: ruff clean, mypy clean
+  (106 src files), full unit suite 1377 passed. Gated OFF; no live corpus vendored yet (operator builds
+  it from a populated LTM). Honest caveat recorded: behavioural-corpus vs static-query vocabulary
+  mismatch makes matching coarse — exactly why candidates are advisory and the LLM decides.
 - **2026-06-07 U3 pivot: GBDT classifier -> LLM-centric Family-feature RAG.** Per the "everything
   LLM-centric" principle, removed the trained gradient-boosted family classifier (a second brain that
   decides outside the LLM + re-imports drift fragility): deleted `analysis/family_classifier.py`,
