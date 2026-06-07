@@ -122,6 +122,24 @@ class TestAggregateAndDrift:
         agg["2020"] = {"f1": 0.9, "n": 5}
         assert drift_delta(agg) is None
 
+    def test_drift_delta_excludes_undated_cohort(self) -> None:
+        # The 'undated' enrichment cohort (folder-per-family --source dir) must NOT
+        # become the latest endpoint; only 4-digit-year cohorts count.
+        agg: OrderedDict[str, dict] = OrderedDict()
+        agg["2020"] = {"f1": 0.9, "n": 5}
+        agg["2025"] = {"f1": 0.6, "n": 5}
+        agg["undated"] = {"f1": 0.1, "n": 30}
+        d = drift_delta(agg)
+        assert d is not None
+        assert d["earliest_year"] == "2020"
+        assert d["latest_year"] == "2025"  # not 'undated'
+        assert abs(d["f1_delta"] - (-0.3)) < 1e-9
+
+    def test_drift_delta_none_when_only_undated(self) -> None:
+        agg: OrderedDict[str, dict] = OrderedDict()
+        agg["undated"] = {"f1": 0.1, "n": 30}
+        assert drift_delta(agg) is None
+
 
 class TestScanManifest:
     def _samples_dir(self, tmp_path, present: list[tuple[str, str]]):

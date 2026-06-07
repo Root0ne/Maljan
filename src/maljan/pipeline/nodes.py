@@ -84,6 +84,12 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
         return chunks
 
     parsed["analysis_file_path"] = static_path
+    # Also carry the HOST-readable path (when present) so the static-feature
+    # family classifier can read the raw bytes — ember reads the file on the
+    # host, unlike Ghidra which reads the container-visible ``analysis_file_path``.
+    host_path = state.get("sample_path")
+    if isinstance(host_path, str) and host_path:
+        parsed["host_sample_path"] = host_path
     new_content = json.dumps(parsed, indent=2, default=str)
 
     import dataclasses as _dc
@@ -945,6 +951,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # function hashes under its inferred family so the corpus grows.
             # Fully gated + fail-safe; never affects the verdict.
             _func_hash_report: list[dict[str, Any]] = []
+            _classifier_report: list[dict[str, Any]] = []
             try:
                 from maljan.core.config import get_settings
 
@@ -996,6 +1003,34 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as _e:
                 logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
 
+            # Static-feature family classifier (read side): record a learned
+            # specific-family hypothesis in the report. Reads the HOST binary
+            # (ember), so it uses ``sample_path`` (not the container path).
+            # Fail-safe and gated OFF by default (no model -> no rows).
+            try:
+                from maljan.core.config import get_settings as _get_settings
+
+                _cfg2 = _get_settings()
+                _host = state.get("sample_path")
+                if _cfg2.preprocessing.use_static_feature_classifier and _host:
+                    from maljan.analysis.family_classifier import (
+                        load_classifier,
+                    )
+                    from maljan.analysis.family_classifier import (
+                        to_report_dicts as _clf_to_report_dicts,
+                    )
+
+                    _clf = load_classifier(_cfg2.preprocessing.static_classifier_model_path)
+                    if _clf is not None:
+                        _preds = _clf.predict(
+                            str(_host),
+                            top_k=_cfg2.preprocessing.static_classifier_max_suggestions,
+                            threshold=_cfg2.preprocessing.static_classifier_confidence_threshold,
+                        )
+                        _classifier_report = _clf_to_report_dicts(_preds)
+            except Exception as _e:
+                logger.warning("Family classifier skipped (%s). Verdict unaffected.", _e)
+
             return {
                 "final_decision": decision,
                 "judge_report": "Analyzed negotiation history and expert reports.",
@@ -1010,6 +1045,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # Exact opcode-hash family overlap, surfaced into the report's
                 # FamilyAttribution.function_hash_matches by the report node.
                 "function_hash_matches": _func_hash_report,
+                # Learned specific-family prior (static-feature classifier),
+                # surfaced into FamilyAttribution.classifier_matches by the report
+                # node. Empty unless the classifier is enabled with a model.
+                "classifier_matches": _classifier_report,
                 # Sandbox CTI surface for the report node — persisted into
                 # the extended STIX bundle so the UI / API / paper export
                 # can render the full deterministic threat-intel snapshot.
@@ -1189,6 +1228,11 @@ def make_report_node(container: ServiceContainer) -> Any:
             _fh_matches = cast("list[dict[str, Any]]", state.get("function_hash_matches") or [])
             if _fh_matches and getattr(report, "attribution", None) is not None:
                 report.attribution.function_hash_matches = _fh_matches
+            # Same post-build threading for the static-feature classifier's
+            # learned specific-family prior.
+            _clf_matches = cast("list[dict[str, Any]]", state.get("classifier_matches") or [])
+            if _clf_matches and getattr(report, "attribution", None) is not None:
+                report.attribution.classifier_matches = _clf_matches
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {}

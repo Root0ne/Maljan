@@ -279,8 +279,15 @@ def aggregate_by_cohort(scores: list[SampleScore]) -> OrderedDict[str, dict[str,
 
 
 def drift_delta(cohorts: OrderedDict[str, dict[str, Any]]) -> dict[str, Any] | None:
-    """Earliest vs latest cohort F1 delta (None when <2 cohorts scored)."""
-    years = list(cohorts)
+    """Earliest vs latest DATED cohort F1 delta (None when <2 dated cohorts).
+
+    Only 4-digit-year cohort keys are considered. Non-numeric keys (e.g. the
+    ``undated`` enrichment cohort produced by a folder-per-family corpus via
+    ``collect_temporal_manifest.py --source dir``) are excluded so they cannot
+    become the earliest/latest endpoint and pollute the temporal delta — they
+    still appear in the per-cohort accuracy table, just not in the drift figure.
+    """
+    years = sorted(y for y in cohorts if len(y) == 4 and y.isdigit())
     if len(years) < 2:
         return None
     first, last = years[0], years[-1]

@@ -403,6 +403,12 @@ class FamilyAttribution(BaseModel):
     # shared_functions, sample_ids, example_functions, match_method, source.
     # Populated by the report builder from the judge node's function-hash pass.
     function_hash_matches: list[dict[str, Any]] = Field(default_factory=list)
+    # Static-feature family-classifier predictions (a learned specific-family
+    # prior, generalising to unseen samples — sibling of function_hash_matches).
+    # Each row: family, confidence, match_method, source. Populated by the report
+    # node from the judge node's classifier pass (empty unless the classifier is
+    # enabled and a model artifact is present).
+    classifier_matches: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

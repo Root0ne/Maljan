@@ -803,6 +803,71 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     auto-resumed without rescoring). A path bug was fixed first: the harness handed `load_program`
     the host path, not the Ghidra container's `/data/samples` mount, so the static analyst made 0
     tool calls until corrected.
+- `PLANNED` (RAG corpus sourcing, Item 2 follow-up) The function-level RAG (Item 2) retrieves over
+  *this sample's own* decompiled functions; it has no external knowledge corpus. To raise precision
+  (n=210 static-only precision is only 0.09–0.21) the right next input is a corpus of
+  **decompiled-function text or NL behavioural descriptions already mapped to ATT&CK** — retrieve
+  behaviourally-similar, ATT&CK-labelled functions from prior samples as few-shot grounding.
+  **Survey note (2026-06-07):** three candidate datasets were assessed and rejected for this:
+  *CyberLLMInstruct* (arXiv:2503.09334 — LLM-safety instruction pairs, no binaries/ATT&CK, dataset
+  not distributed, only a regeneration pipeline); *LLM-Assisted JAR Classification* (REJAFADA — JAR,
+  binary benign/malicious only, no families/TTPs); *MABEL* (vx-underground, 400+ Windows-PE families,
+  but **static-feature CSV tables only — no raw binaries, no ATT&CK mapping, no NL narratives**,
+  unsuitable for semantic retrieval). None fit. The needed corpus shape (decompiled-code ↔ ATT&CK)
+  does not exist off-the-shelf; building one from our own growing LTM (Qdrant `StoredCase` already
+  holds `technique_ids` + `summary_text`) is the more promising path — i.e. mine our own analysed
+  history into an ATT&CK-labelled retrieval index rather than importing an external dataset.
+- `PLANNED` (static-feature family classifier — candidate new workstream, NOT in the Items 1–5
+  roadmap) A deterministic ML classifier that predicts a malware **family** from static features
+  (imports, PE-header fields, per-section entropy, opcode histogram, packer + YARA capabilities) to
+  give the analyst/judge a family prior **without** dynamic analysis. Motivation: in static-only
+  mode (`SANDBOX__BACKEND=mock`) the existing attribution stack is weak — the grounding guardrail
+  (`extractors/attribution.py`) forces `family_confidence` to 0 whenever no Triage CTI / sandbox sig
+  / ISR claim names the family (frequent in the n=210 run: "family='dropper' marked as ungrounded"),
+  and `function_hash_attribution.py` only fires once the corpus already holds that family
+  (cold-start "no known-family overlap"). A feature classifier generalises to unseen samples and
+  fills exactly that gap; it could also narrow the ATT&CK candidate set via a family→canonical-`uses`
+  prior (a route to lift precision), and add an independent deterministic voice to judge negotiation
+  (our reports often warn "zero cross-layer corroboration"). **Cost/feasibility:** plumbing is mostly
+  in place (pefile, binary chunker, Ghidra opcode access, YARA layer already extract the features); a
+  gradient-boosted tree (LightGBM/XGBoost) on tabular static features is well-trodden. The real cost
+  is **labelled training data** — our MalwareBazaar manifest (210, dated, family-labelled) is too
+  small; **EMBER** (1.1M labelled PE feature vectors, public) is the canonical training set, and
+  **MABEL**'s 400+-family feature tables are a ready secondary (this is the *one* place MABEL is
+  actually useful to us — as classifier training data, not RAG). **Caveats:** it predicts *family*,
+  not the ATT&CK TTPs our headline F1 scores (only an indirect lift via family→uses expansion); family
+  taxonomy is alias-noisy; and a trained classifier **reintroduces the concept-drift sensitivity the
+  n=210 LLM path was just shown NOT to have** (MARD's warning) — it would need periodic retraining and
+  drift monitoring. Verdict: real, well-scoped, fixes a genuine static-only weakness, but orthogonal
+  to the current TTP-accuracy/drift narrative — decide as a separate workstream, not a roadmap item.
+- `SURVEY` (external malware-dataset assessment, 2026-06-07) Nine candidate sources were evaluated
+  against four Maljan use-axes — **U1** Ghidra+LLM raw-binary corpus (drift/TTP eval), **U2**
+  function-level RAG corpus (decompiled-code↔ATT&CK), **U3** static-feature family-classifier training
+  data, **U4** per-sample ATT&CK TTP ground truth. Maljan scope is Windows + Linux only (no Android).
+
+  | Source | Platform | Content | Labels | Dated | Verdict |
+  |---|---|---|---|---|---|
+  | [EMBER](https://github.com/elastic/ember) | Win PE | features only (LIEF), no binaries; 1.1M+1M | benign/malicious only | year + `appeared` mo | U3 base features; family labels must be joined (AVClass/SOREL). |
+  | [MABEL](https://github.com/action-ai-institute/MABEL-dataset) | Win PE | feature CSV, no binaries; 400+ families | family + YARA caps (no ATT&CK) | PE timestamp (weak) | **U3 only** — family-labelled PE features = ready training data. |
+  | [Ultimate-RAT-Collection](https://github.com/Cryakl/Ultimate-RAT-Collection) | Windows | RAW binaries (zip pw "infected", folder/family); 500+ RAT builders | family (folder) | No | **U1 partial** + U3; only ATT&CK-known families score, undated, builders≠payloads. |
+  | MH-1M ([Nature](https://www.nature.com/articles/s41597-025-06469-5) · [Dataverse](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/LLHEGN) · [GitHub](https://github.com/Malware-Hunter/MH-1M)) | **Android** | features `.npz`, no binaries; 1.34M APK | VirusTotal (no family/ATT&CK) | "10+ yrs", no cohorts | **Out of scope** (Android + features-only + no ATT&CK). |
+  | SF23-[AMGenerator](https://github.com/Malware-Hunter/SF23-AMGenerator) / [AMExplorer](https://github.com/Malware-Hunter/SF23-AMExplorer) | **Android** | tools (AndroZoo+AndroGuard+VT), not datasets | — | — | **Out of scope** (Android tooling). |
+  | [APIMDS](https://medium.com/ai-genai-llm/malware-detection-using-machine-learning-methods-on-the-apimds-dataset-8-deep-learning-approach-a6d991e64c49) | Windows | dynamic API-call sequences | benign/malicious only | No | Low — dynamic, not our static path; no ATT&CK. |
+  | [DikeDataset](https://github.com/iosifache/DikeDataset) | Win PE + OLE | RAW binaries (sha256-named); small | malice + category (trojan/ransomware/…) — no family/ATT&CK | No | U1 marginal (category≠family → not ATT&CK-scorable); OLE out of analyser scope. |
+
+  **Findings.** (i) Five of the nine links are **one Android ecosystem** — MH-1M (the Nature
+  descriptor `s41597-025-06469-5`, the Harvard Dataverse `LLHEGN`, and the GitHub repo are the same
+  dataset) plus its SF23 build tools — entirely out of Maljan's Windows/Linux scope. (ii) Only **two
+  sources ship raw binaries** ingestible by the Ghidra+LLM pipeline (Ultimate-RAT-Collection,
+  DikeDataset); both are **undated** (no new drift cohorts) and gated by the ATT&CK-resolvability
+  constraint (a family scores only if it is a MITRE `malware`/`tool` object with ≥3 `uses` techniques
+  and a fixture under `tests/evaluation/ground_truth/attck_malware/`). DikeDataset's labels are coarse
+  categories, not families, so it is **not TTP-scorable** at all. (iii) **MABEL + EMBER** are the only
+  realistic static-feature classifier training data (U3). (iv) **No source provides per-sample ATT&CK
+  TTP labels (U4)** — our family→ATT&CK `uses` mapping stays the only ground truth — and **none
+  provides a decompiled-code↔ATT&CK corpus (U2)**, confirming the "mine our own Qdrant LTM" note
+  above. Actionable residue: U1 (Ultimate-RAT-Collection → deeper per-family sampling on ATT&CK-known
+  families, NOT drift) and U3 (MABEL/EMBER classifier) are the only two viable integrations.
 
 ---
 
@@ -828,6 +893,38 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-07 Dataset-survey follow-through: U1 dir-ingest + U3 classifier scaffold (gated OFF).**
+  Acted on the two viable integrations from the 9-source survey. **U1:** added a
+  `--source dir` adapter to `collect_temporal_manifest.py` (walk a folder-per-family raw-binary
+  tree, sha256 content-addressing, MZ/ELF magic-byte file-type sniff, per-family sampling, copy
+  into `data/samples/`) emitting a single `undated` cohort; `eval_temporal_drift.drift_delta` now
+  considers only 4-digit-year cohorts so the `undated` enrichment never pollutes the temporal
+  delta. This lets a local RAT collection deepen per-family coverage (ATT&CK-resolvable families
+  only) without faking drift cohorts. **U3:** new `src/maljan/analysis/family_classifier.py` — a
+  deterministic static-feature family classifier mirroring `function_hash_attribution.py`
+  (EMBER `PEFeatureExtractor` vectors -> offline GBDT -> top-k family prior), wired as an analyst
+  prompt hint (`static_analyst._compute_family_classifier_hint`, fed the HOST binary path threaded
+  via a new `host_sample_path` chunk field) and a judge-recorded `FamilyAttribution.classifier_matches`
+  block. Offline trainer `scripts/train_family_classifier.py` (trains from the same EMBER extractor
+  for feature parity; folder-per-family or pre-extracted MABEL/EMBER inputs). Gated OFF by default
+  (`PreprocessingConfig.use_static_feature_classifier`); ember/lightgbm/joblib are OPTIONAL,
+  operator-installed for training only — NOT added to the runtime manifest, and the module is
+  lazy-import + fail-safe (no model / no deps -> no-op, byte-identical behaviour). 42 new unit tests;
+  ruff + mypy clean; agents/pipeline/reporting suites green (116). Design notes: (a) the container
+  `get_family_classifier()` getter from the plan was dropped — these deterministic pre-passes are
+  driven from config + module functions (the analyst is container-unaware), matching the
+  function-hash pattern; (b) the classifier is recorded as a sibling of `function_hash_matches`, not
+  a grounding source for the top-level `malware_category` (different granularity: specific family vs
+  category). NO model trained yet (operator step: download EMBER/MABEL or point at the RAT corpus).
+- **2026-06-07 External malware-dataset survey (9 sources).** Assessed EMBER, MABEL,
+  Ultimate-RAT-Collection, MH-1M (= Nature `s41597-025-06469-5` = Harvard Dataverse `LLHEGN` =
+  GitHub), SF23-AMGenerator/AMExplorer, APIMDS, DikeDataset against four use-axes (U1 binary corpus,
+  U2 RAG corpus, U3 classifier data, U4 ATT&CK ground truth). Result: 5/9 are one out-of-scope
+  Android ecosystem (MH-1M + tools); only Ultimate-RAT-Collection + DikeDataset ship raw binaries
+  (both undated, ATT&CK-resolvability-gated); MABEL+EMBER are the only U3 classifier data; **no
+  source provides U2 (decompiled-code↔ATT&CK) or U4 (per-sample ATT&CK TTPs)**. Recorded the full
+  survey table (with links) + U1–U4 mapping in §4. Two viable integrations identified: U1
+  per-family-coverage enrichment and a U3 static-feature family classifier.
 - **2026-06-07 Item 5 concept-drift FULL RUN (n=210, static-only Ghidra+LLM).** Ran the drift eval
   on the **complete** cohort — 30 samples/cohort × 7 years (2020–2026), all 210 MalwareBazaar
   binaries — on the local Qwen3.6-35B-A3B, static-only (`SANDBOX__BACKEND=mock` — no dynamic, no

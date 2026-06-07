@@ -389,6 +389,52 @@ class StaticAnalyst(BaseAnalyst):
             )
             return ""
 
+    def _compute_family_classifier_hint(self, file_path: str) -> str:
+        """Pre-pass: surface a learned family prior from PE static features.
+
+        Runs the offline-trained static-feature classifier (EMBER feature vector)
+        and renders a "family prior" hint. Unlike the function-hash pre-pass this
+        generalises to UNSEEN samples, so it helps exactly where the corpus has no
+        prior match. Deterministic and fail-safe: gated OFF by default, returns ''
+        when disabled, the model/deps are absent, or prediction yields nothing.
+        """
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        if not cfg.preprocessing.use_static_feature_classifier:
+            return ""
+        try:
+            from maljan.analysis.family_classifier import build_classifier_hint, load_classifier
+
+            clf = load_classifier(cfg.preprocessing.static_classifier_model_path)
+            if clf is None:
+                return ""  # model/deps absent — already logged once at load
+            results = clf.predict(
+                file_path,
+                top_k=cfg.preprocessing.static_classifier_max_suggestions,
+                threshold=cfg.preprocessing.static_classifier_confidence_threshold,
+            )
+            hint = build_classifier_hint(results)
+            if hint:
+                self.logger.info(
+                    "Family-classifier pre-pass: %d family prior(s) for '%s' (top=%s).",
+                    len(results),
+                    file_path,
+                    f"{results[0].family}~{results[0].confidence}" if results else "-",
+                )
+            else:
+                self.logger.info(
+                    "Family-classifier pre-pass: no family above threshold — no prior emitted."
+                )
+            return hint
+        except Exception as exc:  # fail-safe: never break analysis over a hint
+            self.logger.warning(
+                "Family-classifier pre-pass failed (%s: %s); continuing without prior.",
+                type(exc).__name__,
+                exc,
+            )
+            return ""
+
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
@@ -541,6 +587,7 @@ class StaticAnalyst(BaseAnalyst):
         # string when disabled, unavailable, or the binary has no named sinks.
         sink_hint = ""
         attr_hint = ""
+        clf_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
             sink_hint = self._compute_sink_priority_hint(analysis_path)
@@ -550,6 +597,13 @@ class StaticAnalyst(BaseAnalyst):
             attr_hint = self._compute_function_hash_hint(
                 analysis_path, _extract_sample_hash(data) or ""
             )
+        # Static-feature family prior: a learned guess that generalises to UNSEEN
+        # samples (where the exact-match function-hash prior is silent). Reads the
+        # raw bytes on the HOST (ember), so it needs the host path, not the
+        # container path Ghidra uses. Fail-safe and gated OFF by default.
+        host_path = _extract_host_path(data)
+        if host_path:
+            clf_hint = self._compute_family_classifier_hint(host_path)
 
         prompt_messages = [
             ("system", _ISR_SYSTEM),
@@ -566,7 +620,7 @@ class StaticAnalyst(BaseAnalyst):
                 "CONFIDENCE: <float>\n"
                 "TECHNIQUE: <T-ID or NONE>\n"
                 "---\n\n"
-                f"{attr_hint}{sink_hint}{load_hint}{target_info}",
+                f"{clf_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]
 
@@ -710,6 +764,29 @@ def _extract_analysis_path(data: str) -> str | None:
     if not isinstance(parsed, dict):
         return None
     path = parsed.get("analysis_file_path")
+    return path if isinstance(path, str) and path else None
+
+
+def _extract_host_path(data: str) -> str | None:
+    """Return the ``host_sample_path`` from a chunk JSON, or None.
+
+    The host-readable raw-binary path (spliced in by
+    ``nodes._augment_static_chunks_with_path``) — distinct from the
+    container-visible ``analysis_file_path`` Ghidra uses. Needed by the
+    static-feature family classifier, which reads the bytes on the host.
+    """
+    import json as _json
+
+    stripped = data.strip()
+    if not stripped or not stripped.startswith("{"):
+        return None
+    try:
+        parsed = _json.loads(stripped)
+    except (_json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    path = parsed.get("host_sample_path")
     return path if isinstance(path, str) and path else None
 
 

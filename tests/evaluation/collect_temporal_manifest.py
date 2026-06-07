@@ -20,6 +20,12 @@ Sources (the cohort logic is identical for all three):
                              (abuse.ch made auth mandatory in 2024). Returns the most
                              recent N per family, so a spread of long-lived families
                              yields a spread of years.
+  * ``--source dir DIR``   — walk a LOCAL folder-per-family tree of raw binaries
+                             (e.g. a RAT collection). UNDATED: all samples land in a
+                             single ``undated`` cohort excluded from the drift delta;
+                             this is a per-family COVERAGE enrichment, not a drift
+                             extension. Copies the sampled binaries into data/samples/
+                             (ISOLATED ENV ONLY) unless ``--no-copy`` is given.
 
 The emitted ``signature`` is only a weak family label; the technique-level
 ground-truth Item 5 scores against still requires a curation pass (flagged in the
@@ -28,6 +34,7 @@ manifest as ``ground_truth_status: "uncurated"``).
 Run:  uv run python tests/evaluation/collect_temporal_manifest.py --selftest
       uv run python tests/evaluation/collect_temporal_manifest.py --source csv full.csv
       uv run python tests/evaluation/collect_temporal_manifest.py --source api --families Mirai
+      uv run python tests/evaluation/collect_temporal_manifest.py --source dir --dir ./rats
       uv run python tests/evaluation/collect_temporal_manifest.py --download   # ISOLATED ENV ONLY
 """
 
@@ -56,6 +63,12 @@ _MB_UA = "Mozilla/5.0 (maljan-temporal-manifest/1.0)"
 # Windows + Linux native binaries only (§1.8). MalwareBazaar ``file_type`` values;
 # Android (apk/dex) and document droppers are deliberately excluded.
 _SCOPE_FILE_TYPES: frozenset[str] = frozenset({"exe", "dll", "sys", "elf", "so"})
+
+# Cohort key for undated raw-binary corpora (folder-per-family sources, e.g. a RAT
+# collection). These have no reliable first-seen date, so they are bucketed under a
+# single non-drift cohort and EXCLUDED from the earliest->latest drift delta in
+# eval_temporal_drift.drift_delta (which only considers 4-digit-year cohorts).
+_UNDATED_YEAR = "undated"
 
 # MalwareBazaar full-dump CSV column order (the export ships a commented header,
 # not a machine header row, so we index by position).
@@ -257,6 +270,144 @@ def records_from_api(families: list[str], auth_key: str, limit: int = 1000) -> l
     return out
 
 
+def _detect_file_type(path: Path) -> str:
+    """Return a scope file-type for ``path`` (extension first, MZ/ELF magic fallback).
+
+    Folder-per-family corpora often ship extension-less or oddly-named binaries;
+    the magic-byte sniff keeps those in scope (PE -> ``exe``, ELF -> ``elf``)
+    instead of silently dropping them.
+    """
+    ext = path.suffix.lower().lstrip(".")
+    if ext in _SCOPE_FILE_TYPES:
+        return ext
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(4)
+    except OSError:
+        return ext
+    if head[:2] == b"MZ":
+        return "exe"
+    if head[:4] == b"\x7fELF":
+        return "elf"
+    return ext
+
+
+def _sha256_of(path: Path) -> str:
+    """Streaming sha256 of a file (content-addressed naming for the samples dir)."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def records_from_dir(root: Path, per_family: int) -> tuple[list[SampleRecord], dict[str, Path]]:
+    """Walk a folder-per-family tree of raw binaries into UNDATED SampleRecords.
+
+    Each immediate sub-directory of ``root`` is treated as a family; every
+    in-scope binary beneath it (recursively) is a sample. Samples are
+    content-addressed (sha256), file-type is taken from the extension with an
+    MZ/ELF magic-byte fallback, and every record is tagged ``year="undated"`` so
+    it never enters the dated drift cohorts. Up to ``per_family`` samples are kept
+    per family (deterministic, sha-strided via ``sample_cohort``) so a few
+    prolific families do not dominate. Returns the records plus a
+    ``sha256 -> source-path`` map for the later binary-copy step.
+
+    Used by ``--source dir`` to ingest local raw-binary corpora (e.g. a RAT
+    collection) as a per-family coverage enrichment — NOT a drift extension.
+    """
+    records: list[SampleRecord] = []
+    path_map: dict[str, Path] = {}
+    if not root.is_dir():
+        return records, path_map
+    for fam_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        family = fam_dir.name
+        fam_records: list[SampleRecord] = []
+        fam_paths: dict[str, Path] = {}
+        for f in sorted(fam_dir.rglob("*")):
+            if not f.is_file():
+                continue
+            ftype = _detect_file_type(f)
+            if ftype not in _SCOPE_FILE_TYPES:
+                continue
+            sha = _sha256_of(f)
+            if sha in fam_paths:  # de-dup identical binaries within a family
+                continue
+            fam_records.append(
+                SampleRecord(
+                    sha256=sha,
+                    first_seen="",
+                    year=_UNDATED_YEAR,
+                    file_type=ftype,
+                    signature=family,
+                )
+            )
+            fam_paths[sha] = f
+        for rec in sample_cohort(fam_records, per_family):
+            records.append(rec)
+            path_map[rec.sha256] = fam_paths[rec.sha256]
+    return records, path_map
+
+
+def build_undated_manifest(records: list[SampleRecord], *, source: str) -> dict:
+    """Package UNDATED dir records as a single non-drift ``undated`` cohort.
+
+    Unlike ``build_manifest`` (which buckets by year and re-samples per cohort),
+    this keeps the per-family sampling already done in ``records_from_dir`` and
+    emits exactly one cohort so the corpus enriches family coverage without
+    creating a spurious temporal cohort.
+    """
+    scoped = filter_scope(records)
+    cohort = sorted((r.to_dict() for r in scoped), key=lambda d: d["sha256"])
+    return {
+        "schema": "maljan-temporal-manifest/v1",
+        "source": source,
+        "scope": ["windows", "linux"],
+        "file_types": sorted(_SCOPE_FILE_TYPES),
+        "per_cohort_target": len(cohort),
+        "ground_truth_status": "uncurated",
+        "note": (
+            "Undated raw-binary corpus (folder-per-family). Every sample is tagged "
+            "year='undated' and grouped in a single non-drift cohort: it enriches "
+            "per-family coverage and is EXCLUDED from the earliest->latest drift "
+            "delta (eval_temporal_drift.drift_delta ignores non-year cohorts). The "
+            "'signature' is the source folder name — it still only scores if it "
+            "resolves to an ATT&CK family fixture."
+        ),
+        "counts": {_UNDATED_YEAR: len(cohort)},
+        "total": len(cohort),
+        "cohorts": {_UNDATED_YEAR: cohort},
+    }
+
+
+def copy_manifest_binaries(manifest: dict, path_map: dict[str, Path], dest_dir: Path) -> int:
+    """Copy each manifest sample's source binary into ``dest_dir/<sha256>.<ext>``.
+
+    Content-addressed; skips files already present. Returns the count copied.
+    This is a byte copy (never an execution) of a (live-malware) binary into the
+    Defender-excluded, gitignored samples dir so ``eval_temporal_drift.locate_binary``
+    can find it.
+    """
+    import shutil
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for recs in manifest.get("cohorts", {}).values():
+        for s in recs:
+            sha = s["sha256"]
+            src = path_map.get(sha)
+            if src is None:
+                continue
+            target = dest_dir / f"{sha}.{s.get('file_type', 'bin') or 'bin'}"
+            if target.exists():
+                continue
+            shutil.copy2(src, target)
+            copied += 1
+    return copied
+
+
 def _extract_password_zip(zpath: Path, dest_dir: Path) -> str:
     """Extract the first file member of a MalwareBazaar password zip to dest_dir.
 
@@ -391,12 +542,22 @@ def _print_summary(manifest: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Dated sample manifest for the §4 Item 5 drift eval.")
-    ap.add_argument("--source", choices=("csv", "api"), help="Live data source.")
+    ap.add_argument("--source", choices=("csv", "api", "dir"), help="Live data source.")
     ap.add_argument(
         "--file", type=str, help="Path to a MalwareBazaar full-dump CSV (--source csv)."
     )
     ap.add_argument(
         "--families", type=str, default="", help="Comma list of family signatures (--source api)."
+    )
+    ap.add_argument(
+        "--dir",
+        type=str,
+        help="Root of a folder-per-family raw-binary tree (--source dir). UNDATED corpus.",
+    )
+    ap.add_argument(
+        "--no-copy",
+        action="store_true",
+        help="(--source dir) build the manifest only; do not copy binaries into --dest.",
     )
     ap.add_argument("--per-cohort", type=int, default=40, help="Target samples per year cohort.")
     ap.add_argument("--out", type=str, default=str(_OUT_FILE), help="Output manifest path.")
@@ -446,6 +607,30 @@ def main() -> int:
         print(f"Self-test {'PASSED' if ok else 'FAILED'}.", flush=True)
         return 0 if ok else 1
 
+    if args.source == "dir":
+        root = Path(args.dir) if args.dir else None
+        if root is None or not root.is_dir():
+            print("--source dir needs an existing --dir <root> (folder-per-family).", flush=True)
+            return 2
+        print(f"Walking folder-per-family tree: {root}", flush=True)
+        records, path_map = records_from_dir(root, args.per_cohort)
+        if not records:
+            print("No in-scope (PE/ELF) binaries found — manifest not written.", flush=True)
+            return 1
+        manifest = build_undated_manifest(records, source="dir")
+        write_manifest(manifest, out_path)
+        _print_summary(manifest)
+        if not args.no_copy:
+            print(
+                "WARNING: copying LIVE malware binaries into the (Defender-excluded, "
+                f"gitignored) samples dir: {args.dest}",
+                flush=True,
+            )
+            n = copy_manifest_binaries(manifest, path_map, Path(args.dest))
+            print(f"Copied {n} binaries into {args.dest}.", flush=True)
+        print(f"\nWrote {out_path}", flush=True)
+        return 0
+
     if args.source == "csv":
         if not args.file or not Path(args.file).exists():
             print("--source csv needs an existing --file <full-dump.csv>.", flush=True)
@@ -469,7 +654,7 @@ def main() -> int:
         print(f"Querying MalwareBazaar get_siginfo for {len(families)} families...", flush=True)
         records = records_from_api(families, key)
     else:
-        print("Pick a mode: --selftest, or --source {csv|api}. See --help.", flush=True)
+        print("Pick a mode: --selftest, or --source {csv|api|dir}. See --help.", flush=True)
         return 2
 
     if not records:
