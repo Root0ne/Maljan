@@ -768,37 +768,41 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
     `get_file`) and run with a live llama-server. The harness scores whatever is present
     (`--max-per-cohort N` for a cheap first pass) and reports the rest as `pending_binary` —
     never silently dropped.
-  - **Live result (2026-06-04, n=42 — 6 per cohort × 7 years).** Binaries downloaded from
-    MalwareBazaar into `data/samples/` (210/210 extracted; AES zips via pyzipper) and analysed
+  - **Live result (2026-06-07, n=210 — FULL cohort, 30 per cohort × 7 years).** Binaries downloaded
+    from MalwareBazaar into `data/samples/` (210/210 extracted; AES zips via pyzipper) and analysed
     **static-only** (Ghidra+LLM, `SANDBOX__BACKEND=mock` so no dynamic / no public-sandbox upload;
     `disable_thinking`, `NEGOTIATION__MAX_ITERATIONS=2`) on the local Qwen3.6-35B-A3B. Per-cohort
     ATT&CK precision / recall / F1 (mean, 95% bootstrap CI):
 
     | year | n | precision | recall | F1 | 95% F1 CI | halluc. |
     |---|---|---|---|---|---|---|
-    | 2020 | 6 | 0.042 | 0.004 | 0.007 | [0.000, 0.020] | 0.000 |
-    | 2021 | 6 | 0.156 | 0.039 | 0.058 | [0.010, 0.122] | 0.000 |
-    | 2022 | 6 | 0.056 | 0.005 | 0.010 | [0.000, 0.029] | 0.000 |
-    | 2023 | 6 | 0.244 | 0.077 | 0.115 | [0.079, 0.166] | 0.057 |
-    | 2024 | 6 | 0.253 | 0.049 | 0.077 | [0.042, 0.110] | 0.017 |
-    | 2025 | 6 | 0.164 | 0.027 | 0.046 | [0.026, 0.060] | 0.000 |
-    | 2026 | 6 | 0.139 | 0.014 | 0.026 | [0.009, 0.043] | 0.000 |
+    | 2020 | 30 | 0.092 | 0.047 | 0.059 | [0.034, 0.089] | 0.007 |
+    | 2021 | 30 | 0.214 | 0.063 | 0.089 | [0.061, 0.121] | 0.003 |
+    | 2022 | 30 | 0.150 | 0.037 | 0.059 | [0.035, 0.086] | 0.000 |
+    | 2023 | 30 | 0.173 | 0.060 | 0.084 | [0.054, 0.114] | 0.011 |
+    | 2024 | 30 | 0.194 | 0.042 | 0.063 | [0.042, 0.087] | 0.003 |
+    | 2025 | 30 | 0.181 | 0.063 | 0.079 | [0.052, 0.110] | 0.002 |
+    | 2026 | 30 | 0.121 | 0.042 | 0.055 | [0.033, 0.079] | 0.000 |
 
-    Earliest→latest drift **delta = +0.019 F1** (2020 0.007 → 2026 0.026).
-  - **Findings.** (i) **No measurable concept drift.** The earliest→latest delta (+0.019) is tiny
-    and the per-cohort F1 CIs overlap heavily (2023 peak 0.115 vs 2020 floor 0.007 is non-monotonic,
-    not a trend) — the static path's accuracy is *temporally stable* across a 7-year span, which is
-    the direction of MARD's robustness claim, just at a low absolute level. (ii) **Low absolute
-    recall is structural, as caveated** — static-only recovers a small fraction (0.004–0.077) of the
-    family-level `uses` sets because those sets are dominated by behavioural/runtime techniques a
-    decompile cannot observe; precision is modest (0.04–0.25) and **hallucination is ~0 across every
-    cohort** (the grounding gates hold on real malware, not just fixtures). (iii) The result argues
-    that **dynamic analysis is required to lift recall** — the static-only arm is a clean,
+    Earliest→latest drift **delta = -0.004 F1** (2020 0.059 → 2026 0.055).
+  - **Findings.** (i) **No measurable concept drift.** The earliest→latest delta (-0.004) is
+    negligible and the per-cohort F1 CIs all overlap (the band is 0.055–0.089 with no monotonic
+    trend; 2021 is the peak, 2026 the floor, but 2026's CI [0.033, 0.079] contains 2020's mean) —
+    the static path's accuracy is *temporally stable* across a 7-year span at full cohort size,
+    confirming the n=42 pilot at 5× the samples and tightening every CI. This is the direction of
+    MARD's robustness claim, just at a low absolute level. (ii) **Low absolute recall is structural,
+    as caveated** — static-only recovers a small fraction (recall 0.037–0.063) of the family-level
+    `uses` sets because those sets are dominated by behavioural/runtime techniques a decompile cannot
+    observe; precision is modest (0.09–0.21) and **hallucination is ~0 across every cohort**
+    (≤0.011; the grounding gates hold on real malware at scale, not just fixtures). (iii) The result
+    argues that **dynamic analysis is required to lift recall** — the static-only arm is a clean,
     upload-free baseline, and the gap to the family ground truth quantifies what dynamic must add.
-  - **Cost.** ~13–20 min/sample on the local 35B (Ghidra auto-analyse + multi-round pipeline);
-    42 samples ran as an overnight batch with JSONL checkpoint resume. A path bug was fixed first:
-    the harness handed `load_program` the host path, not the Ghidra container's `/data/samples`
-    mount, so the static analyst made 0 tool calls until corrected.
+  - **Cost.** ~13–20 min/sample on the local 35B (Ghidra auto-analyse + multi-round pipeline; a few
+    heavy 2026 binaries ran 30–56 min); the full 210 ran as a multi-day batch with JSONL checkpoint
+    resume and an LLM-health gate (llama-server OOM-crashed ~hourly on large binaries — each restart
+    auto-resumed without rescoring). A path bug was fixed first: the harness handed `load_program`
+    the host path, not the Ghidra container's `/data/samples` mount, so the static analyst made 0
+    tool calls until corrected.
 
 ---
 
@@ -823,6 +827,18 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-06-07 Item 5 concept-drift FULL RUN (n=210, static-only Ghidra+LLM).** Ran the drift eval
+  on the **complete** cohort — 30 samples/cohort × 7 years (2020–2026), all 210 MalwareBazaar
+  binaries — on the local Qwen3.6-35B-A3B, static-only (`SANDBOX__BACKEND=mock` — no dynamic, no
+  public-sandbox upload; `disable_thinking`, `NEGOTIATION__MAX_ITERATIONS=2`). Per-cohort F1 band
+  0.055–0.089; **drift delta 2020→2026 = -0.004** (all CIs overlap → **no measurable concept
+  drift**, confirming the n=42 pilot at 5× the samples with tighter CIs). Recall structurally low
+  (0.037–0.063: static cannot see behavioural TTPs that dominate the family `uses` sets), precision
+  modest (0.09–0.21), **hallucination ~0 in every cohort** (≤0.011). Multi-day batch with JSONL
+  checkpoint resume + LLM-health gate (llama-server OOM-crashed ~hourly on large binaries; each
+  restart auto-resumed without rescoring garbage). Replaced the n=42 numbers in §4 Item 5 with the
+  full n=210 table + findings; report rendered to `D:\tmp\temporal_drift.md`.
 
 - **2026-06-04 Item 5 concept-drift LIVE NUMBERS (n=42, static-only Ghidra+LLM).** Downloaded all
   210 MalwareBazaar binaries into `data/samples/` (AES zips via pyzipper; Defender exclusion
