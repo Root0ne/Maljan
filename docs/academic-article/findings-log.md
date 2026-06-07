@@ -840,6 +840,36 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   n=210 LLM path was just shown NOT to have** (MARD's warning) — it would need periodic retraining and
   drift monitoring. Verdict: real, well-scoped, fixes a genuine static-only weakness, but orthogonal
   to the current TTP-accuracy/drift narrative — decide as a separate workstream, not a roadmap item.
+  **SUPERSEDED (2026-06-07):** a trained GBDT is a second statistical brain that decides *outside*
+  the LLM and re-imports drift fragility — against the "everything LLM-centric" principle. The GBDT
+  scaffold was removed and replaced by the LLM-centric Family-feature RAG below.
+- `IMPLEMENTED` (Family-feature RAG — LLM-centric U3) The static-only attribution gap is filled
+  without any trained model: a deterministic static-feature **profile** of the sample (import-capability
+  histogram + characteristic suspicious imports + packer + high-entropy sections, via
+  `extractors/pe_extractor.build_static_analysis`) is embedded and matched against an offline-built
+  **family fingerprint KB**; the top-k nearest families are injected into the static analyst as
+  CANDIDATE evidence and **the LLM decides** the attribution (retrieval only surfaces candidates — the
+  same role YARA / sink-reachability / the ATT&CK index already play). New
+  `analysis/family_feature_rag.py` (shared profile renderer for query + KB → embedding parity) +
+  `memory/family_fingerprint_index.py` (in-memory cosine, embeds catalog text at load like
+  `semantic_attck_index`; reuses the fastembed BGE-384 embedder already loaded for LTM — **zero new
+  deps**). Offline builder `scripts/build_family_feature_kb.py` (folder-per-family raw binaries via the
+  SAME extractor, and/or a generic MABEL CSV) → vendored `data/family_fingerprints_v1.json`. Gated OFF
+  by default (`PreprocessingConfig.use_family_feature_rag`); fail-safe (no catalog → no-op). Recorded
+  as `FamilyAttribution.family_rag_candidates`. Stays drift-robust (nothing trained; adding a family is
+  a new fingerprint row) and fully LLM-centric. MABEL is now used the LLM-centric way — a retrieval KB,
+  not classifier training.
+  **Bootstrap catalog built + verified (2026-06-07):** the builder grew a `--manifest`/`--flat-dir`
+  mode and produced `data/family_fingerprints_v1.json` from the existing local n=210 corpus (no new
+  download — the binaries from the drift run were already on disk; feature extraction is not
+  execution). 21 family fingerprints (families with ≥3 samples). End-to-end verified: the index loads
+  via fastembed BGE-384 and retrieval returns ranked candidates (e.g. an injection+network query →
+  Sliver 0.84 / IcedID 0.80). **Caveats:** (i) the n=210 samples are heavily packed, so the static
+  profiles are thin (mostly "high-entropy sections" + generic imports like GetProcAddress) — fingerprints
+  are coarse, which is precisely why the LLM (it unpacks via Ghidra decompilation) is the decider and
+  retrieval is only advisory; (ii) this bootstrap catalog is built FROM the eval corpus, so it must NOT
+  be used for a leakage-free measurement of the RAG's effect — for that, rebuild from a DISJOINT source
+  (the Ultimate-RAT-Collection via `--samples-dir`, or MABEL via `--csv`). Still OFF by default.
 - `SURVEY` (external malware-dataset assessment, 2026-06-07) Nine candidate sources were evaluated
   against four Maljan use-axes — **U1** Ghidra+LLM raw-binary corpus (drift/TTP eval), **U2**
   function-level RAG corpus (decompiled-code↔ATT&CK), **U3** static-feature family-classifier training
@@ -893,6 +923,24 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-07 U3 pivot: GBDT classifier -> LLM-centric Family-feature RAG.** Per the "everything
+  LLM-centric" principle, removed the trained gradient-boosted family classifier (a second brain that
+  decides outside the LLM + re-imports drift fragility): deleted `analysis/family_classifier.py`,
+  `scripts/train_family_classifier.py`, its tests, and the GBDT config/reporting/judge wiring.
+  Replaced with a Family-feature **RAG**: deterministic static-feature profile → embed → retrieve
+  nearest **family fingerprints** from an offline KB → inject as CANDIDATE evidence → **the LLM
+  decides**. New `analysis/family_feature_rag.py` + `memory/family_fingerprint_index.py` (reuse the
+  fastembed BGE-384 embedder + the `semantic_attck_index`/`function_index` cosine pattern — zero new
+  deps, no ember/lightgbm/joblib), offline builder `scripts/build_family_feature_kb.py` →
+  `data/family_fingerprints_v1.json`, config `use_family_feature_rag` (OFF), report block
+  `FamilyAttribution.family_rag_candidates`. 25 new unit tests; ruff + mypy clean; agents/pipeline/
+  reporting/memory/analysis suites green (278). Stays drift-robust and LLM-centric; MABEL now used as a
+  retrieval KB (not classifier training). `host_sample_path` plumbing + the analyst hint slot from the
+  prior pass are reused unchanged. Then built a **bootstrap catalog** from the existing local n=210
+  corpus (new `--manifest`/`--flat-dir` builder mode; 21 family fingerprints) and verified retrieval
+  end-to-end — see the §4 RAG note for the packed-sample + leakage caveats. Also cleared all
+  backgrounded lint debt repo-wide (Ghidra-headless `extract_cfg.py` F821/E501, `ghidra_manager.py`
+  unused import, a dead constant): full repo ruff clean, mypy clean (104 files), unit suite 1355 green.
 - **2026-06-07 Dataset-survey follow-through: U1 dir-ingest + U3 classifier scaffold (gated OFF).**
   Acted on the two viable integrations from the 9-source survey. **U1:** added a
   `--source dir` adapter to `collect_temporal_manifest.py` (walk a folder-per-family raw-binary

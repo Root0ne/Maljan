@@ -951,7 +951,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # function hashes under its inferred family so the corpus grows.
             # Fully gated + fail-safe; never affects the verdict.
             _func_hash_report: list[dict[str, Any]] = []
-            _classifier_report: list[dict[str, Any]] = []
+            _family_rag_report: list[dict[str, Any]] = []
             try:
                 from maljan.core.config import get_settings
 
@@ -1003,33 +1003,39 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as _e:
                 logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
 
-            # Static-feature family classifier (read side): record a learned
-            # specific-family hypothesis in the report. Reads the HOST binary
-            # (ember), so it uses ``sample_path`` (not the container path).
-            # Fail-safe and gated OFF by default (no model -> no rows).
+            # Family-feature RAG (read side): record the families retrieved by
+            # static-feature similarity as report evidence. Reads the HOST binary
+            # (pe_extractor), so it uses ``sample_path`` (not the container path).
+            # LLM-centric: these are candidates the analyst weighed, not a verdict.
+            # Fail-safe and gated OFF by default (no catalog -> no rows).
             try:
                 from maljan.core.config import get_settings as _get_settings
 
                 _cfg2 = _get_settings()
                 _host = state.get("sample_path")
-                if _cfg2.preprocessing.use_static_feature_classifier and _host:
-                    from maljan.analysis.family_classifier import (
-                        load_classifier,
+                if _cfg2.preprocessing.use_family_feature_rag and _host:
+                    from maljan.analysis.family_feature_rag import (
+                        build_sample_profile_text,
+                        retrieve_candidates,
                     )
-                    from maljan.analysis.family_classifier import (
-                        to_report_dicts as _clf_to_report_dicts,
+                    from maljan.analysis.family_feature_rag import (
+                        to_report_dicts as _rag_to_report_dicts,
                     )
+                    from maljan.extractors.pe_extractor import build_static_analysis
+                    from maljan.memory.family_fingerprint_index import load_family_index
 
-                    _clf = load_classifier(_cfg2.preprocessing.static_classifier_model_path)
-                    if _clf is not None:
-                        _preds = _clf.predict(
-                            str(_host),
-                            top_k=_cfg2.preprocessing.static_classifier_max_suggestions,
-                            threshold=_cfg2.preprocessing.static_classifier_confidence_threshold,
+                    _static = build_static_analysis(sample_path=str(_host))
+                    _index = load_family_index(_cfg2.preprocessing.family_fingerprint_catalog_path)
+                    if _static is not None and _index is not None:
+                        _cands = retrieve_candidates(
+                            build_sample_profile_text(_static),
+                            _index,
+                            top_k=_cfg2.preprocessing.family_rag_top_k,
+                            min_score=_cfg2.preprocessing.family_rag_min_score,
                         )
-                        _classifier_report = _clf_to_report_dicts(_preds)
+                        _family_rag_report = _rag_to_report_dicts(_cands)
             except Exception as _e:
-                logger.warning("Family classifier skipped (%s). Verdict unaffected.", _e)
+                logger.warning("Family-feature RAG skipped (%s). Verdict unaffected.", _e)
 
             return {
                 "final_decision": decision,
@@ -1045,10 +1051,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # Exact opcode-hash family overlap, surfaced into the report's
                 # FamilyAttribution.function_hash_matches by the report node.
                 "function_hash_matches": _func_hash_report,
-                # Learned specific-family prior (static-feature classifier),
-                # surfaced into FamilyAttribution.classifier_matches by the report
-                # node. Empty unless the classifier is enabled with a model.
-                "classifier_matches": _classifier_report,
+                # Family-feature RAG candidates (retrieved by static-feature
+                # similarity), surfaced into FamilyAttribution.family_rag_candidates
+                # by the report node. Empty unless the RAG is enabled with a catalog.
+                "family_rag_candidates": _family_rag_report,
                 # Sandbox CTI surface for the report node — persisted into
                 # the extended STIX bundle so the UI / API / paper export
                 # can render the full deterministic threat-intel snapshot.
@@ -1228,11 +1234,10 @@ def make_report_node(container: ServiceContainer) -> Any:
             _fh_matches = cast("list[dict[str, Any]]", state.get("function_hash_matches") or [])
             if _fh_matches and getattr(report, "attribution", None) is not None:
                 report.attribution.function_hash_matches = _fh_matches
-            # Same post-build threading for the static-feature classifier's
-            # learned specific-family prior.
-            _clf_matches = cast("list[dict[str, Any]]", state.get("classifier_matches") or [])
-            if _clf_matches and getattr(report, "attribution", None) is not None:
-                report.attribution.classifier_matches = _clf_matches
+            # Same post-build threading for the family-feature RAG candidates.
+            _rag_cands = cast("list[dict[str, Any]]", state.get("family_rag_candidates") or [])
+            if _rag_cands and getattr(report, "attribution", None) is not None:
+                report.attribution.family_rag_candidates = _rag_cands
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {}

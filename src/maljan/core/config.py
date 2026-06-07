@@ -415,23 +415,21 @@ class PreprocessingConfig(BaseModel):
     function_hash_min_instructions: int = 8
     function_hash_max_matches: int = 8
 
-    # Static-feature family classifier (§4 dataset-survey workstream). When enabled
-    # AND a trained model exists at ``static_classifier_model_path``, a deterministic
-    # offline-trained model predicts a *specific* malware family from the EMBER PE
-    # feature vector (imports, byte/entropy histograms, PE header, sections). The
-    # static analyst gets it as a "family prior" hint and the judge records it as a
-    # FamilyAttribution.classifier_matches block. This generalises to UNSEEN samples
-    # (unlike function-hash attribution, which needs an exact prior match) and so
-    # fills the static-only attribution gap where no Triage CTI / sandbox sig names
-    # a family. OFF by default: needs a model artifact (train via
-    # scripts/train_family_classifier.py on EMBER/MABEL) plus the optional ember/
-    # lightgbm deps; absent any of these the classifier degrades to no-op (fail-safe).
-    # NOTE: a trained classifier reintroduces concept-drift sensitivity (it predicts
-    # from learned families), so retrain + monitor — it is advisory, never gating.
-    use_static_feature_classifier: bool = False
-    static_classifier_model_path: str = "models/family_classifier_v1.joblib"
-    static_classifier_confidence_threshold: float = 0.60
-    static_classifier_max_suggestions: int = 3
+    # Family-feature RAG (§4 dataset-survey workstream — LLM-centric attribution).
+    # When enabled AND a vendored fingerprint catalog exists at
+    # ``family_fingerprint_catalog_path``, the static analyst gets a deterministic
+    # static-feature PROFILE of the sample matched against an offline-built family
+    # fingerprint KB (from MABEL / a raw-binary corpus); the top-k nearest families
+    # are injected as CANDIDATE evidence and the LLM decides the attribution. This
+    # fills the static-only gap (no Triage CTI / sandbox sig to name a family) while
+    # staying LLM-centric: retrieval only surfaces candidates — it never predicts.
+    # No trained model and no heavy deps (reuses the fastembed BGE-384 embedder
+    # already loaded for LTM). OFF by default: absent a catalog it degrades to a
+    # no-op (fail-safe). Build the catalog with scripts/build_family_feature_kb.py.
+    use_family_feature_rag: bool = False
+    family_fingerprint_catalog_path: str = "data/family_fingerprints_v1.json"
+    family_rag_top_k: int = 5
+    family_rag_min_score: float = 0.3
 
     # Deterministic ATT&CK technique-ID correction. When enabled, the judge node
     # runs a pre-cascade pass that re-grounds each LLM analyst claim's technique_id

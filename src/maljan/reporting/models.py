@@ -403,12 +403,13 @@ class FamilyAttribution(BaseModel):
     # shared_functions, sample_ids, example_functions, match_method, source.
     # Populated by the report builder from the judge node's function-hash pass.
     function_hash_matches: list[dict[str, Any]] = Field(default_factory=list)
-    # Static-feature family-classifier predictions (a learned specific-family
-    # prior, generalising to unseen samples — sibling of function_hash_matches).
-    # Each row: family, confidence, match_method, source. Populated by the report
-    # node from the judge node's classifier pass (empty unless the classifier is
-    # enabled and a model artifact is present).
-    classifier_matches: list[dict[str, Any]] = Field(default_factory=list)
+    # Family-feature RAG candidates — families retrieved by static-feature
+    # similarity to a reference fingerprint KB, surfaced as evidence the LLM
+    # weighed (sibling of function_hash_matches). Each row: family, similarity,
+    # malware_category, sample_count, match_method, source. Populated by the report
+    # node from the judge node's RAG pass (empty unless the RAG is enabled and a
+    # fingerprint catalog is present).
+    family_rag_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

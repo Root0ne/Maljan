@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -33,9 +32,7 @@ COMPOSE_DIR = REPO_ROOT / "docker"
 STATE_FILE = REPO_ROOT / ".ghidra_mcp_state.json"
 
 # GitHub API for Ghidra releases
-GHIDRA_RELEASES_API = (
-    "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
-)
+GHIDRA_RELEASES_API = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases"
 
 
 class Versions(NamedTuple):
@@ -47,9 +44,7 @@ class Versions(NamedTuple):
 
 def _run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> str:
     """Run a shell command and return stdout."""
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=cwd or REPO_ROOT, check=check
-    )
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or REPO_ROOT, check=check)
     return result.stdout.strip()
 
 
@@ -68,8 +63,8 @@ def parse_pom() -> tuple[str, str]:
 def parse_dockerfile() -> tuple[str, str]:
     """Extract GHIDRA_VERSION and GHIDRA_DATE from Dockerfile."""
     text = DOCKERFILE.read_text(encoding="utf-8")
-    version_match = re.search(r'ARG GHIDRA_VERSION=([\d.]+)', text)
-    date_match = re.search(r'ARG GHIDRA_DATE=(\d{8})', text)
+    version_match = re.search(r"ARG GHIDRA_VERSION=([\d.]+)", text)
+    date_match = re.search(r"ARG GHIDRA_DATE=(\d{8})", text)
     if not version_match:
         sys.exit(f"ERROR: GHIDRA_VERSION not found in {DOCKERFILE}")
     version = version_match.group(1)
@@ -87,8 +82,10 @@ def fetch_ghidra_release_date(version: str) -> str | None:
     try:
         req = urllib.request.Request(
             GHIDRA_RELEASES_API,
-            headers={"Accept": "application/vnd.github+json",
-                     "User-Agent": "maljan-ghidra-manager"},
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "maljan-ghidra-manager",
+            },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             releases = json.loads(resp.read().decode())
@@ -139,17 +136,15 @@ def sync_dockerfile(dry_run: bool = False) -> bool:
         return True
 
     text = DOCKERFILE.read_text(encoding="utf-8")
-    text = re.sub(
-        r'ARG GHIDRA_VERSION=[\d.]+', f'ARG GHIDRA_VERSION={pom_version}', text
-    )
+    text = re.sub(r"ARG GHIDRA_VERSION=[\d.]+", f"ARG GHIDRA_VERSION={pom_version}", text)
     if pom_date:
-        if re.search(r'ARG GHIDRA_DATE=\d{8}', text):
-            text = re.sub(r'ARG GHIDRA_DATE=\d{8}', f'ARG GHIDRA_DATE={pom_date}', text)
+        if re.search(r"ARG GHIDRA_DATE=\d{8}", text):
+            text = re.sub(r"ARG GHIDRA_DATE=\d{8}", f"ARG GHIDRA_DATE={pom_date}", text)
         else:
             # Insert after GHIDRA_VERSION line
             text = re.sub(
-                r'(ARG GHIDRA_VERSION=[\d.]+\n)',
-                rf'\1ARG GHIDRA_DATE={pom_date}\n',
+                r"(ARG GHIDRA_VERSION=[\d.]+\n)",
+                rf"\1ARG GHIDRA_DATE={pom_date}\n",
                 text,
             )
     DOCKERFILE.write_text(text, encoding="utf-8")
@@ -187,9 +182,7 @@ def smart_rebuild(force: bool = False) -> None:
     """
     state = load_state()
     current_hash = compute_source_hash()
-    current_docker_hash = hashlib.sha256(
-        DOCKERFILE.read_bytes()
-    ).hexdigest()[:16]
+    current_docker_hash = hashlib.sha256(DOCKERFILE.read_bytes()).hexdigest()[:16]
     pom_version, _ = parse_pom()
 
     last_hash = state.get("src_hash", "")
@@ -218,7 +211,9 @@ def smart_rebuild(force: bool = False) -> None:
     needs_full_rebuild = pom_version != last_version or current_docker_hash != last_docker_hash
 
     build_cmd = [
-        "docker", "compose", "build",
+        "docker",
+        "compose",
+        "build",
         *(["--no-cache"] if needs_full_rebuild else []),
         "ghidra-mcp",
     ]

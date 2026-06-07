@@ -389,47 +389,59 @@ class StaticAnalyst(BaseAnalyst):
             )
             return ""
 
-    def _compute_family_classifier_hint(self, file_path: str) -> str:
-        """Pre-pass: surface a learned family prior from PE static features.
+    def _compute_family_rag_hint(self, file_path: str) -> str:
+        """Pre-pass: retrieve candidate families by static-feature similarity.
 
-        Runs the offline-trained static-feature classifier (EMBER feature vector)
-        and renders a "family prior" hint. Unlike the function-hash pre-pass this
-        generalises to UNSEEN samples, so it helps exactly where the corpus has no
-        prior match. Deterministic and fail-safe: gated OFF by default, returns ''
-        when disabled, the model/deps are absent, or prediction yields nothing.
+        Builds a deterministic static-feature profile of the sample and retrieves
+        the nearest family fingerprints from the vendored KB, rendering them as
+        CANDIDATE evidence for the LLM to weigh. LLM-centric — retrieval surfaces
+        candidates; the analyst decides attribution. Generalises to UNSEEN samples
+        (unlike the exact-match function-hash prior). Fail-safe: gated OFF by
+        default, returns '' when the catalog/profile is absent or empty.
         """
         from maljan.core.config import get_settings
 
         cfg = get_settings()
-        if not cfg.preprocessing.use_static_feature_classifier:
+        if not cfg.preprocessing.use_family_feature_rag:
             return ""
         try:
-            from maljan.analysis.family_classifier import build_classifier_hint, load_classifier
-
-            clf = load_classifier(cfg.preprocessing.static_classifier_model_path)
-            if clf is None:
-                return ""  # model/deps absent — already logged once at load
-            results = clf.predict(
-                file_path,
-                top_k=cfg.preprocessing.static_classifier_max_suggestions,
-                threshold=cfg.preprocessing.static_classifier_confidence_threshold,
+            from maljan.analysis.family_feature_rag import (
+                build_rag_hint,
+                build_sample_profile_text,
+                retrieve_candidates,
             )
-            hint = build_classifier_hint(results)
+            from maljan.extractors.pe_extractor import build_static_analysis
+            from maljan.memory.family_fingerprint_index import load_family_index
+
+            static = build_static_analysis(sample_path=file_path)
+            if static is None:
+                return ""
+            profile = build_sample_profile_text(static)
+            if not profile:
+                return ""
+            index = load_family_index(cfg.preprocessing.family_fingerprint_catalog_path)
+            if index is None:
+                return ""  # catalog absent — already logged once at load
+            candidates = retrieve_candidates(
+                profile,
+                index,
+                top_k=cfg.preprocessing.family_rag_top_k,
+                min_score=cfg.preprocessing.family_rag_min_score,
+            )
+            hint = build_rag_hint(candidates)
             if hint:
                 self.logger.info(
-                    "Family-classifier pre-pass: %d family prior(s) for '%s' (top=%s).",
-                    len(results),
+                    "Family-RAG pre-pass: %d candidate(s) for '%s' (top=%s).",
+                    len(candidates),
                     file_path,
-                    f"{results[0].family}~{results[0].confidence}" if results else "-",
+                    f"{candidates[0].family}~{candidates[0].score:.2f}" if candidates else "-",
                 )
             else:
-                self.logger.info(
-                    "Family-classifier pre-pass: no family above threshold — no prior emitted."
-                )
+                self.logger.info("Family-RAG pre-pass: no family above the similarity floor.")
             return hint
         except Exception as exc:  # fail-safe: never break analysis over a hint
             self.logger.warning(
-                "Family-classifier pre-pass failed (%s: %s); continuing without prior.",
+                "Family-RAG pre-pass failed (%s: %s); continuing without candidates.",
                 type(exc).__name__,
                 exc,
             )
@@ -587,7 +599,7 @@ class StaticAnalyst(BaseAnalyst):
         # string when disabled, unavailable, or the binary has no named sinks.
         sink_hint = ""
         attr_hint = ""
-        clf_hint = ""
+        rag_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
             sink_hint = self._compute_sink_priority_hint(analysis_path)
@@ -597,13 +609,14 @@ class StaticAnalyst(BaseAnalyst):
             attr_hint = self._compute_function_hash_hint(
                 analysis_path, _extract_sample_hash(data) or ""
             )
-        # Static-feature family prior: a learned guess that generalises to UNSEEN
-        # samples (where the exact-match function-hash prior is silent). Reads the
-        # raw bytes on the HOST (ember), so it needs the host path, not the
+        # Family-feature RAG: retrieve candidate families by static-feature
+        # similarity (LLM-centric — the analyst decides). Generalises to UNSEEN
+        # samples where the exact-match function-hash prior is silent. Reads the
+        # raw bytes on the HOST (pe_extractor), so it needs the host path, not the
         # container path Ghidra uses. Fail-safe and gated OFF by default.
         host_path = _extract_host_path(data)
         if host_path:
-            clf_hint = self._compute_family_classifier_hint(host_path)
+            rag_hint = self._compute_family_rag_hint(host_path)
 
         prompt_messages = [
             ("system", _ISR_SYSTEM),
@@ -620,7 +633,7 @@ class StaticAnalyst(BaseAnalyst):
                 "CONFIDENCE: <float>\n"
                 "TECHNIQUE: <T-ID or NONE>\n"
                 "---\n\n"
-                f"{clf_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
+                f"{rag_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]
 

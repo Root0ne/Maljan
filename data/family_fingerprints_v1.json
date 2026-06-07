@@ -1,0 +1,132 @@
+{
+  "schema": "maljan-family-fingerprints/v1",
+  "embed_model": "BAAI/bge-small-en-v1.5",
+  "families": [
+    {
+      "family_id": "AZORult",
+      "description": "WriteFile; GetProcAddress; packer: high-entropy sections (possibly packed/encrypted); GetTickCount; filesystem x1; anti_debug x1; obfuscation: High-entropy sections (>= 7.0): .text; capabilities: privilege x2; execution x1; OpenProcessToken; capabilities: anti_debug x3; execution x2; IsDebuggerPresent; QueryPerformanceCounter; LoadLibraryA; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); suspicious imports: GetTickCount; AdjustTokenPrivileges",
+      "malware_category": "",
+      "sample_count": 8
+    },
+    {
+      "family_id": "Amadey",
+      "description": "GetProcAddress; QueryPerformanceCounter; IsDebuggerPresent; packer: high-entropy sections (possibly packed/encrypted); obfuscation: RWX sections present: (unnamed); .taggant; High-entropy sections (>= 7.0): (unnamed); high-entropy sections: (unnamed)~8.0; VirtualAlloc; WriteFile; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); (unnamed); ravxlgdz; (unnamed)~0.3; .taggant~0.8; htfqyixx",
+      "malware_category": "",
+      "sample_count": 7
+    },
+    {
+      "family_id": "AsyncRAT",
+      "description": "packer: high-entropy sections (possibly packed/encrypted)",
+      "malware_category": "",
+      "sample_count": 3
+    },
+    {
+      "family_id": "BumbleBee",
+      "description": "suspicious imports: CreateFileA; GetProcAddress; execution x1; QueryPerformanceCounter; IsDebuggerPresent; WriteFile; capabilities: filesystem x2; anti_debug x2; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); process_injection x1; VirtualAlloc",
+      "malware_category": "",
+      "sample_count": 6
+    },
+    {
+      "family_id": "CobaltStrike",
+      "description": "GetProcAddress; process_injection x1; LoadLibraryA; VirtualAlloc; packer: high-entropy sections (possibly packed/encrypted); QueryPerformanceCounter; WriteFile; execution x2; IsDebuggerPresent; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); capabilities: filesystem x2; Dynamic API resolution (LoadLibrary + GetProcAddress); filesystem x1; GetTickCount; suspicious imports: WriteFile; execution x1; suspicious imports: CreateFileA; capabilities: execution x2; capabilities: anti_debug x3; suspicious imports: GetTickCount; anti_debug x2",
+      "malware_category": "",
+      "sample_count": 11
+    },
+    {
+      "family_id": "DarkComet",
+      "description": "GetProcAddress; VirtualAlloc; send; capabilities: execution x3; Dynamic API resolution (LoadLibrary + GetProcAddress); network x2; process_injection x1; suspicious imports: LoadLibraryA; ShellExecuteA; URLDownloadToFileA; packer: UPX; obfuscation: RWX sections present: UPX0; UPX1; High-entropy sections (>= 7.0): UPX1; high-entropy sections: UPX0~0.0; UPX1~7.9; WriteFile; LoadLibraryA; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); packer: high-entropy sections (possibly packed/encrypted); QueryPerformanceCounter; VirtualAllocEx; WriteProcessMemory; obfuscation: High-entropy sections (>= 7.0): .text",
+      "malware_category": "",
+      "sample_count": 21
+    },
+    {
+      "family_id": "Dridex",
+      "description": "packer: high-entropy sections (possibly packed/encrypted); obfuscation: High-entropy sections (>= 7.0): .rdata; high-entropy sections: .rdata~7.5; high-entropy sections: .rdata~7.4; capabilities: crypto x1; process_injection x1; suspicious imports: CryptGenKey; VirtualAllocEx; suspicious imports: IsDebuggerPresent; high-entropy sections: .rdata~7.3; capabilities: anti_debug x2; OutputDebugStringA; capabilities: anti_debug x1",
+      "malware_category": "",
+      "sample_count": 13
+    },
+    {
+      "family_id": "Gh0stRAT",
+      "description": "GetProcAddress; WriteFile; LoadLibraryA; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); capabilities: network x4; execution x2; process_injection x1; connect; recv; VirtualAlloc; anti_debug x1; send; GetTickCount; WSAStartup; (unnamed); filesystem x1; anti_debug x3; CreateFileA; IsDebuggerPresent; QueryPerformanceCounter; Dynamic API resolution (LoadLibrary + GetProcAddress); OutputDebugStringA; (unnamed)~7.9; capabilities: execution x2",
+      "malware_category": "",
+      "sample_count": 8
+    },
+    {
+      "family_id": "GuLoader",
+      "description": "anti_debug x1; AdjustTokenPrivileges; WriteFile; GetProcAddress; capabilities: privilege x2; filesystem x1; execution x1; GetTickCount; capabilities: filesystem x6; privilege x3; registry x3; execution x2; CreateProcessA; CreateFileA; MoveFileExA; RegOpenKeyExA; OpenProcessToken",
+      "malware_category": "",
+      "sample_count": 4
+    },
+    {
+      "family_id": "Hancitor",
+      "description": "WriteFile; GetTickCount; GetProcAddress; CreateFileA; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); filesystem x2; execution x2; LoadLibraryA; capabilities: anti_debug x4; OutputDebugStringA; QueryPerformanceCounter; VirtualAlloc; IsDebuggerPresent",
+      "malware_category": "",
+      "sample_count": 4
+    },
+    {
+      "family_id": "IcedID",
+      "description": "capabilities: process_injection x1; suspicious imports: VirtualAlloc; capabilities: anti_debug x2; IsDebuggerPresent; suspicious imports: VirtualAllocEx; QueryPerformanceCounter; process_injection x1; packer: high-entropy sections (possibly packed/encrypted); obfuscation: High-entropy sections (>= 7.0): .reloc; high-entropy sections: .reloc~7.6; execution x1; GetTickCount; suspicious imports: QueryPerformanceCounter",
+      "malware_category": "",
+      "sample_count": 12
+    },
+    {
+      "family_id": "LummaStealer",
+      "description": "packer: high-entropy sections (possibly packed/encrypted); GetProcAddress; obfuscation: RWX sections present: (unnamed); (unnamed); wblnmfuc; .taggant; High-entropy sections (>= 7.0): (unnamed); high-entropy sections: (unnamed)~7.9; (unnamed)~0.3; ayvmvvii; QueryPerformanceCounter; LoadLibraryA; WriteFile; IsDebuggerPresent; obfuscation: High-entropy sections (>= 7.0): .data; Dynamic API resolution (LoadLibrary + GetProcAddress)",
+      "malware_category": "",
+      "sample_count": 6
+    },
+    {
+      "family_id": "NanoCore",
+      "description": "packer: high-entropy sections (possibly packed/encrypted); obfuscation: High-entropy sections (>= 7.0): .rsrc; obfuscation: High-entropy sections (>= 7.0): .text; high-entropy sections: .rsrc~8.0; filesystem x1; GetProcAddress; WriteFile; high-entropy sections: .text~7.7",
+      "malware_category": "",
+      "sample_count": 10
+    },
+    {
+      "family_id": "Pikabot",
+      "description": "IsDebuggerPresent; QueryPerformanceCounter; capabilities: anti_debug x3; execution x2; process_injection x1; suspicious imports: GetProcAddress; LoadLibraryA; VirtualAlloc; WriteFile; OpenProcessToken; packer: high-entropy sections (possibly packed/encrypted); obfuscation: High-entropy sections (>= 7.0): .rsrc; Dynamic API resolution (LoadLibrary + GetProcAddress); filesystem x1",
+      "malware_category": "",
+      "sample_count": 3
+    },
+    {
+      "family_id": "Pony",
+      "description": "packer: high-entropy sections (possibly packed/encrypted); GetProcAddress; Dynamic API resolution (LoadLibrary + GetProcAddress); VirtualAlloc; WriteFile; GetTickCount; capabilities: execution x2; process_injection x1; suspicious imports: LoadLibraryA; registry x2; LoadLibraryA; obfuscation: High-entropy sections (>= 7.0): .text; obfuscation: RWX sections present: ABC0; ABC1; High-entropy sections (>= 7.0): ABC1; high-entropy sections: ABC0~0.0; ABC1~7.9; process_injection x2; anti_debug x1; RegOpenKeyExA; CreateFileA; filesystem x3; suspicious imports: VirtualAlloc; obfuscation: High-entropy sections (>= 7.0): .rsrc",
+      "malware_category": "",
+      "sample_count": 16
+    },
+    {
+      "family_id": "RaccoonStealer",
+      "description": "WriteFile; IsDebuggerPresent; VirtualAlloc; QueryPerformanceCounter; GetTickCount; CreateFileA; LoadLibraryA; execution x2; GetProcAddress; packer: high-entropy sections (possibly packed/encrypted); process_injection x1; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); Dynamic API resolution (LoadLibrary + GetProcAddress); suspicious imports: GetProcAddress; process_injection x2; suspicious imports: LoadLibraryA; DeleteFileA; capabilities: anti_debug x3; filesystem x2; anti_debug x3",
+      "malware_category": "",
+      "sample_count": 15
+    },
+    {
+      "family_id": "RedLineStealer",
+      "description": "packer: high-entropy sections (possibly packed/encrypted); execution x2; LoadLibraryA; QueryPerformanceCounter; WriteFile; VirtualAlloc; IsDebuggerPresent; Dynamic API resolution (LoadLibrary + GetProcAddress); capabilities: network x4; process_injection x3; anti_debug x2; privilege x2; filesystem x1; send; connect; GetProcAddress; VirtualAllocEx; WriteProcessMemory; obfuscation: High-entropy sections (>= 7.0): .rsrc; suspicious imports: WSAStartup; recv; high-entropy sections: .rsrc~7.9; high-entropy sections: .rsrc~8.0; suspicious imports: recv",
+      "malware_category": "",
+      "sample_count": 7
+    },
+    {
+      "family_id": "RemcosRAT",
+      "description": "packer: high-entropy sections (possibly packed/encrypted); obfuscation: High-entropy sections (>= 7.0): .text; high-entropy sections: .text~7.8; high-entropy sections: .text~7.9",
+      "malware_category": "",
+      "sample_count": 5
+    },
+    {
+      "family_id": "Sliver",
+      "description": "process_injection x1; suspicious imports: WriteFile; VirtualAlloc; GetProcAddress; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); capabilities: filesystem x2; execution x2; LoadLibraryA; CreateFileA",
+      "malware_category": "",
+      "sample_count": 4
+    },
+    {
+      "family_id": "TrickBot",
+      "description": "GetProcAddress; WriteFile; process_injection x1; suspicious imports: VirtualAlloc; execution x2; LoadLibraryA; Dynamic API resolution (LoadLibrary + GetProcAddress); CreateFileA; RegSetValueExA; RegOpenKeyExA; RegCreateKeyExA; packer: high-entropy sections (possibly packed/encrypted); registry x3; capabilities: anti_debug x3; QueryPerformanceCounter; GetTickCount; obfuscation: High-entropy sections (>= 7.0): .rsrc; capabilities: filesystem x4; SetFileAttributesA; DeleteFileA; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress); filesystem x1; IsDebuggerPresent; network x4",
+      "malware_category": "",
+      "sample_count": 9
+    },
+    {
+      "family_id": "njrat",
+      "description": "capabilities: anti_debug x3; filesystem x1; execution x1; suspicious imports: WriteFile; GetProcAddress; GetTickCount; IsDebuggerPresent; QueryPerformanceCounter; obfuscation: Dynamic API resolution (LoadLibrary + GetProcAddress)",
+      "malware_category": "",
+      "sample_count": 3
+    }
+  ]
+}

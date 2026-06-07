@@ -1,6 +1,12 @@
-# Ghidra Headless Analyzer Script to Extract Call Graph
+# Ghidra Headless Analyzer Script to Extract Call Graph.
+#
+# Runs inside Ghidra's headless Jython runtime, which injects the globals
+# ``getScriptArgs`` and ``currentProgram`` — hence the per-line F821 waivers below
+# (they are undefined to a normal linter but defined by the Ghidra interpreter).
+#
 # Usage:
-# analyzeHeadless <project_dir> <project_name> -process <binary> -postScript extract_cfg.py <output_file.json>
+#   analyzeHeadless <project_dir> <project_name> -process <binary> \
+#       -postScript extract_cfg.py <output_file.json>
 
 import json
 
@@ -48,10 +54,10 @@ def extract_call_graph(program, output_path):
 
 
 if __name__ == "__main__":
-    args = getScriptArgs()
+    args = getScriptArgs()  # noqa: F821 — Ghidra-injected global
     if len(args) < 1:
         print("Usage: extract_cfg.py <output_json_path>")
     else:
         output_file = args[0]
         # 'currentProgram' is automatically injected by Ghidra
-        extract_call_graph(currentProgram, output_file)
+        extract_call_graph(currentProgram, output_file)  # noqa: F821 — Ghidra-injected global
