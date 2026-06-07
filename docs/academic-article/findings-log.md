@@ -840,9 +840,25 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   the LTM corpus stores *behavioural* `summary_text` while the static-stage query is a *static-feature*
   profile, so matching is coarse (vocabulary mismatch) — which is exactly why the candidates are advisory
   and the LLM decides; the index exposes a generic `search(query_text, …)` so the judge (which has full
-  behavioural claim text) can adopt the same aggregation later for a tighter match. No live corpus is
-  vendored yet (the n=210 drift run wrote to the LTM only when `MEMORY__BACKEND=qdrant`; the operator
-  builds the corpus from a populated store via the builder).
+  behavioural claim text) can adopt the same aggregation later for a tighter match.
+  **Corpus vendored from MABEL (2026-06-08):** the empty-LTM blocker (the n=210 drift run never wrote
+  `StoredCase`s — Qdrant held only the function-hash collection) was resolved WITHOUT a live LTM by
+  mining MABEL instead. The MABEL condensed v2.10 release turns out to carry **per-sample capa-derived
+  ATT&CK ids** (`mitre_attack_id`) plus `standardized_import_functions_sorted` and capa/yara capability
+  columns — i.e. exactly the (behaviour ↔ ATT&CK) shape U2 needs, which the original survey wrongly
+  recorded as "no ATT&CK mapping". A new `--mabel-csv` mode on `scripts/build_attck_case_kb.py`
+  transforms each row into a case (sha256 id; summary_text from imports + capa + yara; technique_ids
+  regex-parsed from `mitre_attack_id`; category from the yara_* family-class columns) with a
+  `--max-per-family` cap so the runtime index does not embed all ~74k labelled rows. Built the vendored
+  `data/attck_case_corpus_v1.json` (the config default path → turnkey): **1,733 cases, 77 distinct
+  ATT&CK techniques** (cap 6/family to keep the artifact ~1.3 MB). End-to-end verified with fastembed
+  BGE-384 — an injection+network static
+  profile retrieves T1055 / T1055.003 (process injection) at 0.90 plus related evasion TTPs.
+  **Caveats:** the ATT&CK labels are capa's *static* inference (not authoritative ground truth, but a
+  large real labelled corpus); MABEL ships no binaries (features-only — safe to download, no live
+  malware); the `--csv`-style summary vocabulary overlaps but does not perfectly match
+  `build_sample_profile_text` (advisory retrieval, LLM decides). Still OFF by default; the Qdrant /
+  JSONL builder modes remain for mining the production LTM as it grows.
 - `PLANNED` (static-feature family classifier — candidate new workstream, NOT in the Items 1–5
   roadmap) A deterministic ML classifier that predicts a malware **family** from static features
   (imports, PE-header fields, per-section entropy, opcode histogram, packer + YARA capabilities) to
@@ -896,6 +912,16 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   retrieval is only advisory; (ii) this bootstrap catalog is built FROM the eval corpus, so it must NOT
   be used for a leakage-free measurement of the RAG's effect — for that, rebuild from a DISJOINT source
   (the Ultimate-RAT-Collection via `--samples-dir`, or MABEL via `--csv`). Still OFF by default.
+  **Disjoint MABEL catalog vendored (2026-06-08):** the leakage caveat above is now addressable — built
+  `data/family_fingerprints_mabel_v1.json` from MABEL's 82,171 feature rows (`--csv` multi-segment;
+  `--family-col family_name --text-cols standardized_import_functions_sorted,yara_capabilities,`
+  `capa_capability_name,trid`): **318 families with ≥3 samples**, 308 KB, fully disjoint from the n=210
+  eval set. End-to-end verified (an injection+network profile retrieves XWorm / AveMaria / EchelonStealer
+  — real inject/RAT/stealer families). The n=210 `family_fingerprints_v1.json` is kept as the *default*
+  because it has perfect query-vocabulary parity (same `build_sample_profile_text` renderer), whereas the
+  MABEL catalog trades parity (its `--csv` columns differ from the runtime profile surface) for 15× the
+  family coverage and zero leakage — operators point `family_fingerprint_catalog_path` at whichever fits
+  the run. Both ship; both gated OFF.
 - `SURVEY` (external malware-dataset assessment, 2026-06-07) Nine candidate sources were evaluated
   against four Maljan use-axes — **U1** Ghidra+LLM raw-binary corpus (drift/TTP eval), **U2**
   function-level RAG corpus (decompiled-code↔ATT&CK), **U3** static-feature family-classifier training
@@ -904,7 +930,7 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   | Source | Platform | Content | Labels | Dated | Verdict |
   |---|---|---|---|---|---|
   | [EMBER](https://github.com/elastic/ember) | Win PE | features only (LIEF), no binaries; 1.1M+1M | benign/malicious only | year + `appeared` mo | U3 base features; family labels must be joined (AVClass/SOREL). |
-  | [MABEL](https://github.com/action-ai-institute/MABEL-dataset) | Win PE | feature CSV, no binaries; 400+ families | family + YARA caps (no ATT&CK) | PE timestamp (weak) | **U3 only** — family-labelled PE features = ready training data. |
+  | [MABEL](https://github.com/action-ai-institute/MABEL-dataset) | Win PE | feature CSV, no binaries; 475 families | family + YARA caps + **capa→ATT&CK** (corrected 2026-06-08) | PE timestamp (weak) | **U3 + U2** — family-labelled features (catalog) AND per-sample capa-derived ATT&CK ids (case corpus). |
   | [Ultimate-RAT-Collection](https://github.com/Cryakl/Ultimate-RAT-Collection) | Windows | RAW binaries (zip pw "infected", folder/family); 500+ RAT builders | family (folder) | No | **U1 partial** + U3; only ATT&CK-known families score, undated, builders≠payloads. |
   | MH-1M ([Nature](https://www.nature.com/articles/s41597-025-06469-5) · [Dataverse](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/LLHEGN) · [GitHub](https://github.com/Malware-Hunter/MH-1M)) | **Android** | features `.npz`, no binaries; 1.34M APK | VirusTotal (no family/ATT&CK) | "10+ yrs", no cohorts | **Out of scope** (Android + features-only + no ATT&CK). |
   | SF23-[AMGenerator](https://github.com/Malware-Hunter/SF23-AMGenerator) / [AMExplorer](https://github.com/Malware-Hunter/SF23-AMExplorer) | **Android** | tools (AndroZoo+AndroGuard+VT), not datasets | — | — | **Out of scope** (Android tooling). |
@@ -951,6 +977,24 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-08 MABEL integrated: real disjoint corpora for U2 + U3 (no live malware).** Downloaded the
+  MABEL condensed v2.10 feature dataset (vx-underground-attributed, features-only — ~3.4 GB CSV, 82,171
+  rows, 475 families, no binaries → safe). Key correction to the 2026-06-07 survey: the condensed release
+  DOES carry per-sample **capa-derived ATT&CK ids** + import lists + capa/yara capabilities (the survey
+  wrongly recorded "no ATT&CK mapping"). Extended both offline builders to mine it: `--mabel-csv` mode on
+  `build_attck_case_kb.py` (U2) and multi-segment `--csv` on `build_family_feature_kb.py` (U3), both with
+  `csv.field_size_limit` bumped for MABEL's large cells, and a `"-"` null-placeholder normaliser.
+  Produced two vendored artifacts: **U2 `data/attck_case_corpus_v1.json`** (1,733 cases, 77 ATT&CK
+  techniques, cap 6/family ~1.3 MB — the config default path, so U2 is now turnkey and the empty-LTM
+  blocker is resolved) and
+  **U3 `data/family_fingerprints_mabel_v1.json`** (318 disjoint families — addresses the n=210 leakage
+  caveat; n=210 stays the parity-perfect default). Both verified end-to-end with fastembed BGE-384
+  (injection profile → T1055 @0.90 for U2; XWorm/AveMaria/EchelonStealer for U3). 7 new builder unit
+  tests (14 total in test_build_attck_case_kb). Caveats recorded: capa ATT&CK is static-tool inference
+  (not authoritative GT); `--csv` summary vocabulary overlaps but is not perfect parity with the runtime
+  static profile (advisory retrieval, LLM decides). Both features stay OFF by default. Out-of-scope
+  sources confirmed skipped: Ultimate-RAT-Collection (26.6 GB live malware — pending scope/Defender
+  decision), DikeDataset (coarse labels), EMBER (no family labels), MH-1M/SF23/APIMDS (Android/dynamic).
 - **2026-06-07 U2 implemented: ATT&CK case-prior RAG (LLM-centric, mines our own LTM).** Built the §4
   U2 follow-up — the function-level RAG's missing *cross-sample* knowledge corpus — without importing
   an external dataset. New `memory/attck_case_index.py` (`AttckCaseIndex`: embeds prior cases'

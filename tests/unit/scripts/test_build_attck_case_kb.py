@@ -18,6 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
 from build_attck_case_kb import (  # noqa: E402
     _cases_from_jsonl,
+    _cases_from_mabel,
+    _mabel_category,
+    _mabel_summary,
+    _mabel_val,
     _row_from_payload,
     main,
 )
@@ -108,3 +112,82 @@ class TestMain:
         )
         assert main() == 1
         assert not out.exists()
+
+
+# MABEL feature-CSV mining (the only header columns the parser reads).
+_MABEL_HEADER = (
+    "sha256_hash,family_name,mitre_attack_id,standardized_import_functions_sorted,"
+    "capa_capability_name,yara_capabilities,yara_ransomware,yara_rat,yara_stealer,yara_miners"
+)
+
+
+class TestMabelHelpers:
+    def test_mabel_val_normalizes_dash(self) -> None:
+        assert _mabel_val({"c": "-"}, "c") == ""  # MABEL's null placeholder
+        assert _mabel_val({"c": " x "}, "c") == "x"
+        assert _mabel_val({}, "c") == ""
+
+    def test_category_from_yara_columns(self) -> None:
+        assert _mabel_category({"yara_ransomware": "ransom_rule"}) == "RANSOMWARE"
+        assert _mabel_category({"yara_rat": "njrat"}) == "RAT"
+        # All-dash (the common case) -> UNKNOWN, not a false RANSOMWARE.
+        assert _mabel_category({"yara_ransomware": "-", "yara_rat": "-"}) == "UNKNOWN"
+
+    def test_summary_renders_imports_capa_yara(self) -> None:
+        s = _mabel_summary(
+            {
+                "standardized_import_functions_sorted": "createprocess createremotethread",
+                "capa_capability_name": "inject process; allocate rwx memory",
+                "yara_capabilities": "win_registry; network_tcp_socket",
+            }
+        )
+        assert "suspicious imports: createprocess" in s
+        assert "capabilities: inject process" in s
+        assert "yara: win_registry" in s
+
+    def test_summary_empty_when_all_dash(self) -> None:
+        assert _mabel_summary({"standardized_import_functions_sorted": "-"}) == ""
+
+
+class TestCasesFromMabel:
+    def _write_csv(self, tmp_path: Path, rows: list[str]) -> Path:
+        p = tmp_path / "mabel.csv"
+        p.write_text(_MABEL_HEADER + "\n" + "\n".join(rows) + "\n", encoding="utf-8")
+        return p
+
+    def test_extracts_techniques_and_caps_family(self, tmp_path: Path) -> None:
+        # 3 rows for family Foo, cap=2 -> only 2 kept; technique ids parsed from the
+        # "Txxxx: name; ..." cell; a row with no ATT&CK id is dropped.
+        rows = [
+            "h1,Foo,T1055: Injection; T1071: C2,createremotethread,inject,win_registry,-,-,-,-",
+            "h2,Foo,T1486: Encrypt,cryptencrypt,encrypt files,-,ransom,-,-,-",
+            "h3,Foo,T1057: Discovery,getprocess,enumerate,-,-,-,-,-",
+            "h4,Bar,no-attack-here,someimport,cap,-,-,-,-,-",
+        ]
+        cases = _cases_from_mabel([str(self._write_csv(tmp_path, rows))], max_per_family=2)
+        # Foo capped at 2 (h1,h2); h3 dropped by cap; h4 dropped (no ATT&CK id).
+        assert len(cases) == 2
+        assert {c["sample_id"] for c in cases} == {"h1", "h2"}
+        h1 = next(c for c in cases if c["sample_id"] == "h1")
+        assert h1["technique_ids"] == ["T1055", "T1071"]
+        h2 = next(c for c in cases if c["sample_id"] == "h2")
+        assert h2["malware_category"] == "RANSOMWARE"
+
+    def test_missing_mitre_column_skips_file(self, tmp_path: Path) -> None:
+        p = tmp_path / "bad.csv"
+        p.write_text("sha256_hash,family_name\nh1,Foo\n", encoding="utf-8")
+        assert _cases_from_mabel([str(p)], max_per_family=10) == []
+
+    def test_main_mabel_end_to_end(self, tmp_path: Path, monkeypatch) -> None:
+        p = self._write_csv(
+            tmp_path,
+            ["h1,Foo,T1055: Injection,createremotethread,inject process,win_registry,-,-,-,-"],
+        )
+        out = tmp_path / "corpus.json"
+        monkeypatch.setattr(
+            sys, "argv", ["x", "--mabel-csv", str(p), "--out", str(out), "--max-per-family", "5"]
+        )
+        assert main() == 0
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        assert doc["schema"] == "maljan-attck-case-corpus/v1"
+        assert doc["cases"][0]["technique_ids"] == ["T1055"]

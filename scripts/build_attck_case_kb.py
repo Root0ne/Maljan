@@ -30,7 +30,9 @@ Run:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -41,6 +43,13 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 
 _CORPUS_SCHEMA = "maljan-attck-case-corpus/v1"
 _EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # what the runtime index embeds the text with
+
+# MABEL feature-CSV mining (a features-only, no-binary dataset whose condensed
+# v2.10 release carries per-sample capa-derived ATT&CK ids — see findings-log §4).
+_MABEL_TID = re.compile(r"T\d{4}(?:\.\d{3})?")
+_MABEL_MAX_IMPORTS = 12
+_MABEL_MAX_CAPA = 8
+_MABEL_MAX_YARA = 8
 
 
 def _row_from_payload(p: dict) -> dict | None:
@@ -102,17 +111,108 @@ def _cases_from_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def _mabel_val(row: dict, col: str) -> str:
+    """MABEL cell value with its '-' null placeholder normalised to ''."""
+    v = (row.get(col) or "").strip()
+    return "" if v == "-" else v
+
+
+def _mabel_category(row: dict) -> str:
+    """Derive a coarse malware category from MABEL's yara family-class columns."""
+    for col, cat in (
+        ("yara_ransomware", "RANSOMWARE"),
+        ("yara_rat", "RAT"),
+        ("yara_stealer", "STEALER"),
+        ("yara_miners", "MINER"),
+    ):
+        if _mabel_val(row, col):
+            return cat
+    return "UNKNOWN"
+
+
+def _mabel_summary(row: dict) -> str:
+    """Render a MABEL row's behaviour as the retrieval key.
+
+    Uses the import list + capa capability names + yara capability tags — a vocabulary
+    that overlaps the runtime static-feature profile (build_sample_profile_text emits
+    'suspicious imports: ...'), so the query and the corpus partially share an
+    embedding space.
+    """
+    parts: list[str] = []
+    imps = _mabel_val(row, "standardized_import_functions_sorted")
+    if imps:
+        names = [t for t in imps.split() if t][:_MABEL_MAX_IMPORTS]
+        if names:
+            parts.append("suspicious imports: " + ", ".join(names))
+    capa = _mabel_val(row, "capa_capability_name")
+    if capa:
+        caps = [c.strip() for c in capa.split(";") if c.strip()][:_MABEL_MAX_CAPA]
+        if caps:
+            parts.append("capabilities: " + "; ".join(caps))
+    yara = _mabel_val(row, "yara_capabilities")
+    if yara:
+        tags = [t.strip() for t in yara.split(";") if t.strip()][:_MABEL_MAX_YARA]
+        if tags:
+            parts.append("yara: " + ", ".join(tags))
+    return "; ".join(parts)
+
+
+def _cases_from_mabel(paths: list[str], max_per_family: int) -> list[dict]:
+    """Transform MABEL feature-CSV rows into ATT&CK case-corpus rows.
+
+    Each row -> one case: sample_id = sha256, summary_text from imports + capa +
+    yara tags, technique_ids parsed from the capa-derived ``mitre_attack_id`` column,
+    category from the yara_* family-class columns. ``max_per_family`` bounds the corpus
+    so the runtime index does not embed all ~74k labelled rows at load.
+    """
+    csv.field_size_limit(10**8)  # MABEL packs large multi-value cells
+    rows: list[dict] = []
+    per_family: dict[str, int] = {}
+    for p in paths:
+        with open(p, newline="", encoding="utf-8", errors="replace") as fh:
+            reader = csv.DictReader(fh)
+            if "mitre_attack_id" not in (reader.fieldnames or []):
+                print(f"  skip {p}: no 'mitre_attack_id' column.", flush=True)
+                continue
+            for row in reader:
+                fam = (row.get("family_name") or "").strip()
+                if max_per_family > 0 and per_family.get(fam, 0) >= max_per_family:
+                    continue
+                techs = list(dict.fromkeys(_MABEL_TID.findall(row.get("mitre_attack_id") or "")))
+                if not techs:
+                    continue
+                summary = _mabel_summary(row)
+                if not summary:
+                    continue
+                rows.append(
+                    {
+                        "sample_id": (row.get("sha256_hash") or "").strip(),
+                        "summary_text": summary,
+                        "technique_ids": techs,
+                        "malware_category": _mabel_category(row),
+                    }
+                )
+                per_family[fam] = per_family.get(fam, 0) + 1
+    return rows
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build the ATT&CK case-prior RAG corpus.")
     ap.add_argument("--qdrant-url", type=str, help="Live Qdrant URL to scroll the LTM from.")
     ap.add_argument("--collection", type=str, default="maljan_cases_v2", help="LTM collection.")
     ap.add_argument("--cases-jsonl", type=str, help="JSONL export (one StoredCase per line).")
+    ap.add_argument(
+        "--mabel-csv", nargs="+", help="MABEL feature CSV segment(s) to mine (capa->ATT&CK)."
+    )
+    ap.add_argument(
+        "--max-per-family", type=int, default=12, help="Cap cases per family (MABEL mode)."
+    )
     ap.add_argument("--out", type=str, default="data/attck_case_corpus_v1.json")
     ap.add_argument("--min-techniques", type=int, default=1, help="Drop cases with fewer.")
     args = ap.parse_args()
 
-    if not args.qdrant_url and not args.cases_jsonl:
-        print("ERROR: pass --qdrant-url or --cases-jsonl.", file=sys.stderr)
+    if not args.qdrant_url and not args.cases_jsonl and not args.mabel_csv:
+        print("ERROR: pass --qdrant-url, --cases-jsonl, or --mabel-csv.", file=sys.stderr)
         return 2
 
     rows: list[dict] = []
@@ -128,6 +228,12 @@ def main() -> int:
             print(f"ERROR: --cases-jsonl not found: {path}", file=sys.stderr)
             return 2
         rows.extend(_cases_from_jsonl(path))
+    if args.mabel_csv:
+        missing = [p for p in args.mabel_csv if not Path(p).is_file()]
+        if missing:
+            print(f"ERROR: --mabel-csv file(s) not found: {missing}", file=sys.stderr)
+            return 2
+        rows.extend(_cases_from_mabel(args.mabel_csv, args.max_per_family))
 
     # De-duplicate by sample_id (keep last) and apply the technique floor.
     by_id: dict[str, dict] = {}

@@ -78,6 +78,7 @@ def _profiles_from_samples_dir(root: Path) -> dict[str, list[str]]:
 
 def _profiles_from_csv(path: Path, family_col: str, text_cols: list[str]) -> dict[str, list[str]]:
     """{family: [row text]} from a generic per-sample feature CSV (e.g. MABEL)."""
+    csv.field_size_limit(10**8)  # MABEL packs large multi-value cells (imports, capa)
     out: dict[str, list[str]] = defaultdict(list)
     with path.open(newline="", encoding="utf-8", errors="replace") as fh:
         reader = csv.DictReader(fh)
@@ -134,7 +135,9 @@ def main() -> int:
     ap.add_argument("--samples-dir", type=str, help="Folder-per-family raw-binary tree.")
     ap.add_argument("--manifest", type=str, help="Temporal manifest (sha256->signature map).")
     ap.add_argument("--flat-dir", type=str, help="Flat <sha256>.<ext> dir (with --manifest).")
-    ap.add_argument("--csv", type=str, help="Per-sample feature CSV (e.g. MABEL).")
+    ap.add_argument(
+        "--csv", nargs="+", help="Per-sample feature CSV segment(s) (e.g. MABEL, multi-part)."
+    )
     ap.add_argument("--family-col", type=str, default="family", help="CSV family column.")
     ap.add_argument("--text-cols", type=str, default="", help="Comma CSV feature columns to use.")
     ap.add_argument("--out", type=str, default="data/family_fingerprints_v1.json")
@@ -161,8 +164,13 @@ def main() -> int:
             profiles[fam].extend(ps)
     if args.csv:
         text_cols = [c.strip() for c in args.text_cols.split(",") if c.strip()]
-        for fam, ps in _profiles_from_csv(Path(args.csv), args.family_col, text_cols).items():
-            profiles[fam].extend(ps)
+        for csv_path in args.csv:
+            p = Path(csv_path)
+            if not p.is_file():
+                print(f"ERROR: --csv file not found: {p}", file=sys.stderr)
+                return 2
+            for fam, ps in _profiles_from_csv(p, args.family_col, text_cols).items():
+                profiles[fam].extend(ps)
     if not profiles:
         print(
             "ERROR: no profiles — pass --samples-dir, --manifest+--flat-dir, and/or --csv.",
