@@ -54,6 +54,11 @@ def _run_condition(checkpoint: Path, rag_on: bool) -> int:
     flag = "true" if rag_on else "false"
     env["PREPROCESSING__USE_FAMILY_FEATURE_RAG"] = flag
     env["PREPROCESSING__USE_ATTCK_CASE_RAG"] = flag
+    # This is a STATIC-feature A/B (both RAGs feed the static analyst). Force the
+    # mock sandbox so the dynamic analyst never detonates/uploads these live
+    # malware samples to the public tria.ge service — and so the only variable
+    # between OFF and ON is the RAG evidence, not sandbox nondeterminism.
+    env["SANDBOX__BACKEND"] = "mock"
     if rag_on:
         env["PREPROCESSING__FAMILY_FINGERPRINT_CATALOG_PATH"] = _MABEL_CATALOG
         env["PREPROCESSING__ATTCK_CASE_CORPUS_PATH"] = _MABEL_CORPUS
