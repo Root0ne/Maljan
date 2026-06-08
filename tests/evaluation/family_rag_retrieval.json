@@ -1,0 +1,12 @@
+{
+  "schema": "maljan-family-rag-retrieval-eval/v1",
+  "source": "Ultimate-RAT-Collection held-out split (a0=train, a1=test)",
+  "families": 158,
+  "test_samples": 629,
+  "recall_at_1": 0.0827,
+  "recall_at_3": 0.159,
+  "recall_at_5": 0.1987,
+  "mrr": 0.1224,
+  "random_baseline_recall_at_5": 0.0316,
+  "leakage_free": true
+}

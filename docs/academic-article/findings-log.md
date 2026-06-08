@@ -977,6 +977,25 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-08 Leakage-free retrieval measurement of the family-feature RAG.** With a DISJOINT catalog
+  finally available, measured the RAG's retrieval quality with zero leakage via a held-out split of the
+  Ultimate-RAT-Collection extraction tree: `a0` archives → TRAIN (family fingerprints), `a1` archives →
+  TEST (query profiles). a0/a1 are different versions of the same family, so a test sample was never
+  used to build the catalog yet its family is represented — the production scenario (attribute a NEW
+  sample of a known family). New `tests/evaluation/eval_family_rag_retrieval.py` (reuses the runtime
+  extractor + profile renderer + index → one embedding space). **Result (158 families, 629 test
+  samples):** recall@1 = 0.083, recall@3 = 0.159, **recall@5 = 0.199**, MRR = 0.122, vs a random-chance
+  recall@5 of 0.032 (1-in-158). **Interpretation:** retrieval is **~6.3× better than chance** → the
+  static-feature fingerprint carries *real* family signal; but absolute recall is modest (~20% @5), so
+  the RAG is NOT reliable enough to attribute alone — which is exactly why it is wired as *advisory*
+  candidates with the **LLM as decider** (the LLM-centric design is validated, not contradicted, by this
+  number). This supersedes the earlier anecdotal spot-checks ("Sliver 0.84") with an honest leakage-free
+  distribution. Why modest: RAT versions diverge across a0/a1, many families share generic packed/loader
+  profiles, and packed samples yield thin static profiles. Measures the retrieval layer only; a full
+  LLM-in-the-loop A/B remains future work (≈days of local 35B compute). Result vendored at
+  `tests/evaluation/family_rag_retrieval.json`. Live-malware scratch cleaned up afterward (~69 GB:
+  rat-collection, dike, extracted, mabel-repo) — only derived text artifacts remain tracked.
+
 - **2026-06-08 Live-malware datasets integrated (Ultimate-RAT-Collection + DikeDataset).** Downloaded
   both into the Defender-excluded, gitignored `data/samples/` (live malware — never committed; only the
   derived text catalogs are).
