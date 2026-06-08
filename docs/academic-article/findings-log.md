@@ -931,11 +931,11 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   |---|---|---|---|---|---|
   | [EMBER](https://github.com/elastic/ember) | Win PE | features only (LIEF), no binaries; 1.1M+1M | benign/malicious only | year + `appeared` mo | U3 base features; family labels must be joined (AVClass/SOREL). |
   | [MABEL](https://github.com/action-ai-institute/MABEL-dataset) | Win PE | feature CSV, no binaries; 475 families | family + YARA caps + **capa→ATT&CK** (corrected 2026-06-08) | PE timestamp (weak) | **U3 + U2** — family-labelled features (catalog) AND per-sample capa-derived ATT&CK ids (case corpus). |
-  | [Ultimate-RAT-Collection](https://github.com/Cryakl/Ultimate-RAT-Collection) | Windows | RAW binaries (zip pw "infected", folder/family); 500+ RAT builders | family (folder) | No | **U1 partial** + U3; only ATT&CK-known families score, undated, builders≠payloads. |
+  | [Ultimate-RAT-Collection](https://github.com/Cryakl/Ultimate-RAT-Collection) | Windows | RAW binaries (.7z pw "infected", folder/family); 649 families | family (folder) | No | **U3 INTEGRATED** (2026-06-08): 278 perfect-parity family fingerprints from extracted Client+Server (payload!) PEs. Undated; only ATT&CK-known families score for U1. |
   | MH-1M ([Nature](https://www.nature.com/articles/s41597-025-06469-5) · [Dataverse](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/LLHEGN) · [GitHub](https://github.com/Malware-Hunter/MH-1M)) | **Android** | features `.npz`, no binaries; 1.34M APK | VirusTotal (no family/ATT&CK) | "10+ yrs", no cohorts | **Out of scope** (Android + features-only + no ATT&CK). |
   | SF23-[AMGenerator](https://github.com/Malware-Hunter/SF23-AMGenerator) / [AMExplorer](https://github.com/Malware-Hunter/SF23-AMExplorer) | **Android** | tools (AndroZoo+AndroGuard+VT), not datasets | — | — | **Out of scope** (Android tooling). |
   | [APIMDS](https://medium.com/ai-genai-llm/malware-detection-using-machine-learning-methods-on-the-apimds-dataset-8-deep-learning-approach-a6d991e64c49) | Windows | dynamic API-call sequences | benign/malicious only | No | Low — dynamic, not our static path; no ATT&CK. |
-  | [DikeDataset](https://github.com/iosifache/DikeDataset) | Win PE + OLE | RAW binaries (sha256-named); small | malice + category (trojan/ransomware/…) — no family/ATT&CK | No | U1 marginal (category≠family → not ATT&CK-scorable); OLE out of analyser scope. |
+  | [DikeDataset](https://github.com/iosifache/DikeDataset) | Win PE | RAW binaries (sha256-named); 10,841 malware + 1,082 benign | malice + category SCORES — no family/ATT&CK | No | **NOT catalogued** (2026-06-08): argmax category collapses to generic/trojan/worm → no discriminative catalog. Binaries kept as a disjoint raw eval corpus only. |
 
   **Findings.** (i) Five of the nine links are **one Android ecosystem** — MH-1M (the Nature
   descriptor `s41597-025-06469-5`, the Harvard Dataverse `LLHEGN`, and the GitHub repo are the same
@@ -976,6 +976,30 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-06-08 Live-malware datasets integrated (Ultimate-RAT-Collection + DikeDataset).** Downloaded
+  both into the Defender-excluded, gitignored `data/samples/` (live malware — never committed; only the
+  derived text catalogs are).
+  **Ultimate-RAT-Collection (36 GB, 649 families, 2,159 `.7z` pw "infected"):** extracted 2 archives/family
+  (935 archives, 0 failures → 640 family dirs, 7,111 PE). Key finding: each archive ships **both
+  `Client.exe` (controller) AND `Server.exe` (the victim payload)** — so it is NOT purely builders, which
+  softens the survey's "builders≠payloads" caveat (real payload PEs feed the fingerprints). Built
+  `data/family_fingerprints_rat_v1.json` via `build_family_feature_kb.py --samples-dir` (the SAME
+  `build_static_analysis` → `build_sample_profile_text` renderer the runtime query uses → **perfect
+  embedding parity**, unlike MABEL's `--csv`): **278 family fingerprints** (families with ≥3 parseable
+  PE32; ~360 families dropped — many old RAT builders are 16-bit NE files pefile can't parse), 139 KB.
+  End-to-end verified — an injection+network profile retrieves NetBus/DRAT/Pest (~0.88), a keylogging
+  profile retrieves GhostVoice/HavRat. This is the highest-quality family catalog yet: perfect parity
+  **and** disjoint from the eval set **and** real payload binaries. Caveats: fingerprints mix
+  controller+payload code; undated (no drift cohorts); only ATT&CK-resolvable families score for U1.
+  **DikeDataset (5.8 GB, 10,841 malware + 1,082 benign sha256-named PE):** its `malware.csv` carries only
+  soft malice/category SCORES; reduced to a dominant label (argmax) the 10,841 samples collapse to
+  generic/trojan/worm — too coarse and non-discriminative for a useful catalog, so **none was built**
+  (a 3-"category" catalog would be misleading in the family-RAG namespace). The real binaries are kept as
+  a disjoint raw-eval / benign-FP corpus in `data/samples/dike/` (gitignored). Confirms the survey's
+  "marginal" verdict. Net: of the 9 surveyed sources, the actionable integrations are MABEL (U2 + U3
+  disjoint corpora) and Ultimate-RAT-Collection (U3 perfect-parity catalog); everything else is
+  out-of-scope or non-integratable.
 
 - **2026-06-08 MABEL integrated: real disjoint corpora for U2 + U3 (no live malware).** Downloaded the
   MABEL condensed v2.10 feature dataset (vx-underground-attributed, features-only — ~3.4 GB CSV, 82,171

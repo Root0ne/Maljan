@@ -82,3 +82,9 @@ apps/web/out/
 # this per-session and should never have been tracked. Removed from
 # the repo in the same commit that added it here.
 .claude/scheduled_tasks.lock
+
+# Live-malware dataset mirrors (full download, 2026-06-08). data/samples is
+# Defender-excluded; these are real malware archives/binaries, never committed.
+data/samples/rat-collection/
+data/samples/dike/
+data/samples/extracted/
