@@ -92,3 +92,4 @@ data/samples/extracted/
 # A/B eval transient checkpoints (regenerated per run)
 tests/evaluation/ab_off.jsonl
 tests/evaluation/ab_on.jsonl
+tests/evaluation/ab_off.partial.jsonl

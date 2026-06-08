@@ -59,6 +59,18 @@ def _run_condition(checkpoint: Path, rag_on: bool) -> int:
     # malware samples to the public tria.ge service — and so the only variable
     # between OFF and ON is the RAG evidence, not sandbox nondeterminism.
     env["SANDBOX__BACKEND"] = "mock"
+    # Cap the negotiation to a single round. With the mock sandbox the dynamic /
+    # network analysts run on empty inputs, so they routinely register dissent;
+    # the judge then enters its ReAct verdict loop, which the local 35B model
+    # cannot converge within the 180s budget and times out EVERY round — driving
+    # every sample to the default max_iterations=5 ceiling (~90 min/sample, ~50h
+    # total) with a timeout-degraded verdict. The signal this A/B measures — the
+    # static analyst's RAG-influenced TTP claims — is fully produced in round 1
+    # (both RAG hints inject into the round-1 static prompt; the judge-node ATT&CK
+    # correction runs regardless of round count). Capping to 1 round removes the
+    # judge-timeout runaway, and the SAME cap on both arms keeps the OFF-vs-ON
+    # delta valid. Override with NEGOTIATION__MAX_ITERATIONS in the environment.
+    env.setdefault("NEGOTIATION__MAX_ITERATIONS", "1")
     if rag_on:
         env["PREPROCESSING__FAMILY_FINGERPRINT_CATALOG_PATH"] = _MABEL_CATALOG
         env["PREPROCESSING__ATTCK_CASE_CORPUS_PATH"] = _MABEL_CORPUS
@@ -98,12 +110,35 @@ def _aggregate(checkpoint: Path) -> dict:
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Family-RAG + ATT&CK-case-RAG LLM-in-the-loop A/B.")
+    ap.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Wipe both checkpoints and start over. Default is RESUME: keep existing "
+        "ab_off.jsonl / ab_on.jsonl rows; eval_temporal_drift skips already-scored samples. "
+        "Each condition's checkpoint only ever holds that condition's rows, so resuming "
+        "cannot mix OFF and ON.",
+    )
+    args = ap.parse_args()
+
     if not _MANIFEST.exists():
         print(f"ERROR: A/B manifest not found: {_MANIFEST}", file=sys.stderr)
         return 2
-    # Fresh checkpoints so a stale resume cannot mix conditions.
-    for c in (_OFF_CKPT, _ON_CKPT):
-        c.unlink(missing_ok=True)
+
+    def _rows(p: Path) -> int:
+        if not p.exists():
+            return 0
+        return sum(1 for ln in p.read_text("utf-8").splitlines() if ln.strip())
+
+    if args.fresh:
+        for c in (_OFF_CKPT, _ON_CKPT):
+            c.unlink(missing_ok=True)
+    else:
+        off_n, on_n = _rows(_OFF_CKPT), _rows(_ON_CKPT)
+        if off_n or on_n:
+            print(f"RESUME: OFF {off_n}/19, ON {on_n}/19 already scored (pass --fresh to restart).")
 
     if _run_condition(_OFF_CKPT, rag_on=False) != 0:
         print("ERROR: OFF condition failed (LLM/Ghidra up?).", file=sys.stderr)
