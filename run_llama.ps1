@@ -25,16 +25,20 @@
 # If the operator runs llama-server on a smaller card, drop -c back to 131072 /
 # 32768 / 16384 and adjust react.max_iterations downstream instead.
 #
-# Launch check: some ik_llama builds reject a quantized V-cache. If the server
-# fails to boot, drop `-ctv q8_0` (keep `-c 131072`) and re-launch.
+# Launch check: some ik_llama builds reject a quantized V-cache.
+# 2026-06-21: dropped `-ctv q8_0` and lowered `-c` 262144 -> 131072 for runtime
+# STABILITY. During the family-RAG A/B the server kept wedging (GPU idle, HTTP
+# unresponsive) roughly every 7-10 min under sustained load; ~9 watchdog restarts
+# in two hours, ~4x throughput loss. The quantized V-cache + 256k context were
+# the suspect; f16 V-cache at 131k has run stably since. To squeeze idle VRAM
+# back, re-add `-ctv q8_0` and/or raise `-c`, but re-validate stability first.
 & "D:\Projects\Maljan\external\ik_llama.cpp\build\bin\Release\llama-server.exe" `
   -m "D:\Projects\Maljan\models\Qwen3.6-35B-A3B-IQ3_K_R4.gguf" `
   -ngl 99 `
   --n-cpu-moe 36 `
   -fa on `
-  -c 262144 `
+  -c 131072 `
   -ctk q8_0 `
-  -ctv q8_0 `
   --jinja `
   --alias qwen3.6-35b-a3b `
   --host 127.0.0.1 `
