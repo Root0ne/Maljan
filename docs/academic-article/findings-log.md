@@ -970,6 +970,28 @@ Only work we directly built on or positioned against — kept deliberately short
 4. Saha et al. *MaLAware: Automating the Comprehension of Malicious Software Behaviours
    using LLMs.* MSR 2025. arXiv:2504.01145. — narrative-quality evaluation protocol (§4).
 
+**Datasets used** (URLs accessed 2026-06-08; the full nine-source survey with per-source
+verdicts is the §4 `SURVEY` table above):
+
+- **MalwareBazaar** (abuse.ch). <https://bazaar.abuse.ch> · API `https://mb-api.abuse.ch/api/v1/`.
+  — primary drift corpus: the 210 dated, family-labelled Windows-PE samples (30/cohort ×
+  2020–2026) actually analysed end-to-end by the pipeline (§4 Item 5). Samples handled only in
+  the Defender-excluded `data/samples/`, never committed.
+- **MABEL — Malware Analysis Benchmark for AI/ML** (vx-underground-attributed, features-only).
+  <https://github.com/action-ai-institute/MABEL-dataset>. — condensed v2.10 feature CSVs
+  (82,171 rows, 475 families); mined offline into the disjoint U3 family-fingerprint catalog
+  (`data/family_fingerprints_mabel_v1.json`) and the U2 ATT&CK case corpus
+  (`data/attck_case_corpus_v1.json`) via the per-sample capa→ATT&CK ids. No binaries downloaded.
+- **Ultimate-RAT-Collection** (Cryakl). <https://github.com/Cryakl/Ultimate-RAT-Collection>.
+  — raw RAT builder/payload binaries (`.7z`, pw "infected"); the perfect-parity U3 catalog
+  (`data/family_fingerprints_rat_v1.json`, 278 families) and the leakage-free retrieval eval's
+  held-out a0/a1 split. Live binaries handled only in `data/samples/`, never committed.
+- **DikeDataset** (iosifache). <https://github.com/iosifache/DikeDataset>. — raw sha256-named
+  Windows-PE binaries; downloaded and assessed but **not catalogued** (labels are coarse
+  malice/category scores, no family/ATT&CK), kept only as a disjoint raw eval corpus.
+- **MITRE ATT&CK** (Enterprise). <https://attack.mitre.org> — family→technique `uses`
+  relationships are the per-sample TTP ground truth (`tests/evaluation/ground_truth/`).
+
 **Stack:** Ghidra MCP (bethington/ghidra-mcp v5.6.0); ik_llama.cpp `llama-server`;
 Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
