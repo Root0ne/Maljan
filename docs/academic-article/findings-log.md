@@ -999,6 +999,31 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-22 LLM-in-the-loop A/B of the family-feature + ATT&CK-case RAGs → no measurable TTP gain
+  (keep gated OFF).** The leakage-free *retrieval* eval (recall@5≈0.20, ~6.3× chance) showed the RAG
+  carries real signal, but could not say whether feeding those advisory candidates to the static analyst
+  improves the LLM's final TTP output. Ran a controlled A/B to answer it: the same 19-sample
+  leakage-free subset (`tests/evaluation/ab_manifest.json` — families in the disjoint MABEL catalog
+  AND with an ATT&CK fixture) analysed twice via `tests/evaluation/run_family_rag_ab.py`, OFF vs ON,
+  both arms forced to `SANDBOX__BACKEND=mock` (static-only; no live-malware upload) and
+  `NEGOTIATION__MAX_ITERATIONS=1` (the judge ReAct loop cannot converge in 180 s under the mock
+  sandbox's empty dynamic/network inputs, which otherwise drives every sample to the 5-round ceiling).
+  **Result (n=19 each, technique-level):** OFF F1=0.012 (P=0.132, R=0.006); ON F1=0.015 (P=0.123,
+  R=0.008); **delta ON−OFF: F1 +0.003, P −0.009, R +0.002, hallucination 0.000 → 0.000.** The F1
+  bump is within noise on a floor-level baseline (both arms ≈0.01); precision actually dips slightly;
+  hallucination is unchanged (the "advisory only, do NOT assert on retrieval alone" framing held).
+  **Verdict:** in this leakage-free static-only / 1-round regime the RAGs produce **no measurable
+  end-to-end improvement** in TTP F1 — the modest retrieval signal does not convert into better LLM
+  output. Both stay **gated OFF by default** (no code removed: harmless, fail-safe, and the retrieval
+  layer retains measured value for future regimes — full dynamic+network evidence, multi-round
+  negotiation, or a richer ground truth). Caveat: the absolute floor (~0.01 F1 for *both* arms) means
+  the constrained regime left little headroom to demonstrate benefit; a non-mock, multi-round rerun
+  could revisit this. Result vendored at `tests/evaluation/family_rag_ab.json`. Infra note: ik_llama
+  `llama-server` wedged (GPU-idle, HTTP-unresponsive) every ~7–10 min under sustained load on the
+  262k-ctx + `-ctv q8_0` config; dropping the quantized V-cache and lowering `-c` to 131072
+  (`run_llama.ps1`) ran stably for the whole rerun. A `d:\tmp\llama_watchdog.ps1` auto-restart guard
+  (restart only on health-fail AND GPU-idle, never mid-inference) covered the unattended run.
+
 - **2026-06-08 Leakage-free retrieval measurement of the family-feature RAG.** With a DISJOINT catalog
   finally available, measured the RAG's retrieval quality with zero leakage via a held-out split of the
   Ultimate-RAT-Collection extraction tree: `a0` archives → TRAIN (family fingerprints), `a1` archives →
