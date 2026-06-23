@@ -13,7 +13,7 @@
 >
 > **Honesty rules for this log:** record confounds and sample sizes; keep negative
 > results; do not inflate single-run probes into "studies"; cite the prior work each
-> finding builds on or contradicts. Last updated: 2026-06-01.
+> finding builds on or contradicts. Last updated: 2026-06-23.
 
 ---
 
@@ -432,8 +432,12 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - **Correction of an a-priori estimate (recorded for honesty).** A GGUF-parameter
   theoretical estimate (40 layers × 2 KV-heads × head_dim 256) over-predicted KV by
   ~4×, leading to an initial (wrong) "262k = OOM" conclusion. The empirical
-  measurement overturned it: 262k is feasible and was deployed. **Lesson: measure
-  KV at boot, don't trust the closed-form estimate for this architecture.**
+  measurement overturned it: 262k is feasible (and was deployed at the time of
+  measurement). **Production later settled on `-c 131072`** for runtime stability —
+  the 262k + quantized-V-cache config wedged (GPU-idle, HTTP-unresponsive) every
+  ~7–10 min under sustained load (see `run_llama.ps1`); the KV-scaling finding below
+  is unchanged. **Lesson: measure KV at boot, don't trust the closed-form estimate
+  for this architecture.**
 - **Throughput.** 38–44 tok/s generation, stable across 32k → 128k → 262k.
 
 ### 2.2 Whole-tool-catalogue exposure is infeasible for the small model — `EXPERIMENTAL` / `OBSERVED`
@@ -676,20 +680,14 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 
 ---
 
-## 4. Open threads / planned experiments
+## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
-- `DONE` (§1.5, §3.3) Production-wired the technique-ID loop fix — repetition-penalty
-  damper + deterministic TF-IDF ID re-grounding. Next: measure FP/throughput impact on
-  real samples (how often correction fires, and correction precision vs a labelled set).
-- `DONE` (§1.5.1) Hybrid technique mapper — semantic embedding for *ranking* + TF-IDF for the
-  *alignment gate*. Implemented (`HybridATTCKIndex`) and made the default; dominates both pure
-  backends on the TRAM2 eval (semantic-grade ranking + the cleanest gate).
-- `DONE` (§3.6) Config-gated view-decomposition pilot with **concurrent** view calls
-  (`LLMConfig.view_decomposition_views`, off by default) + an equal-budget A/B harness.
-  Next: run the harness against the llama-server to settle the §3.2 question.
-- `DONE` (§3.5) Adopted a MaLAware-style [4] multi-metric narrative-quality evaluation
-  harness for the report/NarrativeAgent (`tests/evaluation/eval_narrative_quality.py`).
-  Next: run it against the local llama-server to report the LLM-vs-fallback paired deltas.
+Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
+planned threads and have since landed — kept here as the roadmap's provenance. Four early
+threads are fully resolved and now live in their own sections: the technique-ID loop fix
+(§1.5 / §3.3), the hybrid technique mapper (§1.5.1), config-gated view-decomposition with an
+equal-budget A/B (§3.6), and the MaLAware-style narrative-quality harness (§3.5).
+
 - Reviewed (the "LLM-as-analyst" leads): MARD (multi-agent, arXiv:2604.25264), TraceRAG
   (RAG + explainable, arXiv:2509.08865), LAMD (arXiv:2502.13055). All three are Android,
   but their techniques are platform-agnostic. **Convergent validation:** MARD's
@@ -859,32 +857,13 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   malware); the `--csv`-style summary vocabulary overlaps but does not perfectly match
   `build_sample_profile_text` (advisory retrieval, LLM decides). Still OFF by default; the Qdrant /
   JSONL builder modes remain for mining the production LTM as it grows.
-- `PLANNED` (static-feature family classifier — candidate new workstream, NOT in the Items 1–5
-  roadmap) A deterministic ML classifier that predicts a malware **family** from static features
-  (imports, PE-header fields, per-section entropy, opcode histogram, packer + YARA capabilities) to
-  give the analyst/judge a family prior **without** dynamic analysis. Motivation: in static-only
-  mode (`SANDBOX__BACKEND=mock`) the existing attribution stack is weak — the grounding guardrail
-  (`extractors/attribution.py`) forces `family_confidence` to 0 whenever no Triage CTI / sandbox sig
-  / ISR claim names the family (frequent in the n=210 run: "family='dropper' marked as ungrounded"),
-  and `function_hash_attribution.py` only fires once the corpus already holds that family
-  (cold-start "no known-family overlap"). A feature classifier generalises to unseen samples and
-  fills exactly that gap; it could also narrow the ATT&CK candidate set via a family→canonical-`uses`
-  prior (a route to lift precision), and add an independent deterministic voice to judge negotiation
-  (our reports often warn "zero cross-layer corroboration"). **Cost/feasibility:** plumbing is mostly
-  in place (pefile, binary chunker, Ghidra opcode access, YARA layer already extract the features); a
-  gradient-boosted tree (LightGBM/XGBoost) on tabular static features is well-trodden. The real cost
-  is **labelled training data** — our MalwareBazaar manifest (210, dated, family-labelled) is too
-  small; **EMBER** (1.1M labelled PE feature vectors, public) is the canonical training set, and
-  **MABEL**'s 400+-family feature tables are a ready secondary (this is the *one* place MABEL is
-  actually useful to us — as classifier training data, not RAG). **Caveats:** it predicts *family*,
-  not the ATT&CK TTPs our headline F1 scores (only an indirect lift via family→uses expansion); family
-  taxonomy is alias-noisy; and a trained classifier **reintroduces the concept-drift sensitivity the
-  n=210 LLM path was just shown NOT to have** (MARD's warning) — it would need periodic retraining and
-  drift monitoring. Verdict: real, well-scoped, fixes a genuine static-only weakness, but orthogonal
-  to the current TTP-accuracy/drift narrative — decide as a separate workstream, not a roadmap item.
-  **SUPERSEDED (2026-06-07):** a trained GBDT is a second statistical brain that decides *outside*
-  the LLM and re-imports drift fragility — against the "everything LLM-centric" principle. The GBDT
-  scaffold was removed and replaced by the LLM-centric Family-feature RAG below.
+- `SUPERSEDED` (static-feature family classifier) A trained gradient-boosted family classifier
+  (EMBER/MABEL static features → family prior) was considered for the static-only attribution gap
+  (`SANDBOX__BACKEND=mock` zeroes `family_confidence` whenever no CTI / sandbox sig / ISR claim names
+  the family — frequent in the n=210 run), then **rejected and removed**: a trained model decides
+  *outside* the LLM and re-imports the concept-drift fragility the n=210 run showed the LLM path does
+  NOT have — against the "everything LLM-centric" principle. Replaced by the LLM-centric Family-feature
+  RAG below (U3), which fills the same gap with retrieval + LLM decision and stays drift-robust.
 - `IMPLEMENTED` (Family-feature RAG — LLM-centric U3) The static-only attribution gap is filled
   without any trained model: a deterministic static-feature **profile** of the sample (import-capability
   histogram + characteristic suspicious imports + packer + high-entropy sections, via
