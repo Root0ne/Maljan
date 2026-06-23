@@ -112,6 +112,24 @@ class ConsensusRouter:
             logger.info("Hard iteration limit (%d) reached. Proceeding to judge.", max_iter)
             return "judge"
 
+        # BUG-05 fix (2026-06-23 live-UI audit): a mediation round that ERRORED
+        # (a transient llama blip / timeout, signalled by the mediator argument
+        # finding starting with "[ERROR] Mediation") is NOT a substantive
+        # "no consensus". Routing it to "revision" makes EVERY analyst re-invoke
+        # the LLM (~10-15 min/round) just to retry mediation, and re-exposes the
+        # run to the same blip — the dominant avoidable cost behind the 60-75 min
+        # analyses. Take the already-populated ISRs straight to the judge instead;
+        # the judge still produces a verdict from them (degraded, but fast and
+        # deterministic). Normal consensus / revision flow below is untouched.
+        history = state.get("discussion_history") or []
+        if history and str(getattr(history[-1], "finding", "")).startswith("[ERROR] Mediation"):
+            logger.info(
+                "Mediation errored at round %d — routing to judge with current "
+                "ISRs instead of a wasteful revision round.",
+                iteration,
+            )
+            return "judge"
+
         # 2. Sycophancy override: a "consensus" that comes with sycophancy
         # is treated as premature → force another revision.
         if syco and consensus:

@@ -131,6 +131,31 @@ class TestConsensusRouter:
         state = _make_state(iteration=0, consensus=False, sycophancy=False)
         assert router.should_continue(state) == "revision"
 
+    # --- BUG-05: mediation-error short-circuit (avoid wasteful revision round) ---
+
+    def test_mediation_error_routes_to_judge(self) -> None:
+        router = _make_router(max_iterations=5)
+        state = _make_state(iteration=1, consensus=False, sycophancy=False)
+        state["discussion_history"] = [
+            MagicMock(finding="[ERROR] Mediation failed: Connection error.")
+        ]
+        assert router.should_continue(state) == "judge"
+
+    def test_mediation_timeout_routes_to_judge_round_zero(self) -> None:
+        router = _make_router(max_iterations=5)
+        state = _make_state(iteration=0, consensus=False, sycophancy=False)
+        state["discussion_history"] = [MagicMock(finding="[ERROR] Mediation timed out: 180s")]
+        assert router.should_continue(state) == "judge"
+
+    def test_successful_mediation_no_consensus_still_revises(self) -> None:
+        """A normal (non-error) mediation without consensus still negotiates."""
+        router = _make_router(max_iterations=5)
+        state = _make_state(iteration=1, consensus=False, sycophancy=False)
+        state["discussion_history"] = [
+            MagicMock(finding="Contradictions remain between static and dynamic.")
+        ]
+        assert router.should_continue(state) == "revision"
+
     # --- Phase 2: Adaptive termination ---
 
     def test_adaptive_termination_stable_history(self) -> None:
