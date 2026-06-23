@@ -47,5 +47,27 @@ class AnalysisJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by_user = relationship("User", back_populates="jobs")
     report = relationship("AnalysisReport", back_populates="job", uselist=False, lazy="selectin")
 
+    # BUG-02 (2026-06-23 live-UI audit): the job API exposed only the opaque
+    # ``sample_id`` UUID, so the live analysis header showed a UUID instead of
+    # the sample hash/name until the report landed. These read-only properties
+    # surface the linked sample's hash + filename on ``JobResponse``. Callers
+    # eager-load ``sample`` (AnalysisService.get_job / list_jobs); the inspection
+    # guard returns None rather than triggering an async lazy load if they don't.
+    @property
+    def sample_sha256(self) -> str | None:
+        from sqlalchemy import inspect as sa_inspect
+
+        if "sample" in sa_inspect(self).unloaded:
+            return None
+        return self.sample.sha256 if self.sample is not None else None
+
+    @property
+    def sample_filename(self) -> str | None:
+        from sqlalchemy import inspect as sa_inspect
+
+        if "sample" in sa_inspect(self).unloaded:
+            return None
+        return self.sample.original_filename if self.sample is not None else None
+
     def __repr__(self) -> str:
         return f"<AnalysisJob {self.id} status={self.status}>"

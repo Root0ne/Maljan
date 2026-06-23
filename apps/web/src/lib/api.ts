@@ -29,6 +29,10 @@ export interface SampleDTO {
 export interface JobDTO {
   id: string;
   sample_id: string;
+  // BUG-02: readable sample identity so the live view shows a hash/name instead
+  // of the opaque sample_id UUID before the report exists.
+  sample_sha256?: string | null;
+  sample_filename?: string | null;
   status: string;
   config: Record<string, unknown> | null;
   created_at: string;

@@ -170,7 +170,13 @@ export default function AnalysisLayout({
   const verdict = report?.verdict?.toLowerCase() ?? "unknown";
   const confidence = Math.round((report?.overall_confidence ?? 0) * 100);
   const category = report?.malware_category ?? "";
+  // BUG-02: prefer a readable sample identity (filename, then hash prefix) over
+  // the opaque sample_id UUID — available from the job even during the live run,
+  // before the rich report's identity payload lands.
   const sampleId = job?.sample_id ?? "";
+  const jobSampleLabel =
+    job?.sample_filename ||
+    (job?.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "");
   const duration = formatDuration(job?.duration_seconds);
   const analyzedAt = report?.created_at
     ? new Date(report.created_at).toLocaleString()
@@ -185,7 +191,8 @@ export default function AnalysisLayout({
   const identity = report?.malware_report?.identity;
   const fileName = identity?.file_name?.trim();
   const sha256 = identity?.hashes?.sha256;
-  const headerTitle = fileName || (sha256 ? `${sha256.slice(0, 16)}…` : "Pending analysis");
+  const headerTitle =
+    fileName || (sha256 ? `${sha256.slice(0, 16)}…` : "") || jobSampleLabel || "Pending analysis";
   const family = report?.malware_report?.attribution?.family;
   const headerSubtitle = family || category || "";
 
@@ -246,7 +253,9 @@ export default function AnalysisLayout({
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-text-secondary">
                 <div>
                   <span className="text-text-muted">Sample: </span>
-                  <code className="font-mono">{fileName ?? sampleId.slice(0, 12)}</code>
+                  <code className="font-mono">
+                    {fileName || jobSampleLabel || sampleId.slice(0, 12)}
+                  </code>
                 </div>
                 <div>
                   <span className="text-text-muted">Duration: </span>

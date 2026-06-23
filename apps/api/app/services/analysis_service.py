@@ -11,6 +11,7 @@ import redis.asyncio as aioredis
 from arq import ArqRedis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.logging_config import get_logger
@@ -104,10 +105,14 @@ class AnalysisService:
     ) -> AnalysisJob | None:
         """Retrieve a job by ID, scoped to the requesting user."""
         result = await self.db.execute(
-            select(AnalysisJob).where(
+            select(AnalysisJob)
+            .where(
                 AnalysisJob.id == job_id,
                 AnalysisJob.created_by == user.id,
             )
+            # BUG-02: eager-load the sample so JobResponse.sample_sha256 /
+            # sample_filename populate without an async lazy-load.
+            .options(selectinload(AnalysisJob.sample))
         )
         return result.scalar_one_or_none()
 
@@ -130,6 +135,8 @@ class AnalysisService:
 
         query = query.order_by(AnalysisJob.created_at.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
+        # BUG-02: eager-load sample for sample_sha256 / sample_filename.
+        query = query.options(selectinload(AnalysisJob.sample))
 
         result = await self.db.execute(query)
         jobs = result.scalars().all()
