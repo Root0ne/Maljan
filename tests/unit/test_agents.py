@@ -266,3 +266,87 @@ class TestPerAgentMaxStepsOverride:
         s = Settings()
         assert s.react_agent_max_steps == 10
         assert s.react_agent_max_steps_overrides.get("static") == 40
+
+
+class TestForcedFinalSynthesis:
+    """2026-06-23 live-UI audit: a tool-using ReAct loop that exhausts its step
+    budget returns LangGraph's "Sorry, need more steps to process this request."
+    stop message, silently discarding every tool result it gathered.
+    ``execute_tool_loop`` must salvage that by re-invoking the model once on the
+    accumulated conversation so the evidence becomes a real answer.
+    """
+
+    def _make_tool_agent(self, llm: object):  # type: ignore[no-untyped-def]
+        from maljan.agents.base_agent import BaseAnalyst
+
+        class _ToolAgent(BaseAnalyst):
+            def analyze(self, data: str) -> str:
+                return ""
+
+            def revise(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+                return ""
+
+        return _ToolAgent(llm=llm, name="static", tools=[MagicMock()])  # type: ignore[arg-type]
+
+    @staticmethod
+    def _settings(mock_settings):  # type: ignore[no-untyped-def]
+        cfg = mock_settings.return_value
+        cfg.react_agent_timeout = 180
+        cfg.react_agent_timeout_overrides = {"static": 1200}
+        cfg.react_agent_max_steps = 10
+        cfg.react_agent_max_steps_overrides = {"static": 40}
+        cfg.react_agent_tool_call_budget = 20
+        return cfg
+
+    def test_recursion_stop_triggers_synthesis(self) -> None:
+        # A tool call + result, then the LangGraph "need more steps" stop turn.
+        react_messages = [
+            MagicMock(content="", tool_calls=[{"name": "decompile", "args": {}, "id": "t1"}]),
+            MagicMock(content="entry calls WriteProcessMemory", tool_calls=[]),
+            MagicMock(content="Sorry, need more steps to process this request.", tool_calls=[]),
+        ]
+
+        class _FakeExecutor:
+            async def ainvoke(self, inputs, config):  # type: ignore[no-untyped-def]
+                return {"messages": react_messages}
+
+        synth_llm = MagicMock()
+        synth_llm.invoke.return_value = MagicMock(
+            content=(
+                "CLAIM: Process injection via WriteProcessMemory\n"
+                "EVIDENCE: decompiled entry\nCONFIDENCE: 0.8\nTECHNIQUE: T1055"
+            )
+        )
+        agent = self._make_tool_agent(synth_llm)
+        with patch("maljan.agents.base_agent.get_settings") as ms:
+            self._settings(ms)
+            with patch("langgraph.prebuilt.create_react_agent", return_value=_FakeExecutor()):
+                result = agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert "T1055" in result
+        assert "need more steps" not in result.lower()
+        synth_llm.invoke.assert_called()  # the salvage call fired
+
+    def test_convergent_loop_does_not_trigger_synthesis(self) -> None:
+        react_messages = [
+            MagicMock(content="", tool_calls=[{"name": "decompile", "args": {}, "id": "t1"}]),
+            MagicMock(content="benign code", tool_calls=[]),
+            MagicMock(
+                content="CLAIM: packer detected\nEVIDENCE: x\nCONFIDENCE: 0.7\nTECHNIQUE: T1027",
+                tool_calls=[],
+            ),
+        ]
+
+        class _FakeExecutor:
+            async def ainvoke(self, inputs, config):  # type: ignore[no-untyped-def]
+                return {"messages": react_messages}
+
+        llm = MagicMock()
+        agent = self._make_tool_agent(llm)
+        with patch("maljan.agents.base_agent.get_settings") as ms:
+            self._settings(ms)
+            with patch("langgraph.prebuilt.create_react_agent", return_value=_FakeExecutor()):
+                result = agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert "T1027" in result
+        llm.invoke.assert_not_called()  # a real answer needs no salvage

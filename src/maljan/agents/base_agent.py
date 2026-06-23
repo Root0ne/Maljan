@@ -33,6 +33,15 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 
+# Regex: the ReAct stop message emitted when an agent exhausts its
+# ``recursion_limit`` while still tool-calling (it never wrote a final answer).
+# The static analyst's Ghidra loop hits this after spending its whole step
+# budget gathering evidence; matching it lets ``execute_tool_loop`` salvage that
+# gathered tool output with a forced-synthesis call instead of discarding it and
+# returning a useless "need more steps" non-answer. (Phrase observed across the
+# 2026-06-23 live-UI audit runs; it is not a maljan/langchain in-tree literal.)
+_RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
+
 # Range constraints derived from the public MITRE ATT&CK Enterprise dataset.
 # Anything outside these bounds is treated as a hallucination.
 _TECHNIQUE_MIN: int = 1001
@@ -627,7 +636,63 @@ class BaseAnalyst(ABC):
             )
 
         final_message = msgs[-1]
-        return str(final_message.content)
+        content = str(final_message.content)
+        # Forced synthesis (2026-06-23 live-UI audit): a tool-using ReAct loop
+        # that spends its whole step budget gathering evidence ends with
+        # LangGraph's "need more steps" stop message (or an empty final turn),
+        # silently discarding every tool result it collected. The static
+        # analyst's Ghidra loop did exactly this (19 tool calls -> 41 messages
+        # -> recursion limit -> zero claims). When it happens, re-invoke the
+        # model once on the accumulated conversation with a directive to stop
+        # tool-calling and synthesise now, so the gathered evidence becomes real
+        # claims instead of a useless "need more steps" non-answer.
+        if tool_call_count > 0 and (not content.strip() or _RECURSION_STOP_RE.search(content)):
+            self.logger.warning(
+                "%s ReAct loop ended without a final answer after %d tool calls "
+                "(messages=%d); forcing synthesis from gathered tool output.",
+                self.name,
+                tool_call_count,
+                len(msgs),
+            )
+            synthesized = self._force_final_synthesis(msgs, timeout)
+            if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
+                return synthesized
+        return content
+
+    def _force_final_synthesis(self, msgs: list, timeout: int) -> str:
+        """Salvage a ReAct loop that hit its step budget without answering.
+
+        LangGraph returns a "...need more steps..." stop message when the agent
+        exhausts ``recursion_limit`` while still tool-calling, discarding every
+        tool result it gathered. Re-invoke the model once on the accumulated
+        conversation with a hard directive to stop calling tools and write its
+        final answer now, in the format the original system prompt requested.
+        Runs through the same timeout-guarded path as the no-tools fallback, and
+        is best-effort: on any failure it returns "" so the caller keeps the
+        original content.
+        """
+        from langchain_core.messages import HumanMessage
+
+        directive = HumanMessage(
+            content=(
+                "You have gathered enough tool output above. Do NOT request or "
+                "call any more tools. Using ONLY the evidence already collected "
+                "in this conversation, write your FINAL answer now in the exact "
+                "format the system prompt requested. Where the evidence is "
+                "genuinely insufficient for a point, state that briefly instead "
+                "of asking for more steps."
+            )
+        )
+        try:
+            return self._invoke_llm_with_timeout([*msgs, directive], timeout)
+        except Exception as exc:  # noqa: BLE001 - best-effort salvage
+            self.logger.error(
+                "%s forced synthesis failed: %s (%s)",
+                self.name,
+                type(exc).__name__,
+                exc,
+            )
+            return ""
 
     def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
         """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
