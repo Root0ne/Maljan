@@ -492,7 +492,12 @@ class BaseAnalyst(ABC):
         # commodity hardware; give it the operator-configured headroom.
         overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
         timeout = overrides.get(self.name, cfg.react_agent_timeout)
-        max_steps = cfg.react_agent_max_steps
+        # Per-agent recursion-step override (2026-06-23 live-UI audit): the
+        # static analyst's Ghidra ReAct loop needs far more than the default
+        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
+        # returned the "need more steps" stop message instead of real claims.
+        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
+        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
 
         # BUG-06 fix: run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.

@@ -209,3 +209,60 @@ class TestNoToolsFallbackTimeout:
             f"per-agent override was ignored; observed timeouts: {observed_timeout}"
         )
         assert elapsed < 10, f"override timeout did not fire fast enough: {elapsed:.1f}s"
+
+
+class TestPerAgentMaxStepsOverride:
+    """2026-06-23 live-UI audit: the static analyst's Ghidra ReAct loop needs
+    more than the default 10 recursion steps. ``react_agent_max_steps_overrides``
+    must raise the LangGraph ``recursion_limit`` for ``static`` while leaving
+    other analysts on the default. Without it the loop was cut off after ~4 tool
+    calls and LangGraph returned "Sorry, need more steps to process this request."
+    instead of real claims (live job 3be3ba0e: ReAct "completed" in 17.3s after
+    4 tool calls, with its 1200s *time* budget barely touched).
+    """
+
+    def _make_tool_agent(self, name: str):  # type: ignore[no-untyped-def]
+        from maljan.agents.base_agent import BaseAnalyst
+
+        class _ToolAgent(BaseAnalyst):
+            def analyze(self, data: str) -> str:
+                return ""
+
+            def revise(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+                return ""
+
+        # Non-empty tools so execute_tool_loop takes the ReAct (tools) path.
+        return _ToolAgent(llm=MagicMock(), name=name, tools=[MagicMock()])  # type: ignore[arg-type]
+
+    def _capture_recursion_limit(self, name: str) -> int:
+        captured: dict[str, int] = {}
+
+        class _FakeExecutor:
+            async def ainvoke(self, inputs, config):  # type: ignore[no-untyped-def]
+                captured["recursion_limit"] = int(config.get("recursion_limit"))
+                return {"messages": [MagicMock(content="done", tool_calls=[])]}
+
+        agent = self._make_tool_agent(name)
+        with patch("maljan.agents.base_agent.get_settings") as mock_settings:
+            cfg = mock_settings.return_value
+            cfg.react_agent_timeout = 180
+            cfg.react_agent_timeout_overrides = {"static": 1200}
+            cfg.react_agent_max_steps = 10
+            cfg.react_agent_max_steps_overrides = {"static": 40}
+            cfg.react_agent_tool_call_budget = 20
+            with patch("langgraph.prebuilt.create_react_agent", return_value=_FakeExecutor()):
+                agent.execute_tool_loop([("system", "s"), ("human", "h")])
+        return captured["recursion_limit"]
+
+    def test_static_uses_max_steps_override(self) -> None:
+        assert self._capture_recursion_limit("static") == 40
+
+    def test_non_overridden_agent_uses_global_default(self) -> None:
+        assert self._capture_recursion_limit("network") == 10
+
+    def test_config_default_pins_static_override(self) -> None:
+        from maljan.core.config import Settings
+
+        s = Settings()
+        assert s.react_agent_max_steps == 10
+        assert s.react_agent_max_steps_overrides.get("static") == 40

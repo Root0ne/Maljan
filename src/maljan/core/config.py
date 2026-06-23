@@ -668,6 +668,23 @@ class Settings(BaseSettings):
         }
     )
 
+    # Per-agent ReAct recursion-step overrides. The default
+    # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
+    # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
+    # (load_program -> list functions -> decompile -> imports/strings) that
+    # needs far more than ~4 tool calls. With only 10 recursion steps it was
+    # cut off mid-analysis and LangGraph returned the "Sorry, need more steps
+    # to process this request." stop message instead of real claims (live job
+    # 3be3ba0e, 2026-06-23: ReAct "completed" in 17.3s after just 4 tool calls,
+    # hitting the step cap while its 1200s *time* budget was barely touched —
+    # the per-agent timeout override added earlier missed the parallel step
+    # cap). Override via env, e.g. ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
+    react_agent_max_steps_overrides: dict[str, int] = Field(
+        default_factory=lambda: {
+            "static": 40,
+        }
+    )
+
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx
     # ServiceContainer reads these and sets the OS env vars LangChain expects.
