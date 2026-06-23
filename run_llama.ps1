@@ -1,5 +1,13 @@
 # ik_llama.cpp llama-server: Qwen3.6-35B-A3B-IQ3_K_R4 on RTX 5060 8 GB (38-44 tok/s output, ~15 min/sample end-to-end).
 #
+# CLIENT NOTE (2026-06-23 live-UI audit): the Maljan client MUST set
+# LLM__OPENAI__DISABLE_THINKING=true (see .env.example). With Qwen3 thinking ON,
+# each analyst LLM call emits a ~22k-token reasoning trace that never reaches
+# `content`, so the tool-less dynamic/network analysts time out at their hard
+# cap and the static Ghidra ReAct loop stalls -> degraded, zero-confidence
+# reports. This server launch is unaffected; the toggle is forwarded per
+# request as chat_template_kwargs.enable_thinking=false.
+#
 # Wave 10 W10-LLM-05 (2026-05-30): context window bumped 16384 -> 32768.
 # 2026-05-31: 32768 -> 131072 -> 262144 (the model's native max).
 #

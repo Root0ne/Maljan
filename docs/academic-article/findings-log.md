@@ -999,6 +999,38 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-06-23 Live-UI audit: degraded live reports were caused by THREE LLM-loop root causes
+  (all fixed), not by the analysis logic.** A full live run of a Windows PE (Pony) under
+  `SANDBOX__BACKEND=mock` completed but returned `degraded_mode=true`, `overall_confidence=0`,
+  `category=unknown`, with the dynamic+network analysts in `failed_analysts`. Each layer was
+  root-caused and fixed end-to-end, verified across 5 live runs (final: `verdict=Malware`,
+  `confidence=0.873`, `category=dropper`, all five evidence layers contributing cross-corroborated
+  claims incl. a real static T1027 unpacking-routine finding):
+  1. **Qwen3 thinking mode.** With thinking ON, each analyst LLM call emitted a ~22k-token
+     reasoning trace that never reached `content`, so the tool-less dynamic/network analysts
+     timed out at their per-agent hard cap (600s/300s) and the static ReAct loop stalled. Probe:
+     correct T1497 claim in 4.3s with `enable_thinking=false` vs 0-char content after 800 thinking
+     tokens. Fix: `LLM__OPENAI__DISABLE_THINKING=true` (flag + provider wiring already existed,
+     just off) — documented in `.env.example` + `run_llama.ps1`. Deployment/config setting
+     (gitignored `.env`), not a code change.
+  2. **`react_agent_max_steps=10` too low for the static analyst.** Its Ghidra ReAct loop was
+     cut off after ~4 tool calls and LangGraph returned "Sorry, need more steps to process this
+     request." instead of claims. The codebase already gave static a per-agent *timeout* override
+     (1200s) but missed the parallel *step* cap. Fix: `react_agent_max_steps_overrides={static:40}`
+     (commit 0ffdfd9).
+  3. **The static ReAct loop did not self-terminate.** Even at 40 steps it kept tool-calling
+     (19 calls → 41 messages → recursion limit) and discarded all gathered Ghidra evidence as the
+     "need more steps" non-answer. Fix: a forced-synthesis fallback in `execute_tool_loop` — when a
+     tool-using loop ends on that stop message (after ≥1 tool call), re-invoke the model once on
+     the accumulated conversation with a directive to stop tool-calling and synthesise now, so the
+     evidence becomes real claims (commit f261ef9). Best-effort; convergent loops untouched.
+  Also fixed in the same audit: BUG-02 job-API sample sha256/filename (d9ba6ba), BUG-05
+  mediation-error → judge routing (5419409), BUG-04/06/07 persistent agent event loop + static
+  placeholder handling (e3a3685). Operator tooling: `d:\tmp\llama_watchdog.ps1` gained a third
+  detector — an active inference probe for the "idle wedge" (`/health`=200, slot idle, yet
+  `/v1/chat/completions` hangs) that detectors 1 (health) and 2 (busy-wedge) both miss and that
+  silently stalled runs all day. 1422 unit tests green; ruff + mypy clean.
+
 - **2026-06-22 LLM-in-the-loop A/B of the family-feature + ATT&CK-case RAGs → no measurable TTP gain
   (keep gated OFF).** The leakage-free *retrieval* eval (recall@5≈0.20, ~6.3× chance) showed the RAG
   carries real signal, but could not say whether feeding those advisory candidates to the static analyst
