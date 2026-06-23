@@ -14,9 +14,12 @@ Untrusted input handling:
 
 from __future__ import annotations
 
+import asyncio
 import re
+import threading
 from abc import ABC, abstractmethod
-from typing import Literal
+from concurrent.futures import TimeoutError as _FuturesTimeout
+from typing import Any, Literal
 
 import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -357,6 +360,64 @@ def wrap_untrusted(text: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# BUG-06 fix (2026-06-23 live-UI audit): single process-wide agent event loop.
+#
+# Every agent ReAct / no-tools LLM call used to spin up a throwaway
+# ``asyncio.new_event_loop()`` in its own thread and ``close()`` it afterwards.
+# The openai SDK lazily builds an httpx ASYNC connection pool bound to whatever
+# loop first awaits it; once that per-call loop closed, the pooled connections
+# were orphaned and their later cleanup ran ``loop.call_soon`` on the CLOSED
+# loop -> ``RuntimeError: Event loop is closed`` (Windows ProactorEventLoop),
+# surfaced to the SDK as a bogus ``APIConnectionError`` that aborted the
+# negotiation + mediator phases. A per-invocation FRESH client (an earlier
+# attempt) removed the cross-loop reuse but introduced a pipeline hang.
+#
+# The root fix is to stop churning loops at all: one long-lived loop in a
+# daemon thread serves every agent coroutine via ``run_coroutine_threadsafe``.
+# Async clients are created once on that loop and reused on the SAME loop for
+# the process lifetime, so the cross-loop reuse is structurally impossible and
+# there is no per-call client rebuild to hang on. The hard wall-clock cap is
+# preserved via ``future.result(timeout=...)`` (mirrors the old ``t.join``).
+_AGENT_LOOP: asyncio.AbstractEventLoop | None = None
+_AGENT_LOOP_LOCK = threading.Lock()
+
+
+def _get_agent_loop() -> asyncio.AbstractEventLoop:
+    """Return the process-wide agent event loop, starting it on first use."""
+    global _AGENT_LOOP
+    with _AGENT_LOOP_LOCK:
+        loop = _AGENT_LOOP
+        if loop is None or loop.is_closed():
+            loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=loop.run_forever,
+                name="maljan-agent-loop",
+                daemon=True,
+            )
+            thread.start()
+            _AGENT_LOOP = loop
+        return loop
+
+
+def _run_coro_blocking(coro: Any, hard_timeout: float) -> Any:
+    """Submit ``coro`` to the shared agent loop and block until done / timeout.
+
+    Mirrors the old daemon-thread + ``t.join(timeout)`` contract: on the hard
+    wall-clock cap we cancel the scheduled task and raise ``TimeoutError`` so the
+    caller surfaces a degraded analyst instead of hanging. Any exception raised
+    inside the coroutine (including the inner ``asyncio.wait_for`` stall) is
+    re-raised here unchanged.
+    """
+    loop = _get_agent_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return future.result(timeout=hard_timeout)
+    except _FuturesTimeout:
+        future.cancel()  # schedule cancellation of the asyncio task on the loop
+        raise TimeoutError(f"agent coroutine exceeded hard cap of {hard_timeout}s") from None
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
@@ -417,9 +478,6 @@ class BaseAnalyst(ABC):
         if not self.tools:
             return self._invoke_llm_with_timeout(prebuilt, no_tools_timeout)
 
-        import asyncio
-        import threading
-
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
@@ -435,22 +493,32 @@ class BaseAnalyst(ABC):
         overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
         timeout = overrides.get(self.name, cfg.react_agent_timeout)
         max_steps = cfg.react_agent_max_steps
-        thread_result: dict | None = None
-        thread_exception: Exception | None = None
 
-        def _run_in_thread() -> None:
-            """Run agent in a thread-local event loop — avoids nest_asyncio/anyio issues."""
-            nonlocal thread_result, thread_exception
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
+        # BUG-06 fix: run the ReAct coroutine on the shared, never-closing agent
+        # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
+        async def _invoke() -> dict:
+            self.logger.info(
+                "Invoking ReAct agent (timeout=%ds, tools=%d)...",
+                timeout,
+                len(self.tools),
+            )
+            # BUG-04 fix (2026-06-22 live-UI audit): the provider sets
+            # ``max_retries=0`` on purpose to stop the openai SDK from
+            # retry-storming a *stalled* request (3 x request_timeout).
+            # But a transient ``APIConnectionError`` — the local
+            # llama-server briefly dropping an idle socket during a long
+            # Ghidra tool-call gap — is NOT a stall, and with zero
+            # retries it aborted the entire (most-important) static
+            # analyst on a single blip (observed: static ReAct died at
+            # 86s, no watchdog hang). Retry ONLY APIConnectionError, a
+            # few times with short backoff. A genuine stall surfaces as
+            # asyncio.TimeoutError from the wait_for below and is NOT
+            # retried — the anti-storm intent is preserved.
+            from openai import APIConnectionError
 
-                async def _invoke() -> dict:
-                    self.logger.info(
-                        "Invoking ReAct agent (timeout=%ds, tools=%d)...",
-                        timeout,
-                        len(self.tools),
-                    )
+            last_conn_exc: Exception | None = None
+            for _attempt in range(3):
+                try:
                     result = await asyncio.wait_for(
                         agent_executor.ainvoke(
                             {"messages": messages},
@@ -460,73 +528,53 @@ class BaseAnalyst(ABC):
                     )
                     msg_count = len(result.get("messages", []))
                     self.logger.info(
-                        "ReAct loop completed: %d messages in conversation.", msg_count
+                        "ReAct loop completed: %d messages in conversation.",
+                        msg_count,
                     )
                     return result
+                except APIConnectionError as conn_exc:
+                    last_conn_exc = conn_exc
+                    if _attempt < 2:
+                        _wait = 2**_attempt
+                        self.logger.warning(
+                            "ReAct LLM connection error (attempt %d/3): %s — retrying in %ds.",
+                            _attempt + 1,
+                            conn_exc,
+                            _wait,
+                        )
+                        await asyncio.sleep(_wait)
+                        continue
+                    raise
+            # Unreachable: the loop always returns on success or re-raises
+            # on the final attempt. Kept as a typed fallback so mypy sees
+            # a BaseException (last_conn_exc is Exception | None).
+            raise last_conn_exc or RuntimeError(  # pragma: no cover
+                "ReAct retry loop exited without result"
+            )
 
-                thread_result = loop.run_until_complete(_invoke())
-            except Exception as exc:
-                self.logger.error(
-                    "ReAct agent failed in thread: %s (%s)",
-                    type(exc).__name__,
-                    exc,
-                )
-                thread_exception = exc
-            finally:
-                # Bulletproof cleanup — never let loop.close() fail.
-                try:
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    if pending:
-                        try:
-                            loop.run_until_complete(
-                                asyncio.gather(*pending, return_exceptions=True)
-                            )
-                        except Exception as cleanup_exc:
-                            self.logger.debug(
-                                "Task cleanup warning (non-critical): %s", cleanup_exc
-                            )
-                except Exception as cleanup_exc:
-                    self.logger.debug("Pending task enumeration warning: %s", cleanup_exc)
-                finally:
-                    try:
-                        loop.close()
-                    except Exception as close_exc:
-                        self.logger.debug("Loop close warning (non-critical): %s", close_exc)
-
-        # Use a daemon thread so the OS can reap it even if it hangs.
         # PERF-STATIC-ANALYST-LATENCY-01 (audit 2026-05-19): instrument the
         # outer execute_tool_loop window so operators can correlate slow
         # analysts with token / tool-call counts without sprinkling timers
         # across the codebase. Minimal-viable implementation: wall-clock,
-        # message count, tool-call count. Per-step granularity is a
-        # follow-up that needs LangGraph callback hooks.
+        # message count, tool-call count.
         import time as _time
 
         _t0 = _time.monotonic()
-        thread_timeout = timeout + 30
-        t = threading.Thread(target=_run_in_thread, daemon=True)
-        t.start()
-        t.join(timeout=thread_timeout)
-
-        if t.is_alive():
+        hard_timeout = timeout + 30
+        try:
+            thread_result: dict | None = _run_coro_blocking(_invoke(), hard_timeout)
+        except TimeoutError:
             self.logger.critical(
-                "ReAct agent thread still alive after %ds timeout. "
-                "The daemon thread will be reaped when the process exits, "
-                "but the current job cannot complete.",
-                thread_timeout,
+                "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
+                self.name,
+                hard_timeout,
             )
-            raise TimeoutError(
-                f"ReAct agent thread timed out after {thread_timeout}s and refused to terminate"
-            )
-
-        if thread_exception is not None:
-            if isinstance(thread_exception, TimeoutError):
-                raise thread_exception
-            raise AnalystError(
-                f"{self.name} ReAct agent failed: {thread_exception}"
-            ) from thread_exception
+            raise
+        except AnalystError:
+            raise
+        except Exception as exc:
+            self.logger.error("ReAct agent failed: %s (%s)", type(exc).__name__, exc)
+            raise AnalystError(f"{self.name} ReAct agent failed: {exc}") from exc
 
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")
@@ -585,92 +633,45 @@ class BaseAnalyst(ABC):
         the worker. The thread is daemonised so the OS will reap it if it
         refuses to die after ``timeout + 30``s.
         """
-        import asyncio
-        import threading
         import time as _time
 
         from maljan.core.exceptions import AnalystError
 
-        thread_result: dict[str, str] = {}
-        thread_exception: Exception | None = None
-
-        def _run_in_thread() -> None:
-            nonlocal thread_exception
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-
-                async def _invoke() -> str:
-                    self.logger.info(
-                        "Invoking LLM (no-tools fallback, timeout=%ds)...",
-                        timeout,
-                    )
-                    # Run the (sync) ``invoke`` in a thread executor so
-                    # ``wait_for`` can cancel it — mirrors langchain's own
-                    # sync-bridge and keeps compatibility with MagicMock-based
-                    # unit tests that only stub ``invoke``.
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(self.llm.invoke, messages),
-                        timeout=float(timeout),
-                    )
-                    record_response_usage(
-                        self.token_ledger, response, prompt_text=_messages_text(messages)
-                    )
-                    return str(response.content)
-
-                thread_result["content"] = loop.run_until_complete(_invoke())
-            except Exception as exc:
-                self.logger.error(
-                    "LLM no-tools fallback failed in thread: %s (%s)",
-                    type(exc).__name__,
-                    exc,
-                )
-                thread_exception = exc
-            finally:
-                try:
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    if pending:
-                        try:
-                            loop.run_until_complete(
-                                asyncio.gather(*pending, return_exceptions=True)
-                            )
-                        except Exception as cleanup_exc:
-                            self.logger.debug(
-                                "Task cleanup warning (non-critical): %s", cleanup_exc
-                            )
-                except Exception as cleanup_exc:
-                    self.logger.debug("Pending task enumeration warning: %s", cleanup_exc)
-                finally:
-                    try:
-                        loop.close()
-                    except Exception as close_exc:
-                        self.logger.debug("Loop close warning (non-critical): %s", close_exc)
-
-        thread_timeout = timeout + 30
-        _t0 = _time.monotonic()
-        t = threading.Thread(target=_run_in_thread, daemon=True)
-        t.start()
-        t.join(timeout=thread_timeout)
-
-        if t.is_alive():
-            self.logger.critical(
-                "LLM no-tools fallback thread still alive after %ds. "
-                "Daemon thread will be reaped at process exit; current job aborts.",
-                thread_timeout,
+        # BUG-06 fix: run on the shared agent loop (see ``_get_agent_loop``)
+        # rather than a throwaway per-call loop, so no openai async client is
+        # ever orphaned on a closed loop.
+        async def _invoke() -> str:
+            self.logger.info(
+                "Invoking LLM (no-tools fallback, timeout=%ds)...",
+                timeout,
             )
-            raise TimeoutError(f"LLM no-tools fallback timed out after {thread_timeout}s")
+            # Run the (sync) ``invoke`` in a thread executor so ``wait_for`` can
+            # cancel it — mirrors langchain's own sync-bridge and keeps
+            # compatibility with MagicMock-based unit tests that only stub
+            # ``invoke``.
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self.llm.invoke, messages),
+                timeout=float(timeout),
+            )
+            record_response_usage(self.token_ledger, response, prompt_text=_messages_text(messages))
+            return str(response.content)
 
-        if thread_exception is not None:
-            if isinstance(thread_exception, TimeoutError):
-                raise thread_exception
-            raise AnalystError(
-                f"{self.name} no-tools fallback failed: {thread_exception}"
-            ) from thread_exception
-
-        if "content" not in thread_result:
-            raise AnalystError(f"{self.name} no-tools fallback returned no result")
+        _t0 = _time.monotonic()
+        hard_timeout = timeout + 30
+        try:
+            content = _run_coro_blocking(_invoke(), hard_timeout)
+        except TimeoutError:
+            self.logger.critical(
+                "%s no-tools fallback exceeded the %ds hard cap.",
+                self.name,
+                hard_timeout,
+            )
+            raise
+        except AnalystError:
+            raise
+        except Exception as exc:
+            self.logger.error("LLM no-tools fallback failed: %s (%s)", type(exc).__name__, exc)
+            raise AnalystError(f"{self.name} no-tools fallback failed: {exc}") from exc
 
         elapsed = _time.monotonic() - _t0
         self.logger.info(
@@ -679,7 +680,7 @@ class BaseAnalyst(ABC):
             elapsed,
             timeout,
         )
-        return thread_result["content"]
+        return str(content)
 
     # ------------------------------------------------------------------
     # Abstract text interface (must be implemented by subclasses)
@@ -826,8 +827,6 @@ class BaseAnalyst(ABC):
         when set; binding failures degrade to an unbound call so a provider that
         rejects the kwarg never breaks the pilot.
         """
-        from typing import Any
-
         from langchain_core.messages import HumanMessage, SystemMessage
 
         messages = [
@@ -1094,8 +1093,23 @@ class BaseAnalyst(ABC):
     # of inflating verdict confidence with a 1.0 sentence. The fallback
     # strings come from ``file_loader.py:107`` ("No * data available for
     # sample ...") and from analyst LLM fallbacks that copy that wording.
+    # BUG-07 (2026-06-23 live-UI audit): widened beyond the bare file_loader
+    # placeholder to also catch the DEFEATIST re-wordings a small model emits
+    # when it parrots a "No <x> data available" raw-data slot — e.g. "Static
+    # analysis could not be performed due to missing binary data" (confidence
+    # 1.0). Those parse as well-formed CLAIM blocks and would otherwise inflate
+    # the verdict with a fake high-confidence "I couldn't analyse" claim instead
+    # of honestly collapsing to a zero-claim, degraded-flagged ISR. Kept tight
+    # (requires "be performed/completed/conducted") so a genuine partial finding
+    # like "Static analysis could not confirm RC4 but ..." is NOT swallowed.
     _META_CLAIM_RE = re.compile(
-        r"^\s*no\s+[a-z_]+\s+data\s+available\b",
+        r"^\s*(?:"
+        r"no\s+[a-z_]+\s+data\s+(?:available|was\s+available|provided|found)"
+        r"|(?:static|dynamic|network)\s+analysis\s+"
+        r"(?:could\s+not|cannot|can\s*not|was\s+not\s+able\s+to)\s+"
+        r"be\s+(?:performed|completed|conducted)"
+        r"|(?:missing|no)\s+binary\s+data"
+        r")",
         flags=re.IGNORECASE,
     )
 
@@ -1104,9 +1118,26 @@ class BaseAnalyst(ABC):
         if not text:
             return True
         # Match the placeholder anywhere near the start of the text — analysts
-        # sometimes prepend a one-line header before parroting the fallback.
+        # sometimes prepend a one-line header (e.g. "CLAIM:") before parroting
+        # the fallback, so probe both the raw first line and the same line with
+        # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
         first = text.strip().splitlines()[0] if text.strip() else ""
-        return bool(self._META_CLAIM_RE.match(first))
+        if self._META_CLAIM_RE.match(first):
+            return True
+        unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
+        return bool(self._META_CLAIM_RE.match(unlabelled))
+
+    def _drop_meta_claims(self, claims: list[ClaimEvidence]) -> list[ClaimEvidence]:
+        """Strip parsed claims that are really "I could not analyse" meta-claims.
+
+        ANA-MARK-01 / BUG-07: ``_text_to_isr`` neutralises the placeholder on the
+        text-fallback path, but a defeatist claim that parses as a well-formed
+        ``CLAIM/EVIDENCE/CONFIDENCE`` block bypasses it. Filtering the parsed list
+        here makes a no-real-finding analyst collapse to a zero-claim ISR so the
+        downstream confidence cap honestly marks the run degraded instead of
+        crediting a fake high-confidence claim.
+        """
+        return [c for c in claims if not self._is_meta_claim_text(c.claim)]
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR."""

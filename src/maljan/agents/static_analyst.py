@@ -78,6 +78,39 @@ _ISR_SYSTEM = (
 )
 
 
+# BUG-07 (2026-06-23 live-UI audit): the deterministic raw-data slot.
+_STATIC_RAW_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
+
+
+def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
+    """Rephrase the 'No static data available' file-loader placeholder.
+
+    BUG-07: for a freshly uploaded sample there is no pre-extracted
+    ``data/samples/static/<sha>.json`` fixture, so
+    ``FileBasedLoader.load(sha, "static")`` returns the literal placeholder
+    "No static data available for sample <sha>." When that text lands in the
+    revision prompt's RAW DATA slot, the small reasoning model treats it as
+    authoritative and OVERWRITES its good live-Ghidra analysis with a defeatist
+    "static analysis could not be performed" claim — even though its tool calls
+    returned real ``get_current_program_info`` / ``detect_malware_behaviors``
+    data. When the analyst has live Ghidra tools we swap the misleading
+    placeholder for an explicit instruction to rely on the tool-derived ORIGINAL
+    REPORT. Fail-safe: returns ``data`` unchanged for real data, or when the
+    analyst has no tools (then the placeholder genuinely means "no evidence").
+    """
+    if not has_tools or not data:
+        return data
+    if _STATIC_RAW_PLACEHOLDER_RE.match(data.strip()):
+        return (
+            "No pre-extracted static fixture is available for this sample. This is "
+            "EXPECTED for a freshly analysed binary and does NOT mean static analysis "
+            "is impossible — your live Ghidra tool findings in YOUR ORIGINAL REPORT "
+            "above are the authoritative static evidence. Revise from those findings; "
+            "do NOT claim the binary data is missing or that analysis could not be performed."
+        )
+    return data
+
+
 @register_agent("static")
 class StaticAnalyst(BaseAnalyst):
     """Specialized agent for evaluating decompiled code and strings via Ghidra MCP."""
@@ -595,7 +628,9 @@ class StaticAnalyst(BaseAnalyst):
                 "own_report": own_report,
                 "peer_section": peer_section,
                 "mediator_feedback": mediator_feedback,
-                "data": original_data,
+                # BUG-07: don't let the "No static data available" placeholder
+                # talk the model out of its live-Ghidra ORIGINAL REPORT.
+                "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
         )
         return str(response.content)
@@ -704,7 +739,25 @@ class StaticAnalyst(BaseAnalyst):
         ]
 
         content = self.execute_tool_loop(prompt_messages)
-        claims = _parse_claim_blocks(content)
+        parsed = _parse_claim_blocks(content)
+        # BUG-07: a defeatist "could not be performed / missing binary data"
+        # claim parses as a well-formed block but is not a real finding — drop it
+        # so static collapses to a zero-claim (degraded) ISR rather than a fake
+        # high-confidence one.
+        claims = self._drop_meta_claims(parsed)
+
+        if parsed and not claims:
+            self.logger.info(
+                "%s: all initial claims were meta-claims; emitting zero-claim ISR.",
+                self.name,
+            )
+            return AgentISR(
+                agent_id=self.name,
+                domain="static",
+                claims=[],
+                dissent_items=[],
+                revision_round=0,
+            )
 
         if not claims:
             # Fallback to text extraction if parsing fails
@@ -766,13 +819,33 @@ class StaticAnalyst(BaseAnalyst):
                 "own_report": own_report,
                 "peer_section": peer_isr_summaries,
                 "mediator_feedback": mediator_feedback,
-                "data": original_data,
+                # BUG-07: don't let the "No static data available" placeholder
+                # talk the model out of its live-Ghidra ORIGINAL REPORT.
+                "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
         )
         content = str(response.content)
 
-        claims = _parse_claim_blocks(content)
+        parsed = _parse_claim_blocks(content)
+        # BUG-07: drop defeatist meta-claims ("could not be performed / missing
+        # binary data") that parse as well-formed blocks; a no-real-finding
+        # revision must collapse to a zero-claim ISR so the run is honestly
+        # marked degraded instead of crediting a fake high-confidence claim.
+        claims = self._drop_meta_claims(parsed)
         dissent = _parse_disputes(content)
+
+        if parsed and not claims:
+            self.logger.info(
+                "%s: all revision claims were meta-claims; emitting zero-claim ISR.",
+                self.name,
+            )
+            return content, AgentISR(
+                agent_id=self.name,
+                domain="static",
+                claims=[],
+                dissent_items=dissent,
+                revision_round=revision_round,
+            )
 
         if not claims:
             return content, self._text_to_isr(content, revision_round=revision_round)
