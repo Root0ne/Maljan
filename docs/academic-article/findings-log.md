@@ -255,7 +255,7 @@ positioning.
   high-confidence hash/C2 IOCs.
 
 ### 1.7 Static keyword vs dynamic semantic category inference — `IMPLEMENTED` (knob shipped, default unchanged) / zero-shot variant `NEGATIVE`
-- **Question.** The §7.1 STIX schema-pruning hint is driven by `infer_malware_category` — a
+- **Question.** The STIX schema-pruning hint is driven by `infer_malware_category` — a
   static, hand-maintained keyword table (substring scoring over the analyst text + ISR claims).
   Two honest doubts: (a) how reliable is a fixed keyword list, and how much of its accuracy is
   just the text *literally naming* the category; (b) can a dynamic embedding classifier do better,
@@ -359,8 +359,8 @@ positioning.
   one-paragraph single verdict, so recall is floored; only the paired delta is meaningful.
 - **Takeaways (paper + product).** (i) An "advisory, low-impact" prompt addition can have a
   first-order effect through an *unmeasured channel* (completion/latency), invisible to a pure
-  mapping-quality metric — measure bundle shape and completion, not just F1. (ii) The §7.1
-  schema-pruning feature earns its place: disabling it ~halves bundle completeness and 6×'s the
+  mapping-quality metric — measure bundle shape and completion, not just F1. (ii) The
+  category-driven STIX schema-pruning feature earns its place: disabling it ~halves bundle completeness and 6×'s the
   empty-fallback rate on this deployment. (iii) The §1.7 default (keyword) is reaffirmed — keyword
   supplies a hint ~94 % of the time on realistic text, so it already delivers this completion benefit;
   no backend change is warranted on this evidence. Artifacts: `tests/evaluation/eval_hint_ablation.py`,
@@ -392,7 +392,7 @@ positioning.
 - **Deliberately kept.** The Android *false-positive* denylists (`ANDROID_CLASS_REF_RE`,
   `_indicator_denylists`, the STIX-renderer noise filter) stay — they suppress garbage indicators when
   a sample *contains* Android-ish strings (NDK paths, JVM class refs); they are defensive FP hygiene,
-  not OS support, and removing them would regress the §1.6/§2.4 indicator quality.
+  not OS support, and removing them would regress the §1.6/§1.9 indicator quality.
 - **Consequence.** The previously-deferred "Android persistence (manifest/receiver) parser" backlog
   item is **dropped** — there is no Android data source in scope.
 - **Verification.** `mypy` clean (99 source files); 1226 unit tests pass (platform tests updated:
@@ -411,6 +411,35 @@ positioning.
   tests (sigma/yara/cascade) were reframed to use a supported Win/Linux *sample* with a foreign
   *rule*, preserving every quality assertion without a non-Win/Linux sample platform. 1242 unit +
   report-pipeline tests pass; mypy/ruff clean.
+
+### 1.9 Deterministic signal-quality hardening — `IMPLEMENTED`
+- **Premise.** The deterministic extractors feed both the report and the LLM analysts, so a
+  false positive or a miscalibrated confidence propagates and compounds. A four-part hardening
+  wave raised signal quality across the extractor layer without adding speculative features.
+- **(A) Network FP reduction + validation.** Drop reserved/private/link-local/broadcast IPs and
+  RFC 6761 reserved / single-label domains from IOC emission (on both the CAPE and Triage-CTI
+  paths); expand the benign CDN/infra allowlist; unify the DGA/benign suspicion scorer across
+  sources; validate port (1–65535) and HTTP-status (100–599) ranges; lowercase + dedup URL hosts;
+  fix HTTPS scheme inference (8443 / `encrypted` flag).
+- **(B) Platform-aware persistence + dynamic FP reduction.** Gate the Windows registry/service/
+  scheduled-task scanners on `sample_platform` (a Linux/Android sample is no longer flagged with
+  Windows registry-run persistence — the critical FP); whitelist OS-normal injector processes
+  (svchost/lsass/…); add XDG-autostart + systemd-timer Linux paths; harden the process tree
+  (cycle detection, depth cap, duplicate-PID keep-first); drop read-only registry queries; require
+  a cron-path write to corroborate a bare `crontab -e`.
+- **(C) Anti-false-confidence calibration.** Drop zero-confidence + zero-evidence capability cells
+  (they rendered as "verified" and seeded fabricated narrative); guard category inference against
+  malformed ISR objects; fold suspicious network infrastructure into the LTM similar-samples query.
+- **(D) Enrichment trust & freshness.** Pre-filter private/reserved IPs before paid reputation
+  lookups; fix idempotency to retry *failed* (source-less) lookups; annotate VT reputation with
+  `age_days` and treat >90-day data as stale; feed a verified-malicious reputation back into the
+  heuristic `is_suspicious` flag; make the GeoIP DB path env-configurable.
+- **Method note.** Findings came from a 3-agent code sweep; each was verified against the live
+  code before implementation, and one ("word-boundary keyword matching" for category inference)
+  was **rejected after testing** — it broke the keyword table's intentional stems
+  (`keylog`→keylogger, `exfiltrat`→exfiltration), a reminder that an FP "fix" can destroy real
+  signal. Net: deterministic FP↓ and calibration↑ with no valid-signal regression (verified by
+  the existing + new extractor/enrichment test suites).
 
 ---
 
@@ -450,35 +479,6 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
 - Tested mainline llama.cpp MTP / speculative-draft decoding against the production
   ik_llama + IQ3_K_R4 setup. **No throughput gain** on this A3B MoE; the engine swap
   regressed quality. Kept the production setup. (Recorded as a negative result.)
-
-### 2.4 Deterministic signal-quality hardening — `IMPLEMENTED`
-- **Premise.** The deterministic extractors feed both the report and the LLM analysts, so a
-  false positive or a miscalibrated confidence propagates and compounds. A four-part hardening
-  wave raised signal quality across the extractor layer without adding speculative features.
-- **(A) Network FP reduction + validation.** Drop reserved/private/link-local/broadcast IPs and
-  RFC 6761 reserved / single-label domains from IOC emission (on both the CAPE and Triage-CTI
-  paths); expand the benign CDN/infra allowlist; unify the DGA/benign suspicion scorer across
-  sources; validate port (1–65535) and HTTP-status (100–599) ranges; lowercase + dedup URL hosts;
-  fix HTTPS scheme inference (8443 / `encrypted` flag).
-- **(B) Platform-aware persistence + dynamic FP reduction.** Gate the Windows registry/service/
-  scheduled-task scanners on `sample_platform` (a Linux/Android sample is no longer flagged with
-  Windows registry-run persistence — the critical FP); whitelist OS-normal injector processes
-  (svchost/lsass/…); add XDG-autostart + systemd-timer Linux paths; harden the process tree
-  (cycle detection, depth cap, duplicate-PID keep-first); drop read-only registry queries; require
-  a cron-path write to corroborate a bare `crontab -e`.
-- **(C) Anti-false-confidence calibration.** Drop zero-confidence + zero-evidence capability cells
-  (they rendered as "verified" and seeded fabricated narrative); guard category inference against
-  malformed ISR objects; fold suspicious network infrastructure into the LTM similar-samples query.
-- **(D) Enrichment trust & freshness.** Pre-filter private/reserved IPs before paid reputation
-  lookups; fix idempotency to retry *failed* (source-less) lookups; annotate VT reputation with
-  `age_days` and treat >90-day data as stale; feed a verified-malicious reputation back into the
-  heuristic `is_suspicious` flag; make the GeoIP DB path env-configurable.
-- **Method note.** Findings came from a 3-agent code sweep; each was verified against the live
-  code before implementation, and one ("word-boundary keyword matching" for category inference)
-  was **rejected after testing** — it broke the keyword table's intentional stems
-  (`keylog`→keylogger, `exfiltrat`→exfiltration), a reminder that an FP "fix" can destroy real
-  signal. Net: deterministic FP↓ and calibration↑ with no valid-signal regression (verified by
-  the existing + new extractor/enrichment test suites).
 
 ---
 
@@ -1413,11 +1413,11 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   (`attck_autocorrect_swap_valid=False`, default) — re-measured: hallucination 100%→0%, +19%
   recovery retained, **correct-ID regression eliminated (→0%)**. Added §1.5.2; 56 ATT&CK tests
   pass.
-- **2026-06-02 signal quality.** Added §2.4: a four-part deterministic extractor hardening wave
+- **2026-06-02 signal quality.** Added §1.9 (filed under §2.4 at the time): a four-part deterministic extractor hardening wave
   (network FP/validation, platform-aware persistence + dynamic FP, anti-false-confidence
   calibration, enrichment trust/freshness). Rejected a word-boundary category-keyword change after
   it broke intentional stems. 329 extractor/enrichment/reporting/integration tests pass; mypy clean.
-- **2026-06-02 category inference (static vs dynamic).** Measured the §7.1 schema-pruning category
+- **2026-06-02 category inference (static vs dynamic).** Measured the category-driven schema-pruning category
   classifier against a non-circular ATT&CK ground truth (101 families labelled by self-declared
   type; full vs behavioral-only regimes). Findings (§1.7): keyword is accurate only when the text
   names the category (full 0.792 → behavioral 0.327, abstaining 38% — a *safe* failure mode);
@@ -1433,7 +1433,7 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   accuracy** — without it the judge hits the 600 s timeout and falls back to an empty bundle 6/17
   vs 1/17 with it, roughly doubling objects/attack-patterns/relationships; exact-F1 delta +0.029
   (95% CI [-0.001, +0.072], crosses 0). An operational, timeout-mediated benefit specific to the
-  slow local model — reaffirms the keyword default and that §7.1 schema-pruning earns its place.
+  slow local model — reaffirms the keyword default and that the schema-pruning hint earns its place.
   New harness `tests/evaluation/eval_hint_ablation.py`.
 - **2026-06-02 judge output cap.** Follow-up to §1.7.1: the judge had no output bound (only the
   600 s wall-clock), so a degenerate decode burned the full budget. Added `LLMConfig.judge_max_tokens`
