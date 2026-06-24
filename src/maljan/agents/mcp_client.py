@@ -1,7 +1,13 @@
 """MCP Client wrapper that exposes MCP server tools as LangChain tools.
 
-This module connects to an MCP server via stdio and converts its
-tools into LangChain BaseTool objects for use with create_react_agent.
+This module connects to an MCP server and converts its tools into LangChain
+BaseTool objects for use with create_react_agent. Two transports are
+supported:
+
+  - "stdio": local subprocess (the default). Pass a ``StdioServerParameters``.
+  - "http" / "sse": a remote MCP server reachable over HTTP (e.g. a CAPEv2
+    MCP server running on a separate Ubuntu VM). Pass ``transport`` plus
+    ``http_url`` (and optional ``http_headers`` for auth).
 """
 
 from __future__ import annotations
@@ -22,11 +28,18 @@ class MCPLangChainToolkit:
 
     def __init__(
         self,
-        server_params: StdioServerParameters,
+        server_params: StdioServerParameters | None = None,
         output_guardrail: Callable[[str], str] | None = None,
         max_output_chars: int = 8000,
+        *,
+        transport: str = "stdio",
+        http_url: str = "",
+        http_headers: dict[str, str] | None = None,
     ):
         self.server_params = server_params
+        self.transport = (transport or "stdio").lower()
+        self.http_url = http_url
+        self.http_headers = http_headers or {}
         self.session: ClientSession | None = None
         self._exit_stack: Any = None
         self._tools: list[BaseTool] = []
@@ -37,15 +50,36 @@ class MCPLangChainToolkit:
         """Initialize the connection to the MCP server and fetch available tools."""
         from contextlib import AsyncExitStack
 
-        logger.info(
-            f"Connecting to MCP server: {self.server_params.command} {self.server_params.args}"
-        )
         self._exit_stack = AsyncExitStack()
 
         try:
-            read, write = await self._exit_stack.enter_async_context(
-                stdio_client(self.server_params)
-            )
+            if self.transport in ("http", "streamable-http"):
+                from mcp.client.streamable_http import streamablehttp_client
+
+                logger.info("Connecting to MCP server over streamable-http: %s", self.http_url)
+                streams = await self._exit_stack.enter_async_context(
+                    streamablehttp_client(self.http_url, headers=self.http_headers)
+                )
+                # streamablehttp_client yields (read, write, get_session_id).
+                read, write = streams[0], streams[1]
+            elif self.transport == "sse":
+                from mcp.client.sse import sse_client
+
+                logger.info("Connecting to MCP server over SSE: %s", self.http_url)
+                read, write = await self._exit_stack.enter_async_context(
+                    sse_client(self.http_url, headers=self.http_headers)
+                )
+            else:
+                if self.server_params is None:
+                    raise ValueError("stdio transport requires server_params (command/args).")
+                logger.info(
+                    "Connecting to MCP server over stdio: %s %s",
+                    self.server_params.command,
+                    self.server_params.args,
+                )
+                read, write = await self._exit_stack.enter_async_context(
+                    stdio_client(self.server_params)
+                )
             self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
             await self.session.initialize()
 

@@ -6,8 +6,9 @@ parsed into LangChain StructuredTool instances with proper parameter schemas.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -326,3 +327,152 @@ class TestCreateLangChainToolCAPEv2:
 
         assert lc_tool.name == "get_cuckoo_status"
         assert len(lc_tool.args_schema.model_fields) == 0
+
+
+# ---------------------------------------------------------------------------
+# HTTP transport (remote CAPE MCP on a separate VM)
+# ---------------------------------------------------------------------------
+
+
+class TestHttpTransport:
+    """The toolkit must connect over streamable-http (not stdio) when
+    transport='http', forwarding the URL and auth headers."""
+
+    def test_http_transport_uses_streamablehttp_client(self, monkeypatch) -> None:
+        import mcp.client.streamable_http as shm
+
+        captured: dict[str, Any] = {}
+
+        class _FakeStreamCtx:
+            async def __aenter__(self):
+                # streamablehttp_client yields (read, write, get_session_id)
+                return ("read", "write", lambda: "sid")
+
+            async def __aexit__(self, *exc: object) -> bool:
+                return False
+
+        def _fake_streamablehttp_client(url, headers=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            return _FakeStreamCtx()
+
+        monkeypatch.setattr(shm, "streamablehttp_client", _fake_streamablehttp_client)
+
+        fake_session = MagicMock()
+        fake_session.initialize = AsyncMock()
+        list_resp = MagicMock()
+        list_resp.tools = []
+        fake_session.list_tools = AsyncMock(return_value=list_resp)
+
+        class _FakeSessionCtx:
+            def __init__(self, read, write):
+                captured["read_write"] = (read, write)
+
+            async def __aenter__(self):
+                return fake_session
+
+            async def __aexit__(self, *exc: object) -> bool:
+                return False
+
+        monkeypatch.setattr("maljan.agents.mcp_client.ClientSession", _FakeSessionCtx)
+
+        tk = MCPLangChainToolkit(
+            transport="http",
+            http_url="http://vm:9004/mcp/",
+            http_headers={"Authorization": "Bearer secret"},
+        )
+        asyncio.run(tk.initialize())
+
+        assert captured["url"] == "http://vm:9004/mcp/"
+        assert captured["headers"] == {"Authorization": "Bearer secret"}
+        assert captured["read_write"] == ("read", "write")
+        assert tk.session is fake_session
+        fake_session.initialize.assert_awaited_once()
+
+
+class TestDynamicAnalystMcpTransportWiring:
+    """DynamicAnalyst._initialize_mcp_client picks the transport from config:
+    transport='http' must build an HTTP toolkit (url + Bearer header), never
+    a stdio subprocess."""
+
+    def _make_analyst(self):
+        import logging
+
+        from maljan.agents.dynamic_analyst import DynamicAnalyst
+
+        inst = DynamicAnalyst.__new__(DynamicAnalyst)
+        inst.logger = logging.getLogger("test.dynamic_analyst")
+        return inst
+
+    def test_http_transport_builds_http_toolkit(self, monkeypatch) -> None:
+        import maljan.agents.mcp_client as mc
+        import maljan.core.config as cfgmod
+
+        captured: dict[str, Any] = {}
+
+        class _FakeToolkit:
+            def __init__(
+                self,
+                server_params=None,
+                output_guardrail=None,
+                max_output_chars=8000,
+                *,
+                transport="stdio",
+                http_url="",
+                http_headers=None,
+            ):
+                captured["transport"] = transport
+                captured["http_url"] = http_url
+                captured["http_headers"] = http_headers
+                captured["server_params"] = server_params
+
+            async def initialize(self):
+                return None
+
+            def get_tools(self):
+                return []
+
+        monkeypatch.setattr(mc, "MCPLangChainToolkit", _FakeToolkit)
+
+        cape = MagicMock()
+        cape.enabled = True
+        cape.transport = "http"
+        cape.url = "http://vm:9004/mcp/"
+        cape.auth_token = "secret"
+        cape.tools = []
+        cfg = MagicMock()
+        cfg.mcp.cape = cape
+        monkeypatch.setattr(cfgmod, "get_settings", lambda: cfg)
+
+        analyst = self._make_analyst()
+        analyst._initialize_mcp_client()
+
+        assert captured["transport"] == "http"
+        assert captured["http_url"] == "http://vm:9004/mcp/"
+        assert captured["http_headers"] == {"Authorization": "Bearer secret"}
+        # stdio path must NOT have been taken
+        assert captured["server_params"] is None
+
+    def test_http_transport_without_url_skips(self, monkeypatch) -> None:
+        import maljan.agents.mcp_client as mc
+        import maljan.core.config as cfgmod
+
+        def _boom(*a, **k):
+            raise AssertionError("toolkit must not be built when url is empty")
+
+        monkeypatch.setattr(mc, "MCPLangChainToolkit", _boom)
+
+        cape = MagicMock()
+        cape.enabled = True
+        cape.transport = "http"
+        cape.url = ""
+        cape.auth_token = ""
+        cape.tools = []
+        cfg = MagicMock()
+        cfg.mcp.cape = cape
+        monkeypatch.setattr(cfgmod, "get_settings", lambda: cfg)
+
+        analyst = self._make_analyst()
+        # Should log a warning and return without raising.
+        analyst._initialize_mcp_client()
+        assert getattr(analyst, "toolkit", None) is None

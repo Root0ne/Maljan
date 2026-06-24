@@ -1,0 +1,37 @@
+diff --git a/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java b/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java
+index b290011..0d0a69f 100644
+--- a/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java
++++ b/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java
+@@ -376,11 +376,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
+
+         // --- Project Organization ---
+
+-        safeContext("/create_folder", exchange -> {
+-            Map<String, String> params = parsePostParams(exchange);
+-            sendResponse(exchange, endpointHandler.createFolder(params.get("path"), params.get("program")));
+-        });
+-
+         safeContext("/move_file", exchange -> {
+             Map<String, String> params = parsePostParams(exchange);
+             sendResponse(exchange, endpointHandler.moveFile(params.get("filePath"), params.get("destFolder")));
+@@ -391,11 +386,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
+             sendResponse(exchange, endpointHandler.moveFolder(params.get("sourcePath"), params.get("destPath")));
+         });
+
+-        safeContext("/delete_file", exchange -> {
+-            Map<String, String> params = parsePostParams(exchange);
+-            sendResponse(exchange, endpointHandler.deleteFile(params.get("filePath")));
+-        });
+-
+         // --- Server Endpoints ---
+
+         safeContext("/server/connect", exchange -> {
+@@ -518,7 +508,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
+     private int countEndpoints() {
+         // registeredEndpointCount = annotation-scanned (shared services + HeadlessManagementService)
+         // 31 = infrastructure + schema + remaining manual createContext registrations
+-        return registeredEndpointCount + 31;
++        return registeredEndpointCount + 29;
+     }
+
+     public void stop() {
