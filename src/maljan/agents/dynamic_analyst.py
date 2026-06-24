@@ -63,20 +63,42 @@ class DynamicAnalyst(BaseAnalyst):
             self.logger.info("CAPEv2 MCP is disabled in config.")
             return
 
-        command = cfg.mcp.cape.command
-        args = cfg.mcp.cape.args
+        transport = (getattr(cfg.mcp.cape, "transport", "stdio") or "stdio").lower()
 
-        env = os.environ.copy()
-        if cfg.mcp.cape.env:
-            env.update(cfg.mcp.cape.env)
+        if transport in ("http", "streamable-http", "sse"):
+            # Remote CAPE MCP server (e.g. cape_mcp_wrapper.py running on a
+            # separate Ubuntu VM with --transport streamable-http). There is no
+            # local subprocess to launch; connect over HTTP.
+            url = cfg.mcp.cape.url
+            if not url:
+                self.logger.warning(
+                    "CAPE MCP transport=%s but mcp.cape.url is empty; skipping MCP init.",
+                    transport,
+                )
+                return
+            headers: dict[str, str] = {}
+            token = getattr(cfg.mcp.cape, "auth_token", "")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            self.logger.info("Initializing CAPEv2 MCP over %s: %s", transport, url)
+            toolkit = MCPLangChainToolkit(transport=transport, http_url=url, http_headers=headers)
+        else:
+            command = cfg.mcp.cape.command
+            args = cfg.mcp.cape.args
 
-        from maljan.core.paths import get_project_root, resolve_mcp_args
+            env = os.environ.copy()
+            if cfg.mcp.cape.env:
+                env.update(cfg.mcp.cape.env)
 
-        project_root = str(get_project_root())
-        args = resolve_mcp_args(args)
-        server_params = StdioServerParameters(command=command, args=args, env=env, cwd=project_root)
+            from maljan.core.paths import get_project_root, resolve_mcp_args
 
-        toolkit = MCPLangChainToolkit(server_params)
+            project_root = str(get_project_root())
+            args = resolve_mcp_args(args)
+            server_params = StdioServerParameters(
+                command=command, args=args, env=env, cwd=project_root
+            )
+
+            toolkit = MCPLangChainToolkit(server_params)
 
         try:
             loop = asyncio.get_running_loop()
