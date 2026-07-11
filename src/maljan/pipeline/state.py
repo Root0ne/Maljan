@@ -101,12 +101,6 @@ class AnalysisState(TypedDict):
     degraded_mode: bool
     degradation_reasons: list[str]
 
-    # Sandbox CTI block surfaced by the judge node when the active sandbox
-    # client (currently TriageClient) synthesised ``report["cti"]``.
-    # Consumed by the report node to embed the deterministic threat-intel
-    # snapshot under ``stix_bundle_extended["x_maljan_cti"]``.
-    sandbox_cti: dict[str, Any] | None
-
     # F10 (2026-07-05): attribution side-channels written by the judge node
     # (``make_judge_node``) and read back by the report node to populate
     # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``

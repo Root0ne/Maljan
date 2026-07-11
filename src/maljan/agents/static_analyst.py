@@ -273,23 +273,28 @@ class StaticAnalyst(BaseAnalyst):
         )
 
     def _run_async(self, coro: Any) -> None:
-        """Run an async coroutine from a sync context, handling nested loops."""
-        import asyncio
+        """Run an MCP-client init coroutine on the *shared agent loop*.
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        The Ghidra HTTP client builds its long-lived ``httpx.AsyncClient`` inside
+        ``initialize()`` (via ``_get_http``); httpx binds that client's
+        connection pool — and the asyncio primitives behind it — to whichever
+        loop first creates it. The ReAct tool calls later run on the
+        process-wide agent loop (``base_agent._get_agent_loop``), so the old
+        implementation here — which ran init on a throwaway ``new_event_loop()``
+        (LangGraph runs sync nodes in a worker thread with no running loop) —
+        bound the client to a *different* loop than the ReAct. The first chunk's
+        tool call then raised ``<asyncio.locks.Event ...> is bound to a different
+        event loop`` and that chunk was lost on every run (and, under the CLI's
+        ``asyncio.run``, the whole static analyst). Submitting init to the same
+        shared loop the ReAct uses keeps client creation and use on one loop.
 
-        if loop is not None and loop.is_running():
-            import nest_asyncio
+        Only ever called from a synchronous setup path (``analyze`` /
+        ``analyze_isr``) on the main/worker thread — never from within the agent
+        loop itself — so blocking on the result cannot deadlock.
+        """
+        from maljan.agents.base_agent import _run_coro_blocking
 
-            nest_asyncio.apply()
-            loop.run_until_complete(coro)
-        else:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(coro)
+        _run_coro_blocking(coro, hard_timeout=120.0)
 
     def _compute_sink_priority_hint(self, file_path: str) -> str:
         """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.

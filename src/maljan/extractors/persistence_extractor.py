@@ -166,7 +166,7 @@ def _scan_linux_persistence(
 
     Sources:
       * ``behavior.summary.files`` / ``behavior.summary.write_files`` —
-        Triage rolls written paths into these lists.
+        the sandbox rolls written paths into these lists.
       * ``behavior.processes[].command_line`` — catches ``crontab -e`` /
         ``systemctl enable`` invocations.
       * ``notable_apis`` (LD_PRELOAD env mutations).

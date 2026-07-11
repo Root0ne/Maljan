@@ -21,7 +21,7 @@ LangSmith Observability:
 
 Sandbox Backend:
     ``get_sandbox_client()`` returns the configured sandbox client (mock,
-    cape2, triage) and caches it for the lifetime of the container.
+    cape2) and caches it for the lifetime of the container.
 """
 
 from __future__ import annotations
@@ -204,58 +204,6 @@ class ServiceContainer:
                 logger.info(
                     "Sandbox backend: CAPEv2Client (url=%s).",
                     self.config.sandbox.cape2_base_url,
-                )
-            elif backend == "triage":
-                from maljan.core.paths import resolve_data
-                from maljan.loaders.triage_client import TriageClient
-
-                pcap_dir = (
-                    str(resolve_data(self.config.sandbox.triage_pcap_dir))
-                    if self.config.sandbox.triage_fetch_pcapng
-                    else None
-                )
-                dumps_dir = (
-                    str(resolve_data(self.config.sandbox.triage_dumps_dir))
-                    if self.config.sandbox.triage_fetch_dumps
-                    else None
-                )
-                onemon_dir = (
-                    str(resolve_data(self.config.sandbox.triage_onemon_dir))
-                    if self.config.sandbox.triage_fetch_onemon
-                    else None
-                )
-                user_tags_raw = self.config.sandbox.triage_user_tags or ""
-                user_tags = [t.strip() for t in user_tags_raw.split(",") if t.strip()]
-                self._sandbox_client_cache = TriageClient(
-                    api_token=self.config.sandbox.triage_api_token,
-                    base_url=self.config.sandbox.triage_base_url,
-                    timeout=self.config.sandbox.triage_timeout_seconds,
-                    poll_interval=self.config.sandbox.triage_poll_interval_seconds,
-                    interactive=self.config.sandbox.triage_interactive,
-                    auto_profile=self.config.sandbox.triage_auto_profile,
-                    force_os_tag=self.config.sandbox.triage_force_os_tag or None,
-                    behavioral_timeout=self.config.sandbox.triage_behavioral_timeout,
-                    network_mode=self.config.sandbox.triage_network_mode,
-                    geolocation=self.config.sandbox.triage_geolocation or None,
-                    archive_password=self.config.sandbox.triage_archive_password or None,
-                    user_tags=user_tags or None,
-                    pcap_dir=pcap_dir,
-                    dumps_dir=dumps_dir,
-                    onemon_dir=onemon_dir,
-                )
-                logger.info(
-                    "Sandbox backend: TriageClient (url=%s, force_os_tag=%s, "
-                    "behavioral_timeout=%ds, pcap=%s, dumps=%s, onemon=%s, "
-                    "user_tags=%s). WARNING: public-cloud submissions are "
-                    "world-visible and cannot be deleted — use research / "
-                    "published samples only.",
-                    self.config.sandbox.triage_base_url,
-                    self.config.sandbox.triage_force_os_tag or "<auto>",
-                    self.config.sandbox.triage_behavioral_timeout,
-                    "on" if pcap_dir else "off",
-                    "on" if dumps_dir else "off",
-                    "on" if onemon_dir else "off",
-                    user_tags or "[]",
                 )
             else:
                 from maljan.loaders.mock_sandbox_client import MockSandboxClient

@@ -145,11 +145,21 @@ services:
       # token_auth is disabled on this instance (empty token). MCP path stays
       # off (:9004 wrapper not running on the VM); the REST report is enough.
       SANDBOX__BACKEND: ${SANDBOX_BACKEND:-cape2}
-      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://10.65.0.40:8000}
+      # Container reaches CAPE (10.65.0.40) through the host-side proxy
+      # (maljan-cape-proxy.service): the bridge can hit host.docker.internal
+      # but not the on-link WiFi peer directly. Host CLI uses 10.65.0.40
+      # directly via .env. 18000->CAPE:8000 (REST), 19004->CAPE:9004 (MCP).
+      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
       SANDBOX__CAPE2_API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
       SANDBOX__CAPE2_TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
       SANDBOX__CAPE2_POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
-      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-false}
+      # CAPE MCP over HTTP — interactive tools for the dynamic analyst's ReAct
+      # loop (search_task, get_task_iocs, get_task_config, ...). Additive on
+      # top of the REST report. Reached via the same proxy (19004->CAPE:9004).
+      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-true}
+      MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
+      MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
+      MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
     # F8 (2026-07-05): on Linux ``host.docker.internal`` does not resolve
     # unless mapped to the host gateway (Docker Desktop on Win/Mac provides
     # it natively, where this is a harmless no-op). Lets the container reach
@@ -206,11 +216,21 @@ services:
       # block for the rationale; the worker is the process that actually
       # submits + polls CAPE, so this env is what enables real detonation.
       SANDBOX__BACKEND: ${SANDBOX_BACKEND:-cape2}
-      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://10.65.0.40:8000}
+      # Container reaches CAPE (10.65.0.40) through the host-side proxy
+      # (maljan-cape-proxy.service): the bridge can hit host.docker.internal
+      # but not the on-link WiFi peer directly. Host CLI uses 10.65.0.40
+      # directly via .env. 18000->CAPE:8000 (REST), 19004->CAPE:9004 (MCP).
+      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
       SANDBOX__CAPE2_API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
       SANDBOX__CAPE2_TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
       SANDBOX__CAPE2_POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
-      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-false}
+      # CAPE MCP over HTTP — interactive tools for the dynamic analyst's ReAct
+      # loop (search_task, get_task_iocs, get_task_config, ...). Additive on
+      # top of the REST report. Reached via the same proxy (19004->CAPE:9004).
+      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-true}
+      MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
+      MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
+      MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"

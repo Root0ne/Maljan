@@ -219,7 +219,7 @@ async def enqueue_enrichment_job(
 
     # Wave 9 (2026-05-29) pre-flight: skip the enqueue when the report
     # carries no network IOCs to enrich. The 2026-05-29 Linux ELF audit
-    # found that ELF samples with no PCAP / Triage network trace queued
+    # found that ELF samples with no PCAP / sandbox network trace queued
     # an ARQ job that silently no-op'd; surfacing ``skipped_no_network_iocs``
     # makes the UI's "Enrich" button informative instead of misleading.
     _mr = report_row.malware_report or {}

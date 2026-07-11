@@ -373,6 +373,9 @@ def _extract_domains(raw: dict[str, Any]) -> list[NetworkDomain]:
         node.dga_score = verdict.dga_score
         node.is_punycode = verdict.is_punycode
         node.homograph_target = verdict.homograph_target
+        # Deterministic VirusTotal permalink (no API/quota); async enrichment
+        # may later merge real VT scores on top (enrichment/orchestrator.py).
+        node.reputation = {"virustotal_url": _vt_url_domain(node.fqdn), "source": "cape"}
 
     return sorted(emittable, key=lambda d: (not d.is_suspicious, d.fqdn))
 
@@ -386,9 +389,8 @@ def _get_or_create_domain(table: dict[str, NetworkDomain], fqdn: str) -> Network
 
 @dataclass(frozen=True)
 class _DomainVerdict:
-    """Outcome of scoring one FQDN — the single source of truth for both the
-    CAPE-path extractor and the Triage-CTI merge so domains are judged
-    identically regardless of source."""
+    """Outcome of scoring one FQDN — the single source of truth for the
+    sandbox-report extractor so every domain is judged identically."""
 
     suspicious: bool
     reason: str | None = None
@@ -636,8 +638,66 @@ def build_dga_isr(network_iocs: NetworkIOCs | None) -> AgentISR | None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# VirusTotal permalinks + CAPE host metadata (2026-07-11)
+#
+# CAPE gives more than bare addresses: ``network.hosts`` carries per-IP ASN /
+# country / hostname / ports, and every IP/domain has a deterministic
+# VirusTotal GUI permalink (no API call or quota needed). Both are folded onto
+# the emitted IOCs so the network analyst and the report see the *contacted
+# host* (geo/ASN + a click-through VT link), not just the address.
+# ---------------------------------------------------------------------------
+
+_VT_GUI = "https://www.virustotal.com/gui"
+
+
+def _vt_url_ip(ip: str) -> str:
+    """Deterministic VirusTotal GUI permalink for an IP address."""
+    return f"{_VT_GUI}/ip-address/{ip}"
+
+
+def _vt_url_domain(fqdn: str) -> str:
+    """Deterministic VirusTotal GUI permalink for a domain."""
+    return f"{_VT_GUI}/domain/{fqdn}"
+
+
+def _build_host_meta(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Map ``IP -> {asn, geo, hostname, ports}`` from the CAPE ``hosts`` list.
+
+    The tcp/udp flow lists only expose ``dst``/``dport``; the aggregate
+    ``hosts`` entries carry the enrichment (``asn`` / ``asn_name`` /
+    ``country_name`` / ``hostname`` / ``ports``). CAPE writes the literal
+    string ``"unknown"`` for un-geolocated hosts, which we treat as absent.
+    """
+    meta: dict[str, dict[str, Any]] = {}
+    for entry in raw.get("hosts") or []:
+        if not isinstance(entry, dict):
+            continue
+        ip = str(entry.get("ip") or entry.get("address") or "").strip()
+        if not ip:
+            continue
+        m: dict[str, Any] = {}
+        asn = str(entry.get("asn") or "").strip()
+        asn_name = str(entry.get("asn_name") or "").strip()
+        asn_label = " ".join(p for p in (asn, asn_name) if p).strip()
+        if asn_label and asn_label.lower() != "unknown":
+            m["asn"] = asn_label
+        country = str(entry.get("country_name") or "").strip()
+        if country and country.lower() != "unknown":
+            m["geo"] = country
+        hostname = str(entry.get("hostname") or "").strip()
+        if hostname:
+            m["hostname"] = hostname
+        ports = entry.get("ports")
+        if isinstance(ports, list) and ports:
+            m["ports"] = ports
+        meta[ip] = m
+    return meta
+
+
 def _extract_ips(raw: dict[str, Any]) -> list[NetworkIP]:
     seen: dict[tuple[str, int | None, str | None], NetworkIP] = {}
+    host_meta = _build_host_meta(raw)
 
     def _add(address: str, port: int | None, transport: str | None) -> None:
         if not _is_valid_ip(address) or not _is_emittable_ip(address):
@@ -646,14 +706,27 @@ def _extract_ips(raw: dict[str, Any]) -> list[NetworkIP]:
         if key in seen:
             return
         suspicious, reason = _ip_suspicious(address)
-        seen[key] = NetworkIP(
+        meta = host_meta.get(address, {})
+        ip_obj = NetworkIP(
             address=address,
             port=port,
             transport=transport,  # type: ignore[arg-type]
+            asn=meta.get("asn"),
+            geo=meta.get("geo"),
             is_suspicious=suspicious,
         )
+        # Every emitted IP is public/routable (see ``_is_emittable_ip``), so the
+        # VirusTotal permalink is always meaningful. Async enrichment may later
+        # merge real VT scores on top (see enrichment/orchestrator.py).
+        rep: dict[str, Any] = {"virustotal_url": _vt_url_ip(address), "source": "cape"}
         if reason:
-            seen[key].reputation = {"_heuristic_reason": reason}
+            rep["_heuristic_reason"] = reason
+        if meta.get("hostname"):
+            rep["hostname"] = meta["hostname"]
+        if meta.get("ports"):
+            rep["contacted_ports"] = meta["ports"]
+        ip_obj.reputation = rep
+        seen[key] = ip_obj
 
     for entry in raw.get("tcp") or []:
         _read_flow(entry, "tcp", _add)
@@ -825,161 +898,4 @@ def _extract_ja3s(raw: dict[str, Any]) -> list[str]:
         if ja3s and ja3s not in seen:
             seen.add(str(ja3s))
             out.append(str(ja3s))
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Wave 10 W10-NET-01 (2026-05-30) — fold Triage SandboxCTI.network into the
-# typed NetworkIOCs. The 2026-05-30 UI walk found that
-# ``stix_bundle_extended.x_maljan_cti.network`` carried 6 domains + 19 IPs +
-# 3 URLs from Triage but ``MalwareReport.network`` was None, so the NETWORK
-# tab and SUMMARY snapshot card both rendered zeros.
-# ---------------------------------------------------------------------------
-
-
-def merge_sandbox_cti_network(
-    network_iocs: NetworkIOCs | None,
-    sandbox_cti: dict[str, Any] | None,
-) -> NetworkIOCs | None:
-    """Augment NetworkIOCs with the Triage SandboxCTI block (or build fresh).
-
-    SandboxCTI shape (from ``maljan/analysis/sandbox_cti.py``)::
-
-        {
-          "network": {
-            "ips":         [str],
-            "domains":     [str],
-            "http_urls":   [str],
-            "tls_ja3":     [str],
-            "tls_ja3s":    [str],
-            "tls_sni":     [str],   # treated as additional FQDNs
-            "dns_queries": [str],   # treated as additional FQDNs
-          },
-          ...
-        }
-
-    Returns ``network_iocs`` unchanged when ``sandbox_cti`` has no usable
-    network entries, or a merged ``NetworkIOCs`` with CTI rows appended (and
-    deduped by FQDN / address / URL).
-    """
-    if not isinstance(sandbox_cti, dict):
-        return network_iocs
-    cti_net = sandbox_cti.get("network")
-    if not isinstance(cti_net, dict):
-        return network_iocs
-
-    cti_domains_raw = _gather_strings(
-        cti_net.get("domains"), cti_net.get("tls_sni"), cti_net.get("dns_queries")
-    )
-    cti_ips_raw = _gather_strings(cti_net.get("ips"))
-    cti_urls_raw = _gather_strings(cti_net.get("http_urls"), cti_net.get("urls"))
-    cti_ja3_raw = _gather_strings(cti_net.get("tls_ja3"))
-    cti_ja3s_raw = _gather_strings(cti_net.get("tls_ja3s"))
-
-    if not (cti_domains_raw or cti_ips_raw or cti_urls_raw or cti_ja3_raw or cti_ja3s_raw):
-        return network_iocs
-
-    base = network_iocs or NetworkIOCs()
-    seen_fqdn = {d.fqdn.lower() for d in base.domains}
-    seen_addr = {ip.address for ip in base.ips}
-    seen_url = {u.url for u in base.urls}
-    seen_ja3 = set(base.ja3_fingerprints)
-    seen_ja3s = set(base.ja3s_fingerprints)
-
-    new_domains = list(base.domains)
-    for fqdn in cti_domains_raw:
-        key = fqdn.lower().rstrip(".")
-        if key in seen_fqdn or not _is_emittable_domain(fqdn):
-            continue
-        seen_fqdn.add(key)
-        # Same scorer as the CAPE path (single source of truth) so CTI-sourced
-        # domains are judged identically — and the real reason / scores are
-        # preserved (previously overwritten with a generic provenance string).
-        verdict = _assess_domain(fqdn)
-        reason = verdict.reason
-        if verdict.suspicious and reason:
-            reason = f"{reason} [Triage CTI]"
-        new_domains.append(
-            NetworkDomain(
-                fqdn=key,
-                is_suspicious=verdict.suspicious,
-                reason=reason,
-                dga_score=verdict.dga_score,
-                is_punycode=verdict.is_punycode,
-                homograph_target=verdict.homograph_target,
-            )
-        )
-
-    new_ips = list(base.ips)
-    for addr in cti_ips_raw:
-        if addr in seen_addr or not _is_emittable_ip(addr):
-            continue
-        seen_addr.add(addr)
-        new_ips.append(NetworkIP(address=addr))
-
-    new_urls = list(base.urls)
-    for url in cti_urls_raw:
-        if url in seen_url:
-            continue
-        seen_url.add(url)
-        new_urls.append(NetworkURL(url=url))
-
-    new_ja3 = list(base.ja3_fingerprints)
-    for ja3 in cti_ja3_raw:
-        if ja3 in seen_ja3:
-            continue
-        seen_ja3.add(ja3)
-        new_ja3.append(ja3)
-
-    new_ja3s = list(base.ja3s_fingerprints)
-    for ja3s in cti_ja3s_raw:
-        if ja3s in seen_ja3s:
-            continue
-        seen_ja3s.add(ja3s)
-        new_ja3s.append(ja3s)
-
-    added = (
-        (len(new_domains) - len(base.domains))
-        + (len(new_ips) - len(base.ips))
-        + (len(new_urls) - len(base.urls))
-        + (len(new_ja3) - len(base.ja3_fingerprints))
-        + (len(new_ja3s) - len(base.ja3s_fingerprints))
-    )
-    if added:
-        logger.info(
-            "network_extractor: merged %d SandboxCTI entries "
-            "(domains+%d, ips+%d, urls+%d, ja3+%d, ja3s+%d).",
-            added,
-            len(new_domains) - len(base.domains),
-            len(new_ips) - len(base.ips),
-            len(new_urls) - len(base.urls),
-            len(new_ja3) - len(base.ja3_fingerprints),
-            len(new_ja3s) - len(base.ja3s_fingerprints),
-        )
-
-    return NetworkIOCs(
-        domains=new_domains,
-        ips=new_ips,
-        urls=new_urls,
-        user_agents=list(base.user_agents),
-        ja3_fingerprints=new_ja3,
-        ja3s_fingerprints=new_ja3s,
-    )
-
-
-def _gather_strings(*sources: Any) -> list[str]:
-    """Flatten the given sources into a deduped ordered list of clean strings."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for src in sources:
-        if not isinstance(src, list):
-            continue
-        for item in src:
-            if not isinstance(item, str):
-                continue
-            v = item.strip()
-            if not v or v in seen:
-                continue
-            seen.add(v)
-            out.append(v)
     return out

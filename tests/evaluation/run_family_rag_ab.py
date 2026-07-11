@@ -56,7 +56,7 @@ def _run_condition(checkpoint: Path, rag_on: bool) -> int:
     env["PREPROCESSING__USE_ATTCK_CASE_RAG"] = flag
     # This is a STATIC-feature A/B (both RAGs feed the static analyst). Force the
     # mock sandbox so the dynamic analyst never detonates/uploads these live
-    # malware samples to the public tria.ge service — and so the only variable
+    # malware samples to a public sandbox service — and so the only variable
     # between OFF and ON is the RAG evidence, not sandbox nondeterminism.
     env["SANDBOX__BACKEND"] = "mock"
     # Cap the negotiation to a single round. With the mock sandbox the dynamic /

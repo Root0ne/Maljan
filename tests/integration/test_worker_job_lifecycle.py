@@ -332,15 +332,15 @@ def test_upload_temp_dir_resolves_to_absolute_path() -> None:
     """Regression: the original Wave 9 ERGO-06 commit set
     ``APISettings.upload_temp_dir = "data/uploads/.tmp"`` (relative) and
     consumers (API startup, sample upload endpoint, worker MinIO download)
-    used ``Path(settings.upload_temp_dir)`` directly. When TriageClient's
-    httpx coroutine then tried to open that relative path from a CWD that
+    used ``Path(settings.upload_temp_dir)`` directly. When a downstream
+    consumer then tried to open that relative path from a CWD that
     wasn't the project root it failed with ``[Errno 22] Invalid argument``.
 
     The hotfix is ``Path(settings.upload_temp_dir).resolve()`` at every
     use-site so the path stays absolute / CWD-independent. This test
     documents the invariant — Python's ``Path.resolve()`` will turn any
     relative settings value into an absolute Path that the downstream
-    Triage / MinIO / Ghidra consumers can rely on.
+    MinIO / Ghidra consumers can rely on.
     """
     from pathlib import Path
 

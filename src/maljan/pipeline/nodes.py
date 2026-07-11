@@ -22,7 +22,6 @@ from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     build_dga_isr,
     build_network_iocs,
-    merge_sandbox_cti_network,
 )
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.state import AgentArgument, AnalysisState
@@ -177,7 +176,7 @@ def make_analyst_node(
 
             if not chunks:
                 # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
-                # found that an ELF sample with no PCAP / Triage network
+                # found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
                 # AnalystError ([ERROR] prefix), which then routed into
                 # ``failed_analysts`` and forced ``degraded_mode=true``.
@@ -652,11 +651,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _sandbox_report = state.get("sandbox_report")
             _sandbox_report = _sandbox_report if isinstance(_sandbox_report, dict) else None
             try:
-                dga_isr = build_dga_isr(
-                    merge_sandbox_cti_network(
-                        build_network_iocs(_sandbox_report), state.get("sandbox_cti")
-                    )
-                )
+                dga_isr = build_dga_isr(build_network_iocs(_sandbox_report))
                 if dga_isr is not None:
                     isr_reports["network_dga"] = dga_isr
                     logger.info(
@@ -760,17 +755,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Evidence corpus build skipped: %s", exc)
 
-            # Sandbox CTI — when the active sandbox client synthesises a
-            # flat CTI block (currently TriageClient), forward it to the
-            # judge so deterministic family / C2 / extracted-secret
-            # evidence influences the verdict directly.
-            _cti_block: dict[str, Any] | None = None
-            _sb = state.get("sandbox_report")
-            if isinstance(_sb, dict):
-                _maybe = _sb.get("cti")
-                if isinstance(_maybe, dict):
-                    _cti_block = _maybe
-
             bundle = await judge.give_verdict(
                 reports=reports,
                 history=state.get("discussion_history") or [],
@@ -780,7 +764,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 memory_store=memory_store,
                 evidence_corpus=evidence_corpus or None,
                 current_sample_id=state.get("file_hash"),
-                cti_block=_cti_block,
             )
 
             stix_output: dict[str, Any] = {}
@@ -833,7 +816,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # the empty dynamic tab (sandbox traced nothing because the
             # sample noticed it was being observed). Pattern matched
             # case-insensitively against the signature name + description
-            # so Triage's verbose copy ("Listens for changes in the
+            # so a sandbox's verbose copy ("Listens for changes in the
             # sensor environment (might be used to detect emulation)") is
             # caught the same as CAPE's short ("anti-vm").
             _ANTI_EMU_RE = re.compile(
@@ -1127,10 +1110,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # cases), surfaced into FamilyAttribution.attck_case_candidates by the
                 # report node. Empty unless the RAG is enabled with a case corpus.
                 "attck_case_candidates": _attck_case_report,
-                # Sandbox CTI surface for the report node — persisted into
-                # the extended STIX bundle so the UI / API / paper export
-                # can render the full deterministic threat-intel snapshot.
-                "sandbox_cti": _cti_block,
             }
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
             # give_verdict() drives the LLM; on a constrained / local host it can
@@ -1292,12 +1271,6 @@ def make_report_node(container: ServiceContainer) -> Any:
                 overall_confidence=overall_confidence,
                 cascade_summary=cascade_summary,
                 malware_category=malware_category,
-                # Wave 10 W10-NET-01 (2026-05-30): pass Triage SandboxCTI
-                # so the network extractor can populate
-                # ``MalwareReport.network`` even when the CAPE-style
-                # sandbox_report has no ``network`` block (the common
-                # case for the Triage-only CTI flow).
-                sandbox_cti=state.get("sandbox_cti"),
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
@@ -1399,14 +1372,6 @@ def make_report_node(container: ServiceContainer) -> Any:
                 extended_dump = None
 
         if extended_dump is not None:
-            # Attach the sandbox CTI block as a custom STIX extension so the
-            # full deterministic threat-intel snapshot is preserved with the
-            # report (paper exports / API consumers / dashboards can quote
-            # it directly without re-parsing the raw sandbox report).
-            sandbox_cti = state.get("sandbox_cti")
-            if isinstance(sandbox_cti, dict) and sandbox_cti:
-                extended_dump.setdefault("x_maljan_cti", sandbox_cti)
-
             # D20 fix: rewrite the malware SDO description when the judge
             # emitted a fallback placeholder (timeout / non-JSON output).
             # The fallback writes a stale verdict that cross-layer
@@ -1453,14 +1418,11 @@ def make_report_node(container: ServiceContainer) -> Any:
 
         logger.info(
             "report_node: built MalwareReport (verdict=%s, severity=%s, "
-            "markdown_chars=%d, extended_objects=%d, cti=%s, fp_warnings=%d).",
+            "markdown_chars=%d, extended_objects=%d, fp_warnings=%d).",
             report.verdict,
             report.severity.rating,
             len(markdown),
             len(extended_dump.get("objects", [])) if extended_dump else 0,
-            "yes"
-            if isinstance(state.get("sandbox_cti"), dict) and state.get("sandbox_cti")
-            else "no",
             len(fp_warnings),
         )
 

@@ -209,8 +209,21 @@ class ChunkingConfig(BaseModel):
     independently and merge the summaries before ISR construction.
     """
 
-    # Maximum tokens per chunk sent to the LLM
-    max_tokens_per_chunk: int = 6000
+    # Maximum tokens per chunk sent to the LLM.
+    #
+    # 2026-07-11 — raised 6000 -> 20000 after the GPU/context upgrade. The old
+    # 6000 was sized for the pre-GPU ~32K-context era; against a real PE it
+    # split the decompiled static text into 27 chunks, and since the static
+    # analyst's per-chunk ReAct loop re-runs ``load_program`` + Ghidra auto-
+    # analysis on EVERY chunk (see static_analyst._ISR_SYSTEM step 1), each of
+    # the 27 chunks burned its full 1200s budget — jobs never finished (live
+    # job 95d88f7e/task 10, 2026-07-11: chunk 1/27 alone hit the hard cap).
+    # llama-server now serves 128K (``-c 131072``); budgeting ~80K for the
+    # static loop's 40 tool observations (max_tool_output_chars=8000 each), ~4K
+    # system and ~8K generation leaves ~36K headroom, so 20K/chunk is safe and
+    # collapses that same PE to ~8 chunks. Override via
+    # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
+    max_tokens_per_chunk: int = 20000
 
     # Overlap between consecutive chunks (in tokens) to preserve context
     overlap_tokens: int = 200
@@ -265,76 +278,18 @@ class SandboxConfig(BaseModel):
         "cape2" — CAPEv2Client submits samples to a live CAPEv2 instance via
                 its REST API. Requires httpx and a running CAPEv2 server.
                 Recommended for production / private samples.
-        "triage" — TriageClient submits to Recorded Future Sandbox (tria.ge).
-                Public-cloud submissions on the free Researcher tier are
-                world-visible and cannot be deleted; use only with samples
-                whose public exposure is already acceptable (corpus samples,
-                published-IOC samples). Intended for academic / research-paper
-                reproducibility — every submission yields a citeable
-                tria.ge/<sample_id> URL.
 
     cape2_base_url, cape2_api_token, cape2_timeout_seconds,
     cape2_poll_interval_seconds:
         CAPEv2 endpoint, optional bearer token, completion timeout and poll
         interval. Token can be empty for unauthenticated local instances.
-
-    triage_api_token, triage_base_url, triage_timeout_seconds,
-    triage_poll_interval_seconds:
-        Triage API token (https://tria.ge/account -> API access), API base
-        URL (default https://api.tria.ge — leave the trailing /v0 off, the
-        client appends it), submission-to-report timeout and poll interval.
     """
 
-    backend: str = "mock"  # "mock" | "cape2" | "triage"
+    backend: str = "mock"  # "mock" | "cape2"
     cape2_base_url: str = "http://localhost:8000"
     cape2_api_token: SecretStr = SecretStr("")
     cape2_timeout_seconds: int = 300
     cape2_poll_interval_seconds: int = 10
-    triage_api_token: SecretStr = SecretStr("")
-    triage_base_url: str = "https://api.tria.ge"
-    triage_timeout_seconds: int = 1800
-    triage_poll_interval_seconds: int = 15
-    # Research-paper defaults: every submission embeds an explicit OS-tag
-    # profile derived from the file extension, so behavioral analysis is
-    # guaranteed even on Researcher-tier accounts that have no saved
-    # profiles (where ``auto: true`` would fall back to static-only).
-    # Override per-account by setting ``triage_force_os_tag`` to a tag from
-    # ``GET /v0/resources`` (e.g. ``os:windows10-2004-x64``); leave empty to
-    # use the built-in extension -> OS mapping.
-    triage_force_os_tag: str = ""
-    # Behavioral analysis timeout per task (seconds, Triage hard cap 3600).
-    triage_behavioral_timeout: int = 120
-    # Behavioral network mode: internet | drop | tor.
-    triage_network_mode: str = "internet"
-    # Optional VPN geolocation tag (see GET /v0/geolocations). Empty = default.
-    triage_geolocation: str = ""
-    # Optional password for encrypted archives. Common for malware
-    # distribution (e.g. "infected"-locked .zip / .rar).
-    triage_archive_password: str = ""
-    # Comma-separated experiment-metadata tags embedded in every
-    # submission (e.g. "experiment:rq2,batch:7"). Surfaces in Triage's
-    # report and lets the paper correlate runs by tag.
-    triage_user_tags: str = ""
-    # Set to True for the old static -> POST /profile {auto:true} flow.
-    # Only useful when the account has saved profiles via the web UI; the
-    # default embedded-profile path covers the typical research case.
-    triage_interactive: bool = False
-    triage_auto_profile: bool = False
-    # Pull the decrypted PCAPNG file for each behavioral task and persist it
-    # under data/triage_pcaps/<task>/. Off by default — PCAPs are large
-    # (often tens of MB) and only network-deep analyses need them.
-    triage_fetch_pcapng: bool = False
-    triage_pcap_dir: str = "data/triage_pcaps"
-    # Download dropped/dumped binaries from each behavioral task — payload
-    # bytes themselves, not just sha256/path. Persisted under
-    # data/triage_dumps/<sample_id>/<sha256_prefix>_<name>. Off by default
-    # (can be many tens of MB per sample).
-    triage_fetch_dumps: bool = False
-    triage_dumps_dir: str = "data/triage_dumps"
-    # Pull the raw kernel-monitor JSON log for each behavioral task. Off
-    # by default. Persisted under data/triage_logs/<sample>/<task>.onemon.json.
-    triage_fetch_onemon: bool = False
-    triage_onemon_dir: str = "data/triage_logs"
 
 
 class AnalysisConfig(BaseModel):
@@ -374,7 +329,15 @@ class PreprocessingConfig(BaseModel):
     summarizer_provider: str = "ollama"
     summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: int = 150
-    max_tool_output_chars: int = 8000
+    # 2026-07-11 — lowered 8000 -> 3000. The Qwen3 model is SWA (sliding-window
+    # attention); ik_llama.cpp cannot reuse the KV cache across the static
+    # analyst's multi-step ReAct loop, so every step re-prefills the whole
+    # accumulated context from scratch (llama log: "forcing full prompt
+    # re-processing due to lack of cache data (likely due to SWA)" — 31.8k tokens
+    # = 51s). Capping each Ghidra tool observation to ~750 tokens slows context
+    # growth so those forced re-prefills stay cheap. Pairs with the static
+    # max-steps cut below; revisit if we move to a --swa-full llama build.
+    max_tool_output_chars: int = 3000
 
     # Sink-reachability triage (Maltracker-inspired). When enabled, the static
     # analyst runs a deterministic pre-pass over the Ghidra call graph to find
@@ -421,7 +384,7 @@ class PreprocessingConfig(BaseModel):
     # static-feature PROFILE of the sample matched against an offline-built family
     # fingerprint KB (from MABEL / a raw-binary corpus); the top-k nearest families
     # are injected as CANDIDATE evidence and the LLM decides the attribution. This
-    # fills the static-only gap (no Triage CTI / sandbox sig to name a family) while
+    # fills the static-only gap (no sandbox CTI / sandbox sig to name a family) while
     # staying LLM-centric: retrieval only surfaces candidates — it never predicts.
     # No trained model and no heavy deps (reuses the fastembed BGE-384 embedder
     # already loaded for LTM). OFF by default: absent a catalog it degrades to a
@@ -653,7 +616,17 @@ class Settings(BaseSettings):
             # 3600s job timeout once we add dynamic (600s) + network
             # (300s) + negotiation + judge. Reduce to 600s for hosted
             # multi-slot APIs.
-            "static": 1200,
+            #
+            # 2026-07-11 — cut 1200 -> 300 (per *chunk*, not per analyst). On the
+            # SWA model with no cross-step KV reuse a chunk's ReAct occasionally
+            # blows up (full re-prefill loop) and, at 1200s, burned 20 min before
+            # being skipped — a few such chunks alone exceed the 3600s job budget.
+            # safe_analyze_isr_chunked *tolerates* per-chunk failures (it merges
+            # the successful chunks), so a tight 300s cap cuts a runaway chunk
+            # short and moves on: fast chunks (observed 105-188s incl. cold Ghidra
+            # auto-analysis on chunk 1) still finish, blowups are dropped, and 10
+            # chunks stay well under budget. Pairs with static max_steps=8.
+            "static": 300,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -679,9 +652,30 @@ class Settings(BaseSettings):
     # hitting the step cap while its 1200s *time* budget was barely touched —
     # the per-agent timeout override added earlier missed the parallel step
     # cap). Override via env, e.g. ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
+    # ``network`` is capped LOW: with a real CAPE PCAP the analyst can enter a
+    # read_pcap_summary/extract_* tool loop whose large per-packet output is slow
+    # to prefill+decode on a constrained local model, over-running the 330s
+    # analyst budget (live task 8, 2026-07-11). The structured flows are handed
+    # to it up front (see network_analyst.analyze_isr), so a tight cap keeps the
+    # optional PCAP peek from starving synthesis. ~6 steps ≈ 2-3 tool calls.
+    # 2026-07-11 — static lowered 40 -> 12. The 40-step ceiling let the ReAct
+    # loop accumulate ~58k tokens of Ghidra observations; on the SWA model
+    # (no cross-step KV-cache reuse in ik_llama.cpp) every step re-prefills that
+    # growing context from scratch, so late steps cost 50-90s each and the chunk
+    # blew its 1200s cap (live fixture job 2026-07-11: chunk 1/10 timed out at
+    # ~16.5 min, same "Request timed out" as the real 27-chunk run). At 12 steps
+    # most chunks finished in ~170s but occasional deep chunks still blew the cap
+    # (fixture retest 2026-07-11: chunks 1-3 = 166/175/188s, chunk 4 timed out),
+    # so it is set to 8 (~4 tool calls: load_program -> auto-analyze -> a couple
+    # decompiles) — below the 5-tool-call chunk that finished cleanly in 166s — to
+    # keep the accumulated context, and thus each forced re-prefill, bounded so
+    # every chunk stays fast. Staged fix ("bound first"); the clean fix is a
+    # --swa-full llama build (restores cross-step cache reuse). Override via
+    # ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
     react_agent_max_steps_overrides: dict[str, int] = Field(
         default_factory=lambda: {
-            "static": 40,
+            "static": 8,
+            "network": 6,
         }
     )
 

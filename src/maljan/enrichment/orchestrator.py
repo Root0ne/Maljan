@@ -50,6 +50,22 @@ def _annotate_reputation_age(rep: dict[str, Any]) -> None:
             rep["stale"] = True
 
 
+def _carry_cape_context(prev: Any, rep: dict[str, Any]) -> None:
+    """Preserve CAPE-sourced context when live enrichment replaces reputation.
+
+    The network extractor seeds ``reputation`` with a deterministic
+    ``virustotal_url`` permalink (plus ``hostname`` / ``contacted_ports`` for
+    IPs) straight from the CAPE report. The live VT/AbuseIPDB scores are richer
+    but lack those keys, so fold them forward instead of clobbering them.
+    """
+    if not isinstance(prev, dict):
+        return
+    for key in ("virustotal_url", "hostname", "contacted_ports"):
+        val = prev.get(key)
+        if val is not None and rep.get(key) is None:
+            rep[key] = val
+
+
 def _reputation_is_malicious(rep: dict[str, Any] | None) -> bool:
     """Whether a fresh reputation result indicates a malicious indicator."""
     if not isinstance(rep, dict) or rep.get("stale"):
@@ -157,6 +173,7 @@ async def _enrich_domains(
         rep = await vt.domain_reputation(fqdn)
         if rep is not None:
             _annotate_reputation_age(rep)
+            _carry_cape_context(dom.get("reputation"), rep)
             dom["reputation"] = rep
             # Feed verified reputation back into the heuristic suspicion flag so
             # an enriched-malicious domain is not stuck at is_suspicious=False.
@@ -188,6 +205,7 @@ async def _enrich_ips(
                 rep = await abuse.ip_check(address)
             if rep is not None:
                 _annotate_reputation_age(rep)
+                _carry_cape_context(ip.get("reputation"), rep)
                 ip["reputation"] = rep
                 if _reputation_is_malicious(rep):
                     ip["is_suspicious"] = True

@@ -370,7 +370,6 @@ class JudgeAgent:
         memory_store: MemoryStore | None = None,
         evidence_corpus: set[str] | None = None,
         current_sample_id: str | None = None,
-        cti_block: dict[str, Any] | None = None,
     ) -> Bundle:
         """Final judge decision returning a structured STIX 2.1 Bundle.
 
@@ -388,13 +387,6 @@ class JudgeAgent:
         top-k most similar past analysis cases are retrieved and injected as
         few-shot context before the verdict LLM call.
 
-        Triage CTI: When ``cti_block`` (the flat ``report["cti"]`` dict
-        synthesised by ``TriageClient``) is provided, a compact summary of
-        the deterministic CTI evidence (family, MITRE TTPs, C2, extracted
-        secrets, dropped files, etc.) is injected into the prompt. The LLM
-        is instructed to weigh it as ground-truth evidence, especially
-        when analyst claims are sparse or conflict.
-
         Args:
             reports: Final expert reports (revised where applicable).
             history: Full negotiation history.
@@ -402,8 +394,6 @@ class JudgeAgent:
             attck_validator: Optional ATTCKValidator instance.
             cascade_summary: Optional CascadeSummary from TTPCascadeEngine.
             memory_store: Optional MemoryStore for long-term case retrieval.
-            cti_block: Optional flat CTI dict from the sandbox client
-                (currently TriageClient's ``report["cti"]``).
 
         Returns:
             A valid STIX 2.1 Bundle with MITRE ATT&CK TTP mappings.
@@ -452,13 +442,6 @@ class JudgeAgent:
         if memory_block:
             reports_text = f"{reports_text}\n\n{memory_block}"
 
-        # Sandbox CTI block — deterministic evidence from the sandbox layer
-        # (currently the TriageClient ``report["cti"]`` shape). Empty when
-        # the active sandbox client does not synthesise CTI (mock / cape2).
-        cti_text = _build_cti_block(cti_block)
-        if cti_text:
-            reports_text = f"{reports_text}\n\n{cti_text}"
-
         verdict_system = (
             "You are the Chief Malware Judge. Based on the expert reports below, "
             "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
@@ -476,12 +459,6 @@ class JudgeAgent:
             "appear verbatim in the deterministic evidence (static strings, "
             "sandbox observations, or network IOCs). When in doubt, emit zero "
             "Indicators — the deterministic renderer will fill them in.\n"
-            "- When a SANDBOX_CTI block is present, treat it as ground-truth "
-            "deterministic evidence: families it lists MUST be reflected in "
-            "the Bundle (Malware SDO), C2 entries become Indicator + "
-            "Infrastructure SDOs, extracted credentials / mutexes / keys "
-            "become Indicator objects with kind=other. Use it to corroborate "
-            "or override sparse analyst claims.\n"
             "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
         )
 
@@ -1107,130 +1084,3 @@ class JudgeAgent:
 
         lines.append("=== END LONG-TERM MEMORY ===")
         return "\n".join(lines)
-
-
-def _build_cti_block(cti: dict[str, Any] | None) -> str:
-    """Render the flat sandbox CTI dict into a compact prompt section.
-
-    Returns ``""`` when ``cti`` is None / empty / contains no signal so the
-    judge prompt stays small for runs that did not go through a CTI-aware
-    sandbox (mock / CAPEv2 / Triage with empty observations).
-
-    Lists are truncated to keep the prompt bounded — full data still lives
-    on ``report["cti"]`` for downstream consumers.
-    """
-    if not isinstance(cti, dict) or not cti:
-        return ""
-
-    def _head(items: Any, n: int = 8) -> list[Any]:
-        if not isinstance(items, list):
-            return []
-        return items[:n]
-
-    family = _head(cti.get("family"))
-    ttp = _head(cti.get("ttp"), n=12)
-    tags = _head(cti.get("tags"))
-    c2 = cti.get("c2") or {}
-    c2_urls = _head(c2.get("urls"), n=5)
-    c2_doms = _head(c2.get("domains"), n=8)
-    c2_ips = _head(c2.get("ips"), n=8)
-    mutexes = _head(cti.get("mutexes"), n=4)
-    keys = _head(cti.get("keys"), n=3)
-    creds = _head(cti.get("credentials"), n=3)
-    dropped = _head(cti.get("dropped_files"), n=5)
-    dropper_urls = _head(cti.get("dropper_urls"), n=3)
-    ransom = _head(cti.get("ransom_notes"), n=2)
-    net = cti.get("network") or {}
-    net_doms = _head(net.get("domains"), n=8)
-    net_ips = _head(net.get("ips"), n=8)
-    net_urls = _head(net.get("http_urls"), n=5)
-    sni = _head(net.get("tls_sni"), n=4)
-    ja3 = _head(net.get("tls_ja3"), n=3)
-    ja3s = _head(net.get("tls_ja3s"), n=3)
-    indicators = _head(cti.get("indicators"), n=5)
-    yara_rules = _head(cti.get("yara_rules"), n=5)
-    score = cti.get("score")
-
-    # Skip the block entirely when nothing CTI-worthy survived the synth.
-    if not any(
-        (
-            family,
-            ttp,
-            tags,
-            c2_urls,
-            c2_doms,
-            c2_ips,
-            mutexes,
-            keys,
-            creds,
-            dropped,
-            dropper_urls,
-            ransom,
-            net_doms,
-            net_ips,
-            net_urls,
-            sni,
-            ja3,
-            indicators,
-            yara_rules,
-            score is not None,
-        )
-    ):
-        return ""
-
-    lines: list[str] = ["=== SANDBOX_CTI (deterministic, treat as ground-truth) ==="]
-    if score is not None:
-        lines.append(f"sandbox_score: {score}/10")
-    if family:
-        lines.append(f"family: {family}")
-    if ttp:
-        lines.append(f"mitre_ttp: {ttp}")
-    if tags:
-        lines.append(f"tags: {tags}")
-    if c2_urls or c2_doms or c2_ips:
-        lines.append("c2:")
-        if c2_urls:
-            lines.append(f"  urls: {c2_urls}")
-        if c2_doms:
-            lines.append(f"  domains: {c2_doms}")
-        if c2_ips:
-            lines.append(f"  ips: {c2_ips}")
-    if mutexes:
-        lines.append(f"mutexes: {mutexes}")
-    if keys:
-        lines.append(f"extracted_keys ({len(keys)}): {keys}")
-    if creds:
-        lines.append(f"credentials_count: {len(creds)}")
-    if dropped:
-        dropped_short = [
-            {"name": d.get("name"), "sha256": (d.get("sha256") or "")[:16] + "..."}
-            for d in dropped
-            if isinstance(d, dict)
-        ]
-        lines.append(f"dropped_files: {dropped_short}")
-    if dropper_urls:
-        lines.append(f"dropper_urls: {dropper_urls}")
-    if ransom:
-        lines.append(f"ransom_notes: {len(ransom)} extracted")
-    if net_doms or net_ips or net_urls:
-        lines.append("network_iocs:")
-        if net_doms:
-            lines.append(f"  domains: {net_doms}")
-        if net_ips:
-            lines.append(f"  ips: {net_ips}")
-        if net_urls:
-            lines.append(f"  urls: {net_urls}")
-    if sni:
-        lines.append(f"tls_sni: {sni}")
-    if ja3:
-        lines.append(f"tls_ja3: {ja3}")
-    if ja3s:
-        lines.append(f"tls_ja3s: {ja3s}")
-    if indicators:
-        ind_short = [i.get("ioc", "") for i in indicators if isinstance(i, dict) and i.get("ioc")]
-        if ind_short:
-            lines.append(f"sandbox_indicators: {ind_short}")
-    if yara_rules:
-        lines.append(f"yara_rules: {yara_rules}")
-    lines.append("=== END SANDBOX_CTI ===")
-    return "\n".join(lines)

@@ -19,10 +19,7 @@ from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix
 from maljan.extractors.dynamic_extractor import build_dynamic_behavior
-from maljan.extractors.network_extractor import (
-    build_network_iocs,
-    merge_sandbox_cti_network,
-)
+from maljan.extractors.network_extractor import build_network_iocs
 from maljan.extractors.pe_extractor import build_static_analysis
 from maljan.extractors.persistence_extractor import build_persistence_list
 from maljan.extractors.sample_identity import build_sample_identity
@@ -63,14 +60,6 @@ class MalwareReportBuilder:
         overall_confidence: float = 0.0,
         cascade_summary: Any | None = None,
         malware_category: str | None = None,
-        # Wave 10 W10-NET-01 (2026-05-30): Triage SandboxCTI block carries
-        # network IOCs (domains, IPs, URLs, JA3) that the CAPE-style
-        # ``sandbox_report['network']`` doesn't capture. Folding both
-        # through the same ``build_network_iocs`` pipeline keeps the
-        # NETWORK tab + SUMMARY snapshot card populated even when the
-        # cuckoo-like sandbox path is empty (the common case for the
-        # Triage-only CTI flow).
-        sandbox_cti: dict[str, Any] | None = None,
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
         sample_platform: str | None = None,
@@ -88,7 +77,6 @@ class MalwareReportBuilder:
         self.overall_confidence = overall_confidence
         self.cascade_summary = cascade_summary
         self.malware_category = malware_category
-        self.sandbox_cti = sandbox_cti
         self.degraded_mode = degraded_mode
         self.degradation_reasons = degradation_reasons or []
         self.sample_platform = sample_platform
@@ -108,11 +96,6 @@ class MalwareReportBuilder:
         static = build_static_analysis(sample_path=self.sample_path)
         dynamic = build_dynamic_behavior(self.sandbox_report)
         network = build_network_iocs(self.sandbox_report)
-        # Wave 10 W10-NET-01 (2026-05-30): fold the Triage SandboxCTI
-        # network IOCs onto whatever the CAPE-style extractor produced.
-        # When the sandbox report is empty (Triage-only CTI path) this is
-        # the only source of typed network indicators.
-        network = merge_sandbox_cti_network(network, self.sandbox_cti)
         persistence = build_persistence_list(self.sandbox_report, self.sample_platform)
         cells, mappings = build_capability_matrix(
             cascade_summary=self.cascade_summary,

@@ -227,7 +227,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     field="attribution.family",
                     explanation=(
                         "D11 guardrail (Wave 3, 2026-05-24): the family "
-                        "name came from analyst LLM with no Triage CTI, "
+                        "name came from analyst LLM with no sandbox CTI, "
                         "sandbox signature, or Qdrant ground match. The "
                         "confidence has already been zeroed and the Wave 4 "
                         "Sigma/YARA gates refuse auto-generation. UI "

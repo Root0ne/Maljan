@@ -50,17 +50,17 @@ def _is_family_grounded(
     """Return True when ``family`` is corroborated by deterministic evidence.
 
     D11 fix: in the 2026-05-23 E2E run the judge fallback path emitted
-    ``attribution.family = "rat"`` despite Triage returning an empty
+    ``attribution.family = "rat"`` despite the sandbox returning an empty
     ``families[]`` and no analyst claim ever naming the family. The previous
     builder copied the value through unconditionally with the global
     ``overall_confidence`` as ``family_confidence`` — UI consumers had no way to
     tell which family assertions had grounding.
 
     Grounding sources (any one is enough):
-    - Triage CTI ``family[]`` list contains the candidate (case insensitive
-      substring match — Triage often emits multi-token entries like
+    - Sandbox CTI ``family[]`` list contains the candidate (case insensitive
+      substring match — CTI often emits multi-token entries like
       ``"trojan/rat"``).
-    - Triage ``signatures[].name`` mentions the family literally.
+    - Sandbox ``signatures[].name`` mentions the family literally.
     - Any ISR claim's ``claim``, ``evidence_ref``, or ``technique_id`` text
       contains the family name.
 
@@ -74,14 +74,14 @@ def _is_family_grounded(
     if not needle:
         return True
 
-    # Triage CTI block (synthesised by TriageClient._synthesize_cti)
+    # Sandbox CTI block (when the sandbox synthesises one)
     cti = (sandbox_report or {}).get("cti") or {}
     if isinstance(cti.get("family"), list):
         for f in cti["family"]:
             if isinstance(f, str) and needle in f.lower():
                 return True
 
-    # Triage / CAPE sandbox signatures
+    # Sandbox signatures
     sigs = (sandbox_report or {}).get("signatures") or []
     for sig in sigs:
         if not isinstance(sig, dict):
@@ -127,7 +127,7 @@ def build_family_attribution(
     if family and not grounded:
         logger.info(
             "Attribution guardrail: family=%r marked as ungrounded — no "
-            "Triage CTI / sandbox sig / ISR claim corroborates it. "
+            "sandbox CTI / sandbox sig / ISR claim corroborates it. "
             "family_confidence forced to 0.0.",
             family,
         )

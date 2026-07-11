@@ -72,7 +72,7 @@ _REAL_DOMAIN_CASES = [
     "google.com",
     "evil.example.net",
     "c2-server.malware.tld",
-    "api.tria.ge",
+    "api.example.io",
     "sub.deep.example.co.uk",
 ]
 

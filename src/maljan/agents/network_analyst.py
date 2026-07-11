@@ -74,7 +74,6 @@ class NetworkAnalyst(BaseAnalyst):
         if getattr(self, "tools", None):
             return
 
-        import asyncio
         import sys
 
         from mcp import StdioServerParameters
@@ -94,20 +93,17 @@ class NetworkAnalyst(BaseAnalyst):
 
         toolkit = MCPLangChainToolkit(server_params)
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        # Init the MCP toolkit on the shared agent loop so its session/transport
+        # is bound to the SAME loop the ReAct tool calls later run on. Running it
+        # on a throwaway ``new_event_loop()`` (LangGraph runs sync nodes in a
+        # worker thread with no running loop) bound the toolkit to a different
+        # loop, so the first PCAP MCP tool call raised "<Event> is bound to a
+        # different event loop" (see static_analyst._run_async for the full
+        # rationale). Always called from the sync analyze path, never from within
+        # the agent loop, so blocking on the result cannot deadlock.
+        from maljan.agents.base_agent import _run_coro_blocking
 
-        if loop is not None and loop.is_running():
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            loop.run_until_complete(toolkit.initialize())
-        else:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(toolkit.initialize())
+        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0)
 
         self.toolkit = toolkit
         self.tools = toolkit.get_tools()
@@ -254,16 +250,31 @@ class NetworkAnalyst(BaseAnalyst):
             mcp_ready = self._try_initialize_mcp()
 
             if mcp_ready:
+                # The structured CAPE flows (``data``) are the PRIMARY evidence —
+                # they already carry DNS/HTTP/TCP/UDP/hosts with ASN/country +
+                # VirusTotal permalinks (network_extractor). The raw PCAP is an
+                # OPTIONAL deep-dive: on a constrained local model an unbounded
+                # read_pcap_summary loop over-ran the 330s analyst budget and
+                # aborted, so we hand the analyst the structured evidence up front
+                # and cap the PCAP peek (react_agent_max_steps_overrides.network).
                 prompt_messages = [
                     ("system", _ISR_SYSTEM),
                     (
                         "human",
-                        "A PCAP capture file is available for analysis.\n\n"
-                        f"PCAP file path: {pcap_path}\n\n"
-                        "Use the available tools to inspect the PCAP, then return "
-                        "a structured list of findings.\n\n"
+                        "Analyze the network activity below and return a structured "
+                        "list of findings.\n\n"
+                        "PRIMARY EVIDENCE — structured CAPE network flows (DNS / HTTP / "
+                        "TCP / UDP / contacted hosts, annotated with ASN/country and "
+                        "VirusTotal permalinks):\n"
+                        f"{data}\n\n"
+                        f"A raw packet capture is ALSO available at: {pcap_path}\n"
+                        "You MAY make at most one or two PCAP tool calls "
+                        "(read_pcap_summary / extract_dns / extract_http) to confirm "
+                        "packet-level beaconing or tunnelling — but base your findings "
+                        "primarily on the structured flows above and do NOT block on the "
+                        "PCAP.\n\n"
                         "For each finding state: the claim, the exact artifact reference "
-                        "(e.g. 'PCAP frame 10: dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
+                        "(e.g. 'TCP dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
                         "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
                         "Format each finding as:\n"
                         "CLAIM: <claim text>\n"

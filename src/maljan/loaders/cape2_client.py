@@ -233,6 +233,51 @@ class CAPEv2Client:
             report=report,
         )
 
+    def fetch_pcap(self, task_id: str, dest_dir: str | Path) -> str | None:
+        """Download the task's raw PCAP into ``dest_dir``; return the local path.
+
+        ``GET /apiv2/tasks/get/pcap/{task_id}/`` streams the libpcap capture of
+        the detonation's traffic. The network analyst's local PCAP MCP
+        (read_pcap_summary / extract_dns / extract_http) then deep-inspects it
+        for beaconing / tunnelling that the structured ``network`` block can't
+        express. Returns None when the task has no PCAP (404), the payload is
+        empty, or the download fails — the analyst then works from the
+        structured IOCs alone (never a hard failure).
+        """
+        dest = Path(dest_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        out = dest / f"cape_task_{task_id}.pcap"
+        try:
+            with self._http.stream("GET", f"/apiv2/tasks/get/pcap/{task_id}/", timeout=120) as resp:
+                if resp.status_code == 404:
+                    logger.info("CAPEv2Client: task %s has no PCAP (404).", task_id)
+                    return None
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "CAPEv2Client: PCAP fetch HTTP %d for task %s.",
+                        resp.status_code,
+                        task_id,
+                    )
+                    return None
+                with open(out, "wb") as f:
+                    for chunk in resp.iter_bytes(65536):
+                        f.write(chunk)
+        except Exception as exc:
+            logger.warning("CAPEv2Client: PCAP download failed for task %s: %s", task_id, exc)
+            return None
+
+        # libpcap/pcapng global header is 24 bytes; anything smaller is empty.
+        size = out.stat().st_size if out.exists() else 0
+        if size < 24:
+            logger.info(
+                "CAPEv2Client: PCAP for task %s empty/too small (%d bytes) — skipping.",
+                task_id,
+                size,
+            )
+            return None
+        logger.info("CAPEv2Client: PCAP for task %s -> %s (%d bytes).", task_id, out, size)
+        return str(out)
+
     def close(self) -> None:
         """Close the underlying HTTP client connection pool."""
         self._http.close()

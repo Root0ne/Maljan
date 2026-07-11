@@ -133,9 +133,38 @@ class MaljanApp:
                 result = await client.submit_and_wait(path)
             else:
                 task_id = client.submit(sample_path)
-                status = client.wait_for_completion(task_id)
+                # Thread the configured completion timeout + poll interval
+                # (SANDBOX__CAPE2_TIMEOUT_SECONDS / _POLL_INTERVAL_SECONDS)
+                # into the poll loop. Without this the client's 300s default
+                # was used regardless of config, and a real CAPE detonation
+                # (win10 guest run alone is ~280s + processing) timed out
+                # before the report was ready — silently degrading every run
+                # to static-only. All SandboxClient impls share this signature.
+                status = client.wait_for_completion(
+                    task_id,
+                    timeout_seconds=self.config.sandbox.cape2_timeout_seconds,
+                    poll_interval_seconds=self.config.sandbox.cape2_poll_interval_seconds,
+                )
                 if status == "reported":
                     result = client.fetch_report(task_id)
+                    # Pull the raw PCAP alongside the JSON report so the network
+                    # analyst can deep-inspect the capture with its local PCAP
+                    # MCP (per-packet beaconing / tunnelling / TLS-SNI) — the
+                    # structured ``network`` block can't express that. Best
+                    # effort: a missing/failed PCAP just leaves the analyst on
+                    # the structured IOCs. Only CAPEv2Client exposes fetch_pcap.
+                    if hasattr(client, "fetch_pcap") and isinstance(result.report, dict):
+                        try:
+                            import tempfile
+
+                            pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
+                            pcap_path = client.fetch_pcap(task_id, pcap_dir)
+                            if pcap_path:
+                                net = result.report.setdefault("network", {})
+                                if isinstance(net, dict):
+                                    net["pcap_local_path"] = pcap_path
+                        except Exception as exc:
+                            logger.warning("PCAP fetch/attach failed (non-fatal): %s", exc)
                 else:
                     result = SubmissionResult(
                         task_id=task_id,
@@ -177,7 +206,7 @@ class MaljanApp:
             file_hash: Sample identifier (sha256).
             file_name: Optional human-readable name.
             sample_path: Optional host path to the original sample file for
-                sandbox submission (Triage / CAPE upload).
+                sandbox submission (CAPE upload).
             static_sample_path: Optional container-visible path the static
                 analyst's Ghidra MCP server can read. Worker on the host
                 writes the sample into ``data/samples/<sha256><ext>`` (bound
@@ -255,7 +284,6 @@ class MaljanApp:
             "stix_bundle_extended": None,
             "degraded_mode": False,
             "degradation_reasons": [],
-            "sandbox_cti": None,
             # F10: declared AnalysisState channels, populated later by the
             # attribution/RAG nodes. Must be initialised so the TypedDict is
             # complete (and the LangGraph channels exist from the first step).

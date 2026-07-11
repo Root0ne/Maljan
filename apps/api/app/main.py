@@ -32,10 +32,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from pathlib import Path as _Path
 
     # Wave 9 HOTFIX-08 (2026-05-29): resolve to absolute BEFORE writing so
-    # downstream consumers (worker MinIO download, Triage submit) don't
+    # downstream consumers (worker MinIO download, sandbox submit) don't
     # inherit a CWD-dependent relative path. The 2026-05-29 ELF smoke test
-    # hit ``[Errno 22] Invalid argument`` from TriageClient.submit_and_wait
-    # when its httpx coroutine context tried to open
+    # hit ``[Errno 22] Invalid argument`` from the sandbox client's submit
+    # path when its httpx coroutine context tried to open
     # ``data\uploads\.tmp\<sha>.elf`` from a CWD that wasn't the project root.
     _upload_tmp = _Path(settings.upload_temp_dir).resolve()
     try:

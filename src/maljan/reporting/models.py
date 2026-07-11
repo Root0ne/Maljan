@@ -387,7 +387,7 @@ class FamilyAttribution(BaseModel):
     family: str | None = None
     family_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
     # D11 grounding flag — True when the family was named by at least one
-    # supporting source (Triage CTI ``family[]``, sandbox signature, or
+    # supporting source (sandbox CTI ``family[]``, sandbox signature, or
     # an ISR claim). False means the value came from the LLM/heuristic
     # path with no evidence in the deterministic layers; the UI should
     # render it with a "low confidence" badge. Defaults to True so legacy

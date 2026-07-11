@@ -49,7 +49,6 @@ class DynamicAnalyst(BaseAnalyst):
         if getattr(self, "tools", None):
             return
 
-        import asyncio
         import os
 
         from mcp import StdioServerParameters
@@ -100,20 +99,17 @@ class DynamicAnalyst(BaseAnalyst):
 
             toolkit = MCPLangChainToolkit(server_params)
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        # Init the MCP toolkit on the shared agent loop so its session/transport
+        # is bound to the SAME loop the ReAct tool calls later run on. Running it
+        # on a throwaway ``new_event_loop()`` (LangGraph runs sync nodes in a
+        # worker thread with no running loop) bound the toolkit to a different
+        # loop, so the first CAPE MCP tool call raised "<Event> is bound to a
+        # different event loop" (see static_analyst._run_async for the full
+        # rationale). Always called from the sync analyze path, never from within
+        # the agent loop, so blocking on the result cannot deadlock.
+        from maljan.agents.base_agent import _run_coro_blocking
 
-        if loop is not None and loop.is_running():
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            loop.run_until_complete(toolkit.initialize())
-        else:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(toolkit.initialize())
+        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0)
 
         self.toolkit = toolkit
         # Essential CAPE tool list is config-driven: agents do not need to be
