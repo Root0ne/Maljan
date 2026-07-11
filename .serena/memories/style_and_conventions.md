@@ -1,6 +1,6 @@
 # Style and Conventions
 
-> Refreshed 2026-05-30.
+> Refreshed 2026-07-05.
 
 ## Language & Formatting
 - All code, comments, identifiers, docs, and commit messages in **English**.
@@ -31,12 +31,23 @@
   the pipeline always continues.
 - **Platform consistency (Wave 4)**: when touching the cascade / detection rules / fp_linter, keep
   `state["platform"]` threaded consistently (judge and report nodes must use the same value).
+  Platform values are now ONLY windows/linux/unknown; foreign samples rejected at entry.
 - **Confidence integrity (CONF-INFL-01)**: do not surface inflated cascade-only confidence; honour
   `degraded_mode` and the 0.60 cap in consumers.
+- **New feature pattern (June 2026)**: retrieval/heuristic additions must be config-gated on
+  `PreprocessingConfig`, fail-safe (None/empty on any error), verdict-neutral (advisory hints,
+  LLM decides), and measured by an `eval_*` harness before being enabled by default. Vendor only
+  derived text catalogs in `data/`; never commit binaries (`data/samples/` gitignored).
+- **Agent event loop**: all agent coroutines run on the shared persistent loop
+  (`base_agent._get_agent_loop()`); never create/close per-call event loops (BUG-04/06 regression).
+- **Research findings** go to `docs/academic-article/findings-log.md` (append-only,
+  IMPLEMENTED/EXPERIMENTAL/OBSERVED/HYPOTHESIS/NEGATIVE tags).
 
 ## Testing
 - pytest in `tests/`; fixtures in `tests/conftest.py`.
-- Unit `tests/unit/` (~58 modules), integration `tests/integration/` (6), benchmarks `tests/evaluation/` (4).
+- Unit `tests/unit/` (79 modules recursive), integration `tests/integration/` (6),
+  `tests/evaluation/` = 8 `test_*` scoring tests + 10 `eval_*` measurement harnesses
+  (deliberately not `test_*` so pytest skips them).
 - **Frontend E2E**: Playwright in `apps/web/e2e/` (`playwright.config.ts`); run with `npx playwright test`.
 
 ## Development Workflow

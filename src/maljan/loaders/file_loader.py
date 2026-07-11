@@ -131,7 +131,12 @@ class FileDataLoader:
         """Load a JSON file, returning ``None`` if not found."""
         try:
             if not path.exists():
-                logger.warning("File not found: %s", path)
+                # F12 (2026-07-05): optional per-sample fixtures (static/
+                # dynamic/network ``<sha>.json``) are legitimately absent on
+                # a live run — the loader returns None and the caller
+                # degrades gracefully. Log at DEBUG so operators are not
+                # misled into thinking real data is missing.
+                logger.debug("File not found (optional): %s", path)
                 return None
             with open(path, encoding="utf-8") as f:
                 return json.load(f)

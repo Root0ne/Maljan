@@ -812,6 +812,22 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 for name, text in (state.get("reports") or {}).items()
                 if isinstance(text, str) and text.strip().startswith("[ERROR]")
             ]
+            # F2b (2026-07-05): an LLM analyst whose ReAct loop AND forced
+            # synthesis both fail (e.g. a request timeout on a large binary)
+            # yields an empty ISR, but if a later revision round emits
+            # anything the analyst is reported as ``complete`` and never
+            # lands in ``_failed_analysts`` above. Surface analysts that
+            # produced *zero* claims as their own degradation signal so a
+            # verdict assembled without a functioning primary analyst is not
+            # presented at full confidence. (A benign sample still yields at
+            # least one observational claim, so a truly empty ISR is a
+            # failure signal, not a clean result.)
+            _ANALYST_AGENTS = ("static", "dynamic", "network")
+            _empty_analysts = [
+                name
+                for name in _ANALYST_AGENTS
+                if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
+            ]
             # D10: surface anti-emulation / anti-VM / sandbox-detection
             # signatures so the existing DEGRADED RUN banner can explain
             # the empty dynamic tab (sandbox traced nothing because the
@@ -835,12 +851,28 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     if _hit_name and _hit_name not in _anti_emu_hits:
                         _anti_emu_hits.append(_hit_name)
             _degradation_reasons: list[str] = []
-            if _corroborated == 0 and _technique_count > 0:
+            # CONF-INFL-01 fix (2026-07-05): the previous guard required
+            # ``_technique_count > 0`` and so silently *missed* the most
+            # degraded outcome of all — a run with zero corroboration AND
+            # zero techniques (every LLM analyst failed and no YARA/Sigma
+            # layer fired). That left ``degraded_mode = False`` and shipped
+            # an uncapped confidence for an evidence-free verdict. The LTM
+            # quality gate below (``_corroborated == 0 and _technique_count
+            # <= 1``) already treated that case as low-quality, so the two
+            # gates disagreed. Trigger on zero corroboration regardless of
+            # technique count and word the reason for the empty case.
+            if _corroborated == 0:
                 _degradation_reasons.append(
                     f"zero cross-layer corroboration ({_technique_count} single-layer techniques)"
+                    if _technique_count > 0
+                    else "no techniques mapped (no corroborating evidence)"
                 )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
+            if _empty_analysts:
+                _degradation_reasons.append(
+                    f"analysts produced no claims: {', '.join(_empty_analysts)}"
+                )
             if _anti_emu_hits:
                 _short = _anti_emu_hits[0]
                 _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""
@@ -1107,10 +1139,17 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # verdict must degrade to a conservative "Suspicious" result, not abort
             # the run (and, in a batch eval, drop the whole sample).
             logger.error("Judge verdict %s: %s", type(e).__name__, e or "")
+            # F16 (2026-07-05): a judge-body failure must ALSO flag the run as
+            # degraded so the report node caps ``overall_confidence`` (CONF-INFL-01)
+            # and the UI shows the DEGRADED banner. Without these keys the report
+            # node saw ``degraded_mode`` unset and could ship an uncapped
+            # confidence for a verdict the judge never actually produced.
             return {
                 "final_decision": "Suspicious",
                 "judge_report": f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}",
                 "stix_output": {},
+                "degraded_mode": True,
+                "degradation_reasons": [f"judge failed ({type(e).__name__})"],
             }
 
     node_fn.__name__ = "judge_node"

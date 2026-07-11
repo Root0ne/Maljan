@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SampleDTO } from "@/lib/api";
@@ -41,7 +41,7 @@ function formatDate(dateStr: string): string {
   });
 }
 
-export default function SamplesPage() {
+function SamplesPageContent() {
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -305,5 +305,15 @@ export default function SamplesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/* useSearchParams requires a Suspense boundary for prerendering
+   (missing-suspense-with-csr-bailout). */
+export default function SamplesPage() {
+  return (
+    <Suspense fallback={null}>
+      <SamplesPageContent />
+    </Suspense>
   );
 }

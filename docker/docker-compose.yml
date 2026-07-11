@@ -41,7 +41,11 @@ services:
   # Qdrant — Vector database (LTM / RAG)
   # ─────────────────────────────────────────────
   qdrant:
-    image: qdrant/qdrant:latest
+    # F3 (2026-07-05): pin instead of ``:latest`` for reproducibility. An
+    # unpinned server drifted to 1.18.x while the pinned qdrant-client is
+    # 1.17.1, which logged "Failed to obtain server version. Unable to check
+    # client-server compatibility" on every run. Pinning removes that drift.
+    image: qdrant/qdrant:v1.18.2
     container_name: maljan-qdrant
     restart: unless-stopped
     ports:
@@ -113,13 +117,32 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
+      # F3 (2026-07-05): the CORE engine (MaljanApp / QdrantStore) reads the
+      # nested ``MEMORY__QDRANT_URL`` — NOT the flat ``QDRANT_URL`` above,
+      # which only the API server uses. Without this line the .env value
+      # (localhost, meant for the standalone CLI) leaked into the container
+      # and every LTM / function-hash Qdrant call hit ``localhost:6333``
+      # inside the container → Connection refused, silently disabling LTM
+      # and function-hash attribution.
+      MEMORY__QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
       MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # F1 (2026-07-05): make the ``maljan`` core package importable from the
+      # API process (the on-demand markdown re-render imports it). The worker
+      # inserts ``src`` into sys.path at runtime; the API had no such path, so
+      # /reports/{id}/markdown 500'd with ModuleNotFoundError: No module 'maljan'.
+      PYTHONPATH: /app/apps/api:/app/src
       # llama-server on Windows host reachable via host.docker.internal
       LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
       LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
       # Ollama fallback (active only if LLM__PROVIDER=ollama)
       LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
+    # F8 (2026-07-05): on Linux ``host.docker.internal`` does not resolve
+    # unless mapped to the host gateway (Docker Desktop on Win/Mac provides
+    # it natively, where this is a harmless no-op). Lets the container reach
+    # a host llama-server at host.docker.internal:8080.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../src:/app/src
       - ../apps:/app/apps
@@ -154,11 +177,21 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
+      # F3 (2026-07-05): core engine reads nested MEMORY__QDRANT_URL — see the
+      # backend-api block. Without it the worker's LTM + function-hash Qdrant
+      # calls hit localhost inside the container and were refused.
+      MEMORY__QDRANT_URL: http://qdrant:6333
       MINIO_ENDPOINT: minio:9000
       MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # F1 (2026-07-05): make ``maljan`` importable (parity with API); the
+      # worker also inserts src at runtime, this makes it explicit/robust.
+      PYTHONPATH: /app/apps/api:/app/src
       LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
       LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
       LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
+    # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../src:/app/src
       - ../apps:/app/apps

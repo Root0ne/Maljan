@@ -13,8 +13,13 @@ export function downloadBlob(content: string, filename: string, mime: string): v
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  // F14 (2026-07-05): defer revocation. Revoking synchronously right after
+  // click() aborts the download in some browsers (Firefox/Safari) because
+  // the URL is freed before the browser has started fetching the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 export function copyToClipboard(text: string): Promise<boolean> {

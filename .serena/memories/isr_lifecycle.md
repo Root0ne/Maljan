@@ -1,7 +1,19 @@
 # ISR (Intermediate Structural Representation) Lifecycle
 
-> Refreshed 2026-05-30. ISR replaces raw-text inter-agent communication: every claim cites
+> Refreshed 2026-07-05. ISR replaces raw-text inter-agent communication: every claim cites
 > concrete evidence and feeds sycophancy detection, cascade scoring, and ATT&CK validation.
+>
+> June-2026 deltas:
+> - **Layer-0 heuristic ISRs** in the judge node besides yara/sigma: `network_dga`
+>   (T1568.002, domain "network") and `lolbin` (T1218.x, domain "dynamic", conf 0.78,
+>   rule_platforms=["windows"]). See `mem:extractors_enrichment_qa`.
+> - **ATT&CK autocorrect pre-cascade**: `ATTCKValidator.correct_isr_reports()` mutates LLM
+>   analyst claims' technique_ids in place (zero-regression default: fix invalid IDs only,
+>   `attck_autocorrect_swap_valid=False`); yara/sigma layer ISRs are skipped (rule-authoritative).
+> - Platform scope: cascade `_MITRE_PLATFORM_MAP` now only windows/linux (samples for other OSes
+>   are rejected at pipeline entry).
+> - Consistency gate (optional, `use_claim_consistency_gate=False`): `_claim_grounded_in_evidence`
+>   drops ungrounded claims in the safe_* analyst wrappers (token overlap >= 0.34).
 
 ## Core Models (`src/maljan/schemas/isr_models.py`)
 

@@ -1,75 +1,57 @@
 # Pipeline Deep Dive
 
-> Refreshed 2026-05-30. Cross-refs: `mem:data_flow`, `mem:reporting_layer`.
+> Refreshed 2026-07-05. Cross-refs: `mem:data_flow`, `mem:reporting_layer`.
 
 ## State (`src/maljan/pipeline/state.py`)
-`AnalysisState` is a TypedDict with LangGraph reducers. Generic agent-keyed dicts mean adding an
-agent requires ZERO schema change.
+`AnalysisState` TypedDict — **UNCHANGED since 2026-05-30** (git-verified). Fields: file_hash,
+file_name, sample_path, sandbox_report, file_type, platform (now effectively windows/linux/unknown),
+static_sample_path, reports, revised_reports, isr_reports, discussion_history,
+sycophancy_detected, confidence_history, iteration_count, is_consensus, final_decision,
+judge_report, stix_output, run_summary, malware_report, malware_report_markdown,
+stix_bundle_extended, degraded_mode, degradation_reasons, sandbox_cti.
 
-| Field | Type | Reducer | Notes |
-|-------|------|---------|-------|
-| `file_hash` | str | direct | Sample id |
-| `file_name` | str\|None | direct | |
-| `sample_path` | str\|None | direct | For sandbox submit |
-| `sandbox_report` | dict\|None | direct | Normalized sandbox output |
-| `file_type` | str\|None | direct | **Wave 4** — inferred at bootstrap |
-| `platform` | str\|None | direct | **Wave 4** — canonical platform (windows/linux/macos/android/ios/cloud/crossplatform/unknown) |
-| `static_sample_path` | str\|None | direct | **Wave 6 (GHIDRA-DELIVERY-01)** — container-visible path for Ghidra MCP `load_program` |
-| `reports` | dict[str,str] | `_merge_dicts` | Initial text reports |
-| `revised_reports` | dict[str,str] | `_merge_dicts` | Post-revision |
-| `isr_reports` | dict[str,AgentISR] | `_merge_dicts` | Structured ISR |
-| `discussion_history` | list[AgentArgument] | `operator.add` | Append each round |
-| `sycophancy_detected` | bool | direct | |
-| `confidence_history` | list[float] | `operator.add` | Per-round mean confidence |
-| `iteration_count` | int | direct | |
-| `is_consensus` | bool | direct | From mediator (>=0.85) |
-| `final_decision` | Literal[Malware/Benign/Suspicious]\|None | direct | Judge output |
-| `judge_report` | str\|None | direct | |
-| `stix_output` | dict\|None | direct | Minimal judge Bundle |
-| `run_summary` | dict\|None | direct | Observability (incl. cascade platform_filter_summary + fp_warnings) |
-| `malware_report` | dict\|None | direct | **report_node** — comprehensive MalwareReport JSON |
-| `malware_report_markdown` | str\|None | direct | **report_node** — rendered markdown |
-| `stix_bundle_extended` | dict\|None | direct | **report_node** — extended STIX (+ x_maljan_cti) |
-| `degraded_mode` | bool | direct | **CONF-INFL-01** — TTPs w/o LLM corroboration or [ERROR] reports |
-| `degradation_reasons` | list[str] | direct | **CONF-INFL-01** |
-| `sandbox_cti` | dict\|None | direct | Triage CTI block; folded into network IOCs (W10-NET-01) |
+**Gotcha**: `make_judge_node` returns an UNDECLARED key `function_hash_matches` (consumed by
+`make_report_node` -> `report.attribution.function_hash_matches`). Works via LangGraph dict
+merge, but it is not in the TypedDict — declare it if you touch state schema.
 
-(Note: there is no `_max_iterations` state field — the limit comes from `NegotiationConfig.max_iterations`
-via the router.) `AgentArgument` (Pydantic): `agent_name`, `finding`, `confidence_score`.
+## Graph (`pipeline/builder.py`) — unchanged
+- Topology toggle `config.llm.parallel_analysts` (default True; False = sequential chain for
+  single-slot local llama-server). negotiation conditional edges -> {revision, judge};
+  revision -> negotiation; judge -> report -> END (or judge -> END).
 
-## Graph (`pipeline/builder.py`)
-- Nodes built dynamically: per-agent `{name}_analyst`, `negotiation`, `revision`, `judge`,
-  and `report` (only when `config.reporting.enabled`).
-- **Topology toggle** `config.llm.parallel_analysts`:
-  - True (config default): START -> all analysts (parallel) -> negotiation.
-  - False: START -> agent_1 -> ... -> agent_N -> negotiation (sequential chain, registry order) —
-    for single-slot local llama-server to avoid queue contention.
-- `add_conditional_edges("negotiation", router.should_continue, {revision, judge})`;
-  `revision -> negotiation`; `judge -> report -> END` (or `judge -> END` when reporting off).
-
-## Node Functions (`pipeline/nodes.py`, ~1023 lines)
-- `make_analyst_node`: mock returns fixture ISR (`domain=agent_name`, `# type: ignore[arg-type]`);
-  real mode single/multi-chunk analysis; error -> empty ISR + error text.
-- `make_negotiation_node`: active reports (revised else original); sycophancy; `mediate()`; mean_conf;
-  mock -> consensus after 1 round at 0.95.
-- `make_revision_node`: mediator feedback + Devil's Advocate directive; `_build_revision_context()`
-  (single->raw, multi->consolidated ISR summary); per-agent error -> original fallback.
-- `make_judge_node`: platform read -> YARA -> Sigma -> platform-aware cascade -> ATT&CK validate ->
-  LTM retrieve -> evidence corpus -> CTI -> `give_verdict()` (with judge_postprocess) -> decision ->
-  degradation signals -> RunSummary -> LTM persist. No TODO markers remain.
-- `make_report_node`: feature-flag; cascade recompute; overall_confidence (degraded cap 0.60);
-  malware_category; builder.build_deterministic -> narrative (LLM/fallback) -> detection signatures ->
-  markdown + extended STIX -> fp_linter. See `mem:reporting_layer`.
+## Node Functions (`pipeline/nodes.py`, ~1400 lines)
+- `make_analyst_node`: mock fixture ISR; single-chunk (+view decomposition dispatch when
+  `LLM__VIEW_DECOMPOSITION_VIEWS>=2`, facet/tier via `view_decomposition_mode`); multi-chunk
+  (+TraceRAG chunk selection when `static_function_rag_top_k>0`, nodes.py:233-248).
+- `make_negotiation_node`: **broad `except Exception` fault boundary (bcfde63)** — degrades to
+  no-consensus, emits `[ERROR] Mediation timed out/failed` finding.
+- `make_revision_node`: unchanged behavior.
+- `make_judge_node`: platform -> YARA -> Sigma -> **DGA ISR (nodes.py:655) + LOLBin ISR
+  (nodes.py:669)** -> **ATT&CK autocorrect (nodes.py:700)** -> platform-aware cascade ->
+  validation -> LTM -> evidence corpus -> **function-hash attribution read/write
+  (nodes.py:962-993)** -> family/case RAG mirrors (nodes.py:1017/1051, gated OFF) ->
+  `give_verdict()` -> decision -> degradation signals -> RunSummary (+ **token ledger snapshot**
+  nodes.py:883) -> LTM persist. **Broad `except Exception`** -> conservative "Suspicious" +
+  `[ERROR] Judge failed`.
+- `make_report_node`: feature-flag; cascade recompute; degraded cap 0.60; category backend
+  dispatch; builder -> narrative -> signatures -> markdown + extended STIX -> fp_linter.
 
 ## Routing (`pipeline/routing.py`)
-- Constants: `CONFIDENCE_WINDOW=3`, `CONVERGENCE_STD_THRESHOLD=0.04`, `MIN_CONVERGENCE_CONFIDENCE=0.70`.
-- `is_confidence_stable(history)`: last 3 -> std<0.04 AND mean>=0.70 (requires >=3 rounds).
-- `should_continue` priority: hard-limit -> sycophancy+consensus -> genuine consensus -> stable -> revision.
+- Constants unchanged: `CONFIDENCE_WINDOW=3`, `CONVERGENCE_STD_THRESHOLD=0.04`,
+  `MIN_CONVERGENCE_CONFIDENCE=0.70`.
+- `should_continue` priority: hard-limit -> **BUG-05 mediation-error fast-path** ("[ERROR]
+  Mediation" prefix on last finding -> judge) -> sycophancy+consensus -> consensus -> stable ->
+  revision.
 
-## Sycophancy (`pipeline/sycophancy_detector.py`)
-- Vocab from all claim texts -> bag-of-words per ISR -> cosine current vs previous round ->
-  `> SYCOPHANCY_THRESHOLD` flags. `build_revision_directive()` prepends `DEVIL_ADVOCATE_DIRECTIVE`.
+## Agent runtime notes (see `mem:architecture_key_points` §2)
+- Persistent process-wide agent event loop (daemon thread) — all agent coroutines; hard cap
+  timeout+30s; BUG-04 connection-error retry inside `_invoke()`.
+- Forced final synthesis when ReAct exhausts step budget with empty content.
+- Per-agent max-steps: `react_agent_max_steps_overrides` default `{static: 40}` (base 10).
 
-## Mock Mode
-- `container.is_mock=True` skips LLM calls; analyst fixtures; negotiation consensus@1 round (0.95);
-  judge "Malware" + empty STIX; NarrativeAgent is None (report uses fallback narrative).
+## Sycophancy (`pipeline/sycophancy_detector.py`) — unchanged
+Bag-of-words cosine vs previous round; Devil's Advocate directive.
+
+## Mock Mode — unchanged
+Fixtures; consensus@1 round (0.95); judge "Malware" + empty STIX; fallback narrative.
+Eval harnesses force `SANDBOX__BACKEND=mock` to prevent live malware uploads.

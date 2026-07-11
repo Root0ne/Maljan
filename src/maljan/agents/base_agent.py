@@ -598,6 +598,16 @@ class BaseAnalyst(ABC):
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
         tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
+        # F4 (2026-07-05): the ReAct tool-loop's LLM calls happen INSIDE
+        # langgraph's ``create_react_agent`` executor, so they never passed
+        # through ``_invoke_llm_with_timeout`` where token usage is tallied.
+        # Only the no-tools fallback and view paths recorded usage, so the
+        # per-run TokenLedger reported ~1 call for a multi-call ReAct run.
+        # Record every AI turn the executor produced (each carries its own
+        # ``usage_metadata``) so the ledger reflects real LLM spend.
+        for _m in msgs:
+            if getattr(_m, "type", "") == "ai":
+                record_response_usage(self.token_ledger, _m)
         elapsed = _time.monotonic() - _t0
         # PERF-STATIC-ANALYST-LATENCY-01 minimal viable: emit a WARNING
         # when the analyst either hit the configured timeout's 90%
@@ -1231,14 +1241,18 @@ class BaseAnalyst(ABC):
                 revision_round=revision_round,
             )
 
-        technique_ids = _extract_technique_ids(text)
-
         raw_sentences = [
             s.strip() for s in self._SENTENCE_SPLIT_RE.split(text) if len(s.strip()) > 20
         ]
         claims: list[ClaimEvidence] = []
-        for i, sentence in enumerate(raw_sentences[:10]):
-            tid = technique_ids[i] if i < len(technique_ids) else None
+        for sentence in raw_sentences[:10]:
+            # F9 (2026-07-05): bind a technique ID to the sentence that
+            # actually mentions it, not by positional index. The previous
+            # ``technique_ids[i]`` stapled a T-code extracted anywhere in the
+            # report onto an unrelated sentence, injecting mis-attributed
+            # static claims into the TTP cascade at a fixed 0.5 confidence.
+            _sentence_tids = _extract_technique_ids(sentence)
+            tid = _sentence_tids[0] if _sentence_tids else None
             claims.append(
                 ClaimEvidence(
                     claim=sentence[:200],

@@ -156,10 +156,14 @@ export default function AgentsTab() {
                         <span className="text-xs font-medium capitalize">{agent.signal}</span>
                       </div>
                     ) : (
+                      // F13 (2026-07-05): fall back to the ``no_data`` style
+                      // if the backend ever emits a status outside the known
+                      // union — otherwise ``STATUS_STYLES[status].bg`` throws
+                      // on ``undefined``.
                       <span
-                        className={`text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${STATUS_STYLES[agent.status].bg} ${STATUS_STYLES[agent.status].text}`}
+                        className={`text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).bg} ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).text}`}
                       >
-                        {STATUS_STYLES[agent.status].label}
+                        {(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).label}
                       </span>
                     )}
                   </td>

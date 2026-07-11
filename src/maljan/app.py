@@ -256,6 +256,12 @@ class MaljanApp:
             "degraded_mode": False,
             "degradation_reasons": [],
             "sandbox_cti": None,
+            # F10: declared AnalysisState channels, populated later by the
+            # attribution/RAG nodes. Must be initialised so the TypedDict is
+            # complete (and the LangGraph channels exist from the first step).
+            "function_hash_matches": [],
+            "family_rag_candidates": [],
+            "attck_case_candidates": [],
         }
 
         result = await self.graph.ainvoke(initial_state)

@@ -83,6 +83,12 @@ class AnalysisService:
         self.db.add(job)
         await self.db.flush()
         await self.db.refresh(job)
+        # F11 (2026-07-05): attach the already-verified sample so the
+        # ``JobResponse.sample_sha256`` / ``sample_filename`` read-only props
+        # resolve on the create path too. Without this the POST /jobs
+        # response returned those fields as null (the BUG-02 selectinload
+        # fix only covered get_job / list_jobs), diverging from GET /jobs.
+        job.sample = sample
 
         # Enqueue to ARQ worker. Failure here is **propagated** as a 503 by the
         # route handler — silently returning a "failed" job would mislead the

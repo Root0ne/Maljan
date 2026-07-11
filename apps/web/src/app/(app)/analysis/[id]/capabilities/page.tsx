@@ -83,10 +83,28 @@ function parseTechniques(raw: unknown[]): Tactic[] {
 
     const techId = String(t.technique_id ?? t.id ?? "");
     const techName = String(t.technique_name ?? t.name ?? techId);
-    const tacticId = String(t.tactic_id ?? t.tactic ?? "TA0000");
+    // F7 (2026-07-05): use ``||`` not ``??`` so an empty-string tactic (the
+    // TTPMapping default) falls through to "TA0000" instead of collapsing
+    // every un-tacticked technique into one mislabeled "Unknown Tactic".
+    const tacticId = String(t.tactic_id || t.tactic || "TA0000");
     let tacticName = String(t.tactic_name ?? "");
-    const sources = Array.isArray(t.sources) ? (t.sources as string[]) : [];
-    const matches = Number(t.matches ?? t.match_count ?? 1);
+    // F7: the primary (cached) source is ``TTPMapping`` which exposes
+    // ``contributing_layers`` — NOT ``sources`` / ``match_count`` (those
+    // only exist on the /mitre fallback ``MitreTechnique``). Read both so
+    // the per-technique source badges render on both paths and the match
+    // count reflects the number of contributing layers rather than a
+    // hardcoded "1".
+    const sources = Array.isArray(t.sources)
+      ? (t.sources as string[])
+      : Array.isArray(t.contributing_layers)
+        ? (t.contributing_layers as string[])
+        : [];
+    const matches =
+      Number(
+        t.matches ??
+          t.match_count ??
+          (Array.isArray(t.contributing_layers) ? t.contributing_layers.length : 1),
+      ) || 1;
 
     // Enterprise display name from the canonical catalogue when the mapping
     // only carried the TA-id (TTPMapping has no tactic_name field, so columns

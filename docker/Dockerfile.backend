@@ -23,8 +23,12 @@ COPY network-mcp/ network-mcp/
 # Install dependencies
 RUN uv sync --frozen --no-dev
 
-# Set PYTHONPATH so `app.*` imports resolve from apps/api/
-ENV PYTHONPATH="/app/apps/api:${PYTHONPATH}"
+# Set PYTHONPATH so `app.*` (apps/api) AND `maljan.*` (src) both resolve.
+# F1 (2026-07-05): adding /app/src makes the core ``maljan`` package
+# importable from the API process too — the on-demand markdown re-render
+# (report_service.get_malware_report_markdown) imports it, and without src
+# on the path /reports/{id}/markdown 500'd with ModuleNotFoundError.
+ENV PYTHONPATH="/app/apps/api:/app/src:${PYTHONPATH}"
 
 # Expose API port
 EXPOSE 8000

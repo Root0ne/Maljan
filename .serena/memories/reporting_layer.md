@@ -1,8 +1,19 @@
 # Reporting Layer (`src/maljan/reporting/`)
 
-> NEW subsystem (Faz 2-6), written 2026-05-30. A CTI-analyst-grade report layer that runs AFTER the
-> judge node via `pipeline/nodes.py::make_report_node`. Cross-refs: `mem:extractors_enrichment_qa`,
-> `mem:data_flow` (Phase 6), `mem:pipeline_deep_dive`.
+> Refreshed 2026-07-05 (originally written 2026-05-30). A CTI-analyst-grade report layer that runs
+> AFTER the judge node via `pipeline/nodes.py::make_report_node`. Cross-refs:
+> `mem:extractors_enrichment_qa`, `mem:data_flow` (Phase 6), `mem:pipeline_deep_dive`.
+>
+> June-2026 deltas (commit 2a65842 + RAG work):
+> - `MalwareReport` gained `degraded_mode: bool` + `degradation_reasons: list[str]`; markdown
+>   renderer shows a "DEGRADED RUN" banner; family attribution reports honest "not determined".
+> - `FamilyAttribution` gained `function_hash_matches` and `attck_case_candidates` rows.
+> - `NetworkIOCs` gained `ja3s_fingerprints`; domain entries carry `dga_score` / `is_punycode` /
+>   `homograph_target`; persistence kinds gained `com_hijacking` / `systemd_timer` / `xdg_autostart`.
+> - `Platform` Literal narrowed to `"windows" | "linux" | "unknown"` (models.py:91).
+> - `stix_renderer` now runs `enforce_bundle_integrity` (dedup APs/indicators, drop empty
+>   patterns, sweep dangling refs) — see `mem:extractors_enrichment_qa` §6.
+> - `RunSummary` gained `tokens` (`TokenUsageMetrics` from the per-run `TokenLedger`).
 
 ## Big picture
 The judge emits a **minimal STIX Bundle** (Malware + AttackPattern + Relationship). The reporting

@@ -1,7 +1,21 @@
 # API & Infrastructure
 
-> Refreshed 2026-05-30 against `apps/api/`. Cross-refs: `mem:reporting_layer`,
+> Refreshed 2026-07-05 against `apps/api/`. Cross-refs: `mem:reporting_layer`,
 > `mem:extractors_enrichment_qa`, `mem:suggested_commands`.
+>
+> June-2026 deltas (apps surface is otherwise stable — no new endpoints/migrations/middleware):
+> - **BUG-02 (d9ba6ba)**: `JobResponse` gained `sample_sha256` + `sample_filename`
+>   (model read-only props guard `sqlalchemy.inspect(self).unloaded`; `get_job`/`list_jobs` add
+>   `selectinload(AnalysisJob.sample)`). Frontend `JobDTO` mirrors them.
+> - `GET /reports/{id}/iocs` kind filter now includes `ja3s` (`report_service.list_iocs`
+>   flattens `network.ja3s_fingerprints`).
+> - Degraded-run signaling / STIX integrity ride inside the existing `malware_report` /
+>   `run_summary` / `stix_bundle` JSONB passthrough fields — no API schema change.
+> - CORRECTION vs older memory: ARQ analysis `WorkerSettings` = `max_jobs=1`,
+>   `job_timeout=3600`, `max_tries=1` (+ stale-job sweep using job_timeout as cutoff).
+> - Live sandbox path: worker -> CAPEv2 REST in a remote Ubuntu VM
+>   (`SANDBOX__CAPE2_BASE_URL=http://<VM_IP>:8000`; see `docs/CAPE2_REMOTE_VM_SETUP.md`);
+>   optional CAPE MCP over HTTP (`MCP__CAPE__TRANSPORT=http`, VM serves :9004/mcp/).
 
 ## FastAPI Application (`apps/api/app/main.py`)
 
@@ -45,8 +59,8 @@
 ## ARQ Workers (`app/worker/`)
 - `analysis_worker.run_analysis(ctx, job_id)`: load job -> load sample -> status running ->
   `MaljanApp.arun(file_hash, file_name)` -> persist `AnalysisReport` (+ `malware_report`) and
-  `AgentFinding` per agent -> status completed -> publish events. `WorkerSettings`: `max_jobs=2`,
-  `job_timeout=1800`, `max_tries=1`, `health_check_interval=30`.
+  `AgentFinding` per agent -> status completed -> publish events. `WorkerSettings`: `max_jobs=1`,
+  `job_timeout=3600`, `max_tries=1`, `health_check_interval=30` (+ stale-job sweep).
 - `enrich_worker.py` [NEW]: `enrich_threat_intel(ctx, report_id)` — load report -> `enrich_malware_report()`
   (VirusTotal/AbuseIPDB/WHOIS + Qdrant attribution) -> persist mutated report. Idempotent, fail-safe.
 

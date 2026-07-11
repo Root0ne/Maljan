@@ -8,7 +8,14 @@ import { downloadBlob } from "@/lib/report-utils";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
 
+// F6 (2026-07-05): the comprehensive report's verdict vocabulary is
+// "Malware" | "Suspicious" | "Benign" (backend models.py), so a lower-cased
+// verdict is "malware" — which was absent from these maps and fell back to
+// the muted "unknown" grey, rendering every Malware verdict as if it were
+// undetermined. Add the "malware" key (aligned with layout.tsx) alongside
+// the legacy "malicious" alias used by LegacySummary.
 const VERDICT_COLORS: Record<string, string> = {
+  malware: "bg-status-red",
   malicious: "bg-status-red",
   suspicious: "bg-status-orange",
   benign: "bg-status-green",
@@ -16,6 +23,7 @@ const VERDICT_COLORS: Record<string, string> = {
 };
 
 const VERDICT_TEXT: Record<string, string> = {
+  malware: "text-status-red",
   malicious: "text-status-red",
   suspicious: "text-status-orange",
   benign: "text-status-green",

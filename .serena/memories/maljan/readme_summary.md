@@ -1,6 +1,6 @@
 # Maljan README Summary
 
-> Refreshed 2026-05-30. Corrects dead doc references from the previous version.
+> Refreshed 2026-07-05 (content check 2026-05-30 + June doc-map corrections).
 
 ## Purpose
 Maljan is a production-grade malware analysis platform using adversarial multi-agent debate
@@ -17,19 +17,22 @@ STIX 2.1 bundle with per-claim confidence.
 6. Web UI / API endpoints / Development / Configuration / Design Principles.
 
 ## Documentation map (CORRECTED)
-- There is **no root `AGENTS.md`** and **no `docs/ARCHITECTURE.md`** (the previous memory referenced
-  both — they do not exist). Deep-dive operational docs now live at:
-  - `docs/operator-runbook.md` — operator gotchas / runbook (actively updated each Wave).
-  - `docs/triage_api/` — Recorded Future Triage Cloud API reference (supports `loaders/triage_client.py`).
-  - `docs/research/` — research reports / paper drafts.
-  - `apps/web/AGENTS.md` and `apps/web/CLAUDE.md` — frontend-specific agent docs (these DO exist).
-- Config reference: `.env.example` (root) and `apps/api/.env.example`.
+- There is **no root `AGENTS.md`** and **no `docs/ARCHITECTURE.md`**. Deep-dive docs live at:
+  - `docs/CAPE2_REMOTE_VM_SETUP.md` — CAPE remote-VM deployment runbook (NEW 2026-06-24).
+  - `docs/academic-article/findings-log.md` — canonical research/findings log (paper seed).
+  - `docs/migration/ghidra-mcp-patches/` — local patches applied to pinned ghidra-mcp v5.6.0.
+  - `docs/triage_api/` — Triage Cloud API reference; `docs/research/` — research reports.
+  - `apps/web/AGENTS.md` and `apps/web/CLAUDE.md` — frontend-specific agent docs.
+  - **`docs/operator-runbook.md` was DELETED (2026-06-01)** — do not reference it.
+- Config reference: `.env.example` (root, heavily annotated incl. CAPE VM + RAG toggles) and
+  `apps/api/.env.example`.
 
 ## Web UI (apps/web — see `mem:frontend_web_app`)
 - Next.js 16 / React 19 / Tailwind 4 App Router. Auth pages + dashboard / jobs / audit / settings.
-- The analysis detail view (`analysis/[id]/`) now has ~18 tabs: identity, static, dynamic, network,
-  persistence, capabilities, ttps, attribution, signatures, rules, stix, timeline, defense, live,
-  pipeline, agents (plus the overview page). Playwright e2e exists.
+- The analysis detail view (`analysis/[id]/`) has 16 nav tabs (June 2026: TTPS merged into
+  ATT&CK at `/capabilities`, Enterprise-only matrix): summary, identity, static, dynamic,
+  network, persistence, attck/capabilities, attribution, signatures, defense, agents, pipeline,
+  rules, timeline, stix, live. Playwright e2e exists.
 
 ## Design Principles
 No hallucinated TTPs (ATT&CK validation + judge_postprocess), no sycophancy (cosine + Devil's

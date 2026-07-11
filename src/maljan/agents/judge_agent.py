@@ -173,9 +173,17 @@ class JudgeAgent:
                 ),
                 timeout=timeout,
             )
-            msg_count = len(result.get("messages", []))
+            _msgs = result.get("messages", []) or []
+            msg_count = len(_msgs)
             self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
-            return str(result["messages"][-1].content)
+            # F4 (2026-07-05): record every AI turn the ReAct executor produced
+            # so the mediator's tool-loop LLM calls land in the per-run
+            # TokenLedger (the tools path previously recorded nothing — only
+            # the no-tools fallback above did).
+            for _m in _msgs:
+                if getattr(_m, "type", "") == "ai":
+                    record_response_usage(self.token_ledger, _m)
+            return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             raise

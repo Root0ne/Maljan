@@ -20,9 +20,15 @@ Before marking a task complete, verify:
       sandbox, narrative, detection signatures, extractors, enrichment).
 - [ ] Pipeline node change: mock-mode path still works; state reducers correct; `AnalysisState`
       TypedDict compatibility maintained (incl. new fields: platform, malware_report*, degraded_mode, sandbox_cti).
-- [ ] LLM invocation change: ReAct tool-loop thread isolation preserved (no nest_asyncio/anyio cancel-scope issues).
-- [ ] Platform-aware path (Wave 4): cascade / detection rules / fp_linter keep `state["platform"]`
-      consistent between judge and report nodes.
+- [ ] LLM invocation change: agent coroutines stay on the shared persistent event loop
+      (`base_agent._get_agent_loop()`); never create/close per-call loops (BUG-04/06).
+- [ ] Platform-aware path (Wave 4 + 2026-06-02 narrowing): cascade / detection rules / fp_linter
+      keep `state["platform"]` consistent between judge and report nodes; valid values are ONLY
+      windows/linux/unknown; entry rejection (`unsupported_os_reason`) must not block legitimate
+      Win/Linux samples.
+- [ ] New retrieval/heuristic feature: config-gated on `PreprocessingConfig`, fail-safe,
+      verdict-neutral (advisory hint), and measured by an `eval_*` harness before default-ON.
+      Eval harnesses touching live samples must force `SANDBOX__BACKEND=mock`.
 - [ ] Confidence integrity (CONF-INFL-01): degraded runs honour `degraded_mode` + 0.60 cap; do not
       surface inflated cascade-only confidence.
 - [ ] Indicator hygiene: new IOC paths respect `agents/_indicator_denylists.py` and the

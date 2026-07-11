@@ -43,6 +43,40 @@ Examples seen in code:
 - `SEC-CORS-HEADERS-01` (2026-05-19) — security-headers middleware.
 - `PIPE-ANA-01` — static-analyst zero-claim short-circuit guard.
 
+## June 2026 — research/eval era (post-Wave-10)
+After Wave 10 the Wave numbering stopped; work shifted to a research/evaluation cycle logged in
+`docs/academic-article/findings-log.md` (§-numbered sections, entries tagged IMPLEMENTED/
+EXPERIMENTAL/OBSERVED/HYPOTHESIS/NEGATIVE). See `mem:evaluation_research` for datasets, harnesses
+and A/B results. Highlights (chronological):
+- 2026-05-31..06-03: static-analyst verification discipline + advanced-tools prompt (0c56975),
+  sink-reachability triage (90114d8), function-hash attribution (28b8514 — same commit DELETED
+  `docs/operator-runbook.md`), semantic + hybrid ATT&CK index (81949bd/f2653e9), ATT&CK
+  autocorrect zero-regression (6bb1c76), STIX `enforce_bundle_integrity` + degraded-run
+  signaling (2a65842), signal-quality hardening (2ad2346), DGA/IDN + COM-hijack + deterministic
+  technique surfacing (ff88307/09a3af3).
+- 2026-06-02: **OS scope narrowed to Windows+Linux only** (dad0dc8/a5df055) — entry rejection
+  `UnsupportedSampleError`, macOS/mobile Sigma rules removed, web mitre-mobile.ts deleted.
+- 2026-06-04..06-08: view decomposition + equal-budget A/B (2f4bfbe/7fe581f), token ledger
+  (8555f11), concept-drift eval (210 samples / 7 cohorts), judge_max_tokens cap (305018e),
+  hint-ablation harness, static-vs-dynamic category backend (30da002).
+- 2026-06-07: static-feature family classifier added (12e3277) and REMOVED same day (b92f228) —
+  replaced by LLM-centric family-feature RAG (436a16c) + ATT&CK case-prior RAG (07b777f).
+- 2026-06-08: MABEL + Ultimate-RAT-Collection dataset integration (30f2766/09ac1ae),
+  leakage-free retrieval eval.
+- 2026-06-21..23: family-RAG A/B (no measurable TTP gain -> RAGs stay OFF), llama-server
+  stability (c7c0999: back to 131k ctx, f16 V-cache), live-UI audit -> DISABLE_THINKING pinned
+  (577b954), **BUG-01..07 fix batch** (persistent agent loop e3a3685, per-agent max-steps
+  0ffdfd9, forced final synthesis f261ef9, mediation-error routing 5419409, job API
+  sha256/filename d9ba6ba).
+- 2026-06-24 (HEAD): CAPE MCP over HTTP + remote Ubuntu-VM deployment (e2647a8; d9068fb is an
+  identical duplicate commit merged in 4893280).
+
+## New audit-ID pattern: BUG-NN (June 2026)
+- BUG-02 job API sample fields; BUG-04 httpx pool / connection-error retry; BUG-05 mediation-error
+  routing; BUG-06 per-call event-loop churn; BUG-07 static placeholder parroting.
+
 ## Where to look
-- `docs/operator-runbook.md` is updated each Wave with operator gotchas (the canonical changelog-ish doc).
-- `git log --oneline` shows the `feat/fix/chore(scope): Wave N <ID>` commit pattern.
+- `docs/operator-runbook.md` was DELETED (2026-06-01). Operator content now:
+  `docs/CAPE2_REMOTE_VM_SETUP.md` (deployment) + `.env.example` (heavily annotated) +
+  `docs/academic-article/findings-log.md` (canonical research changelog).
+- `git log --oneline` shows the `feat/fix(scope): ...` pattern; audit IDs still appear in code.

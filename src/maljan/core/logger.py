@@ -20,6 +20,21 @@ def setup_logger(name: str = "maljan", level: int = logging.INFO) -> logging.Log
     return logger
 
 
+def quiet_noisy_http_loggers() -> None:
+    """Pin third-party HTTP-client loggers to WARNING.
+
+    F17 (2026-07-05): the OpenAI / httpx / httpcore clients log full request
+    bodies at DEBUG level. Running the app with ``DEBUG=true`` flips the root
+    logger to DEBUG, which then dumps every analyst prompt — including the
+    decompiled sample content — into the logs and floods them. These loggers
+    stay at WARNING regardless of the application log level; genuine client
+    errors still surface.
+    """
+    for _noisy in ("openai", "openai._base_client", "httpx", "httpcore"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+
 # Global application logger
 logger = setup_logger()
 base_logger = logger
+quiet_noisy_http_loggers()

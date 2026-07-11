@@ -1,8 +1,22 @@
 # Maljan Project Analysis Report
 
-> Comprehensive architectural and code-quality analysis. Refreshed against code on 2026-05-30
-> (active "Wave 10"). Cross-refs: `mem:architecture_key_points`, `mem:reporting_layer`,
-> `mem:extractors_enrichment_qa`, `mem:wave_history`.
+> Comprehensive architectural and code-quality analysis. Refreshed 2026-07-05 (base analysis
+> 2026-05-30, Wave 10). Cross-refs: `mem:architecture_key_points`, `mem:reporting_layer`,
+> `mem:extractors_enrichment_qa`, `mem:wave_history`, `mem:evaluation_research`.
+>
+> **June-2026 update (research/eval era)** — the base analysis below still holds; key deltas:
+> - OS scope narrowed to Windows+Linux only; entry rejection via `UnsupportedSampleError`.
+> - Judge node gained Layer-0 heuristics (DGA T1568.002, LOLBin T1218.x), pre-cascade ATT&CK
+>   autocorrect (zero-regression), hybrid semantic+TF-IDF ATT&CK index (default), function-hash
+>   attribution (Qdrant exact-match), and config-gated family/case RAGs (OFF after negative A/B).
+> - Agent runtime: persistent process-wide event loop (BUG-04/06/07), forced final synthesis,
+>   per-agent max-steps overrides; mediation-error fast-path to judge (BUG-05).
+> - Per-run TokenLedger -> RunSummary.tokens; MalwareReport gained degraded_mode/reasons;
+>   STIX `enforce_bundle_integrity`.
+> - Test counts now: unit 79 (recursive), integration 6, evaluation 8 test_* + 10 eval_* harnesses.
+> - ARQ analysis worker now max_jobs=1 / job_timeout=3600 (was 2/1800).
+> - `docs/operator-runbook.md` DELETED; research log = `docs/academic-article/findings-log.md`;
+>   deployment doc = `docs/CAPE2_REMOTE_VM_SETUP.md` (CAPE in remote Ubuntu VM, REST + MCP-HTTP).
 
 ---
 
