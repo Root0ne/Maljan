@@ -541,6 +541,22 @@ class ReportingConfig(BaseModel):
     auto_generate_detection_rules: bool = True
     enrichment_async: bool = True
 
+    # --- Report-reshaping (professional-report front-matter + Composer) ---
+    # Front-matter identity for the report cover / TLP banner.
+    publisher: str = "Maljan"
+    product_type: str = "Malware Analysis Report"
+    author_team: str = "Maljan Multi-Agent Pipeline"
+    report_number_prefix: str = "MJN"
+    default_tlp: Literal["CLEAR", "GREEN", "AMBER", "AMBER_STRICT", "RED"] = "CLEAR"
+    # Section-wise Report Composer (Phase 4). When False, the pipeline keeps the
+    # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
+    # per-section timeout keep the local SWA model from stalling.
+    composer_enabled: bool = True
+    composer_section_max_tokens: int = 900
+    composer_per_section_timeout: int = 120
+    # Server-side HTML→PDF export (Phase 6).
+    html_export_enabled: bool = True
+
 
 # ---------------------------------------------------------------------------
 # Root Settings

@@ -104,6 +104,91 @@ class TestForbidExtra:
         assert report.identity.hashes.sha256 == "a" * 64
 
 
+class TestReshapingSchemaPhase2:
+    """Additive professional-report front-matter + technical spine (Phase 2).
+
+    All new fields must default empty/None so legacy reports still validate,
+    and a fully-populated report must round-trip.
+    """
+
+    def test_new_fields_default_empty(self) -> None:
+        r = _minimal_report()
+        assert r.front_matter is None
+        assert r.version_history == []
+        assert r.tlp == "CLEAR"
+        assert r.technical_analysis is None
+        assert r.c2_channels == []
+        assert r.conclusion is None
+        assert r.consolidated_iocs == []
+        assert r.figures == []
+        assert r.technical_evidence == {}
+
+    def test_legacy_row_still_validates(self) -> None:
+        # A pre-Phase-2 JSONB row (no new keys) must load unchanged.
+        legacy = {
+            "schema_version": "1.0",
+            "verdict": "Malware",
+            "identity": {"hashes": {"sha256": "b" * 64}},
+        }
+        r = MalwareReport.model_validate(legacy)
+        assert r.verdict == "Malware"
+        assert r.front_matter is None and r.technical_analysis is None
+
+    def test_full_spine_round_trip(self) -> None:
+        from maljan.reporting.models import (
+            CliFlag,
+            ConsolidatedIOC,
+            EncryptionScheme,
+            Figure,
+            ReportFrontMatter,
+            TechnicalAnalysis,
+            VersionHistoryEntry,
+        )
+
+        r = _minimal_report(
+            front_matter=ReportFrontMatter(
+                malware_name="CACTUS", tlp="AMBER", report_number="MJN20260713001"
+            ),
+            version_history=[
+                VersionHistoryEntry(
+                    version="1.0", date="2026-07-13", authors="Maljan", description="Completed"
+                )
+            ],
+            tlp="AMBER",
+            technical_analysis=TechnicalAnalysis(
+                cli_flags=[CliFlag(flag="-kd", description="kill + delete shadows")],
+                shadow_copy_destruction=["vssadmin delete shadows /all /quiet"],
+                encryption_scheme=EncryptionScheme(
+                    cipher="AES-256", mode="CBC", extension=".cts6", per_file_key=True
+                ),
+            ),
+            consolidated_iocs=[
+                ConsolidatedIOC(type="Domain", value="888kafa[.]com", is_network=True)
+            ],
+            figures=[Figure(id="f1", caption="ATT&CK", kind="attack_matrix", content="<svg/>")],
+        )
+        r2 = MalwareReport.model_validate(r.model_dump(mode="json"))
+        assert r2.front_matter is not None and r2.front_matter.malware_name == "CACTUS"
+        assert r2.tlp == "AMBER"
+        assert r2.technical_analysis is not None
+        assert r2.technical_analysis.encryption_scheme.extension == ".cts6"
+        assert r2.technical_analysis.cli_flags[0].flag == "-kd"
+        assert r2.consolidated_iocs[0].value == "888kafa[.]com"
+        assert r2.figures[0].kind == "attack_matrix"
+
+    def test_subblocks_forbid_extra(self) -> None:
+        from maljan.reporting.models import EncryptionScheme
+
+        with pytest.raises(ValueError):
+            EncryptionScheme(cipher="AES", bogus_field="x")  # type: ignore[call-arg]
+
+    def test_figure_kind_literal_enforced(self) -> None:
+        from maljan.reporting.models import Figure
+
+        with pytest.raises(ValueError):
+            Figure(id="f", caption="c", kind="screenshot", content="x")  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # Wave 9 — PersistenceKind Linux Literal extension
 # ---------------------------------------------------------------------------
