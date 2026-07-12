@@ -37,6 +37,9 @@ from maljan.reporting.models import (
 # ---------------------------------------------------------------------------
 
 _HIGH_ENTROPY_THRESHOLD = 7.0
+# Below this many named imports, a LoadLibrary/GetProcAddress pair reads as
+# dynamic-API-resolution / API-hiding rather than ordinary delay-loading.
+_SPARSE_IMPORT_THRESHOLD = 15
 _MIN_STRING_LENGTH = 6
 _MAX_STRINGS_KEPT = 200
 _MAX_IOC_STRINGS = 80
@@ -374,14 +377,24 @@ def _pe_obfuscation_indicators(sections: list[PESection], imports: list[ImportRo
         out.append(
             f"High-entropy sections (>= {_HIGH_ENTROPY_THRESHOLD}): {', '.join(high_entropy)}"
         )
-    # GetProcAddress + LoadLibrary => dynamic API resolution (common evasion)
+    # LoadLibrary + GetProcAddress alone is NOT obfuscation — it is the standard
+    # Windows idiom for optional / delay-loaded DLLs and is present in nearly
+    # every non-trivial PE (2026-07: an ordinary 164-import MFC app was flagged,
+    # which the LLM then inflated to T1027 "obfuscation" at conf 0.90). The
+    # genuine dynamic-API-resolution / packing signature is this idiom combined
+    # with a SPARSE import table — a packed binary hides its real APIs and
+    # imports only a handful of functions plus LoadLibrary/GetProcAddress.
     api_resolution = {row.function for row in imports} & {
         "GetProcAddress",
         "LoadLibraryA",
         "LoadLibraryW",
     }
-    if len(api_resolution) >= 2:
-        out.append("Dynamic API resolution (LoadLibrary + GetProcAddress)")
+    if len(api_resolution) >= 2 and len(imports) < _SPARSE_IMPORT_THRESHOLD:
+        out.append(
+            "Dynamic API resolution with a sparse import table "
+            f"({len(imports)} named imports + LoadLibrary/GetProcAddress) "
+            "— possible API hiding / packing"
+        )
     return out
 
 

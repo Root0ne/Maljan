@@ -492,6 +492,17 @@ class MCPServerConfig(BaseModel):
     # http transport settings
     url: str = ""
     auth_token: str = ""
+    # 2026-07 round 3: how many Ghidra MCP tools the static analyst exposes to the
+    # model (MCP__GHIDRA__TOOL_SELECTION):
+    #   "curated" — fixed ~20-tool allowlist (fastest, narrowest).
+    #   "dynamic" — CORE triage set + tools relevant to the sample's capability
+    #               categories (~30-40 tools). All ~165 stay reachable; only the
+    #               relevant subset is shown per run. RECOMMENDED DEFAULT.
+    #   "all"     — every tool the server offers (~165). Maximum coverage but a
+    #               large per-step prompt; measured 5-6x slower + noisier locally.
+    tool_selection: Literal["curated", "dynamic", "all"] = "dynamic"
+    # Back-compat: MCP__GHIDRA__USE_ALL_TOOLS=true still forces "all".
+    use_all_tools: bool = False
 
 
 class MCPConfig(BaseModel):

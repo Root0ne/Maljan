@@ -101,6 +101,7 @@ class MalwareReportBuilder:
         cells, mappings = build_capability_matrix(
             cascade_summary=self.cascade_summary,
             isr_reports=self.isr_reports,
+            static=static,
         )
         severity = self._severity_assessment(static, dynamic, network, persistence, cells, identity)
         verdict = self._verdict_literal(self.final_decision)

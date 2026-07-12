@@ -173,6 +173,22 @@ def make_analyst_node(
             # carries the path into the LLM prompt without a new state hop.
             if agent_name == "static":
                 chunks = _augment_static_chunks_with_path(chunks, state)
+                # 2026-07 round 3: hand the static analyst the sample's capability
+                # categories (from the PE import classification) so dynamic Ghidra
+                # tool selection works regardless of whether the chunk carried a
+                # readable path. state["sample_path"] is reliably host-readable.
+                try:
+                    from maljan.analysis.import_capability_layer import _imports_by_category
+                    from maljan.extractors.pe_extractor import build_static_analysis
+
+                    _sp = state.get("sample_path")
+                    if _sp:
+                        _st = build_static_analysis(sample_path=str(_sp))
+                        agent._sample_categories = (  # type: ignore[attr-defined]
+                            set(_imports_by_category(_st).keys()) if _st else set()
+                        )
+                except Exception as _e:  # noqa: BLE001
+                    logger.debug("static category hint skipped: %s", _e)
 
             if not chunks:
                 # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
