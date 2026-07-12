@@ -223,15 +223,15 @@ export default function AnalysisLayout({
 
             {/* Info */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 mb-1">
-                <h1 className="text-lg font-semibold text-text-primary truncate" title={headerTitle}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-1">
+                <h1 className="text-lg font-semibold text-text-primary truncate max-w-full" title={headerTitle}>
                   {headerTitle}
                 </h1>
                 <span className={`text-xs px-2 py-0.5 rounded ${v.bg} ${v.text}`}>
                   {v.label}
                 </span>
                 <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
-                  Score: {confidence}/100
+                  Confidence: {confidence}/100
                 </span>
                 {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">

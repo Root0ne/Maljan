@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
 import { downloadBlob } from "@/lib/report-utils";
+import { verdictLabel } from "@/lib/verdict";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
 
@@ -116,9 +117,7 @@ function LegacySummary() {
     keyFindings = ["No specific findings were extracted."];
   }
 
-  const verdictLabel = report?.verdict
-    ? report.verdict.charAt(0).toUpperCase() + report.verdict.slice(1)
-    : "Unknown";
+  const verdictDisplay = verdictLabel(report?.verdict);
   const confidence = pct(report?.overall_confidence);
   const verdictColorClass =
     VERDICT_TEXT[lc(report?.verdict)] || VERDICT_TEXT.unknown;
@@ -186,7 +185,7 @@ function LegacySummary() {
         <div className="p-4">
           <p className="text-sm text-text-secondary leading-relaxed">
             The analyzed sample has been classified as{" "}
-            <strong className={verdictColorClass}>{verdictLabel}</strong> with a consensus
+            <strong className={verdictColorClass}>{verdictDisplay}</strong> with a consensus
             confidence score of <strong>{confidence}/100</strong>.
             {report?.malware_category
               ? ` Detected malware category: ${report.malware_category}.`
@@ -337,7 +336,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Verdict
             </div>
-            <div className={`text-base font-semibold ${verdictText}`}>{mr.verdict}</div>
+            <div className={`text-base font-semibold ${verdictText}`}>{verdictLabel(mr.verdict)}</div>
           </div>
           <div>
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
@@ -353,7 +352,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
               className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
             >
               {mr.severity.rating}
-              <span className="font-mono opacity-70">{mr.severity.overall_score.toFixed(1)}/10</span>
+              <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
             </span>
           </div>
           <div>

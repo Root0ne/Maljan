@@ -275,8 +275,10 @@ export default function SearchPalette({
   return (
     <div
       ref={containerRef}
+      id="global-search-palette"
       className="absolute left-0 right-0 top-full mt-1 z-50 bg-bg-surface border border-border rounded shadow-lg overflow-hidden"
       role="listbox"
+      aria-label="Search results"
     >
       {showEmpty && (
         <div className="px-3 py-3 text-xs text-text-muted">

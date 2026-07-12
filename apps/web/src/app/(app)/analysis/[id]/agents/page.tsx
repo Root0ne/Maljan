@@ -152,7 +152,7 @@ export default function AgentsTab() {
                   <td className="px-4 py-3">
                     {agent.status === "complete" ? (
                       <div className={`flex items-center gap-1.5 ${style.class}`}>
-                        <span className="text-sm">{style.icon}</span>
+                        <span className="text-sm" aria-hidden="true">{style.icon}</span>
                         <span className="text-xs font-medium capitalize">{agent.signal}</span>
                       </div>
                     ) : (

@@ -49,6 +49,7 @@ from maljan.schemas.stix_models import (
     ObservedData,
     Relationship,
     Report,
+    get_utcnow,
 )
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -66,6 +67,7 @@ class ExtendedSTIXRenderer:
 
         # 1) Preserve everything the judge already emitted.
         if base_bundle is not None:
+            self._normalize_judge_timestamps(base_bundle.objects)
             objects.extend(base_bundle.objects)
 
         # 2) Identity SDO for Maljan itself.
@@ -240,6 +242,26 @@ class ExtendedSTIXRenderer:
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
         return Bundle(objects=enforce_bundle_integrity(objects))
+
+    @staticmethod
+    def _normalize_judge_timestamps(objects: list[Any]) -> None:
+        """Stamp the judge's SDOs with a real ``created``/``modified`` time.
+
+        The judge Bundle is emitted by the LLM, which copies STIX documentation
+        examples verbatim — the Malware and AttackPattern objects land on the
+        placeholder ``2023-01-01T00:00:00Z`` epoch (audit L7) instead of the
+        analysis time, and a downstream CTI consumer would trust that bogus
+        date. The model cannot know the wall clock, so its timestamps are never
+        authoritative; overwrite them with the render time (matching every
+        renderer-produced SDO, which already uses ``get_utcnow``). Object ids
+        are left untouched so intra-bundle relationship refs stay valid.
+        """
+        now = get_utcnow()
+        for obj in objects:
+            if hasattr(obj, "created"):
+                obj.created = now
+            if hasattr(obj, "modified"):
+                obj.modified = now
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:

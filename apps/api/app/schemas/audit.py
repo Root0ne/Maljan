@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # AuditLog schemas
@@ -26,6 +26,15 @@ class AuditLogResponse(BaseModel):
     details: dict[str, Any] | None
     ip_address: str | None
     created_at: datetime
+
+    @field_validator("ip_address", mode="before")
+    @classmethod
+    def _coerce_ip_to_str(cls, v: Any) -> str | None:
+        # The ORM maps this column to Postgres INET, so SQLAlchemy/asyncpg
+        # hydrates it as an ``ipaddress.IPv4Address``/``IPv6Address`` object,
+        # not a ``str``. Pydantic v2 rejects that under ``str`` and raises a
+        # ResponseValidationError (500). Coerce to text before validation.
+        return None if v is None else str(v)
 
 
 class AuditLogListResponse(BaseModel):

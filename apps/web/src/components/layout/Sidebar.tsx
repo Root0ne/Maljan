@@ -110,20 +110,27 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-2">
+      <nav className="flex-1 py-2" aria-label="Primary">
         {navItems.map((item) => {
           const active = pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
               href={item.href}
+              // The label span is hidden while the rail is collapsed, leaving an
+              // icon-only link with no discernible name (Lighthouse link-name).
+              // aria-label keeps every nav item named in both states; title adds
+              // a hover tooltip for the collapsed rail.
+              aria-label={item.label}
+              title={item.label}
+              aria-current={active ? "page" : undefined}
               className={`flex items-center h-10 px-3.5 mx-1 my-0.5 rounded text-sm transition-colors ${
                 active
                   ? "bg-bg-active text-text-primary"
                   : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
               }`}
             >
-              <span className="flex-shrink-0">{item.icon}</span>
+              <span className="flex-shrink-0" aria-hidden="true">{item.icon}</span>
               {expanded && (
                 <span className="ml-3 truncate">{item.label}</span>
               )}

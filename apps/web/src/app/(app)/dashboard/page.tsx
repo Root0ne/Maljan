@@ -301,6 +301,15 @@ export default function DashboardPage() {
               </div>
             ) : (
               <>
+                {/* Recharts renders an unlabeled SVG; give the chart a text
+                    alternative so it isn't opaque to screen readers (the legend
+                    below repeats the same figures visually). */}
+                <div
+                  role="img"
+                  aria-label={`Verdict distribution: ${verdictData
+                    .map((d) => `${d.name} ${d.value}`)
+                    .join(", ")}`}
+                >
                 <ResponsiveContainer width="100%" height={180}>
                   <PieChart>
                     <Pie
@@ -327,6 +336,7 @@ export default function DashboardPage() {
                     />
                   </PieChart>
                 </ResponsiveContainer>
+                </div>
                 <div className="flex justify-center gap-4 mt-2">
                   {verdictData.map((d, i) => (
                     <div key={d.name} className="flex items-center gap-1.5">

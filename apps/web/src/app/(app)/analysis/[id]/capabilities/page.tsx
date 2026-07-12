@@ -106,13 +106,18 @@ function parseTechniques(raw: unknown[]): Tactic[] {
           (Array.isArray(t.contributing_layers) ? t.contributing_layers.length : 1),
       ) || 1;
 
-    // Enterprise display name from the canonical catalogue when the mapping
-    // only carried the TA-id (TTPMapping has no tactic_name field, so columns
-    // would otherwise read "TA0005" instead of "Defense Evasion").
-    if (!tacticName || tacticName === tacticId || tacticName === "Unknown Tactic") {
-      tacticName = ENTERPRISE_NAME_BY_ID[tacticId] ?? tacticName;
+    // Canonical Enterprise display name wins for any KNOWN tactic id. This
+    // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
+    // no tactic_name, so columns would read "TA0005" instead of "Defense
+    // Evasion"), and (b) audit M2 — a persisted/bundle tactic_name that is
+    // non-canonical (e.g. "Stealth" for TA0005) would otherwise mislabel the
+    // column. Unknown/new tactic ids keep whatever name the mapping supplied.
+    const canonicalName = ENTERPRISE_NAME_BY_ID[tacticId];
+    if (canonicalName) {
+      tacticName = canonicalName;
+    } else if (!tacticName || tacticName === tacticId || tacticName === "Unknown Tactic") {
+      tacticName = tacticId || "Unknown Tactic";
     }
-    if (!tacticName) tacticName = tacticId || "Unknown Tactic";
 
     if (!tacticMap.has(tacticId)) {
       tacticMap.set(tacticId, {
@@ -205,6 +210,9 @@ export default function AttackTab() {
         </h2>
         <input
           type="text"
+          id="attck-technique-search"
+          name="attck-technique-search"
+          aria-label="Search ATT&CK techniques"
           placeholder="Search for technique or subtechnique"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -250,8 +258,10 @@ export default function AttackTab() {
                               key={src}
                               className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
                               title={src}
+                              role="img"
+                              aria-label={`Source: ${src}`}
                             >
-                              {src[0]}
+                              <span aria-hidden="true">{src[0]}</span>
                             </span>
                           ))}
                         </div>
