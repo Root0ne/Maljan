@@ -31,6 +31,7 @@ from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+    from maljan.reporting.models import StaticAnalysis
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +50,56 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     )
 
 
-def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list:
+# The file-loader placeholder for a missing per-sample fixture
+# ("No static data available for sample <sha>."). Local copy of the
+# BUG-07 pattern from static_analyst to avoid a nodes->agents import edge.
+_STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
+
+# Hard ceiling for the synthesized head-chunk content. The augmented chunk
+# is spliced in via ``dataclasses.replace`` AFTER chunking, so it never
+# re-passes the token-budget check — the cap here is load-bearing.
+_MAX_SYNTH_CHUNK_CHARS = 40_000
+
+
+def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
+    """Serialize a StaticAnalysis into a size-capped dict for the LLM prompt.
+
+    Caps keep the synthesized head chunk inside the prompt budget:
+    imports <= 60 rows (suspicious-first), strings <= 40, exports <= 40,
+    ``embedded_resources`` reduced to a count. Truncation markers record
+    how many rows were dropped so the model doesn't mistake a cap for
+    an empty artefact.
+    """
+    dump = static.model_dump(mode="json")
+    out: dict[str, Any] = {
+        "sections": dump.get("sections", []),
+        "packer_hint": dump.get("packer_hint"),
+        "obfuscation_indicators": dump.get("obfuscation_indicators", []),
+        "embedded_resources_count": len(dump.get("embedded_resources", [])),
+    }
+    imports = sorted(
+        dump.get("imports", []),
+        key=lambda r: not bool(r.get("is_suspicious")),
+    )
+    if len(imports) > 60:
+        out["imports_truncated"] = len(imports) - 60
+    out["imports"] = imports[:60]
+    strings = dump.get("interesting_strings", [])
+    if len(strings) > 40:
+        out["strings_truncated"] = len(strings) - 40
+    out["interesting_strings"] = strings[:40]
+    exports = dump.get("exports", [])
+    if len(exports) > 40:
+        out["exports_truncated"] = len(exports) - 40
+    out["exports"] = exports[:40]
+    return out
+
+
+def _augment_static_chunks_with_path(
+    chunks: list,
+    state: AnalysisState,
+    static: StaticAnalysis | None = None,
+) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
     Wave 6 (2026-05-28, GHIDRA-DELIVERY-01). The static analyst's data
@@ -62,11 +112,18 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
     ``analysis_file_path`` into the JSON when the worker recorded a
     container-visible mirror via ``state['static_sample_path']``.
 
+    Ghidra-path fix (2026-07-12, job 60df48cb): when the head chunk is the
+    file-loader placeholder ("No static data available for sample <sha>"),
+    synthesize a real JSON chunk instead of passing the placeholder through.
+    Without it the LLM never sees ``analysis_file_path``, hallucinates a
+    path for ``load_program`` and reports "file was not found on the server
+    filesystem" even though the mirror succeeded. The synthesized chunk
+    carries the paths plus a deterministic PE summary (``static``) so fresh
+    samples get a real data surface. Non-placeholder non-JSON chunks (legacy
+    raw decompile output) still pass through unchanged.
+
     The chunk objects are immutable dataclasses; rebuild with the same
     chunker so downstream code (token budget, chunk_text) keeps working.
-    Best-effort: if the chunk content isn't valid JSON, return chunks
-    unchanged — the static analyst's own placeholder guard handles the
-    "no path, no analysis" path.
     """
     import json
 
@@ -75,12 +132,28 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
         return chunks
 
     head = chunks[0]
+    parsed: dict[str, Any] | None = None
     try:
-        parsed = json.loads(head.content)
+        loaded = json.loads(head.content)
+        if isinstance(loaded, dict):
+            parsed = loaded
     except (json.JSONDecodeError, ValueError):
-        return chunks
-    if not isinstance(parsed, dict):
-        return chunks
+        parsed = None
+
+    if parsed is None:
+        if not _STATIC_PLACEHOLDER_RE.match(head.content.strip()):
+            # Legacy raw (non-JSON, non-placeholder) chunk — pass through.
+            return chunks
+        parsed = {
+            "note": (
+                "Live analysis run: no pre-extracted static fixture exists "
+                "for this sample. The deterministic PE summary below was "
+                "parsed on the host; use your Ghidra tools for deeper "
+                "analysis."
+            ),
+            "sha256": state.get("file_hash") or "",
+            "static_summary": (_compact_static_summary(static) if static is not None else None),
+        }
 
     parsed["analysis_file_path"] = static_path
     # Also carry the HOST-readable path (when present) so the static-feature
@@ -90,6 +163,12 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
     if isinstance(host_path, str) and host_path:
         parsed["host_sample_path"] = host_path
     new_content = json.dumps(parsed, indent=2, default=str)
+    if len(new_content) > _MAX_SYNTH_CHUNK_CHARS and "static_summary" in parsed:
+        # The spliced chunk bypasses the token-budget re-check; drop the
+        # summary rather than blow the prompt window.
+        parsed["static_summary"] = None
+        parsed["static_summary_omitted"] = "too large"
+        new_content = json.dumps(parsed, indent=2, default=str)
 
     import dataclasses as _dc
 
@@ -172,21 +251,39 @@ def make_analyst_node(
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
             if agent_name == "static":
-                chunks = _augment_static_chunks_with_path(chunks, state)
+                # Ghidra-path fix (2026-07-12): compute the deterministic PE
+                # summary ONCE and reuse it for both the synthesized head
+                # chunk and the dynamic-tool-selection categories below.
+                _st: StaticAnalysis | None = None
+                try:
+                    from maljan.extractors.pe_extractor import build_static_analysis
+
+                    _sp = state.get("sample_path")
+                    if _sp:
+                        _st = build_static_analysis(sample_path=str(_sp))
+                except Exception as _e:  # noqa: BLE001
+                    logger.debug("static summary extraction skipped: %s", _e)
+
+                chunks = _augment_static_chunks_with_path(chunks, state, static=_st)
+
+                # Pin the container-visible path on the agent so the
+                # load_program tool wrapper can override hallucinated paths.
+                # Assign unconditionally — agents are cached across samples;
+                # a stale path from the previous sample must be cleared.
+                agent._analysis_file_path = (  # type: ignore[attr-defined]
+                    state.get("static_sample_path") or None
+                )
+
                 # 2026-07 round 3: hand the static analyst the sample's capability
                 # categories (from the PE import classification) so dynamic Ghidra
                 # tool selection works regardless of whether the chunk carried a
                 # readable path. state["sample_path"] is reliably host-readable.
                 try:
                     from maljan.analysis.import_capability_layer import _imports_by_category
-                    from maljan.extractors.pe_extractor import build_static_analysis
 
-                    _sp = state.get("sample_path")
-                    if _sp:
-                        _st = build_static_analysis(sample_path=str(_sp))
-                        agent._sample_categories = (  # type: ignore[attr-defined]
-                            set(_imports_by_category(_st).keys()) if _st else set()
-                        )
+                    agent._sample_categories = (  # type: ignore[attr-defined]
+                        set(_imports_by_category(_st).keys()) if _st else set()
+                    )
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static category hint skipped: %s", _e)
 

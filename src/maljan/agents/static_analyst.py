@@ -178,6 +178,12 @@ class StaticAnalyst(BaseAnalyst):
     # crypto / dataflow / code-gap). The sink-reachability pre-pass focuses
     # the loop, offsetting the larger tool manifest.
 
+    # Container-visible path of the current sample, assigned per-run by the
+    # pipeline (nodes.py) alongside ``_sample_categories``. Read at CALL time
+    # by the load_program wrapper (late binding — the agent is cached across
+    # samples and tools may be selected before the pipeline sets the path).
+    _analysis_file_path: str | None = None
+
     def _ghidra_tool_mode(self) -> str:
         """Resolve the effective tool-selection mode from config (back-compat)."""
         from maljan.core.config import get_settings
@@ -202,7 +208,7 @@ class StaticAnalyst(BaseAnalyst):
         mode = self._ghidra_tool_mode()
         if mode == "all":
             self.logger.info("Ghidra MCP [all]: exposing all %d tools.", len(tools))
-            return list(tools)
+            return self._pin_load_program_path(list(tools))
 
         # Fall back to categories set by the pipeline (nodes.py) when the caller
         # didn't pass any — this is the reliable path (state["sample_path"]).
@@ -219,7 +225,7 @@ class StaticAnalyst(BaseAnalyst):
                 len(tools),
                 sorted(categories) or "{}",
             )
-            return selected
+            return self._pin_load_program_path(selected)
 
         # curated (or dynamic before a sample is known)
         kept = [t for t in tools if getattr(t, "name", "").lower() in self._GHIDRA_ALLOWED_TOOLS]
@@ -229,7 +235,64 @@ class StaticAnalyst(BaseAnalyst):
             len(kept),
             len(tools),
         )
-        return kept
+        return self._pin_load_program_path(kept)
+
+    def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
+        """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
+
+        Ghidra-path fix (2026-07-12, job 60df48cb): on a fresh sample whose
+        chunk lacked ``analysis_file_path`` the LLM invented
+        ``/home/user/data/bin.<sha>`` and load_program failed with
+        "File not found" even though the mirror to ``/data/samples/`` had
+        succeeded. The wrapper deterministically substitutes the known
+        container path (``self._analysis_file_path``, set per-sample by
+        nodes.py) whenever the model supplies a different one. Fail-safe:
+        any wrapping error keeps the original tool.
+        """
+        out: list[Any] = []
+        for tool in tools:
+            if getattr(tool, "name", "") == "load_program":
+                try:
+                    tool = self._wrap_load_program(tool)
+                except Exception as e:  # noqa: BLE001
+                    self.logger.warning("load_program pin skipped: %s", e)
+            out.append(tool)
+        return out
+
+    def _wrap_load_program(self, tool: Any) -> Any:
+        """Rebuild the load_program StructuredTool with a path-pinning coroutine.
+
+        A fresh tool is built rather than mutating ``tool.coroutine`` in
+        place — the original lives in the shared ``_all_ghidra_tools`` pool
+        and the HTTP client's tool list; in-place mutation would leak the
+        wrapper across selections.
+        """
+        from langchain_core.tools import StructuredTool
+
+        inner = getattr(tool, "coroutine", None)
+        if inner is None:
+            return tool  # sync/stdio tool variant — leave untouched
+
+        agent = self
+
+        async def pinned_load_program(**kwargs: Any) -> str:
+            pinned = getattr(agent, "_analysis_file_path", None)
+            if isinstance(pinned, str) and pinned and kwargs.get("file") != pinned:
+                agent.logger.warning(
+                    "load_program: overriding model-supplied path %r with known container path %r.",
+                    kwargs.get("file"),
+                    pinned,
+                )
+                kwargs["file"] = pinned
+            return str(await inner(**kwargs))
+
+        return StructuredTool.from_function(
+            func=None,
+            coroutine=pinned_load_program,
+            name=tool.name,
+            description=tool.description,
+            args_schema=tool.args_schema,
+        )
 
     def _refine_tools_for_sample(self, host_path: str | None) -> None:
         """In dynamic mode, narrow ``self.tools`` to the sample's relevant tools.
