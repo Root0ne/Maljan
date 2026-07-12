@@ -25,10 +25,13 @@ from maljan.extractors.pe_extractor import build_static_analysis
 from maljan.extractors.persistence_extractor import build_persistence_list
 from maljan.extractors.sample_identity import build_sample_identity
 from maljan.reporting.models import (
+    ConsolidatedIOC,
     DefensiveRecommendation,
     ExternalReference,
     MalwareReport,
+    ReportFrontMatter,
     SeverityAssessment,
+    VersionHistoryEntry,
 )
 
 
@@ -156,6 +159,13 @@ class MalwareReportBuilder:
             stix_bundle_extended=self.stix_output,
             references=references,
         )
+        # Report-reshaping Phase 3: deterministic front-matter, version history,
+        # and consolidated IOC table (the professional-report scaffolding the
+        # Composer's prose sits inside). All derived from already-built fields.
+        report.front_matter = self._build_front_matter(report)
+        report.tlp = report.front_matter.tlp
+        report.version_history = _build_version_history(report.front_matter)
+        report.consolidated_iocs = build_consolidated_iocs(report)
         logger.info(
             "MalwareReportBuilder: deterministic build complete "
             "(verdict=%s, severity=%s, TTPs=%d, persistence=%d, IOCs=%d)",
@@ -391,6 +401,144 @@ class MalwareReportBuilder:
                 )
             )
         return refs
+
+    def _build_front_matter(self, report: MalwareReport) -> ReportFrontMatter:
+        """Deterministic report cover / TLP block (reference §1).
+
+        Report number is ``{prefix}{YYYYMMDD}-{sha6}`` — deterministic (no DB
+        counter) yet unique per sample. TLP escalates to AMBER when the report
+        carries live network IOCs (real C2 = more sensitive to share), mirroring
+        the reference's rationale; otherwise the configured default.
+        """
+        from datetime import UTC, datetime
+
+        from maljan.core.config import get_settings
+
+        rc = get_settings().reporting
+        sha = report.identity.hashes.sha256 or ""
+        now = datetime.now(UTC)
+        report_number = f"{rc.report_number_prefix}{now:%Y%m%d}-{sha[:6]}" if sha else None
+
+        tlp = rc.default_tlp
+        net = report.network
+        has_live_c2 = bool(net and (net.domains or net.ips or net.urls))
+        if has_live_c2 and tlp == "CLEAR":
+            tlp = "AMBER"
+
+        name = report.malware_category or (
+            report.attribution.family if report.attribution else None
+        )
+        subtitle = None
+        if report.identity.platform and report.malware_category:
+            subtitle = f"{report.malware_category} targeting {report.identity.platform.title()}"
+
+        return ReportFrontMatter(
+            publisher=rc.publisher,
+            product_type=rc.product_type,
+            malware_name=(name.title() if isinstance(name, str) and name else None),
+            subtitle=subtitle,
+            version="1.0",
+            report_date=f"{now:%Y-%m-%d}",
+            report_number=report_number,
+            team=rc.author_team,
+            tlp=tlp,
+            copyright=f"© {now:%Y} {rc.publisher}",
+        )
+
+
+def _build_version_history(front_matter: ReportFrontMatter) -> list[VersionHistoryEntry]:
+    """Single deterministic revision-history row (reference §2)."""
+    return [
+        VersionHistoryEntry(
+            version=front_matter.version,
+            date=front_matter.report_date or "",
+            authors=front_matter.team or front_matter.publisher,
+            description="Automated multi-agent analysis — initial report.",
+        )
+    ]
+
+
+def defang(value: str) -> str:
+    """Neutralise a live indicator for safe distribution (reference VI.3).
+
+    Bracket the dots in domains/IPs and the scheme separator in URLs. Idempotent
+    and conservative — only touches ``.``, ``://`` and the ``http``/``https``
+    scheme so hashes/registry paths pass through unchanged.
+    """
+    if not value:
+        return value
+    out = value
+    if "://" in out:
+        out = out.replace("http://", "hxxp[://]").replace("https://", "hxxps[://]")
+    # Only defang dotted network-looking tokens (contain a dot, no path sep and
+    # not an obvious filesystem path) to avoid mangling registry/file paths.
+    looks_networky = "." in out and "\\" not in out
+    if looks_networky:
+        out = out.replace("[.]", ".").replace(".", "[.]")
+    return out
+
+
+def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
+    """Gather + dedupe + defang every IOC into one typed table (reference §11).
+
+    A recurring corpus weakness is IOCs dispersed inline; this consolidates
+    hashes, network domains/IPs/URLs, suspicious static strings, and persistence
+    targets into a single ``Type | Description | Value`` table, host- vs
+    network-based via ``is_network``.
+    """
+    rows: list[ConsolidatedIOC] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(ioc_type: str, value: str, description: str = "", is_network: bool = False) -> None:
+        value = (value or "").strip()
+        if not value:
+            return
+        rendered = defang(value) if is_network else value
+        key = (ioc_type, rendered.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append(
+            ConsolidatedIOC(
+                type=ioc_type, description=description, value=rendered, is_network=is_network
+            )
+        )
+
+    h = report.identity.hashes
+    _add("SHA-256", h.sha256 or "", "Sample hash")
+    _add("MD5", h.md5 or "", "Sample hash")
+    _add("SHA-1", h.sha1 or "", "Sample hash")
+
+    net = report.network
+    if net:
+        for d in net.domains:
+            _add("Domain", d.fqdn, d.reason or "", is_network=True)
+        for ip in net.ips:
+            _add("IPv4", ip.address, f"port {ip.port}" if ip.port else "", is_network=True)
+        for u in net.urls:
+            _add("URL", u.url, u.method or "", is_network=True)
+
+    if report.static:
+        _kind_to_type = {
+            "url": "URL",
+            "ip": "IPv4",
+            "domain": "Domain",
+            "registry": "Registry Key",
+            "path": "Path",
+            "mutex": "Mutex",
+            "email": "Email",
+            "command": "Command",
+        }
+        for s in report.static.interesting_strings:
+            ioc_type = _kind_to_type.get(s.kind, "String")
+            is_net = s.kind in {"url", "ip", "domain"}
+            _add(ioc_type, s.value, s.notes or "", is_network=is_net)
+
+    for pm in report.persistence:
+        if pm.target:
+            _add("Persistence", pm.target, pm.kind.replace("_", " "))
+
+    return rows
 
 
 def _derive_recommendation_category(action: str, rationale: str) -> str:
