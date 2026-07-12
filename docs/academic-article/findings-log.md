@@ -978,6 +978,72 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-07-12 Static-analyst performance, before vs after the July fixes (tool-manifest sizing +
+  hallucinated `load_program` path).** Two consecutive root causes limited the static analyst on
+  live runs, and both were measured on the SAME 36 KB MSVC6/MFC PE (`11e77149…`, WS2_32 client →
+  `888kafa.com`) with the same local Qwen3.6-35B backend, giving a clean controlled comparison.
+
+  **(a) Tool-manifest sizing (commit acb4dbb).** Exposing all 165 Ghidra MCP tools
+  (`USE_ALL_TOOLS=true`, job `294eefc3`) was measured strictly WORSE than the curated 20-tool
+  allowlist: the ~15–25k-token manifest is re-prefilled every ReAct step on the SWA model, so the
+  pipeline went from ~255–330 s to **1 580 s (26 min, ~5–6×)**, the analyst managed only 3 tool
+  calls in 67.5 s before forced synthesis, and hallucination went UP (T1027@0.85 + a **fabricated
+  T1055** with no injection API in the sample + T1140@0.70). Fix: dynamic tool-RAG selection
+  (`ghidra_tool_selector.py`, mode `dynamic`) — CORE triage set ∪ category-matched tools derived
+  deterministically from the PE import classification; all 165 stay reachable, ~23–40 are shown.
+  Measured: **23/165 tools selected** for categories `{anti_debug, execution, network}`, pipeline
+  back to **162.8 s** — curated-level speed at much wider tool reach. A deterministic confidence
+  cap (`capability_matrix._cap_unsupported_confidence`) was added in the same commit because the
+  prompt-only constraint did NOT stop the 35B model from claiming T1027@0.85: with no obfuscation
+  evidence (all sections < 7.0 entropy, no packer hint) T1027/T1140 are clamped to ≤0.40, and
+  T1055 likewise unless a real injection import exists. Prompt-level guidance failing where a
+  10-line deterministic post-hoc cap succeeds is itself a paper-relevant negative result.
+
+  **(b) Hallucinated `load_program` path on fresh samples (commit fc85412).** The 162.8 s run
+  above (job `60df48cb`) was fast but its LLM static layer was silently BROKEN end-to-end: for a
+  freshly uploaded sample there is no `data/samples/static/<sha>.json` fixture and (with the CAPE
+  VM down) no sandbox report, so the analyst's head chunk was the non-JSON file-loader placeholder
+  "No static data available for sample <sha>" — and the Wave-6 path splice
+  (`_augment_static_chunks_with_path`) only injected `analysis_file_path` into JSON chunks. The
+  model, given no path, INVENTED `/home/user/data/bin.<sha>`; Ghidra correctly answered "File not
+  found"; the report then carried two poisoned confidence-1.0 claims ("file was not found on the
+  server filesystem", "no binary content was provided") even though the mirror to
+  `/data/samples/<sha>.exe` had succeeded — the deterministic function-hash pre-pass loaded the
+  very same file 90 s later in the same job. Evidence trail: worker log `Mirrored sample…`
+  16:20:40; DB claim `evidence_ref` with the invented path; Ghidra log `Loaded program` 16:22:59.
+  Diagnosis matters: this looked like (and was initially filed as) "Ghidra file-mirroring
+  flakiness" — the infrastructure was innocent; the failure was a prompt-content gap. Fix, two
+  defensive layers: (1) synthesize a real JSON head chunk for the placeholder case, carrying
+  `analysis_file_path`/`host_sample_path`/`sha256` plus a size-capped deterministic PE summary
+  (imports ≤60 suspicious-first, strings ≤40, 40k-char hard ceiling — the spliced chunk bypasses
+  the chunker's token-budget re-check); (2) wrap `load_program` at the tool-selection choke point
+  so a model-supplied `file` argument differing from the known container path is overridden
+  deterministically (late-bound read, since agents are cached across samples).
+
+  **Measured before/after on the same sample (fresh-sample regime, CAPE down):**
+
+  | metric | all-165 (`294eefc3`) | dynamic, pre-fix (`60df48cb`) | dynamic, post-fix (`df8ebc1a`) |
+  |---|---|---|---|
+  | pipeline wall-clock | 1 580 s | 162.8 s | 225.9 s |
+  | tool manifest shown | 165 | 23/165 | 23/165 |
+  | static ReAct loop | 3 calls / 67.5 s | 3 calls / 12.4 s | 3 calls / 16.0 s (+29.6 s synthesis) |
+  | sink-reachability pre-pass | — | **did not fire** (no path in chunk) | fired (991-char priority hint) |
+  | LLM static claims | 3, all hallucinated (incl. fabricated T1055) | 2, both poisoned ("file not found", conf 1.0) | **5, all grounded** (real `FUN_00401310`, section entropy 5.39, `888kafa.com`) |
+  | usable static evidence | none from LLM | deterministic import layer only (T1071@0.60) | LLM (T1071@0.95, anti-debug@0.8, T1036@0.85…) + import layer |
+  | capability matrix | T1027@0.85, fake T1055@0.80 | T1071 only | T1071@0.95; **T1027 capped 0.40** (cap held); **no T1055** |
+  | verdict / confidence | — (not recorded) | Malware / 0.667 (on thin evidence) | Malware / 0.613 (on broad evidence) |
+
+  Post-fix wall-clock is ~63 s higher than pre-fix — that delta is REAL WORK the broken run never
+  did (sink-reachability + function-hash pre-passes now fire before the loop, forced synthesis now
+  has genuine tool output to compress, judge processes 5 claims instead of 2), not a regression.
+  Overall confidence barely moved (0.667→0.613) while the evidence base under it transformed —
+  another instance of the log's recurring theme that scalar confidence is a poor proxy for report
+  quality. Verified: 12 new unit tests (placeholder-chunk synthesis + path pinning), full suite
+  1396 passed / 8 known pre-existing failures, E2E on job `df8ebc1a`. Also fixed en route:
+  `pe_extractor` now only flags "dynamic API resolution" as an obfuscation indicator when the
+  import table is actually sparse (<15 imports), removing a chronic T1027 false-positive trigger
+  for ordinary `LoadLibrary+GetProcAddress` idiom.
+
 - **2026-06-23 Live-UI audit: degraded live reports were caused by THREE LLM-loop root causes
   (all fixed), not by the analysis logic.** A full live run of a Windows PE (Pony) under
   `SANDBOX__BACKEND=mock` completed but returned `degraded_mode=true`, `overall_confidence=0`,
