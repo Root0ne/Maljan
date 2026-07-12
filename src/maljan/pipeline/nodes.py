@@ -582,17 +582,32 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # Linux sample).
             sample_platform = state.get("platform") or "unknown"
 
+            # 2026-07 audit: YARA scans the sample BYTES (not analyst prose) so
+            # an API-name pattern only fires when the string is really in the
+            # binary. Read from the worker-visible host path (same one the PE
+            # extractor / family RAG use), not the container Ghidra path.
+            def _read_sample_bytes() -> bytes | None:
+                from pathlib import Path as _Path
+
+                raw = state.get("sample_path") or state.get("static_sample_path")
+                if not raw:
+                    return None
+                try:
+                    return _Path(str(raw)).read_bytes()
+                except Exception as _e:  # noqa: BLE001
+                    logger.warning("YARA Layer 0: sample unreadable (%s). Skipping.", _e)
+                    return None
+
             async def _run_yara_scan() -> AgentISR | None:
                 try:
                     yara_layer = container.get_yara_layer()
                     if yara_layer.rule_count > 0:
-                        scan_parts: list[str] = list((state.get("reports") or {}).values())
-                        for isr_obj in isr_reports.values():
-                            scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
-                        scan_text = " ".join(scan_parts)
+                        sample_bytes = await asyncio.to_thread(_read_sample_bytes)
+                        if not sample_bytes:
+                            return None
                         yara_layer.reset_filter_stats()
                         yara_matches = await asyncio.to_thread(
-                            yara_layer.scan, scan_text, sample_platform
+                            yara_layer.scan, sample_bytes, sample_platform
                         )
                         if yara_matches:
                             yara_isr: AgentISR = yara_layer.to_isr(yara_matches)
@@ -608,18 +623,26 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     logger.warning("YARA Layer 0 scan failed: %s. Skipping.", e)
                 return None
 
+            # 2026-07 audit: Sigma scans structured events built from real
+            # sandbox telemetry (strict field matching) instead of analyst
+            # prose. No telemetry -> no events -> no matches (correct for
+            # static-only runs).
             async def _run_sigma_scan() -> AgentISR | None:
                 try:
+                    from maljan.analysis.sigma_layer import build_events_from_sandbox
+
                     sigma_layer = container.get_sigma_layer()
                     if sigma_layer.rule_count > 0:
-                        sigma_scan_parts: list[str] = list((state.get("reports") or {}).values())
-                        for isr_obj in isr_reports.values():
-                            sigma_scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
-                        sigma_scan_text = "\n".join(sigma_scan_parts)
+                        _sbx = state.get("sandbox_report")
+                        _sbx = _sbx if isinstance(_sbx, dict) else None
+                        sigma_events = build_events_from_sandbox(_sbx)
+                        if not sigma_events:
+                            return None
                         sigma_layer.reset_filter_stats()
                         sigma_matches = await asyncio.to_thread(
-                            sigma_layer.scan_report_text,
-                            sigma_scan_text,
+                            sigma_layer.scan_events,
+                            sigma_events,
+                            "sandbox",
                             sample_platform,
                         )
                         if sigma_matches or sigma_layer.last_filtered_count:
@@ -705,10 +728,34 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("ATT&CK autocorrect skipped: %s", exc, exc_info=True)
 
+            # 2026-07 audit: mark domains that had no real input data this run so
+            # the cascade can't count an absent layer as corroboration (the
+            # T1497 "1.00 across dynamic,network,static,yara" inflation).
+            _dyn_empty = True
+            if isinstance(_sandbox_report, dict):
+                _beh = _sandbox_report.get("behavior") or {}
+                _dyn_empty = not (
+                    (isinstance(_beh, dict) and (_beh.get("processes") or _beh.get("calls")))
+                    or _sandbox_report.get("signatures")
+                )
+            _net_empty = True
+            try:
+                _net_iocs = build_network_iocs(_sandbox_report)
+                _net_empty = not (
+                    _net_iocs and (_net_iocs.domains or _net_iocs.ips or _net_iocs.urls)
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("network-empty probe failed: %s (treating as empty).", e)
+            _empty_domains = frozenset(
+                d for d, empty in (("dynamic", _dyn_empty), ("network", _net_empty)) if empty
+            )
+
             cascade_summary = None
             try:
                 cascade_summary = TTPCascadeEngine().compute(
-                    isr_reports, sample_platform=sample_platform
+                    isr_reports,
+                    sample_platform=sample_platform,
+                    empty_domains=_empty_domains,
                 )
             except Exception as e:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)

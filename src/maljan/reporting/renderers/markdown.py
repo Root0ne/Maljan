@@ -16,7 +16,6 @@ from typing import Any
 
 from maljan.core.logger import logger
 from maljan.reporting.models import (
-    CapabilityCell,
     DefensiveRecommendation,
     DetectionRule,
     MalwareReport,
@@ -29,7 +28,6 @@ from maljan.reporting.models import (
     SandboxSignature,
     SeverityAssessment,
     StringIOC,
-    TTPMapping,
 )
 
 
@@ -64,11 +62,7 @@ class MarkdownRenderer:
             ),
             self._safe_section(
                 "attack_matrix",
-                lambda: self._section_attack_matrix(report.capability_matrix),
-            ),
-            self._safe_section(
-                "capability_matrix",
-                lambda: self._section_capability_matrix(report.ttp_mappings),
+                lambda: self._section_attack_matrix(report),
             ),
             self._safe_section("attribution", lambda: self._section_attribution(report)),
             self._safe_section(
@@ -384,45 +378,56 @@ class MarkdownRenderer:
             )
         return "\n".join(lines)
 
-    def _section_attack_matrix(self, cells: list[CapabilityCell]) -> str:
+    def _section_attack_matrix(self, report: MalwareReport) -> str:
+        """Single ATT&CK section: the summary table + per-technique evidence.
+
+        2026-07 audit (Bulgu #15): the report previously carried two H2 sections
+        ("MITRE ATT&CK Matrix" and "Capability Matrix (evidence)") that listed
+        the same techniques twice. They are merged here — one table, with the
+        evidence quotes rendered underneath as an ``### Evidence`` subsection —
+        so each technique appears once.
+        """
+        cells = report.capability_matrix
+        mappings = report.ttp_mappings
         lines = ["## MITRE ATT&CK Matrix", ""]
-        if not cells:
+        if not cells and not mappings:
             lines.append("_No ATT&CK techniques mapped._")
             return "\n".join(lines)
-        lines.append("| Tactic | Technique | Confidence | Layers |")
-        lines.append("|---|---|---|---|")
-        for cell in cells:
-            tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
-            layers = ", ".join(cell.contributing_layers) or "-"
-            lines.append(
-                f"| {tactic} | {cell.technique_id} {cell.technique_name} | "
-                f"{cell.confidence:.2f} | {layers} |"
-            )
-        return "\n".join(lines)
 
-    def _section_capability_matrix(self, mappings: list[TTPMapping]) -> str:
-        lines = ["## Capability Matrix (evidence)", ""]
-        if not mappings:
-            lines.append("_No TTP evidence available._")
-            return "\n".join(lines)
-        for mapping in mappings:
-            corroborated = "corroborated" if mapping.is_corroborated else "single-source"
-            lines.append(
-                f"### {mapping.technique_id} — {mapping.technique_name}  "
-                f"`(conf={mapping.confidence:.2f}, {corroborated})`"
-            )
-            if mapping.contributing_layers:
-                lines.append(f"_Layers: {', '.join(mapping.contributing_layers)}_")
+        if cells:
+            lines.append("| Tactic | Technique | Confidence | Layers |")
+            lines.append("|---|---|---|---|")
+            for cell in cells:
+                tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
+                layers = ", ".join(cell.contributing_layers) or "-"
+                lines.append(
+                    f"| {tactic} | {cell.technique_id} {cell.technique_name} | "
+                    f"{cell.confidence:.2f} | {layers} |"
+                )
             lines.append("")
-            for quote in mapping.evidence_quotes[:6]:
-                lines.append(f"> {_truncate(quote, 240)}")
+
+        if mappings:
+            lines.append("### Evidence")
             lines.append("")
+            for mapping in mappings:
+                corroborated = "corroborated" if mapping.is_corroborated else "single-source"
+                lines.append(
+                    f"**{mapping.technique_id} — {mapping.technique_name}**  "
+                    f"`(conf={mapping.confidence:.2f}, {corroborated})`"
+                )
+                lines.append("")
+                for quote in mapping.evidence_quotes[:6]:
+                    lines.append(f"> {_truncate(quote, 240)}")
+                lines.append("")
         return "\n".join(lines).rstrip()
 
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
         lines = ["## Family Attribution", ""]
-        family = attr.family or report.malware_category
+        # 2026-07 audit (Bulgu #6/#7): the behavioural *category* is a distinct
+        # classification, never a family — do NOT fall back to it as the family
+        # name (that produced the contradictory "Family: dropper (0.00)" line).
+        family = attr.family
         if not family or str(family).lower() == "unknown":
             # No family candidate at all — render plainly, without a noisy
             # "confidence 0.00" that reads as an (un)confident verdict.
@@ -435,6 +440,12 @@ class MarkdownRenderer:
             )
             lines.append(
                 f"**Family**: {family} (confidence {attr.family_confidence:.2f}){grounded_note}"
+            )
+        # Surface the behavioural category on its own line so the reader sees the
+        # classification without mistaking it for a family attribution.
+        if report.malware_category and str(report.malware_category).lower() != "unknown":
+            lines.append(
+                f"**Category**: {report.malware_category} _(behavioural class, not a family)_"
             )
         if attr.actor:
             lines.append(f"**Actor**: {attr.actor}")

@@ -101,7 +101,7 @@ class MalwareReportBuilder:
             cascade_summary=self.cascade_summary,
             isr_reports=self.isr_reports,
         )
-        severity = self._severity_assessment(static, dynamic, network, persistence, cells)
+        severity = self._severity_assessment(static, dynamic, network, persistence, cells, identity)
         verdict = self._verdict_literal(self.final_decision)
         attribution = build_family_attribution(
             malware_category=self.malware_category,
@@ -185,6 +185,14 @@ class MalwareReportBuilder:
                     recs.append(DefensiveRecommendation.model_validate(item))
                 except Exception:  # noqa: BLE001
                     continue
+        # 2026-07 audit (Bulgu #13): the narrative LLM gets no guidance on the
+        # ``category`` enum and collapses every recommendation to "patching"
+        # (none of which were patches). Re-derive the category deterministically
+        # from the action/rationale text so the label matches the advice.
+        for rec in recs:
+            rec.category = _derive_recommendation_category(  # type: ignore[assignment]
+                rec.action, rec.rationale
+            )
         report.defensive_recommendations = recs
         return report
 
@@ -259,6 +267,7 @@ class MalwareReportBuilder:
         network: Any | None,
         persistence: list[Any],
         cells: list[Any],
+        identity: Any | None = None,
     ) -> SeverityAssessment:
         """Heuristic CVSS-style score from deterministic signal density."""
         confidence = max(0.0, min(1.0, float(self.overall_confidence)))
@@ -298,7 +307,7 @@ class MalwareReportBuilder:
             else "Sample displays suspicious behaviour consistent with malware; "
             "isolate and analyse further before allowing execution."
         )
-        platforms = self._guess_platforms(static, dynamic)
+        platforms = self._guess_platforms(static, dynamic, identity)
 
         return SeverityAssessment(
             overall_score=round(score, 1),
@@ -308,17 +317,27 @@ class MalwareReportBuilder:
             likely_targets=[],
         )
 
-    def _guess_platforms(self, static: Any | None, dynamic: Any | None) -> list[str]:
+    def _guess_platforms(
+        self, static: Any | None, dynamic: Any | None, identity: Any | None = None
+    ) -> list[str]:
         platforms: list[str] = []
         if dynamic is not None and dynamic.process_tree:
             platforms.append("Windows")  # behavior almost always Windows sandbox
+
+        # 2026-07 audit (Bulgu #9): infer Windows from the PE format itself so a
+        # Windows PE with no dynamic run no longer falls through to "Unknown".
+        # file_type "PE" or the MS-download MIME is a definitive Windows signal.
+        if identity is not None and "Windows" not in platforms:
+            file_type = str(getattr(identity, "file_type", "") or "").upper()
+            mime = str(getattr(identity, "mime_type", "") or "").lower()
+            if file_type == "PE" or "msdownload" in mime or "x-dosexec" in mime:
+                platforms.append("Windows")
+
         if static is not None and static.sections:
             first = static.sections[0]
             char = first.characteristics or ""
             if char == "ELF" or any(s.characteristics == "ELF" for s in static.sections):
-                if "Windows" in platforms:
-                    pass
-                else:
+                if "Windows" not in platforms:
                     platforms.append("Linux")
         if not platforms:
             platforms.append("Unknown")
@@ -341,19 +360,117 @@ class MalwareReportBuilder:
                     ),
                 ]
             )
+        # 2026-07 audit (Bulgu #17): one ExternalReference per technique produced
+        # the "MITRE ATT&CK" source label repeated 7×. Emit a single grouped
+        # ATT&CK reference (pointing at the matrix landing page) whose note lists
+        # the techniques, plus deduped per-technique links keyed by technique id.
+        seen_tids: set[str] = set()
+        tech_notes: list[str] = []
         for mapping in mappings[:10]:
             tid = mapping.technique_id
+            if not tid or tid in seen_tids:
+                continue
+            seen_tids.add(tid)
+            tech_notes.append(f"{tid} {mapping.technique_name}".strip())
+        if tech_notes:
             refs.append(
                 ExternalReference(
                     source="MITRE ATT&CK",
-                    url=f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
-                    note=mapping.technique_name,
+                    url="https://attack.mitre.org/matrices/enterprise/",
+                    note="; ".join(tech_notes),
                 )
             )
         return refs
 
 
+def _derive_recommendation_category(action: str, rationale: str) -> str:
+    """Map a recommendation's free text to the correct ``category`` enum value.
+
+    2026-07 audit (Bulgu #13): the narrative LLM labelled every recommendation
+    "patching" regardless of content. This deterministic mapper inspects the
+    action/rationale wording and returns one of the ``DefensiveRecommendation``
+    enum members, defaulting to ``other`` when nothing matches. Order matters —
+    the most specific signal wins.
+    """
+    text = f"{action} {rationale}".lower()
+    if any(k in text for k in ("patch", "cve-", " cve", "vulnerab", "update the software")):
+        return "patching"
+    if any(
+        k in text
+        for k in (
+            "firewall",
+            "block outbound",
+            "outbound traffic",
+            "outbound connection",
+            "network connection",
+            "egress",
+            "sinkhole",
+            "proxy",
+            " c2 ",
+            "c2 infrastructure",
+            "command and control",
+            "block the domain",
+            "block the ip",
+        )
+    ):
+        return "firewall"
+    if "registry" in text:
+        return "registry_hardening"
+    if any(
+        k in text
+        for k in (
+            "group policy",
+            "gpo",
+            "applocker",
+            "wdac",
+            "constrained language",
+            "software restriction",
+        )
+    ):
+        return "gpo"
+    if any(
+        k in text
+        for k in ("awareness", "phishing", "user training", "user education", "social engineering")
+    ):
+        return "user_awareness"
+    if any(
+        k in text
+        for k in (
+            "monitor",
+            "alert",
+            " edr",
+            "endpoint detection",
+            "hunt",
+            "detect",
+            "sigma",
+            "yara",
+            "sysmon",
+            "telemetry",
+            "process injection",
+            "behaviour",
+            "behavior",
+            "log",
+        )
+    ):
+        return "edr_hunting"
+    return "other"
+
+
 def _ioc_count(report: MalwareReport) -> int:
-    if report.network is None:
-        return 0
-    return len(report.network.domains) + len(report.network.ips) + len(report.network.urls)
+    """Total network-flavoured IOC count.
+
+    2026-07 audit (Bulgu #4): also count network IOCs recovered from static
+    strings (``static.interesting_strings`` with kind domain/ip/url), so a
+    hard-coded C2 domain like ``888kafa.com`` is no longer reported as "0
+    domains" just because the sandbox never observed it on the wire.
+    """
+    total = 0
+    if report.network is not None:
+        total += len(report.network.domains) + len(report.network.ips) + len(report.network.urls)
+    if report.static is not None:
+        total += sum(
+            1
+            for s in report.static.interesting_strings
+            if getattr(s, "kind", None) in {"domain", "ip", "url"}
+        )
+    return total

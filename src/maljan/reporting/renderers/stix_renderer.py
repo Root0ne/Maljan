@@ -245,16 +245,22 @@ class ExtendedSTIXRenderer:
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
-        """Stamp the judge's SDOs with a real ``created``/``modified`` time.
+        """Normalize the judge's LLM-emitted SDOs to authoritative values.
 
         The judge Bundle is emitted by the LLM, which copies STIX documentation
-        examples verbatim — the Malware and AttackPattern objects land on the
-        placeholder ``2023-01-01T00:00:00Z`` epoch (audit L7) instead of the
-        analysis time, and a downstream CTI consumer would trust that bogus
-        date. The model cannot know the wall clock, so its timestamps are never
-        authoritative; overwrite them with the render time (matching every
-        renderer-produced SDO, which already uses ``get_utcnow``). Object ids
-        are left untouched so intra-bundle relationship refs stay valid.
+        examples verbatim. Two fields are never authoritative and are fixed here:
+
+        * ``created``/``modified`` — land on the placeholder
+          ``2023-01-01T00:00:00Z`` epoch (audit L7) instead of the analysis
+          time; a downstream CTI consumer would trust that bogus date. Overwrite
+          with the render time (matching every renderer-produced SDO).
+        * ``is_family`` on Malware SDOs (2026-07 audit, Bulgu #8) — the LLM often
+          copies ``is_family: true`` from the docs, but Maljan analyses a single
+          specimen, so this must be ``false``. STIX ``is_family=true`` asserts
+          the object represents a malware *family*, not one sample.
+
+        Object ids are left untouched so intra-bundle relationship refs stay
+        valid.
         """
         now = get_utcnow()
         for obj in objects:
@@ -262,6 +268,8 @@ class ExtendedSTIXRenderer:
                 obj.created = now
             if hasattr(obj, "modified"):
                 obj.modified = now
+            if isinstance(obj, Malware) and getattr(obj, "is_family", False):
+                obj.is_family = False
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:

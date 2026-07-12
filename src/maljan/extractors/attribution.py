@@ -107,6 +107,21 @@ def _is_family_grounded(
     return False
 
 
+def _extract_sandbox_family(sandbox_report: dict[str, Any] | None) -> str | None:
+    """Return a real malware family name from sandbox CTI, or ``None``.
+
+    Only ``cti.family[]`` entries count — a behavioural category is never a
+    family. The first non-empty string wins.
+    """
+    cti = (sandbox_report or {}).get("cti") or {}
+    fams = cti.get("family") if isinstance(cti, dict) else None
+    if isinstance(fams, list):
+        for f in fams:
+            if isinstance(f, str) and f.strip():
+                return f.strip()
+    return None
+
+
 def build_family_attribution(
     *,
     malware_category: str | None,
@@ -121,8 +136,15 @@ def build_family_attribution(
     ``0.0`` so ungrounded (often hallucinated) family strings cannot inherit the
     verdict confidence. ``similar_samples`` / ``function_hash_matches`` are left
     at their defaults here and filled later by the enrichment / report nodes.
+
+    2026-07 audit (Bulgu #6/#7): the family is drawn ONLY from a real family
+    source (sandbox CTI ``family[]``). The behavioural *category*
+    (``malware_category`` — "dropper", "loader", …) is a class, NOT a family, so
+    it is no longer echoed into ``family``; that echo produced the contradictory
+    "Family: dropper (confidence 0.00)" line. The category is surfaced
+    separately by the renderer.
     """
-    family = malware_category if malware_category else None
+    family = _extract_sandbox_family(sandbox_report)
     grounded = _is_family_grounded(family, sandbox_report, isr_reports)
     if family and not grounded:
         logger.info(

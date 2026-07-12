@@ -18,7 +18,6 @@ from maljan.extractors.attribution import (
     populate_similar_samples,
 )
 from maljan.memory.long_term_memory import StoredCase
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 class TestBuildFamilyAttribution:
@@ -39,60 +38,43 @@ class TestBuildFamilyAttribution:
         # branch is "grounded", so confidence passes through unchanged.
         assert attr.family_confidence == 0.9
 
-    def test_ungrounded_family_zeroes_confidence(self) -> None:
+    def test_category_is_not_surfaced_as_family(self) -> None:
+        # 2026-07 audit (Bulgu #6/#7): a behavioural category ("rat", "dropper")
+        # is a class, NOT a family — it must never become the family attribution.
+        # With no CTI family source, family is left unset.
         attr = build_family_attribution(
             malware_category="rat",
             sandbox_report={},
             isr_reports={},
             overall_confidence=0.6,
         )
-        assert attr.family == "rat"
-        assert attr.family_grounded is False
-        assert attr.family_confidence == 0.0
+        assert attr.family is None
+        assert attr.family_grounded is True  # no claim made => not a guardrail trip
 
-    def test_grounded_via_triage_cti(self) -> None:
+    def test_family_from_cti_is_grounded(self) -> None:
         attr = build_family_attribution(
             malware_category="rat",
             sandbox_report={"cti": {"family": ["Trojan/RAT"]}},
             isr_reports={},
             overall_confidence=0.6,
         )
+        assert attr.family == "Trojan/RAT"
         assert attr.family_grounded is True
         assert attr.family_confidence == 0.6
 
-    def test_grounded_via_signature_name(self) -> None:
+    def test_cti_family_corroborated_by_signature(self) -> None:
         attr = build_family_attribution(
             malware_category="lockbit",
-            sandbox_report={"signatures": [{"name": "LockBit ransomware payload"}]},
+            sandbox_report={
+                "cti": {"family": ["LockBit"]},
+                "signatures": [{"name": "LockBit ransomware payload"}],
+            },
             isr_reports={},
             overall_confidence=0.8,
         )
+        assert attr.family == "LockBit"
         assert attr.family_grounded is True
         assert attr.family_confidence == 0.8
-
-    def test_grounded_via_isr_claim(self) -> None:
-        isr = AgentISR(
-            agent_id="static",
-            domain="static",
-            claims=[
-                ClaimEvidence(
-                    claim="Sample matches Cobalt Strike beacon pattern",
-                    evidence_ref="strings: cobaltstrike-beacon-config",
-                    confidence=0.7,
-                    technique_id="T1059",
-                )
-            ],
-            dissent_items=[],
-            revision_round=0,
-        )
-        attr = build_family_attribution(
-            malware_category="cobaltstrike",
-            sandbox_report={},
-            isr_reports={"static": isr},
-            overall_confidence=0.7,
-        )
-        assert attr.family_grounded is True
-        assert attr.family_confidence == 0.7
 
 
 def test_build_query_includes_suspicious_network_iocs() -> None:

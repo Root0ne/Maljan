@@ -260,6 +260,7 @@ class TTPCascadeEngine:
         isr_reports: dict[str, AgentISR],
         layer_weights: dict[str, float] | None = None,
         sample_platform: str | None = None,
+        empty_domains: frozenset[str] | None = None,
     ) -> CascadeSummary:
         """Compute the three-layer TTP cascade for a complete set of ISR reports.
 
@@ -270,11 +271,18 @@ class TTPCascadeEngine:
             sample_platform: Wave 4 (2026-05-28) — when set, the cascade
                 drops claims whose source rule explicitly declared an
                 incompatible platform. ``None`` preserves legacy behaviour.
+            empty_domains: 2026-07 audit — domains that had NO real input data
+                this run (e.g. ``{"dynamic", "network"}`` when the sandbox never
+                ran). Claims tagged with an empty domain are dropped so an
+                absent layer can't be counted as independent corroboration. This
+                is what inflated T1497 to 1.00 "corroborated across 4 layers"
+                when dynamic+network were both empty. ``None`` = gate nothing.
 
         Returns:
             CascadeSummary with per-technique cascade results and aggregate stats.
         """
         weights = layer_weights or LAYER_WEIGHTS
+        empty_domains = empty_domains or frozenset()
 
         # Step 1: Group claims by technique_id → domain → claims
         tech_domain_claims: dict[str, dict[str, list]] = {}
@@ -323,6 +331,28 @@ class TTPCascadeEngine:
 
                 dom: str = isr.domain  # type: ignore[assignment]
                 agent = isr.agent_id
+
+                # 2026-07 audit: an absent layer cannot corroborate. A claim
+                # tagged to a domain that produced no real data this run (e.g. a
+                # "dynamic" sandbox-evasion claim when no sandbox ever ran) is
+                # dropped so it neither becomes an independent contributing layer
+                # nor feeds the cross-layer multiplier.
+                if dom in empty_domains:
+                    dropped.append(
+                        DroppedTechnique(
+                            technique_id=tid,
+                            source_layer=dom,  # type: ignore[arg-type]
+                            rule_platforms=list(claim.rule_platforms or []),
+                            sample_platform=sample_platform or "unknown",
+                            reason="empty_domain",
+                        )
+                    )
+                    logger.debug(
+                        "Cascade dropped %s — domain '%s' had no input data this run.",
+                        tid,
+                        dom,
+                    )
+                    continue
 
                 if tid not in tech_domain_claims:
                     tech_domain_claims[tid] = {}

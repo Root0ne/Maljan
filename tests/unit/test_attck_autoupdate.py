@@ -204,10 +204,13 @@ class _FakeIndex:
 class TestResolveTactic:
     def test_dynamic_resolution_wins(self) -> None:
         idx = _FakeIndex(_parse_tactics(V19_BUNDLE))
-        # v19 slug not present in the hardcoded fallback resolves from the bundle.
+        # A NEW v19 tactic not in the canonical table resolves straight from the
+        # bundle (tid + live name both come from the catalogue).
         assert _resolve_tactic(idx, "defense-impairment") == ("TA0112", "Defense Impairment")
-        # TA0005's live name (Stealth) overrides the pre-v19 "Defense Evasion".
-        assert _resolve_tactic(idx, "stealth") == ("TA0005", "Stealth")
+        # 2026-07 audit (Bulgu #5): for a KNOWN Enterprise tactic the canonical
+        # display name is pinned, so a v19+ bundle relabelling TA0005 to
+        # "Stealth" no longer leaks into exports — it stays "Defense Evasion".
+        assert _resolve_tactic(idx, "stealth") == ("TA0005", "Defense Evasion")
 
     def test_fallback_to_hardcoded_without_index(self) -> None:
         assert _resolve_tactic(None, "defense-evasion") == _TACTIC_BY_SLUG["defense-evasion"]

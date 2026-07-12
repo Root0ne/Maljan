@@ -69,11 +69,11 @@ const TABS: TabDef[] = [
   { key: "/persistence", label: "PERSISTENCE", group: "analysis" },
   { key: "/capabilities", label: "ATT&CK", group: "intel" },
   { key: "/attribution", label: "ATTRIBUTION", group: "intel" },
-  { key: "/signatures", label: "SIGNATURES", group: "intel" },
+  // 2026-07 audit (Bulgu #1): SIGNATURES + RULES merged into one DETECTION tab.
+  { key: "/detection", label: "DETECTION", group: "intel" },
   { key: "/defense", label: "DEFENSE", group: "intel" },
   { key: "/agents", label: "AGENTS", group: "advanced" },
   { key: "/pipeline", label: "PIPELINE", group: "advanced" },
-  { key: "/rules", label: "RULES", group: "advanced" },
   { key: "/timeline", label: "TIMELINE", group: "advanced" },
   { key: "/stix", label: "STIX", group: "advanced" },
   { key: "/live", label: "LIVE", group: "advanced" },

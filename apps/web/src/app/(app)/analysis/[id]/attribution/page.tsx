@@ -53,6 +53,7 @@ export default function AttributionTab() {
   };
 
   const familyConfidencePct = Math.round(attribution.family_confidence * 100);
+  const malwareCategory = report?.malware_report?.malware_category;
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
   // Wave 4 (D11 UI completion): when the family came back ungrounded the
   // builder already zeroed the confidence. Render the name as muted +
@@ -84,6 +85,14 @@ export default function AttributionTab() {
             valueClassName={familyValueClass}
           />
           <Field
+            label="Category"
+            value={
+              malwareCategory
+                ? `${malwareCategory} (behavioural class)`
+                : "(unclassified)"
+            }
+          />
+          <Field
             label="Family Confidence"
             value={
               attribution.family && !familyUngrounded
@@ -94,10 +103,17 @@ export default function AttributionTab() {
           <Field label="Actor" value={attribution.actor || "(unknown)"} />
           <Field label="Campaign" value={attribution.campaign || "(unknown)"} />
         </div>
+        {!attribution.family && (
+          <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            No specific malware family was attributed. The behavioural{" "}
+            <span className="text-text-secondary">category</span> above
+            classifies how the sample behaves — it is not a family name.
+          </div>
+        )}
         {familyUngrounded && (
           <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
-            Family was emitted by the verdict LLM but is not corroborated
-            by Triage CTI, sandbox signatures, or analyst claims. Treat as
+            Family was emitted by the verdict LLM but is not corroborated by
+            sandbox CTI, sandbox signatures, or analyst claims. Treat as
             unverified.
           </div>
         )}

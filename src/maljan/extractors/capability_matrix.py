@@ -56,6 +56,11 @@ _TACTIC_BY_SLUG: dict[str, tuple[str, str]] = {
     slug: (tid, name) for tid, slug, name in _TACTIC_TABLE
 }
 
+# Canonical Enterprise tactic name per TA-id. Used to pin the display name even
+# when the live ATT&CK bundle renames a tactic (v19 relabelled TA0005
+# "Defense Evasion" -> "Stealth"). The frontend pins the same table.
+_TACTIC_NAME_BY_ID: dict[str, str] = {tid: name for tid, _slug, name in _TACTIC_TABLE}
+
 
 def build_capability_matrix(
     *,
@@ -249,10 +254,13 @@ def _resolve_technique_meta(index: Any | None, tid: str) -> tuple[str, str]:
 def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
     """Resolve a kill-chain slug to ``(tactic_id, tactic_name)``.
 
-    Prefers the live ATT&CK bundle's tactic catalogue (via the index), so new
-    releases — e.g. the v19 Stealth / Defense Impairment split — resolve with no
-    code change. Falls back to the inlined ``_TACTIC_BY_SLUG`` table when the
-    catalogue is unavailable (offline first run, fixture-built index, tests).
+    Prefers the live ATT&CK bundle's tactic catalogue (via the index) for
+    resolution, then pins the *display name* to the canonical Enterprise label
+    for known TA-ids. 2026-07 audit (Bulgu #5): a v19+ bundle returns the
+    renamed label "Stealth" for TA0005, which leaked into the markdown export /
+    ``ttp_mappings`` and contradicted the frontend's "Defense Evasion". Pinning
+    keeps every surface consistent. Falls back to the inlined ``_TACTIC_BY_SLUG``
+    table when the catalogue is unavailable (offline first run, fixtures, tests).
     """
     if not tactic_slug:
         return "", ""
@@ -260,5 +268,7 @@ def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
     if callable(getter):
         tactic = getter(tactic_slug)
         if tactic is not None:
-            return str(getattr(tactic, "tactic_id", "")), str(getattr(tactic, "name", ""))
+            tid = str(getattr(tactic, "tactic_id", ""))
+            name = str(getattr(tactic, "name", ""))
+            return tid, _TACTIC_NAME_BY_ID.get(tid, name)
     return _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))

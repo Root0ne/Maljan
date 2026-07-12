@@ -257,17 +257,34 @@ export default function AttackTab() {
                             <span
                               key={src}
                               className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
-                              title={src}
+                              title={`Supported by the ${src} analysis layer`}
                               role="img"
-                              aria-label={`Source: ${src}`}
+                              aria-label={`Supported by the ${src} analysis layer`}
                             >
                               <span aria-hidden="true">{src[0]}</span>
                             </span>
                           ))}
                         </div>
-                        <span className="text-[11px] text-text-muted">
-                          {tech.matches} match{tech.matches !== 1 ? "es" : ""}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {tech.sources.length >= 2 ? (
+                            <span
+                              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-green/10 text-status-green"
+                              title={`Corroborated across ${tech.sources.length} independent analysis layers (${tech.sources.join(", ")})`}
+                            >
+                              corroborated
+                            </span>
+                          ) : (
+                            <span
+                              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-text-muted/10 text-text-muted"
+                              title="Only one analysis layer supports this technique — weigh with caution"
+                            >
+                              single source
+                            </span>
+                          )}
+                          <span className="text-[11px] text-text-muted">
+                            {tech.matches} match{tech.matches !== 1 ? "es" : ""}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

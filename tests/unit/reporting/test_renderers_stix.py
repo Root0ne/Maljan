@@ -162,6 +162,22 @@ class TestBaseBundlePreserved:
         malware_ids = [o.id for o in bundle.objects if isinstance(o, Malware)]
         assert "malware--b2c3d4e5-f6a7-8901-bcde-f12345678901" in malware_ids
 
+    def test_judge_is_family_normalized_to_false(self) -> None:
+        # Audit Bulgu #8: the LLM copies ``is_family: true`` from STIX docs, but
+        # Maljan analyses a single specimen — the renderer must force it to False
+        # so the SDO doesn't claim to represent a whole malware family.
+        judge_malware = Malware(
+            id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            name="Packed Dropper",
+            malware_types=["dropper"],
+            is_family=True,
+        )
+        base = Bundle(objects=[judge_malware])
+        bundle = ExtendedSTIXRenderer().render(_build(), base_bundle=base)
+        malware_objs = [o for o in bundle.objects if isinstance(o, Malware)]
+        assert malware_objs
+        assert all(m.is_family is False for m in malware_objs)
+
 
 class TestObservedDataAndNote:
     @pytest.fixture

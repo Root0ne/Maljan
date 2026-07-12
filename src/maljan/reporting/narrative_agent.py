@@ -60,13 +60,22 @@ _SYSTEM_PROMPT = (
     "deterministic evidence below supports.\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
     "its ID, e.g. 'process injection (T1055)'.\n"
-    "3. executive_summary: 120-900 characters, one paragraph, no headings.\n"
+    "3. executive_summary: 120-900 characters, one paragraph, no headings. This "
+    "is a verdict/impact briefing ONLY — state the classification, the severity, "
+    "the single most important risk, and the containment call to action. Do NOT "
+    "enumerate individual techniques or restate the capability narrative here.\n"
     "4. capabilities_narrative: 3-5 paragraphs (one item per paragraph). Each "
-    "paragraph covers a single kill-chain phase or capability cluster.\n"
+    "paragraph covers a single kill-chain phase or capability cluster and its "
+    "supporting evidence. This is the ONLY place technique detail belongs — do "
+    "NOT repeat the executive_summary, and do NOT include defensive/remediation "
+    "advice here (that belongs solely in defensive_recommendations).\n"
     "5. defensive_recommendations: 3-8 entries. Priority P0 only for active "
     "C2 / exfiltration / wiper-grade prevention. P1 for hardening, P2 for hunt "
-    "/ telemetry tasks.\n"
-    "6. Output MUST conform to the provided JSON schema."
+    "/ telemetry tasks. Each entry is a distinct, non-overlapping action; do not "
+    "duplicate an action already implied by the narrative prose.\n"
+    "6. The three fields must NOT restate one another — a reader should be able "
+    "to read all three with no repeated sentences.\n"
+    "7. Output MUST conform to the provided JSON schema."
 )
 
 
@@ -194,9 +203,18 @@ def build_prompt_text(report: MalwareReport) -> str:
 class NarrativeAgent:
     """One LLM round producing ``NarrativeOutput``. Async, no retry."""
 
-    def __init__(self, llm: BaseChatModel, max_input_tokens: int = 3000) -> None:
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        max_input_tokens: int = 3000,
+        token_ledger: Any | None = None,
+    ) -> None:
         self.llm = llm
         self.max_input_tokens = max_input_tokens
+        # 2026-07 audit (Bulgu #10, G1): the narrative round is a real LLM call
+        # and must count toward run_summary token metrics. Recorded on the raw
+        # path below (the structured path hides usage behind the parser).
+        self.token_ledger = token_ledger
 
     async def generate(self, report: MalwareReport) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
@@ -231,6 +249,13 @@ class NarrativeAgent:
         # servers that occasionally return text wrapped in ```json fences.
         try:
             raw = await self.llm.ainvoke(messages)
+            if self.token_ledger is not None:
+                try:
+                    from maljan.core.token_ledger import record_response_usage
+
+                    record_response_usage(self.token_ledger, raw)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
             payload = safe_parse_json(_message_text(raw))
             if not payload:
                 return None

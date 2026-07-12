@@ -260,7 +260,11 @@ class ServiceContainer:
 
                 llm = self.get_judge_llm()
                 max_tokens = self.config.reporting.narrative_max_tokens
-                self._narrative_agent_cache = NarrativeAgent(llm=llm, max_input_tokens=max_tokens)
+                self._narrative_agent_cache = NarrativeAgent(
+                    llm=llm,
+                    max_input_tokens=max_tokens,
+                    token_ledger=getattr(self, "_token_ledger", None),
+                )
             return self._narrative_agent_cache
 
     # ------------------------------------------------------------------

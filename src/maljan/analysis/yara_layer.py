@@ -1,8 +1,14 @@
 """YARA-TTP Layer 0 — Deterministic signature-based ATT&CK technique detection.
 
 This module implements the Layer 0 (pre-LLM) grounding step of the Maljan
-TTP cascade pipeline. It scans analysis text against a YAML-configured rule
-set and produces a synthetic AgentISR with domain="yara".
+TTP cascade pipeline. It scans the **sample's raw bytes** against a
+YAML-configured rule set and produces a synthetic AgentISR with domain="yara".
+
+2026-07 audit: the scan target was changed from concatenated analyst prose to
+the actual sample bytes. Scanning prose let a rule fire whenever an analyst
+merely *mentioned* an API name (e.g. "no evidence of WriteProcessMemory"),
+manufacturing high-confidence false T1055/T1497 evidence. Matching against the
+binary keeps every hit grounded in what the sample actually contains.
 
 Key design decisions:
   - Zero hard dependencies: pure Python string matching (no yara-python required).
@@ -24,7 +30,7 @@ Rule file format (YAML):
 
 Integration:
     yara_layer = YaraLayer.from_default_rules()
-    matches = yara_layer.scan(combined_analyst_text)
+    matches = yara_layer.scan(sample_bytes)
     if matches:
         isr = yara_layer.to_isr(matches)
         # Merge into isr_reports before cascade computation
@@ -187,7 +193,7 @@ class YaraLayer:
 
     Usage:
         layer = YaraLayer.from_default_rules()
-        matches = layer.scan(analyst_reports_text)
+        matches = layer.scan(sample_bytes)
         if matches:
             isr = layer.to_isr(matches)
     """
@@ -353,13 +359,13 @@ class YaraLayer:
             )
             return None, {}
 
-    def _yara_scan(self, text: str) -> list[YaraMatch]:
-        """Scan text using the compiled yara-python engine."""
+    def _yara_scan(self, data: bytes) -> list[YaraMatch]:
+        """Scan raw bytes using the compiled yara-python engine."""
         if self._yara_rules is None or yara is None:
             return []
 
         try:
-            matches = self._yara_rules.match(data=text.encode("utf-8", errors="replace"))
+            matches = self._yara_rules.match(data=data)
         except Exception as exc:
             logger.warning("YaraLayer: yara-python scan failed: %s. Falling back to regex.", exc)
             return []
@@ -423,14 +429,21 @@ class YaraLayer:
     # Core scanning
     # ------------------------------------------------------------------
 
-    def scan(self, text: str, sample_platform: str | None = None) -> list[YaraMatch]:
-        """Scan text against all loaded rules.
+    def scan(self, data: bytes | str, sample_platform: str | None = None) -> list[YaraMatch]:
+        """Scan the sample's raw bytes against all loaded rules.
 
         Uses the compiled yara-python engine when available; falls back to
         regex-based string matching otherwise.
 
+        2026-07 audit (deep re-architecture): the scan target is now the
+        **sample bytes**, not analyst prose. An API-name pattern such as
+        ``WriteProcessMemory`` therefore only fires when the string is
+        actually present in the binary (import table / embedded strings),
+        never because an analyst merely mentioned it in a report. A ``str``
+        is still accepted (encoded as UTF-8) for legacy/test callers.
+
         Args:
-            text: Combined analysis text (analyst reports + ISR evidence_refs).
+            data: Raw sample bytes (preferred) or text.
             sample_platform: Wave 4 — drop rules whose declared
                 ``platform`` field doesn't intersect the sample's
                 canonical platform. ``None`` keeps legacy callers green.
@@ -438,8 +451,10 @@ class YaraLayer:
         Returns:
             List of YaraMatch objects, one per triggered rule.
         """
-        if not text or not self._rules:
+        if not data or not self._rules:
             return []
+
+        data_bytes = data if isinstance(data, bytes) else data.encode("utf-8", errors="replace")
 
         # Wave 4: pre-filter the rule list by platform compatibility.
         # We keep _rules as the canonical full set so callers querying
@@ -459,7 +474,7 @@ class YaraLayer:
 
         # Prefer yara-python engine when available
         if self._yara_rules is not None:
-            matches = self._yara_scan(text)
+            matches = self._yara_scan(data_bytes)
             # Drop matches whose original rule is platform-incompatible.
             # (Compiled yara_rules is built from the full corpus; we filter
             # here rather than rebuild the compiled object per-scan.)
@@ -478,7 +493,9 @@ class YaraLayer:
                 )
             return matches
 
-        # Fallback: regex-based string matching
+        # Fallback: regex-based string matching. Decode the bytes leniently so
+        # ASCII API names / string IOCs embedded in the binary still match.
+        text = data_bytes.decode("utf-8", errors="replace")
         regex_matches: list[YaraMatch] = []
 
         for rule in active_rules:

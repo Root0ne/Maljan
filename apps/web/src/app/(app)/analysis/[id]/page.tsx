@@ -51,11 +51,31 @@ function countNetworkIOCs(mr: MalwareReport): {
   suspicious: number;
 } {
   const n = mr.network;
-  if (!n) return { domains: 0, ips: 0, urls: 0, suspicious: 0 };
+  // 2026-07 audit (Bulgu #4): also count network IOCs recovered from static
+  // strings so a hard-coded C2 domain isn't reported as "0 domains".
+  const staticIocs = (mr.static?.interesting_strings ?? []).filter(
+    (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
+  );
+  const staticDomains = staticIocs.filter((s) => s.kind === "domain").length;
+  const staticIps = staticIocs.filter((s) => s.kind === "ip").length;
+  const staticUrls = staticIocs.filter((s) => s.kind === "url").length;
+  if (!n) {
+    return {
+      domains: staticDomains,
+      ips: staticIps,
+      urls: staticUrls,
+      suspicious: 0,
+    };
+  }
   const susp =
     n.domains.filter((d) => d.is_suspicious).length +
     n.ips.filter((i) => i.is_suspicious).length;
-  return { domains: n.domains.length, ips: n.ips.length, urls: n.urls.length, suspicious: susp };
+  return {
+    domains: n.domains.length + staticDomains,
+    ips: n.ips.length + staticIps,
+    urls: n.urls.length + staticUrls,
+    suspicious: susp,
+  };
 }
 
 export default function SummaryTab() {
