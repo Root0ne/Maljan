@@ -270,6 +270,7 @@ class MaljanApp:
             "reports": {},
             "revised_reports": {},
             "isr_reports": {},
+            "tool_evidence": {},
             "discussion_history": [],
             "sycophancy_detected": False,
             "confidence_history": [],

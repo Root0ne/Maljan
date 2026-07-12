@@ -539,6 +539,14 @@ class MalwareReport(BaseModel):
     # --- References ---
     references: list[ExternalReference] = Field(default_factory=list)
 
+    # --- Captured tool evidence (report-reshaping Phase 1) ---
+    # Per-agent list of captured ReAct tool outputs (decompiled functions,
+    # crypto constants, emulation/dataflow traces) — the durable raw material
+    # the report Composer grounds the deep technical spine in. Size-capped
+    # upstream (see ``schemas.tool_evidence``); kept out of the STIX / FP-linter
+    # paths. Empty on legacy rows and mock runs.
+    technical_evidence: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
 
 # Resolve the recursive ``ProcessNode.children`` forward reference.
 ProcessNode.model_rebuild()

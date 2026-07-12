@@ -378,10 +378,21 @@ def make_analyst_node(
                     f"[WARN] {agent_name}: ISR produced no claims (multi-chunk fallback empty)."
                 )
 
-            return {
+            # Report-reshaping Phase 1: carry the captured tool-loop outputs
+            # (decompiled functions, crypto constants, emulation/dataflow) into
+            # state so report_node can ground the deep technical spine. Best-
+            # effort — a capture read must never break the analyst node.
+            node_out: dict[str, Any] = {
                 "reports": {agent_name: report},
                 "isr_reports": {agent_name: isr},
             }
+            try:
+                _ev = agent.get_last_tool_evidence()
+                if _ev:
+                    node_out["tool_evidence"] = {agent_name: [o.model_dump() for o in _ev]}
+            except Exception as _ev_exc:  # noqa: BLE001
+                logger.debug("tool-evidence read skipped for %s: %s", agent_name, _ev_exc)
+            return node_out
         except (AnalystError, LLMError) as e:
             # OPS-ANALYST-ERROR-TRACKING-01 + OBS-STRUCTURED-LOGS-MISSING-FIELDS-01
             # (audit 2026-05-19): structured error event so Loki/Promtail
@@ -1474,6 +1485,12 @@ def make_report_node(container: ServiceContainer) -> Any:
             _attck_cands = cast("list[dict[str, Any]]", state.get("attck_case_candidates") or [])
             if _attck_cands and getattr(report, "attribution", None) is not None:
                 report.attribution.attck_case_candidates = _attck_cands
+            # Report-reshaping Phase 1: attach the captured tool-loop evidence so
+            # the Composer can ground the deep technical spine. Already size-
+            # capped upstream (schemas.tool_evidence); stored verbatim here.
+            _tool_ev = cast("dict[str, list[dict[str, Any]]]", state.get("tool_evidence") or {})
+            if _tool_ev:
+                report.technical_evidence = _tool_ev
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {}

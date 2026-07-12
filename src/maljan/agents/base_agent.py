@@ -29,6 +29,12 @@ from maljan.core.exceptions import AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.tool_evidence import (
+    MAX_OUTPUTS_PER_AGENT,
+    CapturedToolOutput,
+    _symbol_from_args,
+    trim_output,
+)
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
@@ -438,6 +444,11 @@ class BaseAnalyst(ABC):
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
+        # Report-reshaping Phase 1: durable capture of the ReAct tool loop's
+        # ToolMessages (decompile/crypto/emulate/dataflow) so the report
+        # Composer can ground deep sections instead of hallucinating. Populated
+        # by execute_tool_loop; read via get_last_tool_evidence().
+        self._last_tool_evidence: list[CapturedToolOutput] = []
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -490,6 +501,10 @@ class BaseAnalyst(ABC):
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
+
+        # Report-reshaping Phase 1: reset the per-run capture buffer before this
+        # loop populates it from the ReAct message stream (see below).
+        self._last_tool_evidence = []
 
         agent_executor = create_react_agent(self.llm, self.tools)
 
@@ -594,6 +609,14 @@ class BaseAnalyst(ABC):
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
+        # Report-reshaping Phase 1: capture the tool loop's ToolMessages as
+        # durable evidence for the report Composer. Best-effort — a capture
+        # failure must never sink the analysis.
+        try:
+            self._last_tool_evidence = self._capture_tool_evidence(msgs)
+        except Exception as _cap_exc:  # noqa: BLE001
+            self.logger.debug("tool-evidence capture skipped: %s", _cap_exc)
+            self._last_tool_evidence = []
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -668,6 +691,54 @@ class BaseAnalyst(ABC):
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 return synthesized
         return content
+
+    def _capture_tool_evidence(self, msgs: list) -> list[CapturedToolOutput]:
+        """Pair each tool call with its result from the ReAct message stream.
+
+        Report-reshaping Phase 1. AIMessages carry ``tool_calls`` (name + args +
+        id); ToolMessages carry the result keyed by ``tool_call_id``. We pair by
+        id — not positional order — so provider-specific interleaving cannot
+        mis-associate an output. Capped at ``MAX_OUTPUTS_PER_AGENT`` and each
+        output re-trimmed. Result feeds the report Composer's evidence bundles.
+        """
+        # tool_call_id -> (tool_name, args)
+        calls: dict[str, tuple[str, dict]] = {}
+        for m in msgs:
+            for tc in getattr(m, "tool_calls", None) or []:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+                tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
+                if isinstance(tc_id, str) and tc_name:
+                    calls[tc_id] = (str(tc_name), tc_args if isinstance(tc_args, dict) else {})
+
+        captured: list[CapturedToolOutput] = []
+        seq = 0
+        for m in msgs:
+            if getattr(m, "type", "") != "tool":
+                continue
+            msg_id = getattr(m, "tool_call_id", None)
+            tool_name = str(getattr(m, "name", "") or "unknown")
+            tool_args: dict = {}
+            if isinstance(msg_id, str) and msg_id in calls:
+                tool_name, tool_args = calls[msg_id]
+            captured.append(
+                CapturedToolOutput(
+                    agent_id=self.name,
+                    tool_name=tool_name,
+                    args=tool_args,
+                    symbol=_symbol_from_args(tool_args),
+                    output=trim_output(str(getattr(m, "content", "") or "")),
+                    seq=seq,
+                )
+            )
+            seq += 1
+            if len(captured) >= MAX_OUTPUTS_PER_AGENT:
+                break
+        return captured
+
+    def get_last_tool_evidence(self) -> list[CapturedToolOutput]:
+        """Return the tool outputs captured by the most recent ReAct loop."""
+        return list(self._last_tool_evidence)
 
     def _force_final_synthesis(self, msgs: list, timeout: int) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
