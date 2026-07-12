@@ -690,6 +690,26 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:  # noqa: BLE001
                 logger.warning("LOLBin Layer 0 failed: %s. Skipping.", e)
 
+            # Import-capability Layer 0 (2026-07 round 2): turn the PE extractor's
+            # deterministic import classification (+ static-string IOCs) into
+            # grounded ATT&CK techniques (e.g. WS2_32 client + hard-coded domain
+            # -> T1071). Closes the under-reporting gap the byte-scan YARA corpus
+            # leaves. Fail-safe; builds static from the worker-readable path.
+            try:
+                from maljan.analysis.import_capability_layer import (
+                    build_import_capability_isr,
+                )
+                from maljan.extractors.pe_extractor import build_static_analysis
+
+                _host_imp = state.get("sample_path")
+                if _host_imp:
+                    _static_imp = build_static_analysis(sample_path=str(_host_imp))
+                    import_isr = build_import_capability_isr(_static_imp)
+                    if import_isr is not None:
+                        isr_reports["import_capability"] = import_isr
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Import-capability Layer 0 failed: %s. Skipping.", e)
+
             # Deterministic ATT&CK technique-ID correction (2026-06-01). Run
             # BEFORE the cascade so corrected IDs flow into corroboration, the
             # judge's grounding, the report and the STIX bundle. Re-grounds each

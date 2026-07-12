@@ -2,6 +2,7 @@
 
 import RuleMatchesPanel from "../rules/page";
 import GeneratedRulesPanel from "../signatures/page";
+import StixPanel from "../stix/page";
 
 /**
  * Unified "Detection" tab (2026-07 audit, Bulgu #1 UI).
@@ -43,6 +44,19 @@ export default function DetectionTab() {
           </p>
         </div>
         <GeneratedRulesPanel />
+      </section>
+
+      <section>
+        <div className="mb-3 pt-4 border-t border-border">
+          <h2 className="text-sm font-semibold text-text-primary">
+            STIX 2.1 bundle (export)
+          </h2>
+          <p className="text-xs text-text-muted mt-0.5">
+            Machine-readable STIX 2.1 bundle for sharing with other tooling —
+            copy or download from the controls below.
+          </p>
+        </div>
+        <StixPanel />
       </section>
     </div>
   );

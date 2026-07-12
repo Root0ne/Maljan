@@ -267,11 +267,32 @@ def _extract_compile_timestamp(blob: bytes | None) -> datetime | None:
     return None
 
 
+# MSVC MajorLinkerVersion → Visual Studio product family.
+_MSVC_LINKER: dict[int, str] = {
+    6: "6.0",
+    7: "2002/2003",
+    8: "2005",
+    9: "2008",
+    10: "2010",
+    11: "2012",
+    12: "2013",
+    14: "2015-2022",
+}
+
+
 def _detect_language_or_compiler(blob: bytes | None) -> str | None:
-    """Lightweight compiler / runtime fingerprint from binary signatures."""
+    """Compiler / runtime fingerprint.
+
+    2026-07 round 2: the previous version only matched six literal byte markers
+    and returned "unknown" for ordinary MSVC PEs (the toolchain evidence lives in
+    the PE Rich header + linker version + import DLLs, none of which it read).
+    We keep the fast byte-signature path for packers/scripting runtimes, then
+    fall back to a real PE fingerprint (Rich header, linker version, MFC/MSVCP/
+    MinGW/Python import heuristics).
+    """
     if not blob:
         return None
-    # Look at the first 4 KB for common toolchain markers.
+    # Fast path — packer / scripting-runtime markers.
     head = blob[: 4 * 1024]
     if b"Go build ID" in head or b"GoStringer" in blob[: 64 * 1024]:
         return "Go"
@@ -279,12 +300,60 @@ def _detect_language_or_compiler(blob: bytes | None) -> str | None:
         return "Python (PyInstaller)"
     if b"UPX!" in blob[: 64 * 1024]:
         return "C/C++ (UPX packed)"
+    if b"rustc" in blob[: 64 * 1024]:
+        return "Rust"
+    # PE-format fingerprint (MSVC/MFC/MinGW).
+    pe_guess = _pe_compiler_fingerprint(blob)
+    if pe_guess:
+        return pe_guess
+    # Legacy literal fallbacks.
     if b"Microsoft Visual C++" in blob[: 64 * 1024]:
         return "Microsoft Visual C++"
     if b"GCC: (" in blob[: 64 * 1024]:
         return "GCC"
-    if b"rustc" in blob[: 64 * 1024]:
-        return "Rust"
+    return None
+
+
+def _pe_compiler_fingerprint(blob: bytes) -> str | None:
+    """Derive a compiler string from PE Rich header / linker version / imports."""
+    if len(blob) < 64 or blob[:2] != b"MZ":
+        return None
+    try:
+        import pefile  # type: ignore[import-not-found]
+
+        pe = pefile.PE(data=blob, fast_load=False)
+    except Exception:  # noqa: BLE001
+        return None
+
+    dlls: set[str] = set()
+    if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
+        for entry in pe.DIRECTORY_ENTRY_IMPORT:
+            try:
+                dlls.add(entry.dll.decode("latin1").lower())
+            except Exception:  # noqa: BLE001
+                continue
+
+    if any("libgcc" in d or "mingw" in d or "cygwin" in d for d in dlls):
+        return "MinGW / GCC"
+    py_dll = next((d for d in dlls if d.startswith("python") and d.endswith(".dll")), None)
+    if py_dll:
+        return f"Python (embedded {py_dll})"
+
+    is_mfc = any(d.startswith("mfc") for d in dlls)
+    is_cpp = is_mfc or any(d.startswith("msvcp") for d in dlls)
+    has_rich = False
+    try:
+        has_rich = bool(pe.parse_rich_header())
+    except Exception:  # noqa: BLE001
+        has_rich = False
+    major = int(getattr(pe.OPTIONAL_HEADER, "MajorLinkerVersion", 0) or 0)
+
+    if is_mfc or is_cpp or has_rich or major >= 6:
+        ver = _MSVC_LINKER.get(major)
+        base = f"Microsoft Visual C++ {ver}" if ver else "Microsoft Visual C++"
+        lang = "C++" if is_cpp else "C/C++"
+        suffix = " (MFC)" if is_mfc else ""
+        return f"{base} ({lang}){suffix}"
     return None
 
 

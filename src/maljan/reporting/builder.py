@@ -13,6 +13,7 @@ after this deterministic phase.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from maljan.core.logger import logger
@@ -189,10 +190,18 @@ class MalwareReportBuilder:
         # ``category`` enum and collapses every recommendation to "patching"
         # (none of which were patches). Re-derive the category deterministically
         # from the action/rationale text so the label matches the advice.
+        valid_tids = {m.technique_id for m in report.ttp_mappings if m.technique_id}
         for rec in recs:
             rec.category = _derive_recommendation_category(  # type: ignore[assignment]
                 rec.action, rec.rationale
             )
+            # 2026-07 round 2: when the LLM omits technique_id, recover it from a
+            # T#### cited in the action/rationale/detection text, preferring one
+            # that is actually mapped in this report.
+            if not rec.technique_id:
+                rec.technique_id = _first_report_technique(
+                    f"{rec.action} {rec.rationale} {rec.detection or ''}", valid_tids
+                )
         report.defensive_recommendations = recs
         return report
 
@@ -454,6 +463,21 @@ def _derive_recommendation_category(action: str, rationale: str) -> str:
     ):
         return "edr_hunting"
     return "other"
+
+
+_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+
+
+def _first_report_technique(text: str, valid_tids: set[str]) -> str | None:
+    """Return the first T#### in ``text`` that is mapped in the report, else the
+    first T#### found, else ``None``."""
+    found: list[str] = _TECHNIQUE_RE.findall(text or "")
+    if not found:
+        return None
+    for tid in found:
+        if tid in valid_tids:
+            return str(tid)
+    return str(found[0])
 
 
 def _ioc_count(report: MalwareReport) -> int:

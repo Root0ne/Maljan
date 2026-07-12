@@ -20,8 +20,12 @@ COPY data/ data/
 COPY threatintel-mcp/ threatintel-mcp/
 COPY network-mcp/ network-mcp/
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+# Install dependencies.
+# 2026-07 round 2: include the ``yara`` extra so yara-python is available in the
+# backend image — otherwise detection_signatures._validate_yara reports
+# "yara-python not installed; rule body not validated" for every generated rule.
+# The manylinux wheel bundles libyara, so no system package is required.
+RUN uv sync --frozen --no-dev --extra yara
 
 # Set PYTHONPATH so `app.*` (apps/api) AND `maljan.*` (src) both resolve.
 # F1 (2026-07-05): adding /app/src makes the core ``maljan`` package

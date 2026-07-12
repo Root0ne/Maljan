@@ -454,6 +454,11 @@ class DefensiveRecommendation(BaseModel):
     action: str
     rationale: str
     priority: Literal["P0", "P1", "P2"]
+    # 2026-07 round 2: link each recommendation to the ATT&CK technique it
+    # defends against, and carry concrete detection guidance (specific API /
+    # registry key / telemetry source / sigma-yara pointer) rather than prose.
+    technique_id: str | None = None
+    detection: str | None = None
 
 
 class ExternalReference(BaseModel):

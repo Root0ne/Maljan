@@ -59,16 +59,33 @@ export default function DefenseTab() {
                   key={`${priority}-${i}`}
                   className="bg-bg-surface border border-border rounded p-4"
                 >
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="text-[11px] uppercase tracking-wider text-text-muted">
                       {CATEGORY_LABELS[rec.category]}
                     </span>
+                    {rec.technique_id && (
+                      <a
+                        href={`https://attack.mitre.org/techniques/${rec.technique_id.replace(".", "/")}/`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-status-purple/10 text-status-purple hover:underline"
+                        title="ATT&CK technique this recommendation defends against"
+                      >
+                        {rec.technique_id}
+                      </a>
+                    )}
                   </div>
                   <div className="text-sm text-text-primary leading-relaxed">{rec.action}</div>
                   <div className="text-sm text-text-secondary leading-relaxed mt-2 border-l-2 border-border-light pl-3">
                     <span className="text-text-muted">Why: </span>
                     {rec.rationale}
                   </div>
+                  {rec.detection && (
+                    <div className="text-sm text-text-secondary leading-relaxed mt-2 border-l-2 border-status-blue/40 pl-3">
+                      <span className="text-text-muted">Detection: </span>
+                      <span className="font-mono text-xs">{rec.detection}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

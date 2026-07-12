@@ -348,7 +348,9 @@ class TestYaraPlatformFiltering:
         layer = YaraLayer.from_default_rules()
         if layer.rule_count == 0:
             pytest.skip("Default rules file not found")
-        matches = layer.scan("Listens for sandbox detection", sample_platform="linux")
+        # 2026-07 round 2: the bare "sandbox" pattern was dropped (FP source);
+        # use a remaining VM-detection marker to exercise platform filtering.
+        matches = layer.scan("checks for vmware and virtualbox artifacts", sample_platform="linux")
         triggered = {m.rule_id for m in matches}
         assert "sandbox_evasion" in triggered
 

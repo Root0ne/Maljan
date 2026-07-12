@@ -124,8 +124,6 @@ class MarkdownRenderer:
         lines.append(f"| File type | {ident.file_type} |")
         if ident.mime_type:
             lines.append(f"| MIME | {ident.mime_type} |")
-        if ident.magic_bytes:
-            lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
         if ident.compile_timestamp:
             lines.append(f"| Compile timestamp | {ident.compile_timestamp.isoformat()} |")
         if ident.language_or_compiler:

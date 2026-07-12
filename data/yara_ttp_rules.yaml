@@ -182,15 +182,17 @@ rules:
     confidence: 0.85
     description: "Virtualization and sandbox evasion"
     platform: ["any"]
+    # 2026-07 round 2: dropped bare "sandbox" — matched any incidental mention
+    # of the word. Keep VM/debugger-detection-specific markers only.
     patterns:
       - "IsDebuggerPresent"
       - "CheckRemoteDebuggerPresent"
       - "NtGlobalFlag"
-      - "HeapFlags"
       - "vmware"
       - "virtualbox"
-      - "sandbox"
       - "SbieDll"
+      - "vboxservice"
+      - "VBoxTray"
 
   # T1497.001 - System Checks
   - id: system_checks_evasion
@@ -198,13 +200,15 @@ rules:
     confidence: 0.82
     description: "System checks for sandbox evasion"
     platform: ["windows"]
+    # 2026-07 round 2: dropped "Sleep", "GetTickCount", "QueryPerformanceCounter"
+    # — ubiquitous benign timing APIs that fired T1497.001 on ordinary apps.
+    # Keep user-activity / interaction checks that are evasion-specific.
     patterns:
-      - "GetTickCount"
-      - "Sleep"
-      - "QueryPerformanceCounter"
       - "GetCursorPos"
       - "GetForegroundWindow"
+      - "GetLastInputInfo"
       - "mouse_event"
+      - "GetSystemFirmwareTable"
 
   # T1003 - OS Credential Dumping
   - id: credential_dumping
@@ -371,13 +375,15 @@ rules:
     confidence: 0.85
     description: "DLL side-loading for execution"
     platform: ["windows"]
+    # 2026-07 round 2: dropped bare "LoadLibrary" — the most common Windows API,
+    # present in nearly every PE, which caused T1574.002 to fire on benign MFC
+    # apps. Keep only side-loading-specific indicator strings.
     patterns:
-      - "LoadLibrary"
       - "side-load"
-      - "hijack"
+      - "sideload"
       - "DLL Search Order"
-      - " fake"
-      - "phantom"
+      - "phantom dll"
+      - "DllHijack"
 
   # T1001 - Data Obfuscation
   - id: data_obfuscation

@@ -58,6 +58,8 @@ interface TabDef {
   key: string;
   label: string;
   group: "overview" | "analysis" | "intel" | "advanced";
+  // 2026-07 round 2: LIVE is only meaningful while the job runs.
+  liveOnly?: boolean;
 }
 
 const TABS: TabDef[] = [
@@ -69,14 +71,14 @@ const TABS: TabDef[] = [
   { key: "/persistence", label: "PERSISTENCE", group: "analysis" },
   { key: "/capabilities", label: "ATT&CK", group: "intel" },
   { key: "/attribution", label: "ATTRIBUTION", group: "intel" },
-  // 2026-07 audit (Bulgu #1): SIGNATURES + RULES merged into one DETECTION tab.
+  // 2026-07 audit (Bulgu #1): SIGNATURES + RULES merged into one DETECTION tab
+  // (round 2 also folds the STIX export bundle in as a third section).
   { key: "/detection", label: "DETECTION", group: "intel" },
   { key: "/defense", label: "DEFENSE", group: "intel" },
-  { key: "/agents", label: "AGENTS", group: "advanced" },
-  { key: "/pipeline", label: "PIPELINE", group: "advanced" },
-  { key: "/timeline", label: "TIMELINE", group: "advanced" },
-  { key: "/stix", label: "STIX", group: "advanced" },
-  { key: "/live", label: "LIVE", group: "advanced" },
+  // 2026-07 round 2: AGENTS + PIPELINE + TIMELINE merged into one PROCESS tab.
+  { key: "/process", label: "PROCESS", group: "advanced" },
+  // LIVE shown only while the job is running (see filter below).
+  { key: "/live", label: "LIVE", group: "advanced", liveOnly: true },
 ];
 
 const TAB_GROUP_ORDER: TabDef["group"][] = ["overview", "analysis", "intel", "advanced"];
@@ -273,7 +275,14 @@ export default function AnalysisLayout({
         {/* Tab Bar — grouped by section with thin separators */}
         <div className="flex flex-wrap items-end border-b border-border mb-4">
           {TAB_GROUP_ORDER.map((group, gi) => {
-            const groupTabs = TABS.filter((t) => t.group === group);
+            const groupTabs = TABS.filter(
+              (t) =>
+                t.group === group &&
+                (!t.liveOnly ||
+                  job?.status === "running" ||
+                  job?.status === "pending"),
+            );
+            if (groupTabs.length === 0) return null;
             return (
               <div key={group} className="flex items-end">
                 {gi > 0 && (
