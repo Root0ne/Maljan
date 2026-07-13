@@ -134,6 +134,21 @@ class LLMConfig(BaseModel):
     # per-agent timeout budget instead of letting them choke each other
     # in the request queue. Set ``LLM__PARALLEL_ANALYSTS=false`` for
     # local llama.cpp / ollama deployments without ``--parallel N``.
+    #
+    # 2026-07-13 ROOT-CAUSE (supersedes the "SWA re-prefill" misdiagnosis in
+    # findings-log): the served Qwen3.6-35B-A3B is a HYBRID Gated-DeltaNet
+    # (recurrent) + attention MoE — NOT a sliding-window model. On a single
+    # llama-server slot, "parallel" analysts interleave their requests and each
+    # one CLOBBERS the others' per-slot recurrent DeltaNet state; llama.cpp /
+    # ik_llama cannot restore the recurrent context checkpoint (open bug
+    # ik_llama#1762 / ggml-org#20225), so every ReAct step then does a FULL
+    # prompt re-processing → minutes/turn → the revision round hit
+    # request_timeout (900s) and runs took ~41 min. Sequential (False) gives
+    # each analyst exclusive slot use, so its recurrent state survives across
+    # its own ReAct steps → only new tokens are processed → no re-prefill, no
+    # timeout. MEASURED on sample 11e77149 + CAPE: parallel 2480s (revision
+    # timed out) → sequential 743s (3.3×, zero timeouts). Do NOT re-enable
+    # parallel on a single-slot hybrid-model deployment.
     parallel_analysts: bool = True
 
     # View-decomposition pilot (findings-log §3.6). 0 = off (today's single

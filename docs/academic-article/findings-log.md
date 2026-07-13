@@ -978,6 +978,36 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-07-13 The "SWA re-prefill bottleneck" was a MISDIAGNOSIS — the real cause is a hybrid
+  Gated-DeltaNet recurrent model + parallel analysts thrashing a single llama-server slot. Fixed by a
+  one-flag config change; 41 min → 12 min, zero timeouts.** A CAPE-on live run timed out the revision
+  round at `request_timeout=900s`; runs took ~41 min. Prior notes (and the config.py comments) blamed a
+  *sliding-window-attention (SWA)* re-prefill on ik_llama. **Deep web research + the model metadata
+  disproved this:** (1) the served **Qwen3.6-35B-A3B is a HYBRID Gated-DeltaNet (linear/recurrent) +
+  GQA-attention MoE** (Qwen3-Next family) — NOT an SWA model (`/props` shows no sliding window;
+  `n_ctx_train=262144`); (2) llama.cpp / ik_llama cannot restore the **recurrent context checkpoint**
+  for hybrid models (open bugs **ggml-org/llama.cpp#20225, #22384, #24055** and **ik_llama#1762**), so
+  the server does a **full prompt re-processing on every conversation turn** (measured upstream:
+  `prompt eval 195154 ms / 66293 tokens` ≈ 3 min/turn). The trigger in Maljan was
+  **`LLM__PARALLEL_ANALYSTS=true`**: on a single slot the three analysts interleave and each clobbers
+  the others' per-slot DeltaNet recurrent state → every ReAct step re-prefills from scratch → the
+  revision round (large peer context) blows 900s. **Why not the "obvious" fixes:** `--swa-full` is
+  irrelevant (not SWA) and unsupported by ik_llama; `-np` multi-slot is *actively harmful* here
+  (DeltaNet mixed-batch decode collapses to ~0.59 t/s) and the exact model has an **unresolved decode
+  hang after cache-invalidation (#22450, closed "not planned")**, so hand-patching ik_llama's
+  checkpoint code (untestable Windows-CUDA rebuild + hang risk) was rejected as higher-risk. **The fix
+  is the already-implemented sequential topology** (`pipeline/builder.py`, `parallel_analysts=False`):
+  each analyst gets exclusive slot use, so its recurrent state survives across its own ReAct steps →
+  only new tokens are processed. **Measured on `11e77149` + CAPE:** parallel **2480.5 s** (revision
+  timed out, `verdict=Malware conf=0.61`) → sequential **743.4 s** (**3.3×**, zero `Request timed out`,
+  zero `forcing full prompt re-processing`; static/dynamic/network ReAct = 28.9/52.6/30.8 s; full
+  report incl. Composer 4 sections + 4 figures + 11 IOCs + 3 rules; `conf=0.0` this run is the honest
+  degraded-mode cap from CAPE flagging `antivm_generic_system`, not a regression — CAPE anti-VM
+  detection varies run-to-run). Permanent fix: `parallel_analysts=False` in `.env` + documented in
+  `.env.example` and the `config.py` field comment. Deeper cure if ever needed (not required now):
+  serve a pure full-attention model (e.g. Qwen3-30B-A3B original) where prompt-cache reuse is native.
+  Corrects the `[[swa-react-reprefill-bottleneck]]` memory note.
+
 - **2026-07-12 Static-analyst performance, before vs after the July fixes (tool-manifest sizing +
   hallucinated `load_program` path).** Two consecutive root causes limited the static analyst on
   live runs, and both were measured on the SAME 36 KB MSVC6/MFC PE (`11e77149…`, WS2_32 client →
