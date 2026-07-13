@@ -729,9 +729,13 @@ class Settings(BaseSettings):
     # tokens processed), so a deep loop is cheap again. 40 (~20 tool calls) is
     # the full Ghidra pass (load_program -> auto-analyze -> enumerate -> decompile
     # the sink-reachability priority functions -> xrefs -> strings -> imports ->
-    # malware-specific tools); a hint-directed chunk concludes NATURALLY at ~30-36
-    # steps, so 40 lets rich chunks finish on their own instead of hitting the cap
-    # and triggering the forced-synthesis salvage on an incomplete decompilation.
+    # malware-specific tools). MEASURED (E2E 2026-07-13, sample 11e77149): static
+    # did 19 tool calls -> 7 claims (vs 3 calls at cap=8), zero re-prefill, 120.9s
+    # < 1500s. The small local model tends to keep tool-calling to the cap rather
+    # than self-terminating, so the forced-synthesis salvage still fires — but now
+    # it synthesises DEEP (19-call) evidence, not shallow (3-call). Depth is the
+    # win; the salvage is the conclusion mechanism, not a bug. Raising the cap
+    # further mostly adds tool calls + salvage time (diminishing returns).
     # MUST move with the static timeout (1500) — the per-chunk wall-clock is the
     # binding constraint. Context-safe: 40 steps * ~1500 tok (max_tool_output_
     # chars=6000) ~= 90-95k peak, ~36k under n_ctx=131072. Override via

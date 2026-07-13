@@ -978,6 +978,24 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-07-13 Depth-restore E2E validation — CORE CONFIRMED (6.3× deeper, zero re-prefill, zero
+  timeout); multi-chunk + revision-round E2E still UNVERIFIED (a healthy run was killed on a
+  misdiagnosed clock offset).** Ran the full pipeline in the worker on sample `11e77149` (CAPE-off for
+  speed) with the restored deep config (max_steps=40, chars=6000, timeout=1500, sequential). **Result
+  vs the same sample under the old cap=8:** static did **19 tool calls → 7 claims** (was 3 tool calls),
+  **6.4 s/step** (re-prefill would be 50–90 s → confirms zero re-prefill), 120.9 s < 1500 s (no
+  timeout); full run 761 s → verdict=Malware, report 7615 chars + 4 Composer sections + 1 detection
+  rule. **Honest nuances:** (1) the small local model keeps tool-calling to the cap rather than
+  self-terminating, so the forced-synthesis salvage STILL fires (now on 19-call deep evidence, not
+  3-call shallow) — the config.py "concludes naturally ~30–36 steps" prediction did NOT hold on this
+  tiny sample; the salvage is the conclusion mechanism, and raising the cap further just adds tool
+  calls + salvage time. (2) The **multi-chunk multiplier and the revision-round re-prefill check
+  remain E2E-UNVERIFIED**: a first run on a 3.8 MB 2-chunk PE (CAPE-on) was **killed by mistake** — the
+  worker container's clock runs 3 h behind the host, and that offset was misread as a "3-hour hang" (the
+  run was ~1 min into Ghidra `load_program`, healthy). Lesson: verify container/host clock skew before
+  diagnosing a stall. The revision-node serialisation is still covered by the deterministic
+  `asyncio.gather`-spy unit test; a real multi-chunk + dissent E2E is the remaining confirmation.
+
 - **2026-07-13 The sequential-analyst fix was INCOMPLETE (revision node still ran concurrent), and
   the "SWA" depth band-aids were obsolete — completed the fix, then restored full static-analysis
   depth. `IMPLEMENTED` (config + guard tests green); the depth *benefit* is `PENDING` a multi-chunk
