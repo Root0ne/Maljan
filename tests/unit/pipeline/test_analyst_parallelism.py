@@ -10,10 +10,16 @@ the regression becomes a hard failure at CI time.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+# The real coroutine function, captured before any test patches the reference
+# on ``maljan.pipeline.nodes.asyncio.gather``. Spies ``wraps`` this so the
+# concurrent branch keeps working while call-count stays observable.
+_REAL_GATHER = asyncio.gather
 
 
 @pytest.fixture
@@ -159,3 +165,127 @@ def test_sequential_mode_preserves_negotiation_downstream(
     assert ("revision", "negotiation") in edge_set
     # Judge → END (reporting disabled in the fixture).
     assert any(src == "judge" for src, _ in edge_set)
+
+
+# ---------------------------------------------------------------------------
+# Revision-node fan-out topology (2026-07-13 — Interaction B)
+# The INITIAL fan-out is serialised by graph edges (tested above), but the
+# revision node fans out INTERNALLY (its own gather over the analysts). It must
+# honour ``parallel_analysts`` too, or every revision round re-introduces the
+# single-slot recurrent-state clobbering the sequential topology exists to
+# prevent. The original 2026-07-13 fix wired only the builder edges and MISSED
+# this node — these tests pin the contract so that regression can't recur.
+# ---------------------------------------------------------------------------
+
+
+def _revision_container(parallel: bool, call_order: list[str]) -> Any:
+    """Container stub whose three agents return a deterministic (text, ISR).
+
+    Each ``safe_revise_isr`` records its agent name in ``call_order`` so the
+    execution order is observable. ``load_chunked`` raises so
+    ``_build_revision_context`` takes its documented load_data fallback (keeps
+    the fixture free of TextChunk plumbing).
+    """
+    from maljan.pipeline.nodes import _empty_isr
+
+    container = MagicMock()
+    container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
+    container.is_mock = False
+    container.config.llm.parallel_analysts = parallel
+    container.load_chunked.side_effect = RuntimeError("force load_data fallback")
+    container.load_data.return_value = "raw analysis data"
+
+    def _get_agent(name: str) -> Any:
+        agent = MagicMock()
+
+        def _revise(*_args: Any, _n: str = name, **_kw: Any) -> tuple[str, Any]:
+            call_order.append(_n)
+            return (f"{_n} revised", _empty_isr(_n, revision_round=1))
+
+        agent.safe_revise_isr.side_effect = _revise
+        return agent
+
+    container.get_agent.side_effect = _get_agent
+    return container
+
+
+def _revision_state() -> dict[str, Any]:
+    return {
+        "iteration_count": 1,
+        "reports": {"static": "r0", "dynamic": "r0", "network": "r0"},
+    }
+
+
+def test_revision_node_sequential_does_not_gather() -> None:
+    """``parallel_analysts=False`` → the revision node must NOT use
+    ``asyncio.gather`` (that would run the analysts concurrently on the single
+    slot). Deterministic two-way guard for Interaction B: a revert to the
+    unconditional gather flips ``assert_not_called`` to a hard failure. The
+    registry-order check confirms the sequential ``await`` loop ran each revise
+    to completion before the next (exclusive slot use)."""
+    from maljan.pipeline.nodes import make_revision_node
+
+    call_order: list[str] = []
+    container = _revision_container(parallel=False, call_order=call_order)
+    node = make_revision_node(container)
+
+    with patch("maljan.pipeline.nodes.asyncio.gather", wraps=_REAL_GATHER) as gather_spy:
+        result = asyncio.run(node(_revision_state()))
+
+    gather_spy.assert_not_called()
+    assert call_order == ["static", "dynamic", "network"]
+    assert set(result["revised_reports"]) == {"static", "dynamic", "network"}
+    assert result["revised_reports"]["static"] == "static revised"
+    assert set(result["isr_reports"]) == {"static", "dynamic", "network"}
+
+
+def test_revision_node_parallel_uses_gather() -> None:
+    """``parallel_analysts=True`` keeps the concurrent gather and still returns
+    a revised report + ISR for every analyst (the branch must not regress)."""
+    from maljan.pipeline.nodes import make_revision_node
+
+    container = _revision_container(parallel=True, call_order=[])
+    node = make_revision_node(container)
+
+    with patch("maljan.pipeline.nodes.asyncio.gather", wraps=_REAL_GATHER) as gather_spy:
+        result = asyncio.run(node(_revision_state()))
+
+    gather_spy.assert_called_once()
+    assert set(result["revised_reports"]) == {"static", "dynamic", "network"}
+    assert set(result["isr_reports"]) == {"static", "dynamic", "network"}
+
+
+def test_revision_node_sequential_tolerates_one_failure() -> None:
+    """A single analyst raising must not abort the round (parity with
+    ``gather(return_exceptions=True)``): the survivors still revise and the
+    failed agent falls back to its original report."""
+    from maljan.pipeline.nodes import make_revision_node
+
+    call_order: list[str] = []
+    container = _revision_container(parallel=False, call_order=call_order)
+
+    # Make the dynamic agent's revise blow up.
+    def _get_agent(name: str) -> Any:
+        agent = MagicMock()
+        if name == "dynamic":
+            agent.safe_revise_isr.side_effect = RuntimeError("boom")
+        else:
+
+            def _revise(*_a: Any, _n: str = name, **_k: Any) -> tuple[str, Any]:
+                from maljan.pipeline.nodes import _empty_isr
+
+                call_order.append(_n)
+                return (f"{_n} revised", _empty_isr(_n, revision_round=1))
+
+            agent.safe_revise_isr.side_effect = _revise
+        return agent
+
+    container.get_agent.side_effect = _get_agent
+    node = make_revision_node(container)
+
+    result = asyncio.run(node(_revision_state()))
+
+    # Survivors revised; the failed agent kept its original report.
+    assert result["revised_reports"]["static"] == "static revised"
+    assert result["revised_reports"]["network"] == "network revised"
+    assert result["revised_reports"]["dynamic"] == "r0"

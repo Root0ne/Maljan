@@ -127,13 +127,13 @@ class LLMConfig(BaseModel):
     # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
     judge_max_tokens: int = 8192
 
-    # Wave 7 THROUGHPUT-01 (2026-05-28): when True (default), analysts run
-    # in parallel — correct for hosted multi-slot LLMs. When False, the
-    # pipeline runs analysts sequentially so a single-slot local
-    # llama-server can give each analyst the full LLM bandwidth for its
-    # per-agent timeout budget instead of letting them choke each other
-    # in the request queue. Set ``LLM__PARALLEL_ANALYSTS=false`` for
-    # local llama.cpp / ollama deployments without ``--parallel N``.
+    # Wave 7 THROUGHPUT-01 (2026-05-28): when True, analysts run in parallel —
+    # correct for hosted multi-slot LLMs. When False (the DEFAULT since
+    # 2026-07-13), the pipeline runs analysts sequentially so a single-slot
+    # local llama-server gives each analyst exclusive slot use for its
+    # per-agent timeout budget instead of letting them choke each other in the
+    # request queue. Set ``LLM__PARALLEL_ANALYSTS=true`` only for a hosted
+    # multi-slot API with real per-request isolation.
     #
     # 2026-07-13 ROOT-CAUSE (supersedes the "SWA re-prefill" misdiagnosis in
     # findings-log): the served Qwen3.6-35B-A3B is a HYBRID Gated-DeltaNet
@@ -147,9 +147,17 @@ class LLMConfig(BaseModel):
     # each analyst exclusive slot use, so its recurrent state survives across
     # its own ReAct steps → only new tokens are processed → no re-prefill, no
     # timeout. MEASURED on sample 11e77149 + CAPE: parallel 2480s (revision
-    # timed out) → sequential 743s (3.3×, zero timeouts). Do NOT re-enable
-    # parallel on a single-slot hybrid-model deployment.
-    parallel_analysts: bool = True
+    # timed out) → sequential 743s (3.3×, zero timeouts).
+    #
+    # Honoured in BOTH phases: the initial fan-out (pipeline/builder.py —
+    # parallel edges vs a sequential chain) AND the revision node
+    # (pipeline/nodes.py — concurrent asyncio.gather vs a sequential await
+    # loop). The default flipped True→False (2026-07-13) so a run WITHOUT a
+    # local .env (CI, fresh clone, deploy) is safe by default — otherwise
+    # parallel + the restored deep static budget = the exact uncapped
+    # re-prefill the old caps once masked. Do NOT re-enable on a single-slot
+    # hybrid-model deployment.
+    parallel_analysts: bool = False
 
     # View-decomposition pilot (findings-log §3.6). 0 = off (today's single
     # monolithic analyst call). N > 0 splits the analyst's text-evidence into N

@@ -637,8 +637,33 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 iteration,
             )
 
-        tasks = [_revise_one(name) for name in agent_names]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Slot-topology parity with the initial fan-out (builder.py). On a
+        # single-slot local llama-server the analysts' revise calls must NOT
+        # run concurrently or they clobber each other's per-slot recurrent
+        # DeltaNet state → full re-prefill every step (the 2026-07-13 root
+        # cause; see LLMConfig.parallel_analysts). The initial pass is
+        # serialised by the graph edges, but this revision node fans out
+        # itself, so it must honour the same flag. When sequential, await each
+        # revise in turn (exclusive slot use); when parallel, keep the
+        # concurrent gather for hosted multi-slot APIs. Both branches tolerate
+        # a per-analyst failure (mirrors gather(return_exceptions=True)) so one
+        # bad revise never aborts the round.
+        parallel = True
+        try:
+            parallel = bool(container.config.llm.parallel_analysts)
+        except AttributeError:
+            parallel = True
+
+        results: list[Any] = []
+        if parallel:
+            tasks = [_revise_one(name) for name in agent_names]
+            results = list(await asyncio.gather(*tasks, return_exceptions=True))
+        else:
+            for name in agent_names:
+                try:
+                    results.append(await _revise_one(name))
+                except Exception as exc:  # noqa: BLE001 — parity with gather()
+                    results.append(exc)
 
         revised: dict[str, str] = {}
         revised_isrs: dict[str, AgentISR] = {}
