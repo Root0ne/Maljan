@@ -1530,6 +1530,33 @@ def make_report_node(container: ServiceContainer) -> Any:
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report)
 
+        # Report-reshaping Phase 4: section-wise Composer authors the professional
+        # spine (intro, technical-analysis subsections, C2 channels, conclusion),
+        # each grounded in its isolated evidence bundle. Best-effort — a Composer
+        # failure never blocks the report. None in mock / when composer disabled.
+        try:
+            composer = container.get_report_composer()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
+            composer = None
+        if composer is not None:
+            try:
+                await composer.compose(report, state.get("isr_reports"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
+                )
+
+        # Report-reshaping Phase 5: deterministic figures (inline SVG + Ghidra
+        # code listings) generated from the report's own data — real charts, no
+        # fabricated screenshots. Best-effort; empty when data is absent.
+        try:
+            from maljan.reporting.figures import build_figures
+
+            report.figures = build_figures(report)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report_node: figure generation failed (%s).", exc)
+
         # Detection signatures (Faz 4) — template-based YARA/Sigma/Suricata
         # generation. Runs after narrative so the LLM-written family name can
         # influence rule metadata. Disabled via config when desired.

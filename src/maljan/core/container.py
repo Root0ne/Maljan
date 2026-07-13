@@ -96,6 +96,7 @@ class ServiceContainer:
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
+        self._report_composer_cache: Any | None = None
         self._samples_dir = str(resolve_data(samples_dir))
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
@@ -266,6 +267,28 @@ class ServiceContainer:
                     token_ledger=getattr(self, "_token_ledger", None),
                 )
             return self._narrative_agent_cache
+
+    def get_report_composer(self) -> Any | None:
+        """Return the singleton section-wise ReportComposer, or ``None``.
+
+        Reshaping Phase 4. ``None`` in mock mode or when ``composer_enabled`` is
+        off (callers then simply skip the professional spine). Reuses the judge
+        LLM like the NarrativeAgent.
+        """
+        if self.is_mock or not self.config.reporting.composer_enabled:
+            return None
+        with self._lock:
+            if getattr(self, "_report_composer_cache", None) is None:
+                from maljan.reporting.composer import ReportComposer
+
+                rc = self.config.reporting
+                self._report_composer_cache = ReportComposer(
+                    llm=self.get_judge_llm(),
+                    section_max_tokens=rc.composer_section_max_tokens,
+                    per_section_timeout=rc.composer_per_section_timeout,
+                    token_ledger=getattr(self, "_token_ledger", None),
+                )
+            return self._report_composer_cache
 
     # ------------------------------------------------------------------
     # Data loading
