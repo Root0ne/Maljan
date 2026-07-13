@@ -876,13 +876,17 @@ class WorkerSettings:
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.
-    # job_timeout=3600 (60 min) covers the Wave 4 pipeline (platform-aware
-    # cascade + per-platform Sigma scan + FP linter) which can run longer
-    # than 30 min on the 35B local LLM, especially on a cold-cache start.
-    # Wave 3 baseline was ~21 min; Wave 4 adds ~4-5 min of cascade work +
-    # variance from LLM throughput. 60 min gives ~2x headroom before
-    # we'd consider the run truly hung.
+    # job_timeout=28800 (8h) — 2026-07-13 deep-analysis restore. The outer ARQ
+    # ceiling must sit ABOVE the sum of the inner per-loop safety nets, or it
+    # fires while a run is still legitimately progressing ("a timeout is a bug").
+    # Static now runs a full-depth ReAct loop PER CHUNK (~8-10 chunks, up to
+    # 1530s each) plus dynamic/CAPE, network, up to 5 revision rounds, judge and
+    # the report Composer; a realistic-slow cold-cache run is ~2-4h. 8h is a
+    # never-fires safety net: a single-slot LLM can't run two jobs at once so a
+    # high ceiling costs nothing, and every LLM/CAPE path is bounded by its own
+    # inner timeout, so this only trips on a true hang outside those paths. Was
+    # 3600 (60 min), sized for the pre-restore shallow static pass.
     max_jobs = 1
-    job_timeout = 3600
+    job_timeout = 28800
     max_tries = 1  # Don't retry failed analyses automatically
     health_check_interval = 30

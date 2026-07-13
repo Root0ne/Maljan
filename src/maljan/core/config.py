@@ -352,15 +352,22 @@ class PreprocessingConfig(BaseModel):
     summarizer_provider: str = "ollama"
     summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: int = 150
-    # 2026-07-11 — lowered 8000 -> 3000. The Qwen3 model is SWA (sliding-window
-    # attention); ik_llama.cpp cannot reuse the KV cache across the static
-    # analyst's multi-step ReAct loop, so every step re-prefills the whole
-    # accumulated context from scratch (llama log: "forcing full prompt
-    # re-processing due to lack of cache data (likely due to SWA)" — 31.8k tokens
-    # = 51s). Capping each Ghidra tool observation to ~750 tokens slows context
-    # growth so those forced re-prefills stay cheap. Pairs with the static
-    # max-steps cut below; revisit if we move to a --swa-full llama build.
-    max_tool_output_chars: int = 3000
+    # 2026-07-13 — restored 3000 -> 6000 (was 8000 before the 2026-07-11 cut).
+    # The cut to 3000 blamed "SWA re-prefill", a MISDIAGNOSIS: the served model
+    # is a hybrid Gated-DeltaNet (recurrent) MoE, not sliding-window, and the
+    # real re-prefill cause was parallel analysts clobbering the single slot's
+    # recurrent state (fixed by parallel_analysts=False; see LLMConfig). With
+    # sequential analysts each ReAct step reuses the prior context, so richer
+    # observations no longer inflate re-prefill cost. 6000 chars (~1500 tokens)
+    # per Ghidra observation lets a full priority function's pseudo-C survive
+    # untruncated. NOT 8000: there is no in-loop context pruning, so at the
+    # restored static max_steps=40 the worst-case accumulation is ~40*1500 tool
+    # tokens + 20k chunk + ~12k system/gen ~= 90-95k — a safe ~36k under
+    # n_ctx=131072. 8000 would push the peak to ~112k, and crossing 131072
+    # triggers a silent server context-shift that drops the earliest tokens (the
+    # load_program framing) — catastrophic and invisible. Override via
+    # ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
+    max_tool_output_chars: int = 6000
 
     # Sink-reachability triage (Maltracker-inspired). When enabled, the static
     # analyst runs a deterministic pre-pass over the Ghidra call graph to find
@@ -667,16 +674,19 @@ class Settings(BaseSettings):
             # (300s) + negotiation + judge. Reduce to 600s for hosted
             # multi-slot APIs.
             #
-            # 2026-07-11 — cut 1200 -> 300 (per *chunk*, not per analyst). On the
-            # SWA model with no cross-step KV reuse a chunk's ReAct occasionally
-            # blows up (full re-prefill loop) and, at 1200s, burned 20 min before
-            # being skipped — a few such chunks alone exceed the 3600s job budget.
-            # safe_analyze_isr_chunked *tolerates* per-chunk failures (it merges
-            # the successful chunks), so a tight 300s cap cuts a runaway chunk
-            # short and moves on: fast chunks (observed 105-188s incl. cold Ghidra
-            # auto-analysis on chunk 1) still finish, blowups are dropped, and 10
-            # chunks stay well under budget. Pairs with static max_steps=8.
-            "static": 300,
+            # 2026-07-13 — restored 300 -> 1500 (per *chunk*). The 2026-07-11 cut
+            # to 300 blamed "SWA re-prefill" (a MISDIAGNOSIS — see
+            # max_tool_output_chars / parallel_analysts): the 1200s blow-ups were
+            # parallel analysts clobbering the single slot's recurrent state, now
+            # fixed by the sequential topology. This per-chunk wall-clock is the
+            # BINDING constraint on depth — the restored static max_steps=40 is
+            # inert unless the timeout moves with it (at ~15-20s/step, 300s fits
+            # only ~15-20 steps). 40 steps ~= 600-800s when a rich chunk uses them
+            # all; 1500 (hard cap timeout+30 = 1530s) is generous headroom so the
+            # net never fires on a *progressing* chunk ("a timeout is a bug").
+            # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
+            # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
+            "static": 1500,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -708,23 +718,27 @@ class Settings(BaseSettings):
     # analyst budget (live task 8, 2026-07-11). The structured flows are handed
     # to it up front (see network_analyst.analyze_isr), so a tight cap keeps the
     # optional PCAP peek from starving synthesis. ~6 steps ≈ 2-3 tool calls.
-    # 2026-07-11 — static lowered 40 -> 12. The 40-step ceiling let the ReAct
-    # loop accumulate ~58k tokens of Ghidra observations; on the SWA model
-    # (no cross-step KV-cache reuse in ik_llama.cpp) every step re-prefills that
-    # growing context from scratch, so late steps cost 50-90s each and the chunk
-    # blew its 1200s cap (live fixture job 2026-07-11: chunk 1/10 timed out at
-    # ~16.5 min, same "Request timed out" as the real 27-chunk run). At 12 steps
-    # most chunks finished in ~170s but occasional deep chunks still blew the cap
-    # (fixture retest 2026-07-11: chunks 1-3 = 166/175/188s, chunk 4 timed out),
-    # so it is set to 8 (~4 tool calls: load_program -> auto-analyze -> a couple
-    # decompiles) — below the 5-tool-call chunk that finished cleanly in 166s — to
-    # keep the accumulated context, and thus each forced re-prefill, bounded so
-    # every chunk stays fast. Staged fix ("bound first"); the clean fix is a
-    # --swa-full llama build (restores cross-step cache reuse). Override via
+    # 2026-07-13 — static RESTORED 8 -> 40 (its original designed depth). The
+    # 2026-07-11 cuts (40 -> 12 -> 8) blamed "SWA re-prefill": every step
+    # re-prefilling ~58k tokens of growing Ghidra context, so late steps cost
+    # 50-90s and chunks blew their cap. That was a MISDIAGNOSIS — the model is a
+    # hybrid Gated-DeltaNet (recurrent) MoE, and the re-prefill was actually
+    # parallel analysts clobbering the single slot's recurrent state, now fixed
+    # by parallel_analysts=False (+ the revision node serialised; see LLMConfig).
+    # With sequential analysts each step reuses the prior context (only new
+    # tokens processed), so a deep loop is cheap again. 40 (~20 tool calls) is
+    # the full Ghidra pass (load_program -> auto-analyze -> enumerate -> decompile
+    # the sink-reachability priority functions -> xrefs -> strings -> imports ->
+    # malware-specific tools); a hint-directed chunk concludes NATURALLY at ~30-36
+    # steps, so 40 lets rich chunks finish on their own instead of hitting the cap
+    # and triggering the forced-synthesis salvage on an incomplete decompilation.
+    # MUST move with the static timeout (1500) — the per-chunk wall-clock is the
+    # binding constraint. Context-safe: 40 steps * ~1500 tok (max_tool_output_
+    # chars=6000) ~= 90-95k peak, ~36k under n_ctx=131072. Override via
     # ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
     react_agent_max_steps_overrides: dict[str, int] = Field(
         default_factory=lambda: {
-            "static": 8,
+            "static": 40,
             "network": 6,
         }
     )

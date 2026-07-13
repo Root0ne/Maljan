@@ -978,6 +978,50 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-07-13 The sequential-analyst fix was INCOMPLETE (revision node still ran concurrent), and
+  the "SWA" depth band-aids were obsolete — completed the fix, then restored full static-analysis
+  depth. `IMPLEMENTED` (config + guard tests green); the depth *benefit* is `PENDING` a multi-chunk
+  E2E.** Two coupled findings, building on the same-day misdiagnosis correction below.
+  **(1) The prior `parallel_analysts=False` fix only covered the INITIAL fan-out.** It serialised the
+  analyst nodes via the LangGraph edges (`pipeline/builder.py`), but the **revision node**
+  (`pipeline/nodes.make_revision_node`) fanned out *internally* through an unconditional
+  `asyncio.gather` over all analysts, gated on nothing. So every negotiation **revision round**
+  re-introduced the single-slot recurrent-state clobbering → full re-prefill — *the exact phase the
+  41-min runs blew `request_timeout=900s` on*. The 743 s validation run (previous entry) converged
+  before a real revision round (small 1-chunk sample, degraded-mode consensus), so the gap never
+  surfaced. **Fixed** by gating the revision fan-out on `parallel_analysts` (a sequential `await`
+  loop when False; the concurrent gather only for hosted multi-slot APIs), and **flipping the
+  config.py DEFAULT `True→False`** so a run without a local `.env` (CI, fresh clone) is safe by
+  default — otherwise it would pair parallel with the restored deep budget = uncapped re-prefill.
+  Pinned with a deterministic `asyncio.gather`-spy regression test (`test_analyst_parallelism.py`).
+  **(2) With the topology now guaranteed-sequential in BOTH phases, the 2026-07-11 "SWA" depth caps
+  are obsolete** — they blamed the same misdiagnosed cause and were suppressing analysis depth for no
+  benefit. Diagnostic: even a 1-chunk sample hit the `forcing synthesis` salvage (static ReAct 28.9 s
+  for only 3 tool calls, then a **47.8 s** salvage LLM call = **62 %** of static wall-time wasted on
+  cap-hit recovery, not analysis). **Restored, as config.py defaults** (`.env` sets none of these
+  keys), as a *coupled set* because the per-chunk wall-clock — not the step count — is the binding
+  constraint (at ~15–20 s/step, a 300 s cap fits only ~15–20 steps, so raising `max_steps` alone is
+  inert): `react_agent_max_steps_overrides[static]` **8→40** (original designed depth; a hint-directed
+  chunk concludes naturally ~30–36 steps, so 40 avoids salvage on an incomplete decompilation),
+  `max_tool_output_chars` **3000→6000** (NOT 8000 — no in-loop pruning, and 8000 risks crossing
+  `n_ctx=131072` → a silent server context-shift that drops the earliest tokens / `load_program`
+  framing; 6000 keeps worst-case peak ~90–95 k), `react_agent_timeout_overrides[static]` **300→1500**
+  (hard cap `timeout+30`=1530 s). Raised the never-fires safety-net ceilings so a deeper-but-
+  *progressing* run is never killed ("a timeout is a bug"): `request_timeout` **900→1800** (≥ the
+  1530 s hard cap, per the provider's must-exceed-longest-agent-budget invariant), and `job_timeout`
+  **3600→28800 (8 h)** — static runs one ReAct loop **per chunk** (~8–10 chunks for a real PE), so a
+  realistic-slow cold-cache run is ~2–4 h and the outer ARQ ceiling must exceed the sum of the inner
+  nets. Rewrote the three now-false SWA comment blocks to the real cause. Side effect: **fixed two
+  previously-red tests** that already expected `static==40` (`test_agents.py`) — the 2026-07-11 cut
+  lowered the config without updating them. **Honest status:** the config + topology change is
+  verified (guard tests green, 0 new failures; 8 *pre-existing, unrelated* suite failures confirmed by
+  stash — stale chunker default, 6 view-decomposition, 1 YARA-gate); the **depth quality win is not
+  yet measured** — the 743 s run was 1-chunk. Acceptance gate: a real PE that splits into ≥8 chunks
+  AND produces dissent (≥1 revision round), confirming zero re-prefill in *both* phases, no chunk
+  hitting its 1530 s cap, salvage absent on rich chunks, peak context <~120 k, and a quality delta
+  (more decompiled functions / grounded techniques) vs the `max_steps=8` baseline. Best-quality runs
+  now take ~2–4 h/sample by design (time cost explicitly accepted).
+
 - **2026-07-13 The "SWA re-prefill bottleneck" was a MISDIAGNOSIS — the real cause is a hybrid
   Gated-DeltaNet recurrent model + parallel analysts thrashing a single llama-server slot. Fixed by a
   one-flag config change; 41 min → 12 min, zero timeouts.** A CAPE-on live run timed out the revision

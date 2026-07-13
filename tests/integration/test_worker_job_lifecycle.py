@@ -235,10 +235,11 @@ async def test_pipeline_failure_sets_failed_status(
 def test_worker_settings_sanity() -> None:
     """Verify ARQ worker tuning values are production-ready."""
     assert WorkerSettings.max_jobs == 1
-    # Wave 4 (2026-05-28): bumped 1800 -> 3600 because the Wave 4 pipeline
-    # (platform-aware cascade + per-platform Sigma scan + FP linter) on a
-    # cold-cache local 35B LLM can exceed the original 30 min ceiling.
-    assert WorkerSettings.job_timeout == 3600
+    # 2026-07-13: bumped 3600 -> 28800 (8h) for the deep-analysis restore.
+    # Full-depth static runs one ReAct loop PER CHUNK (~8-10 chunks), so a
+    # realistic-slow cold-cache run is ~2-4h; the outer ARQ ceiling must sit
+    # above the inner per-loop safety nets so it never kills a progressing run.
+    assert WorkerSettings.job_timeout == 28800
     assert WorkerSettings.max_tries == 1
 
 

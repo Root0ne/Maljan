@@ -304,7 +304,7 @@ def main_async(
 
     container = ServiceContainer(get_settings(), mock=False)
     agent = container.get_agent("static")
-    # Eval-only: the production request_timeout (900s) is sized for the static
+    # Eval-only: the production request_timeout (1800s) is sized for the static
     # ReAct budget; here a single degenerate/stuck text decode would stall the
     # whole batch for 15 min. Fail it fast so the run keeps moving.
     try:
