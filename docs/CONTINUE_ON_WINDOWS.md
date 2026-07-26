@@ -30,19 +30,45 @@ Windows machine. (Written 2026-07-13.)
    `host.docker.internal:18000`.
 
 ## GitHub
-Remote is `https://github.com/Root0ne/Maljan.git`. See the token-setup file placed
-at the **root of the transfer zip** (not committed) for the one command that makes
-`git push`/`pull` work immediately. **Rotate that token soon** — it is over-scoped
-and has been exposed; regenerate at github.com → Settings → Developer settings →
-Personal access tokens and re-auth with `gh auth login`.
+Remote is `https://github.com/Root0ne/Maljan.git`, and the branch is already pushed
+— local and origin match, so nothing is stranded on the Linux box.
+
+**Before you push from Windows you must rotate the token.** The old classic token
+carried nearly every scope (`admin:org`, `delete_repo`, `workflow`, `user`, …) and
+was exposed in a chat transcript, so it has to be deleted rather than reused. Step
+by step: `_GITHUB_SETUP.txt` at the **root of the transfer zip** (not committed —
+and it no longer contains any token). Short version: delete the old token at
+github.com → Settings → Developer settings → Personal access tokens, mint a
+fine-grained one scoped to `Root0ne/Maljan` with *Contents: Read and write*, then
+`gh auth login` and paste it.
 
 ## First things to verify after transfer
 - `git log` shows the depth-restore commits (`c856ba4`, `287740c`, + this session).
 - `docker compose ... up -d` brings up worker/api/frontend/postgres/redis/qdrant/
   ghidra-mcp/minio.
-- `make test` (or `uv run pytest tests/ -q`) — note 8 pre-existing unrelated
-  failures (stale chunker default, view-decomposition, YARA-gate); the depth work
-  itself is green.
+- `make test` (or `uv run pytest tests/ -q`) — the suite is **fully green**. The 8
+  failures this file used to warn about were fixed in the 2026-07-26 audit round
+  (two of them turned out to be real bugs, not stale tests: view-decomposition
+  dropped every ATT&CK technique ID, and the YARA gate still emitted
+  `Maljan_AutoGen_unknown`). Any failure you see on Windows is new — do not
+  dismiss it as pre-existing.
+
+## Report export (Phase 6)
+`GET /api/v1/reports/{id}/html` and `/pdf` render the full report — A4, numbered
+pages, linked contents, and the deterministic SVG figures, which until now were
+generated on every run and displayed nowhere. Both come from one document, so
+they cannot disagree; `?download=true` on `/html` forces a save instead of
+opening inline. The analysis page has matching *↓ PDF report* / *↓ HTML report*
+buttons next to Markdown.
+
+Inside Docker this just works — `docker/Dockerfile.backend` installs WeasyPrint's
+runtime libraries (`libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`,
+`fonts-dejavu-core`). **If you run the backend natively on Windows instead**,
+`uv sync` will install the wheel happily and `/pdf` will still return 503,
+because WeasyPrint binds to those libraries through ctypes at call time, not at
+import. Install the GTK runtime
+(<https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer>) and
+it resolves. Markdown, HTML and STIX exports need none of this.
 
 ## Known follow-ups
 - **Multi-chunk + revision-round E2E** still unverified (the single-chunk run

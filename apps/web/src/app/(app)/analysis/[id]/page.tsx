@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
-import { downloadBlob } from "@/lib/report-utils";
+import { downloadBlob, downloadObject } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
 import { verdictLabel } from "@/lib/verdict";
 import { SEVERITY_STYLES } from "@/types/malware-report";
@@ -526,6 +526,36 @@ function DownloadBar({
     }
   };
 
+  const downloadPdf = async () => {
+    if (!reportId) return;
+    setBusy("pdf");
+    setError(null);
+    try {
+      // Server-rendered: A4, numbered pages, linked contents and the
+      // deterministic figures in place. Can take a second on a figure-heavy
+      // report, hence the busy state on the button.
+      downloadObject(await api.getReportPdf(reportId), `${safeName}.pdf`);
+    } catch (err) {
+      setError(`Could not download the PDF report: ${getErrorMessage(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadHtml = async () => {
+    if (!reportId) return;
+    setBusy("html");
+    setError(null);
+    try {
+      const body = await api.getReportHtml(reportId);
+      downloadBlob(body, `${safeName}.html`, "text/html");
+    } catch (err) {
+      setError(`Could not download the HTML report: ${getErrorMessage(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const downloadStix = () => {
     const body = JSON.stringify(mr.stix_bundle_extended, null, 2);
     downloadBlob(body, `${safeName}-stix.json`, "application/json");
@@ -549,6 +579,22 @@ function DownloadBar({
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "md" ? "fetching..." : "↓ Markdown report"}
+      </button>
+      <button
+        onClick={downloadPdf}
+        disabled={!reportId || busy === "pdf"}
+        title="Print-ready A4 report with figures and a linked table of contents"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "pdf" ? "rendering..." : "↓ PDF report"}
+      </button>
+      <button
+        onClick={downloadHtml}
+        disabled={!reportId || busy === "html"}
+        title="Self-contained HTML — opens offline, no external requests"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "html" ? "fetching..." : "↓ HTML report"}
       </button>
       <button
         onClick={downloadStix}

@@ -3,9 +3,16 @@ FROM python:3.13-slim AS base
 
 WORKDIR /app
 
-# System dependencies
+# System dependencies.
+# The pango/harfbuzz trio and the DejaVu fonts are WeasyPrint's runtime
+# requirement for /reports/{id}/pdf (Phase 6). WeasyPrint loads them through
+# ctypes at call time, not at import, so without them the PDF endpoint would
+# 503 at runtime while everything else kept working — easy to miss. DejaVu is
+# the last entry in the report stylesheet's font stack and the only one that
+# exists in a slim image; drop it and every glyph falls back to a default.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl gcc libpq-dev && \
+    curl gcc libpq-dev \
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast dependency management

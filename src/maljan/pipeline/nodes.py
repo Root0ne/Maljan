@@ -60,6 +60,14 @@ _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGN
 # re-passes the token-budget check — the cap here is load-bearing.
 _MAX_SYNTH_CHUNK_CHARS = 40_000
 
+# CONF-INFL-01: the confidence ceiling for a degraded run. Public, and
+# module-level, because it is a cross-layer contract rather than an
+# implementation detail of the report node: the worker persists whatever ends
+# up under it, the dashboard styles "low confidence" at the same threshold, and
+# the 2026-07-26 audit found the value silently disagreeing between layers. One
+# name, so a change cannot land in only half of them.
+DEGRADED_CONFIDENCE_CAP = 0.60
+
 
 def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
     """Serialize a StaticAnalysis into a size-capped dict for the LLM prompt.
@@ -1433,18 +1441,15 @@ def make_report_node(container: ServiceContainer) -> Any:
         # node flagged the run as degraded. Without this, a verdict drawn
         # entirely from YARA/Sigma deterministic layers (with all three
         # LLM analysts silently producing zero claims) lands at 0.98+ and
-        # is indistinguishable in the UI from a fully corroborated
-        # finding. The 0.60 ceiling is the same threshold the dashboard
-        # uses to render "low confidence" styling.
-        _DEGRADED_CONFIDENCE_CAP = 0.60
-        if state.get("degraded_mode") and overall_confidence > _DEGRADED_CONFIDENCE_CAP:
+        # is indistinguishable in the UI from a fully corroborated finding.
+        if state.get("degraded_mode") and overall_confidence > DEGRADED_CONFIDENCE_CAP:
             logger.warning(
                 "report_node: capping overall_confidence %.3f -> %.2f (degraded run: %s).",
                 overall_confidence,
-                _DEGRADED_CONFIDENCE_CAP,
+                DEGRADED_CONFIDENCE_CAP,
                 "; ".join(state.get("degradation_reasons") or []) or "no reason recorded",
             )
-            overall_confidence = _DEGRADED_CONFIDENCE_CAP
+            overall_confidence = DEGRADED_CONFIDENCE_CAP
 
         # Best-effort malware category — cheap and fully deterministic.
         #

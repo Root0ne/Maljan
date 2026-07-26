@@ -7,8 +7,12 @@
  */
 
 export function downloadBlob(content: string, filename: string, mime: string): void {
+  downloadObject(new Blob([content], { type: mime }), filename);
+}
+
+/** Save an already-built Blob (PDF and other binary exports). */
+export function downloadObject(blob: Blob, filename: string): void {
   if (typeof window === "undefined") return;
-  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
