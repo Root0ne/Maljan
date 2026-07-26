@@ -417,6 +417,10 @@ def make_analyst_node(
                 status="complete" if isr.claims else "no_data",
                 claims=claims_to_payload(isr.claims),
                 dissent=list(isr.dissent_items or []),
+                # The analyst's own prose, so the transcript can offer it behind
+                # a disclosure. Previously this text reached the database as
+                # ``agent_reports`` and the UI could only show it as a JSON dump.
+                report=report,
             )
 
             node_out: dict[str, Any] = {
@@ -780,6 +784,11 @@ def make_revision_node(container: ServiceContainer) -> Any:
                     status="complete" if isr.claims else "no_data",
                     claims=claims_to_payload(isr.claims),
                     dissent=list(isr.dissent_items or []),
+                    # The rewritten report. This text was previously dropped
+                    # entirely: ``revised_reports`` never reached the database,
+                    # so what an agent said *after* the negotiation existed only
+                    # inside the run.
+                    report=revised_text,
                 )
 
         return {"revised_reports": revised, "isr_reports": revised_isrs}

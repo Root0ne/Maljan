@@ -97,6 +97,31 @@ class AgentFindingResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AgentMessageResponse(BaseModel):
+    """One line of the negotiation transcript, as it was broadcast.
+
+    Mirrors the live ``agent_message`` event payload field for field, so the
+    frontend maps a replayed conversation and a live one through the same code
+    path — which is the point of storing the broadcast rather than
+    reconstructing it from ``agent_findings``.
+    """
+
+    seq: int
+    speaker: str
+    role: str
+    round: int
+    status: str
+    text: str
+    report: str | None = None
+    report_truncated: bool = False
+    confidence: float | None = None
+    claims: list | None = None
+    dissent: list | None = None
+    ts: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class ReportDetailResponse(BaseModel):
     """Full analysis report."""
 
@@ -115,6 +140,11 @@ class ReportDetailResponse(BaseModel):
     # to the legacy fields above when this is missing.
     malware_report: dict | None = None
     agent_findings: list[AgentFindingResponse]
+    # The conversation itself, ordered by ``seq``. Empty for reports written
+    # before ``agent_messages`` existed (migration 20260726020000) — the
+    # frontend falls back to reconstructing what it can from ``agent_findings``
+    # and ``negotiation_log`` for those, exactly as it did before.
+    transcript: list[AgentMessageResponse] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -156,7 +156,10 @@ class ReportService:
         """Get a report by ID, scoped to the requesting user's jobs."""
         result = await self.db.execute(
             select(AnalysisReport)
-            .options(selectinload(AnalysisReport.agent_findings))
+            .options(
+                selectinload(AnalysisReport.agent_findings),
+                selectinload(AnalysisReport.transcript),
+            )
             .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
             .where(
                 AnalysisReport.id == report_id,
@@ -174,8 +177,9 @@ class ReportService:
 
         Audit 2026-07-26 (Ö4). Scoped through the owning job exactly like
         ``get_report`` so one user can never delete another's report.
-        ``AnalysisReport.agent_findings`` is declared with
-        ``cascade="all, delete-orphan"``, so the findings go with it.
+        ``AnalysisReport.agent_findings`` and ``.transcript`` are both
+        declared with ``cascade="all, delete-orphan"``, so the findings and
+        the stored conversation go with it.
         """
         report = await self.get_report(report_id, user)
         if report is None:
@@ -197,7 +201,10 @@ class ReportService:
         """Get the report for a specific job."""
         result = await self.db.execute(
             select(AnalysisReport)
-            .options(selectinload(AnalysisReport.agent_findings))
+            .options(
+                selectinload(AnalysisReport.agent_findings),
+                selectinload(AnalysisReport.transcript),
+            )
             .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
             .where(
                 AnalysisReport.job_id == job_id,

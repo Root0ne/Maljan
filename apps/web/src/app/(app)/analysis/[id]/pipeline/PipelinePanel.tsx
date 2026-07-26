@@ -190,7 +190,14 @@ export default function PipelineTab() {
   const findings: AgentFinding[] = (report?.agent_findings ?? []) as AgentFinding[];
   const negotiation: NegotiationLog | null =
     (report?.negotiation_log as NegotiationLog) ?? null;
-  const agentReports = report?.agent_reports ?? null;
+  // `agent_reports` is `Record<agentName, prose>`; the type is loose because
+  // it is a JSONB column. Filter to the string values so a malformed row
+  // cannot put `[object Object]` on the page — there is no error boundary in
+  // this app, and the tab walk in e2e asserts zero page errors.
+  const agentReportEntries = Object.entries(report?.agent_reports ?? {}).filter(
+    (entry): entry is [string, string] =>
+      typeof entry[1] === "string" && entry[1].trim().length > 0
+  );
   const runSummary = report?.run_summary ?? null;
 
   // Map agents to steps
@@ -512,35 +519,29 @@ export default function PipelineTab() {
         </div>
       </div>
 
-      {/* Raw Agent Reports */}
-      {agentReports && (
-        <CollapsibleSection title="Raw Agent Reports (JSON)">
-          <pre className="text-[11px] text-text-muted overflow-auto max-h-96">
-            {JSON.stringify(agentReports, null, 2)}
-          </pre>
-        </CollapsibleSection>
-      )}
-
-      {/* Full Report JSON */}
-      {report && (
-        <CollapsibleSection title="Full Report (JSON)">
-          <pre className="text-[11px] text-text-muted overflow-auto max-h-96">
-            {JSON.stringify(
-              {
-                id: report.id,
-                job_id: report.job_id,
-                verdict: report.verdict,
-                overall_confidence: report.overall_confidence,
-                malware_category: report.malware_category,
-                agent_findings: report.agent_findings,
-                negotiation_log: report.negotiation_log,
-                run_summary: report.run_summary,
-                mitre_techniques: report.mitre_techniques,
-              },
-              null,
-              2
-            )}
-          </pre>
+      {/* Each agent's written report.
+       *
+       * This was a `JSON.stringify` of the whole `agent_reports` object — a
+       * wall of escaped newlines that technically contained the analysts'
+       * prose and in practice nobody read. The reports are the most readable
+       * thing the pipeline produces; the only reason they looked like data was
+       * that they were rendered as data. Same payload, one section per agent,
+       * as text. The transcript on the PROCESS tab shows the same prose
+       * per round, in context. */}
+      {agentReportEntries.length > 0 && (
+        <CollapsibleSection title="Agent reports">
+          <div className="space-y-4">
+            {agentReportEntries.map(([name, body]) => (
+              <div key={name}>
+                <h4 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-1">
+                  {name}
+                </h4>
+                <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+                  {body}
+                </p>
+              </div>
+            ))}
+          </div>
         </CollapsibleSection>
       )}
     </div>

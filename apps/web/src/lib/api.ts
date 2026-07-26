@@ -1,3 +1,4 @@
+import type { TranscriptRow } from "@/lib/transcript";
 import type {
   EnrichTriggerResponse,
   MalwareReport,
@@ -82,6 +83,10 @@ export interface ReportDetailDTO {
   // CAPABILITIES tab can read platform_filter_summary without casts.
   run_summary: RunSummary | null;
   agent_findings: AgentFindingDTO[];
+  /* The recorded conversation, ordered by ``seq``. Empty for reports written
+   * before the ``agent_messages`` table existed — the transcript view falls
+   * back to rebuilding what it can from ``agent_findings`` for those. */
+  transcript?: TranscriptRow[];
   malware_report: MalwareReport | null;
   created_at: string;
 }

@@ -36,6 +36,13 @@ EventSink = Callable[[str, dict[str, Any]], None]
 # through a single code path, and a new participant needs no client change.
 AGENT_MESSAGE = "agent_message"
 
+# Ceiling on the full prose report carried alongside a message. These events are
+# fanned out to every connected browser and mirrored into a bounded Redis Stream
+# (maxlen 1000), so an unbounded field would let one verbose analyst evict the
+# rest of the run from the replay window. Generous enough for a real report;
+# truncation is flagged in the payload rather than done silently.
+REPORT_CHAR_LIMIT = 8_000
+
 
 def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
     """Send one event to ``sink``, swallowing every failure.
@@ -61,6 +68,7 @@ def emit_agent_message(
     confidence: float | None = None,
     claims: list[dict[str, Any]] | None = None,
     dissent: list[str] | None = None,
+    report: str | None = None,
 ) -> None:
     """Emit one transcript line.
 
@@ -77,6 +85,14 @@ def emit_agent_message(
         confidence: 0-1 self-reported confidence, when the speaker has one.
         claims: Evidence-backed claims, already dumped to plain dicts.
         dissent: Peer claims this speaker still disputes.
+        report: The speaker's full prose report for this round, if it wrote one.
+            Deliberately *not* folded into ``text`` — see ``summarize_claims``
+            below for why that was undone once already. The UI keeps the
+            headline as the message body and puts this behind a disclosure, so
+            the conversation stays skimmable and the evidence stays one click
+            away. Truncated to ``REPORT_CHAR_LIMIT``; when that happens the
+            payload also carries ``report_truncated: True`` rather than leaving
+            the reader to guess whether the report really ended there.
     """
     payload: dict[str, Any] = {
         "speaker": speaker,
@@ -91,6 +107,12 @@ def emit_agent_message(
         payload["claims"] = claims
     if dissent:
         payload["dissent"] = dissent
+    if report:
+        body = str(report)
+        if len(body) > REPORT_CHAR_LIMIT:
+            body = body[:REPORT_CHAR_LIMIT]
+            payload["report_truncated"] = True
+        payload["report"] = body
     emit(sink, AGENT_MESSAGE, payload)
 
 

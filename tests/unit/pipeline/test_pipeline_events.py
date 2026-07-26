@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from maljan.pipeline.events import (
     AGENT_MESSAGE,
+    REPORT_CHAR_LIMIT,
     claims_to_payload,
     emit,
     emit_agent_message,
@@ -281,3 +282,154 @@ class TestStageNodesEmit:
         # carry the detail, and the persisted view summarises identically.
         assert message["text"] == "1 evidence-backed claim from the network layer. Leading: c"
         assert message["dissent"] == ["still disagree with static"]
+
+
+class TestProseTravelsWithTheMessage:
+    """The agent's written report rides alongside the headline, not inside it.
+
+    Two separate reasons this field exists, and both are load-bearing:
+
+    * The prose is what a human actually reads. It reached the database as
+      ``agent_reports`` and the UI could only render it as a JSON blob, so in
+      practice nobody saw it.
+    * The *revised* prose reached nothing at all. ``revised_reports`` was a
+      pipeline-state key the worker never persisted, so what an agent wrote
+      after being contradicted existed only for the duration of the run.
+
+    It stays out of ``text`` deliberately — see ``summarize_claims``. The
+    headline is the message; this is the attachment.
+    """
+
+    def test_analyst_carries_its_report(self) -> None:
+        rec = Recorder()
+        container = _container(rec)
+        isr = AgentISR(
+            agent_id="network",
+            domain="network",
+            claims=[ClaimEvidence(claim="c", evidence_ref="r", confidence=0.5)],
+        )
+        agent = MagicMock()
+        agent.safe_analyze_isr.return_value = isr
+        agent.safe_analyze_isr_chunked.return_value = isr
+        agent.get_last_tool_evidence.return_value = []
+        container.get_agent.return_value = agent
+        container.load_chunked.return_value = [MagicMock(content="chunk")]
+
+        node = make_analyst_node("network", container)
+        node({"file_hash": "a" * 64})
+
+        message = rec.messages()[0]
+        # The node's own ``report`` variable — ``isr.to_text_summary()`` — which
+        # is exactly the prose that used to reach the database as
+        # ``agent_reports`` and be rendered as escaped JSON.
+        assert message["report"] == isr.to_text_summary()
+        # The headline is still the headline, and still not the prose.
+        assert message["text"].startswith("1 evidence-backed claim")
+        assert message["report"] != message["text"]
+
+    def test_revision_carries_the_rewritten_report(self) -> None:
+        rec = Recorder()
+        container = _container(rec, agents=["network"])
+        isr = AgentISR(
+            agent_id="network",
+            domain="network",
+            claims=[ClaimEvidence(claim="c", evidence_ref="r", confidence=0.5)],
+        )
+        agent = MagicMock()
+        agent.safe_revise_isr.return_value = ("the rewritten write-up", isr)
+        container.get_agent.return_value = agent
+
+        node = make_revision_node(container)
+        asyncio.run(node({"iteration_count": 1, "reports": {"network": "f"}, "isr_reports": {}}))
+
+        message = rec.messages()[0]
+        assert message["report"] == "the rewritten write-up"
+
+    def test_absent_report_omits_the_field(self) -> None:
+        """Same rule as confidence/claims/dissent: no value, no key."""
+        rec = Recorder()
+        emit_agent_message(rec, speaker="Mediator", role="negotiator", text="hm")
+        assert "report" not in rec.messages()[0]
+
+    def test_an_oversized_report_is_capped_and_says_so(self) -> None:
+        """A verbose analyst must not evict the rest of the run.
+
+        These events are mirrored into a Redis Stream capped at 1000 entries and
+        fanned out to every connected browser, so an unbounded field is a way
+        for one message to cost every other message its replay. Truncation is
+        announced rather than silent — a reader must not mistake the cut for the
+        end of the report.
+        """
+        rec = Recorder()
+        emit_agent_message(
+            rec,
+            speaker="static",
+            role="analyst",
+            text="headline",
+            report="x" * (REPORT_CHAR_LIMIT + 500),
+        )
+        message = rec.messages()[0]
+        assert len(message["report"]) == REPORT_CHAR_LIMIT
+        assert message["report_truncated"] is True
+
+    def test_a_report_within_the_cap_is_not_flagged(self) -> None:
+        rec = Recorder()
+        emit_agent_message(rec, speaker="static", role="analyst", text="headline", report="short")
+        assert "report_truncated" not in rec.messages()[0]
+
+
+class TestSycophancyAndJudgeSpeak:
+    """The two messages nothing covered, and one of them is the whole point.
+
+    The sycophancy detector is the pipeline's own scepticism made visible — it
+    is the reason a fourth round exists. It was emitted and never persisted, so
+    a day later a manufactured consensus was indistinguishable from an earned
+    one. Now that it is recorded, the emission itself needs pinning.
+    """
+
+    def test_the_detector_announces_the_intervention(self) -> None:
+        rec = Recorder()
+        container = _container(rec)
+        argument = MagicMock(agent_name="Mediator", finding="All agree.", confidence_score=0.9)
+        judge = MagicMock()
+        judge.mediate = AsyncMock(return_value=(argument, True))
+        container.get_judge_agent.return_value = judge
+
+        isr = AgentISR(
+            agent_id="network",
+            domain="network",
+            claims=[ClaimEvidence(claim="identical", evidence_ref="r", confidence=0.9)],
+        )
+        node = make_negotiation_node(container)
+        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=True):
+            asyncio.run(
+                node(
+                    {
+                        "iteration_count": 2,
+                        "reports": {"network": "f"},
+                        "isr_reports": {"network": isr},
+                    }
+                )
+            )
+
+        speakers = [m["speaker"] for m in rec.messages()]
+        assert "Sycophancy detector" in speakers
+        notice = next(m for m in rec.messages() if m["speaker"] == "Sycophancy detector")
+        assert notice["role"] == "system"
+        assert "without new evidence" in notice["text"]
+
+    def test_no_detector_message_when_agreement_is_earned(self) -> None:
+        rec = Recorder()
+        container = _container(rec)
+        argument = MagicMock(agent_name="Mediator", finding="All agree.", confidence_score=0.9)
+        judge = MagicMock()
+        judge.mediate = AsyncMock(return_value=(argument, True))
+        container.get_judge_agent.return_value = judge
+
+        node = make_negotiation_node(container)
+        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+            asyncio.run(
+                node({"iteration_count": 2, "reports": {"network": "f"}, "isr_reports": {}})
+            )
+
+        assert [m["speaker"] for m in rec.messages()] == ["Mediator"]

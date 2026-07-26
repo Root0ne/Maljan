@@ -1,15 +1,19 @@
-/* One transcript model, two sources.
+/* One transcript model, three sources.
  *
  * The agent conversation has to read the same whether you are watching it
- * arrive over the WebSocket or opening the job a week later. Those are very
- * different inputs — live `agent_message` events versus the persisted
- * `agent_findings` rows and `negotiation_log` — so both are normalised into
- * `TranscriptMessage[]` here and the panel only ever sees one shape.
+ * arrive over the WebSocket or opening the job a month later, so every input is
+ * normalised into `TranscriptMessage[]` here and the panel only ever sees one
+ * shape:
  *
- * Doing it this way is what keeps the two views honest: a live run and its
- * replay cannot disagree about who said what, because there is only one
- * renderer and one model. It is the same reasoning as the report exports
- * sharing MarkdownRenderer.
+ *  - `messagesFromEvents`     — the live WebSocket feed and its stream back-fill.
+ *  - `messagesFromTranscript` — the recorded `agent_messages` rows. Not a
+ *    reconstruction: the worker writes down each event as it broadcasts it, so
+ *    these are the same messages the live viewer saw.
+ *  - `messagesFromReport`     — a lossy rebuild from `agent_findings` and
+ *    `negotiation_log`, for reports written before the recording existed.
+ *
+ * One renderer and one model is what keeps the views honest — a live run and
+ * its replay cannot disagree about who said what.
  */
 
 import { verdictLabel } from "@/lib/verdict";
@@ -38,11 +42,25 @@ export interface TranscriptMessage {
   role: TranscriptRole;
   round: number;
   status: TranscriptStatus;
+  /** The skimmable one-line body. */
   text: string;
+  /**
+   * The speaker's full prose report for this round, when it wrote one.
+   *
+   * Deliberately separate from `text`: putting the prose in the body was tried
+   * and undone once, because it restated every claim inline and turned the
+   * conversation into a wall. The panel keeps `text` as the message and puts
+   * this behind a disclosure.
+   */
+  report?: string;
+  /** True when `report` was cut at the producer's size cap. */
+  reportTruncated?: boolean;
   confidence?: number;
   claims: TranscriptClaim[];
   dissent: string[];
   ts?: string;
+  /** Emission order within the run. Only present on persisted rows. */
+  seq?: number;
 }
 
 const ROLES: TranscriptRole[] = [
@@ -151,6 +169,8 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
       round,
       status: asStatus(d.status),
       text,
+      report: typeof d.report === "string" && d.report ? d.report : undefined,
+      reportTruncated: d.report_truncated === true || undefined,
       confidence: d.confidence === undefined ? undefined : Number(d.confidence),
       claims: asClaims(d.claims),
       dissent: asStrings(d.dissent),
@@ -160,7 +180,68 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
   return sortTranscript(out);
 }
 
-/* ── Persisted source: the stored report ─────────────── */
+/* ── Persisted source: the recorded transcript ───────── */
+
+/** One `agent_messages` row, as returned by the API. */
+export interface TranscriptRow {
+  seq: number;
+  speaker: string;
+  role: string;
+  round: number;
+  status: string;
+  text: string;
+  report?: string | null;
+  report_truncated?: boolean;
+  confidence?: number | null;
+  claims?: unknown;
+  dissent?: unknown;
+  ts?: string | null;
+}
+
+/**
+ * Map the recorded conversation straight onto the model.
+ *
+ * This is the preferred replay path and it does no reconstruction at all: the
+ * worker writes down every `agent_message` as it broadcasts it, so these rows
+ * *are* the live feed, stored. A run read a month later shows the same
+ * messages, in the same order, that its live viewer saw — including the
+ * per-round revisions and the sycophancy intervention, neither of which
+ * survives anywhere else.
+ *
+ * `messagesFromReport` below remains for reports written before the recording
+ * existed.
+ */
+export function messagesFromTranscript(
+  rows: TranscriptRow[] | null | undefined
+): TranscriptMessage[] {
+  const out: TranscriptMessage[] = [];
+  for (const row of rows ?? []) {
+    const role = asRole(row.role);
+    const speaker = String(row.speaker ?? "unknown");
+    const round = Number(row.round ?? 0);
+    out.push({
+      id: `${role}:${speaker}:${round}`,
+      speaker,
+      role,
+      round,
+      status: asStatus(row.status),
+      text: String(row.text ?? ""),
+      report: row.report || undefined,
+      reportTruncated: row.report_truncated === true || undefined,
+      confidence:
+        row.confidence === null || row.confidence === undefined
+          ? undefined
+          : Number(row.confidence),
+      claims: asClaims(row.claims),
+      dissent: asStrings(row.dissent),
+      ts: row.ts || undefined,
+      seq: Number(row.seq ?? 0),
+    });
+  }
+  return sortTranscript(out);
+}
+
+/* ── Legacy source: rebuilt from the stored report ───── */
 
 interface NegotiationEntry {
   round?: number;
@@ -170,12 +251,17 @@ interface NegotiationEntry {
 }
 
 /**
- * Rebuild the transcript from what was saved.
+ * Rebuild an approximate transcript from the summary tables.
  *
- * Runs that finished before the live feed existed still have their findings
- * and negotiation log, so their conversation is reconstructed rather than
- * shown as empty — the panel is useful on every historical job, not only on
- * new ones.
+ * The fallback for reports written before `agent_messages` existed. It is
+ * genuinely lossy and cannot be otherwise — the source data is gone:
+ * `agent_findings` holds one row per agent (its *final* ISR, not its position
+ * in each round), and the sycophancy intervention was never persisted at all.
+ * What can be recovered is recovered: final positions, every mediator round,
+ * and a synthesised verdict line, so an old job still reads as a conversation
+ * instead of showing empty.
+ *
+ * Prefer `messagesFromTranscript` whenever the report carries one.
  */
 export function messagesFromReport(
   findings: AgentFinding[] | null | undefined,
@@ -185,9 +271,9 @@ export function messagesFromReport(
   const out: TranscriptMessage[] = [];
 
   for (const f of findings ?? []) {
-    // revision_rounds > 0 means the persisted row is the agent's *final*
-    // position after revising, not its opening one. Label it truthfully;
-    // the per-round intermediate ISRs are not persisted.
+    // revision_rounds > 0 means this row is the agent's *final* position
+    // after revising, not its opening one. Label it truthfully; for these
+    // legacy reports the per-round ISRs were never written down.
     const revised = (f.revision_rounds ?? 0) > 0;
     out.push({
       id: `analyst:${f.agent_name}:0`,
@@ -281,12 +367,35 @@ export function mergeTranscripts(
 ): TranscriptMessage[] {
   const byId = new Map<string, TranscriptMessage>();
   for (const message of live) byId.set(message.id, message);
-  for (const message of persisted) byId.set(message.id, message);
+  for (const message of persisted) {
+    const existing = byId.get(message.id);
+    if (!existing) {
+      byId.set(message.id, message);
+      continue;
+    }
+    /* Field-level, not wholesale. Replacing the object meant a persisted row
+     * missing a field would *erase* the live one that had it — the legacy
+     * rebuild carries no prose report, so on a job with both sources the
+     * report a live viewer could read would vanish the moment the run
+     * finished. Persisted still wins wherever it actually has a value. */
+    byId.set(message.id, {
+      ...existing,
+      ...Object.fromEntries(
+        Object.entries(message).filter(([, v]) => v !== undefined)
+      ),
+    } as TranscriptMessage);
+  }
   return sortTranscript([...byId.values()]);
 }
 
 export function sortTranscript(messages: TranscriptMessage[]): TranscriptMessage[] {
   return [...messages].sort((a, b) => {
+    // Recorded emission order beats every heuristic below, and is the only
+    // thing that can separate two speakers inside one round. Present only on
+    // rows that came from the recording, so the fallbacks still matter.
+    if (a.seq !== undefined && b.seq !== undefined && a.seq !== b.seq) {
+      return a.seq - b.seq;
+    }
     // The judge speaks last, whatever round counter it carries.
     if (a.role === "judge" !== (b.role === "judge")) {
       return a.role === "judge" ? 1 : -1;

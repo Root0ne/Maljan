@@ -1,15 +1,30 @@
 "use client";
 
-/* The agent conversation, as a conversation.
+/* The agent conversation, rendered as one.
  *
  * Used unchanged in two places: the LIVE tab while the pipeline runs, and the
  * PROCESS tab afterwards. Both pass `TranscriptMessage[]` built by
  * lib/transcript.ts, so a run and its replay cannot render differently.
  *
- * Layout follows the pipeline's own shape rather than a generic chat: domain
- * analysts sit on the left as participants, while the stages that rule on them
- * — mediator, sycophancy detector, judge — span the full width, because they
- * are speaking *about* the conversation rather than in it.
+ * This is a group chat and the reader is a spectator, so **every speaker sits
+ * on the left**. Nobody is "you": right-alignment in a messaging app means
+ * "sent by me", and claiming one of the agents on the reader's behalf would be
+ * a lie about who said what. What carries identity instead is the same thing
+ * that carries it in any group thread — a coloured name, an avatar, and
+ * grouping: consecutive messages from one speaker share a single header, so a
+ * three-round argument reads as a conversation rather than a table.
+ *
+ * Two things are deliberately *not* bubbles. Round changes are centred chips,
+ * like the date dividers in WhatsApp, because they mark time rather than
+ * speech. And `role: "system"` — the sycophancy detector — is a centred
+ * notice, because it is the room telling you something, not a participant
+ * making a claim.
+ *
+ * Message bodies stay one line. The evidence behind a claim and the agent's
+ * full prose report are both real, both often long, and both live behind
+ * disclosures that render only when opened: an unexpanded thread must stay
+ * skimmable, and a collapsed report must not exist in the DOM to be found by
+ * a text search that the reader did not ask for.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -28,6 +43,9 @@ const SPEAKER_COLORS: Record<string, string> = {
   sigma: "#f2cc60",
   mediator: "#a5d6ff",
   judge: "#e3b341",
+  // Previously fell through to grey, which read as an unremarkable participant.
+  // It is an intervention, and it is the reason a round exists.
+  "sycophancy detector": "#f0883e",
 };
 const FALLBACK_COLOR = "#8b949e";
 
@@ -61,19 +79,33 @@ const STATUS_BADGE: Record<TranscriptStatus, { label: string; cls: string } | nu
   },
 };
 
+/* What this message is, *within* its round.
+ *
+ * `analyst` is deliberately blank: the round chip above the group already says
+ * "Initial analysis", and every bubble under it would have repeated the same
+ * two words. The others earn their label — inside one negotiation round a
+ * revision, a mediation and a verdict are genuinely different acts. */
 const ROLE_LABEL: Record<string, string> = {
-  analyst: "initial analysis",
+  analyst: "",
   reviser: "revised",
   negotiator: "mediation",
   judge: "verdict",
   system: "system",
 };
 
+/** `12:04` from an ISO timestamp; empty when there isn't one. */
+function clock(ts?: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 interface Props {
   messages: TranscriptMessage[];
   /** Live mode: auto-scroll, and show who is currently working. */
   live?: boolean;
-  /** Agent currently running, for the live "working" row. */
+  /** Agent currently running, for the live "typing" row. */
   activeSpeaker?: string | null;
   /** Rendered when there is nothing to show yet. */
   emptyHint?: string;
@@ -85,7 +117,8 @@ export default function TranscriptPanel({
   activeSpeaker = null,
   emptyHint,
 }: Props) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [openClaims, setOpenClaims] = useState<Set<string>>(new Set());
+  const [openReports, setOpenReports] = useState<Set<string>>(new Set());
   const [roleFilter, setRoleFilter] = useState<"all" | "analysts" | "stages">("all");
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -106,13 +139,16 @@ export default function TranscriptPanel({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [live, visible.length]);
 
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggler =
+    (set: (fn: (prev: Set<string>) => Set<string>) => void) => (id: string) =>
+      set((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+  const toggleClaims = toggler(setOpenClaims);
+  const toggleReport = toggler(setOpenReports);
 
   const claimTotal = messages.reduce((sum, m) => sum + m.claims.length, 0);
 
@@ -168,51 +204,74 @@ export default function TranscriptPanel({
               : "No agent transcript was recorded for this run.")}
         </p>
       ) : (
-        <div className="divide-y divide-border-light max-h-[70vh] overflow-y-auto">
+        <div className="bg-bg-base/20 max-h-[70vh] overflow-y-auto px-3 py-3 space-y-1">
           {visible.map((message, index) => {
             const previous = index > 0 ? visible[index - 1] : null;
             const newRound = !previous || previous.round !== message.round;
+            /* Same speaker, same round, uninterrupted — one header for the
+             * run, exactly as a messaging app groups a burst. A round chip
+             * always breaks the group: it is a new moment in the argument. */
+            const grouped =
+              !newRound &&
+              previous !== null &&
+              previous.speaker === message.speaker &&
+              previous.role === message.role;
+
             return (
               <div key={message.id}>
-                {newRound && message.round > 0 && (
-                  <div className="px-4 py-1.5 bg-bg-base/40 flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider text-text-muted">
-                      Negotiation round {message.round}
-                    </span>
-                    <span className="flex-1 h-px bg-border-light" />
-                  </div>
+                {newRound && <RoundChip round={message.round} />}
+                {message.role === "system" ? (
+                  <SystemNotice message={message} />
+                ) : (
+                  <Bubble
+                    message={message}
+                    grouped={grouped}
+                    claimsOpen={openClaims.has(message.id)}
+                    reportOpen={openReports.has(message.id)}
+                    onToggleClaims={() => toggleClaims(message.id)}
+                    onToggleReport={() => toggleReport(message.id)}
+                  />
                 )}
-                <MessageRow
-                  message={message}
-                  expanded={expanded.has(message.id)}
-                  onToggle={() => toggle(message.id)}
-                />
               </div>
             );
           })}
-          {live && activeSpeaker && (
-            <div className="flex gap-3 px-4 py-3">
-              <Avatar speaker={activeSpeaker} />
-              <div className="flex items-center gap-2 text-sm text-text-muted">
-                <span style={{ color: speakerColor(activeSpeaker) }}>
-                  {speakerLabel(activeSpeaker)}
-                </span>
-                <span className="flex gap-1" aria-label="analysing">
-                  {[0, 150, 300].map((delay) => (
-                    <span
-                      key={delay}
-                      className="w-1 h-1 rounded-full bg-text-muted animate-pulse"
-                      style={{ animationDelay: `${delay}ms` }}
-                    />
-                  ))}
-                </span>
-                <span className="text-xs">analysing…</span>
-              </div>
-            </div>
-          )}
+          {live && activeSpeaker && <TypingRow speaker={activeSpeaker} />}
           <div ref={endRef} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Centred divider marking where a round begins — the date-chip pattern. */
+function RoundChip({ round }: { round: number }) {
+  return (
+    <div className="flex justify-center py-2">
+      <span className="px-2.5 py-0.5 rounded-full bg-bg-surface border border-border text-[10px] uppercase tracking-wider text-text-muted">
+        {round > 0 ? `Negotiation round ${round}` : "Initial analysis"}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A centred notice rather than a bubble.
+ *
+ * The sycophancy detector is not a participant — it is the process telling the
+ * reader that the agreement it just watched was not earned. Rendering it as a
+ * message from a sixth agent would bury the one line most worth noticing.
+ */
+function SystemNotice({ message }: { message: TranscriptMessage }) {
+  return (
+    <div className="flex justify-center py-2">
+      <div className="max-w-[85%] px-3 py-2 rounded-lg bg-status-orange/10 border border-status-orange/25 text-center">
+        <p className="text-[11px] uppercase tracking-wider text-status-orange mb-0.5">
+          {speakerLabel(message.speaker)}
+        </p>
+        <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
+          {message.text}
+        </p>
+      </div>
     </div>
   );
 }
@@ -221,7 +280,7 @@ function Avatar({ speaker }: { speaker: string }) {
   const color = speakerColor(speaker);
   return (
     <div
-      className="shrink-0 w-7 h-7 rounded flex items-center justify-center text-[11px] font-medium border"
+      className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-medium border"
       style={{ color, borderColor: `${color}55`, backgroundColor: `${color}15` }}
       aria-hidden="true"
     >
@@ -230,53 +289,75 @@ function Avatar({ speaker }: { speaker: string }) {
   );
 }
 
-function MessageRow({
+function TypingRow({ speaker }: { speaker: string }) {
+  return (
+    <div className="flex gap-2 items-end pt-1">
+      <Avatar speaker={speaker} />
+      <div className="px-3 py-2 rounded-2xl rounded-bl-sm bg-bg-surface border border-border flex items-center gap-2">
+        <span className="text-xs" style={{ color: speakerColor(speaker) }}>
+          {speakerLabel(speaker)}
+        </span>
+        <span className="flex gap-1" aria-label="analysing">
+          {[0, 150, 300].map((delay) => (
+            <span
+              key={delay}
+              className="w-1 h-1 rounded-full bg-text-muted animate-pulse"
+              style={{ animationDelay: `${delay}ms` }}
+            />
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Bubble({
   message,
-  expanded,
-  onToggle,
+  grouped,
+  claimsOpen,
+  reportOpen,
+  onToggleClaims,
+  onToggleReport,
 }: {
   message: TranscriptMessage;
-  expanded: boolean;
-  onToggle: () => void;
+  grouped: boolean;
+  claimsOpen: boolean;
+  reportOpen: boolean;
+  onToggleClaims: () => void;
+  onToggleReport: () => void;
 }) {
   const color = speakerColor(message.speaker);
   const badge = STATUS_BADGE[message.status];
-  const stage = isStageSpeaker(message.role);
-  const hasDetail = message.claims.length > 0 || message.dissent.length > 0;
+  const hasClaims = message.claims.length > 0 || message.dissent.length > 0;
+  const time = clock(message.ts);
 
   return (
-    <div
-      className={`flex gap-3 px-4 py-3 hover:bg-bg-hover transition-colors ${
-        stage ? "bg-bg-base/30" : ""
-      }`}
-    >
-      <Avatar speaker={message.speaker} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap mb-1">
-          <span className="text-xs font-medium" style={{ color }}>
-            {speakerLabel(message.speaker)}
-          </span>
-          <span className="text-[10px] text-text-muted uppercase tracking-wider">
-            {ROLE_LABEL[message.role] ?? message.role}
-          </span>
-          {badge && (
-            <span className={`px-1.5 py-0.5 text-[10px] rounded border ${badge.cls}`}>
-              {badge.label}
+    <div className={`flex gap-2 items-end ${grouped ? "pt-0.5" : "pt-2"}`}>
+      {/* A spacer keeps grouped messages aligned under the first one's avatar. */}
+      {grouped ? (
+        <div className="shrink-0 w-7" aria-hidden="true" />
+      ) : (
+        <Avatar speaker={message.speaker} />
+      )}
+
+      <div
+        className={`max-w-[85%] min-w-0 bg-bg-surface border border-border px-3 py-2 rounded-2xl ${
+          grouped ? "rounded-bl-2xl" : "rounded-bl-sm"
+        }`}
+        style={{ borderLeftColor: `${color}66` }}
+      >
+        {!grouped && (
+          <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+            <span className="text-xs font-medium" style={{ color }}>
+              {speakerLabel(message.speaker)}
             </span>
-          )}
-          {message.confidence !== undefined && (
-            <span
-              className="text-[11px] text-text-muted font-mono"
-              /* Self-reported confidence in the agent's OWN claim — not a
-               * probability of maliciousness. The title spells that out because
-               * the audit found "Malicious · 100% · no malicious behaviour"
-               * being read as a verdict. */
-              title="The agent's confidence in its own finding, not a maliciousness score"
-            >
-              {Math.round(message.confidence * 100)}%
-            </span>
-          )}
-        </div>
+            {(ROLE_LABEL[message.role] ?? message.role) && (
+              <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                {ROLE_LABEL[message.role] ?? message.role}
+              </span>
+            )}
+          </div>
+        )}
 
         {message.text && (
           <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
@@ -284,68 +365,123 @@ function MessageRow({
           </p>
         )}
 
-        {hasDetail && (
-          <>
-            <button
-              onClick={onToggle}
-              aria-expanded={expanded}
-              className="mt-2 text-[11px] text-text-muted hover:text-text-primary transition-colors"
-            >
-              {expanded ? "▾" : "▸"} {message.claims.length} claim
-              {message.claims.length === 1 ? "" : "s"}
-              {message.dissent.length > 0 &&
-                ` · ${message.dissent.length} dissent`}
-            </button>
-
-            {expanded && (
-              <div className="mt-2 space-y-2">
-                {message.claims.map((claim, i) => (
-                  <div
-                    key={i}
-                    className="border-l-2 pl-3 py-0.5"
-                    style={{ borderColor: `${color}55` }}
-                  >
-                    <div className="flex items-baseline gap-2 flex-wrap">
-                      <span className="text-sm text-text-primary">{claim.claim}</span>
-                      {claim.technique_id && (
-                        <span className="px-1 py-0.5 text-[10px] font-mono rounded bg-bg-base text-text-muted border border-border">
-                          {claim.technique_id}
-                        </span>
-                      )}
-                      <span className="text-[11px] text-text-muted font-mono">
-                        {Math.round(claim.confidence * 100)}%
-                      </span>
-                    </div>
-                    {claim.evidence_ref && (
-                      /* Every claim must cite a concrete artefact — that is the
-                       * grounding rule the analysts are held to, so the evidence
-                       * is shown next to the claim rather than hidden a click away. */
-                      <p className="text-[11px] text-text-muted font-mono mt-0.5 break-all">
-                        {claim.evidence_ref}
-                      </p>
-                    )}
-                  </div>
-                ))}
-
-                {message.dissent.length > 0 && (
-                  <div className="border-l-2 border-status-orange/50 pl-3 py-0.5">
-                    <p className="text-[10px] uppercase tracking-wider text-status-orange mb-1">
-                      Still disputes
-                    </p>
-                    <ul className="space-y-0.5">
-                      {message.dissent.map((item, i) => (
-                        <li key={i} className="text-xs text-text-secondary">
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
+        {(hasClaims || message.report) && (
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            {hasClaims && (
+              <button
+                onClick={onToggleClaims}
+                aria-expanded={claimsOpen}
+                className="text-[11px] text-text-muted hover:text-accent transition-colors"
+              >
+                {claimsOpen ? "▾" : "▸"} {message.claims.length} claim
+                {message.claims.length === 1 ? "" : "s"}
+                {message.dissent.length > 0 &&
+                  ` · ${message.dissent.length} dispute${
+                    message.dissent.length === 1 ? "" : "s"
+                  }`}
+              </button>
             )}
-          </>
+            {message.report && (
+              <button
+                onClick={onToggleReport}
+                aria-expanded={reportOpen}
+                className="text-[11px] text-text-muted hover:text-accent transition-colors"
+              >
+                {reportOpen ? "▾" : "▸"} full report
+              </button>
+            )}
+          </div>
         )}
+
+        {claimsOpen && hasClaims && <ClaimList message={message} color={color} />}
+
+        {reportOpen && message.report && (
+          /* Bounded and scrollable: these run to thousands of characters, and
+           * an unbounded one would push every other message off the screen —
+           * which is exactly the failure the one-line body exists to avoid. */
+          <div className="mt-2 pt-2 border-t border-border-light">
+            <pre className="text-[11px] text-text-secondary leading-relaxed whitespace-pre-wrap break-words font-sans max-h-64 overflow-y-auto">
+              {message.report}
+            </pre>
+            {message.reportTruncated && (
+              <p className="mt-1 text-[10px] text-text-muted italic">
+                Truncated — the full text is in the report export.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mt-1 justify-end flex-wrap">
+          {badge && (
+            <span
+              className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wider border rounded ${badge.cls}`}
+            >
+              {badge.label}
+            </span>
+          )}
+          {message.confidence !== undefined && (
+            <span className="text-[10px] text-text-muted tabular-nums">
+              {Math.round(message.confidence * 100)}%
+            </span>
+          )}
+          {time && <span className="text-[10px] text-text-muted">{time}</span>}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ClaimList({
+  message,
+  color,
+}: {
+  message: TranscriptMessage;
+  color: string;
+}) {
+  return (
+    <div className="mt-2 pt-2 border-t border-border-light space-y-2">
+      {message.claims.map((claim, i) => (
+        <div
+          key={`${message.id}-claim-${i}`}
+          className="pl-2 border-l-2"
+          style={{ borderColor: `${color}55` }}
+        >
+          <p className="text-xs text-text-primary leading-relaxed break-words">
+            {claim.claim}
+          </p>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            {claim.technique_id && (
+              <span className="px-1 py-0.5 text-[10px] rounded bg-bg-base border border-border text-text-muted">
+                {claim.technique_id}
+              </span>
+            )}
+            <span className="text-[10px] text-text-muted tabular-nums">
+              {Math.round(claim.confidence * 100)}%
+            </span>
+            {claim.evidence_ref && (
+              <span className="text-[10px] text-text-muted font-mono break-all">
+                {claim.evidence_ref}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {message.dissent.length > 0 && (
+        <div className="pl-2 border-l-2 border-status-orange/50">
+          <p className="text-[10px] uppercase tracking-wider text-status-orange mb-0.5">
+            Still disputes
+          </p>
+          {message.dissent.map((item, i) => (
+            <p
+              key={`${message.id}-dissent-${i}`}
+              className="text-xs text-text-secondary leading-relaxed break-words"
+            >
+              {item}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

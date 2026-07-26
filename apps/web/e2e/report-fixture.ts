@@ -262,6 +262,120 @@ export const MALWARE_REPORT: MalwareReport = {
   ],
 };
 
+/**
+ * The recorded conversation — the same messages the live viewer saw.
+ *
+ * Two rounds, so the fixture actually exercises what the recording exists for:
+ * the round-0 positions *and* the round-1 revisions, which the legacy rebuild
+ * from `agent_findings` cannot produce (it only ever had each agent's final
+ * position). The sycophancy notice is here for the same reason — it was
+ * emitted live and persisted nowhere, so nothing could render it after a run.
+ */
+export const TRANSCRIPT = [
+  {
+    seq: 0,
+    speaker: "static",
+    role: "analyst",
+    round: 0,
+    status: "complete",
+    text: "1 evidence-backed claim from the static layer. Leading: Imports VirtualAllocEx and WriteProcessMemory",
+    report:
+      "STATIC ANALYSIS\n\nThe .text section has an entropy of 7.82, consistent with packing. The import table resolves VirtualAllocEx and WriteProcessMemory, which together are the standard remote-injection pair.",
+    report_truncated: false,
+    confidence: 0.9,
+    claims: [
+      {
+        claim: "Imports VirtualAllocEx and WriteProcessMemory",
+        evidence_ref: "IAT: KERNEL32.dll!VirtualAllocEx",
+        confidence: 0.9,
+        technique_id: "T1055",
+      },
+    ],
+    dissent: [],
+    ts: "2026-07-26T12:04:00Z",
+  },
+  {
+    seq: 1,
+    speaker: "dynamic",
+    role: "analyst",
+    round: 0,
+    status: "failed",
+    text: "sandbox unreachable",
+    report: null,
+    report_truncated: false,
+    confidence: null,
+    claims: [],
+    dissent: [],
+    ts: "2026-07-26T12:04:30Z",
+  },
+  {
+    seq: 2,
+    speaker: "Mediator",
+    role: "negotiator",
+    round: 1,
+    status: "complete",
+    text: "Static evidence is uncorroborated by the dynamic layer.",
+    report: null,
+    report_truncated: false,
+    confidence: 0.55,
+    claims: [],
+    dissent: [],
+    ts: "2026-07-26T12:05:00Z",
+  },
+  {
+    seq: 3,
+    speaker: "Sycophancy detector",
+    role: "system",
+    round: 1,
+    status: "complete",
+    text:
+      "Agents converged without new evidence — flagged as sycophantic agreement. " +
+      "The next revision round carries a directive to re-argue from evidence rather than defer to peers.",
+    report: null,
+    report_truncated: false,
+    confidence: null,
+    claims: [],
+    dissent: [],
+    ts: "2026-07-26T12:05:10Z",
+  },
+  {
+    seq: 4,
+    speaker: "static",
+    role: "reviser",
+    round: 1,
+    status: "complete",
+    text: "1 evidence-backed claim from the static layer. Leading: Injection pair confirmed against the packed section",
+    report:
+      "STATIC ANALYSIS (revised)\n\nI stand by the injection finding. The dynamic layer produced no data at all rather than contradicting evidence, so its silence is not a counter-argument.",
+    report_truncated: false,
+    confidence: 0.88,
+    claims: [
+      {
+        claim: "Injection pair confirmed against the packed section",
+        evidence_ref: "IAT + .text entropy 7.82",
+        confidence: 0.88,
+        technique_id: "T1055",
+      },
+    ],
+    dissent: ["Dynamic analyst reported no data; absence is not contradiction."],
+    ts: "2026-07-26T12:08:00Z",
+  },
+  {
+    seq: 5,
+    speaker: "Judge",
+    role: "judge",
+    round: 1,
+    status: "complete",
+    text: "Final verdict: Malicious. Closed without full consensus — see the mediator rounds above.",
+    report: null,
+    report_truncated: false,
+    confidence: 0.91,
+    claims: [],
+    dissent: [],
+    ts: "2026-07-26T12:30:00Z",
+  },
+];
+
 export const REPORT: ReportDetailDTO = {
   id: REPORT_ID,
   job_id: JOB_ID,
@@ -276,7 +390,10 @@ export const REPORT: ReportDetailDTO = {
     objects: [{ type: "indicator", id: "indicator--1", name: "C2 domain" }],
   },
   mitre_techniques: [{ technique_id: "T1055", name: "Process Injection" }],
-  agent_reports: {},
+  agent_reports: {
+    static: "STATIC ANALYSIS (revised)\n\nI stand by the injection finding.",
+    dynamic: "[ERROR] dynamic: sandbox unreachable",
+  },
   negotiation_log: {
     discussion_history: [
       {
@@ -356,6 +473,7 @@ export const REPORT: ReportDetailDTO = {
     },
   ],
   malware_report: MALWARE_REPORT,
+  transcript: TRANSCRIPT,
   created_at: "2026-07-26T12:30:00Z",
 };
 

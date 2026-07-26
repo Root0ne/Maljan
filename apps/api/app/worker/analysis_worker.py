@@ -81,10 +81,27 @@ async def _publish_event(
     )
 
 
+def _parse_event_ts(value: Any) -> datetime | None:
+    """Best-effort ISO-8601 → ``datetime`` for a recorded event timestamp.
+
+    The recorder stamps ``datetime.now(UTC).isoformat()``, so this normally
+    round-trips exactly. It returns ``None`` rather than raising on anything
+    unexpected: the transcript's ordering comes from ``seq``, and a message with
+    no readable clock is still worth keeping.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _make_event_sink(
     redis_conn: aioredis.Redis,
     job_id: str,
     loop: asyncio.AbstractEventLoop,
+    recorder: list[dict[str, Any]] | None = None,
 ) -> Callable[[str, dict[str, Any]], None]:
     """Bridge the pipeline's synchronous event sink onto this event loop.
 
@@ -99,9 +116,27 @@ def _make_event_sink(
     latency to the analysis itself: the pipeline hands the event off and moves
     on. Publishing is best-effort by design (see ``_publish_event``), so a
     dropped progress line never costs a run.
+
+    When ``recorder`` is supplied, every ``agent_message`` is also appended to it
+    **synchronously**, before the publish is scheduled. That list becomes the
+    persisted transcript (``agent_messages``), and doing it here rather than
+    reconstructing the conversation from pipeline state afterwards is what makes
+    the replayed transcript the same recording the live viewer saw rather than a
+    second, subtly different account of it. Appending on the calling thread also
+    means a Redis outage cannot cost us the record: publishing is best-effort,
+    persistence is not.
     """
 
+    # Deferred like every other ``maljan`` import in this module — the core
+    # package is heavy and the API process must not pay for it at import time.
+    from maljan.pipeline.events import AGENT_MESSAGE
+
     def sink(event_type: str, data: dict[str, Any]) -> None:
+        if recorder is not None and event_type == AGENT_MESSAGE:
+            try:
+                recorder.append({**data, "ts": datetime.now(UTC).isoformat()})
+            except Exception as exc:  # noqa: BLE001 — recording must not fail a run
+                logger.debug("transcript recorder rejected an event (%s); continuing.", exc)
         try:
             loop.call_soon_threadsafe(
                 lambda: asyncio.ensure_future(  # noqa: RUF006 — fire-and-forget by design
@@ -259,11 +294,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # The sink is what turns a 30-minute silent run into a readable
             # transcript: each node reports its own findings as it produces
             # them, straight onto the same PubSub channel the Live tab is
-            # already attached to.
+            # already attached to. ``transcript`` collects those same messages
+            # so they can be written to ``agent_messages`` when the run
+            # finishes — the live feed and the permanent record are one list,
+            # not two derivations that can drift.
+            transcript: list[dict[str, Any]] = []
             app = MaljanApp(
                 config=core_settings,
                 mock=_mock_active,
-                event_sink=_make_event_sink(redis_conn, job_id, asyncio.get_running_loop()),
+                event_sink=_make_event_sink(
+                    redis_conn,
+                    job_id,
+                    asyncio.get_running_loop(),
+                    recorder=transcript,
+                ),
             )
 
             # Announce which agents are about to run so the frontend can show them
@@ -498,7 +542,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
             # ── 4. Save report ───────────────────────────────────
-            from app.models.report import AgentFinding, AnalysisReport
+            from app.models.report import AgentFinding, AgentMessage, AnalysisReport
 
             # Prefer the rich extended bundle produced by ``report_node``
             # (54+ objects with Identity/Indicator/ObservedData/Note/Report
@@ -522,7 +566,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 malware_category=_extract_category(pipeline_result),
                 stix_bundle=stix_bundle_for_persist,
                 mitre_techniques=_extract_mitre(pipeline_result),
-                agent_reports=pipeline_result.get("reports"),
+                # The agents' *final* prose. This used to persist only
+                # ``reports`` — the first-pass text — so the report an analyst
+                # rewrote after the negotiation was thrown away, and the stored
+                # prose silently contradicted the stored claims (which do come
+                # from the revised ISR). ``revised_reports`` is keyed by the
+                # same agent names, so the merge is per-agent and an agent that
+                # never revised keeps its original.
+                agent_reports={
+                    **(pipeline_result.get("reports") or {}),
+                    **(pipeline_result.get("revised_reports") or {}),
+                },
                 negotiation_log={
                     "discussion_history": [
                         {
@@ -547,6 +601,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     "confidence_history": pipeline_result.get("confidence_history", []),
                     "iteration_count": pipeline_result.get("iteration_count", 0),
                     "is_consensus": pipeline_result.get("is_consensus", False),
+                    # Whether the last round's agreement was flagged as
+                    # sycophantic — agents converging without new evidence. It
+                    # reached the database only buried inside ``run_summary``
+                    # before, so nothing rendering the negotiation could tell
+                    # a genuine consensus from a manufactured one.
+                    "sycophancy_detected": bool(
+                        pipeline_result.get("sycophancy_detected", False)
+                    ),
                 },
                 run_summary=pipeline_result.get("run_summary"),
                 malware_report=pipeline_result.get("malware_report"),
@@ -617,6 +679,37 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             logger.info(
                 f"Saved {len(isr_reports)} agent findings for report={report.id}",
+                extra={"job_id": job_id},
+            )
+
+            # ── 4b. Save the transcript ──────────────────────────
+            # The conversation itself, written down exactly as it was
+            # broadcast. ``agent_findings`` above records where each agent
+            # *ended up*; this records what was said and in what order, which
+            # is the only place the per-round positions, the sycophancy
+            # intervention and the revised prose survive past the 24 h Redis
+            # stream. See ``AgentMessage`` for the full rationale.
+            for seq, message in enumerate(transcript):
+                db.add(
+                    AgentMessage(
+                        report_id=report.id,
+                        seq=seq,
+                        speaker=str(message.get("speaker", "unknown"))[:100],
+                        role=str(message.get("role", "system"))[:20],
+                        round=int(message.get("round", 0) or 0),
+                        status=str(message.get("status", "complete"))[:20],
+                        text=str(message.get("text", "") or ""),
+                        report=message.get("report"),
+                        report_truncated=bool(message.get("report_truncated", False)),
+                        confidence=message.get("confidence"),
+                        claims=message.get("claims") or [],
+                        dissent=message.get("dissent") or [],
+                        ts=_parse_event_ts(message.get("ts")),
+                    )
+                )
+
+            logger.info(
+                f"Saved {len(transcript)} transcript messages for report={report.id}",
                 extra={"job_id": job_id},
             )
 

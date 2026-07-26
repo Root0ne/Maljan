@@ -22,6 +22,7 @@ import {
   mergeTranscripts,
   messagesFromEvents,
   messagesFromReport,
+  messagesFromTranscript,
 } from "@/lib/transcript";
 import type { WSEvent } from "@/types";
 import { useReport } from "../layout";
@@ -55,18 +56,25 @@ export default function TranscriptView() {
     };
   }, [jobId]);
 
-  const messages = useMemo(
-    () =>
-      mergeTranscripts(
-        messagesFromReport(
+  const messages = useMemo(() => {
+    /* Prefer the recording. `transcript` is the conversation as it was
+     * broadcast, so it needs no reconstruction and carries the things a
+     * rebuild cannot recover: each agent's position in every round, the
+     * sycophancy intervention, and the prose each one wrote. Reports created
+     * before that table existed have none, and fall back to the lossy rebuild
+     * so an old job still reads as a conversation rather than showing empty. */
+    const persisted = report?.transcript?.length
+      ? messagesFromTranscript(report.transcript)
+      : messagesFromReport(
           report?.agent_findings,
           report?.negotiation_log,
           report?.verdict
-        ),
-        messagesFromEvents([...backfill, ...events])
-      ),
-    [report, backfill, events]
-  );
+        );
+    return mergeTranscripts(
+      persisted,
+      messagesFromEvents([...backfill, ...events])
+    );
+  }, [report, backfill, events]);
 
   if (loading) {
     return <p className="text-sm text-text-muted px-1">Loading transcript…</p>;
