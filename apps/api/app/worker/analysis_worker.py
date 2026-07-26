@@ -9,6 +9,9 @@ pipeline, streaming progress events via Redis PubSub.
 """
 
 import asyncio
+import gc
+import os
+import signal
 import time
 import traceback
 import uuid
@@ -178,6 +181,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
     async with db_session() as db:
         job = None  # Ensure job is defined for the except block
+        app: Any = None  # released in the finally below, whichever way we leave
         try:
             # ── 1. Load job ──────────────────────────────────────
             from app.models.job import AnalysisJob
@@ -299,6 +303,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # finishes — the live feed and the permanent record are one list,
             # not two derivations that can drift.
             transcript: list[dict[str, Any]] = []
+            from maljan.core import memprobe
+
+            memprobe.reset()
+            memprobe.probe("job:start", job_id=job_id)
             app = MaljanApp(
                 config=core_settings,
                 mock=_mock_active,
@@ -595,20 +603,37 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                             "argument": (
                                 arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
                             ),
+                            # ``complete`` | ``failed`` | ``timeout``. Without
+                            # it a mediation that never ran is indistinguishable
+                            # from one where the agents calmly disagreed: both
+                            # store ``is_consensus=False`` at 0.0 confidence.
+                            # Every run in this database is the former, and the
+                            # UI drew all of them as the latter.
+                            "status": (
+                                getattr(arg, "status", "complete")
+                                if hasattr(arg, "status")
+                                else arg.get("status", "complete")
+                            ),
                         }
                         for i, arg in enumerate(pipeline_result.get("discussion_history") or [])
                     ],
                     "confidence_history": pipeline_result.get("confidence_history", []),
                     "iteration_count": pipeline_result.get("iteration_count", 0),
                     "is_consensus": pipeline_result.get("is_consensus", False),
+                    # True when at least one round failed outright, so consumers
+                    # can say "the negotiation did not run" rather than "the
+                    # agents did not agree".
+                    "mediation_failed": any(
+                        getattr(a, "status", "complete") in ("failed", "timeout")
+                        for a in (pipeline_result.get("discussion_history") or [])
+                        if getattr(a, "agent_name", "") == "Mediator"
+                    ),
                     # Whether the last round's agreement was flagged as
                     # sycophantic — agents converging without new evidence. It
                     # reached the database only buried inside ``run_summary``
                     # before, so nothing rendering the negotiation could tell
                     # a genuine consensus from a manufactured one.
-                    "sycophancy_detected": bool(
-                        pipeline_result.get("sycophancy_detected", False)
-                    ),
+                    "sycophancy_detected": bool(pipeline_result.get("sycophancy_detected", False)),
                 },
                 run_summary=pipeline_result.get("run_summary"),
                 malware_report=pipeline_result.get("malware_report"),
@@ -848,6 +873,27 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             return {"status": "failed", "error": error_msg}
 
+        finally:
+            # Release the agents' MCP toolkits, their stdio subprocesses and the
+            # per-job caches. A ``finally`` rather than ``async with`` because
+            # the body above spans ~500 lines and returns early on the
+            # user-cancelled path — this covers success, failure and
+            # cancellation without re-indenting any of it.
+            #
+            # ``aclose`` is total by construction (see MaljanApp.aclose), so a
+            # failed teardown cannot turn a completed analysis into a failed
+            # one. Whether it actually reclaims the memory is a separate
+            # question, which is why the readings are logged either side of it
+            # and why the worker also carries a hard recycle backstop.
+            if app is not None:
+                from maljan.core import memprobe
+
+                memprobe.probe("job:before_teardown", job_id=job_id)
+                await app.aclose()
+                gc.collect()
+                reclaimed = memprobe.malloc_trim()
+                memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
+
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -938,6 +984,11 @@ def _extract_mitre(result: dict) -> list | None:
 # ── ARQ Worker Configuration ────────────────────────────────────
 
 
+# How long a ``running`` row may be untouched at worker boot before it is
+# considered abandoned. See ``_sweep_orphan_jobs``.
+_ORPHAN_GRACE_SECONDS = int(os.environ.get("ORPHAN_JOB_GRACE_SECONDS", "300"))
+
+
 async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
     """Mark abandoned ``running`` rows as ``failed`` at worker startup.
 
@@ -950,20 +1001,35 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
     them. Auditors looking at the legacy data assume the pipeline is
     still busy.
 
-    Cleanup rule: any ``running`` row whose ``started_at`` is older
-    than ``WorkerSettings.job_timeout`` cannot possibly still be
-    processed by a live worker — arq would have killed it at that
-    boundary. Flip it to ``failed`` with a clear ``error_message`` so
-    the UI shows the right state and the FP rate stats become real.
+    Cleanup rule: at boot, any ``running`` row older than
+    ``_ORPHAN_GRACE_SECONDS`` cannot be held by a live worker — this
+    process is the worker, ``max_jobs = 1``, and it has just started.
+    Flip it to ``failed`` with a clear ``error_message`` so the UI shows
+    the right state and the FP-rate stats become real.
 
-    This runs once per worker boot. It does not race with active jobs
-    because we only touch rows older than the hard timeout.
+    This runs once per worker boot and cannot race with an active job:
+    the only rows in the window are ones written before this process
+    existed.
     """
     from datetime import UTC as _UTC
     from datetime import datetime as _datetime
     from datetime import timedelta as _timedelta
 
-    cutoff_seconds = WorkerSettings.job_timeout
+    # 2026-07-27: the cutoff used to be ``job_timeout`` — eight hours — which
+    # made this sweep useless for the case it names first in its own docstring.
+    # A worker killed mid-flight comes back within seconds, and its abandoned
+    # row then sat in ``running`` for the rest of the day: no worker held it,
+    # ``max_tries=1`` meant nothing retried it, and the UI showed an analysis
+    # that was permanently five minutes from finishing. Observed exactly that
+    # on a verification run, and adding a container memory limit makes a
+    # mid-flight kill *more* likely, not less.
+    #
+    # The grace period only has to exceed the window in which a job can be
+    # legitimately ``running`` while no worker is up. Since ``max_jobs = 1``
+    # and this process has just booted, that window is the time between the
+    # API writing the row and the worker picking it up — seconds. Five minutes
+    # is generous and still bounded.
+    cutoff_seconds = min(WorkerSettings.job_timeout, _ORPHAN_GRACE_SECONDS)
     cutoff_ts = _datetime.now(_UTC) - _timedelta(seconds=cutoff_seconds)
 
     async with db_session() as db:
@@ -1061,6 +1127,54 @@ async def shutdown(ctx: dict) -> None:
 # inside its function, so there is no real circular dependency.
 from app.worker.enrich_worker import enrich_threat_intel  # noqa: E402
 
+# Resident-memory ceiling for the worker process, in MiB. Above this, the
+# worker finishes reporting the job it just completed and then exits so Docker
+# restarts it clean.
+#
+# The measured problem: one analysis takes the process from ~3.4 GB to ~8.5 GB
+# and it never comes back, on a 30 GB host that also runs a ~15 GB llama-server.
+# Two analyses in a row exhausted RAM and all 8 GB of swap, at which point LLM
+# inference crawls and analysts start hitting their own wall-clock caps — a
+# memory problem wearing a timeout costume. The machine hard-locked once.
+#
+# This is a backstop, not the fix, and it is deliberately dumber than the fix:
+# whatever the leak turns out to be, and however well the teardown in
+# ``run_analysis``'s ``finally`` works, a worker that has grown this large has
+# already stopped being safe to keep around.
+_RSS_RESTART_MB = float(os.environ.get("WORKER_RSS_RESTART_MB", "6000"))
+
+
+async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
+    """arq ``after_job_end`` hook: exit when the process has grown too large.
+
+    Runs *after* ``finish_job`` has recorded the result, so nothing is lost by
+    leaving. ``call_later`` rather than an immediate kill so the hook returns
+    and arq can finish its own bookkeeping first; a timer handle is not one of
+    the tasks arq's signal handler cancels, so the exit cannot be swallowed.
+
+    SIGTERM, not ``os._exit``: arq's handler runs ``on_shutdown``, which closes
+    the database engine and the Redis pool. ``restart: unless-stopped`` in
+    compose brings the worker back, and the existing startup orphan sweep
+    repairs any job row left mid-flight.
+    """
+    from maljan.core import memprobe
+
+    rss = memprobe.rss_mb()
+    if rss < _RSS_RESTART_MB:
+        logger.info("Worker RSS %.0f MB (limit %.0f MB).", rss, _RSS_RESTART_MB)
+        return
+
+    logger.critical(
+        "Worker RSS %.0f MB exceeds the %.0f MB ceiling — restarting after this job. "
+        "Queued jobs are unaffected; the supervisor will bring the worker back.",
+        rss,
+        _RSS_RESTART_MB,
+    )
+    try:
+        asyncio.get_running_loop().call_later(1.0, os.kill, os.getpid(), signal.SIGTERM)
+    except RuntimeError:  # pragma: no cover — no loop means we are already going down
+        os.kill(os.getpid(), signal.SIGTERM)
+
 
 class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
@@ -1068,6 +1182,7 @@ class WorkerSettings:
     functions = [run_analysis, enrich_threat_intel]
     on_startup = startup
     on_shutdown = shutdown
+    after_job_end = _recycle_if_bloated
 
     # Parse Redis URL from app config so Docker networking works
     _redis_parsed = urlparse(settings.redis_url)
@@ -1089,6 +1204,10 @@ class WorkerSettings:
     # high ceiling costs nothing, and every LLM/CAPE path is bounded by its own
     # inner timeout, so this only trips on a true hang outside those paths. Was
     # 3600 (60 min), sized for the pre-restore shallow static pass.
+    #
+    # ``max_jobs`` is arq's CONCURRENCY limit — how many jobs run at once — not
+    # a "recycle the worker after N jobs" counter. arq has no such counter;
+    # ``after_job_end`` above is what bounds process lifetime here.
     max_jobs = 1
     job_timeout = 28800
     max_tries = 1  # Don't retry failed analyses automatically

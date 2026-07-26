@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
+from maljan.agents.base_agent import retry_on_connection_error
 from maljan.analysis.schema_pruner import get_pruned_schema_hint
 from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
@@ -124,6 +125,30 @@ class JudgeAgent:
         self.tools = toolkit.get_tools()
         self.logger.info("Initialized ThreatIntel MCP tools: %s", [t.name for t in self.tools])
 
+    async def aclose(self) -> None:
+        """Release the ThreatIntel toolkit and its stdio subprocess.
+
+        Deliberately *not* routed through the shared agent loop, unlike the
+        analysts'. The judge enters its toolkit with a plain ``await`` on
+        whichever loop the graph node is running — see ``_initialize_mcp_client``
+        above — so that is the loop that owns the exit stack, and handing the
+        close to a different one is exactly how anyio's "cancel scope in a
+        different task" error is produced.
+
+        Without this, every mediation round that failed to initialise left
+        another ``threatintel-mcp`` subprocess running: the guard on the caller
+        is ``if self.tools: return``, and a failed init never sets ``tools``.
+        """
+        toolkit: Any = getattr(self, "toolkit", None)
+        self.toolkit = None  # type: ignore[assignment]
+        self.tools = []
+        if toolkit is None:
+            return
+        try:
+            await toolkit.cleanup()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            self.logger.warning("Judge tool cleanup failed (non-fatal): %s", exc)
+
     async def execute_tool_loop(self, prompt_messages: list) -> str:
         """Execute a tool-calling ReAct loop for the agent."""
         import asyncio
@@ -147,7 +172,11 @@ class JudgeAgent:
                 "judge", get_settings().react_agent_timeout
             )
             response = await asyncio.wait_for(
-                self.llm.ainvoke(messages_pre),
+                retry_on_connection_error(
+                    lambda: self.llm.ainvoke(messages_pre),
+                    what="Judge no-tools path",
+                    log=self.logger,
+                ),
                 timeout=float(no_tools_timeout),
             )
             record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
@@ -309,7 +338,11 @@ class JudgeAgent:
                     direct_messages.append(HumanMessage(content=content))
             try:
                 response = await asyncio.wait_for(
-                    self.llm.ainvoke(direct_messages),
+                    retry_on_connection_error(
+                        lambda: self.llm.ainvoke(direct_messages),
+                        what="Mediator fast path",
+                        log=self.logger,
+                    ),
                     timeout=float(get_settings().react_agent_timeout),
                 )
             except TimeoutError:
@@ -486,8 +519,12 @@ class JudgeAgent:
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
         try:
             result_text = await asyncio.wait_for(
-                (prompt | self.llm).ainvoke(
-                    {"reports": reports_text, "history": str(history)[:800]}
+                retry_on_connection_error(
+                    lambda: (prompt | self.llm).ainvoke(
+                        {"reports": reports_text, "history": str(history)[:800]}
+                    ),
+                    what="Judge verdict",
+                    log=self.logger,
                 ),
                 timeout=timeout,
             )

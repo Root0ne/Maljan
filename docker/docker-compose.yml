@@ -237,9 +237,41 @@ services:
       MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
       MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
       MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
+      # glibc allocator (2026-07-26 memory audit). The image is python:3.13-slim
+      # (glibc) and the host has 32 cores, so the default arena cap is 8 x ncores
+      # = 256 arenas of 64 MB each. This process is genuinely multi-threaded —
+      # the arq loop, the persistent agent loop, LangGraph's node threads and
+      # asyncio's to_thread executor — which is the textbook shape for RSS that
+      # climbs and never returns even when nothing is retained. Capping arenas
+      # and lowering the trim threshold costs throughput only under malloc
+      # contention, and this workload waits on an LLM. Revert by deleting both
+      # lines; ``memprobe`` reports whether they helped.
+      MALLOC_ARENA_MAX: "2"
+      MALLOC_TRIM_THRESHOLD_: "134217728"
+      # Ask the allocator to return freed heap at each job boundary, and report
+      # how much came back — the reading that distinguishes fragmentation from
+      # retention. Cheap; leave it on.
+      MALJAN_MALLOC_TRIM: "1"
+      WORKER_RSS_RESTART_MB: ${WORKER_RSS_RESTART_MB:-6000}
+      # onnxruntime sizes its CPU arena from the host core count. Left alone on
+      # a 32-core box, embedding the 697 ATT&CK technique texts reserved 8.3 GB
+      # and was OOM-killed; at these values the same work peaks near 1.3 GB.
+      # See ``src/maljan/memory/embeddings.py`` for the measurements. Raise them
+      # on a host with memory to spare — the cost is only build time.
+      MALJAN_EMBED_THREADS: ${MALJAN_EMBED_THREADS:-2}
+      MALJAN_EMBED_BATCH: ${MALJAN_EMBED_BATCH:-32}
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
+    # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
+    # also runs a ~15 GB llama-server, and the machine locked up. The graceful
+    # path is ``after_job_end`` in WorkerSettings, which exits between jobs; this
+    # is what catches a single job that runs away mid-flight. The kernel kills
+    # only this container, ``restart: unless-stopped`` brings it back, and the
+    # startup orphan sweep repairs the job row it was holding.
+    mem_limit: 8g
+    memswap_limit: 8g
     volumes:
       - ../src:/app/src
       - ../apps:/app/apps

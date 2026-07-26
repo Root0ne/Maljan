@@ -10,6 +10,8 @@ The run() method returns a result dict containing:
   - discussion_history, reports, isr_reports, etc.
 """
 
+from __future__ import annotations
+
 import asyncio
 import time
 from pathlib import Path
@@ -49,6 +51,25 @@ class MaljanApp:
             event_sink=event_sink,
         )
         self.graph = build_graph(self.container)
+
+    async def aclose(self) -> None:
+        """Release the container's agents, toolkits and per-job caches.
+
+        The app owns the container, the container owns the agents, and the
+        agents own their MCP toolkits — so the release has to start here. Never
+        raises: this runs from a ``finally`` around a completed analysis, and
+        teardown must not be able to turn a finished run into a failed one.
+        """
+        try:
+            await self.container.aclose()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("MaljanApp.aclose failed (non-fatal): %s", exc)
+
+    async def __aenter__(self) -> MaljanApp:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.aclose()
 
     def run(
         self,

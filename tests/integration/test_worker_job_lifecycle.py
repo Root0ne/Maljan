@@ -250,14 +250,19 @@ def test_worker_settings_sanity() -> None:
 
 @pytest.mark.asyncio
 async def test_startup_sweeps_phantom_running_jobs() -> None:
-    """``_sweep_orphan_jobs`` flips stale ``running`` rows to ``failed``.
+    """``_sweep_orphan_jobs`` flips abandoned ``running`` rows to ``failed``.
 
-    Without the sweep the dashboard accumulates phantom in-flight jobs
-    every time the operator restarts the worker. The fix flips any
-    ``running`` row whose ``started_at`` is older than the configured
-    ``job_timeout`` to ``failed`` with an explanatory message. Younger
-    ``running`` rows (still inside the budget — a live worker could
-    legitimately own them) must NOT be touched.
+    Without the sweep the dashboard accumulates phantom in-flight jobs every
+    time the worker is killed. The cutoff used to be ``job_timeout`` — eight
+    hours — which made the sweep useless for the case its own docstring names
+    first: a worker killed mid-flight is back within seconds, and its row then
+    sat in ``running`` for the rest of the day with nothing retrying it
+    (``max_tries = 1``). Observed live on 2026-07-26, and a container memory
+    limit makes a mid-flight kill more likely rather than less.
+
+    The grace period only has to exceed the window in which a row can be
+    legitimately ``running`` while no worker is up, which — with ``max_jobs =
+    1`` and this process having just booted — is seconds.
     """
     from datetime import UTC, datetime, timedelta
 
@@ -292,12 +297,20 @@ async def test_startup_sweeps_phantom_running_jobs() -> None:
     assert len(captured_stmts) == 1
     assert sweep_session.commit.await_count == 1
 
-    # Verify the cutoff timestamp is roughly (now - 3600s). We can't read
-    # the SQLAlchemy expression directly without parsing it; instead we
-    # check the timing window the sweep used (started_at < now - 3600s).
-    cutoff_window_lower = before - timedelta(seconds=3600, milliseconds=100)
-    cutoff_window_upper = after - timedelta(seconds=3600)
-    assert cutoff_window_lower <= cutoff_window_upper
+    # The cutoff must be minutes ago, not hours. Read the bound parameter off
+    # the compiled statement rather than comparing two timestamps that are
+    # ordered by construction — the previous assertion here could not fail.
+    from app.worker.analysis_worker import _ORPHAN_GRACE_SECONDS
+
+    params = captured_stmts[0].compile().params
+    cutoff = next(v for v in params.values() if isinstance(v, datetime))
+
+    assert before - timedelta(seconds=_ORPHAN_GRACE_SECONDS + 1) <= cutoff
+    assert cutoff <= after - timedelta(seconds=_ORPHAN_GRACE_SECONDS - 1)
+    assert _ORPHAN_GRACE_SECONDS <= 900, (
+        "a worker killed mid-flight must be reclaimed in minutes; at the old "
+        "eight-hour cutoff the job stayed 'running' all day"
+    )
 
 
 @pytest.mark.asyncio

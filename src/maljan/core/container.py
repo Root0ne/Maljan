@@ -251,6 +251,11 @@ class ServiceContainer:
                 cached = self.agent_registry.create(name, self.get_agent_llm(name))
                 # Wire the per-run token ledger so the agent's LLM calls are tallied.
                 cached.token_ledger = getattr(self, "_token_ledger", None)
+                # Hand the agent a way back to this container. The static
+                # analyst used to construct a *whole new* ServiceContainer on
+                # every failed MCP init — per chunk, so up to ten of them per
+                # run, each rebuilding the Sigma and YARA layers.
+                cached._container = self
                 self._agent_cache[name] = cached
             return cached
 
@@ -268,6 +273,55 @@ class ServiceContainer:
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 self._judge_agent_cache[role] = cached
             return cached
+
+    async def aclose(self) -> None:
+        """Release everything this container handed out. Never raises.
+
+        Correct only because the container is built **per job**
+        (``MaljanApp.__init__`` -> ``run_analysis``): closing cached agents at
+        job end is safe precisely because no later job will reuse them. If
+        agent caching is ever hoisted to process scope, this silently breaks
+        the *next* run rather than this one — so hoist the caching and this
+        method together, or not at all.
+
+        The two halves close on different loops, and that asymmetry is not
+        incidental: the analysts entered their toolkits on the shared agent
+        loop via ``_run_coro_blocking``, while the judge entered its own with a
+        plain ``await`` on the graph's loop. Each stack has to unwind where it
+        was wound.
+        """
+        with self._lock:
+            analysts = list(self._agent_cache.values())
+            judges = list(self._judge_agent_cache.values())
+            self._agent_cache.clear()
+            self._judge_agent_cache.clear()
+
+        for agent in analysts:
+            try:
+                agent.close_tools()  # dispatches onto the agent loop internally
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing agent tools failed (non-fatal): %s", exc)
+
+        for judge in judges:
+            closer = getattr(judge, "aclose", None)
+            if closer is None:
+                continue
+            try:
+                await closer()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Closing judge tools failed (non-fatal): %s", exc)
+
+        # The sample's parsed text and the per-job analysis layers. Not a leak
+        # on their own — the container dies with the job — but dropping them
+        # here means a worker that is *not* recycled starts the next job with a
+        # clean floor rather than one job's residue.
+        with self._lock:
+            self._data_cache.clear()
+            self._yara_layer_cache = None
+            self._sigma_layer_cache = None
+            self._function_summarizer_cache = None
+            self._narrative_agent_cache = None
+            self._report_composer_cache = None
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
