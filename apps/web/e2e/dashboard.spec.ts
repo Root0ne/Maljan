@@ -36,12 +36,17 @@ test.describe("Dashboard", () => {
       authenticatedPage.getByRole("heading", { name: /recent analyses/i })
     ).toBeVisible();
 
+    // The jobs list is mocked (e2e/mocks.ts, MOCK_JOB_SUMMARY), so this no
+    // longer needs the "if there are no rows, skip" escape hatch it carried
+    // while it was reading whatever the dev database happened to hold — an
+    // escape hatch that made the test silently vacuous on an empty database.
     const rows = authenticatedPage.locator('a[href^="/analysis/"]');
-    if ((await rows.count()) === 0) return; // no analyses seeded — nothing to assert
+    await expect(rows).toHaveCount(1);
 
     // Regression guard for the audit finding where every row rendered the same
     // sample_id UUID prefix, making the list unreadable.
     const firstRowText = (await rows.first().innerText()).trim();
     expect(firstRowText).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{3}\b/i);
+    expect(firstRowText).toContain("invoice_scan.exe");
   });
 });

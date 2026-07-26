@@ -9,123 +9,56 @@
  */
 /* eslint-disable react-hooks/rules-of-hooks */
 import { test as base, expect } from "@playwright/test";
+import { assertNoUnmockedCalls, installApiMocks, type MockOptions } from "./mocks";
 
 /**
- * Playwright fixtures with API mocking for Maljan E2E tests.
+ * Playwright fixtures for the Maljan E2E suite.
  *
- * `authenticatedPage` logs in via mocked API endpoints and returns a page
- * that is already on the dashboard.
+ * Both fixtures install the full mock surface from `mocks.ts` and both assert,
+ * on teardown, that nothing escaped it. Every spec must import `test` from
+ * here rather than from `@playwright/test` — a spec that imports the raw one
+ * gets no mocks, and (before the API was made same-origin) silently tested the
+ * developer's own backend. `auth.spec.ts` and `ws_reconnect.spec.ts` both did.
+ *
+ * - `page` — mocked, not logged in. For specs about the unauthenticated state.
+ * - `authenticatedPage` — mocked and already on the dashboard.
+ *
+ * `mockOptions` is an overridable option fixture; a spec that needs different
+ * mock wiring (e.g. its own WebSocket handler) sets it with
+ * `test.use({ mockOptions: { … } })` instead of racing the fixture's own
+ * registrations.
  */
 
 export const test = base.extend<{
+  mockOptions: MockOptions;
   authenticatedPage: import("@playwright/test").Page;
 }>({
+  mockOptions: [{}, { option: true }],
+
+  page: async ({ page, mockOptions }, use) => {
+    await installApiMocks(page, mockOptions);
+    await use(page);
+    assertNoUnmockedCalls(page);
+  },
+
   authenticatedPage: async ({ page }, use) => {
-    // Mock login endpoint
-    await page.route("**/api/v1/auth/login", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          access_token: "mock_access_token",
-          refresh_token: "mock_refresh_token",
-        }),
-      });
+    /* Seed the session rather than driving the login form.
+     *
+     * The form version raced Next's hydration: `page.click` sometimes landed
+     * before React attached `onSubmit`, the browser performed a *native* form
+     * submit, and the test sat on `/login?` until it timed out. Nothing about
+     * the ten tests using this fixture is about the login screen — they need a
+     * signed-in page, and the login flow itself is covered by `auth.spec.ts`,
+     * which drives the real form and handles that race explicitly.
+     *
+     * `addInitScript` runs before any page script, so `AuthProvider` finds the
+     * token on its very first mount and validates it against the mocked
+     * `auth/me` — the same code path a real login lands in. */
+    await page.addInitScript(() => {
+      localStorage.setItem("access_token", "mock_access_token");
+      localStorage.setItem("refresh_token", "mock_refresh_token");
     });
-
-    // Mock current user endpoint
-    await page.route("**/api/v1/auth/me", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          id: "user-1",
-          email: "test@example.com",
-          full_name: "Test User",
-          role: "analyst",
-        }),
-      });
-    });
-
-    // Mock dashboard stats
-    await page.route("**/api/v1/dashboard/stats", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          total_jobs: 42,
-          total_samples: 15,
-          jobs_by_status: {
-            pending: 5,
-            running: 2,
-            completed: 30,
-            failed: 3,
-            cancelled: 2,
-          },
-          verdict_distribution: {
-            Malware: 25,
-            Benign: 3,
-            Suspicious: 2,
-          },
-          avg_duration_seconds: 120,
-        }),
-      });
-    });
-
-    /* The dashboard awaits stats, jobs and system status together, and a
-     * rejection in any of them puts the page into its error state with none of
-     * the panels rendered. Only stats was mocked, so every dashboard assertion
-     * was really asserting against an error screen — the requests fell through
-     * to a real API that rejects the fixture's fake token. `no real backend is
-     * required` above is only true if every call the page makes is covered. */
-    await page.route("**/api/v1/jobs?**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          items: [
-            {
-              id: "job-1",
-              sample_id: "sample-1",
-              sample_filename: "invoice_scan.exe",
-              status: "completed",
-              verdict: "Malware",
-              overall_confidence: 0.93,
-              created_at: "2026-07-26T10:00:00Z",
-              completed_at: "2026-07-26T10:12:00Z",
-              duration_seconds: 720,
-            },
-          ],
-          total: 1,
-          page: 1,
-          page_size: 10,
-        }),
-      });
-    });
-
-    await page.route("**/api/v1/system/status", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        /* Matches _SYSTEM_STATUS_SCHEMA in lib/api.ts. The client asserts the
-         * shape at runtime and logs drift, so a hand-waved mock turns every
-         * dashboard test run into a wall of api-schema-drift warnings. */
-        body: JSON.stringify({
-          app_name: "Maljan",
-          app_version: "0.1.0",
-          mock_mode_allowed: false,
-          enrichment_enabled: true,
-          has_virustotal_key: true,
-          has_abuseipdb_key: false,
-        }),
-      });
-    });
-
-    await page.goto("/login");
-    await page.fill('input[type="email"]', "test@example.com");
-    await page.fill('input[type="password"]', "password123");
-    await page.click('button[type="submit"]');
-
+    await page.goto("/dashboard");
     await page.waitForURL("**/dashboard");
     await use(page);
   },

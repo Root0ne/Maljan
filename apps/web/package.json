@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test"
+    "test:e2e": "./scripts/e2e-clean-env.sh npx playwright test"
   },
   "dependencies": {
     "next": "16.2.4",

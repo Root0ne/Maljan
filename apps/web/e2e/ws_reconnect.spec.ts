@@ -1,57 +1,80 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 /**
- * FE-WS-RECONNECT-TEST-01 (audit 2026-05-19).
+ * FE-WS-RECONNECT-TEST-01 (audit 2026-05-19), rewritten 2026-07-26.
  *
- * The useWebSocket hook applies exponential backoff with full jitter on
- * disconnect (1s, 2s, 4s, ... capped at 30s). Without an e2e harness
- * exercising that path, a regression that re-introduced the old fixed-3s
- * timer (or worse — disabled auto-reconnect entirely) would only surface
- * in production. This spec wires Playwright's WebSocketRoute to fail the
- * first connection attempt and asserts that the client retries.
+ * `useWebSocket` reconnects with exponential backoff and full jitter, and
+ * deliberately does *not* reconnect on close code 1008 — an auth/policy
+ * rejection needs a fresh credential, and retrying just hammers the API with
+ * the same bad token. Neither behaviour was covered.
  *
- * The test is deliberately tolerant: we only check that *more than one*
- * connection attempt was made within a few seconds, not the exact
- * backoff schedule (the random jitter would make that flaky on slow CI).
+ * The previous version of this spec could not have covered them. It observed
+ * `page.on("websocket")` without routing anything, so the browser dialled a
+ * real backend; it mocked no API at all, so `AuthProvider` unmounted the page
+ * before any retry could fire; and its only assertion —
+ * `expect(connectionAttempts).toBeLessThanOrEqual(8)` — **passes when the count
+ * is zero**, which is exactly what it was. A green test that cannot fail is
+ * worse than no test: it occupies the slot where a real one would go.
+ *
+ * These drive the socket through `page.routeWebSocket`, so the schedule is
+ * exercised against a socket the test controls and no backend is involved.
+ *
+ * `/process` rather than `/live` on purpose: the live page mounts a *second*
+ * `useWebSocket` of its own on top of the analysis layout's, which would make
+ * every connection count ambiguous.
  */
 
+const JOB_ID = "00000000-0000-0000-0000-000000000000";
+
+// No default WebSocket route — each test installs its own so it can hold the
+// attempt counter in a local, rather than sharing module state across workers.
+test.use({ mockOptions: { webSocket: null } });
+
 test.describe("WebSocket reconnect", () => {
-  test("retries connection after server-side close", async ({ page }) => {
-    let connectionAttempts = 0;
-
-    // Hook every WS open before the page navigates so we can count
-    // attempts deterministically. Playwright fires this once per
-    // connection regardless of close reason.
-    page.on("websocket", (ws) => {
-      if (ws.url().includes("/ws/analysis/")) {
-        connectionAttempts += 1;
-        // Simulate a server-initiated close immediately after open so the
-        // backoff retry path fires. We don't have access to a real WS in
-        // this scaffold so we just observe the attempt count.
-      }
+  test("retries after the server drops the connection", async ({
+    authenticatedPage,
+  }) => {
+    let attempts = 0;
+    await authenticatedPage.routeWebSocket("**/ws/analysis/**", (ws) => {
+      attempts += 1;
+      // Drop the first two, then accept: the count settles instead of climbing,
+      // so the assertions below are about the schedule, not about how long the
+      // test happened to wait.
+      if (attempts <= 2) ws.close({ code: 1011, reason: "e2e: forced drop" });
     });
 
-    // Pre-populate localStorage with a stub token so useWebSocket fires.
-    await page.addInitScript(() => {
-      localStorage.setItem("access_token", "stub.token.value");
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
+
+    // Two drops must produce two retries. Generous timeout: the delay is
+    // jittered, and on a successful open the schedule resets to its 1 s base.
+    await expect
+      .poll(() => attempts, { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(3);
+
+    // And then it must stop. This is the half the old fixed-3s-timer
+    // regression would have broken: a client that keeps redialling an
+    // already-open socket is the outage amplifier the backoff exists to avoid.
+    const settled = attempts;
+    await authenticatedPage.waitForTimeout(3_000);
+    expect(attempts).toBe(settled);
+  });
+
+  test("does not retry after a policy close (1008)", async ({
+    authenticatedPage,
+  }) => {
+    let attempts = 0;
+    await authenticatedPage.routeWebSocket("**/ws/analysis/**", (ws) => {
+      attempts += 1;
+      ws.close({ code: 1008, reason: "e2e: invalid credentials" });
     });
 
-    // The live page mounts useWebSocket(jobId); the URL doesn't need a
-    // real job — we only care that the WS code path runs.
-    await page.goto("/analysis/00000000-0000-0000-0000-000000000000/live").catch(() => {
-      // Page may 404 against a real backend; we only need the WS code
-      // path to start. Tolerate navigation errors so this test doesn't
-      // depend on a live API.
-    });
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
 
-    // Wait a few seconds for the backoff schedule to fire at least once.
-    // 5s window covers the first two attempts (jittered up to 1s + 2s).
-    await page.waitForTimeout(5000);
+    await expect.poll(() => attempts, { timeout: 10_000 }).toBe(1);
 
-    // Either we recorded multiple WS attempts, or the page didn't reach
-    // the WS-using component at all — both are acceptable here. The
-    // critical regression we guard against is a tight reconnect loop or
-    // a hard-failure abort.
-    expect(connectionAttempts).toBeLessThanOrEqual(8);
+    // Longer than the 1 s base delay by a wide margin, so a regression that
+    // dropped the 1008 check would have reconnected several times by now.
+    await authenticatedPage.waitForTimeout(3_000);
+    expect(attempts).toBe(1);
   });
 });

@@ -4,11 +4,11 @@ import { defineConfig, devices } from "@playwright/test";
  * Playwright E2E test configuration for the Maljan Next.js frontend.
  *
  * - Starts its own `next dev` before tests (webServer).
- * - Mocks API responses so no real backend is required for E2E tests.
+ * - Mocks every API call, so no backend is required — and none is contacted.
  * - Runs against Chromium, Firefox, and WebKit.
  *
- * Two settings below are load-bearing and were the reason the whole suite
- * failed locally (2026-07-26):
+ * Three settings below are load-bearing. Each one was, at some point, the
+ * reason the suite either could not run at all or ran against the wrong thing.
  *
  * **Its own port.** `baseURL` used to be :3000, the same port a dev server or
  * the docker `frontend` container listens on, and `reuseExistingServer` then
@@ -22,6 +22,10 @@ import { defineConfig, devices } from "@playwright/test";
  * `.env.local` in Next's load order, so setting it here pins the suite to the
  * authenticated flow it is actually written to exercise, whatever the machine's
  * dev setup happens to be.
+ *
+ * **A same-origin API.** NEXT_PUBLIC_API_URL/WS_URL point at the Next server's
+ * own origin. See the note on `webServer` — this is what makes the suite both
+ * hermetic and green on WebKit.
  */
 const E2E_PORT = 3100;
 export default defineConfig({
@@ -29,7 +33,14 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  /* Capped rather than left to Playwright's default, which scales with CPU
+   * count. On a 32-core dev box that meant ~42 concurrent browsers, and the
+   * constraint here is memory, not cores: the Docker stack and the local LLM
+   * leave only a few GB free, and `next dev` compiles each route on first hit,
+   * so the whole fleet arrives at an uncompiled page at once. That produced
+   * intermittent "element(s) not found" failures — WebKit first, being the
+   * heaviest — which look like product bugs and are not. */
+  workers: process.env.CI ? 1 : 6,
   reporter: "html",
   use: {
     baseURL: `http://localhost:${E2E_PORT}`,
@@ -45,14 +56,16 @@ export default defineConfig({
       use: { ...devices["Desktop Firefox"] },
     },
     {
-      /* UNRESOLVED locally (2026-07-26). Chromium and Firefox are 13/13; WebKit
-       * passes auth.spec in isolation and then bounces to /login on any full
-       * page load once the whole suite runs — including a plain
-       * goto("/dashboard"), so it is not specific to any one spec. It is
-       * entangled with the non-hermetic mocking noted on webServer below (a dev
-       * backend on :8000 answers whatever the fixtures miss), and was not root
-       * caused. Left enabled rather than quietly dropped: a browser silently
-       * removed from the matrix is a gap nobody sees again. */
+      /* WebKit used to bounce to /login on every full page load once the whole
+       * suite ran, and the cause was CORS, not anything WebKit-specific about
+       * storage: `lib/api.ts` sends Content-Type and Authorization on every
+       * request, neither of which is CORS-safelisted, so each cross-origin call
+       * was preflighted. Playwright answers those OPTIONS preflights itself for
+       * Chromium (CDP) and Firefox (BiDi); its WebKit route does not, so the
+       * preflight escaped to the real backend, which rejects an origin it does
+       * not know. `getMe()` then rejected with a network error rather than a
+       * 401, and both tokens were cleared. Same-origin (see webServer) removes
+       * the preflight entirely, so nothing has to synthesise CORS headers. */
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
     },
@@ -66,14 +79,24 @@ export default defineConfig({
       // Outranks .env.local (Next load order: process.env first), so the login
       // flow exists even on a machine configured to bypass it.
       NEXT_PUBLIC_AUTH_DISABLED: "false",
+
+      /* Point the client at the page's own origin. Two things follow.
+       *
+       * Hermetic: `lib/api.ts` otherwise defaults to http://127.0.0.1:8000, so
+       * on a machine running the dev backend every call the fixtures missed
+       * reached the real API and returned real data — tests passed on live
+       * responses while appearing to assert on mocks. Now an unmocked call can
+       * only reach the Next server, which has no /api routes and no proxy
+       * (see next.config.ts), and `e2e/mocks.ts` traps it by name first.
+       *
+       * Cross-browser: same-origin means no CORS preflight, which is what
+       * WebKit was failing on (see the webkit project above).
+       *
+       * An empty string will not do: api.ts uses `||`, so "" falls through to
+       * the 127.0.0.1 default and silently restores both problems.
+       */
+      NEXT_PUBLIC_API_URL: `http://localhost:${E2E_PORT}`,
+      NEXT_PUBLIC_WS_URL: `ws://localhost:${E2E_PORT}`,
     },
-    // KNOWN GAP (2026-07-26): the suite is not hermetic. lib/api.ts falls back
-    // to 127.0.0.1:8000, so on a machine running the dev backend any call the
-    // fixtures do not mock reaches the real API and returns real data — the
-    // header comment's "no real backend is required" is aspirational. Pointing
-    // NEXT_PUBLIC_API_URL at a dead port here proves it: 20 of 39 tests fail,
-    // because they are relying on live responses rather than mocks. Closing
-    // that means completing the fixture mocks, which is worth doing but is not
-    // a config change.
   },
 });

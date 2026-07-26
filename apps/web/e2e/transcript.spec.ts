@@ -61,6 +61,26 @@ const REPORT = {
   },
 };
 
+const LIVE_EVENT = {
+  type: "agent_message",
+  ts: "2026-07-26T12:00:00Z",
+  data: {
+    speaker: "static",
+    role: "analyst",
+    round: 0,
+    status: "complete",
+    text: "1 evidence-backed claim from the static layer.",
+    claims: [
+      {
+        claim: "Packed section detected",
+        evidence_ref: ".text entropy 7.8",
+        confidence: 0.8,
+        technique_id: null,
+      },
+    ],
+  },
+};
+
 test.describe("Agent transcript", () => {
   test.beforeEach(async ({ authenticatedPage }) => {
     await authenticatedPage.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
@@ -82,6 +102,19 @@ test.describe("Agent transcript", () => {
           verdict: "Malware",
           created_at: "2026-07-26T12:00:00Z",
         }),
+      })
+    );
+    /* TranscriptView back-fills the event stream on mount for *every* job, not
+     * only running ones. This used to be mocked inside the one running-job test,
+     * so the other five back-filled from the real API — and on a finished job a
+     * successful back-fill is indistinguishable from an empty one, which is why
+     * nothing looked wrong. Default it here to "the stream has expired", the
+     * normal state for a completed run older than the 24 h TTL. */
+    await authenticatedPage.route(`**/api/v1/jobs/${JOB_ID}/events**`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: JOB_ID, events: [], count: 0 }),
       })
     );
   });
@@ -166,29 +199,7 @@ test.describe("Agent transcript", () => {
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          events: [
-            {
-              type: "agent_message",
-              ts: "2026-07-26T12:00:00Z",
-              data: {
-                speaker: "static",
-                role: "analyst",
-                round: 0,
-                status: "complete",
-                text: "1 evidence-backed claim from the static layer.",
-                claims: [
-                  {
-                    claim: "Packed section detected",
-                    evidence_ref: ".text entropy 7.8",
-                    confidence: 0.8,
-                    technique_id: null,
-                  },
-                ],
-              },
-            },
-          ],
-        }),
+        body: JSON.stringify({ job_id: JOB_ID, events: [LIVE_EVENT], count: 1 }),
       })
     );
 
