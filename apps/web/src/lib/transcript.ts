@@ -261,6 +261,30 @@ const ROLE_ORDER: Record<TranscriptRole, number> = {
   judge: 4,
 };
 
+/**
+ * Combine the persisted transcript with the live one, persisted winning.
+ *
+ * Both sources are valid at different points in a job's life and neither
+ * covers all of it: a *running* job has events and no report row at all, a job
+ * older than the event stream's 24 h TTL has the report and no events, and in
+ * between both exist. Rendering only one of them left the PROCESS tab claiming
+ * "no agent findings" for the entire duration of every analysis.
+ *
+ * Persisted messages take precedence on conflict because they are the record —
+ * they carry the final revision round and the stored status. Identity is the
+ * shared `role:speaker:round` key, so the same message from both sources
+ * collapses to one.
+ */
+export function mergeTranscripts(
+  persisted: TranscriptMessage[],
+  live: TranscriptMessage[]
+): TranscriptMessage[] {
+  const byId = new Map<string, TranscriptMessage>();
+  for (const message of live) byId.set(message.id, message);
+  for (const message of persisted) byId.set(message.id, message);
+  return sortTranscript([...byId.values()]);
+}
+
 export function sortTranscript(messages: TranscriptMessage[]): TranscriptMessage[] {
   return [...messages].sort((a, b) => {
     // The judge speaks last, whatever round counter it carries.

@@ -133,6 +133,63 @@ test.describe("Agent transcript", () => {
     await expect(authenticatedPage.getByText("T1055", { exact: true })).toBeVisible();
   });
 
+  test("a running job shows its transcript from the event stream", async ({
+    authenticatedPage,
+  }) => {
+    /* Regression: the first cut of this view read only the persisted report,
+     * which does not exist until a run finishes — so it announced "This run
+     * recorded no agent findings" for the entire duration of every analysis
+     * while the findings were already streaming in. */
+    await authenticatedPage.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
+    );
+    await authenticatedPage.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: JOB_ID, status: "running", sample_filename: "evil.exe" }),
+      })
+    );
+    await authenticatedPage.route(`**/api/v1/jobs/${JOB_ID}/events**`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          events: [
+            {
+              type: "agent_message",
+              ts: "2026-07-26T12:00:00Z",
+              data: {
+                speaker: "static",
+                role: "analyst",
+                round: 0,
+                status: "complete",
+                text: "1 evidence-backed claim from the static layer.",
+                claims: [
+                  {
+                    claim: "Packed section detected",
+                    evidence_ref: ".text entropy 7.8",
+                    confidence: 0.8,
+                    technique_id: null,
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      })
+    );
+
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
+
+    await expect(
+      authenticatedPage.getByText(/1 evidence-backed claim from the static layer/)
+    ).toBeVisible();
+    await expect(
+      authenticatedPage.getByText(/recorded no agent findings/)
+    ).toHaveCount(0);
+  });
+
   test("the stages filter hides the domain analysts", async ({ authenticatedPage }) => {
     await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
     await authenticatedPage.getByRole("button", { name: "Stages" }).click();

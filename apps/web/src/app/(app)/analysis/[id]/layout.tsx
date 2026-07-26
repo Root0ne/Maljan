@@ -10,15 +10,27 @@ import { formatDateTime, formatDuration } from "@/lib/report-utils";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
 import { getErrorMessage } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
+import type { WSEvent } from "@/types";
 
 /* ── Report Context (shared with child tabs) ─────────── */
 interface ReportCtx {
   report: ReportDetailDTO | null;
   job: JobDTO | null;
   loading: boolean;
+  /* Live pipeline events. The layout already holds the only WebSocket on this
+   * page; sharing them means a child tab can show a run in progress without
+   * opening a second socket. Necessary because a running job has events and no
+   * persisted report at all — the transcript would otherwise be empty for the
+   * entire duration of every analysis. */
+  events: WSEvent[];
 }
 
-const ReportContext = createContext<ReportCtx>({ report: null, job: null, loading: true });
+const ReportContext = createContext<ReportCtx>({
+  report: null,
+  job: null,
+  loading: true,
+  events: [],
+});
 export function useReport() {
   return useContext(ReportContext);
 }
@@ -214,7 +226,7 @@ export default function AnalysisLayout({
   const headerSubtitle = family || category || "";
 
   return (
-    <ReportContext.Provider value={{ report, job, loading }}>
+    <ReportContext.Provider value={{ report, job, loading, events }}>
       <div>
         {!apiAvailable && !loading && (
           <div role="alert" className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
