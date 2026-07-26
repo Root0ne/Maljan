@@ -597,10 +597,29 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
 
         try:
             judge = container.get_judge_agent(role="expert")
-            argument, is_consensus = await judge.mediate(
-                reports=active_reports,
-                history=state.get("discussion_history") or [],
-                isr_reports=state.get("isr_reports") or {},
+            # Mediation runs on the shared agent loop, not this one. The openai
+            # SDK's httpx pool is process-wide and bound to whichever loop first
+            # awaited it — always the agent loop, because the analysts ran
+            # first — so awaiting the mediator here killed every call instantly
+            # with a bogus ``APIConnectionError("Connection error.")``. See
+            # ``run_on_agent_loop`` for the full account; before this, no run in
+            # the database had ever completed a negotiation round.
+            #
+            # ``mediate`` budgets itself internally (``react_agent_timeout`` for
+            # the reasoning call, then the bounded structured-output retries),
+            # so the outer cap covers both phases plus the house +30s of decode
+            # headroom rather than truncating a mediation that is still working.
+            from maljan.agents.base_agent import run_on_agent_loop
+            from maljan.core.config import get_settings
+
+            mediation_timeout = float(get_settings().react_agent_timeout) * 2 + 30
+            argument, is_consensus = await run_on_agent_loop(
+                judge.mediate(
+                    reports=active_reports,
+                    history=state.get("discussion_history") or [],
+                    isr_reports=state.get("isr_reports") or {},
+                ),
+                hard_timeout=mediation_timeout,
             )
 
             mean_conf = (

@@ -518,6 +518,35 @@ def _run_coro_blocking(coro: Any, hard_timeout: float) -> Any:
         raise TimeoutError(f"agent coroutine exceeded hard cap of {hard_timeout}s") from None
 
 
+async def run_on_agent_loop(coro: Any, hard_timeout: float) -> Any:
+    """Await ``coro`` on the shared agent loop from a *different* running loop.
+
+    The async sibling of ``_run_coro_blocking``, and the other half of the
+    BUG-06 fix above. That fix moved every *analyst* call onto one long-lived
+    loop, but the graph's own coroutine nodes still awaited their agent calls
+    on the worker's loop — and the openai SDK's httpx pool is bound to the loop
+    that first awaited it, which by then is always the agent loop. Building a
+    brand-new ``ChatOpenAI`` does not help: the pool is shared process-wide, so
+    the second loop inherits the first loop's connections and every call dies
+    instantly with ``RuntimeError: ... bound to a different event loop``, which
+    the SDK reports as a bare ``APIConnectionError("Connection error.")``.
+
+    Live evidence (2026-07-26): *every* run in the database recorded
+    ``Mediation failed: Connection error.`` — the negotiation had never once
+    completed in this deployment, and the graph's fault-isolation boundary
+    degraded it to "no consensus" so quietly that nothing ever surfaced it.
+    The judge escaped only because it calls the *sync* client via
+    ``asyncio.to_thread``, which binds no loop at all.
+    """
+    loop = _get_agent_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
+    except (TimeoutError, asyncio.CancelledError):
+        future.cancel()
+        raise TimeoutError(f"agent coroutine exceeded hard cap of {hard_timeout}s") from None
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
