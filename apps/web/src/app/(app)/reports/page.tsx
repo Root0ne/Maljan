@@ -87,7 +87,7 @@ export default function ReportsPage() {
 
   if (error) {
     return (
-      <div className="p-4 text-sm text-status-red bg-status-red/10 border border-status-red/20 rounded">
+      <div role="alert" className="p-4 text-sm text-status-red bg-status-red/10 border border-status-red/20 rounded">
         {error}
       </div>
     );

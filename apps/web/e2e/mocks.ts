@@ -26,6 +26,13 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
  * empirically rather than assumed: with the catch-all first, its handler is not
  * merely out-voted, it is never invoked at all.
  *
+ * Two glob details, also measured rather than inferred, because both look like
+ * they should collide and do not. A pattern is matched against the full URL
+ * *including the query string*, so a pattern ending in `jobs` matches only the
+ * bare collection path and leaves the one ending in `jobs?` + wildcard to serve
+ * the paginated list. And a single `*` never crosses a slash, so a pattern
+ * ending `jobs/` + `*` cannot swallow `jobs/{id}/events`.
+ *
  * ## Adding an endpoint
  *
  * Add it to `installApiMocks` if every spec wants the same answer; override it
@@ -116,6 +123,52 @@ export const MOCK_SYSTEM_STATUS = {
   has_abuseipdb_key: false,
 };
 
+export const MOCK_SAMPLE = {
+  id: "sample-1",
+  sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  md5: "5d41402abc4b2a76b9719d911017c592",
+  original_filename: "invoice_scan.exe",
+  file_size_bytes: 204800,
+  mime_type: "application/x-dosexec",
+  uploaded_at: "2026-07-26T10:00:00Z",
+};
+
+export const MOCK_REPORT_SUMMARY = {
+  id: "report-1",
+  job_id: "job-1",
+  sample_filename: "invoice_scan.exe",
+  // Raw backend spelling: the UI must render "Malicious".
+  verdict: "Malware",
+  overall_confidence: 0.93,
+  malware_category: "trojan",
+  created_at: "2026-07-26T10:00:00Z",
+  techniques_count: 7,
+  findings_count: 12,
+};
+
+export const MOCK_AUDIT_LOG = {
+  id: "log-1",
+  user_id: "user-1",
+  action: "job.create",
+  resource_type: "job",
+  resource_id: "job-1abc2def-0000-0000-0000-000000000000",
+  details: null,
+  ip_address: "10.0.0.5",
+  created_at: "2026-07-26T10:00:00Z",
+};
+
+export const MOCK_API_KEY = {
+  id: "key-1",
+  user_id: "user-1",
+  key_prefix: "mlj_a1b2",
+  name: "CI/CD integration",
+  expires_at: null,
+  last_used_at: null,
+  is_active: true,
+  created_at: "2026-07-26T10:00:00Z",
+  updated_at: "2026-07-26T10:00:00Z",
+};
+
 export interface MockOptions {
   /**
    * Handler for `**​/ws/analysis/**`. The default accepts the connection and
@@ -197,9 +250,21 @@ export async function installApiMocks(
     return json(route, { ...MOCK_JOB_DETAIL, id });
   });
 
+  // The collection path has no query string and no trailing segment, so
+  // neither `jobs?**` (literal `?`) nor `jobs/*` matches it. POST /jobs is what
+  // the Analyze button on /samples fires.
+  await page.route("**/api/v1/jobs", (route) =>
+    json(route, { ...MOCK_JOB_DETAIL, id: "job-created", status: "pending" })
+  );
+
   /* ── Reports ──────────────────────────────────────── */
   await page.route("**/api/v1/reports?**", (route) =>
-    json(route, { items: [], total: 0, page: 1, page_size: 10 })
+    json(route, {
+      items: [MOCK_REPORT_SUMMARY],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    })
   );
   // 404 by default: a report does not exist until a run finishes, and the
   // running job above is the default. Specs that assert on a finished report
@@ -207,12 +272,48 @@ export async function installApiMocks(
   await page.route("**/api/v1/reports/job/*", (route) =>
     json(route, { detail: "Report not found" }, 404)
   );
+  // Sub-resources. Timeline, STIX and MITRE are fetched on mount by the
+  // /process and /detection tabs; signatures and enrich are button-driven.
+  await page.route("**/api/v1/reports/*/timeline", (route) =>
+    json(route, { rounds: [], confidence_series: [] })
+  );
+  await page.route("**/api/v1/reports/*/stix", (route) =>
+    json(route, { type: "bundle", id: "bundle--mock", objects: [] })
+  );
+  await page.route("**/api/v1/reports/*/mitre", (route) =>
+    json(route, { techniques: [] })
+  );
+  await page.route("**/api/v1/reports/*/signatures/*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/plain",
+      body: "rule Maljan_Mock { condition: false }",
+    })
+  );
+  await page.route("**/api/v1/reports/*/enrich", (route) =>
+    json(route, { status: "queued", detail: "Enrichment queued." })
+  );
 
   /* ── Samples ──────────────────────────────────────── */
-  // Not reached by any current spec, but SearchPalette fires samples + jobs +
-  // reports on the first keystroke in the header search box.
   await page.route("**/api/v1/samples?**", (route) =>
-    json(route, { items: [], total: 0, page: 1, page_size: 10 })
+    json(route, { items: [MOCK_SAMPLE], total: 1, page: 1, page_size: 50 })
+  );
+  await page.route("**/api/v1/samples/*", (route) => json(route, MOCK_SAMPLE));
+  // After `samples/*`, which also matches this path — last registration wins.
+  await page.route("**/api/v1/samples/upload", (route) => json(route, MOCK_SAMPLE));
+
+  /* ── Audit & API keys ─────────────────────────────── */
+  await page.route("**/api/v1/audit/logs?**", (route) =>
+    json(route, { items: [MOCK_AUDIT_LOG], total: 1, page: 1, page_size: 20 })
+  );
+  await page.route("**/api/v1/audit/api-keys?**", (route) =>
+    json(route, { items: [MOCK_API_KEY], total: 1, page: 1, page_size: 50 })
+  );
+  await page.route("**/api/v1/audit/api-keys", (route) =>
+    json(route, { ...MOCK_API_KEY, id: "key-2", name: "new key", raw_key: "mlj_secret_value" })
+  );
+  await page.route("**/api/v1/audit/api-keys/*", (route) =>
+    route.fulfill({ status: 204, body: "" })
   );
 
   /* ── WebSocket ────────────────────────────────────── */

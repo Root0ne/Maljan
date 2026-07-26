@@ -66,30 +66,78 @@ function decodeJwtExpiry(token: string): number | null {
   try {
     const payload = token.split(".")[1];
     if (!payload) return null;
-    const decoded = JSON.parse(atob(payload));
+    // JWT payloads are base64*url*: `-` and `_` instead of `+` and `/`, and no
+    // padding. `atob` takes standard base64, and WebKit's is stricter than V8's
+    // about both — feeding it the raw segment threw there for any token whose
+    // payload happened to contain those characters, and the caller then fell
+    // back to a blanket 14-minute refresh window without anyone noticing.
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const decoded = JSON.parse(atob(padded));
     return typeof decoded.exp === "number" ? decoded.exp * 1000 : null;
   } catch {
     return null;
   }
 }
 
+/**
+ * Refresh exactly once across every open tab.
+ *
+ * The timer is per-mounted-AuthProvider, so N tabs wake up at roughly the same
+ * moment holding the same refresh token. If the backend rotates refresh tokens
+ * — and it does — the first request invalidates the value the others are still
+ * holding, and each loser's refresh comes back 401. That used to call
+ * `onFailure` → `logout()` → a hard redirect, so opening the app in a second
+ * tab could sign you out of the first.
+ *
+ * Two independent guards, because either alone leaves a hole:
+ *  - a Web Lock serialises the tabs that have one, and
+ *  - inside the lock the token is re-read from localStorage, so a tab that
+ *    queued behind the winner sees the rotated value and stands down rather
+ *    than spending a token that is already gone. This is also the whole fix on
+ *    browsers without `navigator.locks`.
+ */
+async function runRefresh(
+  scheduledWith: string,
+  onSuccess: (access: string, refresh: string) => void,
+  onFailure: (error: unknown) => void,
+  onAlreadyRefreshed: (refresh: string) => void
+): Promise<void> {
+  const current = localStorage.getItem("refresh_token");
+  if (!current) return;
+  if (current !== scheduledWith) {
+    // Another tab got there first. Adopt its token and re-arm.
+    onAlreadyRefreshed(current);
+    return;
+  }
+  try {
+    const tokens = await api.refresh(current);
+    localStorage.setItem("access_token", tokens.access_token);
+    localStorage.setItem("refresh_token", tokens.refresh_token);
+    onSuccess(tokens.access_token, tokens.refresh_token);
+  } catch (err) {
+    onFailure(err);
+  }
+}
+
 function scheduleRefresh(
   refreshToken: string,
   onSuccess: (access: string, refresh: string) => void,
-  onFailure: () => void
+  onFailure: (error: unknown) => void,
+  onAlreadyRefreshed: (refresh: string) => void
 ): ReturnType<typeof setTimeout> {
   const expiry = decodeJwtExpiry(refreshToken);
   const msUntilExpiry = expiry ? expiry - Date.now() : 14 * 60 * 1000; // default 14 min
   const msBefore = Math.max(msUntilExpiry - 60_000, 5_000); // refresh 60s before expiry, min 5s
 
-  return setTimeout(async () => {
-    try {
-      const tokens = await api.refresh(refreshToken);
-      localStorage.setItem("access_token", tokens.access_token);
-      localStorage.setItem("refresh_token", tokens.refresh_token);
-      onSuccess(tokens.access_token, tokens.refresh_token);
-    } catch {
-      onFailure();
+  return setTimeout(() => {
+    const attempt = () =>
+      runRefresh(refreshToken, onSuccess, onFailure, onAlreadyRefreshed);
+    const locks = globalThis.navigator?.locks;
+    if (locks) {
+      void locks.request("maljan-token-refresh", attempt);
+    } else {
+      void attempt();
     }
   }, msBefore);
 }
@@ -122,17 +170,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearRefreshTimer();
       refreshTimerRef.current = scheduleRefresh(
         refreshToken,
-        (_access, refresh) => {
-          // Chain next refresh through the ref so we always read the
-          // latest closure (a future dep change on startRefreshTimer
-          // would otherwise leave this site bound to the original).
-          refreshTimerRef.current = scheduleRefresh(
-            refresh,
-            (t) => startRefreshTimerRef.current?.(t),
-            () => logoutRef.current?.(),
-          );
+        // Re-arm through the ref so this always reaches the latest closure (a
+        // future dep change on startRefreshTimer would otherwise leave the call
+        // site bound to the original).
+        (_access, refresh) => startRefreshTimerRef.current?.(refresh),
+        (err) => {
+          // Only a *rejected* credential ends the session. A connection
+          // failure or a 500 says nothing about the token — signing out there
+          // turned every backend blip into a forced logout. Re-arm instead;
+          // the delay floors at 5 s once the token's expiry has passed, so
+          // this retries until the API answers or genuinely refuses.
+          if (isSessionRejection(err)) logoutRef.current?.();
+          else startRefreshTimerRef.current?.(refreshToken);
         },
-        () => logoutRef.current?.(),
+        // Another tab refreshed first: adopt its token and re-arm on that.
+        (refresh) => startRefreshTimerRef.current?.(refresh),
       );
     },
     [clearRefreshTimer]

@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
 
 /**
  * The agent transcript — the same panel live and after the fact.
@@ -6,60 +7,13 @@ import { test, expect } from "./fixtures";
  * These drive the post-run path, because it is the one that can silently rot:
  * it reconstructs the conversation from `agent_findings` and `negotiation_log`
  * rather than replaying events, so a schema change breaks it without breaking
- * the live feed. The route is mocked so the assertions do not depend on
- * whatever happens to be in the dev database.
+ * the live feed.
+ *
+ * The payload comes from `report-fixture.ts` rather than an inline literal, so
+ * this spec and the tab walk assert against the same report and `tsc` checks
+ * both against the real DTO. The fixture is a superset of what this file needs;
+ * the transcript reads only `agent_findings`, `negotiation_log` and `verdict`.
  */
-
-const JOB_ID = "11111111-2222-3333-4444-555555555555";
-
-const REPORT = {
-  id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-  job_id: JOB_ID,
-  // Raw backend spelling on purpose: the transcript must normalise it.
-  verdict: "Malware",
-  overall_confidence: 0.6,
-  agent_findings: [
-    {
-      agent_name: "static",
-      domain: "static",
-      claims: [
-        {
-          claim: "Imports VirtualAllocEx and WriteProcessMemory",
-          evidence_ref: "IAT: KERNEL32.dll!VirtualAllocEx",
-          confidence: 0.9,
-          technique_id: "T1055",
-        },
-      ],
-      dissent_items: [],
-      revision_rounds: 0,
-      final_confidence: 0.9,
-      status: "complete",
-      status_reason: null,
-    },
-    {
-      agent_name: "dynamic",
-      domain: "dynamic",
-      claims: [],
-      dissent_items: [],
-      revision_rounds: 0,
-      final_confidence: 0,
-      status: "failed",
-      status_reason: "sandbox unreachable",
-    },
-  ],
-  negotiation_log: {
-    discussion_history: [
-      {
-        round: 1,
-        agent: "Mediator",
-        argument: "Static evidence is uncorroborated by the dynamic layer.",
-        confidence: 55,
-      },
-    ],
-    is_consensus: false,
-    iteration_count: 1,
-  },
-};
 
 const LIVE_EVENT = {
   type: "agent_message",
@@ -94,14 +48,7 @@ test.describe("Agent transcript", () => {
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          id: JOB_ID,
-          status: "completed",
-          sample_id: "99999999-8888-7777-6666-555555555555",
-          sample_filename: "evil.exe",
-          verdict: "Malware",
-          created_at: "2026-07-26T12:00:00Z",
-        }),
+        body: JSON.stringify(COMPLETED_JOB),
       })
     );
     /* TranscriptView back-fills the event stream on mount for *every* job, not

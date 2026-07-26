@@ -209,7 +209,7 @@ export default function SettingsPage() {
               {userLoading ? (
                 <div className="text-xs text-text-muted">Loading...</div>
               ) : userError ? (
-                <div className="text-xs text-status-red">{userError}</div>
+                <div role="alert" className="text-xs text-status-red">{userError}</div>
               ) : user ? (
                 <form onSubmit={handleSaveProfile} className="space-y-4">
                   <div>
@@ -366,7 +366,7 @@ export default function SettingsPage() {
           )}
 
           {apiKeysError && (
-            <div className="p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+            <div role="alert" className="p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
               {apiKeysError}
             </div>
           )}
@@ -374,6 +374,13 @@ export default function SettingsPage() {
           {/* Key list */}
           {apiKeysLoading ? (
             <div className="text-xs text-text-muted">Loading API keys...</div>
+          ) : apiKeysError ? (
+            /* Same trap as /audit: "No API keys found." used to render right
+             * under the error banner, so a failed fetch looked like an account
+             * that simply has no keys. */
+            <div className="text-xs text-text-muted">
+              Keys could not be loaded — see the message above.
+            </div>
           ) : apiKeys.length === 0 ? (
             <div className="text-xs text-text-muted">No API keys found.</div>
           ) : (

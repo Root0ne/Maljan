@@ -48,7 +48,7 @@ export default function AuditLogsPage() {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+        <div role="alert" className="mb-4 p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
           {error}
         </div>
       )}
@@ -69,6 +69,16 @@ export default function AuditLogsPage() {
                 <tr>
                   <td colSpan={4} className="px-4 py-6 text-center text-xs text-text-muted">
                     Loading...
+                  </td>
+                </tr>
+              ) : error ? (
+                /* Without this branch the table said "No audit logs found."
+                 * directly underneath the error banner — a failed request and
+                 * an genuinely empty log rendered identically, so anything
+                 * asserting on the empty state passed on a broken page. */
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-xs text-text-muted">
+                    Log entries could not be loaded — see the message above.
                   </td>
                 </tr>
               ) : logs.length === 0 ? (

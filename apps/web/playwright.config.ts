@@ -40,7 +40,17 @@ export default defineConfig({
    * so the whole fleet arrives at an uncompiled page at once. That produced
    * intermittent "element(s) not found" failures — WebKit first, being the
    * heaviest — which look like product bugs and are not. */
-  workers: process.env.CI ? 1 : 6,
+  workers: process.env.CI ? 1 : 4,
+  /* Above Playwright's 30 s default for the same reason. A spec that passes
+   * 6/6 in isolation and fails four of those under a full run is not flaky
+   * code, it is a starved machine; raising the ceiling is honest, silently
+   * retrying would not be. */
+  timeout: 45_000,
+  /* Likewise above the 5 s default. Under `next dev` the first test to reach a
+   * route waits on its compile, and 5 s is not always enough for that on a
+   * loaded machine — the symptom is a single assertion failing in a spec that
+   * passes 6/6 on its own. */
+  expect: { timeout: 10_000 },
   reporter: "html",
   use: {
     baseURL: `http://localhost:${E2E_PORT}`,

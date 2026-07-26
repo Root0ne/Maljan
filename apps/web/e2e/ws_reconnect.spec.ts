@@ -34,6 +34,10 @@ test.describe("WebSocket reconnect", () => {
   test("retries after the server drops the connection", async ({
     authenticatedPage,
   }) => {
+    // Two jittered backoff windows plus a settling period; this one genuinely
+    // spends ~20 s waiting rather than doing work, so give it the headroom
+    // instead of trimming the waits until the assertions stop meaning anything.
+    test.slow();
     let attempts = 0;
     await authenticatedPage.routeWebSocket("**/ws/analysis/**", (ws) => {
       attempts += 1;
