@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { formatDateTime } from "@/lib/report-utils";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<"general" | "apikeys">("general");
@@ -26,11 +28,36 @@ export default function SettingsPage() {
   const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<ApiKeyCreateDTO | null>(null);
+  /* audit 2026-07-26 (T5): native alert()/confirm() replaced by the in-page
+   * banner + toast + confirm-modal pattern already used by jobs/page.tsx. */
+  const [keyActionError, setKeyActionError] = useState<string | null>(null);
+  const [keyToast, setKeyToast] = useState<string | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<ApiKeyDTO | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   const tabs = [
     { key: "general" as const, label: "General" },
     { key: "apikeys" as const, label: "API Keys" },
   ];
+
+  useEffect(() => {
+    if (!keyToast) return;
+    const t = setTimeout(() => setKeyToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [keyToast]);
+
+  /* Escape closes the revoke dialog (pattern copied from SearchPalette). */
+  useEffect(() => {
+    if (!confirmRevoke) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (revoking) return;
+      setConfirmRevoke(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmRevoke, revoking]);
 
   useEffect(() => {
     if (activeTab === "general") {
@@ -47,8 +74,7 @@ export default function SettingsPage() {
           setFullName(me.full_name || "");
         })
         .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to load user profile.";
-          setUserError(msg);
+          setUserError(getErrorMessage(err) || "Failed to load user profile.");
         })
         .finally(() => setUserLoading(false));
     }
@@ -63,8 +89,7 @@ export default function SettingsPage() {
     api.getApiKeys(1, 50)
       .then((res) => setApiKeys(res.items))
       .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : "Failed to load API keys.";
-        setApiKeysError(msg);
+        setApiKeysError(getErrorMessage(err) || "Failed to load API keys.");
       })
       .finally(() => setApiKeysLoading(false));
   }
@@ -72,6 +97,10 @@ export default function SettingsPage() {
   const passwordsMatch = password === passwordConfirm;
   const passwordRequested = password.length > 0 || passwordConfirm.length > 0;
   const passwordValid = !passwordRequested || (password.length >= 8 && passwordsMatch);
+  // Hoisted so the inputs can point `aria-describedby` at the messages only
+  // while they are actually rendered (audit 2026-07-26, §4 accessibility).
+  const passwordTooShort = passwordRequested && password.length > 0 && password.length < 8;
+  const passwordMismatch = passwordRequested && !passwordsMatch;
   const canSave = !saving && !!user && passwordValid;
 
   async function handleSaveProfile(e: React.FormEvent) {
@@ -105,8 +134,7 @@ export default function SettingsPage() {
       setPasswordConfirm("");
       setSaveSuccess("Profile updated successfully.");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to update profile.";
-      setSaveError(msg);
+      setSaveError(getErrorMessage(err) || "Failed to update profile.");
     } finally {
       setSaving(false);
     }
@@ -115,33 +143,36 @@ export default function SettingsPage() {
   async function handleCreateKey(e: React.FormEvent) {
     e.preventDefault();
     if (!newKeyName.trim()) return;
+    setKeyActionError(null);
     try {
       const key = await api.createApiKey(newKeyName.trim());
       setCreatedKey(key);
       setNewKeyName("");
       loadApiKeys();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to create API key.";
-      alert(msg);
+      setKeyActionError(getErrorMessage(err) || "Failed to create API key.");
     }
   }
 
-  async function handleRevokeKey(keyId: string) {
-    if (!confirm("Revoke this API key? It cannot be undone.")) return;
+  async function handleConfirmRevoke() {
+    if (!confirmRevoke) return;
+    setRevoking(true);
+    setKeyActionError(null);
     try {
-      await api.revokeApiKey(keyId);
+      await api.revokeApiKey(confirmRevoke.id);
+      setKeyToast(`API key "${confirmRevoke.name}" revoked.`);
+      setConfirmRevoke(null);
       loadApiKeys();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to revoke API key.";
-      alert(msg);
+      setKeyActionError(getErrorMessage(err) || "Failed to revoke API key.");
+    } finally {
+      setRevoking(false);
     }
   }
 
-  function formatDate(iso: string | null) {
-    if (!iso) return "Never";
-    return new Date(iso).toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
-    });
+  function closeRevokeModal() {
+    if (revoking) return;
+    setConfirmRevoke(null);
   }
 
   return (
@@ -178,12 +209,14 @@ export default function SettingsPage() {
               {userLoading ? (
                 <div className="text-xs text-text-muted">Loading...</div>
               ) : userError ? (
-                <div className="text-xs text-status-red">{userError}</div>
+                <div role="alert" className="text-xs text-status-red">{userError}</div>
               ) : user ? (
                 <form onSubmit={handleSaveProfile} className="space-y-4">
                   <div>
-                    <label className="block text-xs text-text-secondary mb-1.5">Full Name</label>
+                    <label htmlFor="settings-full-name" className="block text-xs text-text-secondary mb-1.5">Full Name</label>
                     <input
+                      id="settings-full-name"
+                      name="full_name"
                       type="text"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
@@ -191,8 +224,10 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-text-secondary mb-1.5">Email</label>
+                    <label htmlFor="settings-email" className="block text-xs text-text-secondary mb-1.5">Email</label>
                     <input
+                      id="settings-email"
+                      name="email"
                       type="email"
                       defaultValue={user.email || ""}
                       readOnly
@@ -206,30 +241,36 @@ export default function SettingsPage() {
                     </h3>
                     <div className="space-y-3">
                       <div>
-                        <label className="block text-xs text-text-secondary mb-1.5">New password</label>
+                        <label htmlFor="settings-new-password" className="block text-xs text-text-secondary mb-1.5">New password</label>
                         <input
+                          id="settings-new-password"
+                          name="new_password"
                           type="password"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           autoComplete="new-password"
                           minLength={8}
+                          aria-describedby={passwordTooShort ? "settings-new-password-error" : undefined}
                           className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                         />
-                        {passwordRequested && password.length > 0 && password.length < 8 && (
-                          <p className="mt-1 text-xs text-status-red">Must be at least 8 characters.</p>
+                        {passwordTooShort && (
+                          <p id="settings-new-password-error" className="mt-1 text-xs text-status-red">Must be at least 8 characters.</p>
                         )}
                       </div>
                       <div>
-                        <label className="block text-xs text-text-secondary mb-1.5">Confirm new password</label>
+                        <label htmlFor="settings-confirm-password" className="block text-xs text-text-secondary mb-1.5">Confirm new password</label>
                         <input
+                          id="settings-confirm-password"
+                          name="confirm_password"
                           type="password"
                           value={passwordConfirm}
                           onChange={(e) => setPasswordConfirm(e.target.value)}
                           autoComplete="new-password"
+                          aria-describedby={passwordMismatch ? "settings-confirm-password-error" : undefined}
                           className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                         />
-                        {passwordRequested && !passwordsMatch && (
-                          <p className="mt-1 text-xs text-status-red">Passwords do not match.</p>
+                        {passwordMismatch && (
+                          <p id="settings-confirm-password-error" className="mt-1 text-xs text-status-red">Passwords do not match.</p>
                         )}
                       </div>
                     </div>
@@ -272,14 +313,21 @@ export default function SettingsPage() {
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-3">
               Create API Key
             </h2>
-            <form onSubmit={handleCreateKey} className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Key name (e.g., CI/CD integration)"
-                value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
-                className="flex-1 h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-              />
+            <form onSubmit={handleCreateKey} className="flex items-end gap-2">
+              <div className="flex-1">
+                <label htmlFor="settings-api-key-name" className="block text-xs text-text-secondary mb-1.5">
+                  Key name
+                </label>
+                <input
+                  id="settings-api-key-name"
+                  name="api_key_name"
+                  type="text"
+                  placeholder="Key name (e.g., CI/CD integration)"
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                />
+              </div>
               <button
                 type="submit"
                 className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
@@ -303,8 +351,22 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {keyActionError && (
+            <div
+              role="alert"
+              className="text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+            >
+              {keyActionError}
+            </div>
+          )}
+          {keyToast && (
+            <div className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-1.5">
+              {keyToast}
+            </div>
+          )}
+
           {apiKeysError && (
-            <div className="p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+            <div role="alert" className="p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
               {apiKeysError}
             </div>
           )}
@@ -312,6 +374,13 @@ export default function SettingsPage() {
           {/* Key list */}
           {apiKeysLoading ? (
             <div className="text-xs text-text-muted">Loading API keys...</div>
+          ) : apiKeysError ? (
+            /* Same trap as /audit: "No API keys found." used to render right
+             * under the error banner, so a failed fetch looked like an account
+             * that simply has no keys. */
+            <div className="text-xs text-text-muted">
+              Keys could not be loaded — see the message above.
+            </div>
           ) : apiKeys.length === 0 ? (
             <div className="text-xs text-text-muted">No API keys found.</div>
           ) : (
@@ -337,16 +406,19 @@ export default function SettingsPage() {
                         <span className="text-xs text-text-muted font-mono bg-bg-deep px-1.5 py-0.5 rounded">
                           {key.key_prefix}***
                         </span>
-                        <span className="text-xs text-text-muted">Created {formatDate(key.created_at)}</span>
+                        <span className="text-xs text-text-muted">Created {formatDateTime(key.created_at)}</span>
                         {key.expires_at && (
-                          <span className="text-xs text-status-orange">Expires {formatDate(key.expires_at)}</span>
+                          <span className="text-xs text-status-orange">Expires {formatDateTime(key.expires_at)}</span>
                         )}
                       </div>
                     </div>
                     <div className="flex gap-2 ml-4 shrink-0">
                       {key.is_active && (
                         <button
-                          onClick={() => handleRevokeKey(key.id)}
+                          onClick={() => {
+                            setKeyActionError(null);
+                            setConfirmRevoke(key);
+                          }}
                           className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30 transition-colors"
                         >
                           Revoke
@@ -358,6 +430,65 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Revoke Confirmation Modal */}
+      {confirmRevoke && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={closeRevokeModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="revoke-key-title"
+            className="bg-bg-surface border border-border rounded w-full max-w-md p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 id="revoke-key-title" className="text-sm font-semibold text-text-primary">Revoke API Key</h3>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={closeRevokeModal}
+                disabled={revoking}
+                className="text-text-muted hover:text-text-primary disabled:text-text-disabled"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-sm text-text-secondary mb-4 leading-relaxed">
+              Revoke &ldquo;{confirmRevoke.name}&rdquo;? Anything still using this key will
+              stop working. Cannot be undone.
+            </p>
+            {keyActionError && (
+              <div role="alert" className="mb-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5">
+                {keyActionError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeRevokeModal}
+                disabled={revoking}
+                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors disabled:text-text-disabled"
+              >
+                Keep it
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRevoke}
+                disabled={revoking}
+                className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 transition-colors disabled:opacity-50"
+              >
+                {revoking ? "Revoking..." : "Revoke key"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

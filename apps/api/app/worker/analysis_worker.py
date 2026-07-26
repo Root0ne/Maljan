@@ -12,6 +12,7 @@ import asyncio
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,41 @@ async def _publish_event(
         f"Published event: type={event_type} job={job_id[:8]}...",
         extra={"job_id": job_id, "component": "pubsub"},
     )
+
+
+def _make_event_sink(
+    redis_conn: aioredis.Redis,
+    job_id: str,
+    loop: asyncio.AbstractEventLoop,
+) -> Callable[[str, dict[str, Any]], None]:
+    """Bridge the pipeline's synchronous event sink onto this event loop.
+
+    ``maljan.pipeline.events.EventSink`` is a plain sync callable because the
+    analyst node is synchronous and LangGraph runs it in a worker thread, while
+    the negotiation / revision / judge nodes are coroutines on the loop. One
+    signature has to serve both, so the bridge is here rather than in the core.
+
+    ``call_soon_threadsafe`` is correct from either side — it is the documented
+    way in from another thread, and a no-op-ish fast path when already on the
+    loop. Scheduling rather than awaiting also means a slow Redis never adds
+    latency to the analysis itself: the pipeline hands the event off and moves
+    on. Publishing is best-effort by design (see ``_publish_event``), so a
+    dropped progress line never costs a run.
+    """
+
+    def sink(event_type: str, data: dict[str, Any]) -> None:
+        try:
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(  # noqa: RUF006 — fire-and-forget by design
+                    _publish_event(redis_conn, job_id, event_type, data)
+                )
+            )
+        except RuntimeError:
+            # Loop already closed (job cancelled / shutting down). Nothing to
+            # report to, and the pipeline must not care.
+            pass
+
+    return sink
 
 
 # ── Main analysis task ──────────────────────────────────────────
@@ -220,7 +256,15 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 _job_mock,
                 settings.mock_mode_allowed,
             )
-            app = MaljanApp(config=core_settings, mock=_mock_active)
+            # The sink is what turns a 30-minute silent run into a readable
+            # transcript: each node reports its own findings as it produces
+            # them, straight onto the same PubSub channel the Live tab is
+            # already attached to.
+            app = MaljanApp(
+                config=core_settings,
+                mock=_mock_active,
+                event_sink=_make_event_sink(redis_conn, job_id, asyncio.get_running_loop()),
+            )
 
             # Announce which agents are about to run so the frontend can show them
             registered_agents = app.container.agent_registry.list_agents()
@@ -234,12 +278,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     "sha256": sample.sha256[:16] + "...",
                 },
             )
+            # Roster only — "waiting", not "analyzing". Analysts are serialised
+            # on the single-slot local model, so marking them all busy up front
+            # was simply false; each analyst node now announces its own start
+            # (see maljan.pipeline.nodes), which is the real signal.
             for agent_name in registered_agents:
                 await _publish_event(
                     redis_conn,
                     job_id,
                     "agent_progress",
-                    {"agent": agent_name, "phase": "analyzing"},
+                    {"agent": agent_name, "phase": "waiting"},
                 )
 
             # Download sample from MinIO for sandbox submission
@@ -346,12 +394,35 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # avoid "Event loop is closed" errors caused by threading mismatches.
             # Heartbeat task keeps the job alive in the DB and logs progress.
             heartbeat_stop_event = asyncio.Event()
+            pipeline_task: asyncio.Task | None = None
+            cancelled_by_user = False
 
             async def _heartbeat() -> None:
+                # Audit 2026-07-26 (Ö5): the heartbeat is also the cancellation
+                # poller. `cancel_job` sets `analysis:{job_id}:cancel`; the
+                # pipeline is a single long `await`, so cancelling that task is
+                # the only way to stop the run. Previously the worker checked the
+                # job status exactly once (before starting), so a cancel issued
+                # mid-run was ignored and the finished pipeline overwrote the
+                # `cancelled` row with `completed`/`failed`.
+                nonlocal cancelled_by_user
                 while not heartbeat_stop_event.is_set():
                     try:
-                        await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=60.0)
+                        await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=15.0)
                     except TimeoutError:
+                        try:
+                            if await redis_conn.get(f"analysis:{job_id}:cancel"):
+                                cancelled_by_user = True
+                                logger.info(
+                                    "Cancellation requested for job=%s — stopping pipeline.",
+                                    job_id,
+                                    extra={"job_id": job_id, "component": "heartbeat"},
+                                )
+                                if pipeline_task is not None:
+                                    pipeline_task.cancel()
+                                return
+                        except Exception as exc:  # noqa: BLE001 — polling must never kill the run
+                            logger.debug("Cancel-flag poll failed: %s", exc)
                         logger.info(
                             "Pipeline heartbeat: job=%s still running...",
                             job_id,
@@ -369,12 +440,34 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # callback wiring.
             await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
             try:
-                pipeline_result = await app.arun(
-                    file_hash=sample.sha256,
-                    file_name=sample.original_filename,
-                    sample_path=temp_path,
-                    static_sample_path=static_sample_path,
+                # Run the pipeline as a task so the heartbeat poller can cancel
+                # it when the user cancels the job (audit 2026-07-26, Ö5).
+                pipeline_task = asyncio.create_task(
+                    app.arun(
+                        file_hash=sample.sha256,
+                        file_name=sample.original_filename,
+                        sample_path=temp_path,
+                        static_sample_path=static_sample_path,
+                    )
                 )
+                pipeline_result = await pipeline_task
+            except asyncio.CancelledError:
+                if not cancelled_by_user:
+                    raise
+                logger.info(
+                    "Pipeline cancelled by user request: job=%s",
+                    job_id,
+                    extra={"job_id": job_id},
+                )
+                await _publish_event(redis_conn, job_id, "cancelled", {})
+                async with db_session() as cleanup_db:
+                    await cleanup_db.execute(
+                        update(AnalysisJob)
+                        .where(AnalysisJob.id == job.id)
+                        .values(status="cancelled", completed_at=datetime.now(UTC))
+                    )
+                    await cleanup_db.commit()
+                return {"status": "cancelled", "job_id": job_id}
             finally:
                 heartbeat_stop_event.set()
                 try:
@@ -667,7 +760,24 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
 
 def _extract_confidence(result: dict) -> float:
-    """Extract overall confidence from the pipeline result."""
+    """Extract overall confidence from the pipeline result.
+
+    CONF-INFL-01 (audit 2026-07-26): the degraded-run confidence cap
+    (``nodes.py`` ``_DEGRADED_CONFIDENCE_CAP``) is applied while building the
+    ``MalwareReport``; ``run_summary`` and ``confidence_history`` still carry the
+    RAW judge value. Persisting the raw value here made the API, the reports
+    list and the analysis header show an uncapped confidence — the UI displayed
+    "DEGRADED RUN" and "Confidence: 91/100" side by side, which is precisely the
+    inflation the guardrail exists to prevent. The ``MalwareReport`` is therefore
+    the authoritative source and is checked FIRST; the other two remain as
+    fallbacks for legacy/partial results that carry no report.
+    """
+    malware_report = result.get("malware_report")
+    if isinstance(malware_report, dict):
+        conf = malware_report.get("overall_confidence")
+        if conf is not None:
+            return float(conf)
+
     # From run_summary if available
     run_summary = result.get("run_summary")
     if run_summary and isinstance(run_summary, dict):
@@ -876,13 +986,17 @@ class WorkerSettings:
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.
-    # job_timeout=3600 (60 min) covers the Wave 4 pipeline (platform-aware
-    # cascade + per-platform Sigma scan + FP linter) which can run longer
-    # than 30 min on the 35B local LLM, especially on a cold-cache start.
-    # Wave 3 baseline was ~21 min; Wave 4 adds ~4-5 min of cascade work +
-    # variance from LLM throughput. 60 min gives ~2x headroom before
-    # we'd consider the run truly hung.
+    # job_timeout=28800 (8h) — 2026-07-13 deep-analysis restore. The outer ARQ
+    # ceiling must sit ABOVE the sum of the inner per-loop safety nets, or it
+    # fires while a run is still legitimately progressing ("a timeout is a bug").
+    # Static now runs a full-depth ReAct loop PER CHUNK (~8-10 chunks, up to
+    # 1530s each) plus dynamic/CAPE, network, up to 5 revision rounds, judge and
+    # the report Composer; a realistic-slow cold-cache run is ~2-4h. 8h is a
+    # never-fires safety net: a single-slot LLM can't run two jobs at once so a
+    # high ceiling costs nothing, and every LLM/CAPE path is bounded by its own
+    # inner timeout, so this only trips on a true hang outside those paths. Was
+    # 3600 (60 min), sized for the pre-restore shallow static pass.
     max_jobs = 1
-    job_timeout = 3600
+    job_timeout = 28800
     max_tries = 1  # Don't retry failed analyses automatically
     health_check_interval = 30

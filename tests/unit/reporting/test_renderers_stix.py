@@ -8,6 +8,7 @@ a round-trip through ``Bundle.model_validate``.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -16,6 +17,7 @@ from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport, StaticAnalysis, StringIOC
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 from maljan.schemas.stix_models import (
+    AttackPattern,
     Bundle,
     Identity,
     Indicator,
@@ -128,6 +130,53 @@ class TestBaseBundlePreserved:
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=base)
         names = [obj.name for obj in bundle.objects if isinstance(obj, Malware)]
         assert "pre-existing" in names
+
+    def test_judge_placeholder_timestamps_normalized(self) -> None:
+        # Audit L7: the LLM copies STIX doc examples verbatim, stamping its
+        # Malware/AttackPattern SDOs with the 2023-01-01 placeholder epoch and
+        # a fake sequential id. The renderer must overwrite those bogus dates
+        # with the real analysis time while leaving the id (and its relationship
+        # refs) untouched.
+        epoch = datetime(2023, 1, 1, tzinfo=UTC)
+        stale_malware = Malware(
+            id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            name="Packed Dropper",
+            malware_types=["dropper"],
+            created=epoch,
+            modified=epoch,
+        )
+        stale_ap = AttackPattern(
+            id="attack-pattern--c3d4e5f6-a7b8-9012-cdef-123456789012",
+            name="Process Injection",
+            created=epoch,
+            modified=epoch,
+        )
+        base = Bundle(objects=[stale_malware, stale_ap])
+        bundle = ExtendedSTIXRenderer().render(_build(), base_bundle=base)
+
+        for obj in bundle.objects:
+            if isinstance(obj, Malware | AttackPattern):
+                assert obj.created.year >= 2024, f"{obj.type} kept placeholder date"
+                assert obj.modified >= obj.created
+        # id (and therefore any relationship ref) is preserved verbatim
+        malware_ids = [o.id for o in bundle.objects if isinstance(o, Malware)]
+        assert "malware--b2c3d4e5-f6a7-8901-bcde-f12345678901" in malware_ids
+
+    def test_judge_is_family_normalized_to_false(self) -> None:
+        # Audit Bulgu #8: the LLM copies ``is_family: true`` from STIX docs, but
+        # Maljan analyses a single specimen — the renderer must force it to False
+        # so the SDO doesn't claim to represent a whole malware family.
+        judge_malware = Malware(
+            id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            name="Packed Dropper",
+            malware_types=["dropper"],
+            is_family=True,
+        )
+        base = Bundle(objects=[judge_malware])
+        bundle = ExtendedSTIXRenderer().render(_build(), base_bundle=base)
+        malware_objs = [o for o in bundle.objects if isinstance(o, Malware)]
+        assert malware_objs
+        assert all(m.is_family is False for m in malware_objs)
 
 
 class TestObservedDataAndNote:

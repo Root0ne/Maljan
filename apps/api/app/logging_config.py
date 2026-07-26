@@ -147,8 +147,15 @@ def setup_logging() -> None:
     # Reduce noise from third-party libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    # Audit 2026-07-26 (Ö6): SQL logging is gated on its own flag, not on the
+    # general DEBUG switch. With DEBUG=true this logger sat at INFO and echoed
+    # every statement — twice, once raw and once through the coloured formatter —
+    # which buried the pipeline-stage lines an operator actually needs. Tracing a
+    # running analysis required grepping the noise away first. Turning `echo` off
+    # on the engine is not enough on its own: SQLAlchemy emits through this
+    # logger, so its level has to be pinned here too.
     logging.getLogger("sqlalchemy.engine").setLevel(
-        logging.INFO if settings.debug else logging.WARNING
+        logging.INFO if settings.sql_echo else logging.WARNING
     )
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)

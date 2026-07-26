@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useReport } from "../layout";
 import { copyToClipboard, formatBytes } from "@/lib/report-utils";
+import Field from "@/components/ui/Field";
 import type { SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
@@ -110,34 +111,6 @@ export default function IdentityTab() {
           </div>
         </div>
       )}
-
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Magic Bytes (first 16)
-          </h2>
-        </div>
-        <div className="p-4">
-          {identity.magic_bytes ? (
-            <code className="block font-mono text-xs text-status-blue break-all">
-              {identity.magic_bytes}
-            </code>
-          ) : (
-            <span className="text-xs text-text-muted">(no magic bytes captured)</span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-        {label}
-      </div>
-      <div className="text-sm text-text-primary break-all">{value}</div>
     </div>
   );
 }

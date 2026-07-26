@@ -1,7 +1,10 @@
 """Report service — business logic for report retrieval and export."""
 
+import asyncio
+import re
+import string
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
 from sqlalchemy import select
@@ -14,11 +17,58 @@ from app.models.job import AnalysisJob
 from app.models.report import AnalysisReport
 from app.models.user import User
 
+if TYPE_CHECKING:  # pragma: no cover — import cycle-free typing only
+    from maljan.reporting.models import MalwareReport
+
 logger = get_logger("service.report")
+
+# Download names are derived from attacker-controlled file names, so everything
+# outside this set is collapsed to "-" before it reaches a Content-Disposition
+# header — a quote or a newline there is a header-injection primitive.
+_UNSAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+# Digest prefix length used in download names — long enough to stay unique
+# across a corpus, short enough to read.
+_HASH_NAME_CHARS = 16
 
 
 class EnrichmentEnqueueError(RuntimeError):
     """Raised when the ARQ enqueue for enrichment fails (503 to the client)."""
+
+
+class RenderedReport(NamedTuple):
+    """A rendered export plus the download name derived from the sample."""
+
+    content: bytes
+    filename: str
+
+
+def _export_filename(report: "MalwareReport", extension: str) -> str:
+    """Build a safe, informative download name for a rendered report."""
+    stem = (report.identity.file_name or "").strip()
+    if not stem:
+        stem = (report.identity.hashes.sha256 or "report")[:_HASH_NAME_CHARS]
+    stem = _shorten_hash_like(stem)
+    stem = _UNSAFE_FILENAME_RE.sub("-", stem).strip("-.") or "report"
+    return f"maljan-{stem[:60]}.{extension}"
+
+
+def _shorten_hash_like(stem: str) -> str:
+    """Collapse a hash-shaped file name to a readable prefix.
+
+    Malware pipelines routinely store a sample under its own digest, and this
+    one is no exception — the live corpus is full of ``<sha256>.exe``. Left
+    alone that produced ``maljan-<60 chars of hash>.pdf``: truncated mid-digest,
+    so it neither identified the sample nor kept the original extension. Keeping
+    a short prefix plus the extension says strictly more in a quarter the width.
+    """
+    base, dot, ext = stem.rpartition(".")
+    if not dot:
+        base, ext = stem, ""
+    if len(base) < 32 or not all(c in string.hexdigits for c in base):
+        return stem
+    short = base[:_HASH_NAME_CHARS]
+    return f"{short}.{ext}" if ext else short
 
 
 class ReportService:
@@ -115,6 +165,30 @@ class ReportService:
         )
         return result.scalar_one_or_none()
 
+    async def delete_report(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+    ) -> bool:
+        """Delete a report owned by ``user``. Returns False when not found.
+
+        Audit 2026-07-26 (Ö4). Scoped through the owning job exactly like
+        ``get_report`` so one user can never delete another's report.
+        ``AnalysisReport.agent_findings`` is declared with
+        ``cascade="all, delete-orphan"``, so the findings go with it.
+        """
+        report = await self.get_report(report_id, user)
+        if report is None:
+            return False
+        await self.db.delete(report)
+        await self.db.flush()
+        logger.info(
+            "Report deleted: id=%s",
+            report_id,
+            extra={"user_id": str(user.id)},
+        )
+        return True
+
     async def get_report_by_job(
         self,
         job_id: uuid.UUID,
@@ -176,21 +250,73 @@ class ReportService:
         user: User,
     ) -> str | None:
         """Return the markdown rendering of the comprehensive report."""
-        mr = await self.get_malware_report(report_id, user)
-        if not mr:
-            return None
         # The renderer stores its output on the pipeline ``state`` rather than
         # inside the MalwareReport itself — we re-render here so the API path
         # stays consistent with newer reports whose markdown was not persisted.
-        from maljan.reporting.models import MalwareReport
+        loaded = await self._load_malware_report(report_id, user, "markdown")
+        if loaded is None:
+            return None
         from maljan.reporting.renderers import MarkdownRenderer
 
-        try:
-            report_obj = MalwareReport.model_validate(mr)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_malware_report_markdown: validation failed (%s).", exc)
+        return str(MarkdownRenderer().render(loaded))
+
+    async def get_malware_report_html(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+    ) -> RenderedReport | None:
+        """Render the comprehensive report as a standalone HTML document (Phase 6)."""
+        loaded = await self._load_malware_report(report_id, user, "html")
+        if loaded is None:
             return None
-        return str(MarkdownRenderer().render(report_obj))
+        from maljan.reporting.renderers import HtmlRenderer
+
+        return RenderedReport(
+            content=HtmlRenderer().render(loaded).encode("utf-8"),
+            filename=_export_filename(loaded, "html"),
+        )
+
+    async def get_malware_report_pdf(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+    ) -> RenderedReport | None:
+        """Render the comprehensive report as PDF (Phase 6).
+
+        Raises:
+            PdfUnavailableError: WeasyPrint is not loadable on this host; the
+                router turns that into a 503 rather than a 500, because the
+                report itself is fine and every other export still works.
+        """
+        loaded = await self._load_malware_report(report_id, user, "pdf")
+        if loaded is None:
+            return None
+        from maljan.reporting.renderers import HtmlRenderer, PdfRenderer
+
+        html_doc = HtmlRenderer().render(loaded)
+        # WeasyPrint is synchronous and CPU-bound (roughly a second on a
+        # figure-heavy report), so it must not run on the event loop — a single
+        # export would otherwise stall every other request on this worker.
+        pdf = await asyncio.to_thread(PdfRenderer.render_html, html_doc)
+        return RenderedReport(content=pdf, filename=_export_filename(loaded, "pdf"))
+
+    async def _load_malware_report(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+        export: str,
+    ) -> "MalwareReport | None":
+        """Fetch + validate the stored MalwareReport, or ``None`` if unusable."""
+        mr = await self.get_malware_report(report_id, user)
+        if not mr:
+            return None
+        from maljan.reporting.models import MalwareReport
+
+        try:
+            return MalwareReport.model_validate(mr)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_malware_report_%s: validation failed (%s).", export, exc)
+            return None
 
     async def get_malware_report_iocs(
         self,

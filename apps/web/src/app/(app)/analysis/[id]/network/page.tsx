@@ -4,6 +4,9 @@ import { useState } from "react";
 
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import Th from "@/components/ui/Th";
+import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
 export default function NetworkTab() {
@@ -15,8 +18,17 @@ export default function NetworkTab() {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
-  const net = report?.malware_report?.network;
-  if (!net) {
+  const mr = report?.malware_report;
+  const net = mr?.network;
+  // 2026-07 audit (Bulgu #4): network IOCs recovered from the PE's static
+  // strings (e.g. a hard-coded C2 domain) live on ``static.interesting_strings``,
+  // not on the (sandbox-only) ``network`` block. Surface them here — clearly
+  // labelled as static-derived — so a domain like 888kafa.com is no longer
+  // reported as "0 domains" just because the sandbox never ran.
+  const staticIocs = (mr?.static?.interesting_strings ?? []).filter(
+    (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
+  );
+  if (!net && staticIocs.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
         No network IOCs available — the sample may not have contacted the network
@@ -31,10 +43,13 @@ export default function NetworkTab() {
     setEnrichBusy(true);
     setEnrichMsg(null);
     try {
-      await api.enrichReport(reportId);
-      setEnrichMsg("Enrichment queued. The page will refresh when results arrive.");
+      // audit 2026-07-26 (§4): the endpoint distinguishes queued /
+      // already_queued / skipped_no_network_iocs — say which one happened
+      // instead of always promising a refresh.
+      const res = await api.enrichReport(reportId);
+      setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
     } catch (e) {
-      setEnrichMsg(`Failed to queue enrichment: ${(e as Error).message}`);
+      setEnrichMsg(`Failed to queue enrichment: ${getErrorMessage(e)}`);
     } finally {
       setEnrichBusy(false);
     }
@@ -44,16 +59,25 @@ export default function NetworkTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-xs text-text-muted">
-          {net.domains.length} domain{net.domains.length !== 1 ? "s" : ""} ·{" "}
-          {net.ips.length} IP{net.ips.length !== 1 ? "s" : ""} · {net.urls.length}{" "}
-          URL{net.urls.length !== 1 ? "s" : ""}
+          {(net?.domains.length ?? 0) +
+            staticIocs.filter((s) => s.kind === "domain").length}{" "}
+          domain(s) · {(net?.ips.length ?? 0) +
+            staticIocs.filter((s) => s.kind === "ip").length}{" "}
+          IP(s) · {(net?.urls.length ?? 0) +
+            staticIocs.filter((s) => s.kind === "url").length}{" "}
+          URL(s)
+          {staticIocs.length > 0 && (
+            <span className="ml-1 text-text-disabled">
+              ({staticIocs.length} from static strings)
+            </span>
+          )}
         </div>
         <button
           onClick={triggerEnrich}
           disabled={enrichBusy || !reportId}
           className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
         >
-          {enrichBusy ? "queueing..." : "trigger threat-intel enrichment"}
+          {enrichBusy ? "queueing..." : ENRICH_BUTTON_LABEL}
         </button>
       </div>
       {enrichMsg && (
@@ -62,6 +86,43 @@ export default function NetworkTab() {
         </div>
       )}
 
+      {staticIocs.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Static-string indicators ({staticIocs.length})
+            </h2>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Extracted from the binary&apos;s strings — potential C2/network
+              endpoints that were not observed on the wire during analysis.
+            </p>
+          </div>
+          <div className="divide-y divide-border-light">
+            {staticIocs.map((s, i) => (
+              <div
+                key={`${s.kind}-${s.value}-${i}`}
+                className="px-4 py-2 flex items-center gap-3 hover:bg-bg-hover transition-colors"
+              >
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0">
+                  {s.kind}
+                </span>
+                <code className="text-xs font-mono text-status-blue break-all">
+                  {s.value}
+                </code>
+                <span
+                  className="ml-auto text-[10px] text-text-disabled shrink-0"
+                  title="Seen in static strings, not in sandbox network telemetry"
+                >
+                  static
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {net && (
+      <>
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -205,6 +266,8 @@ export default function NetworkTab() {
           </ul>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -310,13 +373,5 @@ function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
       {source}
       {score !== null ? ` · ${score}` : ""}
     </span>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return (
-    <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">
-      {children}
-    </th>
   );
 }

@@ -6,12 +6,12 @@ Uses ReportService for business logic separation.
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_active_user
 from app.models.user import User
 from app.schemas.job import IOCEntry, IOCListResponse, ReportDetailResponse
 from app.services.report_service import EnrichmentEnqueueError, ReportService
@@ -145,6 +145,78 @@ async def get_full_malware_report_markdown(
     return markdown
 
 
+@router.get("/{report_id}/html", response_class=HTMLResponse)
+async def get_full_malware_report_html(
+    report_id: uuid.UUID,
+    download: bool = Query(
+        default=False,
+        description="Serve as a file download instead of rendering in the browser.",
+    ),
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> Response:
+    """Render the comprehensive report as a standalone HTML document (Phase 6).
+
+    Self-contained: inline CSS and inline SVG figures, no external requests, so
+    it can be archived or opened in an offline analysis VM. Served inline by
+    default so it opens in a tab; ``?download=true`` forces a file save.
+    """
+    rendered = await svc.get_malware_report_html(report_id, user)
+    if rendered is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or HTML could not be rendered",
+        )
+    return Response(
+        content=rendered.content,
+        media_type="text/html; charset=utf-8",
+        headers=_disposition(rendered.filename, attachment=download),
+    )
+
+
+@router.get(
+    "/{report_id}/pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def get_full_malware_report_pdf(
+    report_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> Response:
+    """Render the comprehensive report as a print-ready PDF (Phase 6).
+
+    Same document as ``/html``, printed through WeasyPrint: A4, numbered pages,
+    a linked table of contents and the deterministic figures in place. Returns
+    503 (not 500) when the PDF toolchain is unavailable on the host — the report
+    is fine, only this one export cannot be produced.
+    """
+    from maljan.reporting.renderers import PdfUnavailableError
+
+    try:
+        rendered = await svc.get_malware_report_pdf(report_id, user)
+    except PdfUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    if rendered is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or PDF could not be rendered",
+        )
+    return Response(
+        content=rendered.content,
+        media_type="application/pdf",
+        headers=_disposition(rendered.filename, attachment=True),
+    )
+
+
+def _disposition(filename: str, *, attachment: bool) -> dict[str, str]:
+    """Build a Content-Disposition header (the name is sanitised upstream)."""
+    kind = "attachment" if attachment else "inline"
+    return {"Content-Disposition": f'{kind}; filename="{filename}"'}
+
+
 @router.get("/{report_id}/iocs", response_model=IOCListResponse)
 async def get_full_malware_report_iocs(
     report_id: uuid.UUID,
@@ -264,3 +336,24 @@ async def get_negotiation_timeline(
             detail="Report not found",
         )
     return timeline
+
+
+@router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_report(
+    report_id: uuid.UUID,
+    user: User = Depends(require_active_user),
+    svc: ReportService = Depends(_get_service),
+) -> None:
+    """Delete a single analysis report.
+
+    Audit 2026-07-26 (Ö4): reports could be created but never removed, so a
+    mis-run or duplicate analysis stayed in the list forever. The owning job is
+    kept — only its report (and the agent findings that cascade from it) is
+    removed, so the job history stays intact and the sample can be re-analysed.
+    """
+    deleted = await svc.delete_report(report_id, user)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found",
+        )

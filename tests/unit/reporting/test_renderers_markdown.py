@@ -27,7 +27,6 @@ REQUIRED_HEADINGS = [
     "## Network IOCs",
     "## Persistence Mechanisms",
     "## MITRE ATT&CK Matrix",
-    "## Capability Matrix (evidence)",
     "## Family Attribution",
     "## Detection Signatures",
     "## Defensive Recommendations",

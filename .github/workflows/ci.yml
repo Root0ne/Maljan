@@ -141,6 +141,10 @@ jobs:
         working-directory: apps/web
         run: npx playwright install --with-deps
 
+      # Same entry point developers use. The wrapper strips Snap-injected env
+      # that crashes WebKit on a confined desktop; on a runner there is nothing
+      # to strip and it exec's straight through, so CI and local runs cannot
+      # drift apart.
       - name: Run Playwright tests
         working-directory: apps/web
-        run: npx playwright test
+        run: npm run test:e2e

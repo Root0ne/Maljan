@@ -14,8 +14,12 @@ COPY apps/web/ ./
 # Build arguments for API URL (baked into client bundle)
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000
+# Audit 2026-07-26 (K3): default authentication ON. This must never be "true"
+# in a built image — see .dockerignore for the .env.local leak this closes.
+ARG NEXT_PUBLIC_AUTH_DISABLED=false
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
+ENV NEXT_PUBLIC_AUTH_DISABLED=$NEXT_PUBLIC_AUTH_DISABLED
 
 RUN npm run build
 

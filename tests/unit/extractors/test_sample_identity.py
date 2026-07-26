@@ -6,7 +6,40 @@ from pathlib import Path
 
 import pytest
 
-from maljan.extractors.sample_identity import _infer_platform, unsupported_os_reason
+from maljan.extractors.sample_identity import (
+    _detect_language_or_compiler,
+    _infer_platform,
+    unsupported_os_reason,
+)
+
+
+class TestCompilerDetection:
+    """2026-07 round 2: compiler/language fingerprint via byte markers + PE
+    Rich header / linker version / import heuristics (was a 6-marker stub that
+    returned None for ordinary MSVC PEs)."""
+
+    def test_byte_markers(self) -> None:
+        assert _detect_language_or_compiler(b"MZ..Go build ID: abc") == "Go"
+        assert _detect_language_or_compiler(b"MZ.." + b"UPX!" + b"x" * 100) == "C/C++ (UPX packed)"
+        assert _detect_language_or_compiler(b"MZ..rustc-1.70 stuff") == "Rust"
+
+    def test_none_for_empty_or_non_pe(self) -> None:
+        assert _detect_language_or_compiler(b"") is None
+        assert _detect_language_or_compiler(b"not a binary at all") is None
+
+    def test_real_mfc_sample_detected(self) -> None:
+        sample = (
+            Path(__file__).resolve().parents[3]
+            / "data"
+            / "samples"
+            / "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00.exe"
+        )
+        if not sample.exists():
+            pytest.skip("sample not present in this checkout")
+        result = _detect_language_or_compiler(sample.read_bytes())
+        assert result is not None
+        assert "Visual C++" in result
+        assert "MFC" in result
 
 
 # OS-support scope (2026-06-02): Windows + Linux only. Every other executable

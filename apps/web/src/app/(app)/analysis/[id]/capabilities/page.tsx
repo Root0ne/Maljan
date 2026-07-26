@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 
 /* Canonical MITRE Enterprise tactic catalogue in kill-chain (matrix) column
    order, with display names. TA0005 (Defense Evasion / Stealth in ATT&CK v19)
@@ -106,13 +107,18 @@ function parseTechniques(raw: unknown[]): Tactic[] {
           (Array.isArray(t.contributing_layers) ? t.contributing_layers.length : 1),
       ) || 1;
 
-    // Enterprise display name from the canonical catalogue when the mapping
-    // only carried the TA-id (TTPMapping has no tactic_name field, so columns
-    // would otherwise read "TA0005" instead of "Defense Evasion").
-    if (!tacticName || tacticName === tacticId || tacticName === "Unknown Tactic") {
-      tacticName = ENTERPRISE_NAME_BY_ID[tacticId] ?? tacticName;
+    // Canonical Enterprise display name wins for any KNOWN tactic id. This
+    // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
+    // no tactic_name, so columns would read "TA0005" instead of "Defense
+    // Evasion"), and (b) audit M2 — a persisted/bundle tactic_name that is
+    // non-canonical (e.g. "Stealth" for TA0005) would otherwise mislabel the
+    // column. Unknown/new tactic ids keep whatever name the mapping supplied.
+    const canonicalName = ENTERPRISE_NAME_BY_ID[tacticId];
+    if (canonicalName) {
+      tacticName = canonicalName;
+    } else if (!tacticName || tacticName === tacticId || tacticName === "Unknown Tactic") {
+      tacticName = tacticId || "Unknown Tactic";
     }
-    if (!tacticName) tacticName = tacticId || "Unknown Tactic";
 
     if (!tacticMap.has(tacticId)) {
       tacticMap.set(tacticId, {
@@ -141,6 +147,9 @@ export default function AttackTab() {
   const { report, job, loading } = useReport();
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
+  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed /mitre fallback
+  // rendered as "no techniques mapped", which is a different claim entirely.
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Prefer ttp_mappings from the cached MalwareReport; fall back to the /mitre
   // endpoint only for legacy rows that predate the rich report payload.
@@ -153,8 +162,15 @@ export default function AttackTab() {
     if (report?.id) {
       api
         .getReportMitre(report.id)
-        .then((data) => setMitreData(data.techniques))
-        .catch(() => {});
+        .then((data) => {
+          setMitreData(data.techniques);
+          setFetchError(null);
+        })
+        .catch((err: unknown) =>
+          setFetchError(
+            `Could not load the ATT&CK technique mapping: ${getErrorMessage(err)}`,
+          ),
+        );
     }
   }, [report?.id, report?.malware_report?.ttp_mappings]);
 
@@ -192,7 +208,7 @@ export default function AttackTab() {
   if (rawTechniques.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No MITRE ATT&amp;CK techniques were mapped for this analysis.
+        {fetchError ?? "No MITRE ATT&CK techniques were mapped for this analysis."}
       </div>
     );
   }
@@ -205,6 +221,9 @@ export default function AttackTab() {
         </h2>
         <input
           type="text"
+          id="attck-technique-search"
+          name="attck-technique-search"
+          aria-label="Search ATT&CK techniques"
           placeholder="Search for technique or subtechnique"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -249,15 +268,34 @@ export default function AttackTab() {
                             <span
                               key={src}
                               className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
-                              title={src}
+                              title={`Supported by the ${src} analysis layer`}
+                              role="img"
+                              aria-label={`Supported by the ${src} analysis layer`}
                             >
-                              {src[0]}
+                              <span aria-hidden="true">{src[0]}</span>
                             </span>
                           ))}
                         </div>
-                        <span className="text-[11px] text-text-muted">
-                          {tech.matches} match{tech.matches !== 1 ? "es" : ""}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {tech.sources.length >= 2 ? (
+                            <span
+                              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-green/10 text-status-green"
+                              title={`Corroborated across ${tech.sources.length} independent analysis layers (${tech.sources.join(", ")})`}
+                            >
+                              corroborated
+                            </span>
+                          ) : (
+                            <span
+                              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-text-muted/10 text-text-muted"
+                              title="Only one analysis layer supports this technique — weigh with caution"
+                            >
+                              single source
+                            </span>
+                          )}
+                          <span className="text-[11px] text-text-muted">
+                            {tech.matches} match{tech.matches !== 1 ? "es" : ""}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

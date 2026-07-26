@@ -20,6 +20,7 @@ from maljan.analysis.sigma_layer import (
     SigmaMatch,
     _classify_log_source,
     _is_rule_compatible,
+    build_events_from_sandbox,
 )
 
 # ---------------------------------------------------------------------------
@@ -339,3 +340,68 @@ class TestScanWithPlatformFilter:
 
         matches = layer.scan_log_lines(log_lines)
         assert len(matches) == 1
+
+
+class TestBuildEventsFromSandbox:
+    """2026-07 audit (Bulgu #2): Sigma scans structured events built from real
+    sandbox telemetry (strict field matching), never analyst prose."""
+
+    def test_no_sandbox_yields_no_events(self) -> None:
+        assert build_events_from_sandbox(None) == []
+        assert build_events_from_sandbox({}) == []
+        assert build_events_from_sandbox({"behavior": {}}) == []
+
+    def test_process_events_have_sysmon_fields(self) -> None:
+        sandbox = {
+            "behavior": {
+                "processes": [
+                    {"pid": 4, "ppid": 0, "process_name": "explorer.exe", "cmd": "explorer.exe"},
+                    {
+                        "pid": 42,
+                        "ppid": 4,
+                        "process_name": "evil.exe",
+                        "command_line": "evil.exe -beacon",
+                    },
+                ]
+            }
+        }
+        events = build_events_from_sandbox(sandbox)
+        child = next(e for e in events if e.get("Image") == "evil.exe")
+        assert child["CommandLine"] == "evil.exe -beacon"
+        assert child["ParentImage"] == "explorer.exe"
+
+    def test_registry_write_events(self) -> None:
+        run_key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\x"
+        sandbox = {
+            "behavior": {
+                "calls": [
+                    {
+                        "api": "RegSetValueExW",
+                        "arguments": [
+                            {"FullName": run_key},
+                            {"Buffer": "C:\\evil.exe"},
+                        ],
+                    },
+                    {"api": "RegQueryValueExW", "arguments": [{"FullName": "HKCU\\ignored"}]},
+                ]
+            }
+        }
+        events = build_events_from_sandbox(sandbox)
+        reg = [e for e in events if "TargetObject" in e]
+        assert len(reg) == 1  # the read-only query is not a write event
+        assert reg[0]["TargetObject"].endswith("Run\\x")
+        assert reg[0]["Details"] == "C:\\evil.exe"
+
+    def test_namevalue_argument_form(self) -> None:
+        sandbox = {
+            "behavior": {
+                "calls": [
+                    {
+                        "api": "RegCreateKeyExW",
+                        "arguments": [{"name": "FullName", "value": "HKLM\\Software\\Evil"}],
+                    }
+                ]
+            }
+        }
+        events = build_events_from_sandbox(sandbox)
+        assert any(e.get("TargetObject") == "HKLM\\Software\\Evil" for e in events)

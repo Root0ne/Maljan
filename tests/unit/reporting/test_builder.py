@@ -156,13 +156,14 @@ class TestAttributionGrounding:
         # Legacy behaviour: missing family => no grounding claim to make.
         assert report.attribution.family_grounded is True
 
-    def test_ungrounded_family_zeroes_confidence(self) -> None:
+    def test_category_not_surfaced_as_family(self) -> None:
+        # 2026-07 audit (Bulgu #6/#7): the behavioural category is never echoed
+        # into the family attribution; family stays unset without a CTI source.
         report = _build(category="rat", confidence=0.6)
-        assert report.attribution.family == "rat"
-        assert report.attribution.family_grounded is False
-        # Confidence must drop to 0.0 — the value was unsupported by any
-        # deterministic layer.
-        assert report.attribution.family_confidence == 0.0
+        assert report.attribution.family is None
+        assert report.attribution.family_grounded is True
+        # The category is still available on the report, just not as a family.
+        assert report.malware_category == "rat"
 
     def test_family_grounded_via_triage_cti(self) -> None:
         sandbox = {"cti": {"family": ["Trojan/RAT"]}}

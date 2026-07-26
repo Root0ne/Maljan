@@ -1,30 +1,82 @@
 """FastAPI dependencies — database sessions, current user extraction."""
 
+import hashlib
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import decode_token
 from app.config import settings
 from app.database import get_db
+from app.models.audit import APIKey
 from app.models.user import User
 
 # auto_error=False so the dependency still runs when ``auth_disabled`` is
 # active and the client sends no Authorization header.
 security_scheme = HTTPBearer(auto_error=False)
 
+# Audit 2026-07-26 (K2): API keys used to be write-only — ``/audit/api-keys``
+# minted them and the UI told the operator to copy the secret, but NOTHING ever
+# read ``APIKey.key_hash`` back, so a key authenticated exactly zero requests.
+# auto_error=False mirrors the bearer scheme so the two can coexist.
+api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def hash_api_key(raw_key: str) -> str:
+    """Return the stored representation of a raw API key.
+
+    Must stay in lockstep with ``app.api.v1.audit._generate_api_key``; both call
+    sites import this helper so the algorithm can only ever change in one place.
+    """
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+async def _user_from_api_key(raw_key: str, db: AsyncSession) -> User:
+    """Resolve an ``X-API-Key`` header to its owning user.
+
+    Rejects unknown, revoked and expired keys with the same generic 401 so the
+    header can't be used as an oracle to distinguish them. Stamps
+    ``last_used_at`` so operators can spot stale or leaked keys.
+    """
+    result = await db.execute(select(APIKey).where(APIKey.key_hash == hash_api_key(raw_key)))
+    api_key = result.scalar_one_or_none()
+
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired API key",
+    )
+    if api_key is None or not api_key.is_active:
+        raise invalid
+    if api_key.expires_at is not None and api_key.expires_at <= datetime.now(UTC):
+        raise invalid
+
+    user_result = await db.execute(select(User).where(User.id == api_key.user_id))
+    user = user_result.scalar_one_or_none()
+    if user is None:
+        raise invalid
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+
+    api_key.last_used_at = datetime.now(UTC)
+    return user
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    api_key: str | None = Depends(api_key_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Extract and validate the current user from the JWT bearer token.
+    """Resolve the caller from an ``X-API-Key`` header or a JWT bearer token.
 
     Raises:
-        HTTPException 401: If the token is invalid, expired, or user not found.
+        HTTPException 401: If the credential is missing, invalid or expired.
         HTTPException 403: If the user account is deactivated.
     """
     if settings.auth_disabled:
@@ -40,6 +92,12 @@ async def get_current_user(
                 ),
             )
         return dev_user
+
+    # API key first: it is an explicit, unambiguous credential, so a caller that
+    # sends one gets its verdict rather than silently falling through to the
+    # bearer path and receiving a confusing "Not authenticated".
+    if api_key:
+        return await _user_from_api_key(api_key, db)
 
     if credentials is None:
         raise HTTPException(

@@ -29,6 +29,12 @@ from maljan.core.exceptions import AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.tool_evidence import (
+    MAX_OUTPUTS_PER_AGENT,
+    CapturedToolOutput,
+    _symbol_from_args,
+    trim_output,
+)
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
@@ -49,6 +55,91 @@ _TECHNIQUE_MAX: int = 1700
 
 # Explicit placeholders that LLMs sometimes emit when uncertain.
 _INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
+
+
+def describe_exception(exc: BaseException) -> str:
+    """Return a non-empty, diagnosable description of ``exc``.
+
+    Audit 2026-07-26: analyst failures were logged as
+    ``"dynamic ISR analysis failed: "`` — an empty tail — because several
+    exceptions raised on the MCP path carry no message (bare ``Exception``,
+    ``ExceptionGroup``, ``anyio`` cancellation wrappers). The operator was left
+    with a failure and zero information about it. Always fall back to the
+    exception's class name, and unwrap ``ExceptionGroup`` sub-exceptions so an
+    MCP connection error inside a task group is still visible.
+    """
+    text = str(exc).strip()
+    inner = getattr(exc, "exceptions", None)
+    if not text and isinstance(inner, list | tuple) and inner:
+        parts = [describe_exception(sub) for sub in inner[:3]]
+        return f"{type(exc).__name__}({'; '.join(p for p in parts if p)})"
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+# Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing, used by the
+# view- and tier-decomposition paths whose prompts explicitly demand that shape.
+_BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
+_BLOCK_CLAIM_RE = re.compile(
+    r"CLAIM:\s*(.+?)(?=\s*\n\s*(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+)
+_BLOCK_EVIDENCE_RE = re.compile(
+    r"EVIDENCE:\s*(.+?)(?=\s*\n\s*(?:CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+)
+_BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
+_BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
+
+
+def parse_structured_claims(text: str) -> list[ClaimEvidence]:
+    """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
+
+    Audit 2026-07-26: the view/tier decomposition prompts (``_VIEW_SYSTEM``)
+    require this exact format, but the parsed output was handed to
+    ``_text_to_isr``'s free-text sentence splitter, which has no notion of a
+    ``TECHNIQUE:`` line. Every technique ID produced through those paths was
+    therefore silently dropped and the raw "CLAIM: ..." prefix leaked into the
+    claim text.
+
+    Deliberately more lenient than the static analyst's strict variant: a block
+    is kept as long as it has a ``CLAIM:``. A model that omits ``CONFIDENCE:``
+    or ``EVIDENCE:`` still produced a real finding, and discarding it loses
+    evidence — the defaults below mark it as unsourced/medium-confidence
+    instead.
+    """
+    claims: list[ClaimEvidence] = []
+    for raw_block in _BLOCK_SPLIT_RE.split(text):
+        block = raw_block.strip()
+        if not block or "CLAIM:" not in block:
+            continue
+        claim_match = _BLOCK_CLAIM_RE.search(block)
+        if not claim_match:
+            continue
+
+        evidence_match = _BLOCK_EVIDENCE_RE.search(block)
+        confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
+        technique_match = _BLOCK_TECHNIQUE_RE.search(block)
+
+        confidence = 0.5
+        if confidence_match:
+            try:
+                confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
+            except ValueError:
+                confidence = 0.5
+
+        technique_id: str | None = None
+        if technique_match:
+            raw_tid = technique_match.group(1).upper()
+            if raw_tid != "NONE" and _technique_id_is_valid(raw_tid):
+                technique_id = raw_tid
+
+        claims.append(
+            ClaimEvidence(
+                claim=claim_match.group(1).strip()[:300],
+                evidence_ref=(evidence_match.group(1).strip()[:200] if evidence_match else ""),
+                confidence=confidence,
+                technique_id=technique_id,
+            )
+        )
+    return claims
 
 
 def _technique_id_is_valid(tid: str) -> bool:
@@ -438,6 +529,11 @@ class BaseAnalyst(ABC):
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
+        # Report-reshaping Phase 1: durable capture of the ReAct tool loop's
+        # ToolMessages (decompile/crypto/emulate/dataflow) so the report
+        # Composer can ground deep sections instead of hallucinating. Populated
+        # by execute_tool_loop; read via get_last_tool_evidence().
+        self._last_tool_evidence: list[CapturedToolOutput] = []
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -490,6 +586,10 @@ class BaseAnalyst(ABC):
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
+
+        # Report-reshaping Phase 1: reset the per-run capture buffer before this
+        # loop populates it from the ReAct message stream (see below).
+        self._last_tool_evidence = []
 
         agent_executor = create_react_agent(self.llm, self.tools)
 
@@ -594,6 +694,14 @@ class BaseAnalyst(ABC):
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
+        # Report-reshaping Phase 1: capture the tool loop's ToolMessages as
+        # durable evidence for the report Composer. Best-effort — a capture
+        # failure must never sink the analysis.
+        try:
+            self._last_tool_evidence = self._capture_tool_evidence(msgs)
+        except Exception as _cap_exc:  # noqa: BLE001
+            self.logger.debug("tool-evidence capture skipped: %s", _cap_exc)
+            self._last_tool_evidence = []
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -668,6 +776,54 @@ class BaseAnalyst(ABC):
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 return synthesized
         return content
+
+    def _capture_tool_evidence(self, msgs: list) -> list[CapturedToolOutput]:
+        """Pair each tool call with its result from the ReAct message stream.
+
+        Report-reshaping Phase 1. AIMessages carry ``tool_calls`` (name + args +
+        id); ToolMessages carry the result keyed by ``tool_call_id``. We pair by
+        id — not positional order — so provider-specific interleaving cannot
+        mis-associate an output. Capped at ``MAX_OUTPUTS_PER_AGENT`` and each
+        output re-trimmed. Result feeds the report Composer's evidence bundles.
+        """
+        # tool_call_id -> (tool_name, args)
+        calls: dict[str, tuple[str, dict]] = {}
+        for m in msgs:
+            for tc in getattr(m, "tool_calls", None) or []:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+                tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
+                if isinstance(tc_id, str) and tc_name:
+                    calls[tc_id] = (str(tc_name), tc_args if isinstance(tc_args, dict) else {})
+
+        captured: list[CapturedToolOutput] = []
+        seq = 0
+        for m in msgs:
+            if getattr(m, "type", "") != "tool":
+                continue
+            msg_id = getattr(m, "tool_call_id", None)
+            tool_name = str(getattr(m, "name", "") or "unknown")
+            tool_args: dict = {}
+            if isinstance(msg_id, str) and msg_id in calls:
+                tool_name, tool_args = calls[msg_id]
+            captured.append(
+                CapturedToolOutput(
+                    agent_id=self.name,
+                    tool_name=tool_name,
+                    args=tool_args,
+                    symbol=_symbol_from_args(tool_args),
+                    output=trim_output(str(getattr(m, "content", "") or "")),
+                    seq=seq,
+                )
+            )
+            seq += 1
+            if len(captured) >= MAX_OUTPUTS_PER_AGENT:
+                break
+        return captured
+
+    def get_last_tool_evidence(self) -> list[CapturedToolOutput]:
+        """Return the tool outputs captured by the most recent ReAct loop."""
+        return list(self._last_tool_evidence)
 
     def _force_final_synthesis(self, msgs: list, timeout: int) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
@@ -836,8 +992,8 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("ISR analysis failed: %s", e)
-            raise AnalystError(f"{self.name} ISR analysis failed: {e}") from e
+            self.logger.error("ISR analysis failed: %s", describe_exception(e))
+            raise AnalystError(f"{self.name} ISR analysis failed: {describe_exception(e)}") from e
 
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
@@ -1002,8 +1158,10 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("View-decomposition ISR analysis failed: %s", e)
-            raise AnalystError(f"{self.name} view-decomposition failed: {e}") from e
+            self.logger.error("View-decomposition ISR analysis failed: %s", describe_exception(e))
+            raise AnalystError(
+                f"{self.name} view-decomposition failed: {describe_exception(e)}"
+            ) from e
 
     # ------------------------------------------------------------------
     # Tier-wise (vertical) reasoning (findings-log §4 Item 3) — text path
@@ -1093,8 +1251,10 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", e)
-            raise AnalystError(f"{self.name} tier-wise reasoning failed: {e}") from e
+            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", describe_exception(e))
+            raise AnalystError(
+                f"{self.name} tier-wise reasoning failed: {describe_exception(e)}"
+            ) from e
 
     # ------------------------------------------------------------------
     # Inline consistency gate (findings-log §4 Item 4)
@@ -1240,6 +1400,23 @@ class BaseAnalyst(ABC):
                 dissent_items=[],
                 revision_round=revision_round,
             )
+
+        # Structured output first (audit 2026-07-26). Several prompts —
+        # notably the view/tier decomposition ones — mandate the
+        # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format. Running the
+        # free-text sentence splitter over that shape kept the literal
+        # "CLAIM: " prefix in the claim text and threw away every
+        # ``TECHNIQUE:`` line, so those paths produced technique-less claims.
+        if "CLAIM:" in text:
+            structured = parse_structured_claims(text)
+            if structured:
+                return AgentISR(
+                    agent_id=self.name,
+                    domain=domain,
+                    claims=structured,
+                    dissent_items=[],
+                    revision_round=revision_round,
+                )
 
         raw_sentences = [
             s.strip() for s in self._SENTENCE_SPLIT_RE.split(text) if len(s.strip()) > 20

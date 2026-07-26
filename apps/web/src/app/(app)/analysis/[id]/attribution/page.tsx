@@ -5,6 +5,9 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
+import { getErrorMessage } from "@/lib/errors";
+import Field from "@/components/ui/Field";
+import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
 import type { FamilyAttribution } from "@/types/malware-report";
 
 type SimilarSample = {
@@ -41,18 +44,19 @@ export default function AttributionTab() {
     setEnrichBusy(true);
     setEnrichMsg(null);
     try {
-      await api.enrichReport(reportId);
-      setEnrichMsg(
-        "Enrichment queued. similar_samples will appear when the worker finishes.",
-      );
+      // audit 2026-07-26 (§4): report the actual endpoint status rather than
+      // promising a refresh for every outcome.
+      const res = await api.enrichReport(reportId);
+      setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
     } catch (e) {
-      setEnrichMsg(`Failed to queue enrichment: ${(e as Error).message}`);
+      setEnrichMsg(`Failed to queue enrichment: ${getErrorMessage(e)}`);
     } finally {
       setEnrichBusy(false);
     }
   };
 
   const familyConfidencePct = Math.round(attribution.family_confidence * 100);
+  const malwareCategory = report?.malware_report?.malware_category;
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
   // Wave 4 (D11 UI completion): when the family came back ungrounded the
   // builder already zeroed the confidence. Render the name as muted +
@@ -84,6 +88,14 @@ export default function AttributionTab() {
             valueClassName={familyValueClass}
           />
           <Field
+            label="Category"
+            value={
+              malwareCategory
+                ? `${malwareCategory} (behavioural class)`
+                : "(unclassified)"
+            }
+          />
+          <Field
             label="Family Confidence"
             value={
               attribution.family && !familyUngrounded
@@ -94,10 +106,17 @@ export default function AttributionTab() {
           <Field label="Actor" value={attribution.actor || "(unknown)"} />
           <Field label="Campaign" value={attribution.campaign || "(unknown)"} />
         </div>
+        {!attribution.family && (
+          <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            No specific malware family was attributed. The behavioural{" "}
+            <span className="text-text-secondary">category</span> above
+            classifies how the sample behaves — it is not a family name.
+          </div>
+        )}
         {familyUngrounded && (
           <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
-            Family was emitted by the verdict LLM but is not corroborated
-            by Triage CTI, sandbox signatures, or analyst claims. Treat as
+            Family was emitted by the verdict LLM but is not corroborated by
+            sandbox CTI, sandbox signatures, or analyst claims. Treat as
             unverified.
           </div>
         )}
@@ -113,7 +132,7 @@ export default function AttributionTab() {
             disabled={enrichBusy || !reportId}
             className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
           >
-            {enrichBusy ? "queueing..." : "trigger LTM lookup"}
+            {enrichBusy ? "queueing..." : ENRICH_BUTTON_LABEL}
           </button>
         </div>
         {enrichMsg && (
@@ -124,8 +143,8 @@ export default function AttributionTab() {
         {similars.length === 0 ? (
           <div className="p-8 text-center text-sm text-text-muted">
             No nearest-neighbour cases recorded yet. Run the threat-intel
-            enrichment step (button above) to populate this list from the
-            Maljan LTM (Qdrant).
+            enrichment step (button above) to populate this list from Maljan&apos;s
+            long-term memory of previously analysed samples.
           </div>
         ) : (
           <div className="divide-y divide-border-light">
@@ -134,29 +153,6 @@ export default function AttributionTab() {
             ))}
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  valueClassName,
-}: {
-  label: string;
-  value: string;
-  valueClassName?: string;
-}) {
-  return (
-    <div>
-      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-        {label}
-      </div>
-      <div
-        className={`text-sm text-text-primary break-all ${valueClassName ?? ""}`}
-      >
-        {value}
       </div>
     </div>
   );

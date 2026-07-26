@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { api } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { verdictLabel } from "@/lib/verdict";
+import { messagesFromEvents } from "@/lib/transcript";
+import TranscriptPanel from "@/components/TranscriptPanel";
+import type { WSEvent } from "@/types";
 
 type AgentPhase = "waiting" | "analyzing" | "done";
 type PipelinePhase = "waiting" | "analyzing" | "negotiation" | "completed" | "failed";
@@ -29,10 +34,16 @@ function buildMessage(type: string, data: Record<string, unknown>): string {
     }
     case "agent_progress":
       return `Agent [${data.agent}]: ${data.phase}`;
+    case "agent_message": {
+      const claims = Array.isArray(data.claims) ? data.claims.length : 0;
+      return `${data.speaker} (${data.role}): ${data.status}${claims ? `, ${claims} claim(s)` : ""}`;
+    }
     case "phase_change":
       return `Pipeline phase: ${data.phase}`;
     case "completed":
-      return `Analysis complete — verdict: ${data.verdict} (confidence: ${data.confidence})`;
+      // audit 2026-07-26 (T2): the WS payload carries the raw backend verdict
+      // ("Malware"); show the same normalised label as every other surface.
+      return `Analysis complete — verdict: ${verdictLabel(String(data.verdict ?? ""))} (confidence: ${data.confidence})`;
     case "error":
       return `Error: ${String(data.error ?? "unknown error")}`;
     case "cancelled":
@@ -49,7 +60,11 @@ const PHASE_CONFIG: Record<PipelinePhase, { banner: string; label: string }> = {
   },
   analyzing: {
     banner: "bg-status-blue/10 border-status-blue/20 text-status-blue",
-    label: "Analyst agents running in parallel...",
+    // audit 2026-07-26 (T1): the old copy claimed the analysts run in
+    // parallel, but `parallel_analysts=False` is the default — they run one
+    // after another. Keep the label topology-neutral so it stays true under
+    // either setting.
+    label: "Analyst agents examining the sample...",
   },
   negotiation: {
     banner: "bg-status-orange/10 border-status-orange/20 text-status-orange",
@@ -84,9 +99,14 @@ export default function LiveAnalysisPage() {
   const { events: wsEvents, connected } = useWebSocket(jobId);
 
   const [agents, setAgents] = useState<AgentState[]>([]);
+  const [messageEvents, setMessageEvents] = useState<WSEvent[]>([]);
   const [eventLog, setEventLog] = useState<EventEntry[]>([]);
   const [phase, setPhase] = useState<PipelinePhase>("waiting");
   const [jobMockMode, setJobMockMode] = useState<boolean | null>(null);
+  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): the backfill, the job
+  // fetch and the polling fallback all failed silently, so a page that had
+  // quietly stopped tracking the run looked identical to a healthy one.
+  const [feedError, setFeedError] = useState<string | null>(null);
 
   const processedCount = useRef(0);
   // Dedupe key set — covers both stream_id (from backfill) and a stable
@@ -134,6 +154,26 @@ export default function LiveAnalysisPage() {
         });
       }
 
+      // The transcript itself. Raw events are accumulated and normalised in
+      // one place (lib/transcript) rather than reduced here, so this page and
+      // the post-run PROCESS tab build their messages identically.
+      if (ev.type === "agent_message") {
+        setMessageEvents((prev) => [
+          ...prev,
+          { type: "agent_message", data, ts: ev.ts ?? new Date().toISOString() },
+        ]);
+        const speaker = String(data.speaker ?? "");
+        const role = String(data.role ?? "");
+        // An analyst that has spoken is finished — its own message is a more
+        // reliable "done" signal than a separate progress event that may not
+        // arrive if the node failed.
+        if (speaker && (role === "analyst" || role === "reviser")) {
+          setAgents((prev) =>
+            prev.map((a) => (a.name === speaker ? { ...a, phase: "done" } : a))
+          );
+        }
+      }
+
       if (ev.type === "phase_change") {
         const p = data.phase as string | undefined;
         if (p === "negotiation") setPhase("negotiation");
@@ -169,8 +209,14 @@ export default function LiveAnalysisPage() {
         for (const ev of res.events) {
           applyEvent(ev as PipelineEvent & { stream_id?: string });
         }
-      } catch {
-        /* Stream may not exist yet — WS will populate it. */
+      } catch (err) {
+        // The stream may legitimately not exist yet, but say so rather than
+        // leaving an empty log that looks like "nothing has happened".
+        if (!cancelled) {
+          setFeedError(
+            `Could not replay earlier events (${getErrorMessage(err)}). Only events received from now on are shown.`,
+          );
+        }
       }
     })();
     return () => {
@@ -190,8 +236,14 @@ export default function LiveAnalysisPage() {
         if (cancelled) return;
         const cfg = (job.config ?? {}) as Record<string, unknown>;
         setJobMockMode(Boolean(cfg.mock_mode));
-      } catch {
-        /* Best-effort: leave the badge absent when the API is unreachable. */
+      } catch (err) {
+        // The MOCK badge is derived from this call — if it fails we cannot
+        // promise the run is a real one, so surface it.
+        if (!cancelled) {
+          setFeedError(
+            `Could not read this job's configuration (${getErrorMessage(err)}). The MOCK-mode badge may be missing.`,
+          );
+        }
       }
     })();
     return () => {
@@ -222,8 +274,11 @@ export default function LiveAnalysisPage() {
         } else if (job.status === "failed") {
           setPhase("failed");
         }
-      } catch {
-        /* API unreachable — WS still works */
+        setFeedError(null);
+      } catch (err) {
+        setFeedError(
+          `Status polling failed (${getErrorMessage(err)}). Live updates depend on the WebSocket alone until the API responds again.`,
+        );
       }
     }, 5000);
 
@@ -231,9 +286,20 @@ export default function LiveAnalysisPage() {
   }, [jobId, phase]);
 
   const phaseConfig = PHASE_CONFIG[phase];
+  const transcript = useMemo(() => messagesFromEvents(messageEvents), [messageEvents]);
+  const activeSpeaker = agents.find((a) => a.phase === "analyzing")?.name ?? null;
 
   return (
     <div className="space-y-4">
+      {feedError && (
+        <div
+          role="alert"
+          className="text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+        >
+          {feedError}
+        </div>
+      )}
+
       {/* Status Banner */}
       <div
         className={`p-3 rounded border text-xs font-medium flex items-center justify-between ${phaseConfig.banner}`}
@@ -256,6 +322,24 @@ export default function LiveAnalysisPage() {
           </span>
         </span>
       </div>
+
+      {/* The conversation itself, above the status grid and the raw log:
+        * what the agents actually found is the reason to watch a live run,
+        * and until now the page could only say that they were busy. */}
+      <TranscriptPanel
+        messages={transcript}
+        live={phase === "analyzing" || phase === "negotiation"}
+        activeSpeaker={activeSpeaker}
+        /* This tab replays from the Redis event stream, which expires after
+         * 24 h. An older run therefore has an empty feed here while its full
+         * transcript is still on the PROCESS tab, rebuilt from the database —
+         * say so rather than implying nothing was recorded. */
+        emptyHint={
+          phase === "completed" || phase === "failed"
+            ? "The live event feed for this run has expired (events are kept for 24 hours). The full transcript is on the PROCESS tab."
+            : undefined
+        }
+      />
 
       <div className="grid grid-cols-3 gap-4">
         {/* Agent Status Grid */}

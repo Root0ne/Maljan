@@ -7,8 +7,12 @@
  */
 
 export function downloadBlob(content: string, filename: string, mime: string): void {
+  downloadObject(new Blob([content], { type: mime }), filename);
+}
+
+/** Save an already-built Blob (PDF and other binary exports). */
+export function downloadObject(blob: Blob, filename: string): void {
   if (typeof window === "undefined") return;
-  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -30,6 +34,46 @@ export function copyToClipboard(text: string): Promise<boolean> {
     .writeText(text)
     .then(() => true)
     .catch(() => false);
+}
+
+/* ── Time / duration formatting ─────────────────────────
+ *
+ * audit 2026-07-26 (T3): `formatDate` existed in four slightly different
+ * shapes and `formatDuration` in three, so the same timestamp rendered
+ * differently on every page. These are the single canonical implementations;
+ * every page imports from here.
+ */
+
+/** Canonical absolute timestamp, e.g. "Jul 5, 2026, 07:34 PM". */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "Never";
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Canonical elapsed duration: "N/A", "42s", or "3m 07s" (seconds zero-padded). */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (!seconds) return "N/A";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+/** Canonical relative timestamp, e.g. "just now" / "12m ago" / "3d ago". */
+export function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export function formatBytes(bytes: number): string {

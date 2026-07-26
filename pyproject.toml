@@ -39,6 +39,13 @@ dependencies = [
     "alembic>=1.14.0",
     "filetype>=1.2.0",
     "pyelftools>=0.32",
+    # Report export (Phase 6). markdown-it-py converts the MarkdownRenderer
+    # output to HTML with raw-HTML passthrough disabled — the XSS guard for
+    # LLM/malware-derived report text. weasyprint prints that HTML to PDF; it
+    # binds to Pango/HarfBuzz at call time, which docker/Dockerfile.backend
+    # installs, and PdfRenderer degrades with a clear error where they are absent.
+    "markdown-it-py>=3.0.0",
+    "weasyprint>=62.0",
 ]
 
 [project.scripts]

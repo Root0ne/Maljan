@@ -27,7 +27,7 @@ from app.auth.throttle import (
     refresh_token_register,
 )
 from app.config import settings
-from app.database import get_db
+from app.database import async_session_factory, get_db
 from app.deps import get_current_user
 from app.logging_config import get_logger
 from app.models.audit import AuditLog
@@ -58,17 +58,38 @@ async def _audit(
     request: Request,
     detail: str | None = None,
 ) -> None:
+    """Persist an auth audit row on an INDEPENDENT transaction.
+
+    Audit 2026-07-26 (K1): this used to ``db.add()`` on the request-scoped
+    session, which only commits when the endpoint returns successfully
+    (``database.get_db``). Every audit row written on a failure path was
+    therefore rolled back with the ``HTTPException`` — verified live: after a
+    failed login the table contained only ``auth.login.success`` and
+    ``auth.register`` rows. That silently discarded exactly the
+    security-relevant events: ``login.failure`` (brute force),
+    ``login.locked``, ``login.blocked_inactive``, ``refresh.invalid`` and
+    ``refresh.reuse_detected`` (a token-theft indicator).
+
+    Writing on a separate session decouples the audit record from the request
+    transaction's fate, so it survives the rollback. Best-effort by design: an
+    audit failure must never turn a handled 401 into a 500, so every error is
+    swallowed at DEBUG. ``db`` is kept in the signature for call-site
+    compatibility and is deliberately unused.
+    """
+    del db  # audit rows must not share the request transaction (see docstring)
     try:
-        db.add(
-            AuditLog(
-                user_id=user_id,
-                action=action,
-                resource_type="auth",
-                resource_id=str(user_id) if user_id else None,
-                details={"detail": detail} if detail else None,
-                ip_address=_client_ip(request) or None,
+        async with async_session_factory() as audit_session:
+            audit_session.add(
+                AuditLog(
+                    user_id=user_id,
+                    action=action,
+                    resource_type="auth",
+                    resource_id=str(user_id) if user_id else None,
+                    details={"detail": detail} if detail else None,
+                    ip_address=_client_ip(request) or None,
+                )
             )
-        )
+            await audit_session.commit()
     except Exception as exc:
         logger.debug("AuditLog insert failed: %s", exc)
 

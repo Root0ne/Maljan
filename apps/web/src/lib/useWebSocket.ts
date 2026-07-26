@@ -3,7 +3,22 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { WSEvent } from "@/types";
 
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
+/**
+ * Where the socket dials.
+ *
+ * NEXT_PUBLIC_WS_URL is the override; the default is derived from the API base
+ * rather than written out again. The two used to be independent literals —
+ * `ws://localhost:8000` here against `http://127.0.0.1:8000` in api.ts — which
+ * are *different origins*, so an unconfigured deployment could reach the API
+ * and silently fail to reach the socket, and a test harness had to remember to
+ * pin two variables instead of one.
+ */
+function defaultWsBase(): string {
+  const api = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  return api.replace(/^http/, "ws");
+}
+
+const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || defaultWsBase();
 
 /**
  * Reconnect schedule (audit follow-up 2026-05-19).

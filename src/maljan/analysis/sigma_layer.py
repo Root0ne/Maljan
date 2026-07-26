@@ -1,8 +1,16 @@
 """Sigma rule-based log analysis — ATT&CK Layer 0 deterministic detection.
 
 Sigma and YARA are complementary layers:
-  - YARA: looks at binary content and analysis text.
-  - Sigma: looks at log lines (Windows Event Log, Sysmon, Zeek, Suricata).
+  - YARA: looks at the sample's binary content.
+  - Sigma: looks at structured telemetry events (process creation, registry
+    writes) built from the sandbox report (Sysmon/Windows-Event-Log shaped).
+
+2026-07 audit: the pipeline feeds Sigma structured events built from real
+sandbox telemetry via ``build_events_from_sandbox`` + ``scan_events`` (strict
+field matching). The legacy ``scan_report_text``/``scan_log_lines`` prose path
+is retained only for tests/back-compat — it must NOT be used on analyst prose,
+because ``strict=False`` matches rule values against arbitrary text and
+manufactures false detections.
 
 Together they cover the full deterministic-signal surface. Without Sigma,
 log-based attack patterns (e.g. LSASS access, unnecessary LOLBin usage)
@@ -529,3 +537,107 @@ class SigmaLayer:
             dissent_items=[],
             revision_round=0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Telemetry -> Sysmon-shaped events (2026-07 deep re-architecture)
+# ---------------------------------------------------------------------------
+
+
+def _sandbox_arg_value(args: Any, names: tuple[str, ...]) -> str | None:
+    """Pull the first matching argument value from a CAPE call's ``arguments``.
+
+    Handles both the direct-key form (``{"FullName": "..."}``) and the
+    name/value-pair form (``{"name": "FullName", "value": "..."}``).
+    """
+    if not isinstance(args, list):
+        return None
+    for item in args:
+        if not isinstance(item, dict):
+            continue
+        for name in names:
+            if name in item and item[name] not in (None, ""):
+                return str(item[name])
+        if str(item.get("name")) in names and item.get("value") not in (None, ""):
+            return str(item.get("value"))
+    return None
+
+
+def build_events_from_sandbox(sandbox_report: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Translate real sandbox telemetry into Sysmon-shaped events for strict
+    Sigma evaluation.
+
+    2026-07 audit: Sigma previously scanned concatenated analyst prose with
+    ``strict=False``, which matched a rule's *values* against any text — e.g.
+    the Ghidra tool name ``list_imports`` appearing in an analyst report
+    satisfied a ``CommandLine|contains: list_imports`` rule and surfaced as a
+    fake "CommandLine" detection. We now build structured events from actual
+    process/registry telemetry and evaluate with ``strict=True`` so a rule only
+    fires against the field it targets. No telemetry -> no events -> no matches
+    (the correct outcome for static-only runs).
+
+    Returns a list of ``{field: value}`` dicts (process-creation and
+    registry-write shapes). Fail-safe: any malformed input yields ``[]``.
+    """
+    if not isinstance(sandbox_report, dict):
+        return []
+    behavior = sandbox_report.get("behavior")
+    if not isinstance(behavior, dict):
+        behavior = {}
+
+    events: list[dict[str, str]] = []
+
+    procs = behavior.get("processes")
+    pid_to_name: dict[int, str] = {}
+    if isinstance(procs, list):
+        for proc in procs:
+            if not isinstance(proc, dict):
+                continue
+            try:
+                pid = int(proc.get("pid") or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            name = str(proc.get("process_name") or proc.get("name") or "").strip()
+            if pid and name:
+                pid_to_name[pid] = name
+        for proc in procs:
+            if not isinstance(proc, dict):
+                continue
+            name = str(proc.get("process_name") or proc.get("name") or "").strip()
+            cmd = str(proc.get("command_line") or proc.get("cmd") or "").strip()
+            if not (name or cmd):
+                continue
+            try:
+                ppid = int(proc.get("ppid") or 0)
+            except (TypeError, ValueError):
+                ppid = 0
+            event = {
+                "Image": name,
+                "CommandLine": cmd or name,
+                "ParentImage": pid_to_name.get(ppid, ""),
+            }
+            trimmed = {k: v for k, v in event.items() if v}
+            if trimmed:
+                events.append(trimmed)
+
+    calls = behavior.get("calls")
+    if isinstance(calls, list):
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            api = str(call.get("api") or "").strip()
+            if not api.startswith("Reg"):
+                continue
+            if not ("Set" in api or "Create" in api or "Delete" in api):
+                continue
+            args = call.get("arguments") or []
+            key = _sandbox_arg_value(args, ("FullName", "Key", "lpSubKey", "key"))
+            if not key:
+                continue
+            reg_event: dict[str, str] = {"TargetObject": key}
+            details = _sandbox_arg_value(args, ("Buffer", "Value", "lpData", "data"))
+            if details:
+                reg_event["Details"] = details
+            events.append(reg_event)
+
+    return events

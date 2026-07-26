@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ReportSummaryDTO } from "@/lib/api";
+import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { formatDateTime } from "@/lib/report-utils";
 
 interface ReportRow {
   id: string;
@@ -23,16 +25,6 @@ const VERDICT_STYLES: Record<string, { dot: string; text: string }> = {
   benign: { dot: "bg-status-green", text: "text-status-green" },
   unknown: { dot: "bg-text-muted", text: "text-text-muted" },
 };
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function mapReport(dto: ReportSummaryDTO): ReportRow {
   return {
@@ -66,10 +58,13 @@ export default function ReportsPage() {
     })();
   }, []);
 
+  // Normalize the backend verdict ("Malware"/…) to a bucket before comparing —
+  // otherwise the "malicious" filter never matched a "Malware" verdict and the
+  // list showed nothing while All(n) had rows (audit M1).
   const filtered =
     filter === "all"
       ? reports
-      : reports.filter((r) => r.verdict === filter);
+      : reports.filter((r) => verdictBucket(r.verdict) === filter);
 
   const confidencePercent = (c: number) => Math.round(c * 100);
 
@@ -92,7 +87,7 @@ export default function ReportsPage() {
 
   if (error) {
     return (
-      <div className="p-4 text-sm text-status-red bg-status-red/10 border border-status-red/20 rounded">
+      <div role="alert" className="p-4 text-sm text-status-red bg-status-red/10 border border-status-red/20 rounded">
         {error}
       </div>
     );
@@ -129,7 +124,7 @@ export default function ReportsPage() {
           >
             {f.label}
             <span className="ml-1.5 text-text-muted">
-              ({f.key === "all" ? reports.length : reports.filter((r) => r.verdict === f.key).length})
+              ({f.key === "all" ? reports.length : reports.filter((r) => verdictBucket(r.verdict) === f.key).length})
             </span>
           </button>
         ))}
@@ -142,7 +137,7 @@ export default function ReportsPage() {
             <tr className="border-b border-border">
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider">Sample</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-28">Verdict</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-24">Score</th>
+              <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-24">Confidence</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-20">TTPs</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-20">Findings</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2.5 uppercase tracking-wider w-36">Date</th>
@@ -157,7 +152,7 @@ export default function ReportsPage() {
               </tr>
             ) : (
               filtered.map((report) => {
-                const v = VERDICT_STYLES[report.verdict] || VERDICT_STYLES.unknown;
+                const v = VERDICT_STYLES[verdictBucket(report.verdict)] || VERDICT_STYLES.unknown;
                 const pct = confidencePercent(report.overall_confidence);
                 return (
                   <tr key={report.id} className="hover:bg-bg-hover transition-colors">
@@ -172,7 +167,7 @@ export default function ReportsPage() {
                     <td className="px-4 py-3">
                       <div className={`flex items-center gap-1.5 ${v.text}`}>
                         <span className={`w-2 h-2 rounded-full ${v.dot}`} />
-                        <span className="text-xs capitalize">{report.verdict}</span>
+                        <span className="text-xs">{verdictLabel(report.verdict)}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -192,7 +187,7 @@ export default function ReportsPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-text-secondary">{report.techniques_count}</td>
                     <td className="px-4 py-3 text-xs text-text-secondary">{report.findings_count}</td>
-                    <td className="px-4 py-3 text-xs text-text-muted">{formatDate(report.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-text-muted">{formatDateTime(report.created_at)}</td>
                   </tr>
                 );
               })

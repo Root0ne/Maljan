@@ -454,6 +454,11 @@ class DefensiveRecommendation(BaseModel):
     action: str
     rationale: str
     priority: Literal["P0", "P1", "P2"]
+    # 2026-07 round 2: link each recommendation to the ATT&CK technique it
+    # defends against, and carry concrete detection guidance (specific API /
+    # registry key / telemetry source / sigma-yara pointer) rather than prose.
+    technique_id: str | None = None
+    detection: str | None = None
 
 
 class ExternalReference(BaseModel):
@@ -464,6 +469,190 @@ class ExternalReference(BaseModel):
     source: str  # "VirusTotal", "MalwareBazaar", "MITRE ATT&CK", ...
     url: str
     note: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Professional-report front-matter & technical spine (report-reshaping Phase 2)
+# ---------------------------------------------------------------------------
+#
+# Additive, all-optional containers modelled on the reference spec at
+# docs/report-reference/malware-analysis-report-reference.md. Deterministic
+# extractors (Phase 3) fill the front-matter / IOC / fingerprint fields; the
+# section-wise Composer (Phase 4) fills the prose subsections, each grounded in
+# captured tool evidence. Every field defaults empty so a report never regresses
+# when a section has no evidence — the renderer states absence explicitly.
+
+TLPLevel = Literal["CLEAR", "GREEN", "AMBER", "AMBER_STRICT", "RED"]
+
+
+class VersionHistoryEntry(BaseModel):
+    """One row of the report's revision-history table (reference §2)."""
+
+    model_config = _STRICT_CONFIG
+
+    version: str
+    date: str
+    authors: str
+    description: str
+
+
+class ReportFrontMatter(BaseModel):
+    """Cover / front-matter identity block (reference §1)."""
+
+    model_config = _STRICT_CONFIG
+
+    publisher: str = "Maljan"
+    product_type: str = "Malware Analysis Report"
+    malware_name: str | None = None  # headline name (family or sample-derived)
+    codename: str | None = None
+    subtitle: str | None = None  # one-line targeting descriptor
+    version: str = "1.0"
+    report_date: str | None = None
+    report_number: str | None = None
+    authors: str | None = None
+    team: str | None = None
+    tlp: TLPLevel = "CLEAR"
+    copyright: str | None = None
+    license: str | None = None
+
+
+class CliFlag(BaseModel):
+    """A single command-line flag/argument the sample accepts (reference §8.2)."""
+
+    model_config = _STRICT_CONFIG
+
+    flag: str
+    description: str
+    evidence_ref: str | None = None
+
+
+class ServiceProcessKill(BaseModel):
+    """Service/process termination behaviour (reference IV.1)."""
+
+    model_config = _STRICT_CONFIG
+
+    kill_list: list[str] = Field(default_factory=list)
+    white_list: list[str] = Field(default_factory=list)
+    mechanism: str | None = None  # e.g. "Toolhelp32 + ControlService", "net stop / taskkill"
+
+
+class EncryptionScheme(BaseModel):
+    """Reverse-engineered crypto scheme (reference I.6 / IV.1)."""
+
+    model_config = _STRICT_CONFIG
+
+    cipher: str | None = None  # e.g. "AES-256"
+    mode: str | None = None  # e.g. "CBC", "GCM"
+    library: str | None = None  # e.g. "OpenSSL EVP", "Windows CNG (BCrypt)"
+    key_source: str | None = None
+    key_management: str | None = None
+    iv: str | None = None
+    file_marker: str | None = None
+    extension: str | None = None  # appended extension, e.g. ".MEDUSA"
+    partial_threshold: str | None = None  # e.g. "files > 8 MB partially encrypted"
+    per_file_key: bool | None = None
+    evidence_ref: str | None = None
+
+
+class RansomNote(BaseModel):
+    """Extracted ransom-note artefact (reference IV.1)."""
+
+    model_config = _STRICT_CONFIG
+
+    filename: str | None = None
+    verbatim_content: str | None = None
+    sections: list[str] = Field(default_factory=list)
+    company_id_hash: str | None = None
+
+
+class TechnicalSubsection(BaseModel):
+    """A free-prose technical-spine subsection authored by the Composer.
+
+    Used for the narrative subsections that don't warrant their own typed model
+    (packing/obfuscation, string resolution, discovery, persistence detail,
+    message/packet structure, evasion/anti-forensics). ``body`` is empty when no
+    evidence supports the subsection; the renderer then states absence.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    title: str
+    body: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class TechnicalAnalysis(BaseModel):
+    """The report's technical-analysis spine (reference §8)."""
+
+    model_config = _STRICT_CONFIG
+
+    packing_obfuscation: TechnicalSubsection | None = None
+    cli_flags: list[CliFlag] = Field(default_factory=list)
+    string_resolution: TechnicalSubsection | None = None
+    discovery: TechnicalSubsection | None = None
+    service_process_kill: ServiceProcessKill | None = None
+    shadow_copy_destruction: list[str] = Field(default_factory=list)  # verbatim commands
+    encryption_scheme: EncryptionScheme | None = None
+    persistence_detail: TechnicalSubsection | None = None
+    message_packet_structure: TechnicalSubsection | None = None
+    evasion_antiforensics: TechnicalSubsection | None = None
+    ransom_note: RansomNote | None = None
+
+
+class C2Channel(BaseModel):
+    """One command-and-control channel (reference §9)."""
+
+    model_config = _STRICT_CONFIG
+
+    name: str
+    protocol: str | None = None
+    encryption: str | None = None
+    packet_layout: str | None = None
+    beacon_format: str | None = None
+    evidence_ref: str | None = None
+
+
+class ConsolidatedIOC(BaseModel):
+    """One row of the consolidated, typed, defanged IOC table (reference §11)."""
+
+    model_config = _STRICT_CONFIG
+
+    type: str  # Domain / C2 URL / IPv4 / Registry Key / Path / File / Mutex / Filename / Hash
+    description: str = ""
+    value: str  # defanged
+    is_network: bool = False
+
+
+class Figure(BaseModel):
+    """A deterministic figure embedded in the report (reference Part V).
+
+    ``content`` holds inline SVG (charts/diagrams) or ``<pre>`` text (Ghidra
+    listings). No fake screenshots — every figure is generated from real data.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    id: str
+    caption: str
+    kind: Literal[
+        "process_tree",
+        "attack_matrix",
+        "entropy_chart",
+        "network_graph",
+        "infection_chain",
+        "code_listing",
+    ]
+    content: str  # inline SVG or <pre> HTML
+    legend: str | None = None
+
+
+class Conclusion(BaseModel):
+    """Graded closing assessment (reference §10)."""
+
+    model_config = _STRICT_CONFIG
+
+    sophistication_rating: str | None = None  # e.g. "medium sophistication"
+    text: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +722,32 @@ class MalwareReport(BaseModel):
 
     # --- References ---
     references: list[ExternalReference] = Field(default_factory=list)
+
+    # --- Captured tool evidence (report-reshaping Phase 1) ---
+    # Per-agent list of captured ReAct tool outputs (decompiled functions,
+    # crypto constants, emulation/dataflow traces) — the durable raw material
+    # the report Composer grounds the deep technical spine in. Size-capped
+    # upstream (see ``schemas.tool_evidence``); kept out of the STIX / FP-linter
+    # paths. Empty on legacy rows and mock runs.
+    technical_evidence: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
+    # --- Professional-report front-matter & spine (report-reshaping Phase 2) ---
+    # All additive/optional. Deterministic extractors fill front_matter /
+    # version_history / consolidated_iocs; the section-wise Composer fills the
+    # prose (technical spine, intro, conclusion, C2). Empty/None until Phase 3-4
+    # populate them — legacy consumers ignore unknown fields.
+    front_matter: ReportFrontMatter | None = None
+    version_history: list[VersionHistoryEntry] = Field(default_factory=list)
+    tlp: TLPLevel = "CLEAR"
+    intro_background: str = ""
+    technical_analysis: TechnicalAnalysis | None = None
+    c2_channels: list[C2Channel] = Field(default_factory=list)
+    conclusion: Conclusion | None = None
+    consolidated_iocs: list[ConsolidatedIOC] = Field(default_factory=list)
+    figures: list[Figure] = Field(default_factory=list)
+    appendices: list[str] = Field(default_factory=list)
+    disclaimer: str | None = None
+    acknowledgements: str | None = None
 
 
 # Resolve the recursive ``ProcessNode.children`` forward reference.

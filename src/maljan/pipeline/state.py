@@ -63,6 +63,14 @@ class AnalysisState(TypedDict):
     # Per-agent structured ISR reports
     isr_reports: Annotated[dict[str, AgentISR], _merge_dicts]
 
+    # Report-reshaping Phase 1: per-agent captured tool-loop outputs
+    # (decompiled functions, crypto constants, emulation/dataflow traces).
+    # Written by the analyst node from ``agent.get_last_tool_evidence()`` and
+    # read by ``report_node`` to ground the deep technical spine. Each value is
+    # a list of ``CapturedToolOutput`` model dumps. Optional/absent on legacy
+    # state; consumers default to ``{}``.
+    tool_evidence: Annotated[dict[str, list[dict[str, Any]]], _merge_dicts]
+
     # Mediator/argument log (append-only)
     discussion_history: Annotated[list[AgentArgument], operator.add]
 

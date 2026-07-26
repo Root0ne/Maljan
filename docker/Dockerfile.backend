@@ -3,9 +3,16 @@ FROM python:3.13-slim AS base
 
 WORKDIR /app
 
-# System dependencies
+# System dependencies.
+# The pango/harfbuzz trio and the DejaVu fonts are WeasyPrint's runtime
+# requirement for /reports/{id}/pdf (Phase 6). WeasyPrint loads them through
+# ctypes at call time, not at import, so without them the PDF endpoint would
+# 503 at runtime while everything else kept working — easy to miss. DejaVu is
+# the last entry in the report stylesheet's font stack and the only one that
+# exists in a slim image; drop it and every glyph falls back to a default.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl gcc libpq-dev && \
+    curl gcc libpq-dev \
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast dependency management
@@ -20,8 +27,12 @@ COPY data/ data/
 COPY threatintel-mcp/ threatintel-mcp/
 COPY network-mcp/ network-mcp/
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+# Install dependencies.
+# 2026-07 round 2: include the ``yara`` extra so yara-python is available in the
+# backend image — otherwise detection_signatures._validate_yara reports
+# "yara-python not installed; rule body not validated" for every generated rule.
+# The manylinux wheel bundles libyara, so no system package is required.
+RUN uv sync --frozen --no-dev --extra yara
 
 # Set PYTHONPATH so `app.*` (apps/api) AND `maljan.*` (src) both resolve.
 # F1 (2026-07-05): adding /app/src makes the core ``maljan`` package

@@ -66,7 +66,15 @@ _ISR_SYSTEM = (
     "  likely source DLL, or emit CONFIDENCE <= 0.5.\n"
     "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
     "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
-    "  contradictory signals before emitting.\n\n"
+    "  contradictory signals before emitting.\n"
+    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
+    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
+    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
+    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
+    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
+    "  import table that hides the real APIs. A rich, fully-named import table\n"
+    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
+    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim.\n\n"
     "IMPORTANT:\n"
     "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
     "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
@@ -170,25 +178,152 @@ class StaticAnalyst(BaseAnalyst):
     # crypto / dataflow / code-gap). The sink-reachability pre-pass focuses
     # the loop, offsetting the larger tool manifest.
 
-    def _filter_ghidra_tools(self, tools: list[Any]) -> list[Any]:
-        """Keep only allowlisted read-only analysis tools.
+    # Container-visible path of the current sample, assigned per-run by the
+    # pipeline (nodes.py) alongside ``_sample_categories``. Read at CALL time
+    # by the load_program wrapper (late binding — the agent is cached across
+    # samples and tools may be selected before the pipeline sets the path).
+    _analysis_file_path: str | None = None
 
-        Cuts catalogue size ~5x so each ReAct step has a small enough tool
-        manifest for local 7-9B models to iterate at reasonable speed.
+    def _ghidra_tool_mode(self) -> str:
+        """Resolve the effective tool-selection mode from config (back-compat)."""
+        from maljan.core.config import get_settings
+
+        ghidra = get_settings().mcp.ghidra
+        if getattr(ghidra, "use_all_tools", False):
+            return "all"
+        return str(getattr(ghidra, "tool_selection", "dynamic"))
+
+    def _select_ghidra_tools(
+        self, tools: list[Any], categories: set[str] | None = None
+    ) -> list[Any]:
+        """Pick the tool manifest to expose to the model per the configured mode.
+
+        - ``curated`` — the fixed ~20-tool allowlist (fastest, narrowest).
+        - ``dynamic`` — CORE triage set + tools relevant to the sample's
+          capability ``categories`` (~30-40). All tools stay reachable; only the
+          relevant subset is shown (2026-07 round 3, tool-RAG). Without
+          categories (init time) it falls back to the curated allowlist.
+        - ``all`` — every tool the server offers (measured 5-6x slower + noisier).
         """
-        kept: list[Any] = []
-        for tool in tools:
-            name = getattr(tool, "name", "").lower()
-            if name in self._GHIDRA_ALLOWED_TOOLS:
-                kept.append(tool)
+        mode = self._ghidra_tool_mode()
+        if mode == "all":
+            self.logger.info("Ghidra MCP [all]: exposing all %d tools.", len(tools))
+            return self._pin_load_program_path(list(tools))
+
+        # Fall back to categories set by the pipeline (nodes.py) when the caller
+        # didn't pass any — this is the reliable path (state["sample_path"]).
+        if categories is None:
+            categories = getattr(self, "_sample_categories", None)
+
+        if mode == "dynamic" and categories is not None:
+            from maljan.agents.ghidra_tool_selector import select_relevant_ghidra_tools
+
+            selected = select_relevant_ghidra_tools(tools, categories)
+            self.logger.info(
+                "Ghidra MCP [dynamic]: selected %d/%d tools for categories %s.",
+                len(selected),
+                len(tools),
+                sorted(categories) or "{}",
+            )
+            return self._pin_load_program_path(selected)
+
+        # curated (or dynamic before a sample is known)
+        kept = [t for t in tools if getattr(t, "name", "").lower() in self._GHIDRA_ALLOWED_TOOLS]
         self.logger.info(
-            "Ghidra MCP: kept %d/%d tools via static-analyst allowlist.",
+            "Ghidra MCP [%s]: kept %d/%d tools via curated allowlist.",
+            mode,
             len(kept),
             len(tools),
         )
-        return kept
+        return self._pin_load_program_path(kept)
+
+    def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
+        """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
+
+        Ghidra-path fix (2026-07-12, job 60df48cb): on a fresh sample whose
+        chunk lacked ``analysis_file_path`` the LLM invented
+        ``/home/user/data/bin.<sha>`` and load_program failed with
+        "File not found" even though the mirror to ``/data/samples/`` had
+        succeeded. The wrapper deterministically substitutes the known
+        container path (``self._analysis_file_path``, set per-sample by
+        nodes.py) whenever the model supplies a different one. Fail-safe:
+        any wrapping error keeps the original tool.
+        """
+        out: list[Any] = []
+        for tool in tools:
+            if getattr(tool, "name", "") == "load_program":
+                try:
+                    tool = self._wrap_load_program(tool)
+                except Exception as e:  # noqa: BLE001
+                    self.logger.warning("load_program pin skipped: %s", e)
+            out.append(tool)
+        return out
+
+    def _wrap_load_program(self, tool: Any) -> Any:
+        """Rebuild the load_program StructuredTool with a path-pinning coroutine.
+
+        A fresh tool is built rather than mutating ``tool.coroutine`` in
+        place — the original lives in the shared ``_all_ghidra_tools`` pool
+        and the HTTP client's tool list; in-place mutation would leak the
+        wrapper across selections.
+        """
+        from langchain_core.tools import StructuredTool
+
+        inner = getattr(tool, "coroutine", None)
+        if inner is None:
+            return tool  # sync/stdio tool variant — leave untouched
+
+        agent = self
+
+        async def pinned_load_program(**kwargs: Any) -> str:
+            pinned = getattr(agent, "_analysis_file_path", None)
+            if isinstance(pinned, str) and pinned and kwargs.get("file") != pinned:
+                agent.logger.warning(
+                    "load_program: overriding model-supplied path %r with known container path %r.",
+                    kwargs.get("file"),
+                    pinned,
+                )
+                kwargs["file"] = pinned
+            return str(await inner(**kwargs))
+
+        return StructuredTool.from_function(
+            func=None,
+            coroutine=pinned_load_program,
+            name=tool.name,
+            description=tool.description,
+            args_schema=tool.args_schema,
+        )
+
+    def _refine_tools_for_sample(self, host_path: str | None) -> None:
+        """In dynamic mode, narrow ``self.tools`` to the sample's relevant tools.
+
+        Cheaply derives capability categories from the PE import classification
+        (no Ghidra call) and re-selects from the full pool. No-op unless dynamic
+        mode is active and the full pool was captured. Fail-safe.
+        """
+        if self._ghidra_tool_mode() != "dynamic":
+            return
+        pool = getattr(self, "_all_ghidra_tools", None)
+        if not pool or not host_path:
+            return
+        try:
+            from maljan.analysis.import_capability_layer import _imports_by_category
+            from maljan.extractors.pe_extractor import build_static_analysis
+
+            static = build_static_analysis(sample_path=host_path)
+            categories = set(_imports_by_category(static).keys()) if static else set()
+            self.tools = self._select_ghidra_tools(pool, categories)
+        except Exception as e:  # noqa: BLE001
+            self.logger.warning("Dynamic tool selection failed (%s); keeping current set.", e)
 
     def _initialize_mcp_client(self) -> None:
+        # Client already built (possibly on a previous sample if the agent is
+        # cached) — don't rebuild it, but DO refresh the per-sample dynamic tool
+        # selection from the full pool using this sample's categories.
+        _pool = getattr(self, "_all_ghidra_tools", None)
+        if _pool:
+            self.tools = self._select_ghidra_tools(_pool)
+            return
         if getattr(self, "tools", None):
             return
 
@@ -228,12 +363,14 @@ class StaticAnalyst(BaseAnalyst):
 
             self._run_async(client.initialize())
             self.toolkit = client
-            all_tools = client.get_tools()
-            self.tools = self._filter_ghidra_tools(list(all_tools))
+            all_tools = list(client.get_tools())
+            self._all_ghidra_tools = all_tools  # full pool; kept reachable
+            self.tools = self._select_ghidra_tools(all_tools)
             self.logger.info(
-                "Initialized Ghidra HTTP tools: %d/%d (after allowlist).",
+                "Initialized Ghidra HTTP tools: %d/%d (mode=%s).",
                 len(self.tools),
                 len(all_tools),
+                self._ghidra_tool_mode(),
             )
             return
 
@@ -264,12 +401,14 @@ class StaticAnalyst(BaseAnalyst):
 
         self._run_async(toolkit.initialize())
         self.toolkit = toolkit  # type: ignore[assignment]
-        all_tools = toolkit.get_tools()
-        self.tools = self._filter_ghidra_tools(list(all_tools))
+        all_tools = list(toolkit.get_tools())
+        self._all_ghidra_tools = all_tools  # full pool; kept reachable
+        self.tools = self._select_ghidra_tools(all_tools)
         self.logger.info(
-            "Initialized Ghidra MCP tools: %d/%d (after allowlist).",
+            "Initialized Ghidra MCP tools: %d/%d (mode=%s).",
             len(self.tools),
             len(all_tools),
+            self._ghidra_tool_mode(),
         )
 
     def _run_async(self, coro: Any) -> None:
@@ -576,6 +715,10 @@ class StaticAnalyst(BaseAnalyst):
         else:
             target_info = f"Static output:\n{data}"
 
+        # 2026-07 round 3: dynamic-mode tool narrowing when data is a file path.
+        if len(data.strip()) < 512 and os.path.exists(data.strip()):
+            self._refine_tools_for_sample(data.strip())
+
         prompt_messages = [
             ("system", _ISR_SYSTEM),
             (
@@ -723,6 +866,10 @@ class StaticAnalyst(BaseAnalyst):
             # own long-term memory. Same host profile as the family RAG, different KB
             # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
             attck_hint = self._compute_attck_case_hint(host_path)
+        # 2026-07 round 3: in dynamic mode, narrow the Ghidra tool manifest to the
+        # tools relevant to THIS sample's capability categories before the ReAct
+        # loop (all tools stay reachable; only the relevant subset is shown).
+        self._refine_tools_for_sample(host_path)
 
         prompt_messages = [
             ("system", _ISR_SYSTEM),

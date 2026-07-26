@@ -11,6 +11,7 @@ Hardening:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import tempfile
@@ -20,14 +21,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from pydantic import SecretStr
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_active_user
 from app.logging_config import get_logger
+from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.user import User
 from app.schemas.job import SampleListResponse, SampleResponse
@@ -40,6 +42,22 @@ router = APIRouter(prefix="/samples", tags=["Samples"])
 def _minio_secret() -> str:
     raw = settings.minio_secret_key
     return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
+
+
+def _minio_client() -> Any:
+    """Build a MinIO client from settings.
+
+    Single construction point so the upload and delete paths cannot drift apart
+    (audit 2026-07-26 — the client used to be hand-built inline at every site).
+    """
+    from minio import Minio
+
+    return Minio(
+        settings.minio_endpoint,
+        access_key=settings.minio_access_key,
+        secret_key=_minio_secret(),
+        secure=settings.minio_secure,
+    )
 
 
 def _streaming_hashes(file: UploadFile, dest: Path) -> tuple[str, str, str, int]:
@@ -295,14 +313,7 @@ async def upload_sample(
 
         # Stream to MinIO from the temp file (no extra RAM copy).
         try:
-            from minio import Minio
-
-            client = Minio(
-                settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=_minio_secret(),
-                secure=settings.minio_secure,
-            )
+            client = _minio_client()
 
             if not client.bucket_exists(settings.minio_bucket):
                 client.make_bucket(settings.minio_bucket)
@@ -419,6 +430,76 @@ async def get_sample(
     if not sample:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample not found")
     return sample
+
+
+@router.delete("/{sample_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sample(
+    sample_id: uuid.UUID,
+    user: User = Depends(require_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a sample, its stored object and every analysis derived from it.
+
+    Audit 2026-07-26 (Ö4): there was no way to remove an uploaded sample through
+    the API or the UI, so malware binaries accumulated forever with no retention
+    or cleanup path.
+
+    Refuses while an analysis is still in flight — deleting the row underneath a
+    running worker would orphan the job and leave the object half-referenced.
+    The MinIO object is only removed when no OTHER user still references the same
+    sha256 (uploads are deduplicated per user but share one object path).
+    """
+    result = await db.execute(
+        select(Sample).where(Sample.id == sample_id, Sample.uploaded_by == user.id)
+    )
+    sample = result.scalar_one_or_none()
+    if not sample:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample not found")
+
+    active = await db.execute(
+        select(func.count())
+        .select_from(AnalysisJob)
+        .where(
+            AnalysisJob.sample_id == sample.id,
+            AnalysisJob.status.in_(("pending", "running")),
+        )
+    )
+    if (active.scalar() or 0) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sample has a pending or running analysis; cancel it before deleting.",
+        )
+
+    storage_path = sample.storage_path
+    sha256 = sample.sha256
+
+    # Jobs (and their reports, via the report->job cascade) go with the sample.
+    await db.execute(delete(AnalysisJob).where(AnalysisJob.sample_id == sample.id))
+    await db.delete(sample)
+    await db.flush()
+
+    others = await db.execute(
+        select(func.count()).select_from(Sample).where(Sample.sha256 == sha256)
+    )
+    if (others.scalar() or 0) == 0:
+        try:
+            client = _minio_client()
+            await asyncio.to_thread(client.remove_object, settings.minio_bucket, storage_path)
+        except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
+            logger.warning(
+                "Sample %s row deleted but MinIO object %s could not be removed: %s",
+                sample_id,
+                storage_path,
+                exc,
+                extra={"user_id": str(user.id), "component": "minio"},
+            )
+
+    logger.info(
+        "Sample deleted: id=%s sha256=%s",
+        sample_id,
+        sha256[:16],
+        extra={"user_id": str(user.id), "sample_id": str(sample_id)},
+    )
 
 
 # `Any` is exported so the analysis_service can run an IDOR check without

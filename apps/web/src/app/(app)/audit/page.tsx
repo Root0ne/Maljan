@@ -4,17 +4,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { AuditLogDTO } from "@/lib/api";
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { formatDateTime } from "@/lib/report-utils";
 
 export default function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLogDTO[]>([]);
@@ -58,7 +48,7 @@ export default function AuditLogsPage() {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+        <div role="alert" className="mb-4 p-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
           {error}
         </div>
       )}
@@ -81,6 +71,16 @@ export default function AuditLogsPage() {
                     Loading...
                   </td>
                 </tr>
+              ) : error ? (
+                /* Without this branch the table said "No audit logs found."
+                 * directly underneath the error banner — a failed request and
+                 * an genuinely empty log rendered identically, so anything
+                 * asserting on the empty state passed on a broken page. */
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-xs text-text-muted">
+                    Log entries could not be loaded — see the message above.
+                  </td>
+                </tr>
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-6 text-center text-xs text-text-muted">
@@ -92,7 +92,7 @@ export default function AuditLogsPage() {
                   <tr key={log.id} className="hover:bg-bg-hover transition-colors">
                     <td className="px-4 py-2.5">
                       <span className="text-xs text-text-secondary font-mono">
-                        {formatDate(log.created_at)}
+                        {formatDateTime(log.created_at)}
                       </span>
                     </td>
                     <td className="px-4 py-2.5">

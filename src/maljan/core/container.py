@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from maljan.loaders.binary_chunker import TextChunk
     from maljan.loaders.sandbox_client import SandboxClient
     from maljan.memory.long_term_memory import MemoryStore
+    from maljan.pipeline.events import EventSink
 
 
 class ServiceContainer:
@@ -59,9 +60,14 @@ class ServiceContainer:
         config: Settings,
         mock: bool = False,
         samples_dir: str = "data/samples",
+        event_sink: EventSink | None = None,
     ) -> None:
         self.config = config
         self.mock = mock
+        # Progress feed for the live transcript UI. ``None`` outside the API
+        # worker (CLI, tests), which makes every emit a no-op — see
+        # maljan.pipeline.events.
+        self.event_sink = event_sink
 
         self.agent_registry = AgentRegistry()
         self.parser_registry = ParserRegistry()
@@ -96,6 +102,7 @@ class ServiceContainer:
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
+        self._report_composer_cache: Any | None = None
         self._samples_dir = str(resolve_data(samples_dir))
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
@@ -119,12 +126,25 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
+    def _expert_token_cap(self) -> dict[str, int]:
+        """``max_tokens`` kwargs for analyst-role models, or ``{}`` when unset.
+
+        Audit 2026-07-26 (Ö3): the analyst path was the only unbounded LLM call
+        in the system while judge/narrative/composer were all capped. MEASURED:
+        a 19-tool-call static loop produced a forced-synthesis call that ran 19+
+        minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
+        """
+        cap = getattr(self.config.llm, "expert_max_tokens", 0) or 0
+        return {"max_tokens": cap} if cap > 0 else {}
+
     def get_expert_llm(self) -> BaseChatModel:
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         with self._lock:
             if self._expert_llm_cache is None:
-                self._expert_llm_cache = self._llm_registry.build_model(role="expert")
+                self._expert_llm_cache = self._llm_registry.build_model(
+                    role="expert", **self._expert_token_cap()
+                )
             return self._expert_llm_cache
 
     def get_judge_llm(self) -> BaseChatModel:
@@ -147,7 +167,12 @@ class ServiceContainer:
         with self._lock:
             cached = self._agent_llm_cache.get(agent_name)
             if cached is None:
-                cached = self._llm_registry.build_model_for_agent(agent_name)
+                # Analysts share the expert budget cap — this is the path the
+                # static/dynamic/network ReAct loops and their forced-synthesis
+                # fallback actually use (audit 2026-07-26, Ö3).
+                cached = self._llm_registry.build_model_for_agent(
+                    agent_name, **self._expert_token_cap()
+                )
                 self._agent_llm_cache[agent_name] = cached
             return cached
 
@@ -260,8 +285,34 @@ class ServiceContainer:
 
                 llm = self.get_judge_llm()
                 max_tokens = self.config.reporting.narrative_max_tokens
-                self._narrative_agent_cache = NarrativeAgent(llm=llm, max_input_tokens=max_tokens)
+                self._narrative_agent_cache = NarrativeAgent(
+                    llm=llm,
+                    max_input_tokens=max_tokens,
+                    token_ledger=getattr(self, "_token_ledger", None),
+                )
             return self._narrative_agent_cache
+
+    def get_report_composer(self) -> Any | None:
+        """Return the singleton section-wise ReportComposer, or ``None``.
+
+        Reshaping Phase 4. ``None`` in mock mode or when ``composer_enabled`` is
+        off (callers then simply skip the professional spine). Reuses the judge
+        LLM like the NarrativeAgent.
+        """
+        if self.is_mock or not self.config.reporting.composer_enabled:
+            return None
+        with self._lock:
+            if getattr(self, "_report_composer_cache", None) is None:
+                from maljan.reporting.composer import ReportComposer
+
+                rc = self.config.reporting
+                self._report_composer_cache = ReportComposer(
+                    llm=self.get_judge_llm(),
+                    section_max_tokens=rc.composer_section_max_tokens,
+                    per_section_timeout=rc.composer_per_section_timeout,
+                    token_ledger=getattr(self, "_token_ledger", None),
+                )
+            return self._report_composer_cache
 
     # ------------------------------------------------------------------
     # Data loading

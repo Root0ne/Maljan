@@ -37,6 +37,9 @@ from maljan.reporting.models import (
 # ---------------------------------------------------------------------------
 
 _HIGH_ENTROPY_THRESHOLD = 7.0
+# Below this many named imports, a LoadLibrary/GetProcAddress pair reads as
+# dynamic-API-resolution / API-hiding rather than ordinary delay-loading.
+_SPARSE_IMPORT_THRESHOLD = 15
 _MIN_STRING_LENGTH = 6
 _MAX_STRINGS_KEPT = 200
 _MAX_IOC_STRINGS = 80
@@ -281,17 +284,52 @@ def _pe_exports(pe: Any) -> list[str]:
     return out
 
 
+# Standard Win32 resource-type IDs (RT_*). 2026-07 audit (Bulgu #16): the
+# report showed raw "TYPE_3 / TYPE_5" which carry no meaning; map the well-known
+# ids to their symbolic names so the STATIC tab reads "RT_ICON (…)" etc.
+_RT_NAMES: dict[int, str] = {
+    1: "RT_CURSOR",
+    2: "RT_BITMAP",
+    3: "RT_ICON",
+    4: "RT_MENU",
+    5: "RT_DIALOG",
+    6: "RT_STRING",
+    7: "RT_FONTDIR",
+    8: "RT_FONT",
+    9: "RT_ACCELERATOR",
+    10: "RT_RCDATA",
+    11: "RT_MESSAGETABLE",
+    12: "RT_GROUP_CURSOR",
+    14: "RT_GROUP_ICON",
+    16: "RT_VERSION",
+    17: "RT_DLGINCLUDE",
+    19: "RT_PLUGPLAY",
+    20: "RT_VXD",
+    21: "RT_ANICURSOR",
+    22: "RT_ANIICON",
+    23: "RT_HTML",
+    24: "RT_MANIFEST",
+}
+
+
+def _resource_type_name(resource_type: Any) -> str:
+    """Human-readable resource type: custom string name, RT_* symbol, or id."""
+    name_obj = getattr(resource_type, "name", None)
+    if name_obj and getattr(name_obj, "string", None):
+        return str(name_obj.string.decode("utf-8", errors="replace"))
+    rid = getattr(resource_type, "id", None)
+    if isinstance(rid, int) and rid in _RT_NAMES:
+        return _RT_NAMES[rid]
+    return f"TYPE_{rid if rid is not None else '?'}"
+
+
 def _pe_resources(pe: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     rsrc_dir = getattr(pe, "DIRECTORY_ENTRY_RESOURCE", None)
     if rsrc_dir is None:
         return out
     for resource_type in getattr(rsrc_dir, "entries", []) or []:
-        type_name = (
-            resource_type.name.string.decode("utf-8", errors="replace")
-            if getattr(resource_type, "name", None) and resource_type.name
-            else f"TYPE_{getattr(resource_type, 'id', '?')}"
-        )
+        type_name = _resource_type_name(resource_type)
         directory = getattr(resource_type, "directory", None)
         for resource_id in getattr(directory, "entries", []) or []:
             entry_id = (
@@ -339,14 +377,24 @@ def _pe_obfuscation_indicators(sections: list[PESection], imports: list[ImportRo
         out.append(
             f"High-entropy sections (>= {_HIGH_ENTROPY_THRESHOLD}): {', '.join(high_entropy)}"
         )
-    # GetProcAddress + LoadLibrary => dynamic API resolution (common evasion)
+    # LoadLibrary + GetProcAddress alone is NOT obfuscation — it is the standard
+    # Windows idiom for optional / delay-loaded DLLs and is present in nearly
+    # every non-trivial PE (2026-07: an ordinary 164-import MFC app was flagged,
+    # which the LLM then inflated to T1027 "obfuscation" at conf 0.90). The
+    # genuine dynamic-API-resolution / packing signature is this idiom combined
+    # with a SPARSE import table — a packed binary hides its real APIs and
+    # imports only a handful of functions plus LoadLibrary/GetProcAddress.
     api_resolution = {row.function for row in imports} & {
         "GetProcAddress",
         "LoadLibraryA",
         "LoadLibraryW",
     }
-    if len(api_resolution) >= 2:
-        out.append("Dynamic API resolution (LoadLibrary + GetProcAddress)")
+    if len(api_resolution) >= 2 and len(imports) < _SPARSE_IMPORT_THRESHOLD:
+        out.append(
+            "Dynamic API resolution with a sparse import table "
+            f"({len(imports)} named imports + LoadLibrary/GetProcAddress) "
+            "— possible API hiding / packing"
+        )
     return out
 
 

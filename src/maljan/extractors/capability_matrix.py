@@ -56,22 +56,94 @@ _TACTIC_BY_SLUG: dict[str, tuple[str, str]] = {
     slug: (tid, name) for tid, slug, name in _TACTIC_TABLE
 }
 
+# Canonical Enterprise tactic name per TA-id. Used to pin the display name even
+# when the live ATT&CK bundle renames a tactic (v19 relabelled TA0005
+# "Defense Evasion" -> "Stealth"). The frontend pins the same table.
+_TACTIC_NAME_BY_ID: dict[str, str] = {tid: name for tid, _slug, name in _TACTIC_TABLE}
+
+
+# 2026-07 round 3 — deterministic cap for LLM-only over-claims.
+_LOW_CONF_CAP = 0.40
+# Base technique ids gated by obfuscation evidence (+ their sub-techniques).
+_OBFUSCATION_TIDS = ("T1027", "T1140")
+# Base technique ids gated by a real imported injection API.
+_INJECTION_TIDS = ("T1055",)
+
+
+def _static_evidence_flags(static: Any | None) -> tuple[bool, bool]:
+    """Return (obfuscation_present, injection_real) from the static analysis."""
+    if static is None:
+        # No static picture to contradict the LLM — do not cap.
+        return True, True
+    try:
+        from maljan.analysis.import_capability_layer import _INJECTION_FUNCS
+        from maljan.extractors.pe_extractor import _HIGH_ENTROPY_THRESHOLD
+
+        sections = getattr(static, "sections", None) or []
+        obf = (
+            getattr(static, "packer_hint", None) is not None
+            or any(getattr(s, "entropy", 0.0) >= _HIGH_ENTROPY_THRESHOLD for s in sections)
+            or bool(getattr(static, "obfuscation_indicators", None))
+        )
+        imports = getattr(static, "imports", None) or []
+        inj = any(
+            getattr(imp, "category", None) == "process_injection"
+            and getattr(imp, "function", None) in _INJECTION_FUNCS
+            for imp in imports
+        )
+        return obf, inj
+    except Exception:  # noqa: BLE001 — never break the report over a cap probe
+        return True, True
+
+
+def _cap_unsupported_confidence(
+    tid: str,
+    confidence: float,
+    layers: list[str],
+    obfuscation_present: bool,
+    injection_real: bool,
+) -> float:
+    """Cap LLM-only obfuscation/injection claims lacking static evidence.
+
+    Only applies when the technique's sole contributing layer is ``static``
+    (i.e. the LLM/import layer) — a real YARA/Sigma/dynamic corroboration is
+    left untouched.
+    """
+    if set(layers) - {"static"}:
+        return confidence  # corroborated by a non-LLM layer — trust it
+    is_obf = any(tid == b or tid.startswith(b + ".") for b in _OBFUSCATION_TIDS)
+    is_inj = any(tid == b or tid.startswith(b + ".") for b in _INJECTION_TIDS)
+    if is_obf and not obfuscation_present:
+        return min(confidence, _LOW_CONF_CAP)
+    if is_inj and not injection_real:
+        return min(confidence, _LOW_CONF_CAP)
+    return confidence
+
 
 def build_capability_matrix(
     *,
     cascade_summary: Any,
     isr_reports: dict[str, Any] | None,
+    static: Any | None = None,
 ) -> tuple[list[CapabilityCell], list[TTPMapping]]:
     """Return ``(capability_cells, ttp_mappings)`` for the report.
 
     Both lists are sorted by descending confidence so the UI renders the
     most relevant rows first.
+
+    ``static`` (the ``StaticAnalysis``) enables a 2026-07 round-3 deterministic
+    confidence cap: the local LLM keeps over-claiming obfuscation (T1027/T1140)
+    from ordinary dynamic-API-resolution and process injection (T1055) with no
+    imported injection APIs. When the supporting static evidence is absent AND
+    the technique's only support is the LLM static layer, its confidence is
+    capped so a prose-only guess can't read as a high-confidence capability.
     """
     techniques = _collect_techniques(cascade_summary, isr_reports)
     if not techniques:
         return [], []
 
     index = _load_attck_index()
+    obfuscation_present, injection_real = _static_evidence_flags(static)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -87,6 +159,10 @@ def build_capability_matrix(
         # would expand into fabricated prose.
         if confidence <= 0.0 and not evidence and not layers:
             continue
+
+        confidence = _cap_unsupported_confidence(
+            tid, confidence, layers, obfuscation_present, injection_real
+        )
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
         cells.append(
@@ -249,10 +325,13 @@ def _resolve_technique_meta(index: Any | None, tid: str) -> tuple[str, str]:
 def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
     """Resolve a kill-chain slug to ``(tactic_id, tactic_name)``.
 
-    Prefers the live ATT&CK bundle's tactic catalogue (via the index), so new
-    releases — e.g. the v19 Stealth / Defense Impairment split — resolve with no
-    code change. Falls back to the inlined ``_TACTIC_BY_SLUG`` table when the
-    catalogue is unavailable (offline first run, fixture-built index, tests).
+    Prefers the live ATT&CK bundle's tactic catalogue (via the index) for
+    resolution, then pins the *display name* to the canonical Enterprise label
+    for known TA-ids. 2026-07 audit (Bulgu #5): a v19+ bundle returns the
+    renamed label "Stealth" for TA0005, which leaked into the markdown export /
+    ``ttp_mappings`` and contradicted the frontend's "Defense Evasion". Pinning
+    keeps every surface consistent. Falls back to the inlined ``_TACTIC_BY_SLUG``
+    table when the catalogue is unavailable (offline first run, fixtures, tests).
     """
     if not tactic_slug:
         return "", ""
@@ -260,5 +339,7 @@ def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
     if callable(getter):
         tactic = getter(tactic_slug)
         if tactic is not None:
-            return str(getattr(tactic, "tactic_id", "")), str(getattr(tactic, "name", ""))
+            tid = str(getattr(tactic, "tactic_id", ""))
+            name = str(getattr(tactic, "name", ""))
+            return tid, _TACTIC_NAME_BY_ID.get(tid, name)
     return _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))

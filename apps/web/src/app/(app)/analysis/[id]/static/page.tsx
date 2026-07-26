@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { useReport } from "../layout";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
+import Th from "@/components/ui/Th";
 import type { StringIOC, StringIOCKind } from "@/types/malware-report";
 
 const STRING_KINDS: (StringIOCKind | "all")[] = [
@@ -258,13 +259,5 @@ export default function StaticTab() {
         </div>
       )}
     </div>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return (
-    <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">
-      {children}
-    </th>
   );
 }

@@ -24,6 +24,12 @@ from maljan.extractors.network_extractor import (
     build_network_iocs,
 )
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline.events import (
+    claims_to_payload,
+    emit,
+    emit_agent_message,
+    summarize_claims,
+)
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.schemas.isr_models import AgentISR
@@ -31,6 +37,7 @@ from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+    from maljan.reporting.models import StaticAnalysis
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +56,64 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     )
 
 
-def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list:
+# The file-loader placeholder for a missing per-sample fixture
+# ("No static data available for sample <sha>."). Local copy of the
+# BUG-07 pattern from static_analyst to avoid a nodes->agents import edge.
+_STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
+
+# Hard ceiling for the synthesized head-chunk content. The augmented chunk
+# is spliced in via ``dataclasses.replace`` AFTER chunking, so it never
+# re-passes the token-budget check — the cap here is load-bearing.
+_MAX_SYNTH_CHUNK_CHARS = 40_000
+
+# CONF-INFL-01: the confidence ceiling for a degraded run. Public, and
+# module-level, because it is a cross-layer contract rather than an
+# implementation detail of the report node: the worker persists whatever ends
+# up under it, the dashboard styles "low confidence" at the same threshold, and
+# the 2026-07-26 audit found the value silently disagreeing between layers. One
+# name, so a change cannot land in only half of them.
+DEGRADED_CONFIDENCE_CAP = 0.60
+
+
+def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
+    """Serialize a StaticAnalysis into a size-capped dict for the LLM prompt.
+
+    Caps keep the synthesized head chunk inside the prompt budget:
+    imports <= 60 rows (suspicious-first), strings <= 40, exports <= 40,
+    ``embedded_resources`` reduced to a count. Truncation markers record
+    how many rows were dropped so the model doesn't mistake a cap for
+    an empty artefact.
+    """
+    dump = static.model_dump(mode="json")
+    out: dict[str, Any] = {
+        "sections": dump.get("sections", []),
+        "packer_hint": dump.get("packer_hint"),
+        "obfuscation_indicators": dump.get("obfuscation_indicators", []),
+        "embedded_resources_count": len(dump.get("embedded_resources", [])),
+    }
+    imports = sorted(
+        dump.get("imports", []),
+        key=lambda r: not bool(r.get("is_suspicious")),
+    )
+    if len(imports) > 60:
+        out["imports_truncated"] = len(imports) - 60
+    out["imports"] = imports[:60]
+    strings = dump.get("interesting_strings", [])
+    if len(strings) > 40:
+        out["strings_truncated"] = len(strings) - 40
+    out["interesting_strings"] = strings[:40]
+    exports = dump.get("exports", [])
+    if len(exports) > 40:
+        out["exports_truncated"] = len(exports) - 40
+    out["exports"] = exports[:40]
+    return out
+
+
+def _augment_static_chunks_with_path(
+    chunks: list,
+    state: AnalysisState,
+    static: StaticAnalysis | None = None,
+) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
     Wave 6 (2026-05-28, GHIDRA-DELIVERY-01). The static analyst's data
@@ -62,11 +126,18 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
     ``analysis_file_path`` into the JSON when the worker recorded a
     container-visible mirror via ``state['static_sample_path']``.
 
+    Ghidra-path fix (2026-07-12, job 60df48cb): when the head chunk is the
+    file-loader placeholder ("No static data available for sample <sha>"),
+    synthesize a real JSON chunk instead of passing the placeholder through.
+    Without it the LLM never sees ``analysis_file_path``, hallucinates a
+    path for ``load_program`` and reports "file was not found on the server
+    filesystem" even though the mirror succeeded. The synthesized chunk
+    carries the paths plus a deterministic PE summary (``static``) so fresh
+    samples get a real data surface. Non-placeholder non-JSON chunks (legacy
+    raw decompile output) still pass through unchanged.
+
     The chunk objects are immutable dataclasses; rebuild with the same
     chunker so downstream code (token budget, chunk_text) keeps working.
-    Best-effort: if the chunk content isn't valid JSON, return chunks
-    unchanged — the static analyst's own placeholder guard handles the
-    "no path, no analysis" path.
     """
     import json
 
@@ -75,12 +146,28 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
         return chunks
 
     head = chunks[0]
+    parsed: dict[str, Any] | None = None
     try:
-        parsed = json.loads(head.content)
+        loaded = json.loads(head.content)
+        if isinstance(loaded, dict):
+            parsed = loaded
     except (json.JSONDecodeError, ValueError):
-        return chunks
-    if not isinstance(parsed, dict):
-        return chunks
+        parsed = None
+
+    if parsed is None:
+        if not _STATIC_PLACEHOLDER_RE.match(head.content.strip()):
+            # Legacy raw (non-JSON, non-placeholder) chunk — pass through.
+            return chunks
+        parsed = {
+            "note": (
+                "Live analysis run: no pre-extracted static fixture exists "
+                "for this sample. The deterministic PE summary below was "
+                "parsed on the host; use your Ghidra tools for deeper "
+                "analysis."
+            ),
+            "sha256": state.get("file_hash") or "",
+            "static_summary": (_compact_static_summary(static) if static is not None else None),
+        }
 
     parsed["analysis_file_path"] = static_path
     # Also carry the HOST-readable path (when present) so the static-feature
@@ -90,6 +177,12 @@ def _augment_static_chunks_with_path(chunks: list, state: AnalysisState) -> list
     if isinstance(host_path, str) and host_path:
         parsed["host_sample_path"] = host_path
     new_content = json.dumps(parsed, indent=2, default=str)
+    if len(new_content) > _MAX_SYNTH_CHUNK_CHARS and "static_summary" in parsed:
+        # The spliced chunk bypasses the token-budget re-check; drop the
+        # summary rather than blow the prompt window.
+        parsed["static_summary"] = None
+        parsed["static_summary_omitted"] = "too large"
+        new_content = json.dumps(parsed, indent=2, default=str)
 
     import dataclasses as _dc
 
@@ -152,6 +245,12 @@ def make_analyst_node(
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
 
+        # Analysts run sequentially on the single-slot local model, so a
+        # per-agent "started" event is the only way the UI can say which one is
+        # actually working — the worker's up-front announcement marks them all
+        # busy at once and is a poor proxy.
+        emit(container.event_sink, "agent_progress", {"agent": agent_name, "phase": "analyzing"})
+
         try:
             agent = container.get_agent(agent_name)
 
@@ -172,7 +271,41 @@ def make_analyst_node(
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
             if agent_name == "static":
-                chunks = _augment_static_chunks_with_path(chunks, state)
+                # Ghidra-path fix (2026-07-12): compute the deterministic PE
+                # summary ONCE and reuse it for both the synthesized head
+                # chunk and the dynamic-tool-selection categories below.
+                _st: StaticAnalysis | None = None
+                try:
+                    from maljan.extractors.pe_extractor import build_static_analysis
+
+                    _sp = state.get("sample_path")
+                    if _sp:
+                        _st = build_static_analysis(sample_path=str(_sp))
+                except Exception as _e:  # noqa: BLE001
+                    logger.debug("static summary extraction skipped: %s", _e)
+
+                chunks = _augment_static_chunks_with_path(chunks, state, static=_st)
+
+                # Pin the container-visible path on the agent so the
+                # load_program tool wrapper can override hallucinated paths.
+                # Assign unconditionally — agents are cached across samples;
+                # a stale path from the previous sample must be cleared.
+                agent._analysis_file_path = (  # type: ignore[attr-defined]
+                    state.get("static_sample_path") or None
+                )
+
+                # 2026-07 round 3: hand the static analyst the sample's capability
+                # categories (from the PE import classification) so dynamic Ghidra
+                # tool selection works regardless of whether the chunk carried a
+                # readable path. state["sample_path"] is reliably host-readable.
+                try:
+                    from maljan.analysis.import_capability_layer import _imports_by_category
+
+                    agent._sample_categories = (  # type: ignore[attr-defined]
+                        set(_imports_by_category(_st).keys()) if _st else set()
+                    )
+                except Exception as _e:  # noqa: BLE001
+                    logger.debug("static category hint skipped: %s", _e)
 
             if not chunks:
                 # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
@@ -190,13 +323,19 @@ def make_analyst_node(
                     "as graceful degradation (Wave 9 no-data path).",
                     agent_name,
                 )
+                no_data_text = (
+                    f"[WARN] {agent_name}: no {agent_name} data available "
+                    "for this sample — analyst skipped."
+                )
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=agent_name,
+                    role="analyst",
+                    text=no_data_text,
+                    status="no_data",
+                )
                 return {
-                    "reports": {
-                        agent_name: (
-                            f"[WARN] {agent_name}: no {agent_name} data available "
-                            "for this sample — analyst skipped."
-                        )
-                    },
+                    "reports": {agent_name: no_data_text},
                     "isr_reports": {agent_name: _empty_isr(agent_name)},
                 }
 
@@ -265,10 +404,32 @@ def make_analyst_node(
                     f"[WARN] {agent_name}: ISR produced no claims (multi-chunk fallback empty)."
                 )
 
-            return {
+            # Report-reshaping Phase 1: carry the captured tool-loop outputs
+            # (decompiled functions, crypto constants, emulation/dataflow) into
+            # state so report_node can ground the deep technical spine. Best-
+            # effort — a capture read must never break the analyst node.
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=summarize_claims(isr.claims, speaker=agent_name),
+                round_index=0,
+                status="complete" if isr.claims else "no_data",
+                claims=claims_to_payload(isr.claims),
+                dissent=list(isr.dissent_items or []),
+            )
+
+            node_out: dict[str, Any] = {
                 "reports": {agent_name: report},
                 "isr_reports": {agent_name: isr},
             }
+            try:
+                _ev = agent.get_last_tool_evidence()
+                if _ev:
+                    node_out["tool_evidence"] = {agent_name: [o.model_dump() for o in _ev]}
+            except Exception as _ev_exc:  # noqa: BLE001
+                logger.debug("tool-evidence read skipped for %s: %s", agent_name, _ev_exc)
+            return node_out
         except (AnalystError, LLMError) as e:
             # OPS-ANALYST-ERROR-TRACKING-01 + OBS-STRUCTURED-LOGS-MISSING-FIELDS-01
             # (audit 2026-05-19): structured error event so Loki/Promtail
@@ -286,8 +447,16 @@ def make_analyst_node(
                     "error_type": type(e).__name__,
                 },
             )
+            failed_text = f"[ERROR] {agent_name} analysis failed: {e}"
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=failed_text,
+                status="failed",
+            )
             return {
-                "reports": {agent_name: f"[ERROR] {agent_name} analysis failed: {e}"},
+                "reports": {agent_name: failed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
         except (ValueError, RuntimeError) as e:
@@ -303,8 +472,16 @@ def make_analyst_node(
                     "fatal": True,
                 },
             )
+            crashed_text = f"[ERROR] {agent_name} crashed: {e}"
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=crashed_text,
+                status="failed",
+            )
             return {
-                "reports": {agent_name: f"[ERROR] {agent_name} crashed: {e}"},
+                "reports": {agent_name: crashed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
 
@@ -428,6 +605,29 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 else argument.confidence_score
             )
 
+            emit_agent_message(
+                container.event_sink,
+                speaker="Mediator",
+                role="negotiator",
+                text=argument.finding,
+                round_index=iteration + 1,
+                status="complete",
+                confidence=argument.confidence_score,
+            )
+            if syco:
+                emit_agent_message(
+                    container.event_sink,
+                    speaker="Sycophancy detector",
+                    role="system",
+                    text=(
+                        "Agents converged without new evidence — flagged as sycophantic "
+                        "agreement. The next revision round carries a directive to "
+                        "re-argue from evidence rather than defer to peers."
+                    ),
+                    round_index=iteration + 1,
+                    status="complete",
+                )
+
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": is_consensus,
@@ -446,6 +646,14 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
             # scoreable result instead of aborting an entire batch on one blip.
             label = "timed out" if isinstance(e, TimeoutError) else "failed"
             logger.error("Negotiation %s: %s", label, e or type(e).__name__)
+            emit_agent_message(
+                container.event_sink,
+                speaker="Mediator",
+                role="negotiator",
+                text=f"[ERROR] Mediation {label}: {e or type(e).__name__}",
+                round_index=iteration + 1,
+                status="timeout" if isinstance(e, TimeoutError) else "failed",
+            )
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": False,
@@ -513,8 +721,33 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 iteration,
             )
 
-        tasks = [_revise_one(name) for name in agent_names]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Slot-topology parity with the initial fan-out (builder.py). On a
+        # single-slot local llama-server the analysts' revise calls must NOT
+        # run concurrently or they clobber each other's per-slot recurrent
+        # DeltaNet state → full re-prefill every step (the 2026-07-13 root
+        # cause; see LLMConfig.parallel_analysts). The initial pass is
+        # serialised by the graph edges, but this revision node fans out
+        # itself, so it must honour the same flag. When sequential, await each
+        # revise in turn (exclusive slot use); when parallel, keep the
+        # concurrent gather for hosted multi-slot APIs. Both branches tolerate
+        # a per-analyst failure (mirrors gather(return_exceptions=True)) so one
+        # bad revise never aborts the round.
+        parallel = True
+        try:
+            parallel = bool(container.config.llm.parallel_analysts)
+        except AttributeError:
+            parallel = True
+
+        results: list[Any] = []
+        if parallel:
+            tasks = [_revise_one(name) for name in agent_names]
+            results = list(await asyncio.gather(*tasks, return_exceptions=True))
+        else:
+            for name in agent_names:
+                try:
+                    results.append(await _revise_one(name))
+                except Exception as exc:  # noqa: BLE001 — parity with gather()
+                    results.append(exc)
 
         revised: dict[str, str] = {}
         revised_isrs: dict[str, AgentISR] = {}
@@ -526,10 +759,28 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 logger.error("%s revision failed: %s", name, result)
                 revised[name] = original_reports.get(name, "")
                 revised_isrs[name] = _empty_isr(name, revision_round=iteration)
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=name,
+                    role="reviser",
+                    text=f"[ERROR] {name} revision failed: {result}",
+                    round_index=iteration,
+                    status="failed",
+                )
             else:
                 revised_text, isr = result
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=name,
+                    role="reviser",
+                    text=summarize_claims(isr.claims, speaker=name),
+                    round_index=iteration,
+                    status="complete" if isr.claims else "no_data",
+                    claims=claims_to_payload(isr.claims),
+                    dissent=list(isr.dissent_items or []),
+                )
 
         return {"revised_reports": revised, "isr_reports": revised_isrs}
 
@@ -582,17 +833,32 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # Linux sample).
             sample_platform = state.get("platform") or "unknown"
 
+            # 2026-07 audit: YARA scans the sample BYTES (not analyst prose) so
+            # an API-name pattern only fires when the string is really in the
+            # binary. Read from the worker-visible host path (same one the PE
+            # extractor / family RAG use), not the container Ghidra path.
+            def _read_sample_bytes() -> bytes | None:
+                from pathlib import Path as _Path
+
+                raw = state.get("sample_path") or state.get("static_sample_path")
+                if not raw:
+                    return None
+                try:
+                    return _Path(str(raw)).read_bytes()
+                except Exception as _e:  # noqa: BLE001
+                    logger.warning("YARA Layer 0: sample unreadable (%s). Skipping.", _e)
+                    return None
+
             async def _run_yara_scan() -> AgentISR | None:
                 try:
                     yara_layer = container.get_yara_layer()
                     if yara_layer.rule_count > 0:
-                        scan_parts: list[str] = list((state.get("reports") or {}).values())
-                        for isr_obj in isr_reports.values():
-                            scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
-                        scan_text = " ".join(scan_parts)
+                        sample_bytes = await asyncio.to_thread(_read_sample_bytes)
+                        if not sample_bytes:
+                            return None
                         yara_layer.reset_filter_stats()
                         yara_matches = await asyncio.to_thread(
-                            yara_layer.scan, scan_text, sample_platform
+                            yara_layer.scan, sample_bytes, sample_platform
                         )
                         if yara_matches:
                             yara_isr: AgentISR = yara_layer.to_isr(yara_matches)
@@ -608,18 +874,26 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     logger.warning("YARA Layer 0 scan failed: %s. Skipping.", e)
                 return None
 
+            # 2026-07 audit: Sigma scans structured events built from real
+            # sandbox telemetry (strict field matching) instead of analyst
+            # prose. No telemetry -> no events -> no matches (correct for
+            # static-only runs).
             async def _run_sigma_scan() -> AgentISR | None:
                 try:
+                    from maljan.analysis.sigma_layer import build_events_from_sandbox
+
                     sigma_layer = container.get_sigma_layer()
                     if sigma_layer.rule_count > 0:
-                        sigma_scan_parts: list[str] = list((state.get("reports") or {}).values())
-                        for isr_obj in isr_reports.values():
-                            sigma_scan_parts.extend(c.evidence_ref for c in isr_obj.claims)
-                        sigma_scan_text = "\n".join(sigma_scan_parts)
+                        _sbx = state.get("sandbox_report")
+                        _sbx = _sbx if isinstance(_sbx, dict) else None
+                        sigma_events = build_events_from_sandbox(_sbx)
+                        if not sigma_events:
+                            return None
                         sigma_layer.reset_filter_stats()
                         sigma_matches = await asyncio.to_thread(
-                            sigma_layer.scan_report_text,
-                            sigma_scan_text,
+                            sigma_layer.scan_events,
+                            sigma_events,
+                            "sandbox",
                             sample_platform,
                         )
                         if sigma_matches or sigma_layer.last_filtered_count:
@@ -667,6 +941,26 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:  # noqa: BLE001
                 logger.warning("LOLBin Layer 0 failed: %s. Skipping.", e)
 
+            # Import-capability Layer 0 (2026-07 round 2): turn the PE extractor's
+            # deterministic import classification (+ static-string IOCs) into
+            # grounded ATT&CK techniques (e.g. WS2_32 client + hard-coded domain
+            # -> T1071). Closes the under-reporting gap the byte-scan YARA corpus
+            # leaves. Fail-safe; builds static from the worker-readable path.
+            try:
+                from maljan.analysis.import_capability_layer import (
+                    build_import_capability_isr,
+                )
+                from maljan.extractors.pe_extractor import build_static_analysis
+
+                _host_imp = state.get("sample_path")
+                if _host_imp:
+                    _static_imp = build_static_analysis(sample_path=str(_host_imp))
+                    import_isr = build_import_capability_isr(_static_imp)
+                    if import_isr is not None:
+                        isr_reports["import_capability"] = import_isr
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Import-capability Layer 0 failed: %s. Skipping.", e)
+
             # Deterministic ATT&CK technique-ID correction (2026-06-01). Run
             # BEFORE the cascade so corrected IDs flow into corroboration, the
             # judge's grounding, the report and the STIX bundle. Re-grounds each
@@ -705,10 +999,34 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("ATT&CK autocorrect skipped: %s", exc, exc_info=True)
 
+            # 2026-07 audit: mark domains that had no real input data this run so
+            # the cascade can't count an absent layer as corroboration (the
+            # T1497 "1.00 across dynamic,network,static,yara" inflation).
+            _dyn_empty = True
+            if isinstance(_sandbox_report, dict):
+                _beh = _sandbox_report.get("behavior") or {}
+                _dyn_empty = not (
+                    (isinstance(_beh, dict) and (_beh.get("processes") or _beh.get("calls")))
+                    or _sandbox_report.get("signatures")
+                )
+            _net_empty = True
+            try:
+                _net_iocs = build_network_iocs(_sandbox_report)
+                _net_empty = not (
+                    _net_iocs and (_net_iocs.domains or _net_iocs.ips or _net_iocs.urls)
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("network-empty probe failed: %s (treating as empty).", e)
+            _empty_domains = frozenset(
+                d for d, empty in (("dynamic", _dyn_empty), ("network", _net_empty)) if empty
+            )
+
             cascade_summary = None
             try:
                 cascade_summary = TTPCascadeEngine().compute(
-                    isr_reports, sample_platform=sample_platform
+                    isr_reports,
+                    sample_platform=sample_platform,
+                    empty_domains=_empty_domains,
                 )
             except Exception as e:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)
@@ -849,6 +1167,20 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     f"zero cross-layer corroboration ({_technique_count} single-layer techniques)"
                     if _technique_count > 0
                     else "no techniques mapped (no corroborating evidence)"
+                )
+            # Audit 2026-07-26 (Ö2): a missing sandbox report is itself a
+            # degradation, and it was the one cause NOT represented here. With
+            # CAPE unreachable ``_submit_to_sandbox`` swallows the error and
+            # returns None, so the run silently becomes static-only; the
+            # anti-emulation reason below cannot fire either because it needs a
+            # sandbox report to inspect. If static analysis alone corroborated a
+            # technique, ``degraded_mode`` stayed False and an uncapped
+            # confidence shipped for a verdict formed without any dynamic
+            # evidence. Verified live: the only operator signal was a single
+            # "Sandbox submission failed" line in the worker log.
+            if not state.get("sandbox_report"):
+                _degradation_reasons.append(
+                    "no sandbox report (dynamic detonation unavailable) — static-only evidence"
                 )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
@@ -1088,6 +1420,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as _e:
                 logger.warning("ATT&CK-case RAG skipped (%s). Verdict unaffected.", _e)
 
+            emit_agent_message(
+                container.event_sink,
+                speaker="Judge",
+                role="judge",
+                text=(
+                    f"Verdict: {decision}."
+                    + (
+                        " Run flagged as degraded — "
+                        + "; ".join(_degradation_reasons)
+                        + ". Confidence is capped accordingly."
+                        if _degraded_mode
+                        else " All layers corroborated."
+                    )
+                ),
+                round_index=state.get("iteration_count", 0),
+                status="complete",
+            )
+
             return {
                 "final_decision": decision,
                 "judge_report": "Analyzed negotiation history and expert reports.",
@@ -1118,6 +1468,18 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # verdict must degrade to a conservative "Suspicious" result, not abort
             # the run (and, in a batch eval, drop the whole sample).
             logger.error("Judge verdict %s: %s", type(e).__name__, e or "")
+            emit_agent_message(
+                container.event_sink,
+                speaker="Judge",
+                role="judge",
+                text=(
+                    f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}. "
+                    "Falling back to a conservative Suspicious verdict; the run is "
+                    "marked degraded and its confidence capped."
+                ),
+                round_index=state.get("iteration_count", 0),
+                status="failed",
+            )
             # F16 (2026-07-05): a judge-body failure must ALSO flag the run as
             # degraded so the report node caps ``overall_confidence`` (CONF-INFL-01)
             # and the UI shows the DEGRADED banner. Without these keys the report
@@ -1203,18 +1565,15 @@ def make_report_node(container: ServiceContainer) -> Any:
         # node flagged the run as degraded. Without this, a verdict drawn
         # entirely from YARA/Sigma deterministic layers (with all three
         # LLM analysts silently producing zero claims) lands at 0.98+ and
-        # is indistinguishable in the UI from a fully corroborated
-        # finding. The 0.60 ceiling is the same threshold the dashboard
-        # uses to render "low confidence" styling.
-        _DEGRADED_CONFIDENCE_CAP = 0.60
-        if state.get("degraded_mode") and overall_confidence > _DEGRADED_CONFIDENCE_CAP:
+        # is indistinguishable in the UI from a fully corroborated finding.
+        if state.get("degraded_mode") and overall_confidence > DEGRADED_CONFIDENCE_CAP:
             logger.warning(
                 "report_node: capping overall_confidence %.3f -> %.2f (degraded run: %s).",
                 overall_confidence,
-                _DEGRADED_CONFIDENCE_CAP,
+                DEGRADED_CONFIDENCE_CAP,
                 "; ".join(state.get("degradation_reasons") or []) or "no reason recorded",
             )
-            overall_confidence = _DEGRADED_CONFIDENCE_CAP
+            overall_confidence = DEGRADED_CONFIDENCE_CAP
 
         # Best-effort malware category — cheap and fully deterministic.
         #
@@ -1294,6 +1653,12 @@ def make_report_node(container: ServiceContainer) -> Any:
             _attck_cands = cast("list[dict[str, Any]]", state.get("attck_case_candidates") or [])
             if _attck_cands and getattr(report, "attribution", None) is not None:
                 report.attribution.attck_case_candidates = _attck_cands
+            # Report-reshaping Phase 1: attach the captured tool-loop evidence so
+            # the Composer can ground the deep technical spine. Already size-
+            # capped upstream (schemas.tool_evidence); stored verbatim here.
+            _tool_ev = cast("dict[str, list[dict[str, Any]]]", state.get("tool_evidence") or {})
+            if _tool_ev:
+                report.technical_evidence = _tool_ev
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {}
@@ -1332,6 +1697,33 @@ def make_report_node(container: ServiceContainer) -> Any:
             )
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report)
+
+        # Report-reshaping Phase 4: section-wise Composer authors the professional
+        # spine (intro, technical-analysis subsections, C2 channels, conclusion),
+        # each grounded in its isolated evidence bundle. Best-effort — a Composer
+        # failure never blocks the report. None in mock / when composer disabled.
+        try:
+            composer = container.get_report_composer()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
+            composer = None
+        if composer is not None:
+            try:
+                await composer.compose(report, state.get("isr_reports"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
+                )
+
+        # Report-reshaping Phase 5: deterministic figures (inline SVG + Ghidra
+        # code listings) generated from the report's own data — real charts, no
+        # fabricated screenshots. Best-effort; empty when data is absent.
+        try:
+            from maljan.reporting.figures import build_figures
+
+            report.figures = build_figures(report)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("report_node: figure generation failed (%s).", exc)
 
         # Detection signatures (Faz 4) — template-based YARA/Sigma/Suricata
         # generation. Runs after narrative so the LLM-written family name can

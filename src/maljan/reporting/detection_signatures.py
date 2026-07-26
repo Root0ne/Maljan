@@ -121,6 +121,42 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
     return rules
 
 
+# Names that assert an attribution the report does not actually have. A rule
+# titled after any of these is the ``Maljan_AutoGen_unknown`` stub the D11
+# guardrail exists to stop (audit 2026-07-26).
+_PLACEHOLDER_NAMES: frozenset[str] = frozenset({"unknown", "unclassified", "none", "n/a", ""})
+
+
+def _rule_name_seed(report: MalwareReport) -> str:
+    """Return the value rule naming is derived from.
+
+    Single source of truth for the YARA and Sigma naming fallbacks so the gate
+    can reason about the name that will actually be emitted.
+    """
+    attribution = getattr(report, "attribution", None)
+    family = getattr(attribution, "family", None) if attribution is not None else None
+    return str(family or getattr(report, "malware_category", None) or "unknown")
+
+
+def _rule_name_component(report: MalwareReport) -> str:
+    """The family/category component of a generated rule name.
+
+    Falls back to the sample hash when nothing is attributed. Audit 2026-07-26
+    round 2: the D11 placeholder check gates YARA and Sigma, but Suricata is
+    deliberately ungated — its rule body fires on network IOCs, which stay valid
+    whether or not the family is known, so refusing it would throw away a good
+    signature. The *name* still has to be honest, and it was not: an
+    unattributed report produced ``Maljan_AutoGen_Suricata_unknown``, asserting
+    an attribution the report does not have. Naming it after the sample says
+    exactly what the rule matches and claims nothing else.
+    """
+    seed = _rule_name_seed(report)
+    if seed.strip().lower() in _PLACEHOLDER_NAMES:
+        sha256 = (report.identity.hashes.sha256 or "").strip()
+        return _safe_rule_name(f"Sample_{sha256[:12]}") if sha256 else "Sample"
+    return _safe_rule_name(seed)
+
+
 def _family_grounded_reason(report: MalwareReport) -> str | None:
     """Shared family-grounding gate (D11 guardrail).
 
@@ -137,6 +173,17 @@ def _family_grounded_reason(report: MalwareReport) -> str | None:
     grounded = getattr(attribution, "family_grounded", True)
     if family and grounded is False:
         return f"ungrounded family '{family}' (D11 guardrail)"
+
+    # Audit 2026-07-26: the guardrail was still being defeated from the other
+    # side. With NO family attributed, ``family_grounded`` is vacuously True, so
+    # the check above passes — but rule naming falls back to
+    # ``family or malware_category or sha256[:12]``, and when the category is
+    # also unresolved that yields the literal ``Maljan_AutoGen_unknown`` stub the
+    # 2026-05-29 Linux ELF audit created this gate to stop. A rule named after a
+    # placeholder asserts an attribution the report does not have, so refuse it
+    # regardless of which field produced the placeholder.
+    if _rule_name_seed(report).strip().lower() in _PLACEHOLDER_NAMES:
+        return "no resolved family or category — rule name would be a placeholder"
     return None
 
 
@@ -199,8 +246,10 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
             strings.append((slot, f"{imp.dll}!{imp.function}"))
             sources.append(f"import:{imp.dll}!{imp.function}")
 
-    safe_name = _safe_rule_name(report.attribution.family or report.malware_category or sha256[:12])
-    rule_name = f"Maljan_AutoGen_{safe_name}"
+    # Gated above when the seed is a placeholder, so this normally uses the real
+    # family; _rule_name_component keeps the name honest anyway should the gate
+    # ever be relaxed.
+    rule_name = f"Maljan_AutoGen_{_rule_name_component(report)}"
 
     body = _render_yara(
         rule_name=rule_name,
@@ -318,8 +367,8 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
         return None
 
     sha256 = report.identity.hashes.sha256
-    family = report.attribution.family or report.malware_category or "unknown"
-    safe_name = _safe_rule_name(family)
+    family = _rule_name_seed(report)
+    safe_name = _rule_name_component(report)
     rule_id = str(uuid.UUID(bytes=hashlib.sha256(sha256.encode()).digest()[:16]))
 
     selections: dict[str, dict[str, Any]] = {}
@@ -493,9 +542,13 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     if not (domains or ips or urls):
         return None
 
-    family = report.attribution.family or report.malware_category or "unknown"
+    seed = _rule_name_seed(report)
+    # "unattributed" rather than "unknown": the comment is read by whoever
+    # deploys the rule, and "family: unknown" reads like a failed lookup rather
+    # than a report that never claimed a family.
+    family = "unattributed" if seed.strip().lower() in _PLACEHOLDER_NAMES else seed
     sha256 = report.identity.hashes.sha256
-    rule_name = f"Maljan_AutoGen_Suricata_{_safe_rule_name(family)}"
+    rule_name = f"Maljan_AutoGen_Suricata_{_rule_name_component(report)}"
 
     sources: list[str] = []
     lines: list[str] = [

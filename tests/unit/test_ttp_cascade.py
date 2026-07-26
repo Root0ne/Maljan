@@ -453,3 +453,41 @@ class TestPlatformAwareCascade:
         }
         summary = engine.compute(isrs, sample_platform="unknown")
         assert summary.total_techniques == 1
+
+
+class TestEmptyDomainGate:
+    """2026-07 audit (Bulgu #3): a domain with no real input data this run must
+    not be counted as an independent corroborating layer — that is what inflated
+    T1497 to 1.00 "corroborated across dynamic,network,static,yara" when the
+    sandbox never ran."""
+
+    def test_empty_domain_claims_dropped(self, engine: TTPCascadeEngine) -> None:
+        isrs = {
+            "dyn": _make_isr("dynamic", "dynamic", [_claim("T1497", 0.9)]),
+            "net": _make_isr("network", "network", [_claim("T1497", 0.9)]),
+            "stat": _make_isr("static", "static", [_claim("T1497", 0.5)]),
+        }
+        summary = engine.compute(isrs, empty_domains=frozenset({"dynamic", "network"}))
+        # Only the static layer survives → single-source, not corroborated.
+        assert summary.total_techniques == 1
+        result = summary.results[0]
+        assert result.contributing_layers == ["static"]
+        assert not result.is_corroborated
+        assert result.weighted_confidence < 1.0
+
+    def test_technique_vanishes_when_only_empty_domains(self, engine: TTPCascadeEngine) -> None:
+        # A T1497 claim that exists ONLY in the empty dynamic layer disappears.
+        isrs = {
+            "dyn": _make_isr("dynamic", "dynamic", [_claim("T1497", 0.9)]),
+        }
+        summary = engine.compute(isrs, empty_domains=frozenset({"dynamic"}))
+        assert summary.total_techniques == 0
+
+    def test_no_gate_preserves_legacy(self, engine: TTPCascadeEngine) -> None:
+        isrs = {
+            "dyn": _make_isr("dynamic", "dynamic", [_claim("T1497", 0.9)]),
+            "stat": _make_isr("static", "static", [_claim("T1497", 0.5)]),
+        }
+        summary = engine.compute(isrs)  # empty_domains=None → gate nothing
+        assert summary.total_techniques == 1
+        assert set(summary.results[0].contributing_layers) == {"dynamic", "static"}

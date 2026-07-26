@@ -978,6 +978,164 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-07-13 Depth-restore E2E validation — CORE CONFIRMED (6.3× deeper, zero re-prefill, zero
+  timeout); multi-chunk + revision-round E2E still UNVERIFIED (a healthy run was killed on a
+  misdiagnosed clock offset).** Ran the full pipeline in the worker on sample `11e77149` (CAPE-off for
+  speed) with the restored deep config (max_steps=40, chars=6000, timeout=1500, sequential). **Result
+  vs the same sample under the old cap=8:** static did **19 tool calls → 7 claims** (was 3 tool calls),
+  **6.4 s/step** (re-prefill would be 50–90 s → confirms zero re-prefill), 120.9 s < 1500 s (no
+  timeout); full run 761 s → verdict=Malware, report 7615 chars + 4 Composer sections + 1 detection
+  rule. **Honest nuances:** (1) the small local model keeps tool-calling to the cap rather than
+  self-terminating, so the forced-synthesis salvage STILL fires (now on 19-call deep evidence, not
+  3-call shallow) — the config.py "concludes naturally ~30–36 steps" prediction did NOT hold on this
+  tiny sample; the salvage is the conclusion mechanism, and raising the cap further just adds tool
+  calls + salvage time. (2) The **multi-chunk multiplier and the revision-round re-prefill check
+  remain E2E-UNVERIFIED**: a first run on a 3.8 MB 2-chunk PE (CAPE-on) was **killed by mistake** — the
+  worker container's clock runs 3 h behind the host, and that offset was misread as a "3-hour hang" (the
+  run was ~1 min into Ghidra `load_program`, healthy). Lesson: verify container/host clock skew before
+  diagnosing a stall. The revision-node serialisation is still covered by the deterministic
+  `asyncio.gather`-spy unit test; a real multi-chunk + dissent E2E is the remaining confirmation.
+
+- **2026-07-13 The sequential-analyst fix was INCOMPLETE (revision node still ran concurrent), and
+  the "SWA" depth band-aids were obsolete — completed the fix, then restored full static-analysis
+  depth. `IMPLEMENTED` (config + guard tests green); the depth *benefit* is `PENDING` a multi-chunk
+  E2E.** Two coupled findings, building on the same-day misdiagnosis correction below.
+  **(1) The prior `parallel_analysts=False` fix only covered the INITIAL fan-out.** It serialised the
+  analyst nodes via the LangGraph edges (`pipeline/builder.py`), but the **revision node**
+  (`pipeline/nodes.make_revision_node`) fanned out *internally* through an unconditional
+  `asyncio.gather` over all analysts, gated on nothing. So every negotiation **revision round**
+  re-introduced the single-slot recurrent-state clobbering → full re-prefill — *the exact phase the
+  41-min runs blew `request_timeout=900s` on*. The 743 s validation run (previous entry) converged
+  before a real revision round (small 1-chunk sample, degraded-mode consensus), so the gap never
+  surfaced. **Fixed** by gating the revision fan-out on `parallel_analysts` (a sequential `await`
+  loop when False; the concurrent gather only for hosted multi-slot APIs), and **flipping the
+  config.py DEFAULT `True→False`** so a run without a local `.env` (CI, fresh clone) is safe by
+  default — otherwise it would pair parallel with the restored deep budget = uncapped re-prefill.
+  Pinned with a deterministic `asyncio.gather`-spy regression test (`test_analyst_parallelism.py`).
+  **(2) With the topology now guaranteed-sequential in BOTH phases, the 2026-07-11 "SWA" depth caps
+  are obsolete** — they blamed the same misdiagnosed cause and were suppressing analysis depth for no
+  benefit. Diagnostic: even a 1-chunk sample hit the `forcing synthesis` salvage (static ReAct 28.9 s
+  for only 3 tool calls, then a **47.8 s** salvage LLM call = **62 %** of static wall-time wasted on
+  cap-hit recovery, not analysis). **Restored, as config.py defaults** (`.env` sets none of these
+  keys), as a *coupled set* because the per-chunk wall-clock — not the step count — is the binding
+  constraint (at ~15–20 s/step, a 300 s cap fits only ~15–20 steps, so raising `max_steps` alone is
+  inert): `react_agent_max_steps_overrides[static]` **8→40** (original designed depth; a hint-directed
+  chunk concludes naturally ~30–36 steps, so 40 avoids salvage on an incomplete decompilation),
+  `max_tool_output_chars` **3000→6000** (NOT 8000 — no in-loop pruning, and 8000 risks crossing
+  `n_ctx=131072` → a silent server context-shift that drops the earliest tokens / `load_program`
+  framing; 6000 keeps worst-case peak ~90–95 k), `react_agent_timeout_overrides[static]` **300→1500**
+  (hard cap `timeout+30`=1530 s). Raised the never-fires safety-net ceilings so a deeper-but-
+  *progressing* run is never killed ("a timeout is a bug"): `request_timeout` **900→1800** (≥ the
+  1530 s hard cap, per the provider's must-exceed-longest-agent-budget invariant), and `job_timeout`
+  **3600→28800 (8 h)** — static runs one ReAct loop **per chunk** (~8–10 chunks for a real PE), so a
+  realistic-slow cold-cache run is ~2–4 h and the outer ARQ ceiling must exceed the sum of the inner
+  nets. Rewrote the three now-false SWA comment blocks to the real cause. Side effect: **fixed two
+  previously-red tests** that already expected `static==40` (`test_agents.py`) — the 2026-07-11 cut
+  lowered the config without updating them. **Honest status:** the config + topology change is
+  verified (guard tests green, 0 new failures; 8 *pre-existing, unrelated* suite failures confirmed by
+  stash — stale chunker default, 6 view-decomposition, 1 YARA-gate); the **depth quality win is not
+  yet measured** — the 743 s run was 1-chunk. Acceptance gate: a real PE that splits into ≥8 chunks
+  AND produces dissent (≥1 revision round), confirming zero re-prefill in *both* phases, no chunk
+  hitting its 1530 s cap, salvage absent on rich chunks, peak context <~120 k, and a quality delta
+  (more decompiled functions / grounded techniques) vs the `max_steps=8` baseline. Best-quality runs
+  now take ~2–4 h/sample by design (time cost explicitly accepted).
+
+- **2026-07-13 The "SWA re-prefill bottleneck" was a MISDIAGNOSIS — the real cause is a hybrid
+  Gated-DeltaNet recurrent model + parallel analysts thrashing a single llama-server slot. Fixed by a
+  one-flag config change; 41 min → 12 min, zero timeouts.** A CAPE-on live run timed out the revision
+  round at `request_timeout=900s`; runs took ~41 min. Prior notes (and the config.py comments) blamed a
+  *sliding-window-attention (SWA)* re-prefill on ik_llama. **Deep web research + the model metadata
+  disproved this:** (1) the served **Qwen3.6-35B-A3B is a HYBRID Gated-DeltaNet (linear/recurrent) +
+  GQA-attention MoE** (Qwen3-Next family) — NOT an SWA model (`/props` shows no sliding window;
+  `n_ctx_train=262144`); (2) llama.cpp / ik_llama cannot restore the **recurrent context checkpoint**
+  for hybrid models (open bugs **ggml-org/llama.cpp#20225, #22384, #24055** and **ik_llama#1762**), so
+  the server does a **full prompt re-processing on every conversation turn** (measured upstream:
+  `prompt eval 195154 ms / 66293 tokens` ≈ 3 min/turn). The trigger in Maljan was
+  **`LLM__PARALLEL_ANALYSTS=true`**: on a single slot the three analysts interleave and each clobbers
+  the others' per-slot DeltaNet recurrent state → every ReAct step re-prefills from scratch → the
+  revision round (large peer context) blows 900s. **Why not the "obvious" fixes:** `--swa-full` is
+  irrelevant (not SWA) and unsupported by ik_llama; `-np` multi-slot is *actively harmful* here
+  (DeltaNet mixed-batch decode collapses to ~0.59 t/s) and the exact model has an **unresolved decode
+  hang after cache-invalidation (#22450, closed "not planned")**, so hand-patching ik_llama's
+  checkpoint code (untestable Windows-CUDA rebuild + hang risk) was rejected as higher-risk. **The fix
+  is the already-implemented sequential topology** (`pipeline/builder.py`, `parallel_analysts=False`):
+  each analyst gets exclusive slot use, so its recurrent state survives across its own ReAct steps →
+  only new tokens are processed. **Measured on `11e77149` + CAPE:** parallel **2480.5 s** (revision
+  timed out, `verdict=Malware conf=0.61`) → sequential **743.4 s** (**3.3×**, zero `Request timed out`,
+  zero `forcing full prompt re-processing`; static/dynamic/network ReAct = 28.9/52.6/30.8 s; full
+  report incl. Composer 4 sections + 4 figures + 11 IOCs + 3 rules; `conf=0.0` this run is the honest
+  degraded-mode cap from CAPE flagging `antivm_generic_system`, not a regression — CAPE anti-VM
+  detection varies run-to-run). Permanent fix: `parallel_analysts=False` in `.env` + documented in
+  `.env.example` and the `config.py` field comment. Deeper cure if ever needed (not required now):
+  serve a pure full-attention model (e.g. Qwen3-30B-A3B original) where prompt-cache reuse is native.
+  Corrects the `[[swa-react-reprefill-bottleneck]]` memory note.
+
+- **2026-07-12 Static-analyst performance, before vs after the July fixes (tool-manifest sizing +
+  hallucinated `load_program` path).** Two consecutive root causes limited the static analyst on
+  live runs, and both were measured on the SAME 36 KB MSVC6/MFC PE (`11e77149…`, WS2_32 client →
+  `888kafa.com`) with the same local Qwen3.6-35B backend, giving a clean controlled comparison.
+
+  **(a) Tool-manifest sizing (commit acb4dbb).** Exposing all 165 Ghidra MCP tools
+  (`USE_ALL_TOOLS=true`, job `294eefc3`) was measured strictly WORSE than the curated 20-tool
+  allowlist: the ~15–25k-token manifest is re-prefilled every ReAct step on the SWA model, so the
+  pipeline went from ~255–330 s to **1 580 s (26 min, ~5–6×)**, the analyst managed only 3 tool
+  calls in 67.5 s before forced synthesis, and hallucination went UP (T1027@0.85 + a **fabricated
+  T1055** with no injection API in the sample + T1140@0.70). Fix: dynamic tool-RAG selection
+  (`ghidra_tool_selector.py`, mode `dynamic`) — CORE triage set ∪ category-matched tools derived
+  deterministically from the PE import classification; all 165 stay reachable, ~23–40 are shown.
+  Measured: **23/165 tools selected** for categories `{anti_debug, execution, network}`, pipeline
+  back to **162.8 s** — curated-level speed at much wider tool reach. A deterministic confidence
+  cap (`capability_matrix._cap_unsupported_confidence`) was added in the same commit because the
+  prompt-only constraint did NOT stop the 35B model from claiming T1027@0.85: with no obfuscation
+  evidence (all sections < 7.0 entropy, no packer hint) T1027/T1140 are clamped to ≤0.40, and
+  T1055 likewise unless a real injection import exists. Prompt-level guidance failing where a
+  10-line deterministic post-hoc cap succeeds is itself a paper-relevant negative result.
+
+  **(b) Hallucinated `load_program` path on fresh samples (commit fc85412).** The 162.8 s run
+  above (job `60df48cb`) was fast but its LLM static layer was silently BROKEN end-to-end: for a
+  freshly uploaded sample there is no `data/samples/static/<sha>.json` fixture and (with the CAPE
+  VM down) no sandbox report, so the analyst's head chunk was the non-JSON file-loader placeholder
+  "No static data available for sample <sha>" — and the Wave-6 path splice
+  (`_augment_static_chunks_with_path`) only injected `analysis_file_path` into JSON chunks. The
+  model, given no path, INVENTED `/home/user/data/bin.<sha>`; Ghidra correctly answered "File not
+  found"; the report then carried two poisoned confidence-1.0 claims ("file was not found on the
+  server filesystem", "no binary content was provided") even though the mirror to
+  `/data/samples/<sha>.exe` had succeeded — the deterministic function-hash pre-pass loaded the
+  very same file 90 s later in the same job. Evidence trail: worker log `Mirrored sample…`
+  16:20:40; DB claim `evidence_ref` with the invented path; Ghidra log `Loaded program` 16:22:59.
+  Diagnosis matters: this looked like (and was initially filed as) "Ghidra file-mirroring
+  flakiness" — the infrastructure was innocent; the failure was a prompt-content gap. Fix, two
+  defensive layers: (1) synthesize a real JSON head chunk for the placeholder case, carrying
+  `analysis_file_path`/`host_sample_path`/`sha256` plus a size-capped deterministic PE summary
+  (imports ≤60 suspicious-first, strings ≤40, 40k-char hard ceiling — the spliced chunk bypasses
+  the chunker's token-budget re-check); (2) wrap `load_program` at the tool-selection choke point
+  so a model-supplied `file` argument differing from the known container path is overridden
+  deterministically (late-bound read, since agents are cached across samples).
+
+  **Measured before/after on the same sample (fresh-sample regime, CAPE down):**
+
+  | metric | all-165 (`294eefc3`) | dynamic, pre-fix (`60df48cb`) | dynamic, post-fix (`df8ebc1a`) |
+  |---|---|---|---|
+  | pipeline wall-clock | 1 580 s | 162.8 s | 225.9 s |
+  | tool manifest shown | 165 | 23/165 | 23/165 |
+  | static ReAct loop | 3 calls / 67.5 s | 3 calls / 12.4 s | 3 calls / 16.0 s (+29.6 s synthesis) |
+  | sink-reachability pre-pass | — | **did not fire** (no path in chunk) | fired (991-char priority hint) |
+  | LLM static claims | 3, all hallucinated (incl. fabricated T1055) | 2, both poisoned ("file not found", conf 1.0) | **5, all grounded** (real `FUN_00401310`, section entropy 5.39, `888kafa.com`) |
+  | usable static evidence | none from LLM | deterministic import layer only (T1071@0.60) | LLM (T1071@0.95, anti-debug@0.8, T1036@0.85…) + import layer |
+  | capability matrix | T1027@0.85, fake T1055@0.80 | T1071 only | T1071@0.95; **T1027 capped 0.40** (cap held); **no T1055** |
+  | verdict / confidence | — (not recorded) | Malware / 0.667 (on thin evidence) | Malware / 0.613 (on broad evidence) |
+
+  Post-fix wall-clock is ~63 s higher than pre-fix — that delta is REAL WORK the broken run never
+  did (sink-reachability + function-hash pre-passes now fire before the loop, forced synthesis now
+  has genuine tool output to compress, judge processes 5 claims instead of 2), not a regression.
+  Overall confidence barely moved (0.667→0.613) while the evidence base under it transformed —
+  another instance of the log's recurring theme that scalar confidence is a poor proxy for report
+  quality. Verified: 12 new unit tests (placeholder-chunk synthesis + path pinning), full suite
+  1396 passed / 8 known pre-existing failures, E2E on job `df8ebc1a`. Also fixed en route:
+  `pe_extractor` now only flags "dynamic API resolution" as an obfuscation indicator when the
+  import table is actually sparse (<15 imports), removing a chronic T1027 false-positive trigger
+  for ordinary `LoadLibrary+GetProcAddress` idiom.
+
 - **2026-06-23 Live-UI audit: degraded live reports were caused by THREE LLM-loop root causes
   (all fixed), not by the analysis logic.** A full live run of a Windows PE (Pony) under
   `SANDBOX__BACKEND=mock` completed but returned `degraded_mode=true`, `overall_confidence=0`,

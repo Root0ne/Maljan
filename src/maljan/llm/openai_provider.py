@@ -83,11 +83,13 @@ class OpenAIProvider:
         # response before the outer wrapper's hard cap fires (live trace
         # 2026-05-28 showed static analyst dropping at exactly 300s
         # because the previous Wave 5 value was tighter than its 600s
-        # ReAct budget). 900s matches the worst case of static (600s) +
-        # decode headroom on a cold-cache local 35B. ``max_retries=0``
-        # keeps a single attempt regardless of size — the daemon-thread
-        # cap in ``execute_tool_loop`` is the only retry policy we want.
-        build_kwargs.setdefault("request_timeout", 900)
+        # ReAct budget). 1800s (2026-07-13) stays >= the longest agent
+        # ``wait_for`` hard cap: the deep-analysis restore raised static's
+        # per-chunk budget to 1500s (hard cap timeout+30 = 1530s), plus decode
+        # headroom on a cold-cache local 35B. ``max_retries=0`` keeps a single
+        # attempt regardless of size — the daemon-thread cap in
+        # ``execute_tool_loop`` is the only retry policy we want.
+        build_kwargs.setdefault("request_timeout", 1800)
         build_kwargs.setdefault("max_retries", 0)
 
         return ChatOpenAI(**build_kwargs)

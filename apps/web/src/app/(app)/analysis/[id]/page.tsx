@@ -4,7 +4,9 @@ import { useState } from "react";
 
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
-import { downloadBlob } from "@/lib/report-utils";
+import { downloadBlob, downloadObject } from "@/lib/report-utils";
+import { getErrorMessage } from "@/lib/errors";
+import { verdictLabel } from "@/lib/verdict";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
 
@@ -50,11 +52,31 @@ function countNetworkIOCs(mr: MalwareReport): {
   suspicious: number;
 } {
   const n = mr.network;
-  if (!n) return { domains: 0, ips: 0, urls: 0, suspicious: 0 };
+  // 2026-07 audit (Bulgu #4): also count network IOCs recovered from static
+  // strings so a hard-coded C2 domain isn't reported as "0 domains".
+  const staticIocs = (mr.static?.interesting_strings ?? []).filter(
+    (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
+  );
+  const staticDomains = staticIocs.filter((s) => s.kind === "domain").length;
+  const staticIps = staticIocs.filter((s) => s.kind === "ip").length;
+  const staticUrls = staticIocs.filter((s) => s.kind === "url").length;
+  if (!n) {
+    return {
+      domains: staticDomains,
+      ips: staticIps,
+      urls: staticUrls,
+      suspicious: 0,
+    };
+  }
   const susp =
     n.domains.filter((d) => d.is_suspicious).length +
     n.ips.filter((i) => i.is_suspicious).length;
-  return { domains: n.domains.length, ips: n.ips.length, urls: n.urls.length, suspicious: susp };
+  return {
+    domains: n.domains.length + staticDomains,
+    ips: n.ips.length + staticIps,
+    urls: n.urls.length + staticUrls,
+    suspicious: susp,
+  };
 }
 
 export default function SummaryTab() {
@@ -116,9 +138,7 @@ function LegacySummary() {
     keyFindings = ["No specific findings were extracted."];
   }
 
-  const verdictLabel = report?.verdict
-    ? report.verdict.charAt(0).toUpperCase() + report.verdict.slice(1)
-    : "Unknown";
+  const verdictDisplay = verdictLabel(report?.verdict);
   const confidence = pct(report?.overall_confidence);
   const verdictColorClass =
     VERDICT_TEXT[lc(report?.verdict)] || VERDICT_TEXT.unknown;
@@ -186,7 +206,7 @@ function LegacySummary() {
         <div className="p-4">
           <p className="text-sm text-text-secondary leading-relaxed">
             The analyzed sample has been classified as{" "}
-            <strong className={verdictColorClass}>{verdictLabel}</strong> with a consensus
+            <strong className={verdictColorClass}>{verdictDisplay}</strong> with a consensus
             confidence score of <strong>{confidence}/100</strong>.
             {report?.malware_category
               ? ` Detected malware category: ${report.malware_category}.`
@@ -337,7 +357,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Verdict
             </div>
-            <div className={`text-base font-semibold ${verdictText}`}>{mr.verdict}</div>
+            <div className={`text-base font-semibold ${verdictText}`}>{verdictLabel(mr.verdict)}</div>
           </div>
           <div>
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
@@ -353,7 +373,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
               className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
             >
               {mr.severity.rating}
-              <span className="font-mono opacity-70">{mr.severity.overall_score.toFixed(1)}/10</span>
+              <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
             </span>
           </div>
           <div>
@@ -452,42 +472,9 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           )}
         </div>
       </div>
-
-      {/* External References — pulled from MalwareReport.references; the
-       * deterministic builder seeds VirusTotal / MalwareBazaar / ATT&CK links
-       * for every report so this section is reliably populated. */}
-      {mr.references && mr.references.length > 0 && (
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              External References
-            </h2>
-          </div>
-          <ul className="p-4 space-y-1.5">
-            {mr.references.map((ref, i) => (
-              <li key={`${ref.source}-${i}`} className="flex items-baseline gap-3 text-xs">
-                <span className="text-text-muted uppercase tracking-wide w-28 shrink-0">
-                  {ref.source}
-                </span>
-                <a
-                  href={ref.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent-strong hover:underline truncate"
-                  title={ref.url}
-                >
-                  {ref.url}
-                </a>
-                {ref.note && (
-                  <span className="text-text-muted text-[11px] truncate" title={ref.note}>
-                    — {ref.note}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* 2026-07 round 2: "External References" section removed from SUMMARY per
+       * user request. The same references remain in the Markdown export
+       * (## References). */}
     </div>
   );
 }
@@ -519,17 +506,51 @@ function DownloadBar({
   shortHash: string;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed markdown fetch
+  // left the button looking like it had worked.
+  const [error, setError] = useState<string | null>(null);
 
   const safeName = `maljan-${shortHash}`;
 
   const downloadMarkdown = async () => {
     if (!reportId) return;
     setBusy("md");
+    setError(null);
     try {
       const body = await api.getReportMarkdown(reportId);
       downloadBlob(body, `${safeName}.md`, "text/markdown");
-    } catch {
-      /* ignore */
+    } catch (err) {
+      setError(`Could not download the Markdown report: ${getErrorMessage(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadPdf = async () => {
+    if (!reportId) return;
+    setBusy("pdf");
+    setError(null);
+    try {
+      // Server-rendered: A4, numbered pages, linked contents and the
+      // deterministic figures in place. Can take a second on a figure-heavy
+      // report, hence the busy state on the button.
+      downloadObject(await api.getReportPdf(reportId), `${safeName}.pdf`);
+    } catch (err) {
+      setError(`Could not download the PDF report: ${getErrorMessage(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadHtml = async () => {
+    if (!reportId) return;
+    setBusy("html");
+    setError(null);
+    try {
+      const body = await api.getReportHtml(reportId);
+      downloadBlob(body, `${safeName}.html`, "text/html");
+    } catch (err) {
+      setError(`Could not download the HTML report: ${getErrorMessage(err)}`);
     } finally {
       setBusy(null);
     }
@@ -560,6 +581,22 @@ function DownloadBar({
         {busy === "md" ? "fetching..." : "↓ Markdown report"}
       </button>
       <button
+        onClick={downloadPdf}
+        disabled={!reportId || busy === "pdf"}
+        title="Print-ready A4 report with figures and a linked table of contents"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "pdf" ? "rendering..." : "↓ PDF report"}
+      </button>
+      <button
+        onClick={downloadHtml}
+        disabled={!reportId || busy === "html"}
+        title="Self-contained HTML — opens offline, no external requests"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "html" ? "fetching..." : "↓ HTML report"}
+      </button>
+      <button
         onClick={downloadStix}
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
       >
@@ -573,6 +610,14 @@ function DownloadBar({
       >
         ↓ MISP attributes
       </button>
+      {error && (
+        <div
+          role="alert"
+          className="w-full text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+        >
+          {error}
+        </div>
+      )}
     </div>
   );
 }

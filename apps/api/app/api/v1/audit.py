@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -12,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user, require_admin
+from app.deps import get_current_user, hash_api_key, require_admin
 from app.logging_config import get_logger
 from app.models.audit import APIKey, AuditLog
 from app.models.user import User
@@ -106,7 +105,9 @@ def _generate_api_key() -> tuple[str, str, str]:
         (raw_key, key_hash, key_prefix)
     """
     raw = "mk_" + secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+    # Hashing lives in ``app.deps`` so minting and verification can never drift
+    # apart (audit 2026-07-26, K2 — keys previously verified nothing at all).
+    key_hash = hash_api_key(raw)
     prefix = raw[:8]
     return raw, key_hash, prefix
 

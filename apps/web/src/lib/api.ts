@@ -1,6 +1,5 @@
 import type {
   EnrichTriggerResponse,
-  IOCListResponse,
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
@@ -102,19 +101,6 @@ export interface SystemStatusDTO {
   enrichment_enabled: boolean;
   has_virustotal_key: boolean;
   has_abuseipdb_key: boolean;
-}
-
-export interface LTMPurgeRequest {
-  max_total_techniques?: number;
-  require_uncorroborated?: boolean;
-  include_analyst_errors?: boolean;
-  dry_run?: boolean;
-}
-
-export interface LTMPurgeResponse {
-  removed: number;
-  backend: string;
-  dry_run: boolean;
 }
 
 export interface AuditLogDTO {
@@ -319,6 +305,39 @@ class ApiClient {
     return res.text();
   }
 
+  /** Same contract as textRequest, but keeps the body binary (PDF export). */
+  private async blobRequest(
+    path: string,
+    options: RequestInit = {}
+  ): Promise<Blob> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
+
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+      }
+      throw new Error("Unauthorized");
+    }
+
+    if (!res.ok) {
+      // The error body is JSON even though the success body is not, so it has
+      // to be read as JSON here rather than reusing the blob.
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed: ${res.status}`);
+    }
+
+    return res.blob();
+  }
+
   private async uploadRequest<T>(
     path: string,
     formData: FormData
@@ -405,13 +424,6 @@ class ApiClient {
     return data;
   }
 
-  ltmPurge(body: LTMPurgeRequest) {
-    return this.request<LTMPurgeResponse>("/api/v1/system/ltm/purge", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
   /* ── Samples ───────────────────────────────────────── */
   getSamples(page = 1, pageSize = 50) {
     return this.request<PaginatedResponse<SampleDTO>>(
@@ -482,11 +494,10 @@ class ApiClient {
     }>(`/api/v1/jobs/${jobId}/events?limit=${limit}`);
   }
 
-  /* ── Reports ───────────────────────────────────────── */
-  getReport(reportId: string) {
-    return this.request<ReportDetailDTO>(`/api/v1/reports/${reportId}`);
-  }
-
+  /* ── Reports ───────────────────────────────────────────
+   * audit 2026-07-26 (§5 "çağrılmayan API istemci metodları"): ``getReport``,
+   * ``getReportFull``, ``getReportIOCs`` and ``ltmPurge`` had zero call sites
+   * and were removed. The pages reach a report through its job id. */
   getReportByJobId(jobId: string) {
     return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
   }
@@ -515,17 +526,18 @@ class ApiClient {
     );
   }
 
-  getReportFull(reportId: string) {
-    return this.request<MalwareReport>(`/api/v1/reports/${reportId}/full`);
-  }
-
   getReportMarkdown(reportId: string) {
     return this.textRequest(`/api/v1/reports/${reportId}/markdown`);
   }
 
-  getReportIOCs(reportId: string, kind?: string) {
-    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
-    return this.request<IOCListResponse>(`/api/v1/reports/${reportId}/iocs${qs}`);
+  /** Standalone HTML report — inline CSS and SVG figures, no external requests. */
+  getReportHtml(reportId: string) {
+    return this.textRequest(`/api/v1/reports/${reportId}/html`);
+  }
+
+  /** Print-ready PDF of the same document. 503 when the host lacks WeasyPrint. */
+  getReportPdf(reportId: string) {
+    return this.blobRequest(`/api/v1/reports/${reportId}/pdf`);
   }
 
   getReportSignature(reportId: string, kind: "yara" | "sigma" | "suricata" | "snort") {
