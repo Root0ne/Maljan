@@ -103,25 +103,15 @@ class NetworkAnalyst(BaseAnalyst):
         # the agent loop, so blocking on the result cannot deadlock.
         from maljan.agents.base_agent import _run_coro_blocking
 
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0)
+        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="network-mcp-init")
 
         self.toolkit = toolkit
         self.tools = toolkit.get_tools()
         self.logger.info("Initialized Network MCP toolkit with %d tools", len(self.tools))
 
-    def _try_initialize_mcp(self) -> bool:
-        """Attempt MCP initialization, returning True on success.
-
-        Unlike _initialize_mcp_client(), this method catches all errors
-        and returns False instead of crashing. Used for graceful degradation
-        when scapy or other dependencies are unavailable.
-        """
-        try:
-            self._initialize_mcp_client()
-            return bool(self.tools)
-        except Exception as exc:
-            self.logger.warning("Network MCP initialization failed (graceful degradation): %s", exc)
-            return False
+    # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``
+    # unchanged in behaviour and name, because the dynamic analyst needed the
+    # same graceful degradation and had been hard-failing every run without it.
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

@@ -338,9 +338,15 @@ class StaticAnalyst(BaseAnalyst):
         # Build output guardrail: use FunctionSummarizer if available
         output_guardrail = None
         if cfg.preprocessing.use_function_summarizer:
-            from maljan.core.container import ServiceContainer
+            # Reuse the container that owns this agent. Constructing a fresh
+            # one here rebuilt the 2651-rule Sigma layer, the YARA layer and a
+            # new set of LLM clients — and this runs once per chunk, so a run
+            # with ten static chunks built ten of them and dropped them all.
+            container = getattr(self, "_container", None)
+            if container is None:
+                from maljan.core.container import ServiceContainer
 
-            container = ServiceContainer(config=cfg)
+                container = ServiceContainer(config=cfg)
             summarizer = container.get_function_summarizer()
             if summarizer is not None:
                 output_guardrail = summarizer.summarize_chunk
@@ -433,7 +439,7 @@ class StaticAnalyst(BaseAnalyst):
         """
         from maljan.agents.base_agent import _run_coro_blocking
 
-        _run_coro_blocking(coro, hard_timeout=120.0)
+        _run_coro_blocking(coro, hard_timeout=120.0, label="ghidra-mcp-init")
 
     def _compute_sink_priority_hint(self, file_path: str) -> str:
         """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.

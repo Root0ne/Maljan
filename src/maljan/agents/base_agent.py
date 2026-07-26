@@ -18,6 +18,8 @@ import asyncio
 import re
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from typing import Any, Literal
 
@@ -25,7 +27,7 @@ import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.core.config import get_settings
-from maljan.core.exceptions import AnalystError
+from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -57,6 +59,58 @@ _TECHNIQUE_MAX: int = 1700
 _INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
 
 
+async def retry_on_connection_error(
+    make_awaitable: Callable[[], Awaitable[Any]],
+    *,
+    attempts: int = 3,
+    what: str = "LLM call",
+    log: Any = None,
+) -> Any:
+    """Await ``make_awaitable()``, retrying only a transient connection error.
+
+    ``openai_provider`` sets ``max_retries=0`` process-wide, deliberately: the
+    SDK's own retries would storm a *stalled* request three times its 1800 s
+    timeout. The comment there says the ReAct loop's cap "is the only retry
+    policy we want" — but that retry only ever wrapped the ReAct executor, so
+    every other call in the system was left with exactly one attempt against a
+    client configured never to retry.
+
+    That is not a theoretical gap. The judge's verdict, the mediator's fast
+    path and the entire reporting layer were all single-attempt, and a local
+    llama-server dropping an idle socket during a long tool-call gap is a
+    routine event here. One blip degraded a whole run to "Suspicious", or
+    silently dropped a report section.
+
+    Narrow on purpose, preserving the original anti-storm intent:
+    ``APIConnectionError`` only. A stall surfaces as ``TimeoutError`` from the
+    caller's ``wait_for`` and is never retried. Backoff is 1 s then 2 s.
+
+    Takes a *factory* rather than an awaitable because a coroutine cannot be
+    awaited twice.
+    """
+    from openai import APIConnectionError
+
+    emit = log or logger
+    for attempt in range(attempts):
+        try:
+            return await make_awaitable()
+        except APIConnectionError as exc:
+            if attempt >= attempts - 1:
+                emit.error("%s: connection error after %d attempts: %s", what, attempts, exc)
+                raise
+            wait = 2**attempt
+            emit.warning(
+                "%s: connection error (attempt %d/%d): %s — retrying in %ds.",
+                what,
+                attempt + 1,
+                attempts,
+                exc,
+                wait,
+            )
+            await asyncio.sleep(wait)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def describe_exception(exc: BaseException) -> str:
     """Return a non-empty, diagnosable description of ``exc``.
 
@@ -73,7 +127,18 @@ def describe_exception(exc: BaseException) -> str:
     if not text and isinstance(inner, list | tuple) and inner:
         parts = [describe_exception(sub) for sub in inner[:3]]
         return f"{type(exc).__name__}({'; '.join(p for p in parts if p)})"
-    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+    if text:
+        return f"{type(exc).__name__}: {text}"
+    # 2026-07-26: the class name alone was still ambiguous for the one that
+    # mattered most. ``concurrent.futures.CancelledError`` and
+    # ``asyncio.CancelledError`` are *different classes* that print the same
+    # bare word, and only the first is an ``Exception`` — which is precisely
+    # why it slipped through every handler and reached the log as the
+    # uninformative ``ISR analysis failed: CancelledError``. Qualify it.
+    module = type(exc).__module__
+    if module and module not in ("builtins", "__main__"):
+        return f"{module}.{type(exc).__name__}"
+    return type(exc).__name__
 
 
 # Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing, used by the
@@ -500,7 +565,7 @@ def _get_agent_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
-def _run_coro_blocking(coro: Any, hard_timeout: float) -> Any:
+def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     """Submit ``coro`` to the shared agent loop and block until done / timeout.
 
     Mirrors the old daemon-thread + ``t.join(timeout)`` contract: on the hard
@@ -508,17 +573,35 @@ def _run_coro_blocking(coro: Any, hard_timeout: float) -> Any:
     caller surfaces a degraded analyst instead of hanging. Any exception raised
     inside the coroutine (including the inner ``asyncio.wait_for`` stall) is
     re-raised here unchanged.
+
+    ``label`` names what is being run ("cape-mcp-init", "react:static") and is
+    the difference between a diagnosable failure and a shrug. Pass it.
+
+    Two ways a coroutine can end without a result, and they mean opposite
+    things — see ``AgentLoopCancelled``. The second branch existed nowhere
+    before 2026-07-26, which is how every dynamic-analyst failure in the
+    database came to say ``CancelledError`` and nothing else.
     """
     loop = _get_agent_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
+    what = label or "agent coroutine"
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
+        # We cancelled it: it ran out of wall clock.
         future.cancel()  # schedule cancellation of the asyncio task on the loop
-        raise TimeoutError(f"agent coroutine exceeded hard cap of {hard_timeout}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
+    except _FuturesCancelled as exc:
+        # It cancelled itself. ``concurrent.futures.CancelledError`` is an
+        # ``Exception`` whose ``str()`` is empty, so left alone it reaches the
+        # operator as one uninformative word.
+        raise AgentLoopCancelled(
+            f"{what} was cancelled from inside — the underlying service closed the "
+            f"connection or its task group aborted (no timeout was reached)"
+        ) from exc
 
 
-async def run_on_agent_loop(coro: Any, hard_timeout: float) -> Any:
+async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> Any:
     """Await ``coro`` on the shared agent loop from a *different* running loop.
 
     The async sibling of ``_run_coro_blocking``, and the other half of the
@@ -540,11 +623,22 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float) -> Any:
     """
     loop = _get_agent_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
+    what = label or "agent coroutine"
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
-    except (TimeoutError, asyncio.CancelledError):
+    except TimeoutError:
         future.cancel()
-        raise TimeoutError(f"agent coroutine exceeded hard cap of {hard_timeout}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
+    except (asyncio.CancelledError, _FuturesCancelled) as exc:
+        # Same distinction as ``_run_coro_blocking``, and here the old code was
+        # actively misleading: it folded cancellation into ``TimeoutError``, so
+        # a transport that died in milliseconds was reported as having "exceeded
+        # a hard cap" of several minutes. This is the mediator and judge path.
+        future.cancel()
+        raise AgentLoopCancelled(
+            f"{what} was cancelled from inside — the underlying service closed the "
+            f"connection or its task group aborted (no timeout was reached)"
+        ) from exc
 
 
 class BaseAnalyst(ABC):
@@ -563,6 +657,92 @@ class BaseAnalyst(ABC):
         # Composer can ground deep sections instead of hallucinating. Populated
         # by execute_tool_loop; read via get_last_tool_evidence().
         self._last_tool_evidence: list[CapturedToolOutput] = []
+        # Declared here rather than only in the subclasses that populate them,
+        # because ``close_tools`` below has to be able to release them for any
+        # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
+        # depending on transport; ``_container`` is the per-job container that
+        # created this agent, so the static analyst can reuse it instead of
+        # building a new one per chunk.
+        self.toolkit: Any = None
+        self._all_ghidra_tools: list[Any] = []
+        self._container: Any = None
+
+    def _initialize_mcp_client(self) -> None:
+        """Attach this analyst's MCP toolkit. Subclasses that have one override."""
+        return None
+
+    def close_tools(self) -> None:
+        """Release this analyst's MCP toolkit and any HTTP client it holds.
+
+        Whoever caches a toolkit closes it, and nobody did. ``cleanup()`` had a
+        single caller in the whole repository — its own failure branch — so
+        every successful run abandoned an ``AsyncExitStack``, its anyio task
+        group and, for stdio transports, an unreaped MCP server subprocess.
+        They accumulated on the process-wide agent loop, which by design never
+        closes, for the life of the worker.
+
+        Cleanup is dispatched to ``_AGENT_LOOP`` because that is the loop the
+        stack was *entered* on; closing it from anywhere else is what makes
+        anyio raise "Attempted to exit cancel scope in a different task". Even
+        so this is best-effort — a cancelled scope can refuse to unwind — which
+        is why the worker also carries a hard memory backstop.
+
+        Total and idempotent: called from a job-end ``finally``, so it must not
+        be able to turn a finished analysis into a failed one.
+        """
+        # ``toolkit`` is an MCPLangChainToolkit (``cleanup``) for the stdio and
+        # streamable-http analysts, and a GhidraHTTPClient (``aclose``) when the
+        # static analyst talks to Ghidra over plain HTTP. Both leak; accept
+        # either.
+        toolkit = getattr(self, "toolkit", None)
+        closers: list[Any] = []
+        for closer_name in ("cleanup", "aclose"):
+            closer = getattr(toolkit, closer_name, None)
+            if callable(closer):
+                closers.append(closer())
+                break
+
+        for coro in closers:
+            try:
+                _run_coro_blocking(coro, hard_timeout=15.0, label=f"close-tools:{self.name}")
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                self.logger.warning(
+                    "Tool cleanup for %s failed (non-fatal): %s", self.name, describe_exception(exc)
+                )
+
+        # Drop the references regardless, so a retained agent cannot keep a
+        # half-closed session — or its captured tool output — alive.
+        self.toolkit = None
+        self.tools = []
+        self._all_ghidra_tools = []
+        self._last_tool_evidence = []
+
+    def _try_initialize_mcp(self) -> bool:
+        """Attach the MCP toolkit, returning False instead of raising.
+
+        Lifted from the network analyst, where it was the only place this
+        pattern existed. Everywhere else called ``_initialize_mcp_client()``
+        bare, and the dynamic analyst paid for it: with the CAPE forward
+        half-dead, an unreachable toolkit aborted the whole analyst on every
+        single run rather than falling back to the evidence it already had.
+
+        Whether degrading is *right* is a per-analyst judgement, not a default.
+        It is right for dynamic and network, which each hold a second source of
+        evidence. It is wrong for static, where Ghidra IS the evidence and a
+        toolless run would produce a confident-looking report grounded in
+        nothing — so static keeps calling ``_initialize_mcp_client()`` bare and
+        keeps failing loudly.
+        """
+        try:
+            self._initialize_mcp_client()
+            return bool(self.tools)
+        except Exception as exc:
+            self.logger.warning(
+                "%s MCP initialization failed (graceful degradation, continuing without tools): %s",
+                self.name,
+                describe_exception(exc),
+            )
+            return False
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -705,7 +885,9 @@ class BaseAnalyst(ABC):
         _t0 = _time.monotonic()
         hard_timeout = timeout + 30
         try:
-            thread_result: dict | None = _run_coro_blocking(_invoke(), hard_timeout)
+            thread_result: dict | None = _run_coro_blocking(
+                _invoke(), hard_timeout, label=f"react:{self.name}"
+            )
         except TimeoutError:
             self.logger.critical(
                 "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
@@ -924,7 +1106,7 @@ class BaseAnalyst(ABC):
         _t0 = _time.monotonic()
         hard_timeout = timeout + 30
         try:
-            content = _run_coro_blocking(_invoke(), hard_timeout)
+            content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
         except TimeoutError:
             self.logger.critical(
                 "%s no-tools fallback exceeded the %ds hard cap.",

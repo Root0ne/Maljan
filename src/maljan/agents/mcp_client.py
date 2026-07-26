@@ -13,6 +13,7 @@ supported:
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -90,9 +91,31 @@ class MCPLangChainToolkit:
                 self._tools.append(lc_tool)
 
             logger.info(f"Successfully loaded {len(self._tools)} tools from MCP server.")
-        except Exception as e:
-            logger.error(f"Failed to initialize MCP client: {e}")
-            await self.cleanup()
+        except BaseException as e:
+            # ``BaseException``, not ``Exception``, and that distinction is the
+            # whole bug. ``mcp``'s streamable-http and stdio transports run in
+            # an anyio task group; when the transport child dies — a peer that
+            # accepts TCP and immediately closes, i.e. a stale port-forward —
+            # the group cancels its scope and delivers ``asyncio.CancelledError``
+            # into this coroutine. That is a ``BaseException``, so the old
+            # ``except Exception`` missed it entirely: nothing was logged and
+            # ``cleanup()`` never ran, leaking the exit stack and its transport
+            # tasks onto the process-wide agent loop on every single run.
+            #
+            # Cleanup is best-effort and must not mask the original failure:
+            # anyio raises ``RuntimeError: Attempted to exit cancel scope in a
+            # different task`` when the stack is closed from a task other than
+            # the one that entered it, and a cancelled scope is exactly when
+            # that happens.
+            #
+            # The cancellation is deliberately NOT converted to a typed error
+            # here. At this depth a hard-cap cancel (ours) and a transport-death
+            # cancel (theirs) are indistinguishable; swallowing the former would
+            # break the timeout contract in ``_run_coro_blocking``. The
+            # conversion belongs at the loop boundary, which can tell them apart.
+            logger.error("Failed to initialize MCP client (%s): %s", type(e).__name__, e or "—")
+            with suppress(BaseException):
+                await self.cleanup()
             raise
 
     def get_tools(self) -> list[BaseTool]:
@@ -100,20 +123,41 @@ class MCPLangChainToolkit:
         return self._tools
 
     async def cleanup(self) -> None:
-        """Close the MCP server connection."""
-        if self._exit_stack:
-            try:
-                await self._exit_stack.aclose()
-            except RuntimeError as exc:
-                # stdio_client may raise cancel-scope errors when closed
-                # from a different task; this is non-fatal.
-                if "cancel scope" in str(exc).lower():
-                    logger.warning("MCP cleanup cancel-scope warning (non-fatal): %s", exc)
-                else:
-                    raise
-            finally:
-                self._exit_stack = None
-                self.session = None
+        """Close the MCP server connection. Total: never raises, safe to repeat.
+
+        Teardown that can throw is teardown nobody calls, and this method had
+        exactly one caller in the whole repository — its own failure branch in
+        ``initialize()``. On the success path the stack was simply abandoned,
+        which for stdio transports also meant the MCP server subprocess was
+        never reaped. Now that ``ServiceContainer.aclose()`` drives this at the
+        end of every job, it has to survive anything it meets: a cancelled
+        scope, a half-open socket, a loop that has moved on.
+
+        The references are cleared even when the close fails, so a caller that
+        retries does not attempt to re-close a stack that is already unwinding.
+        """
+        stack, self._exit_stack, self.session = self._exit_stack, None, None
+        if stack is None:
+            return
+        try:
+            await stack.aclose()
+        except RuntimeError as exc:
+            # anyio raises this when the stack is closed from a task other than
+            # the one that entered it — the ordinary case here, since agents
+            # enter on the shared agent loop and may be closed from elsewhere.
+            if "cancel scope" in str(exc).lower():
+                logger.warning("MCP cleanup cancel-scope warning (non-fatal): %s", exc)
+            else:
+                logger.warning("MCP cleanup failed (non-fatal): %s", exc)
+        except BaseException as exc:  # noqa: BLE001 — teardown must not propagate
+            logger.warning("MCP cleanup failed (%s, non-fatal): %s", type(exc).__name__, exc or "—")
+
+    async def __aenter__(self) -> MCPLangChainToolkit:
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.cleanup()
 
     def _create_langchain_tool(self, mcp_tool: Any) -> BaseTool:
         """Convert an MCP Tool definition into a LangChain StructuredTool."""

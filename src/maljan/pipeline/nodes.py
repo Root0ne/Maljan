@@ -66,6 +66,38 @@ _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGN
 # re-passes the token-budget check — the cap here is load-bearing.
 _MAX_SYNTH_CHUNK_CHARS = 40_000
 
+
+def _is_placeholder_only(chunks: list, agent_name: str = "") -> bool:
+    """True when the loader produced nothing but its "no data" sentence.
+
+    The graceful no-data path below was unreachable, and had been since it was
+    written. ``file_loader`` does not return an empty result when a sample has
+    no data for a layer — it returns the *string* ``"No dynamic data available
+    for sample <sha>."``, which is truthy, chunks into exactly one chunk, and
+    sails past ``if not chunks``. So the pipeline paid for a full MCP
+    connection attempt and an LLM call to analyse that one sentence, and the
+    network analyst dutifully reported it back as its sole "evidence-backed
+    claim" — into the transcript, the report and the UI.
+
+    Two placements are deliberate and both are load-bearing:
+
+    * **After** the static augmentation block, never before. Static's real head
+      chunk is *synthesized* because the loader returned this placeholder, so
+      matching earlier would disable the static analyst on every live run.
+    * **Never for static at all**, even after augmentation. When the sample
+      cannot be mirrored for the Ghidra container ``static_sample_path`` stays
+      ``None``, augmentation returns the placeholder untouched, and the static
+      analyst is *supposed* to fall back to a metadata-only prompt — an
+      intended degraded path, not an absence of data. Skipping it here would
+      silently delete the primary analyst on exactly the runs that most need
+      whatever it can still say.
+    """
+    if agent_name == "static" or len(chunks) != 1:
+        return False
+    content = getattr(chunks[0], "content", "") or ""
+    return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
+
+
 # CONF-INFL-01: the confidence ceiling for a degraded run. Public, and
 # module-level, because it is a cross-layer contract rather than an
 # implementation detail of the report node: the worker persists whatever ends
@@ -307,7 +339,7 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static category hint skipped: %s", _e)
 
-            if not chunks:
+            if not chunks or _is_placeholder_only(chunks, agent_name):
                 # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
                 # found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
@@ -609,7 +641,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
             # the reasoning call, then the bounded structured-output retries),
             # so the outer cap covers both phases plus the house +30s of decode
             # headroom rather than truncating a mediation that is still working.
-            from maljan.agents.base_agent import run_on_agent_loop
+            from maljan.agents.base_agent import describe_exception, run_on_agent_loop
             from maljan.core.config import get_settings
 
             mediation_timeout = float(get_settings().react_agent_timeout) * 2 + 30
@@ -620,6 +652,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                     isr_reports=state.get("isr_reports") or {},
                 ),
                 hard_timeout=mediation_timeout,
+                label="mediation",
             )
 
             mean_conf = (
@@ -668,14 +701,15 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
             # are already populated by the analyst nodes), so the run still returns a
             # scoreable result instead of aborting an entire batch on one blip.
             label = "timed out" if isinstance(e, TimeoutError) else "failed"
-            logger.error("Negotiation %s: %s", label, e or type(e).__name__)
+            status = "timeout" if isinstance(e, TimeoutError) else "failed"
+            logger.error("Negotiation %s: %s", label, describe_exception(e))
             emit_agent_message(
                 container.event_sink,
                 speaker="Mediator",
                 role="negotiator",
-                text=f"[ERROR] Mediation {label}: {e or type(e).__name__}",
+                text=f"[ERROR] Mediation {label}: {describe_exception(e)}",
                 round_index=iteration + 1,
-                status="timeout" if isinstance(e, TimeoutError) else "failed",
+                status=status,
             )
             return {
                 "iteration_count": iteration + 1,
@@ -685,8 +719,12 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 "discussion_history": [
                     AgentArgument(
                         agent_name="Mediator",
-                        finding=f"[ERROR] Mediation {label}: {e or type(e).__name__}",
+                        finding=f"[ERROR] Mediation {label}: {describe_exception(e)}",
                         confidence_score=0.0,
+                        # The structured signal. The "[ERROR] Mediation " prefix
+                        # above stays for old stored state, but nothing new
+                        # should have to parse prose to learn this.
+                        status=status,
                     )
                 ],
             }

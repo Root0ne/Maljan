@@ -109,7 +109,7 @@ class DynamicAnalyst(BaseAnalyst):
         # the agent loop, so blocking on the result cannot deadlock.
         from maljan.agents.base_agent import _run_coro_blocking
 
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0)
+        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
 
         self.toolkit = toolkit
         # Essential CAPE tool list is config-driven: agents do not need to be
@@ -153,7 +153,11 @@ class DynamicAnalyst(BaseAnalyst):
         """Translates sandbox JSON logs into a behavioral malware profile."""
         self.logger.info("Executing dynamic behavior analysis...")
 
-        self._initialize_mcp_client()
+        # Graceful: the CAPE MCP endpoint is a port-forward to a separate VM
+        # and is routinely unreachable. The sandbox JSON in ``data`` is
+        # evidence on its own, so a missing toolkit costs depth, not the
+        # analyst. See ``BaseAnalyst._try_initialize_mcp``.
+        self._try_initialize_mcp()
 
         # Treat `data` as task_id if it's numeric/short
         task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
@@ -227,7 +231,11 @@ class DynamicAnalyst(BaseAnalyst):
         """Return a structured AgentISR with evidence-backed behavioral claims."""
         self.logger.info("Executing dynamic ISR analysis...")
 
-        self._initialize_mcp_client()
+        # Graceful: the CAPE MCP endpoint is a port-forward to a separate VM
+        # and is routinely unreachable. The sandbox JSON in ``data`` is
+        # evidence on its own, so a missing toolkit costs depth, not the
+        # analyst. See ``BaseAnalyst._try_initialize_mcp``.
+        self._try_initialize_mcp()
 
         # Treat `data` as task_id if it's numeric/short
         task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
