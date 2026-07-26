@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { JobDTO, ReportSummaryDTO, SampleDTO } from "@/lib/api";
+import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { getErrorMessage } from "@/lib/errors";
+import type { VerdictBucket } from "@/lib/verdict";
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -32,14 +35,18 @@ interface SearchPaletteProps {
 
 /* ── Helpers ───────────────────────────────────────────── */
 
-const VERDICT_CLASS: Record<string, string> = {
+/* audit 2026-07-26 (T2): keyed by the shared bucket, not the raw string. The
+ * backend emits "Malware", which was not a key here — every malicious report's
+ * badge silently fell through to the muted "unknown" grey. */
+const VERDICT_CLASS: Record<VerdictBucket, string> = {
   malicious: "text-status-red",
   suspicious: "text-status-orange",
   benign: "text-status-green",
+  unknown: "text-text-muted",
 };
 
 function verdictClass(verdict: string): string {
-  return VERDICT_CLASS[verdict.toLowerCase()] ?? "text-text-muted";
+  return VERDICT_CLASS[verdictBucket(verdict)];
 }
 
 function ci(haystack: string | null | undefined, needle: string): boolean {
@@ -116,20 +123,34 @@ export default function SearchPalette({
     setLoading(true);
     setError(null);
 
+    // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): each source used to be
+    // swallowed into an empty list, so an unreachable API rendered as a
+    // confident "No matches". Track which sources failed and say so.
     Promise.all([
-      api.getSamples(1, 50).catch(() => ({ items: [] as SampleDTO[] })),
-      api.getJobs(1, 50).catch(() => ({ items: [] as JobDTO[] })),
-      api.getReports(1, 50).catch(() => ({ items: [] as ReportSummaryDTO[] })),
+      api.getSamples(1, 50).catch((e: unknown) => e as Error),
+      api.getJobs(1, 50).catch((e: unknown) => e as Error),
+      api.getReports(1, 50).catch((e: unknown) => e as Error),
     ])
       .then(([s, j, r]) => {
         if (cancelled) return;
-        setSamples(s.items ?? []);
-        setJobs(j.items ?? []);
-        setReports(r.items ?? []);
+        const failed: string[] = [];
+        if (s instanceof Error) failed.push("samples");
+        else setSamples(s.items ?? []);
+        if (j instanceof Error) failed.push("jobs");
+        else setJobs(j.items ?? []);
+        if (r instanceof Error) failed.push("reports");
+        else setReports(r.items ?? []);
+        setError(
+          failed.length === 0
+            ? null
+            : failed.length === 3
+              ? "Search unavailable — could not reach the API."
+              : `Search is incomplete — ${failed.join(", ")} could not be loaded.`,
+        );
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Search failed");
+        setError(`Search unavailable — ${getErrorMessage(err)}`);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -165,13 +186,24 @@ export default function SearchPalette({
       }));
 
     const jobMatches: ResultItem[] = jobs
-      .filter((j) => ci(j.id, q) || ci(j.sample_id, q))
+      .filter(
+        (j) =>
+          ci(j.id, q) ||
+          ci(j.sample_id, q) ||
+          // audit 2026-07-26 (T4): jobs were only findable by UUID even though
+          // the API returns the sample's filename and hash.
+          ci(j.sample_filename, q) ||
+          ci(j.sample_sha256, q)
+      )
       .slice(0, 8)
       .map((j) => ({
         group: "jobs",
         key: `job-${j.id}`,
-        primary: j.id,
-        secondary: `sample ${j.sample_id.slice(0, 12)}...`,
+        primary:
+          j.sample_filename ||
+          (j.sample_sha256 ? `${j.sample_sha256.slice(0, 16)}…` : "") ||
+          j.sample_id.slice(0, 12),
+        secondary: `job ${j.id.slice(0, 12)}...`,
         badge: j.status,
         badgeClass:
           j.status === "completed"
@@ -187,6 +219,9 @@ export default function SearchPalette({
     const reportMatches: ResultItem[] = reports
       .filter((r) => {
         if (ci(r.verdict, q)) return true;
+        // audit 2026-07-26 (T2): the UI shows "Malicious" but the stored
+        // verdict is "Malware" — typing what you see found nothing.
+        if (ci(verdictLabel(r.verdict), q)) return true;
         if (ci(r.malware_category, q)) return true;
         if (ci(r.sample_filename, q)) return true;
         return false;
@@ -197,9 +232,9 @@ export default function SearchPalette({
         key: `report-${r.id}`,
         primary: r.sample_filename || r.id,
         secondary: r.malware_category
-          ? `${r.verdict} · ${r.malware_category}`
-          : r.verdict,
-        badge: r.verdict,
+          ? `${verdictLabel(r.verdict)} · ${r.malware_category}`
+          : verdictLabel(r.verdict),
+        badge: verdictLabel(r.verdict),
         badgeClass: verdictClass(r.verdict),
         href: `/analysis/${r.job_id}`,
       }));
@@ -287,7 +322,7 @@ export default function SearchPalette({
       )}
 
       {error && (
-        <div className="px-3 py-3 text-xs text-status-red">
+        <div role="alert" className="px-3 py-3 text-xs text-status-red">
           {error}
         </div>
       )}

@@ -5,6 +5,9 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
+import { getErrorMessage } from "@/lib/errors";
+import Field from "@/components/ui/Field";
+import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
 import type { FamilyAttribution } from "@/types/malware-report";
 
 type SimilarSample = {
@@ -41,12 +44,12 @@ export default function AttributionTab() {
     setEnrichBusy(true);
     setEnrichMsg(null);
     try {
-      await api.enrichReport(reportId);
-      setEnrichMsg(
-        "Enrichment queued. similar_samples will appear when the worker finishes.",
-      );
+      // audit 2026-07-26 (§4): report the actual endpoint status rather than
+      // promising a refresh for every outcome.
+      const res = await api.enrichReport(reportId);
+      setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
     } catch (e) {
-      setEnrichMsg(`Failed to queue enrichment: ${(e as Error).message}`);
+      setEnrichMsg(`Failed to queue enrichment: ${getErrorMessage(e)}`);
     } finally {
       setEnrichBusy(false);
     }
@@ -129,7 +132,7 @@ export default function AttributionTab() {
             disabled={enrichBusy || !reportId}
             className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
           >
-            {enrichBusy ? "queueing..." : "trigger LTM lookup"}
+            {enrichBusy ? "queueing..." : ENRICH_BUTTON_LABEL}
           </button>
         </div>
         {enrichMsg && (
@@ -140,8 +143,8 @@ export default function AttributionTab() {
         {similars.length === 0 ? (
           <div className="p-8 text-center text-sm text-text-muted">
             No nearest-neighbour cases recorded yet. Run the threat-intel
-            enrichment step (button above) to populate this list from the
-            Maljan LTM (Qdrant).
+            enrichment step (button above) to populate this list from Maljan&apos;s
+            long-term memory of previously analysed samples.
           </div>
         ) : (
           <div className="divide-y divide-border-light">
@@ -150,29 +153,6 @@ export default function AttributionTab() {
             ))}
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  valueClassName,
-}: {
-  label: string;
-  value: string;
-  valueClassName?: string;
-}) {
-  return (
-    <div>
-      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-        {label}
-      </div>
-      <div
-        className={`text-sm text-text-primary break-all ${valueClassName ?? ""}`}
-      >
-        {value}
       </div>
     </div>
   );

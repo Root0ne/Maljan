@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 
 /* Canonical MITRE Enterprise tactic catalogue in kill-chain (matrix) column
    order, with display names. TA0005 (Defense Evasion / Stealth in ATT&CK v19)
@@ -146,6 +147,9 @@ export default function AttackTab() {
   const { report, job, loading } = useReport();
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
+  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed /mitre fallback
+  // rendered as "no techniques mapped", which is a different claim entirely.
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Prefer ttp_mappings from the cached MalwareReport; fall back to the /mitre
   // endpoint only for legacy rows that predate the rich report payload.
@@ -158,8 +162,15 @@ export default function AttackTab() {
     if (report?.id) {
       api
         .getReportMitre(report.id)
-        .then((data) => setMitreData(data.techniques))
-        .catch(() => {});
+        .then((data) => {
+          setMitreData(data.techniques);
+          setFetchError(null);
+        })
+        .catch((err: unknown) =>
+          setFetchError(
+            `Could not load the ATT&CK technique mapping: ${getErrorMessage(err)}`,
+          ),
+        );
     }
   }, [report?.id, report?.malware_report?.ttp_mappings]);
 
@@ -197,7 +208,7 @@ export default function AttackTab() {
   if (rawTechniques.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No MITRE ATT&amp;CK techniques were mapped for this analysis.
+        {fetchError ?? "No MITRE ATT&CK techniques were mapped for this analysis."}
       </div>
     );
   }

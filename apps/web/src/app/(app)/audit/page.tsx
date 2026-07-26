@@ -4,17 +4,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { AuditLogDTO } from "@/lib/api";
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { formatDateTime } from "@/lib/report-utils";
 
 export default function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLogDTO[]>([]);
@@ -92,7 +82,7 @@ export default function AuditLogsPage() {
                   <tr key={log.id} className="hover:bg-bg-hover transition-colors">
                     <td className="px-4 py-2.5">
                       <span className="text-xs text-text-secondary font-mono">
-                        {formatDate(log.created_at)}
+                        {formatDateTime(log.created_at)}
                       </span>
                     </td>
                     <td className="px-4 py-2.5">

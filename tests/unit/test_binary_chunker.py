@@ -280,7 +280,11 @@ class TestMergeSummaries:
 class TestChunkingConfig:
     def test_defaults(self) -> None:
         config = ChunkingConfig()
-        assert config.max_tokens_per_chunk == 6000
+        # 2026-07-11 raised this 6000 -> 20000 after the GPU/context upgrade:
+        # the old value split a real PE into 27 chunks and the static analyst
+        # re-ran Ghidra auto-analysis on every one of them. The assertion was
+        # never updated and had been failing since (audit 2026-07-26).
+        assert config.max_tokens_per_chunk == 20000
         assert config.overlap_tokens == 200
         assert config.skip_if_fits is True
 

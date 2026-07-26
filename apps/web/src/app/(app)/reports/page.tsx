@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ReportSummaryDTO } from "@/lib/api";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { formatDateTime } from "@/lib/report-utils";
 
 interface ReportRow {
   id: string;
@@ -24,16 +25,6 @@ const VERDICT_STYLES: Record<string, { dot: string; text: string }> = {
   benign: { dot: "bg-status-green", text: "text-status-green" },
   unknown: { dot: "bg-text-muted", text: "text-text-muted" },
 };
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function mapReport(dto: ReportSummaryDTO): ReportRow {
   return {
@@ -196,7 +187,7 @@ export default function ReportsPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-text-secondary">{report.techniques_count}</td>
                     <td className="px-4 py-3 text-xs text-text-secondary">{report.findings_count}</td>
-                    <td className="px-4 py-3 text-xs text-text-muted">{formatDate(report.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-text-muted">{formatDateTime(report.created_at)}</td>
                   </tr>
                 );
               })

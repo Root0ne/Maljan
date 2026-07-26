@@ -19,7 +19,13 @@ logger = get_logger("database")
 
 async_engine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
+    # Audit 2026-07-26 (Ö6): this used to be ``settings.debug``, and since the
+    # deployed .env sets DEBUG=true every SQL statement was echoed — twice, once
+    # raw and once through the coloured formatter. Worker/API logs became
+    # unreadable: tracing which pipeline stage a job was in required grepping
+    # the noise away. SQL echo is a targeted debugging tool, not something a
+    # general DEBUG flag should switch on, so it now has its own opt-in.
+    echo=settings.sql_echo,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
     pool_pre_ping=True,

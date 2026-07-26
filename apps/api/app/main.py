@@ -4,8 +4,10 @@ Wires together all route modules, middleware, and lifecycle events
 into a single FastAPI application instance.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,84 @@ from app.logging_config import get_logger, setup_logging
 setup_logging()
 
 logger = get_logger("main")
+
+# Per-component probe budget for the deep health check. Short on purpose: the
+# endpoint must answer quickly even when a dependency is black-holing packets.
+_PROBE_TIMEOUT_SECONDS = 3.0
+
+
+async def _probe_database() -> None:
+    import sqlalchemy
+
+    from app.database import async_engine
+
+    async with async_engine.begin() as conn:
+        await conn.execute(sqlalchemy.text("SELECT 1"))
+
+
+async def _probe_redis() -> None:
+    import redis.asyncio as aioredis
+
+    conn = aioredis.from_url(settings.redis_url)
+    try:
+        await conn.ping()
+    finally:
+        await conn.aclose()
+
+
+async def _probe_minio() -> None:
+    from minio import Minio
+    from pydantic import SecretStr
+
+    secret = settings.minio_secret_key
+    secret_value = secret.get_secret_value() if isinstance(secret, SecretStr) else str(secret)
+
+    def _check() -> None:
+        # The MinIO SDK is synchronous — keep it off the event loop.
+        client = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=secret_value,
+            secure=settings.minio_secure,
+        )
+        client.bucket_exists(settings.minio_bucket)
+
+    await asyncio.to_thread(_check)
+
+
+async def _probe_qdrant() -> None:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS) as client:
+        resp = await client.get(f"{settings.qdrant_url.rstrip('/')}/readyz")
+        resp.raise_for_status()
+
+
+async def _probe_components() -> dict[str, dict[str, Any]]:
+    """Probe every backing service concurrently.
+
+    Each probe reports ``{"ok": bool, "error": str | None}``; a failure is data,
+    never an exception, so one dead dependency cannot take the endpoint down.
+    """
+    probes: dict[str, Any] = {
+        "database": _probe_database,
+        "redis": _probe_redis,
+        "minio": _probe_minio,
+        "qdrant": _probe_qdrant,
+    }
+
+    async def _run(name: str, fn: Any) -> tuple[str, dict[str, Any]]:
+        try:
+            await asyncio.wait_for(fn(), timeout=_PROBE_TIMEOUT_SECONDS)
+            return name, {"ok": True, "error": None}
+        except TimeoutError:
+            return name, {"ok": False, "error": f"timeout after {_PROBE_TIMEOUT_SECONDS:g}s"}
+        except Exception as exc:  # noqa: BLE001 — a probe failure is a result
+            detail = str(exc).strip() or type(exc).__name__
+            return name, {"ok": False, "error": detail[:200]}
+
+    results = await asyncio.gather(*(_run(n, f) for n, f in probes.items()))
+    return dict(results)
 
 
 @asynccontextmanager
@@ -239,14 +319,39 @@ def create_app() -> FastAPI:
     # ── Health Check ─────────────────────────────────────────
     @app.get("/health", tags=["System"])
     @app.get("/healthz", tags=["System"])
-    async def health_check() -> dict:
-        # Two paths so both bare ("/health") and Kubernetes-style
-        # ("/healthz") liveness probes succeed without extra config.
-        return {
+    async def health_check(deep: bool = False) -> dict:
+        """Liveness (default) and readiness (``?deep=true``) probe.
+
+        Two paths so both bare ("/health") and Kubernetes-style ("/healthz")
+        liveness probes succeed without extra config.
+
+        Audit 2026-07-26 (Ö1): this used to return a hard-coded
+        ``{"status": "healthy"}`` with **no I/O at all**, so it reported a
+        perfectly healthy system while dependencies were dead — verified live
+        with the sandbox down. ``?deep=true`` now actually probes the backing
+        services and downgrades ``status`` to ``degraded`` when a required one
+        is unreachable, so an orchestrator or dashboard can tell the difference.
+        The bare form stays dependency-free and fast: a liveness probe must not
+        restart the API just because Postgres is briefly unavailable.
+        """
+        body: dict[str, Any] = {
             "status": "healthy",
             "service": settings.app_name,
             "version": settings.app_version,
         }
+        if not deep:
+            return body
+
+        components = await _probe_components()
+        body["components"] = components
+        # Only components the API cannot serve requests without are allowed to
+        # flip the overall status; optional subsystems are reported but not fatal.
+        required = ("database", "redis")
+        if any(components.get(name, {}).get("ok") is False for name in required):
+            body["status"] = "degraded"
+        elif any(c.get("ok") is False for c in components.values()):
+            body["status"] = "degraded_optional"
+        return body
 
     logger.info(
         f"FastAPI app created with {len(app.routes)} routes",

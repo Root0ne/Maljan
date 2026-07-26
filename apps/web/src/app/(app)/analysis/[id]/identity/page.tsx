@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useReport } from "../layout";
 import { copyToClipboard, formatBytes } from "@/lib/report-utils";
+import Field from "@/components/ui/Field";
 import type { SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
@@ -110,17 +111,6 @@ export default function IdentityTab() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-        {label}
-      </div>
-      <div className="text-sm text-text-primary break-all">{value}</div>
     </div>
   );
 }

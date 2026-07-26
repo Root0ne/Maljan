@@ -238,8 +238,21 @@ class TestContainerGetAgentLLM:
         expected_llm = MagicMock()
         container._llm_registry.build_model_for_agent.return_value = expected_llm
         result = container.get_agent_llm("static")
-        container._llm_registry.build_model_for_agent.assert_called_once_with("static")
+        # Analyst models carry the expert output cap (audit 2026-07-26, Ö3):
+        # the analyst path was the only unbounded LLM call in the system and a
+        # single forced-synthesis call was measured running 19+ minutes.
+        container._llm_registry.build_model_for_agent.assert_called_once_with(
+            "static", max_tokens=container.config.llm.expert_max_tokens
+        )
         assert result is expected_llm
+
+    def test_no_token_cap_kwarg_when_budget_disabled(self) -> None:
+        """``expert_max_tokens = 0`` means "provider default" — send no kwarg."""
+        container = self._make_container()
+        container.config.llm.expert_max_tokens = 0
+        container._llm_registry.build_model_for_agent.return_value = MagicMock()
+        container.get_agent_llm("static")
+        container._llm_registry.build_model_for_agent.assert_called_once_with("static")
 
     def test_caches_result(self) -> None:
         container = self._make_container()

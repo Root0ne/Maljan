@@ -115,6 +115,30 @@ class ReportService:
         )
         return result.scalar_one_or_none()
 
+    async def delete_report(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+    ) -> bool:
+        """Delete a report owned by ``user``. Returns False when not found.
+
+        Audit 2026-07-26 (Ö4). Scoped through the owning job exactly like
+        ``get_report`` so one user can never delete another's report.
+        ``AnalysisReport.agent_findings`` is declared with
+        ``cascade="all, delete-orphan"``, so the findings go with it.
+        """
+        report = await self.get_report(report_id, user)
+        if report is None:
+            return False
+        await self.db.delete(report)
+        await self.db.flush()
+        logger.info(
+            "Report deleted: id=%s",
+            report_id,
+            extra={"user_id": str(user.id)},
+        )
+        return True
+
     async def get_report_by_job(
         self,
         job_id: uuid.UUID,

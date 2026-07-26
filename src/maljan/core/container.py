@@ -120,12 +120,25 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
+    def _expert_token_cap(self) -> dict[str, int]:
+        """``max_tokens`` kwargs for analyst-role models, or ``{}`` when unset.
+
+        Audit 2026-07-26 (Ö3): the analyst path was the only unbounded LLM call
+        in the system while judge/narrative/composer were all capped. MEASURED:
+        a 19-tool-call static loop produced a forced-synthesis call that ran 19+
+        minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
+        """
+        cap = getattr(self.config.llm, "expert_max_tokens", 0) or 0
+        return {"max_tokens": cap} if cap > 0 else {}
+
     def get_expert_llm(self) -> BaseChatModel:
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         with self._lock:
             if self._expert_llm_cache is None:
-                self._expert_llm_cache = self._llm_registry.build_model(role="expert")
+                self._expert_llm_cache = self._llm_registry.build_model(
+                    role="expert", **self._expert_token_cap()
+                )
             return self._expert_llm_cache
 
     def get_judge_llm(self) -> BaseChatModel:
@@ -148,7 +161,12 @@ class ServiceContainer:
         with self._lock:
             cached = self._agent_llm_cache.get(agent_name)
             if cached is None:
-                cached = self._llm_registry.build_model_for_agent(agent_name)
+                # Analysts share the expert budget cap — this is the path the
+                # static/dynamic/network ReAct loops and their forced-synthesis
+                # fallback actually use (audit 2026-07-26, Ö3).
+                cached = self._llm_registry.build_model_for_agent(
+                    agent_name, **self._expert_token_cap()
+                )
                 self._agent_llm_cache[agent_name] = cached
             return cached
 

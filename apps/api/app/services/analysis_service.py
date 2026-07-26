@@ -179,14 +179,32 @@ class AnalysisService:
         job.completed_at = datetime.now(UTC)
         await self.db.flush()
 
-        # Publish cancellation event
+        # Audit 2026-07-26 (Ö5). This used to ONLY publish to PubSub, which had
+        # two consequences:
+        #   1. The running worker never learned about the cancellation — it
+        #      checks the job status exactly once, before starting — so the
+        #      pipeline kept burning LLM time and later overwrote the row with
+        #      `completed`/`failed`, silently undoing the cancel.
+        #   2. The event was absent from the replay stream, so a client that
+        #      reconnected and back-filled via GET /jobs/{id}/events never saw it.
+        # Now we also set a cancel flag the worker polls, and mirror the event
+        # into the stream like every other event type.
         try:
             redis_conn = aioredis.from_url(settings.redis_url)
             import json
 
-            await redis_conn.publish(
-                f"analysis:{job_id}",
-                json.dumps({"type": "cancelled", "data": {}, "ts": datetime.now(UTC).isoformat()}),
+            message = json.dumps(
+                {"type": "cancelled", "data": {}, "ts": datetime.now(UTC).isoformat()}
+            )
+            # Cooperative-cancellation flag. TTL keeps abandoned keys from
+            # accumulating; it outlives any realistic single analysis.
+            await redis_conn.set(f"analysis:{job_id}:cancel", "1", ex=86_400)
+            await redis_conn.publish(f"analysis:{job_id}", message)
+            await redis_conn.xadd(
+                f"analysis:{job_id}:events",
+                {"payload": message},
+                maxlen=1000,
+                approximate=True,
             )
             await redis_conn.aclose()
         except Exception:

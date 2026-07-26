@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_active_user
 from app.models.user import User
 from app.schemas.job import IOCEntry, IOCListResponse, ReportDetailResponse
 from app.services.report_service import EnrichmentEnqueueError, ReportService
@@ -264,3 +264,24 @@ async def get_negotiation_timeline(
             detail="Report not found",
         )
     return timeline
+
+
+@router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_report(
+    report_id: uuid.UUID,
+    user: User = Depends(require_active_user),
+    svc: ReportService = Depends(_get_service),
+) -> None:
+    """Delete a single analysis report.
+
+    Audit 2026-07-26 (Ö4): reports could be created but never removed, so a
+    mis-run or duplicate analysis stayed in the list forever. The owning job is
+    kept — only its report (and the agent findings that cascade from it) is
+    removed, so the job history stays intact and the sample can be re-analysed.
+    """
+    deleted = await svc.delete_report(report_id, user)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found",
+        )

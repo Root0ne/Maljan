@@ -4,6 +4,9 @@ import { useState } from "react";
 
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import Th from "@/components/ui/Th";
+import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
 export default function NetworkTab() {
@@ -40,10 +43,13 @@ export default function NetworkTab() {
     setEnrichBusy(true);
     setEnrichMsg(null);
     try {
-      await api.enrichReport(reportId);
-      setEnrichMsg("Enrichment queued. The page will refresh when results arrive.");
+      // audit 2026-07-26 (§4): the endpoint distinguishes queued /
+      // already_queued / skipped_no_network_iocs — say which one happened
+      // instead of always promising a refresh.
+      const res = await api.enrichReport(reportId);
+      setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
     } catch (e) {
-      setEnrichMsg(`Failed to queue enrichment: ${(e as Error).message}`);
+      setEnrichMsg(`Failed to queue enrichment: ${getErrorMessage(e)}`);
     } finally {
       setEnrichBusy(false);
     }
@@ -71,7 +77,7 @@ export default function NetworkTab() {
           disabled={enrichBusy || !reportId}
           className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
         >
-          {enrichBusy ? "queueing..." : "trigger threat-intel enrichment"}
+          {enrichBusy ? "queueing..." : ENRICH_BUTTON_LABEL}
         </button>
       </div>
       {enrichMsg && (
@@ -367,13 +373,5 @@ function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
       {source}
       {score !== null ? ` · ${score}` : ""}
     </span>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return (
-    <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">
-      {children}
-    </th>
   );
 }

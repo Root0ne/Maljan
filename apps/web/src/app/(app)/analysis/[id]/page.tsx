@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
 import { downloadBlob } from "@/lib/report-utils";
+import { getErrorMessage } from "@/lib/errors";
 import { verdictLabel } from "@/lib/verdict";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
@@ -505,17 +506,21 @@ function DownloadBar({
   shortHash: string;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed markdown fetch
+  // left the button looking like it had worked.
+  const [error, setError] = useState<string | null>(null);
 
   const safeName = `maljan-${shortHash}`;
 
   const downloadMarkdown = async () => {
     if (!reportId) return;
     setBusy("md");
+    setError(null);
     try {
       const body = await api.getReportMarkdown(reportId);
       downloadBlob(body, `${safeName}.md`, "text/markdown");
-    } catch {
-      /* ignore */
+    } catch (err) {
+      setError(`Could not download the Markdown report: ${getErrorMessage(err)}`);
     } finally {
       setBusy(null);
     }
@@ -559,6 +564,14 @@ function DownloadBar({
       >
         ↓ MISP attributes
       </button>
+      {error && (
+        <div
+          role="alert"
+          className="w-full text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+        >
+          {error}
+        </div>
+      )}
     </div>
   );
 }

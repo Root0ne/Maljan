@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useReport } from "../layout";
 import type { ProcessNode } from "@/types/malware-report";
+import Th from "@/components/ui/Th";
 
 export default function DynamicTab() {
   const { report, loading } = useReport();
@@ -249,13 +250,5 @@ function ProcessTreeNode({ node, depth }: { node: ProcessNode; depth: number }) 
         </div>
       )}
     </div>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return (
-    <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">
-      {children}
-    </th>
   );
 }

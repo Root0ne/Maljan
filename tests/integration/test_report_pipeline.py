@@ -193,27 +193,45 @@ class TestNarrativeWithMockLLM:
 class TestDetectionSignaturesInReport:
     """Faz 4: the report_node must attach YARA/Sigma/Suricata rules."""
 
-    def test_yara_gate_holds_in_pipeline_for_ungrounded_family(
+    def test_no_family_attribution_never_ships_a_family_named_rule(
         self, mock_settings: Settings
     ) -> None:
-        """Wave 9 D11 (2026-05-29): when the deterministic builder marks the
-        family attribution as ungrounded (the default for mock-mode runs
-        with no Triage CTI / sandbox sigs / ISR claim), the report_node's
-        ``detection_signatures`` must be empty — YARA generation is gated
-        by ``family_grounded`` just like Sigma. The earlier Faz 4
-        "YARA always present" assertion is superseded by
+        """Wave 9 D11 (2026-05-29), contract corrected by the 2026-07-26 audit.
+
+        The D11 guardrail exists to stop an **unverified family name** being
+        embedded in a generated rule title (the ``Maljan_AutoGen_unknown`` stub
+        from the 2026-05-29 Linux ELF audit). It fires on
+        ``family set AND family_grounded is False``
+        (``detection_signatures._family_grounded_reason``).
+
+        A mock run sets no family at all, and ``extractors.attribution`` marks a
+        *missing* family as vacuously grounded (``family_grounded = grounded if
+        family else True``). There is therefore no family name to leak, and rule
+        naming falls back to ``malware_category`` and then the sha256 prefix —
+        so generation is legitimately allowed here.
+
+        This test previously asserted ``family_grounded is False`` and
+        ``detection_signatures == []``, encoding the pre-correction contract; it
+        had been failing ever since and so guarded nothing. It now asserts the
+        invariant that actually matters end-to-end: whatever rules the pipeline
+        emits, none of them may be named after an unverified family. The
+        named-but-ungrounded refusal itself is covered at function level by
         ``tests/unit/reporting/test_detection_signatures.py``'s
-        ``TestYaraFamilyGroundedGate`` which covers the gated /
-        grounded / no-family-set paths at the function level. This
-        integration test confirms the gate's effect propagates through
-        the report_node end-to-end.
+        ``TestYaraFamilyGroundedGate``.
         """
         app = MaljanApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="detect-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
-        assert report.attribution.family_grounded is False
-        assert report.detection_signatures == []
+        # No family was attributed, so the "ungrounded name" hazard cannot arise.
+        assert report.attribution.family is None
+        assert report.attribution.family_grounded is True
+
+        # Nothing generated may claim a family the report does not actually have.
+        for rule in report.detection_signatures:
+            assert "unknown" not in rule.name.lower(), (
+                f"rule {rule.name!r} embeds a placeholder family name"
+            )
 
     def test_disabled_signatures_keep_list_empty(self) -> None:
         s = Settings()

@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+
+const AUTH_DISABLED =
+  process.env.NEXT_PUBLIC_AUTH_DISABLED === "true" ||
+  process.env.NEXT_PUBLIC_AUTH_DISABLED === "1";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -12,6 +16,12 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // audit 2026-07-26 (T6): /login already bounced to the dashboard when auth
+  // is disabled, but /register rendered a full — and pointless — signup form.
+  useEffect(() => {
+    if (AUTH_DISABLED) router.replace("/dashboard");
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -346,12 +346,35 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # avoid "Event loop is closed" errors caused by threading mismatches.
             # Heartbeat task keeps the job alive in the DB and logs progress.
             heartbeat_stop_event = asyncio.Event()
+            pipeline_task: asyncio.Task | None = None
+            cancelled_by_user = False
 
             async def _heartbeat() -> None:
+                # Audit 2026-07-26 (Ö5): the heartbeat is also the cancellation
+                # poller. `cancel_job` sets `analysis:{job_id}:cancel`; the
+                # pipeline is a single long `await`, so cancelling that task is
+                # the only way to stop the run. Previously the worker checked the
+                # job status exactly once (before starting), so a cancel issued
+                # mid-run was ignored and the finished pipeline overwrote the
+                # `cancelled` row with `completed`/`failed`.
+                nonlocal cancelled_by_user
                 while not heartbeat_stop_event.is_set():
                     try:
-                        await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=60.0)
+                        await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=15.0)
                     except TimeoutError:
+                        try:
+                            if await redis_conn.get(f"analysis:{job_id}:cancel"):
+                                cancelled_by_user = True
+                                logger.info(
+                                    "Cancellation requested for job=%s — stopping pipeline.",
+                                    job_id,
+                                    extra={"job_id": job_id, "component": "heartbeat"},
+                                )
+                                if pipeline_task is not None:
+                                    pipeline_task.cancel()
+                                return
+                        except Exception as exc:  # noqa: BLE001 — polling must never kill the run
+                            logger.debug("Cancel-flag poll failed: %s", exc)
                         logger.info(
                             "Pipeline heartbeat: job=%s still running...",
                             job_id,
@@ -369,12 +392,34 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # callback wiring.
             await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
             try:
-                pipeline_result = await app.arun(
-                    file_hash=sample.sha256,
-                    file_name=sample.original_filename,
-                    sample_path=temp_path,
-                    static_sample_path=static_sample_path,
+                # Run the pipeline as a task so the heartbeat poller can cancel
+                # it when the user cancels the job (audit 2026-07-26, Ö5).
+                pipeline_task = asyncio.create_task(
+                    app.arun(
+                        file_hash=sample.sha256,
+                        file_name=sample.original_filename,
+                        sample_path=temp_path,
+                        static_sample_path=static_sample_path,
+                    )
                 )
+                pipeline_result = await pipeline_task
+            except asyncio.CancelledError:
+                if not cancelled_by_user:
+                    raise
+                logger.info(
+                    "Pipeline cancelled by user request: job=%s",
+                    job_id,
+                    extra={"job_id": job_id},
+                )
+                await _publish_event(redis_conn, job_id, "cancelled", {})
+                async with db_session() as cleanup_db:
+                    await cleanup_db.execute(
+                        update(AnalysisJob)
+                        .where(AnalysisJob.id == job.id)
+                        .values(status="cancelled", completed_at=datetime.now(UTC))
+                    )
+                    await cleanup_db.commit()
+                return {"status": "cancelled", "job_id": job_id}
             finally:
                 heartbeat_stop_event.set()
                 try:
@@ -667,7 +712,24 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
 
 def _extract_confidence(result: dict) -> float:
-    """Extract overall confidence from the pipeline result."""
+    """Extract overall confidence from the pipeline result.
+
+    CONF-INFL-01 (audit 2026-07-26): the degraded-run confidence cap
+    (``nodes.py`` ``_DEGRADED_CONFIDENCE_CAP``) is applied while building the
+    ``MalwareReport``; ``run_summary`` and ``confidence_history`` still carry the
+    RAW judge value. Persisting the raw value here made the API, the reports
+    list and the analysis header show an uncapped confidence — the UI displayed
+    "DEGRADED RUN" and "Confidence: 91/100" side by side, which is precisely the
+    inflation the guardrail exists to prevent. The ``MalwareReport`` is therefore
+    the authoritative source and is checked FIRST; the other two remain as
+    fallbacks for legacy/partial results that carry no report.
+    """
+    malware_report = result.get("malware_report")
+    if isinstance(malware_report, dict):
+        conf = malware_report.get("overall_confidence")
+        if conf is not None:
+            return float(conf)
+
     # From run_summary if available
     run_summary = result.get("run_summary")
     if run_summary and isinstance(run_summary, dict):

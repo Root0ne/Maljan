@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SampleDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import { formatDateTime } from "@/lib/report-utils";
 
 /* ── Display interface (maps from SampleDTO) ───────── */
 interface SampleRow {
@@ -31,16 +32,6 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function SamplesPageContent() {
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +39,11 @@ function SamplesPageContent() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [detailSample, setDetailSample] = useState<SampleDTO | null>(null);
+  /* audit 2026-07-26 (T5 + §4): native alert() replaced by the same in-page
+   * banner + toast pattern jobs/page.tsx uses, and the previously silent
+   * deep-link failure now reports itself here too. */
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const searchParams = useSearchParams();
   const sampleParam = searchParams.get("sample");
@@ -66,6 +62,12 @@ function SamplesPageContent() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   /* Deep-link: open the detail modal when ?sample={id} is present. */
   useEffect(() => {
     if (!sampleParam) return;
@@ -74,8 +76,12 @@ function SamplesPageContent() {
       try {
         const detail = await api.getSample(sampleParam);
         if (!cancelled) setDetailSample(detail);
-      } catch {
-        /* Silently ignore; the param may reference a missing sample. */
+      } catch (err) {
+        if (!cancelled) {
+          setActionError(
+            `Could not open the linked sample ${sampleParam.slice(0, 12)}: ${getErrorMessage(err)}`,
+          );
+        }
       }
     })();
     return () => {
@@ -85,16 +91,30 @@ function SamplesPageContent() {
 
   const handleUpload = useCallback(async (file: File) => {
     setUploading(true);
+    setActionError(null);
     try {
       await api.uploadSample(file);
       const res = await api.getSamples();
       setSamples(res.items.map(mapSample));
-    } catch (error) {
-      alert(`Upload failed: ${getErrorMessage(error) || "Unknown error"}`);
+      setToast(`Uploaded ${file.name}.`);
+    } catch (err) {
+      setActionError(`Upload failed: ${getErrorMessage(err) || "Unknown error"}`);
     } finally {
       setUploading(false);
     }
   }, []);
+
+  /* Escape closes the detail modal (pattern copied from SearchPalette). */
+  useEffect(() => {
+    if (!detailSample) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setDetailSample(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailSample]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -129,6 +149,20 @@ function SamplesPageContent() {
 
   return (
     <div>
+      {actionError && (
+        <div
+          role="alert"
+          className="mb-4 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+        >
+          {actionError}
+        </div>
+      )}
+      {toast && (
+        <div className="mb-4 text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-1.5">
+          {toast}
+        </div>
+      )}
+
       {/* Upload Area */}
       <div
         onDragOver={(e) => {
@@ -208,17 +242,18 @@ function SamplesPageContent() {
                     <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className="text-xs text-text-secondary">{formatDate(s.created_at)}</span>
+                    <span className="text-xs text-text-secondary">{formatDateTime(s.created_at)}</span>
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex gap-1.5">
                       <button
                         onClick={async () => {
+                          setActionError(null);
                           try {
                             const detail = await api.getSample(s.id);
                             setDetailSample(detail);
                           } catch (err) {
-                            alert(getErrorMessage(err) || "Failed to load sample details.");
+                            setActionError(getErrorMessage(err) || "Failed to load sample details.");
                           }
                         }}
                         className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
@@ -227,11 +262,12 @@ function SamplesPageContent() {
                       </button>
                       <button
                         onClick={async () => {
+                          setActionError(null);
                           try {
                             const job = await api.createJob(s.id);
                             window.location.href = `/analysis/${job.id}/live`;
                           } catch (err) {
-                            alert(getErrorMessage(err) || "Failed to start analysis.");
+                            setActionError(getErrorMessage(err) || "Failed to start analysis.");
                           }
                         }}
                         className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
@@ -254,12 +290,17 @@ function SamplesPageContent() {
           onClick={() => setDetailSample(null)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sample-detail-title"
             className="bg-bg-surface border border-border rounded w-full max-w-lg p-5 shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-text-primary">Sample Details</h3>
+              <h3 id="sample-detail-title" className="text-sm font-semibold text-text-primary">Sample Details</h3>
               <button
+                type="button"
+                aria-label="Close"
                 onClick={() => setDetailSample(null)}
                 className="text-text-muted hover:text-text-primary"
               >
@@ -298,7 +339,7 @@ function SamplesPageContent() {
               </div>
               <div>
                 <span className="text-text-muted uppercase tracking-wider">Uploaded</span>
-                <p className="text-text-primary mt-0.5">{formatDate(detailSample.uploaded_at)}</p>
+                <p className="text-text-primary mt-0.5">{formatDateTime(detailSample.uploaded_at)}</p>
               </div>
             </div>
           </div>

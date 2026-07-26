@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { DashboardStatsDTO, JobDTO, SystemStatusDTO } from "@/lib/api";
+import { formatDuration, timeAgo } from "@/lib/report-utils";
+import { verdictBucket } from "@/lib/verdict";
 import {
   PieChart,
   Pie,
@@ -39,6 +41,18 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "text-text-muted",
 };
 
+/* audit 2026-07-26 (T4): every recent-analysis row rendered the same
+   `sample_id` UUID prefix, so the ten rows were indistinguishable. Prefer the
+   readable identity the API already returns — same precedence as the analysis
+   header (analysis/[id]/layout.tsx). */
+function sampleLabel(job: JobDTO): string {
+  return (
+    job.sample_filename ||
+    (job.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "") ||
+    job.sample_id.slice(0, 12)
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -68,36 +82,19 @@ function StatCardSkeleton() {
   );
 }
 
-function formatDuration(seconds: number | null): string {
-  if (seconds === null || seconds === 0) return "N/A";
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}m ${s}s`;
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 function mapApiStats(s: DashboardStatsDTO): DisplayStats {
   const byStatus = s.jobs_by_status || {};
   const byVerdict = s.verdict_distribution || {};
 
-  // The API returns the MalwareReport verdict casing ("Malware", "Suspicious",
-  // "Benign") plus legacy "malicious" from older rows. Build a canonical
-  // lookup keyed by lowercase so any combination resolves correctly. Without
-  // this, the chart silently shows "no data" even when the API reports counts.
+  // audit 2026-07-26 (T2): the API returns the MalwareReport verdict casing
+  // ("Malware", "Suspicious", "Benign") plus legacy "malicious" from older
+  // rows. Funnel every key through the shared `verdictBucket` instead of a
+  // hand-rolled lowercase map so the dashboard agrees with every other
+  // surface — and so a new backend spelling only has to be taught once.
   const verdictLookup: Record<string, number> = {};
   for (const [key, value] of Object.entries(byVerdict)) {
-    verdictLookup[key.toLowerCase()] = (verdictLookup[key.toLowerCase()] || 0) + (value || 0);
+    const bucket = verdictBucket(key);
+    verdictLookup[bucket] = (verdictLookup[bucket] || 0) + (value || 0);
   }
 
   return {
@@ -106,8 +103,7 @@ function mapApiStats(s: DashboardStatsDTO): DisplayStats {
     completed: byStatus["completed"] || 0,
     running: byStatus["running"] || 0,
     failed: byStatus["failed"] || 0,
-    // "Malware" (canonical) and "malicious" (legacy) both count as malicious.
-    malicious_count: (verdictLookup["malware"] || 0) + (verdictLookup["malicious"] || 0),
+    malicious_count: verdictLookup["malicious"] || 0,
     suspicious_count: verdictLookup["suspicious"] || 0,
     benign_count: verdictLookup["benign"] || 0,
     avg_duration_seconds: s.avg_duration_seconds || 0,
@@ -269,7 +265,7 @@ export default function DashboardPage() {
                     </svg>
                     <div>
                       <p className="text-sm text-text-primary">
-                        {job.sample_id.slice(0, 12)}
+                        {sampleLabel(job)}
                       </p>
                       <p className="text-xs text-text-muted">
                         {timeAgo(job.created_at)}

@@ -5,29 +5,39 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { JobDTO } from "@/lib/api";
+import { formatDuration, timeAgo } from "@/lib/report-utils";
 
 interface DisplayJob {
   id: string;
   sample_id: string;
+  // audit 2026-07-26 (T4): carry the readable sample identity so rows are
+  // distinguishable instead of all showing the same sample_id UUID prefix.
+  sample_filename: string | null;
+  sample_sha256: string | null;
   status: string;
   created_at: string;
   duration: string | null;
 }
 
 function mapJob(j: JobDTO): DisplayJob {
-  let duration: string | null = null;
-  if (j.duration_seconds) {
-    const m = Math.floor(j.duration_seconds / 60);
-    const s = Math.round(j.duration_seconds % 60);
-    duration = `${m}m ${String(s).padStart(2, "0")}s`;
-  }
   return {
     id: j.id,
     sample_id: j.sample_id,
+    sample_filename: j.sample_filename ?? null,
+    sample_sha256: j.sample_sha256 ?? null,
     status: j.status,
     created_at: j.created_at,
-    duration,
+    duration: j.duration_seconds ? formatDuration(j.duration_seconds) : null,
   };
+}
+
+/* Same precedence as the analysis header (analysis/[id]/layout.tsx). */
+function sampleLabel(job: DisplayJob): string {
+  return (
+    job.sample_filename ||
+    (job.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "") ||
+    job.sample_id.slice(0, 12)
+  );
 }
 
 const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
@@ -39,16 +49,6 @@ const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
 };
 
 const FILTERS = ["all", "completed", "running", "pending", "failed", "cancelled"];
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 function countByStatus(jobs: DisplayJob[]): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -67,6 +67,7 @@ export default function JobsPage() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -91,8 +92,13 @@ export default function JobsPage() {
     try {
       const res = await api.getJobs(1, 100);
       setJobs(res.items.map(mapJob));
-    } catch {
-      /* ignore - keep stale list */
+      setRefreshError(null);
+    } catch (err) {
+      // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): the list stays
+      // stale on failure, so say so rather than silently showing old rows.
+      setRefreshError(
+        `${getErrorMessage(err) || "Failed to refresh jobs."} The list below may be out of date.`,
+      );
     }
   };
 
@@ -118,6 +124,21 @@ export default function JobsPage() {
     setConfirmJob(null);
     setCancelError(null);
   };
+
+  /* audit 2026-07-26 (§4 accessibility): Escape must dismiss the dialog —
+   * same keydown pattern the search palette uses. */
+  useEffect(() => {
+    if (!confirmJob) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (cancelling) return;
+      setConfirmJob(null);
+      setCancelError(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmJob, cancelling]);
 
   const counts = countByStatus(jobs);
   const filtered = filter === "all" ? jobs : jobs.filter((j) => j.status === filter);
@@ -153,6 +174,14 @@ export default function JobsPage() {
 
   return (
     <div>
+      {refreshError && (
+        <div
+          role="alert"
+          className="mb-4 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+        >
+          {refreshError}
+        </div>
+      )}
       <div className="flex gap-6">
         {/* Filter Sidebar */}
         <div className="w-48 shrink-0">
@@ -237,7 +266,7 @@ export default function JobsPage() {
                         <path d="M14 2v6h6" />
                       </svg>
                       <div className="min-w-0">
-                        <p className="text-sm text-text-primary truncate">{job.sample_id.slice(0, 12)}</p>
+                        <p className="text-sm text-text-primary truncate" title={sampleLabel(job)}>{sampleLabel(job)}</p>
                         <p className="text-xs text-text-muted">{timeAgo(job.created_at)}{job.duration ? ` / ${job.duration}` : ""}</p>
                       </div>
                     </Link>
@@ -276,12 +305,17 @@ export default function JobsPage() {
           onClick={closeModal}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cancel-job-title"
             className="bg-bg-surface border border-border rounded w-full max-w-md p-5 shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-text-primary">Cancel Job</h3>
+              <h3 id="cancel-job-title" className="text-sm font-semibold text-text-primary">Cancel Job</h3>
               <button
+                type="button"
+                aria-label="Close"
                 onClick={closeModal}
                 disabled={cancelling}
                 className="text-text-muted hover:text-text-primary disabled:text-text-disabled"
@@ -296,7 +330,7 @@ export default function JobsPage() {
               Cancel job {confirmJob.id.slice(0, 8)}? This will stop the in-flight analysis and mark the job as cancelled. Cannot be undone.
             </p>
             {cancelError && (
-              <div className="mb-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5">
+              <div role="alert" className="mb-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5">
                 {cancelError}
               </div>
             )}

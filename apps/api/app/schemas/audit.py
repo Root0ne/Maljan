@@ -19,10 +19,19 @@ class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    user_id: uuid.UUID
+    # Nullable on purpose: security events that have no authenticated principal
+    # still MUST be recorded — a failed login for an unknown e-mail, a lockout,
+    # or an invalid/replayed refresh token all write ``user_id=NULL``
+    # (``AuditLog.user_id`` is nullable in the model). Declaring this required
+    # made the endpoint raise ResponseValidationError -> 500 as soon as such a
+    # row appeared. Audit 2026-07-26 (K1).
+    user_id: uuid.UUID | None
     action: str
     resource_type: str | None
-    resource_id: uuid.UUID | None
+    # ``AuditLog.resource_id`` is a String(255), not a UUID column (migration
+    # 20250517000000 widened it deliberately). Typing it as UUID here would 500
+    # the endpoint the moment a non-UUID resource id is written.
+    resource_id: str | None
     details: dict[str, Any] | None
     ip_address: str | None
     created_at: datetime

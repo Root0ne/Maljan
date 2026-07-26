@@ -169,8 +169,20 @@ class LLMConfig(BaseModel):
     view_decomposition_views: int = 0
 
     # Per-call output budget for the analyst LLM. Used to size the equal-budget
-    # split when ``view_decomposition_views > 0`` (0 = provider/server default).
-    expert_max_tokens: int = 0
+    # split when ``view_decomposition_views > 0`` (0 = provider/server default,
+    # i.e. UNBOUNDED on llama-server).
+    #
+    # 2026-07-26 audit (Ö3) — raised 0 -> 8192. The analyst path was the only
+    # unbounded LLM call in the system (judge 8192, narrative 1500, composer 900
+    # are all capped). MEASURED on a 36 KB sample: after the depth restore the
+    # static analyst gathered 19 tool observations, and the forced-synthesis
+    # salvage that digests them ran **19+ minutes** against its 25-minute wall
+    # clock (the same sample synthesised in 118 s before the depth restore). An
+    # unbounded budget also gives the §3.3 degenerate-repetition failure mode a
+    # full 25 minutes to burn. 8192 matches ``judge_max_tokens`` and is far above
+    # any legitimate analyst answer (~2-4k tokens observed), so it bounds the
+    # tail without truncating real output. Set 0 to restore unbounded.
+    expert_max_tokens: int = 8192
 
     # View-decomposition strategy when ``view_decomposition_views >= 2``
     # (findings-log §4 Item 3, LAMD). "facet" = horizontal, AppPoet-style

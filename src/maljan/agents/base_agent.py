@@ -57,6 +57,91 @@ _TECHNIQUE_MAX: int = 1700
 _INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
 
 
+def describe_exception(exc: BaseException) -> str:
+    """Return a non-empty, diagnosable description of ``exc``.
+
+    Audit 2026-07-26: analyst failures were logged as
+    ``"dynamic ISR analysis failed: "`` — an empty tail — because several
+    exceptions raised on the MCP path carry no message (bare ``Exception``,
+    ``ExceptionGroup``, ``anyio`` cancellation wrappers). The operator was left
+    with a failure and zero information about it. Always fall back to the
+    exception's class name, and unwrap ``ExceptionGroup`` sub-exceptions so an
+    MCP connection error inside a task group is still visible.
+    """
+    text = str(exc).strip()
+    inner = getattr(exc, "exceptions", None)
+    if not text and isinstance(inner, list | tuple) and inner:
+        parts = [describe_exception(sub) for sub in inner[:3]]
+        return f"{type(exc).__name__}({'; '.join(p for p in parts if p)})"
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+# Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing, used by the
+# view- and tier-decomposition paths whose prompts explicitly demand that shape.
+_BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
+_BLOCK_CLAIM_RE = re.compile(
+    r"CLAIM:\s*(.+?)(?=\s*\n\s*(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+)
+_BLOCK_EVIDENCE_RE = re.compile(
+    r"EVIDENCE:\s*(.+?)(?=\s*\n\s*(?:CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+)
+_BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
+_BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
+
+
+def parse_structured_claims(text: str) -> list[ClaimEvidence]:
+    """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
+
+    Audit 2026-07-26: the view/tier decomposition prompts (``_VIEW_SYSTEM``)
+    require this exact format, but the parsed output was handed to
+    ``_text_to_isr``'s free-text sentence splitter, which has no notion of a
+    ``TECHNIQUE:`` line. Every technique ID produced through those paths was
+    therefore silently dropped and the raw "CLAIM: ..." prefix leaked into the
+    claim text.
+
+    Deliberately more lenient than the static analyst's strict variant: a block
+    is kept as long as it has a ``CLAIM:``. A model that omits ``CONFIDENCE:``
+    or ``EVIDENCE:`` still produced a real finding, and discarding it loses
+    evidence — the defaults below mark it as unsourced/medium-confidence
+    instead.
+    """
+    claims: list[ClaimEvidence] = []
+    for raw_block in _BLOCK_SPLIT_RE.split(text):
+        block = raw_block.strip()
+        if not block or "CLAIM:" not in block:
+            continue
+        claim_match = _BLOCK_CLAIM_RE.search(block)
+        if not claim_match:
+            continue
+
+        evidence_match = _BLOCK_EVIDENCE_RE.search(block)
+        confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
+        technique_match = _BLOCK_TECHNIQUE_RE.search(block)
+
+        confidence = 0.5
+        if confidence_match:
+            try:
+                confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
+            except ValueError:
+                confidence = 0.5
+
+        technique_id: str | None = None
+        if technique_match:
+            raw_tid = technique_match.group(1).upper()
+            if raw_tid != "NONE" and _technique_id_is_valid(raw_tid):
+                technique_id = raw_tid
+
+        claims.append(
+            ClaimEvidence(
+                claim=claim_match.group(1).strip()[:300],
+                evidence_ref=(evidence_match.group(1).strip()[:200] if evidence_match else ""),
+                confidence=confidence,
+                technique_id=technique_id,
+            )
+        )
+    return claims
+
+
 def _technique_id_is_valid(tid: str) -> bool:
     """Return True if a technique ID is within the ATT&CK enterprise range."""
     if tid in _INVALID_TIDS:
@@ -907,8 +992,8 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("ISR analysis failed: %s", e)
-            raise AnalystError(f"{self.name} ISR analysis failed: {e}") from e
+            self.logger.error("ISR analysis failed: %s", describe_exception(e))
+            raise AnalystError(f"{self.name} ISR analysis failed: {describe_exception(e)}") from e
 
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
@@ -1073,8 +1158,10 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("View-decomposition ISR analysis failed: %s", e)
-            raise AnalystError(f"{self.name} view-decomposition failed: {e}") from e
+            self.logger.error("View-decomposition ISR analysis failed: %s", describe_exception(e))
+            raise AnalystError(
+                f"{self.name} view-decomposition failed: {describe_exception(e)}"
+            ) from e
 
     # ------------------------------------------------------------------
     # Tier-wise (vertical) reasoning (findings-log §4 Item 3) — text path
@@ -1164,8 +1251,10 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", e)
-            raise AnalystError(f"{self.name} tier-wise reasoning failed: {e}") from e
+            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", describe_exception(e))
+            raise AnalystError(
+                f"{self.name} tier-wise reasoning failed: {describe_exception(e)}"
+            ) from e
 
     # ------------------------------------------------------------------
     # Inline consistency gate (findings-log §4 Item 4)
@@ -1311,6 +1400,23 @@ class BaseAnalyst(ABC):
                 dissent_items=[],
                 revision_round=revision_round,
             )
+
+        # Structured output first (audit 2026-07-26). Several prompts —
+        # notably the view/tier decomposition ones — mandate the
+        # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format. Running the
+        # free-text sentence splitter over that shape kept the literal
+        # "CLAIM: " prefix in the claim text and threw away every
+        # ``TECHNIQUE:`` line, so those paths produced technique-less claims.
+        if "CLAIM:" in text:
+            structured = parse_structured_claims(text)
+            if structured:
+                return AgentISR(
+                    agent_id=self.name,
+                    domain=domain,
+                    claims=structured,
+                    dissent_items=[],
+                    revision_round=revision_round,
+                )
 
         raw_sentences = [
             s.strip() for s in self._SENTENCE_SPLIT_RE.split(text) if len(s.strip()) > 20

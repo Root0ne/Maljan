@@ -1066,6 +1066,20 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     if _technique_count > 0
                     else "no techniques mapped (no corroborating evidence)"
                 )
+            # Audit 2026-07-26 (Ö2): a missing sandbox report is itself a
+            # degradation, and it was the one cause NOT represented here. With
+            # CAPE unreachable ``_submit_to_sandbox`` swallows the error and
+            # returns None, so the run silently becomes static-only; the
+            # anti-emulation reason below cannot fire either because it needs a
+            # sandbox report to inspect. If static analysis alone corroborated a
+            # technique, ``degraded_mode`` stayed False and an uncapped
+            # confidence shipped for a verdict formed without any dynamic
+            # evidence. Verified live: the only operator signal was a single
+            # "Sandbox submission failed" line in the worker log.
+            if not state.get("sandbox_report"):
+                _degradation_reasons.append(
+                    "no sandbox report (dynamic detonation unavailable) — static-only evidence"
+                )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             if _empty_analysts:

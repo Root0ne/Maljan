@@ -1,8 +1,8 @@
 "use client";
 
-import RuleMatchesPanel from "../rules/page";
-import GeneratedRulesPanel from "../signatures/page";
-import StixPanel from "../stix/page";
+import RuleMatchesPanel from "../rules/RuleMatchesPanel";
+import GeneratedRulesPanel from "../signatures/GeneratedRulesPanel";
+import StixPanel from "../stix/StixPanel";
 
 /**
  * Unified "Detection" tab (2026-07 audit, Bulgu #1 UI).

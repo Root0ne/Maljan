@@ -6,6 +6,10 @@ import { useEffect, useRef, useState, createContext, useContext } from "react";
 import { api } from "@/lib/api";
 import type { ReportDetailDTO, JobDTO } from "@/lib/api";
 import { useWebSocket } from "@/lib/useWebSocket";
+import { formatDateTime, formatDuration } from "@/lib/report-utils";
+import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { getErrorMessage } from "@/lib/errors";
+import type { VerdictBucket } from "@/lib/verdict";
 
 /* ── Report Context (shared with child tabs) ─────────── */
 interface ReportCtx {
@@ -19,37 +23,37 @@ export function useReport() {
   return useContext(ReportContext);
 }
 
-/* ── Verdict badge config ────────────────────────────── */
+/* ── Verdict badge config ──────────────────────────────
+ * audit 2026-07-26 (T2): keyed by the shared `VerdictBucket` rather than a
+ * hand-rolled lower-cased raw verdict, so the backend's "Malware" spelling
+ * can never miss the map and fall through to the muted "unknown" styling.
+ * The human label comes from `verdictLabel` for the same reason. */
 const VERDICT_CONFIG: Record<
-  string,
-  { bg: string; border: string; text: string; label: string; icon: string }
+  VerdictBucket,
+  { bg: string; border: string; text: string; icon: string }
 > = {
-  malware: {
+  malicious: {
     bg: "bg-status-red/10",
     border: "border-status-red/30",
     text: "text-status-red",
-    label: "Malicious",
     icon: "!",
   },
   suspicious: {
     bg: "bg-status-orange/10",
     border: "border-status-orange/30",
     text: "text-status-orange",
-    label: "Suspicious",
     icon: "?",
   },
   benign: {
     bg: "bg-status-green/10",
     border: "border-status-green/30",
     text: "text-status-green",
-    label: "Benign",
     icon: "\u2713",
   },
   unknown: {
     bg: "bg-text-muted/10",
     border: "border-text-muted/30",
     text: "text-text-muted",
-    label: "Unknown",
     icon: "-",
   },
 };
@@ -83,13 +87,6 @@ const TABS: TabDef[] = [
 
 const TAB_GROUP_ORDER: TabDef["group"][] = ["overview", "analysis", "intel", "advanced"];
 
-function formatDuration(seconds: number | null | undefined): string {
-  if (!seconds) return "N/A";
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}m ${String(s).padStart(2, "0")}s`;
-}
-
 export default function AnalysisLayout({
   children,
 }: {
@@ -104,6 +101,8 @@ export default function AnalysisLayout({
   const [job, setJob] = useState<JobDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [enrichmentToast, setEnrichmentToast] = useState<string | null>(null);
   const refetchRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -112,13 +111,22 @@ export default function AnalysisLayout({
     const TERMINAL = new Set(["completed", "failed"]);
     const POLL_INTERVAL = 3000;
 
-    async function refetchReport() {
+    async function refetchReport(terminal = false) {
       if (cancelled) return;
       try {
         const r = await api.getReportByJobId(id);
-        if (!cancelled) setReport(r);
-      } catch {
-        /* report still propagating; ignore */
+        if (cancelled) return;
+        setReport(r);
+        setReportError(null);
+      } catch (err) {
+        // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): while the job is
+        // still running a missing report is expected, so stay quiet. Once the
+        // job is terminal the report should exist — surface the failure.
+        if (!cancelled && terminal) {
+          setReportError(
+            getErrorMessage(err) || "Could not load the report for this job.",
+          );
+        }
       }
     }
     refetchRef.current = refetchReport;
@@ -129,9 +137,10 @@ export default function AnalysisLayout({
         if (cancelled) return;
         setJob(j);
         setApiAvailable(true);
+        setApiError(null);
 
         if (TERMINAL.has(j.status)) {
-          await refetchReport();
+          await refetchReport(true);
           if (!cancelled) setLoading(false);
           return; // stop polling
         }
@@ -139,9 +148,13 @@ export default function AnalysisLayout({
         // Job still running — schedule next poll
         if (!cancelled) setLoading(false);
         setTimeout(() => { if (!cancelled) fetchAll(); }, POLL_INTERVAL);
-      } catch {
-        /* API not reachable */
-        if (!cancelled) setLoading(false);
+      } catch (err) {
+        // audit 2026-07-26: report *why* the API call failed instead of only
+        // the generic "could not connect" banner.
+        if (!cancelled) {
+          setApiError(getErrorMessage(err) || "Unknown error");
+          setLoading(false);
+        }
       }
     }
 
@@ -169,7 +182,7 @@ export default function AnalysisLayout({
   }, [events]);
 
   /* Derive header data strictly from real API data — no mock fallback */
-  const verdict = report?.verdict?.toLowerCase() ?? "unknown";
+  const verdict = verdictBucket(report?.verdict);
   const confidence = Math.round((report?.overall_confidence ?? 0) * 100);
   const category = report?.malware_category ?? "";
   // BUG-02: prefer a readable sample identity (filename, then hash prefix) over
@@ -180,11 +193,13 @@ export default function AnalysisLayout({
     job?.sample_filename ||
     (job?.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "");
   const duration = formatDuration(job?.duration_seconds);
-  const analyzedAt = report?.created_at
-    ? new Date(report.created_at).toLocaleString()
-    : job?.created_at ? new Date(job.created_at).toLocaleString() : "";
+  // audit 2026-07-26 (T3): use the one canonical timestamp format instead of
+  // the locale default, which rendered as "26.07.2026 11:04:51" here while the
+  // sample/report lists showed "Jul 5, 2026, 07:34 PM".
+  const analyzedAtIso = report?.created_at ?? job?.created_at;
+  const analyzedAt = analyzedAtIso ? formatDateTime(analyzedAtIso) : "";
 
-  const v = VERDICT_CONFIG[verdict] || VERDICT_CONFIG.unknown;
+  const v = VERDICT_CONFIG[verdict];
 
   /* The H1 should identify the sample, not restate the verdict (the verdict
    * badge already shows it). Prefer the original filename from the rich
@@ -202,8 +217,15 @@ export default function AnalysisLayout({
     <ReportContext.Provider value={{ report, job, loading }}>
       <div>
         {!apiAvailable && !loading && (
-          <div className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
+          <div role="alert" className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
             Could not connect to the API. Please ensure the backend is running.
+            {apiError ? ` (${apiError})` : ""}
+          </div>
+        )}
+
+        {reportError && (
+          <div role="alert" className="mb-4 p-2.5 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+            {reportError}
           </div>
         )}
 
@@ -230,7 +252,7 @@ export default function AnalysisLayout({
                   {headerTitle}
                 </h1>
                 <span className={`text-xs px-2 py-0.5 rounded ${v.bg} ${v.text}`}>
-                  {v.label}
+                  {verdictLabel(report?.verdict)}
                 </span>
                 <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
                   Confidence: {confidence}/100

@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 
-import AgentsPanel from "../agents/page";
-import PipelinePanel from "../pipeline/page";
-import TimelinePanel from "../timeline/page";
+import AgentsPanel from "../agents/AgentsPanel";
+import PipelinePanel from "../pipeline/PipelinePanel";
+import TimelinePanel from "../timeline/TimelinePanel";
 
 /**
  * Unified "Process" tab (2026-07 round 2).
