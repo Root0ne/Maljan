@@ -311,6 +311,17 @@ function TypingRow({ speaker }: { speaker: string }) {
   );
 }
 
+/** Soften the model's markdown list markers into something a chat bubble can wear.
+ *
+ * The mediator writes its ruling as markdown ("*   No contradictions…"), and a
+ * bubble renders it verbatim, asterisks and all. Nothing here parses markdown —
+ * a full renderer would be a liability on model output inside a message thread.
+ * Only a leading list marker on its own line is touched; an asterisk anywhere
+ * else (a glob, a footnote, `*.exe`) is left exactly as written. */
+function asBullets(text: string): string {
+  return text.replace(/^[ \t]*[*+-][ \t]+(?=\S)/gm, "• ");
+}
+
 function Bubble({
   message,
   grouped,
@@ -361,7 +372,7 @@ function Bubble({
 
         {message.text && (
           <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
-            {message.text}
+            {asBullets(message.text)}
           </p>
         )}
 
