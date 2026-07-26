@@ -93,3 +93,6 @@ data/samples/extracted/
 tests/evaluation/ab_off.jsonl
 tests/evaluation/ab_on.jsonl
 tests/evaluation/ab_off.partial.jsonl
+
+# Local transfer helper containing a GitHub token — never commit
+_GITHUB_SETUP.txt
