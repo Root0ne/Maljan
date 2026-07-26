@@ -28,6 +28,11 @@ export type WSEventType =
   | "status_change"
   | "pipeline_started"
   | "agent_progress"
+  /* One transcript line from a pipeline node — an analyst's findings, a
+   * mediator's ruling, a revision, the judge's verdict. Carries a ``role``
+   * discriminator rather than one event type per speaker, so a new
+   * participant needs no client change. See maljan/pipeline/events.py. */
+  | "agent_message"
   | "phase_change"
   | "completed"
   | "enrichment_complete"

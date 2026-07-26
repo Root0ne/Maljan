@@ -24,6 +24,12 @@ from maljan.extractors.network_extractor import (
     build_network_iocs,
 )
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline.events import (
+    claims_to_payload,
+    emit,
+    emit_agent_message,
+    summarize_claims,
+)
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.schemas.isr_models import AgentISR
@@ -239,6 +245,12 @@ def make_analyst_node(
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
 
+        # Analysts run sequentially on the single-slot local model, so a
+        # per-agent "started" event is the only way the UI can say which one is
+        # actually working — the worker's up-front announcement marks them all
+        # busy at once and is a poor proxy.
+        emit(container.event_sink, "agent_progress", {"agent": agent_name, "phase": "analyzing"})
+
         try:
             agent = container.get_agent(agent_name)
 
@@ -311,13 +323,19 @@ def make_analyst_node(
                     "as graceful degradation (Wave 9 no-data path).",
                     agent_name,
                 )
+                no_data_text = (
+                    f"[WARN] {agent_name}: no {agent_name} data available "
+                    "for this sample — analyst skipped."
+                )
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=agent_name,
+                    role="analyst",
+                    text=no_data_text,
+                    status="no_data",
+                )
                 return {
-                    "reports": {
-                        agent_name: (
-                            f"[WARN] {agent_name}: no {agent_name} data available "
-                            "for this sample — analyst skipped."
-                        )
-                    },
+                    "reports": {agent_name: no_data_text},
                     "isr_reports": {agent_name: _empty_isr(agent_name)},
                 }
 
@@ -390,6 +408,17 @@ def make_analyst_node(
             # (decompiled functions, crypto constants, emulation/dataflow) into
             # state so report_node can ground the deep technical spine. Best-
             # effort — a capture read must never break the analyst node.
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=summarize_claims(isr.claims, speaker=agent_name),
+                round_index=0,
+                status="complete" if isr.claims else "no_data",
+                claims=claims_to_payload(isr.claims),
+                dissent=list(isr.dissent_items or []),
+            )
+
             node_out: dict[str, Any] = {
                 "reports": {agent_name: report},
                 "isr_reports": {agent_name: isr},
@@ -418,8 +447,16 @@ def make_analyst_node(
                     "error_type": type(e).__name__,
                 },
             )
+            failed_text = f"[ERROR] {agent_name} analysis failed: {e}"
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=failed_text,
+                status="failed",
+            )
             return {
-                "reports": {agent_name: f"[ERROR] {agent_name} analysis failed: {e}"},
+                "reports": {agent_name: failed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
         except (ValueError, RuntimeError) as e:
@@ -435,8 +472,16 @@ def make_analyst_node(
                     "fatal": True,
                 },
             )
+            crashed_text = f"[ERROR] {agent_name} crashed: {e}"
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=crashed_text,
+                status="failed",
+            )
             return {
-                "reports": {agent_name: f"[ERROR] {agent_name} crashed: {e}"},
+                "reports": {agent_name: crashed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
             }
 
@@ -560,6 +605,29 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 else argument.confidence_score
             )
 
+            emit_agent_message(
+                container.event_sink,
+                speaker="Mediator",
+                role="negotiator",
+                text=argument.finding,
+                round_index=iteration + 1,
+                status="complete",
+                confidence=argument.confidence_score,
+            )
+            if syco:
+                emit_agent_message(
+                    container.event_sink,
+                    speaker="Sycophancy detector",
+                    role="system",
+                    text=(
+                        "Agents converged without new evidence — flagged as sycophantic "
+                        "agreement. The next revision round carries a directive to "
+                        "re-argue from evidence rather than defer to peers."
+                    ),
+                    round_index=iteration + 1,
+                    status="complete",
+                )
+
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": is_consensus,
@@ -578,6 +646,14 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
             # scoreable result instead of aborting an entire batch on one blip.
             label = "timed out" if isinstance(e, TimeoutError) else "failed"
             logger.error("Negotiation %s: %s", label, e or type(e).__name__)
+            emit_agent_message(
+                container.event_sink,
+                speaker="Mediator",
+                role="negotiator",
+                text=f"[ERROR] Mediation {label}: {e or type(e).__name__}",
+                round_index=iteration + 1,
+                status="timeout" if isinstance(e, TimeoutError) else "failed",
+            )
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": False,
@@ -683,10 +759,28 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 logger.error("%s revision failed: %s", name, result)
                 revised[name] = original_reports.get(name, "")
                 revised_isrs[name] = _empty_isr(name, revision_round=iteration)
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=name,
+                    role="reviser",
+                    text=f"[ERROR] {name} revision failed: {result}",
+                    round_index=iteration,
+                    status="failed",
+                )
             else:
                 revised_text, isr = result
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=name,
+                    role="reviser",
+                    text=summarize_claims(isr.claims, speaker=name),
+                    round_index=iteration,
+                    status="complete" if isr.claims else "no_data",
+                    claims=claims_to_payload(isr.claims),
+                    dissent=list(isr.dissent_items or []),
+                )
 
         return {"revised_reports": revised, "isr_reports": revised_isrs}
 
@@ -1326,6 +1420,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as _e:
                 logger.warning("ATT&CK-case RAG skipped (%s). Verdict unaffected.", _e)
 
+            emit_agent_message(
+                container.event_sink,
+                speaker="Judge",
+                role="judge",
+                text=(
+                    f"Verdict: {decision}."
+                    + (
+                        " Run flagged as degraded — "
+                        + "; ".join(_degradation_reasons)
+                        + ". Confidence is capped accordingly."
+                        if _degraded_mode
+                        else " All layers corroborated."
+                    )
+                ),
+                round_index=state.get("iteration_count", 0),
+                status="complete",
+            )
+
             return {
                 "final_decision": decision,
                 "judge_report": "Analyzed negotiation history and expert reports.",
@@ -1356,6 +1468,18 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # verdict must degrade to a conservative "Suspicious" result, not abort
             # the run (and, in a batch eval, drop the whole sample).
             logger.error("Judge verdict %s: %s", type(e).__name__, e or "")
+            emit_agent_message(
+                container.event_sink,
+                speaker="Judge",
+                role="judge",
+                text=(
+                    f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}. "
+                    "Falling back to a conservative Suspicious verdict; the run is "
+                    "marked degraded and its confidence capped."
+                ),
+                round_index=state.get("iteration_count", 0),
+                status="failed",
+            )
             # F16 (2026-07-05): a judge-body failure must ALSO flag the run as
             # degraded so the report node caps ``overall_confidence`` (CONF-INFL-01)
             # and the UI shows the DEGRADED banner. Without these keys the report

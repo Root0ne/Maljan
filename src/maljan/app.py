@@ -20,6 +20,7 @@ from maljan.core.container import ServiceContainer
 from maljan.core.logger import logger
 from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
+from maljan.pipeline.events import EventSink
 from maljan.pipeline.state import AnalysisState
 
 
@@ -38,12 +39,14 @@ class MaljanApp:
         config: Settings | None = None,
         mock: bool = False,
         samples_dir: str = "data/samples",
+        event_sink: EventSink | None = None,
     ) -> None:
         self.config = config or Settings()
         self.container = ServiceContainer(
             config=self.config,
             mock=mock,
             samples_dir=samples_dir,
+            event_sink=event_sink,
         )
         self.graph = build_graph(self.container)
 

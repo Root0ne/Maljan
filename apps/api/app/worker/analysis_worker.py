@@ -12,6 +12,7 @@ import asyncio
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,41 @@ async def _publish_event(
         f"Published event: type={event_type} job={job_id[:8]}...",
         extra={"job_id": job_id, "component": "pubsub"},
     )
+
+
+def _make_event_sink(
+    redis_conn: aioredis.Redis,
+    job_id: str,
+    loop: asyncio.AbstractEventLoop,
+) -> Callable[[str, dict[str, Any]], None]:
+    """Bridge the pipeline's synchronous event sink onto this event loop.
+
+    ``maljan.pipeline.events.EventSink`` is a plain sync callable because the
+    analyst node is synchronous and LangGraph runs it in a worker thread, while
+    the negotiation / revision / judge nodes are coroutines on the loop. One
+    signature has to serve both, so the bridge is here rather than in the core.
+
+    ``call_soon_threadsafe`` is correct from either side — it is the documented
+    way in from another thread, and a no-op-ish fast path when already on the
+    loop. Scheduling rather than awaiting also means a slow Redis never adds
+    latency to the analysis itself: the pipeline hands the event off and moves
+    on. Publishing is best-effort by design (see ``_publish_event``), so a
+    dropped progress line never costs a run.
+    """
+
+    def sink(event_type: str, data: dict[str, Any]) -> None:
+        try:
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(  # noqa: RUF006 — fire-and-forget by design
+                    _publish_event(redis_conn, job_id, event_type, data)
+                )
+            )
+        except RuntimeError:
+            # Loop already closed (job cancelled / shutting down). Nothing to
+            # report to, and the pipeline must not care.
+            pass
+
+    return sink
 
 
 # ── Main analysis task ──────────────────────────────────────────
@@ -220,7 +256,15 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 _job_mock,
                 settings.mock_mode_allowed,
             )
-            app = MaljanApp(config=core_settings, mock=_mock_active)
+            # The sink is what turns a 30-minute silent run into a readable
+            # transcript: each node reports its own findings as it produces
+            # them, straight onto the same PubSub channel the Live tab is
+            # already attached to.
+            app = MaljanApp(
+                config=core_settings,
+                mock=_mock_active,
+                event_sink=_make_event_sink(redis_conn, job_id, asyncio.get_running_loop()),
+            )
 
             # Announce which agents are about to run so the frontend can show them
             registered_agents = app.container.agent_registry.list_agents()
@@ -234,12 +278,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     "sha256": sample.sha256[:16] + "...",
                 },
             )
+            # Roster only — "waiting", not "analyzing". Analysts are serialised
+            # on the single-slot local model, so marking them all busy up front
+            # was simply false; each analyst node now announces its own start
+            # (see maljan.pipeline.nodes), which is the real signal.
             for agent_name in registered_agents:
                 await _publish_event(
                     redis_conn,
                     job_id,
                     "agent_progress",
-                    {"agent": agent_name, "phase": "analyzing"},
+                    {"agent": agent_name, "phase": "waiting"},
                 )
 
             # Download sample from MinIO for sandbox submission

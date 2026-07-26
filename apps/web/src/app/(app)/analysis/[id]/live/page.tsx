@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { verdictLabel } from "@/lib/verdict";
+import { messagesFromEvents } from "@/lib/transcript";
+import TranscriptPanel from "@/components/TranscriptPanel";
+import type { WSEvent } from "@/types";
 
 type AgentPhase = "waiting" | "analyzing" | "done";
 type PipelinePhase = "waiting" | "analyzing" | "negotiation" | "completed" | "failed";
@@ -31,6 +34,10 @@ function buildMessage(type: string, data: Record<string, unknown>): string {
     }
     case "agent_progress":
       return `Agent [${data.agent}]: ${data.phase}`;
+    case "agent_message": {
+      const claims = Array.isArray(data.claims) ? data.claims.length : 0;
+      return `${data.speaker} (${data.role}): ${data.status}${claims ? `, ${claims} claim(s)` : ""}`;
+    }
     case "phase_change":
       return `Pipeline phase: ${data.phase}`;
     case "completed":
@@ -92,6 +99,7 @@ export default function LiveAnalysisPage() {
   const { events: wsEvents, connected } = useWebSocket(jobId);
 
   const [agents, setAgents] = useState<AgentState[]>([]);
+  const [messageEvents, setMessageEvents] = useState<WSEvent[]>([]);
   const [eventLog, setEventLog] = useState<EventEntry[]>([]);
   const [phase, setPhase] = useState<PipelinePhase>("waiting");
   const [jobMockMode, setJobMockMode] = useState<boolean | null>(null);
@@ -144,6 +152,26 @@ export default function LiveAnalysisPage() {
             a.name === agentName ? { ...a, phase: agentPhase } : a
           );
         });
+      }
+
+      // The transcript itself. Raw events are accumulated and normalised in
+      // one place (lib/transcript) rather than reduced here, so this page and
+      // the post-run PROCESS tab build their messages identically.
+      if (ev.type === "agent_message") {
+        setMessageEvents((prev) => [
+          ...prev,
+          { type: "agent_message", data, ts: ev.ts ?? new Date().toISOString() },
+        ]);
+        const speaker = String(data.speaker ?? "");
+        const role = String(data.role ?? "");
+        // An analyst that has spoken is finished — its own message is a more
+        // reliable "done" signal than a separate progress event that may not
+        // arrive if the node failed.
+        if (speaker && (role === "analyst" || role === "reviser")) {
+          setAgents((prev) =>
+            prev.map((a) => (a.name === speaker ? { ...a, phase: "done" } : a))
+          );
+        }
       }
 
       if (ev.type === "phase_change") {
@@ -258,6 +286,8 @@ export default function LiveAnalysisPage() {
   }, [jobId, phase]);
 
   const phaseConfig = PHASE_CONFIG[phase];
+  const transcript = useMemo(() => messagesFromEvents(messageEvents), [messageEvents]);
+  const activeSpeaker = agents.find((a) => a.phase === "analyzing")?.name ?? null;
 
   return (
     <div className="space-y-4">
@@ -292,6 +322,15 @@ export default function LiveAnalysisPage() {
           </span>
         </span>
       </div>
+
+      {/* The conversation itself, above the status grid and the raw log:
+        * what the agents actually found is the reason to watch a live run,
+        * and until now the page could only say that they were busy. */}
+      <TranscriptPanel
+        messages={transcript}
+        live={phase === "analyzing" || phase === "negotiation"}
+        activeSpeaker={activeSpeaker}
+      />
 
       <div className="grid grid-cols-3 gap-4">
         {/* Agent Status Grid */}

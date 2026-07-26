@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from maljan.loaders.binary_chunker import TextChunk
     from maljan.loaders.sandbox_client import SandboxClient
     from maljan.memory.long_term_memory import MemoryStore
+    from maljan.pipeline.events import EventSink
 
 
 class ServiceContainer:
@@ -59,9 +60,14 @@ class ServiceContainer:
         config: Settings,
         mock: bool = False,
         samples_dir: str = "data/samples",
+        event_sink: EventSink | None = None,
     ) -> None:
         self.config = config
         self.mock = mock
+        # Progress feed for the live transcript UI. ``None`` outside the API
+        # worker (CLI, tests), which makes every emit a no-op — see
+        # maljan.pipeline.events.
+        self.event_sink = event_sink
 
         self.agent_registry = AgentRegistry()
         self.parser_registry = ParserRegistry()
