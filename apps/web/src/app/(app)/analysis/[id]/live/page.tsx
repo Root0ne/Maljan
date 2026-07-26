@@ -330,6 +330,15 @@ export default function LiveAnalysisPage() {
         messages={transcript}
         live={phase === "analyzing" || phase === "negotiation"}
         activeSpeaker={activeSpeaker}
+        /* This tab replays from the Redis event stream, which expires after
+         * 24 h. An older run therefore has an empty feed here while its full
+         * transcript is still on the PROCESS tab, rebuilt from the database —
+         * say so rather than implying nothing was recorded. */
+        emptyHint={
+          phase === "completed" || phase === "failed"
+            ? "The live event feed for this run has expired (events are kept for 24 hours). The full transcript is on the PROCESS tab."
+            : undefined
+        }
       />
 
       <div className="grid grid-cols-3 gap-4">
