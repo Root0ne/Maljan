@@ -24,6 +24,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
+from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.reporting.evidence_bundles import bundle_for, is_empty
 from maljan.reporting.models import (
@@ -225,7 +226,10 @@ class ReportComposer:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
             return None
         except Exception as exc:  # noqa: BLE001
-            logger.warning("ReportComposer: section '%s' failed (%s); skipping.", section, exc)
+            # ``error``, not ``warning``: a dropped section is missing content
+            # in a delivered report, and at warning level in a noisy worker log
+            # nobody ever noticed one had gone.
+            logger.error("ReportComposer: section '%s' failed (%s); SKIPPED.", section, exc)
             return None
 
     async def _invoke(
@@ -233,7 +237,9 @@ class ReportComposer:
     ) -> BaseModel | None:
         try:
             structured = self.llm.with_structured_output(schema)
-            result = await structured.ainvoke(messages)
+            result = await retry_on_connection_error(
+                lambda: structured.ainvoke(messages), what="ReportComposer structured"
+            )
             if isinstance(result, schema):
                 return result
             if isinstance(result, dict):
@@ -241,7 +247,9 @@ class ReportComposer:
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
         # Manual JSON fallback for local servers returning fenced JSON.
-        raw = await self.llm.ainvoke(messages)
+        raw = await retry_on_connection_error(
+            lambda: self.llm.ainvoke(messages), what="ReportComposer raw"
+        )
         if self.token_ledger is not None:
             try:
                 from maljan.core.token_ledger import record_response_usage

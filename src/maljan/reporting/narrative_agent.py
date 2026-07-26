@@ -26,6 +26,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
+from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.reporting.models import DefensiveRecommendation, MalwareReport
 from maljan.utils.json_cleaner import safe_parse_json
@@ -235,7 +236,9 @@ class NarrativeAgent:
 
         try:
             structured = self.llm.with_structured_output(NarrativeOutput)
-            result = await structured.ainvoke(messages)
+            result = await retry_on_connection_error(
+                lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
+            )
             if isinstance(result, NarrativeOutput):
                 return result
             # Some providers return a dict — coerce defensively.
@@ -252,10 +255,13 @@ class NarrativeAgent:
                 exc,
             )
 
-        # Manual-parse fallback (single attempt). Useful for local llama.cpp
-        # servers that occasionally return text wrapped in ```json fences.
+        # Manual-parse fallback. Useful for local llama.cpp servers that
+        # occasionally return text wrapped in ```json fences. A dropped socket
+        # is retried (see ``retry_on_connection_error``); a bad parse is not.
         try:
-            raw = await self.llm.ainvoke(messages)
+            raw = await retry_on_connection_error(
+                lambda: self.llm.ainvoke(messages), what="NarrativeAgent raw"
+            )
             if self.token_ledger is not None:
                 try:
                     from maljan.core.token_ledger import record_response_usage
@@ -268,7 +274,9 @@ class NarrativeAgent:
                 return None
             return NarrativeOutput.model_validate(payload)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("NarrativeAgent: manual-parse fallback failed (%s).", exc)
+            # ``error``: reaching here means the report ships with no narrative
+            # at all, which is a visible hole rather than a degraded detail.
+            logger.error("NarrativeAgent: manual-parse fallback failed (%s); NO NARRATIVE.", exc)
             return None
 
     def _build_prompt(self, report: MalwareReport) -> list[BaseMessage]:
