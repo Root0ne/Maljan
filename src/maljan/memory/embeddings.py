@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import threading
 from collections import Counter
 
@@ -42,6 +43,33 @@ _FASTEMBED_DIM = 384
 _FALLBACK_DIM = 384  # match fastembed so the Qdrant collection schema stays stable
 
 EMBED_DIM: int = _FASTEMBED_DIM
+
+# onnxruntime intra-op threads and the batch handed to the model.
+#
+# These two numbers were the whole of the worker's "memory leak" (2026-07-27).
+# The symptom was an arq process climbing from ~3.4 GB to ~8.5 GB during a
+# single analysis and never releasing it; on a 30 GB host also running a 15 GB
+# llama-server that froze the machine, and once a container limit existed it
+# became a cgroup OOM kill mid-job. It is not a leak at all. onnxruntime sizes
+# its CPU arena from the *core count* — 32 here — and pre-allocates per thread
+# and per batch element, so the default configuration reserves multiple GB up
+# front and keeps them for the process lifetime.
+#
+# Measured on this host, embedding the 697 ATT&CK technique texts (~1.4 KB
+# each) in one process:
+#
+#   threads=default(32), batch=default(256)  ->  8.3 GB, OOM-killed
+#   threads=2,           batch=32            ->  1.33 GB, 103 s
+#   threads=1,           batch=8             ->  0.51 GB, 153 s
+#
+# It is a ceiling, not a leak: a second pass over the same corpus added 21 MB
+# and a third added 1 MB. So the fix is to pick the ceiling deliberately rather
+# than let it be a function of the machine's core count. Two threads keeps the
+# once-per-process index build near 100 s while staying an order of magnitude
+# below the old peak. Raise ``MALJAN_EMBED_THREADS`` on a host with memory to
+# spare.
+_EMBED_THREADS = max(1, int(os.environ.get("MALJAN_EMBED_THREADS", "2")))
+_EMBED_BATCH = max(1, int(os.environ.get("MALJAN_EMBED_BATCH", "32")))
 
 _lock = threading.Lock()
 _model: object | None = None
@@ -59,11 +87,13 @@ def _try_load_fastembed() -> object | None:
         try:
             from fastembed import TextEmbedding  # type: ignore[import-not-found]
 
-            _model = TextEmbedding(model_name=_MODEL_NAME)
+            _model = TextEmbedding(model_name=_MODEL_NAME, threads=_EMBED_THREADS)
             logger.info(
-                "Embeddings: loaded fastembed model '%s' (%d-dim).",
+                "Embeddings: loaded fastembed model '%s' (%d-dim, threads=%d, batch=%d).",
                 _MODEL_NAME,
                 _FASTEMBED_DIM,
+                _EMBED_THREADS,
+                _EMBED_BATCH,
             )
         except Exception as exc:  # noqa: BLE001
             if not _fallback_warned:
@@ -151,7 +181,7 @@ def encode_batch(texts: list[str]) -> list[list[float]]:
     if model and model is not False:
         try:
             # fastembed.embed() preserves order and yields one ndarray per input.
-            raw = list(model.embed(texts))  # type: ignore[attr-defined]
+            raw = list(model.embed(texts, batch_size=_EMBED_BATCH))  # type: ignore[attr-defined]
             if len(raw) == len(texts):
                 out: list[list[float]] = []
                 for arr in raw:

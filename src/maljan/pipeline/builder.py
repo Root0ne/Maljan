@@ -26,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from maljan.core.container import ServiceContainer
+from maljan.core.memprobe import instrument_node
 from maljan.pipeline.nodes import (
     make_analyst_node,
     make_judge_node,
@@ -64,16 +65,26 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     if not agent_names:
         raise RuntimeError("No agents registered. Cannot build pipeline.")
 
-    # 2. Create and add analyst nodes dynamically
+    # 2. Create and add analyst nodes dynamically.
+    #    Every node is wrapped in ``instrument_node`` so resident memory is
+    #    reported on each side of it — node boundaries are the finest phase
+    #    granularity that exists here, since the worker's ``phase_change``
+    #    events treat everything from the first analyst to the judge as one
+    #    ``analyzing`` phase. See ``core/memprobe`` for why this exists.
     for name in agent_names:
-        builder.add_node(f"{name}_analyst", make_analyst_node(name, container))
+        builder.add_node(
+            f"{name}_analyst",
+            instrument_node(f"{name}_analyst", make_analyst_node(name, container)),
+        )
 
     # 3. Add negotiation, revision, judge, and report nodes. The report
     #    node only runs when ``config.reporting.enabled`` — the node itself
     #    short-circuits when disabled, so the topology stays unchanged.
-    builder.add_node("negotiation", make_negotiation_node(container))
-    builder.add_node("revision", make_revision_node(container))
-    builder.add_node("judge", make_judge_node(container))
+    builder.add_node(
+        "negotiation", instrument_node("negotiation", make_negotiation_node(container))
+    )
+    builder.add_node("revision", instrument_node("revision", make_revision_node(container)))
+    builder.add_node("judge", instrument_node("judge", make_judge_node(container)))
 
     reporting_enabled = True
     try:
@@ -81,7 +92,7 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     except AttributeError:
         reporting_enabled = True
     if reporting_enabled:
-        builder.add_node("report", make_report_node(container))
+        builder.add_node("report", instrument_node("report", make_report_node(container)))
 
     # 4 + 5. Analyst topology — parallel fan-out (hosted) or sequential
     # chain (local single-slot). Default to sequential because the only
