@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck docker-build docker-up docker-down docker-logs rebuild-ghidra
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra
 
 test:
 	uv run pytest tests/ -q
@@ -69,6 +69,31 @@ docker-down:
 
 docker-logs:
 	cd docker && docker compose logs -f
+
+# ── Development loop ───────────────────────────────────────────────
+# The production stack bakes the frontend into an image and runs the worker
+# under plain `arq`, so NEITHER picks up a source edit on its own. That cost
+# real debugging time (a live analysis ran the previous worker build; the
+# deployed UI was a stale bundle for a whole session), so the two ways out are
+# spelled out here rather than left to be rediscovered.
+
+# Live source for both: `next dev` for the frontend, watchfiles-supervised arq
+# for the worker. Use this while developing.
+dev-up:
+	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
+
+dev-down:
+	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down
+
+dev-logs:
+	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f
+
+# On the production stack, these are the two commands that make an edit real.
+fe-rebuild:
+	cd docker && docker compose build frontend && docker compose up -d --no-deps frontend
+
+worker-restart:
+	docker restart maljan-worker
 
 # ── Ghidra MCP Manager ─────────────────────────────────────────────
 

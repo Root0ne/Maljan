@@ -1,0 +1,52 @@
+# Development overlay — source is live, no image rebuild.
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
+#   (or simply: make dev-up)
+#
+# Why this exists. The production stack serves the frontend from a *baked*
+# Next.js standalone image with no source mount, and the worker mounts source
+# but runs `arq`, which never re-imports a changed module. Neither warns you.
+# Both cost real debugging time on 2026-07-26: a live analysis ran the previous
+# worker build and wrote nothing, and the deployed UI was a pre-change bundle
+# for an entire session while every local check passed.
+#
+# The production file is deliberately untouched, so `docker compose up` without
+# this overlay still builds and runs exactly what ships.
+
+services:
+  # `next dev` against the mounted source: edits are visible on reload.
+  # node_modules stays a container-owned volume so a host install for a
+  # different platform cannot shadow the image's.
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      target: builder
+    command: npm run dev -- --port 3000 --hostname 0.0.0.0
+    working_dir: /app
+    environment:
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Baked at build time in production; supplied at runtime here.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
+      # Defaults to SECURE, exactly as in production. Set it to "true" in .env
+      # only if you want the local stack unauthenticated — it disables auth for
+      # every visitor, which is why the production build refuses to assume it.
+      NEXT_PUBLIC_AUTH_DISABLED: ${NEXT_PUBLIC_AUTH_DISABLED:-false}
+    volumes:
+      - ../apps/web:/app
+      - /app/node_modules
+      - /app/.next
+
+  # Restart the worker process when Python under src/ or apps/ changes. arq has
+  # no reload facility of its own, so watchfiles supervises it.
+  backend-worker:
+    command: >
+      uv run watchfiles
+      "arq app.worker.analysis_worker.WorkerSettings"
+      /app/src /app/apps/api
+    environment:
+      # A reload mid-analysis kills the run, so keep the probe verbose here —
+      # it is the only trace of what the process was doing when it went.
+      MALJAN_MEMPROBE: ${MALJAN_MEMPROBE:-basic}

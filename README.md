@@ -199,10 +199,57 @@ make typecheck
 # Full quality gate
 make check
 
+# If `git commit` prints "`pre-commit` not found. Did you forget to activate
+# your virtualenv?", the installed hook has a stale absolute interpreter path
+# baked into it (it happens whenever the venv is recreated, or when the
+# snap-installed toolchain the venv points at is upgraded). Reinstall it —
+# do NOT reach for --no-verify:
+uv run pre-commit install
+
 # Benchmarks
 make benchmark-attck
 make benchmark-tram
 ```
+
+### Making a code change actually take effect
+
+**Read this before debugging anything that "should have worked".** On the
+production stack neither the frontend nor the worker picks up a source edit,
+and neither of them tells you:
+
+| Service | Source | Picks up an edit? |
+|---|---|---|
+| `backend-api` | bind-mounted | **yes** — uvicorn `--reload` |
+| `backend-worker` | bind-mounted | **no** — `arq` never re-imports a changed module |
+| `frontend` | **baked into the image** | **no** — it serves a Next.js standalone build |
+
+So on the production stack:
+
+```bash
+make worker-restart   # after ANY Python edit under src/ or apps/api
+make fe-rebuild       # after ANY frontend edit — a plain restart is not enough
+```
+
+Both traps cost a full debugging session on 2026-07-26: a live analysis ran the
+*previous* worker build and silently wrote nothing, and the deployed UI served a
+pre-change bundle while every local check passed.
+
+The alternative is the development overlay, where both are live:
+
+```bash
+make dev-up      # next dev + watchfiles-supervised arq, source mounted
+make dev-logs
+make dev-down
+```
+
+### Memory
+
+An analysis can take the worker process from ~3.4 GB to ~8.5 GB. On a host that
+also runs a local LLM this is the difference between a working machine and a
+frozen one, so the worker is capped (`mem_limit: 8g`) and restarts itself
+between jobs above `WORKER_RSS_RESTART_MB`. Set `MALJAN_MEMPROBE=objects` (or
+`tracemalloc`) to see where the growth happens — `src/maljan/core/memprobe.py`
+explains what the numbers mean.
 
 ---
 

@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Maljan web UI
 
-## Getting Started
+Next.js App Router frontend for the Maljan analysis platform.
 
-First, run the development server:
+This file used to be the untouched `create-next-app` boilerplate, which told you
+to run `npm run dev` and promised "the page auto-updates as you edit". That is
+true of a bare Next.js app and false of this one as it is normally run: the
+`frontend` container serves a **baked standalone build** with no source mount,
+so an edit here is invisible until the image is rebuilt.
+
+## Running it
+
+Against the Docker stack — the usual case:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+make dev-up        # from the repo root: mounts this directory, runs `next dev`
+make fe-rebuild    # or, on the production stack, rebuild + recreate the container
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Standalone, against an API you are running yourself:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev        # http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` must point at that API. They are
+**build-time** values in the production image (`Dockerfile.frontend`), which is
+the other half of why a rebuild is needed after changing them.
 
-## Learn More
+## Checks
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npx tsc --noEmit   # types
+npm run lint       # baseline: 0 errors, 10 warnings
+npm run build      # production build
+npm run test:e2e   # Playwright, three browsers
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The e2e suite is hermetic — it mocks every API call and fails the test if an
+unmocked one escapes — so it does not need the backend running. It is also
+memory-hungry: three browsers at four workers each will exhaust a machine that
+is also running a local LLM. Run one project at a time (`--project=chromium`)
+when memory is tight.
