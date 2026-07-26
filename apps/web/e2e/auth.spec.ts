@@ -92,6 +92,15 @@ test.describe("Authentication", () => {
     expect(await page.evaluate(() => localStorage.getItem("access_token"))).toBeNull();
   });
 
+  test("the register page renders its form", async ({ page }) => {
+    // The only other route in the (auth) group, and the only one that can
+    // create an account. It had no coverage at all.
+    await page.goto("/register");
+    await expect(page.locator('input[type="email"]')).toBeVisible();
+    await expect(page.locator('input[type="password"]').first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /sign up|register|create/i })).toBeVisible();
+  });
+
   test("unauthenticated user is redirected to login", async ({ page }) => {
     await page.goto("/dashboard");
     /* The guard is a client-side effect in AuthProvider, so it cannot fire

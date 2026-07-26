@@ -103,6 +103,32 @@ test.describe("Analysis tabs", () => {
     });
   }
 
+  test("/live renders the running view", async ({ sessionPage: page }) => {
+    /* Not in the table above because it is the one tab that needs the opposite
+     * job state: on a completed run it deliberately says there is nothing live
+     * to show. It also mounts a second WebSocket of its own on top of the
+     * layout's, which is why the tab walk uses /process instead. */
+    await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...COMPLETED_JOB, status: "running", completed_at: null }),
+      })
+    );
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/live`);
+
+    await expect(page.getByRole("heading", { name: "Agent Status" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Event Log" })).toBeVisible();
+    await expect(
+      page.getByText(/Analysis already completed/)
+    ).toHaveCount(0);
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
   test("the LIVE tab is offered only while the job is running", async ({
     sessionPage: page,
   }) => {
