@@ -248,6 +248,10 @@ interface NegotiationEntry {
   agent?: string;
   argument?: string;
   confidence?: number;
+  /** "complete" | "failed" | "timeout". Absent on rows written before the
+   *  backend carried the distinction structurally; the "[ERROR]" prefix in
+   *  `argument` is the fallback for those. */
+  status?: string;
 }
 
 /**
@@ -300,7 +304,12 @@ export function messagesFromReport(
         speaker,
         role: "negotiator",
         round,
-        status: text.startsWith("[ERROR]") ? "failed" : "complete",
+        // Prefer the stored status; the "[ERROR]" prefix is the fallback for
+        // rows written before the field existed. The prefix alone also
+        // collapsed a timeout into a plain failure.
+        status:
+          (entry.status as TranscriptMessage["status"] | undefined) ??
+          (text.startsWith("[ERROR]") ? "failed" : "complete"),
         text,
         // Stored as 0-100 by the worker; the model is 0-1 throughout.
         confidence: entry.confidence === undefined ? undefined : Number(entry.confidence) / 100,
@@ -312,6 +321,23 @@ export function messagesFromReport(
 
   if (verdict) {
     const consensus = negotiationLog?.is_consensus === true;
+    /* "Closed without full consensus" is the right sentence for agents who
+     * argued and did not converge. It is the wrong sentence — actively
+     * misleading — for a mediation that never ran, which is what every stored
+     * run in this database actually contains. Say which one happened. */
+    const mediationFailed =
+      negotiationLog?.mediation_failed === true ||
+      (Array.isArray(negotiationLog?.discussion_history) &&
+        negotiationLog.discussion_history.some(
+          (e) =>
+            e &&
+            typeof e === "object" &&
+            ((e as Record<string, unknown>).status === "failed" ||
+              (e as Record<string, unknown>).status === "timeout" ||
+              String((e as Record<string, unknown>).argument ?? "").startsWith(
+                "[ERROR] Mediation"
+              ))
+        ));
     out.push({
       id: "judge:Judge:final",
       speaker: "Judge",
@@ -322,9 +348,11 @@ export function messagesFromReport(
       // facing surface says "Malicious". Normalise here or the transcript
       // contradicts the header two inches above it.
       text: `Final verdict: ${verdictLabel(verdict)}.${
-        consensus
-          ? " Analysts reached consensus."
-          : " Closed without full consensus — see the mediator rounds above."
+        mediationFailed
+          ? " The negotiation could not run — the verdict rests on the analysts' first-pass findings alone."
+          : consensus
+            ? " Analysts reached consensus."
+            : " Closed without full consensus — see the mediator rounds above."
       }`,
       claims: [],
       dissent: [],

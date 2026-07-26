@@ -18,6 +18,19 @@ class AgentArgument(BaseModel):
     agent_name: str = Field(..., description="Name of the agent submitting the argument")
     finding: str = Field(..., description="The main finding or rebuttal")
     confidence_score: float = Field(0.0, description="Confidence of this specific argument (0-1)")
+    status: str = Field(
+        default="complete",
+        description=(
+            "``complete`` | ``failed`` | ``timeout``. Whether this contribution "
+            "was actually produced. A mediation that *errored* and one where the "
+            "agents simply did not converge both leave ``is_consensus=False`` "
+            "with a 0.0 confidence, and until this field existed the only thing "
+            "telling them apart anywhere in the system was the literal prefix "
+            "'[ERROR] Mediation ' inside ``finding`` — sniffed independently by "
+            "the router and by two frontend components. Every stored run in the "
+            "database was an errored mediation presented as a calm disagreement."
+        ),
+    )
 
 
 def _merge_dicts[V](left: dict[str, V], right: dict[str, V]) -> dict[str, V]:

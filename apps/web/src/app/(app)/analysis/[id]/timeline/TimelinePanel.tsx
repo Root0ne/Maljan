@@ -21,6 +21,9 @@ interface DebateEntry {
   position: string;
   confidence: number;
   argument: string;
+  /** The round errored — it produced no opinion, so its 0.0 is not a data
+   *  point about the sample. */
+  failed?: boolean;
 }
 
 const AGENT_COLORS: Record<string, string> = {
@@ -37,6 +40,7 @@ const POSITION_STYLES: Record<string, string> = {
   malicious: "text-status-red",
   suspicious: "text-status-orange",
   benign: "text-status-green",
+  "did not run": "text-status-red",
 };
 
 function confidenceToPosition(confidence: number): string {
@@ -50,8 +54,16 @@ function parseNegotiationLog(negotiationLog: Record<string, unknown> | null | un
 
   const entries: DebateEntry[] = [];
 
-  // Try discussion_history array
-  const discussion = negotiationLog.discussion_history as unknown[] | undefined;
+  /* The endpoint and the embedded column disagree on names, and nothing
+   * caught it: `GET /reports/{id}/timeline` returns `discussion_timeline` +
+   * `confidence_curve`, while the report's own `negotiation_log` column uses
+   * `discussion_history` + `confidence_history`. Since the fetched value is
+   * *preferred* below, a SUCCESSFUL fetch found neither key here, returned
+   * nothing, and quietly demoted the panel to its one-entry-per-agent
+   * fallback — the embedded log, which has the right shape, was consulted
+   * only when the request failed. Accept both. */
+  const discussion = (negotiationLog.discussion_history ??
+    negotiationLog.discussion_timeline) as unknown[] | undefined;
   if (Array.isArray(discussion)) {
     discussion.forEach((item, i) => {
       if (!item || typeof item !== "object") return;
@@ -59,12 +71,25 @@ function parseNegotiationLog(negotiationLog: Record<string, unknown> | null | un
       // confidence may be 0-1 (pipeline) or 0-100 (already scaled)
       let confidence = Number(d.confidence ?? d.final_confidence ?? 50);
       if (confidence <= 1 && confidence > 0) confidence = confidence * 100;
+      const argument = String(d.argument ?? d.content ?? d.message ?? "");
+      /* A round that never ran stores confidence 0.0, and 0 maps to "benign"
+       * — so a mediation that crashed was drawn as an agent confidently
+       * declaring the sample clean, and plotted as a genuine convergence to
+       * zero on the chart. Label it for what it is and keep it off the
+       * curve. */
+      const failed =
+        d.status === "failed" ||
+        d.status === "timeout" ||
+        argument.startsWith("[ERROR]");
       entries.push({
         round: Number(d.round ?? Math.floor(i / 3) + 1),
         agent: String(d.agent ?? d.agent_name ?? "Unknown Agent"),
-        position: String(d.position ?? d.verdict ?? confidenceToPosition(confidence)),
+        position: failed
+          ? "did not run"
+          : String(d.position ?? d.verdict ?? confidenceToPosition(confidence)),
         confidence: Math.round(confidence),
-        argument: String(d.argument ?? d.content ?? d.message ?? ""),
+        argument,
+        failed,
       });
     });
   }
@@ -153,7 +178,9 @@ export default function TimelinePanel() {
     const entry: Record<string, number> = { round };
     for (const a of agents) {
       const r = allEntries.find((x) => x.round === round && x.agent === a);
-      if (r) entry[a] = r.confidence;
+      // A failed round has no confidence to plot; charting its 0 would draw a
+      // convergence that never happened.
+      if (r && !r.failed) entry[a] = r.confidence;
     }
     return entry;
   });
@@ -276,9 +303,12 @@ export default function TimelinePanel() {
                   <span className={`text-xs capitalize ${POSITION_STYLES[entry.position] || "text-text-muted"}`}>
                     {entry.position}
                   </span>
-                  <span className="text-xs text-text-muted font-mono">
-                    {entry.confidence}%
-                  </span>
+                  {/* A failed round's 0% is not a measurement of anything. */}
+                  {!entry.failed && (
+                    <span className="text-xs text-text-muted font-mono">
+                      {entry.confidence}%
+                    </span>
+                  )}
                 </div>
                 {entry.argument && (
                   <p className="text-sm text-text-secondary leading-relaxed">

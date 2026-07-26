@@ -121,8 +121,21 @@ class ConsensusRouter:
         # analyses. Take the already-populated ISRs straight to the judge instead;
         # the judge still produces a verdict from them (degraded, but fast and
         # deterministic). Normal consensus / revision flow below is untouched.
+        #
+        # 2026-07-26: this used to be a bare string comparison against the
+        # mediator's prose, which made the exact wording of an error message
+        # load-bearing routing logic — change the text and the pipeline
+        # silently starts burning a 10-15 min revision round again, with no
+        # test and no signal. ``AgentArgument.status`` now carries it
+        # structurally. The prefix check is kept as a fallback so state
+        # persisted before that field existed still routes correctly.
         history = state.get("discussion_history") or []
-        if history and str(getattr(history[-1], "finding", "")).startswith("[ERROR] Mediation"):
+        last = history[-1] if history else None
+        errored = bool(last) and (
+            getattr(last, "status", "complete") in ("failed", "timeout")
+            or str(getattr(last, "finding", "")).startswith("[ERROR] Mediation")
+        )
+        if errored:
             logger.info(
                 "Mediation errored at round %d — routing to judge with current "
                 "ISRs instead of a wasteful revision round.",

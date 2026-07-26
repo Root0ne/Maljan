@@ -23,6 +23,10 @@ interface AgentFinding {
   dissent_items: unknown[] | null;
   revision_rounds: number;
   final_confidence: number;
+  /** The lifecycle status the worker derives from the ISR shape. A crashed
+   *  analyst still writes a row, so this is the only thing that says whether
+   *  the step actually succeeded. */
+  status?: "complete" | "no_data" | "failed" | "timeout";
 }
 
 interface NegotiationRound {
@@ -31,6 +35,9 @@ interface NegotiationRound {
   position?: string;
   confidence: number;
   argument: string;
+  /** "complete" | "failed" | "timeout"; absent on rows stored before the
+   *  backend carried it. */
+  status?: string;
 }
 
 interface NegotiationLog {
@@ -38,6 +45,7 @@ interface NegotiationLog {
   confidence_history?: number[];
   iteration_count?: number;
   is_consensus?: boolean;
+  mediation_failed?: boolean;
 }
 
 /* ── Step config ─────────────────────────────────────── */
@@ -215,18 +223,43 @@ export default function PipelineTab() {
     negotiation &&
     (negotiation.discussion_history?.length || negotiation.iteration_count);
 
-  const stepStatus = (stepId: string): "done" | "current" | "pending" => {
+  /* A negotiation that errored on every round still had rounds and an
+   * iteration count, so this step rendered a green "Done" for runs where the
+   * mediator never once produced a ruling. Every run in the database looked
+   * like a successful negotiation. */
+  const negotiationFailed =
+    negotiation?.mediation_failed === true ||
+    (negotiation?.discussion_history ?? []).some(
+      (r) =>
+        r.agent === "Mediator" &&
+        (r.status === "failed" ||
+          r.status === "timeout" ||
+          String(r.argument ?? "").startsWith("[ERROR] Mediation"))
+    );
+
+  const findingStatus = (
+    f: AgentFinding | undefined
+  ): "done" | "pending" | "failed" => {
+    if (!f) return "pending";
+    return f.status === "failed" || f.status === "timeout" ? "failed" : "done";
+  };
+
+  const stepStatus = (stepId: string): "done" | "current" | "pending" | "failed" => {
     if (!report) return "pending";
     switch (stepId) {
       case "ingestion":
         return "done";
+      // An analyst that crashed still leaves a findings row, so "a row exists"
+      // was never the same question as "the step succeeded". Dynamic has failed
+      // on every run in this deployment and this panel drew it green each time.
       case "static":
-        return staticFinding ? "done" : "pending";
+        return findingStatus(staticFinding);
       case "dynamic":
-        return dynamicFinding ? "done" : "pending";
+        return findingStatus(dynamicFinding);
       case "network":
-        return networkFinding ? "done" : "pending";
+        return findingStatus(networkFinding);
       case "negotiation":
+        if (negotiationFailed) return "failed";
         return hasNegotiation ? "done" : "pending";
       case "judge":
         return report.verdict ? "done" : "pending";
@@ -255,6 +288,8 @@ export default function PipelineTab() {
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded border transition-colors text-left ${
                     status === "done"
                       ? "border-status-green/30 bg-status-green/5 hover:bg-status-green/10"
+                      : status === "failed"
+                      ? "border-status-red/30 bg-status-red/5 hover:bg-status-red/10"
                       : status === "current"
                       ? "border-status-blue/30 bg-status-blue/5 hover:bg-status-blue/10"
                       : "border-border-light bg-bg-deep hover:bg-bg-hover"
@@ -264,6 +299,8 @@ export default function PipelineTab() {
                     className={`flex items-center justify-center w-6 h-6 rounded text-[11px] font-mono font-bold shrink-0 ${
                       status === "done"
                         ? "bg-status-green/10 text-status-green"
+                        : status === "failed"
+                        ? "bg-status-red/10 text-status-red"
                         : status === "current"
                         ? "bg-status-blue/10 text-status-blue"
                         : "bg-bg-active text-text-muted"
@@ -279,6 +316,11 @@ export default function PipelineTab() {
                       {status === "done" && (
                         <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-green/10 text-status-green uppercase tracking-wider">
                           Done
+                        </span>
+                      )}
+                      {status === "failed" && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red uppercase tracking-wider">
+                          Did not run
                         </span>
                       )}
                     </div>
