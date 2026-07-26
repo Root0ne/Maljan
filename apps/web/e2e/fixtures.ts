@@ -72,6 +72,55 @@ export const test = base.extend<{
       });
     });
 
+    /* The dashboard awaits stats, jobs and system status together, and a
+     * rejection in any of them puts the page into its error state with none of
+     * the panels rendered. Only stats was mocked, so every dashboard assertion
+     * was really asserting against an error screen — the requests fell through
+     * to a real API that rejects the fixture's fake token. `no real backend is
+     * required` above is only true if every call the page makes is covered. */
+    await page.route("**/api/v1/jobs?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              id: "job-1",
+              sample_id: "sample-1",
+              sample_filename: "invoice_scan.exe",
+              status: "completed",
+              verdict: "Malware",
+              overall_confidence: 0.93,
+              created_at: "2026-07-26T10:00:00Z",
+              completed_at: "2026-07-26T10:12:00Z",
+              duration_seconds: 720,
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 10,
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/system/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        /* Matches _SYSTEM_STATUS_SCHEMA in lib/api.ts. The client asserts the
+         * shape at runtime and logs drift, so a hand-waved mock turns every
+         * dashboard test run into a wall of api-schema-drift warnings. */
+        body: JSON.stringify({
+          app_name: "Maljan",
+          app_version: "0.1.0",
+          mock_mode_allowed: false,
+          enrichment_enabled: true,
+          has_virustotal_key: true,
+          has_abuseipdb_key: false,
+        }),
+      });
+    });
+
     await page.goto("/login");
     await page.fill('input[type="email"]', "test@example.com");
     await page.fill('input[type="password"]', "password123");

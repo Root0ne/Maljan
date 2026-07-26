@@ -77,8 +77,10 @@ test.describe("Agent transcript", () => {
         body: JSON.stringify({
           id: JOB_ID,
           status: "completed",
+          sample_id: "99999999-8888-7777-6666-555555555555",
           sample_filename: "evil.exe",
           verdict: "Malware",
+          created_at: "2026-07-26T12:00:00Z",
         }),
       })
     );
@@ -124,8 +126,12 @@ test.describe("Agent transcript", () => {
     // Evidence is the point of the panel — a claim with no artefact behind it
     // is exactly what the grounding rules exist to prevent.
     await authenticatedPage.getByRole("button", { name: /1 claim/ }).first().click();
+    // exact: the headline also quotes the leading claim ("… Leading: Imports
+    // VirtualAllocEx …"), so a substring match resolves to two elements.
     await expect(
-      authenticatedPage.getByText(/Imports VirtualAllocEx and WriteProcessMemory/)
+      authenticatedPage.getByText("Imports VirtualAllocEx and WriteProcessMemory", {
+        exact: true,
+      })
     ).toBeVisible();
     await expect(
       authenticatedPage.getByText(/KERNEL32\.dll!VirtualAllocEx/)
@@ -147,7 +153,13 @@ test.describe("Agent transcript", () => {
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ id: JOB_ID, status: "running", sample_filename: "evil.exe" }),
+        body: JSON.stringify({
+          id: JOB_ID,
+          status: "running",
+          sample_id: "99999999-8888-7777-6666-555555555555",
+          sample_filename: "evil.exe",
+          created_at: "2026-07-26T12:00:00Z",
+        }),
       })
     );
     await authenticatedPage.route(`**/api/v1/jobs/${JOB_ID}/events**`, (route) =>
