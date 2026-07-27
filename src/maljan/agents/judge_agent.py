@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import retry_on_connection_error
+from maljan.agents.base_agent import CLOSE_TOOLS_TIMEOUT, retry_on_connection_error
 from maljan.analysis.schema_pruner import get_pruned_schema_hint
 from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
@@ -145,7 +145,17 @@ class JudgeAgent:
         if toolkit is None:
             return
         try:
-            await toolkit.cleanup()
+            # Bounded. This is a *stdio* transport, so its exit stack waits on
+            # the ``threatintel-mcp`` child process, and a child that does not
+            # exit waits forever — observed live as a job that finished its
+            # analysis and then sat in teardown for 42 minutes until SIGTERM.
+            await asyncio.wait_for(toolkit.cleanup(), timeout=CLOSE_TOOLS_TIMEOUT)
+        except TimeoutError:
+            self.logger.warning(
+                "Judge tool cleanup did not finish in %.0fs; abandoning it. The "
+                "MCP subprocess may outlive this job.",
+                CLOSE_TOOLS_TIMEOUT,
+            )
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             self.logger.warning("Judge tool cleanup failed (non-fatal): %s", exc)
 

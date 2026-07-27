@@ -129,22 +129,35 @@ def malloc_trim() -> float:
     return round(before - rss_mb(), 1)
 
 
-def _agent_loop_tasks() -> int:
-    """Count tasks parked on the shared agent loop.
+def _agent_loop_tasks() -> tuple[int, list[str]]:
+    """Count — and name — the tasks parked on the shared agent loop.
 
     A monotonically rising count is the signature of the leaked MCP transports:
     every ``AsyncExitStack`` that is never closed leaves its anyio task group
     running on that loop for the life of the process.
+
+    The names matter as much as the number. A bare "loop_tasks=3" is a question,
+    not an answer; the coroutine names say straight away whether those three are
+    transports nobody closed or something ordinary and expected.
+
+    ``asyncio.all_tasks`` is not thread-safe and this is usually called from a
+    different thread than the loop, so a concurrent mutation can raise — hence
+    the blanket catch. Instrumentation that can break a run is worse than none.
     """
     try:
         from maljan.agents.base_agent import _AGENT_LOOP
 
         loop = _AGENT_LOOP
         if loop is None or loop.is_closed():
-            return 0
-        return len(asyncio.all_tasks(loop))
+            return 0, []
+        tasks = list(asyncio.all_tasks(loop))
+        names: list[str] = []
+        for task in tasks[:8]:
+            coro = task.get_coro()
+            names.append(getattr(coro, "__qualname__", None) or task.get_name())
+        return len(tasks), names
     except Exception:  # noqa: BLE001 — instrumentation must never break a run
-        return 0
+        return 0, []
 
 
 def reset() -> None:
@@ -174,6 +187,7 @@ def _probe(label: str, **extra: Any) -> dict[str, Any]:
         return {"rss_mb": rss}
 
     blocks = sys.getallocatedblocks()
+    loop_task_count, loop_task_names = _agent_loop_tasks()
     with _lock:
         d_rss = round(rss - _last.get("rss", rss), 1)
         d_blocks = blocks - int(_last.get("blocks", blocks))
@@ -187,9 +201,14 @@ def _probe(label: str, **extra: Any) -> dict[str, Any]:
         "d_blocks": d_blocks,
         "gc": gc.get_count(),
         "threads": threading.active_count(),
-        "loop_tasks": _agent_loop_tasks(),
+        "loop_tasks": loop_task_count,
         **extra,
     }
+    # Only when the set changes, so a steady state costs one line, not one per
+    # probe — and a growing set is impossible to miss.
+    if loop_task_names and loop_task_count != _last.get("loop_tasks"):
+        reading["loop_task_names"] = loop_task_names
+    _last["loop_tasks"] = loop_task_count
 
     if _trim_enabled():
         reading["trimmed_mb"] = malloc_trim()
@@ -211,6 +230,8 @@ def _probe(label: str, **extra: Any) -> dict[str, Any]:
         f" trimmed={reading['trimmed_mb']}MB" if "trimmed_mb" in reading else "",
         extra={"memprobe": reading, "label": label},
     )
+    if "loop_task_names" in reading:
+        logger.info("memprobe %s agent-loop tasks: %s", label, reading["loop_task_names"])
     if "top_alloc" in reading:
         for line in reading["top_alloc"]:
             logger.info("memprobe %s alloc: %s", label, line)

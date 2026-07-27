@@ -601,6 +601,13 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         ) from exc
 
 
+# How long any single toolkit close may take before it is abandoned. Teardown
+# runs after the analysis has already succeeded, so the only thing at stake is
+# reclaiming a subprocess and a socket — never worth holding a finished job
+# open for. See ``BaseAnalyst.close_tools``.
+CLOSE_TOOLS_TIMEOUT = 15.0
+
+
 async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> Any:
     """Await ``coro`` on the shared agent loop from a *different* running loop.
 
@@ -671,7 +678,7 @@ class BaseAnalyst(ABC):
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
         return None
 
-    def close_tools(self) -> None:
+    async def close_tools(self) -> None:
         """Release this analyst's MCP toolkit and any HTTP client it holds.
 
         Whoever caches a toolkit closes it, and nobody did. ``cleanup()`` had a
@@ -687,8 +694,20 @@ class BaseAnalyst(ABC):
         so this is best-effort — a cancelled scope can refuse to unwind — which
         is why the worker also carries a hard memory backstop.
 
+        **Bounded, and awaited rather than blocked on.** The first cut of this
+        used the blocking ``_run_coro_blocking`` from inside the job's
+        coroutine, which does two bad things at once: it pins the worker's
+        event loop while it waits, and it inherits whatever the underlying
+        close decides to do. A live run showed exactly why that matters — the
+        analysis finished, the report was written, and then teardown hung for
+        42 minutes until SIGTERM, with arq still reporting ``j_ongoing=1``. An
+        ``mcp`` stdio transport's exit stack waits on its child process, and a
+        child that does not exit waits forever. With ``max_jobs = 1`` that one
+        stuck teardown blocks every later analysis.
+
         Total and idempotent: called from a job-end ``finally``, so it must not
-        be able to turn a finished analysis into a failed one.
+        be able to turn a finished analysis into a failed one — nor keep it
+        from finishing.
         """
         # ``toolkit`` is an MCPLangChainToolkit (``cleanup``) for the stdio and
         # streamable-http analysts, and a GhidraHTTPClient (``aclose``) when the
@@ -704,7 +723,9 @@ class BaseAnalyst(ABC):
 
         for coro in closers:
             try:
-                _run_coro_blocking(coro, hard_timeout=15.0, label=f"close-tools:{self.name}")
+                await run_on_agent_loop(
+                    coro, hard_timeout=CLOSE_TOOLS_TIMEOUT, label=f"close-tools:{self.name}"
+                )
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 self.logger.warning(
                     "Tool cleanup for %s failed (non-fatal): %s", self.name, describe_exception(exc)

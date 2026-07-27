@@ -26,6 +26,7 @@ Sandbox Backend:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 from typing import TYPE_CHECKING, Any
@@ -50,6 +51,12 @@ if TYPE_CHECKING:
     from maljan.loaders.sandbox_client import SandboxClient
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
+
+
+# Per-closer budget in ``aclose``. Each toolkit is already bounded internally;
+# this is the second fence, because a teardown that hangs holds the whole job
+# open and — with ``max_jobs = 1`` — every job after it.
+_ACLOSE_BUDGET = 20.0
 
 
 class ServiceContainer:
@@ -296,9 +303,14 @@ class ServiceContainer:
             self._agent_cache.clear()
             self._judge_agent_cache.clear()
 
+        # Every close is individually bounded *and* the whole set is bounded
+        # again by the caller, because teardown that can hang is teardown that
+        # blocks the next job — with ``max_jobs = 1`` that means all of them.
         for agent in analysts:
             try:
-                agent.close_tools()  # dispatches onto the agent loop internally
+                await asyncio.wait_for(agent.close_tools(), timeout=_ACLOSE_BUDGET)
+            except TimeoutError:
+                logger.warning("Closing tools for %s timed out; abandoning.", agent.name)
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 logger.warning("Closing agent tools failed (non-fatal): %s", exc)
 
@@ -307,7 +319,9 @@ class ServiceContainer:
             if closer is None:
                 continue
             try:
-                await closer()
+                await asyncio.wait_for(closer(), timeout=_ACLOSE_BUDGET)
+            except TimeoutError:
+                logger.warning("Closing judge tools timed out; abandoning.")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Closing judge tools failed (non-fatal): %s", exc)
 

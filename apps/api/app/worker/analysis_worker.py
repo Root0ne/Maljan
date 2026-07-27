@@ -889,7 +889,28 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 from maljan.core import memprobe
 
                 memprobe.probe("job:before_teardown", job_id=job_id)
-                await app.aclose()
+                try:
+                    # The outermost fence. Each toolkit close is bounded, and
+                    # the container bounds them again — this bounds the lot,
+                    # because a job is not finished until this returns and
+                    # ``max_jobs = 1`` means the next one cannot start.
+                    #
+                    # Earned the hard way: a run that had already written its
+                    # report sat here for 42 minutes with arq still reporting
+                    # ``j_ongoing=1``, and only ended on SIGTERM. An ``mcp``
+                    # stdio exit stack waits on its child process, and a child
+                    # that does not exit waits forever.
+                    await asyncio.wait_for(app.aclose(), timeout=_TEARDOWN_BUDGET)
+                except TimeoutError:
+                    logger.error(
+                        "Teardown exceeded %.0fs and was abandoned; the job is "
+                        "complete and its result is stored, but MCP subprocesses "
+                        "may have leaked. The RSS ceiling will recycle the worker.",
+                        _TEARDOWN_BUDGET,
+                        extra={"job_id": job_id},
+                    )
+                except Exception as exc:  # noqa: BLE001 — teardown never fails a job
+                    logger.warning("Teardown failed (non-fatal): %s", exc)
                 gc.collect()
                 reclaimed = memprobe.malloc_trim()
                 memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
@@ -1142,6 +1163,10 @@ from app.worker.enrich_worker import enrich_threat_intel  # noqa: E402
 # ``run_analysis``'s ``finally`` works, a worker that has grown this large has
 # already stopped being safe to keep around.
 _RSS_RESTART_MB = float(os.environ.get("WORKER_RSS_RESTART_MB", "6000"))
+
+# Absolute ceiling on end-of-job teardown. Reclaiming a subprocess and a socket
+# is never worth holding a finished job — and therefore the whole queue — open.
+_TEARDOWN_BUDGET = float(os.environ.get("WORKER_TEARDOWN_TIMEOUT", "60"))
 
 
 async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
