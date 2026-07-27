@@ -915,23 +915,53 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     logger.warning("YARA Layer 0: sample unreadable (%s). Skipping.", _e)
                     return None
 
+            def _scan_targets() -> list[tuple[str, bytes]]:
+                """The sample, plus anything carved out of it.
+
+                A packed dropper's real payload lives in the overlay or a
+                resource, so a corpus scanned only against the outer shell
+                matches nothing — which reads in the report as "no signatures
+                fired" rather than "we never looked at the interesting part".
+                """
+                sample_bytes = _read_sample_bytes()
+                if not sample_bytes:
+                    return []
+                targets: list[tuple[str, bytes]] = [("sample", sample_bytes)]
+                try:
+                    from maljan.extractors.pe_extractor import carve_payloads
+
+                    targets.extend(carve_payloads(sample_bytes))
+                except Exception as _e:  # noqa: BLE001
+                    logger.warning("YARA Layer 0: carving skipped (%s).", _e)
+                return targets
+
             async def _run_yara_scan() -> AgentISR | None:
                 try:
                     yara_layer = container.get_yara_layer()
                     if yara_layer.rule_count > 0:
-                        sample_bytes = await asyncio.to_thread(_read_sample_bytes)
-                        if not sample_bytes:
+                        targets = await asyncio.to_thread(_scan_targets)
+                        if not targets:
                             return None
                         yara_layer.reset_filter_stats()
-                        yara_matches = await asyncio.to_thread(
-                            yara_layer.scan, sample_bytes, sample_platform
-                        )
+                        yara_matches = []
+                        for label, payload in targets:
+                            hits = await asyncio.to_thread(
+                                yara_layer.scan, payload, sample_platform
+                            )
+                            if label != "sample":
+                                # Say *where* the rule fired: a match on a
+                                # carved child means "this dropper carries X",
+                                # not "this is X".
+                                for hit in hits:
+                                    hit.source_label = label
+                            yara_matches.extend(hits)
                         if yara_matches:
                             yara_isr: AgentISR = yara_layer.to_isr(yara_matches)
                             logger.info(
-                                "YARA Layer 0: %d match(es), %d rule(s) dropped "
-                                "by platform=%s -> cascade domain='yara'.",
+                                "YARA Layer 0: %d match(es) across %d target(s), "
+                                "%d rule(s) dropped by platform=%s -> cascade domain='yara'.",
                                 len(yara_matches),
+                                len(targets),
                                 yara_layer.last_filtered_count,
                                 sample_platform,
                             )

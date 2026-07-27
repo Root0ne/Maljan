@@ -129,6 +129,10 @@ class PESection(BaseModel):
     virtual_address: str  # hex string, e.g. "0x1000"
     virtual_size: int = 0
     raw_size: int = 0
+    # File offset of this section's raw data. Needed to locate the overlay —
+    # everything past the last section's raw end, which is where a dropper's
+    # appended payload lives and which no section header describes.
+    raw_offset: int = 0
     entropy: float = 0.0
     characteristics: str = ""
     is_suspicious: bool = False  # high entropy or RWX flags

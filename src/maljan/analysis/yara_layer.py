@@ -152,6 +152,13 @@ class YaraMatch:
                         ``("any",)`` for cross-platform rules. Propagated
                         into the ISR so the TTP cascade can honour the
                         layer-declared platform over the MITRE catalog.
+        source_label: Which blob matched. Empty for the sample itself, and set
+                        to the carve label (``"overlay+0x1a400"``) when the hit
+                        came from an embedded payload. A rule firing on a
+                        carved child says something different from one firing
+                        on the sample — the difference between "this dropper
+                        carries Emotet" and "this *is* Emotet" — and dropping
+                        the distinction turns a dropper into a misattribution.
     """
 
     rule_id: str
@@ -160,14 +167,16 @@ class YaraMatch:
     description: str
     matched_patterns: list[str] = field(default_factory=list)
     rule_platforms: tuple[str, ...] = ()
+    source_label: str = ""
 
     @property
     def evidence_ref(self) -> str:
         """Short evidence reference string for use in ClaimEvidence."""
+        where = f"[{self.source_label}] " if self.source_label else ""
         if self.matched_patterns:
             snippets = ", ".join(f"'{p}'" for p in self.matched_patterns[:3])
-            return f"YARA rule '{self.rule_id}': patterns matched: {snippets}"
-        return f"YARA rule '{self.rule_id}' matched"
+            return f"{where}YARA rule '{self.rule_id}': patterns matched: {snippets}"
+        return f"{where}YARA rule '{self.rule_id}' matched"
 
     @property
     def claim_text(self) -> str:

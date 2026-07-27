@@ -18,6 +18,7 @@ extending rather than rewriting.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import threading
@@ -263,6 +264,7 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
 
     if blob[:2] == b"MZ":
         sections, imports, exports, embedded, packer_hint, obfuscation = _parse_pe(blob)
+        embedded = embedded + _carve_embedded(blob, sections)
     elif blob[:4] == b"\x7fELF":
         sections = _parse_elf_sections(blob)
         imports = _parse_elf_imports(blob)
@@ -350,6 +352,7 @@ def _pe_sections(pe: Any) -> list[PESection]:
                 virtual_address=f"0x{int(sect.VirtualAddress):08x}",
                 virtual_size=int(sect.Misc_VirtualSize or 0),
                 raw_size=int(sect.SizeOfRawData or 0),
+                raw_offset=int(getattr(sect, "PointerToRawData", 0) or 0),
                 entropy=round(entropy, 3),
                 characteristics=_format_characteristics(char),
                 is_suspicious=(entropy >= _HIGH_ENTROPY_THRESHOLD or rwx),
@@ -715,6 +718,123 @@ def _parse_elf_exports(blob: bytes) -> list[str]:
                 out.append(symbol.name)
     except Exception as exc:  # noqa: BLE001
         logger.warning("pe_extractor: ELF exports parse failed (%s)", exc)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Embedded-payload carving
+# ---------------------------------------------------------------------------
+
+# Magic bytes worth carving on. Kept small on purpose: every entry is a promise
+# that finding these bytes at a non-zero offset means something, and a generous
+# list produces confident-looking noise from ordinary compressed data.
+_CARVE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"MZ\x90\x00", "PE"),
+    (b"\x7fELF", "ELF"),
+    (b"PK\x03\x04", "ZIP"),
+    (b"%PDF-", "PDF"),
+    (b"Rar!\x1a\x07", "RAR"),
+    (b"7z\xbc\xaf\x27\x1c", "7Z"),
+)
+
+_MAX_CARVED_CHILDREN = 8
+_MAX_CARVE_BYTES = 32 * 1024 * 1024
+_MAX_CARVE_INPUT = 128 * 1024 * 1024
+# Below this a "carved payload" is a coincidence — four magic bytes and some
+# padding, not a second stage.
+_MIN_CARVE_BYTES = 1024
+
+
+def _overlay_offset(sections: list[PESection]) -> int:
+    """Where the last section's raw data ends — the start of any overlay.
+
+    Appended data past the final section is the classic place a dropper keeps
+    its payload: it is not covered by any section header, so it is invisible to
+    section-based analysis, and it survives naive unpacking.
+    """
+    end = 0
+    for sect in sections:
+        try:
+            raw_end = int(sect.raw_size or 0) + int(getattr(sect, "raw_offset", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        end = max(end, raw_end)
+    return end
+
+
+def _carve_embedded(blob: bytes, sections: list[PESection]) -> list[dict[str, Any]]:
+    """Report nested executables and archives hiding inside the sample.
+
+    Maljan enumerated PE resources by type, id and size and never looked at the
+    bytes, so a second-stage PE inside ``.rsrc`` — or appended past the last
+    section — was invisible. It is still invisible to the *analysts*, which is
+    a separate and larger problem, but at least the report now says it is there,
+    and the judge's YARA layer gets to scan it (see ``nodes._read_sample_bytes``).
+
+    Deliberately reports rather than recurses. A carved child would need its own
+    ``sample_path``, its own Ghidra container mirror and its own memory upsert;
+    ``AnalysisState`` carries exactly one of each, and faking a second run
+    inside the first is how you get two analyses that each think they own the
+    job row.
+    """
+    if len(blob) > _MAX_CARVE_INPUT:
+        return []
+
+    out: list[dict[str, Any]] = []
+    seen_offsets: set[int] = set()
+    overlay_start = _overlay_offset(sections)
+
+    for magic, kind in _CARVE_SIGNATURES:
+        start = 1  # never offset 0 — that is the sample itself
+        while len(out) < _MAX_CARVED_CHILDREN:
+            offset = blob.find(magic, start)
+            if offset == -1:
+                break
+            start = offset + 1
+            if offset in seen_offsets:
+                continue
+            payload = blob[offset : offset + _MAX_CARVE_BYTES]
+            if len(payload) < _MIN_CARVE_BYTES:
+                continue
+            seen_offsets.add(offset)
+            source = "overlay" if overlay_start and offset >= overlay_start else "body"
+            out.append(
+                {
+                    "type": f"carved:{kind}",
+                    "id": f"{source}+0x{offset:x}",
+                    "size": len(payload),
+                    "offset": offset,
+                    "source": source,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "entropy": round(_shannon_entropy(payload[:65536]), 2),
+                    "carved": True,
+                }
+            )
+        if len(out) >= _MAX_CARVED_CHILDREN:
+            break
+    return out
+
+
+def carve_payloads(blob: bytes) -> list[tuple[str, bytes]]:
+    """Return ``[(label, bytes)]`` for each embedded payload found in ``blob``.
+
+    The judge node scans these alongside the parent. Until it did, a packed
+    dropper's real payload was invisible to every YARA rule in the corpus —
+    the rules only ever saw the packed outer shell, which by construction
+    matches nothing.
+    """
+    if not blob or len(blob) > _MAX_CARVE_INPUT:
+        return []
+    sections: list[PESection] = []
+    if blob[:2] == b"MZ":
+        try:
+            sections = _parse_pe(blob)[0]
+        except Exception:  # noqa: BLE001 — carving must never break the judge
+            sections = []
+    out: list[tuple[str, bytes]] = []
+    for row in _carve_embedded(blob, sections):
+        offset = int(row["offset"])
+        out.append((str(row["id"]), blob[offset : offset + _MAX_CARVE_BYTES]))
     return out
 
 
