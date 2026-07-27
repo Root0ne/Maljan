@@ -177,6 +177,14 @@ class StaticAnalysis(BaseModel):
     embedded_resources: list[dict[str, Any]] = Field(default_factory=list)
     packer_hint: str | None = None
     obfuscation_indicators: list[str] = Field(default_factory=list)
+    # {behaviour_category: count} over the resolved import table. Cheap to carry
+    # and it saves every consumer — prompt, report, family RAG — from
+    # recomputing the same histogram from ``imports``.
+    api_capabilities: dict[str, int] = Field(default_factory=dict)
+    # The audit trail behind the import-capability Layer-0 claims: one row per
+    # technique with the exact imports that evidenced it. Without this a reader
+    # sees a technique in the report and has no way to check the reasoning.
+    api_technique_hits: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

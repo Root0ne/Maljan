@@ -136,8 +136,52 @@ def classify_import(function: str) -> tuple[str | None, bool]:
     the fallback used when no data asset is present; every one of its entries
     is suspicious by construction, which is the invariant the tests pin.
     """
-    category = _SUSPICIOUS_IMPORTS.get(function)
-    return category, bool(category)
+    legacy = _SUSPICIOUS_IMPORTS.get(function)
+    db = _behaviour_db()
+    if db is not None:
+        category, suspicious = db.classify(function)
+        if category is not None:
+            # Suspicion is the *union* of the two sources, not the catalog's
+            # verdict alone. The catalog tiers whole categories, and
+            # ``filesystem``/``registry`` are informational because every
+            # Windows program reads files and opens keys — but six specific
+            # filesystem calls and three registry calls were hand-picked into
+            # the legacy table by someone who decided they mattered, and the
+            # vendored family fingerprints were built against that decision.
+            # Demoting them here would change the family-RAG profile text
+            # without changing the catalog it is matched against: a silent
+            # retrieval regression with no exception to notice it by.
+            #
+            # The result is admittedly uneven — CreateFileA is flagged and
+            # ReadFile is not — but that unevenness is inherited, not
+            # introduced, and preserving it costs nothing.
+            return category, suspicious or bool(legacy)
+        # Fall through: an API the catalog has not heard of may still be in the
+        # curated table, and losing a known-bad name to a catalog gap would be a
+        # silent regression.
+    return legacy, bool(legacy)
+
+
+def _behaviour_db() -> Any:
+    """Return the loaded behaviour catalog, or ``None`` to use the built-in table.
+
+    Config is read per call rather than captured at import: the settings object
+    is memoised anyway, and reading it lazily keeps this module importable
+    without a configured environment — which several tests and the offline
+    scripts rely on.
+    """
+    try:
+        from maljan.analysis.api_capability_db import load_api_behaviour_db
+        from maljan.core.config import get_settings
+        from maljan.core.paths import resolve_data
+
+        cfg = get_settings().preprocessing
+        if not getattr(cfg, "use_api_behaviour_map", False):
+            return None
+        return load_api_behaviour_db(str(resolve_data(cfg.api_behaviour_map_path)))
+    except Exception as exc:  # noqa: BLE001 — classification must never break a parse
+        logger.debug("pe_extractor: behaviour catalog unavailable (%s)", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +269,8 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
     if not packer_hint and any(s.entropy >= _HIGH_ENTROPY_THRESHOLD for s in sections):
         packer_hint = "high-entropy sections (possibly packed/encrypted)"
 
+    capabilities = Counter(imp.category for imp in imports if imp.category)
+
     return StaticAnalysis(
         sections=sections,
         imports=imports,
@@ -233,6 +279,7 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
         embedded_resources=embedded,
         packer_hint=packer_hint,
         obfuscation_indicators=obfuscation,
+        api_capabilities=dict(capabilities),
     )
 
 

@@ -77,19 +77,117 @@ def _net_iocs(static: Any) -> list[tuple[str, str]]:
     return out
 
 
+def _all_imported_functions(static: Any) -> set[str]:
+    """Every imported symbol name, categorised or not.
+
+    The ATT&CK pass deliberately reads *all* imports rather than only the
+    suspicious ones. ``GetTickCount`` and ``FindFirstFileA`` are individually
+    unremarkable — that is exactly why they are tiered informational — but a
+    binary importing eight of them in the right combination is doing discovery,
+    and restricting the match set to already-flagged names would throw that
+    evidence away before it could be counted.
+    """
+    out: set[str] = set()
+    for imp in getattr(static, "imports", None) or []:
+        fn = str(getattr(imp, "function", "") or "")
+        if fn and not fn.startswith("Ordinal_"):
+            out.add(fn)
+    return out
+
+
+def _attck_map() -> Any:
+    """Load the API→ATT&CK catalog, or ``None`` to keep the legacy behaviour."""
+    try:
+        from maljan.analysis.api_capability_db import load_api_attck_map
+        from maljan.core.config import get_settings
+        from maljan.core.paths import resolve_data
+
+        cfg = get_settings().preprocessing
+        if not getattr(cfg, "use_api_attck_map", False):
+            return None
+        return load_api_attck_map(str(resolve_data(cfg.api_attck_map_path)))
+    except Exception as exc:  # noqa: BLE001 — a Layer 0 must never break the judge
+        logger.debug("import-capability: ATT&CK catalog unavailable (%s)", exc)
+        return None
+
+
+def _table_driven_claims(static: Any, net_iocs: list[tuple[str, str]]) -> list[ClaimEvidence]:
+    """Project the resolved-import set onto the ATT&CK taxonomy.
+
+    Returns ``[]`` when no catalog is loaded, which is the signal for the caller
+    to fall back to the three hand-written techniques below.
+    """
+    catalog = _attck_map()
+    if catalog is None:
+        return []
+
+    imported = _all_imported_functions(static)
+    if not imported:
+        return []
+
+    claims: list[ClaimEvidence] = []
+    for rule, matched in catalog.match(imported):
+        evidence = ", ".join(matched[:_MAX_EVIDENCE])
+        if len(matched) > _MAX_EVIDENCE:
+            evidence += f", +{len(matched) - _MAX_EVIDENCE} more"
+        confidence = rule.confidence_for(len(matched))
+        # A network technique corroborated by an actual hard-coded endpoint in
+        # the strings is worth more than the imports alone; this is the one
+        # cross-signal bonus, and it is still bounded by the rule's own ceiling.
+        if net_iocs and rule.technique_id.startswith(("T1071", "T1095", "T1105")):
+            confidence = min(rule.confidence_max, confidence + 0.05)
+            evidence += f"; string:{net_iocs[0][0]}:{net_iocs[0][1][:60]}"
+        claims.append(
+            ClaimEvidence(
+                claim=(
+                    f"{rule.name}: {len(matched)} corroborating import(s) in the import "
+                    f"table (deterministic, no execution required)."
+                ),
+                evidence_ref=f"imports: {evidence}",
+                confidence=confidence,
+                technique_id=rule.technique_id,
+                rule_platforms=list(rule.platforms),
+            )
+        )
+    return claims
+
+
 def build_import_capability_isr(static: Any) -> AgentISR | None:
     """Map deterministically-classified imports (+ static IOCs) to ATT&CK TTPs.
 
     Returns an ``AgentISR(domain="static")`` or ``None`` when nothing qualifies.
     ``static`` is the report's ``StaticAnalysis`` (may be ``None``).
+
+    Two paths. With the API→ATT&CK catalog present, the resolved-import set is
+    projected onto the full technique table — dozens of techniques across
+    Discovery, Persistence, Defense Evasion, Credential Access and Collection,
+    which is what makes a sandbox-unreachable run produce real coverage. Without
+    it, the three hand-written techniques below are kept, so removing the data
+    file degrades this layer to what it did before rather than to nothing.
     """
     if static is None:
         return None
 
+    net_iocs = _net_iocs(static)
+
+    table_claims = _table_driven_claims(static, net_iocs)
+    if table_claims:
+        logger.info(
+            "Import-capability Layer 0: %d technique(s) grounded in imports -> "
+            "cascade domain='static'.",
+            len(table_claims),
+        )
+        return AgentISR(
+            agent_id="import_capability",
+            domain="static",
+            claims=table_claims,
+            dissent_items=[],
+            revision_round=0,
+        )
+
     by_cat = _imports_by_category(static)
     if not by_cat:
         return None
-    net_iocs = _net_iocs(static)
     claims: list[ClaimEvidence] = []
 
     # --- T1071 Application Layer Protocol (C2) --------------------------------

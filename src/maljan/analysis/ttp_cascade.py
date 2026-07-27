@@ -59,6 +59,15 @@ LAYER_WEIGHTS: dict[str, float] = {
     "network": 0.20,  # network traffic analysis
 }
 
+# Layer-0 sources whose confidences come from a rule match rather than a model's
+# opinion. Pooling for these is max(), not mean() — see the comment at the pooling
+# site. Deliberately a name check rather than a domain check: `import_capability`
+# shares domain="static" with the LLM static analyst, which is the whole reason
+# the distinction is needed.
+_DETERMINISTIC_AGENTS: frozenset[str] = frozenset(
+    {"import_capability", "lolbin", "network_dga", "tool_artifact", "yara_layer", "sigma_layer"}
+)
+
 # Unknown domains fall back to this weight
 DEFAULT_LAYER_WEIGHT: float = 0.25
 
@@ -371,7 +380,18 @@ class TTPCascadeEngine:
             for dom, agent_claims in domain_map.items():
                 confidences = [c.confidence for _, c in agent_claims]
                 refs = list({c.evidence_ref for _, c in agent_claims})[:3]
-                mean_conf = sum(confidences) / len(confidences)
+                # Averaging is right for several LLM opinions and wrong the
+                # moment a deterministic rule is one of the voices. The import
+                # layer emits dozens of techniques on domain="static", the same
+                # domain the LLM static analyst writes to, so collisions are
+                # routine: mean(rule 0.62, LLM 0.90) = 0.76 *lowers* a finding
+                # two independent sources agree on, and mean(rule 0.62, LLM
+                # 0.30) = 0.46 lets a guess drag a grounded rule down. Take the
+                # strongest voice instead when one of them is a rule match.
+                if any(agent in _DETERMINISTIC_AGENTS for agent, _ in agent_claims):
+                    mean_conf = max(confidences)
+                else:
+                    mean_conf = sum(confidences) / len(confidences)
 
                 # Use the agent_id from the first claim
                 agent_id = agent_claims[0][0]

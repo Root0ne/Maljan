@@ -436,6 +436,29 @@ class PreprocessingConfig(BaseModel):
     family_rag_top_k: int = 5
     family_rag_min_score: float = 0.3
 
+    # Windows API behaviour map — the data-driven replacement for the 51-entry
+    # ``pe_extractor._SUSPICIOUS_IMPORTS`` table. ~680 API names across 13
+    # behaviour categories, with a per-category tier deciding which of them
+    # actually count as *suspicious* (categorising RegOpenKeyExA is useful;
+    # flagging it is not). ON by default and fail-safe in both directions: a
+    # missing or malformed catalog logs once and falls back to the built-in
+    # table, so the worst case is the behaviour we shipped before it existed.
+    # Build it with scripts/build_api_capability_db.py.
+    use_api_behaviour_map: bool = True
+    api_behaviour_map_path: str = "data/api_behaviour_map_v1.json"
+
+    # Deterministic API→ATT&CK mapping, computed from the same resolved-import
+    # set as the behaviour map above (one parse, two projections). This is what
+    # gives a sandbox-unreachable run real technique coverage: without it the
+    # import layer emits at most three techniques, all hand-coded.
+    # Every claim is capped below the YARA floor (0.70) so it corroborates other
+    # layers without solo-driving a verdict, and each technique declares a
+    # ``min_apis`` so a single ubiquitous import cannot promote itself to a
+    # finding. ON by default; absent the catalog the layer keeps its previous
+    # three-technique behaviour.
+    use_api_attck_map: bool = True
+    api_attck_map_path: str = "data/api_attck_map_v1.json"
+
     # ATT&CK case-prior RAG (§4 U2 — LLM-centric, cross-sample TTP grounding).
     # The per-sample function RAG retrieves over THIS sample's own functions only;
     # this fills the cross-sample gap. When enabled AND a vendored case corpus exists

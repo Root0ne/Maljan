@@ -1,0 +1,900 @@
+{
+  "schema": "maljan-api-attck/v1",
+  "version": "1.0",
+  "techniques": [
+    {
+      "technique_id": "T1057",
+      "name": "Process Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.42,
+      "confidence_max": 0.62,
+      "apis": [
+        "CreateToolhelp32Snapshot",
+        "EnumProcessModules",
+        "EnumProcesses",
+        "GetProcessImageFileNameA",
+        "Process32First",
+        "Process32FirstW",
+        "Process32Next",
+        "Process32NextW",
+        "QueryFullProcessImageNameA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1082",
+      "name": "System Information Discovery",
+      "min_apis": 3,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "GetComputerNameA",
+        "GetComputerNameW",
+        "GetCurrentHwProfileA",
+        "GetLogicalDrives",
+        "GetNativeSystemInfo",
+        "GetProductInfo",
+        "GetSystemFirmwareTable",
+        "GetSystemInfo",
+        "GetSystemMetrics",
+        "GetVersionExA",
+        "GetVersionExW",
+        "GetVolumeInformationA",
+        "GlobalMemoryStatusEx"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1033",
+      "name": "System Owner/User Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.42,
+      "confidence_max": 0.6,
+      "apis": [
+        "GetUserNameA",
+        "GetUserNameExA",
+        "GetUserNameW",
+        "LookupAccountNameA",
+        "LookupAccountSidA",
+        "NetUserGetInfo",
+        "WTSQuerySessionInformationA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1087",
+      "name": "Account Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.62,
+      "apis": [
+        "CheckTokenMembership",
+        "DsGetDcNameA",
+        "LookupAccountNameA",
+        "NetLocalGroupGetMembers",
+        "NetUserEnum",
+        "NetUserGetInfo"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1012",
+      "name": "Query Registry",
+      "min_apis": 2,
+      "confidence_base": 0.38,
+      "confidence_max": 0.55,
+      "apis": [
+        "NtEnumerateKey",
+        "NtQueryValueKey",
+        "RegEnumKeyExA",
+        "RegEnumValueA",
+        "RegGetValueA",
+        "RegQueryInfoKeyA",
+        "RegQueryValueExA",
+        "RegQueryValueExW",
+        "SHGetValueA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1083",
+      "name": "File and Directory Discovery",
+      "min_apis": 3,
+      "confidence_base": 0.38,
+      "confidence_max": 0.55,
+      "apis": [
+        "FindFirstFileA",
+        "FindFirstFileW",
+        "FindNextFileA",
+        "FindNextFileW",
+        "GetDriveTypeA",
+        "GetFileAttributesA",
+        "GetLogicalDriveStringsA",
+        "PathFileExistsA",
+        "SHGetFolderPathA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1010",
+      "name": "Application Window Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.6,
+      "apis": [
+        "EnumDesktopWindows",
+        "EnumWindows",
+        "FindWindowA",
+        "FindWindowW",
+        "GetClassNameA",
+        "GetForegroundWindow",
+        "GetWindowTextA",
+        "GetWindowTextW"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1016",
+      "name": "System Network Configuration Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.42,
+      "confidence_max": 0.58,
+      "apis": [
+        "GetAdaptersAddresses",
+        "GetAdaptersInfo",
+        "GetIfTable",
+        "GetNetworkParams",
+        "NetWkstaGetInfo",
+        "SendARP",
+        "gethostname"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1049",
+      "name": "System Network Connections Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.6,
+      "apis": [
+        "GetExtendedTcpTable",
+        "GetTcpTable",
+        "GetUdpTable",
+        "NetServerEnum",
+        "NetShareEnum",
+        "WNetEnumResourceA",
+        "WNetOpenEnumA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1007",
+      "name": "System Service Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.6,
+      "apis": [
+        "EnumDependentServicesA",
+        "EnumServicesStatusA",
+        "EnumServicesStatusExA",
+        "OpenSCManagerA",
+        "QueryServiceConfigA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1614",
+      "name": "System Location Discovery",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.58,
+      "apis": [
+        "EnumSystemLocalesA",
+        "GetKeyboardLayout",
+        "GetLocaleInfoA",
+        "GetLocaleInfoW",
+        "GetSystemDefaultLangID",
+        "GetTimeZoneInformation",
+        "GetUserDefaultLangID",
+        "GetUserDefaultUILanguage"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1543.003",
+      "name": "Create or Modify System Process: Windows Service",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "ChangeServiceConfig2A",
+        "ChangeServiceConfigA",
+        "ControlService",
+        "CreateServiceA",
+        "CreateServiceW",
+        "DeleteService",
+        "OpenSCManagerA",
+        "OpenSCManagerW",
+        "StartServiceA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1547.001",
+      "name": "Boot or Logon Autostart Execution: Registry Run Keys",
+      "min_apis": 2,
+      "confidence_base": 0.42,
+      "confidence_max": 0.6,
+      "apis": [
+        "NtSetValueKey",
+        "RegCreateKeyExA",
+        "RegCreateKeyExW",
+        "RegSetValueExA",
+        "RegSetValueExW",
+        "SHSetValueA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1053.005",
+      "name": "Scheduled Task/Job: Scheduled Task",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "IRegisteredTask",
+        "ITaskFolder",
+        "ITaskScheduler",
+        "ITaskService",
+        "NetScheduleJobAdd",
+        "NetScheduleJobEnum"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1546.003",
+      "name": "Event Triggered Execution: WMI Event Subscription",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "CoSetProxyBlanket",
+        "IWbemClassObject",
+        "IWbemLocator",
+        "IWbemServices"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1134",
+      "name": "Access Token Manipulation",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "AdjustTokenPrivileges",
+        "CreateProcessAsUserA",
+        "CreateProcessWithTokenW",
+        "DuplicateToken",
+        "DuplicateTokenEx",
+        "ImpersonateLoggedOnUser",
+        "ImpersonateNamedPipeClient",
+        "NtAdjustPrivilegesToken",
+        "OpenProcessToken",
+        "OpenThreadToken",
+        "RtlAdjustPrivilege",
+        "SetThreadToken",
+        "SetTokenInformation"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1548.002",
+      "name": "Abuse Elevation Control Mechanism: Bypass UAC",
+      "min_apis": 2,
+      "confidence_base": 0.45,
+      "confidence_max": 0.62,
+      "apis": [
+        "CLSIDFromProgID",
+        "CheckTokenMembership",
+        "CoGetObject",
+        "GetTokenInformation",
+        "ShellExecuteExA",
+        "ShellExecuteExW"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1055",
+      "name": "Process Injection",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "CreateRemoteThread",
+        "CreateRemoteThreadEx",
+        "NtAllocateVirtualMemory",
+        "NtCreateThreadEx",
+        "NtQueueApcThread",
+        "NtWriteVirtualMemory",
+        "OpenProcess",
+        "QueueUserAPC",
+        "RtlCreateUserThread",
+        "SetWindowsHookEx",
+        "VirtualAllocEx",
+        "WriteProcessMemory"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1055.012",
+      "name": "Process Injection: Process Hollowing",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "CreateProcessInternalW",
+        "GetThreadContext",
+        "NtUnmapViewOfSection",
+        "ResumeThread",
+        "SetThreadContext",
+        "WriteProcessMemory",
+        "ZwUnmapViewOfSection"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1620",
+      "name": "Reflective Code Loading",
+      "min_apis": 2,
+      "confidence_base": 0.45,
+      "confidence_max": 0.62,
+      "apis": [
+        "CreateFileMappingA",
+        "LdrGetProcedureAddress",
+        "LdrLoadDll",
+        "MapViewOfFile",
+        "NtCreateSection",
+        "NtMapViewOfSection",
+        "ZwCreateSection"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1622",
+      "name": "Debugger Evasion",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "CheckRemoteDebuggerPresent",
+        "DebugActiveProcess",
+        "IsDebuggerPresent",
+        "NtClose",
+        "NtQueryInformationProcess",
+        "NtSetInformationThread",
+        "OutputDebugStringA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1497",
+      "name": "Virtualization/Sandbox Evasion",
+      "min_apis": 2,
+      "confidence_base": 0.42,
+      "confidence_max": 0.6,
+      "apis": [
+        "EnumSystemFirmwareTables",
+        "GetCursorPos",
+        "GetLastInputInfo",
+        "GetSystemFirmwareTable",
+        "IsProcessorFeaturePresent",
+        "SetupDiEnumDeviceInfo",
+        "SetupDiGetClassDevsA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1497.003",
+      "name": "Virtualization/Sandbox Evasion: Time Based Evasion",
+      "min_apis": 3,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "GetSystemTimeAsFileTime",
+        "GetTickCount",
+        "GetTickCount64",
+        "NtQueryPerformanceCounter",
+        "NtYieldExecution",
+        "QueryPerformanceCounter",
+        "QueryPerformanceFrequency",
+        "timeGetTime"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1112",
+      "name": "Modify Registry",
+      "min_apis": 2,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "NtDeleteKey",
+        "NtSetValueKey",
+        "RegCreateKeyExA",
+        "RegDeleteKeyA",
+        "RegDeleteTreeA",
+        "RegDeleteValueA",
+        "RegLoadKeyA",
+        "RegRestoreKeyA",
+        "RegSetValueExA",
+        "RegSetValueExW"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1562.001",
+      "name": "Impair Defenses: Disable or Modify Tools",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "AmsiInitialize",
+        "AmsiOpenSession",
+        "AmsiScanBuffer",
+        "EtwEventRegister",
+        "EtwEventUnregister",
+        "EtwEventWrite",
+        "EventWrite"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1562.006",
+      "name": "Impair Defenses: Indicator Blocking",
+      "min_apis": 2,
+      "confidence_base": 0.46,
+      "confidence_max": 0.62,
+      "apis": [
+        "EtwEventRegister",
+        "EtwEventUnregister",
+        "EventWrite",
+        "ReportEventA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1070.004",
+      "name": "Indicator Removal: File Deletion",
+      "min_apis": 2,
+      "confidence_base": 0.38,
+      "confidence_max": 0.55,
+      "apis": [
+        "DeleteFileA",
+        "DeleteFileTransactedA",
+        "DeleteFileW",
+        "MoveFileExA",
+        "NtDeleteFile",
+        "SHFileOperationA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1070.006",
+      "name": "Indicator Removal: Timestomp",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "GetFileTime",
+        "NtSetInformationFile",
+        "SetFileTime"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1027",
+      "name": "Obfuscated Files or Information",
+      "min_apis": 2,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "CryptBinaryToStringA",
+        "CryptStringToBinaryA",
+        "RtlCompressBuffer",
+        "RtlDecompressBuffer"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1140",
+      "name": "Deobfuscate/Decode Files or Information",
+      "min_apis": 2,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "BCryptDecrypt",
+        "CryptDecrypt",
+        "CryptStringToBinaryA",
+        "CryptUnprotectData",
+        "RtlDecompressBuffer",
+        "SystemFunction036"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1564.003",
+      "name": "Hide Artifacts: Hidden Window",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.6,
+      "apis": [
+        "CreateDesktopA",
+        "IsWindowVisible",
+        "OpenDesktopA",
+        "SetThreadDesktop",
+        "SwitchDesktop"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1056.001",
+      "name": "Input Capture: Keylogging",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "AttachThreadInput",
+        "GetAsyncKeyState",
+        "GetKeyNameTextA",
+        "GetKeyState",
+        "GetKeyboardState",
+        "GetRawInputData",
+        "MapVirtualKeyA",
+        "RegisterRawInputDevices",
+        "SetWinEventHook",
+        "SetWindowsHookExA",
+        "SetWindowsHookExW",
+        "ToUnicodeEx"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1555",
+      "name": "Credentials from Password Stores",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "CertOpenSystemStoreA",
+        "CredEnumerateA",
+        "CredEnumerateW",
+        "CredFree",
+        "CredReadA",
+        "CredReadW",
+        "CryptUnprotectData",
+        "PFXImportCertStore",
+        "SystemFunction036",
+        "sqlite3_open",
+        "sqlite3_prepare_v2"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1003",
+      "name": "OS Credential Dumping",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "LsaCallAuthenticationPackage",
+        "LsaEnumerateLogonSessions",
+        "LsaGetLogonSessionData",
+        "LsaOpenPolicy",
+        "LsaRetrievePrivateData",
+        "MsvpPasswordValidate",
+        "SamConnect",
+        "SamEnumerateDomainsInSamServer"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1040",
+      "name": "Network Sniffing",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "WSAIoctl",
+        "WSASocketA",
+        "bind",
+        "ioctlsocket",
+        "recvfrom"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1113",
+      "name": "Screen Capture",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "BitBlt",
+        "CreateCompatibleBitmap",
+        "CreateCompatibleDC",
+        "GetDC",
+        "GetDIBits",
+        "GetWindowDC",
+        "PrintWindow",
+        "StretchBlt"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1115",
+      "name": "Clipboard Data",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "AddClipboardFormatListener",
+        "CloseClipboard",
+        "GetClipboardData",
+        "IsClipboardFormatAvailable",
+        "OpenClipboard",
+        "SetClipboardData"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1123",
+      "name": "Audio Capture",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "capCreateCaptureWindowA",
+        "waveInOpen",
+        "waveInStart"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1071.001",
+      "name": "Application Layer Protocol: Web Protocols",
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.62,
+      "apis": [
+        "HttpOpenRequestA",
+        "HttpQueryInfoA",
+        "HttpSendRequestA",
+        "InternetConnectA",
+        "InternetOpenA",
+        "InternetOpenUrlA",
+        "InternetOpenW",
+        "InternetReadFile",
+        "URLDownloadToFileA",
+        "URLDownloadToFileW",
+        "WinHttpConnect",
+        "WinHttpOpen",
+        "WinHttpOpenRequest",
+        "WinHttpReadData",
+        "WinHttpReceiveResponse",
+        "WinHttpSendRequest"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1071.004",
+      "name": "Application Layer Protocol: DNS",
+      "min_apis": 2,
+      "confidence_base": 0.46,
+      "confidence_max": 0.62,
+      "apis": [
+        "DnsFree",
+        "DnsQueryEx",
+        "DnsQuery_A",
+        "DnsQuery_W",
+        "getaddrinfo"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1095",
+      "name": "Non-Application Layer Protocol",
+      "min_apis": 3,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "IcmpSendEcho",
+        "WSAConnect",
+        "WSARecv",
+        "WSASend",
+        "WSASocketA",
+        "connect",
+        "recv",
+        "recvfrom",
+        "send",
+        "sendto",
+        "socket"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1105",
+      "name": "Ingress Tool Transfer",
+      "min_apis": 2,
+      "confidence_base": 0.46,
+      "confidence_max": 0.62,
+      "apis": [
+        "FtpGetFileA",
+        "InternetReadFile",
+        "URLDownloadToCacheFileA",
+        "URLDownloadToFileA",
+        "URLDownloadToFileW",
+        "WinHttpReadData"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1486",
+      "name": "Data Encrypted for Impact",
+      "min_apis": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.65,
+      "apis": [
+        "BCryptDeriveKeyPBKDF2",
+        "BCryptEncrypt",
+        "BCryptGenerateSymmetricKey",
+        "CryptAcquireContextA",
+        "CryptDeriveKey",
+        "CryptEncrypt",
+        "CryptGenKey",
+        "NCryptEncrypt"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1490",
+      "name": "Inhibit System Recovery",
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "ControlService",
+        "DeleteFileA",
+        "DeleteService",
+        "SHFileOperationA"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1489",
+      "name": "Service Stop",
+      "min_apis": 2,
+      "confidence_base": 0.46,
+      "confidence_max": 0.62,
+      "apis": [
+        "ControlService",
+        "DeleteService",
+        "OpenServiceA",
+        "TerminateProcess"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "technique_id": "T1106",
+      "name": "Native API",
+      "min_apis": 3,
+      "confidence_base": 0.38,
+      "confidence_max": 0.55,
+      "apis": [
+        "LdrLoadDll",
+        "NtAllocateVirtualMemory",
+        "NtCreateFile",
+        "NtCreateUserProcess",
+        "NtOpenKey",
+        "NtProtectVirtualMemory",
+        "NtQuerySystemInformation",
+        "NtSetValueKey",
+        "NtWriteFile",
+        "RtlCreateProcessParameters"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    }
+  ]
+}
