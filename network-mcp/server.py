@@ -11,6 +11,7 @@ from scapy.all import (  # type: ignore[attr-defined]
 
 mcp = FastMCP("NetworkMCP")
 
+
 @mcp.tool()
 def read_pcap_summary(pcap_path: str, packet_limit: int = 100) -> str:
     """Read a summary of packets from a PCAP file."""
@@ -33,6 +34,7 @@ def read_pcap_summary(pcap_path: str, packet_limit: int = 100) -> str:
     except Exception as e:
         return f"Error reading PCAP: {str(e)}"
 
+
 @mcp.tool()
 def extract_dns(pcap_path: str) -> str:
     """Extract all DNS queries from a PCAP file."""
@@ -44,11 +46,12 @@ def extract_dns(pcap_path: str) -> str:
         queries = set()
         for pkt in packets:
             if DNSQR in pkt:
-                qname = pkt[DNSQR].qname.decode('utf-8', errors='ignore')
+                qname = pkt[DNSQR].qname.decode("utf-8", errors="ignore")
                 queries.add(qname)
         return "\n".join(queries) if queries else "No DNS queries found."
     except Exception as e:
         return f"Error extracting DNS: {str(e)}"
+
 
 @mcp.tool()
 def extract_http(pcap_path: str) -> str:
@@ -60,7 +63,7 @@ def extract_http(pcap_path: str) -> str:
         requests = []
         for pkt in packets:
             if TCP in pkt and pkt[TCP].payload:
-                payload = bytes(pkt[TCP].payload).decode('utf-8', errors='ignore')
+                payload = bytes(pkt[TCP].payload).decode("utf-8", errors="ignore")
                 if payload.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ")):
                     # Get just the first line (the request line) and Host header if present
                     lines = payload.split("\r\n")
@@ -75,5 +78,6 @@ def extract_http(pcap_path: str) -> str:
     except Exception as e:
         return f"Error extracting HTTP: {str(e)}"
 
+
 if __name__ == "__main__":
-    mcp.run(transport='stdio')
+    mcp.run(transport="stdio")
