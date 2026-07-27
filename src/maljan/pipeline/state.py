@@ -133,3 +133,4 @@ class AnalysisState(TypedDict):
     function_hash_matches: list[dict[str, Any]]
     family_rag_candidates: list[dict[str, Any]]
     attck_case_candidates: list[dict[str, Any]]
+    tool_artifact_matches: list[dict[str, Any]]

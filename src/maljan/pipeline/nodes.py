@@ -208,6 +208,29 @@ def _augment_static_chunks_with_path(
     host_path = state.get("sample_path")
     if isinstance(host_path, str) and host_path:
         parsed["host_sample_path"] = host_path
+    # The toolchain, which the analyst could not previously see at all:
+    # ``language_or_compiler`` lives on SampleIdentity, this chunk carries
+    # StaticAnalysis, and ``AnalysisState`` has no channel joining them — so
+    # the two never met. Knowing a sample is AutoIt or PyInstaller rather than
+    # "a PE" changes which Ghidra tools are worth spending steps on, and it
+    # costs one line of prompt.
+    #
+    # Detected here from a bounded prefix rather than threaded through state:
+    # toolchain markers live in the runtime stub near the front of the file, and
+    # a new state channel for one string is more machinery than the fact
+    # deserves.
+    if isinstance(host_path, str) and host_path:
+        try:
+            from pathlib import Path as _P
+
+            from maljan.extractors.sample_identity import _detect_language_or_compiler
+
+            with _P(host_path).open("rb") as _fh:
+                _lang = _detect_language_or_compiler(_fh.read(4 * 1024 * 1024))
+            if _lang:
+                parsed["language_or_compiler"] = _lang
+        except Exception as _e:  # noqa: BLE001 — a prompt hint is never worth a failure
+            logger.debug("static chunk: language fingerprint skipped (%s)", _e)
     new_content = json.dumps(parsed, indent=2, default=str)
     if len(new_content) > _MAX_SYNTH_CHUNK_CHARS and "static_summary" in parsed:
         # The spliced chunk bypasses the token-budget re-check; drop the
@@ -1057,6 +1080,28 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Import-capability Layer 0 failed: %s. Skipping.", e)
 
+            # Offensive-tool artifacts. The only source of a family name on a
+            # run with no sandbox — CAPE's cti.family[] is otherwise the sole
+            # producer, so a static-only report knew its verdict but not what it
+            # was looking at. Emits on domain="yara" so it shares the existing
+            # weight and cannot double-count against the YARA layer.
+            _tool_artifact_matches: list[dict[str, Any]] = []
+            try:
+                from maljan.analysis.tool_artifact_layer import build_tool_artifact_isr
+                from maljan.core.paths import resolve_data
+
+                _ta_cfg = container.config.preprocessing
+                if getattr(_ta_cfg, "use_tool_artifacts", False):
+                    _ta_bytes = await asyncio.to_thread(_read_sample_bytes)
+                    _ta_isr, _tool_artifact_matches = build_tool_artifact_isr(
+                        _ta_bytes,
+                        str(resolve_data(_ta_cfg.tool_artifacts_path)),
+                    )
+                    if _ta_isr is not None:
+                        isr_reports["tool_artifact"] = _ta_isr
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Tool-artifact Layer 0 failed: %s. Skipping.", e)
+
             # Deterministic ATT&CK technique-ID correction (2026-06-01). Run
             # BEFORE the cascade so corrected IDs flow into corroboration, the
             # judge's grounding, the report and the STIX bundle. Re-grounds each
@@ -1559,6 +1604,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # Exact opcode-hash family overlap, surfaced into the report's
                 # FamilyAttribution.function_hash_matches by the report node.
                 "function_hash_matches": _func_hash_report,
+                # Offensive-tool markers, surfaced into
+                # FamilyAttribution.tool_artifact_matches by the report node.
+                # This is what lets a sandbox-less run name a family at all.
+                "tool_artifact_matches": _tool_artifact_matches,
                 # Family-feature RAG candidates (retrieved by static-feature
                 # similarity), surfaced into FamilyAttribution.family_rag_candidates
                 # by the report node. Empty unless the RAG is enabled with a catalog.
@@ -1760,6 +1809,19 @@ def make_report_node(container: ServiceContainer) -> Any:
             _attck_cands = cast("list[dict[str, Any]]", state.get("attck_case_candidates") or [])
             if _attck_cands and getattr(report, "attribution", None) is not None:
                 report.attribution.attck_case_candidates = _attck_cands
+            # Offensive-tool markers, and — when the sandbox named nothing — the
+            # family itself. Sandbox CTI keeps precedence: a real detonation
+            # outranks a string match, so this only fills a gap, never overrides.
+            _tool_matches = cast("list[dict[str, Any]]", state.get("tool_artifact_matches") or [])
+            if _tool_matches and getattr(report, "attribution", None) is not None:
+                report.attribution.tool_artifact_matches = _tool_matches
+                if not report.attribution.family:
+                    _best = max(_tool_matches, key=lambda m: float(m.get("confidence") or 0.0))
+                    report.attribution.family = str(_best.get("family") or "") or None
+                    report.attribution.family_confidence = float(_best.get("confidence") or 0.0)
+                    # Grounded by construction: the claim text naming this family
+                    # is in the ISR the cascade already consumed.
+                    report.attribution.family_grounded = bool(report.attribution.family)
             # Report-reshaping Phase 1: attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.

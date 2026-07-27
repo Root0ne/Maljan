@@ -459,6 +459,37 @@ class PreprocessingConfig(BaseModel):
     use_api_attck_map: bool = True
     api_attck_map_path: str = "data/api_attck_map_v1.json"
 
+    # Offensive-tool / commodity-RAT byte markers (Cobalt Strike, Mimikatz,
+    # Sliver, AsyncRAT, ...). The only source of a malware family name on a run
+    # with no sandbox: FamilyAttribution otherwise draws it solely from CAPE's
+    # cti.family[], so a static-only report knew its verdict but not what it was
+    # looking at. Emits on the existing cascade domain "yara" so it inherits
+    # that weight and cannot manufacture cross-layer corroboration with the
+    # real YARA layer. Every entry needs two distinct markers to fire — one is
+    # enough to flag an EDR agent or the defenders' own tooling.
+    use_tool_artifacts: bool = True
+    tool_artifacts_path: str = "data/tool_artifacts_v1.json"
+
+    # Packer / protector signatures, replacing four hardcoded section-name
+    # checks. Ranks its evidence: a section name is strong, an entry point in
+    # an unexpected section is strong, a string is weak — "UPX!" appears in
+    # every scanner's own signature table, this repo's included.
+    # Note the coupling to the T1027 over-claim cap in capability_matrix: that
+    # cap fires when static evidence does NOT support an obfuscation claim, so
+    # a detector that fires more often makes the cap fire less often. The
+    # confidence floor there is what stops a better detector from producing
+    # *more* hallucinated T1027.
+    use_packer_signatures: bool = True
+    packer_signatures_path: str = "data/packer_signatures_v1.json"
+
+    # Compiler / language fingerprints, replacing six literal byte checks.
+    # Feeds two consumers that previously got nothing: platform inference for
+    # otherwise-unknown blobs (an "unknown" platform silently drops every
+    # platform-specific YARA and Sigma rule), and the static analyst's prompt,
+    # which never saw what the sample was written in.
+    use_language_signatures: bool = True
+    language_signatures_path: str = "data/language_signatures_v1.json"
+
     # ATT&CK case-prior RAG (§4 U2 — LLM-centric, cross-sample TTP grounding).
     # The per-sample function RAG retrieves over THIS sample's own functions only;
     # this fills the cross-sample gap. When enabled AND a vendored case corpus exists

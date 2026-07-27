@@ -75,7 +75,7 @@ def build_sample_identity(
     compile_ts = _extract_compile_timestamp(bytes_blob)
     language = _detect_language_or_compiler(bytes_blob)
     signing = _extract_signing(bytes_blob)
-    platform = _infer_platform(file_type, mime_type, sandbox_report)
+    platform = _infer_platform(file_type, mime_type, sandbox_report, language)
 
     return SampleIdentity(
         hashes=hashes,
@@ -95,6 +95,7 @@ def _infer_platform(
     file_type: str,
     mime_type: str | None,
     sandbox_report: dict[str, Any] | None,
+    language_or_compiler: str | None = None,
 ) -> Platform:
     """Map file_type / sandbox hints to the canonical Platform taxonomy.
 
@@ -124,6 +125,20 @@ def _infer_platform(
     # MIME hint as last resort.
     mime = (mime_type or "").lower()
     if "msdownload" in mime or "x-msdos-program" in mime:
+        return "windows"
+
+    # Toolchain hint, last of all. This matters more than its position suggests:
+    # ``unknown`` is not a neutral answer downstream — ``_yara_rule_compatible``
+    # drops *every* platform-specific rule for an unknown platform, and Sigma
+    # does the same, so an unidentified blob is scanned by a fraction of the
+    # corpus. A confident Windows-only toolchain fingerprint is enough to
+    # restore that coverage, and only Windows-exclusive runtimes are listed —
+    # Go and Rust are cross-platform and say nothing about the target.
+    lang = (language_or_compiler or "").lower()
+    if any(
+        marker in lang
+        for marker in ("autoit", ".net", "c#", "delphi", "visual c++", "py2exe", "mfc")
+    ):
         return "windows"
 
     return "unknown"
@@ -292,7 +307,31 @@ def _detect_language_or_compiler(blob: bytes | None) -> str | None:
     """
     if not blob:
         return None
-    # Fast path — packer / scripting-runtime markers.
+
+    # Scored signature table. Replaces the six literal checks below, which
+    # covered four languages and answered "Rust" to any binary containing the
+    # string "rustc" — including, for instance, a scanner carrying Rust
+    # signatures. Scoring makes a single suggestive marker insufficient.
+    catalog_available, scored = _score_language_signatures(blob)
+    if scored:
+        return scored
+
+    # PE-format fingerprint (MSVC/MFC/MinGW). Kept ahead of the literal
+    # fallbacks and never replaced: the Rich header and linker version identify
+    # a toolchain far more precisely than any string table can, and no signature
+    # list in this repo has an equivalent.
+    pe_guess = _pe_compiler_fingerprint(blob)
+    if pe_guess:
+        return pe_guess
+
+    # Legacy literal fallbacks — only when there is no catalog to have an
+    # opinion. "The catalog scored nothing" is a decision, not a gap, and
+    # falling through to a one-substring check would quietly undo the scoring:
+    # `rustc` alone scores 1 against a minimum of 3, and then the literal below
+    # would call it Rust anyway.
+    if catalog_available:
+        return None
+
     head = blob[: 4 * 1024]
     if b"Go build ID" in head or b"GoStringer" in blob[: 64 * 1024]:
         return "Go"
@@ -302,16 +341,71 @@ def _detect_language_or_compiler(blob: bytes | None) -> str | None:
         return "C/C++ (UPX packed)"
     if b"rustc" in blob[: 64 * 1024]:
         return "Rust"
-    # PE-format fingerprint (MSVC/MFC/MinGW).
-    pe_guess = _pe_compiler_fingerprint(blob)
-    if pe_guess:
-        return pe_guess
-    # Legacy literal fallbacks.
     if b"Microsoft Visual C++" in blob[: 64 * 1024]:
         return "Microsoft Visual C++"
     if b"GCC: (" in blob[: 64 * 1024]:
         return "GCC"
     return None
+
+
+def _score_language_signatures(blob: bytes) -> tuple[bool, str | None]:
+    """Score the sample against the language catalog; highest total wins.
+
+    Returns ``(catalog_available, name)``. The first element matters: the caller
+    must distinguish "no catalog to consult" from "the catalog looked and
+    declined to name it", because only the first is a reason to fall back to the
+    cruder literal checks.
+
+    Strong markers are worth three, weak ones one, and a language must clear its
+    own ``min_score`` to be named. That threshold is the difference between
+    "this binary mentions Rust" and "this binary is Rust".
+
+    Scans a bounded prefix rather than the whole file: toolchain markers live in
+    the runtime stub and the metadata, both near the front, and scanning a
+    100 MB installer for them would cost far more than the answer is worth.
+    """
+    try:
+        import json as _json
+
+        from maljan.core.config import get_settings
+        from maljan.core.paths import resolve_data
+
+        cfg = get_settings().preprocessing
+        if not getattr(cfg, "use_language_signatures", False):
+            return False, None
+        path = resolve_data(cfg.language_signatures_path)
+        if not path.is_file():
+            return False, None
+        doc = _json.loads(path.read_text(encoding="utf-8"))
+        rows = doc.get("languages") if isinstance(doc, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return False, None
+    except Exception:  # noqa: BLE001 — identity must never fail over a catalog
+        return False, None
+
+    window = blob[: 4 * 1024 * 1024]
+    best_name: str | None = None
+    best_score = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        strong = [s for s in (row.get("strong") or []) if isinstance(s, str)]
+        weak = [s for s in (row.get("weak") or []) if isinstance(s, str)]
+        score = 3 * sum(1 for s in strong if s.encode("utf-8", errors="ignore") in window)
+        score += sum(1 for s in weak if s.encode("utf-8", errors="ignore") in window)
+        try:
+            minimum = int(row.get("min_score", 3))
+        except (TypeError, ValueError):
+            minimum = 3
+        # Strictly greater: ties go to the earlier entry, which is why the
+        # catalog is ordered most-specific first.
+        if score >= minimum and score > best_score:
+            best_score = score
+            best_name = name
+    return True, best_name
 
 
 def _pe_compiler_fingerprint(blob: bytes) -> str | None:

@@ -65,6 +65,11 @@ _TACTIC_NAME_BY_ID: dict[str, str] = {tid: name for tid, _slug, name in _TACTIC_
 # 2026-07 round 3 — deterministic cap for LLM-only over-claims.
 _LOW_CONF_CAP = 0.40
 # Base technique ids gated by obfuscation evidence (+ their sub-techniques).
+# A packer identification below this is a hint, not corroboration. String-only
+# matches land at 0.45 by construction; structural (section-name / entry-point)
+# matches start at 0.60. See ``_static_evidence_flags``.
+_PACKER_CONFIDENCE_FLOOR = 0.60
+
 _OBFUSCATION_TIDS = ("T1027", "T1140")
 # Base technique ids gated by a real imported injection API.
 _INJECTION_TIDS = ("T1055",)
@@ -80,8 +85,28 @@ def _static_evidence_flags(static: Any | None) -> tuple[bool, bool]:
         from maljan.extractors.pe_extractor import _HIGH_ENTROPY_THRESHOLD
 
         sections = getattr(static, "sections", None) or []
+        # Reads packer_matches rather than packer_hint, and this is the whole
+        # point of that field existing.
+        #
+        # This flag gates the T1027/T1140 confidence cap, which is here because
+        # the local model over-claims obfuscation. The cap fires when the static
+        # evidence does *not* support the claim. So a better packer detector —
+        # one that fires on more samples — makes the cap fire on fewer, and the
+        # net effect of improving detection would have been *more*
+        # high-confidence hallucinated T1027. A confidence threshold is what
+        # breaks that inversion: a 0.45 string-only guess no longer counts as
+        # corroboration, a 0.60+ structural match does.
+        packer_matches = getattr(static, "packer_matches", None) or []
+        confident_packer = any(
+            float(m.get("confidence") or 0.0) >= _PACKER_CONFIDENCE_FLOOR
+            for m in packer_matches
+            if isinstance(m, dict)
+        )
         obf = (
-            getattr(static, "packer_hint", None) is not None
+            confident_packer
+            # No catalog loaded -> no matches -> fall back to the bare hint,
+            # which is the pre-catalog behaviour.
+            or (not packer_matches and getattr(static, "packer_hint", None) is not None)
             or any(getattr(s, "entropy", 0.0) >= _HIGH_ENTROPY_THRESHOLD for s in sections)
             or bool(getattr(static, "obfuscation_indicators", None))
         )

@@ -187,6 +187,12 @@ class StaticAnalysis(BaseModel):
     interesting_strings: list[StringIOC] = Field(default_factory=list)
     embedded_resources: list[dict[str, Any]] = Field(default_factory=list)
     packer_hint: str | None = None
+    # Ranked packer/protector identifications: {name, kind, confidence, method,
+    # evidence}. `packer_hint` is the display string derived from the top row.
+    # The list exists because a *confidence* is what downstream needs — the
+    # T1027 over-claim cap keys on "is this really packed", and a bare
+    # non-None string cannot answer that.
+    packer_matches: list[dict[str, Any]] = Field(default_factory=list)
     obfuscation_indicators: list[str] = Field(default_factory=list)
     # {behaviour_category: count} over the resolved import table. Cheap to carry
     # and it saves every consumer — prompt, report, family RAG — from
@@ -422,6 +428,11 @@ class FamilyAttribution(BaseModel):
     # shared_functions, sample_ids, example_functions, match_method, source.
     # Populated by the report builder from the judge node's function-hash pass.
     function_hash_matches: list[dict[str, Any]] = Field(default_factory=list)
+    # Offensive-tool / commodity-RAT byte markers found in the sample or in a
+    # carved payload. Each row: family, tool, kind, confidence, markers.
+    # Sibling of function_hash_matches, and the only family source that works
+    # without a sandbox — cti.family[] is otherwise the sole producer.
+    tool_artifact_matches: list[dict[str, Any]] = Field(default_factory=list)
     # Family-feature RAG candidates — families retrieved by static-feature
     # similarity to a reference fingerprint KB, surfaced as evidence the LLM
     # weighed (sibling of function_hash_matches). Each row: family, similarity,

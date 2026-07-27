@@ -21,7 +21,24 @@ class TestCompilerDetection:
     def test_byte_markers(self) -> None:
         assert _detect_language_or_compiler(b"MZ..Go build ID: abc") == "Go"
         assert _detect_language_or_compiler(b"MZ.." + b"UPX!" + b"x" * 100) == "C/C++ (UPX packed)"
-        assert _detect_language_or_compiler(b"MZ..rustc-1.70 stuff") == "Rust"
+
+    def test_one_suggestive_string_is_not_an_identification(self) -> None:
+        """Changed 2026-07-27, deliberately.
+
+        This used to assert that ``b"MZ..rustc-1.70 stuff"`` identifies Rust.
+        It does not, and should not: ``rustc`` appears in anything that merely
+        *mentions* the Rust toolchain — a scanner carrying Rust signatures, a
+        build log embedded in a resource, this repository. The scored catalog
+        weights it as a weak marker worth 1 against a minimum of 3, so a real
+        Rust binary (which carries ``rust_begin_unwind`` and
+        ``core::panicking`` as well) still resolves, and a passing mention no
+        longer does.
+        """
+        assert _detect_language_or_compiler(b"MZ..rustc-1.70 stuff") is None
+        assert (
+            _detect_language_or_compiler(b"MZ..rustc-1.70..rust_begin_unwind..core::panicking..")
+            == "Rust"
+        )
 
     def test_none_for_empty_or_non_pe(self) -> None:
         assert _detect_language_or_compiler(b"") is None

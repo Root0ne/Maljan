@@ -24,6 +24,7 @@ import re
 import threading
 from collections import Counter
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -255,20 +256,22 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
         logger.warning("pe_extractor: read failed (%s)", exc)
         return None
 
-    sections: list[PESection] = []
-    imports: list[ImportRow] = []
-    exports: list[str] = []
-    embedded: list[dict[str, Any]] = []
-    packer_hint: str | None = None
-    obfuscation: list[str] = []
+    parsed = _PEParse()
 
     if blob[:2] == b"MZ":
-        sections, imports, exports, embedded, packer_hint, obfuscation = _parse_pe(blob)
-        embedded = embedded + _carve_embedded(blob, sections)
+        parsed = _parse_pe(blob)
+        parsed.embedded = parsed.embedded + _carve_embedded(blob, parsed.sections)
     elif blob[:4] == b"\x7fELF":
-        sections = _parse_elf_sections(blob)
-        imports = _parse_elf_imports(blob)
-        exports = _parse_elf_exports(blob)
+        parsed.sections = _parse_elf_sections(blob)
+        parsed.imports = _parse_elf_imports(blob)
+        parsed.exports = _parse_elf_exports(blob)
+
+    sections = parsed.sections
+    imports = parsed.imports
+    exports = parsed.exports
+    embedded = parsed.embedded
+    packer_hint = parsed.packer_hint
+    obfuscation = parsed.obfuscation
 
     strings = _extract_string_iocs(blob)
 
@@ -286,6 +289,7 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
         packer_hint=packer_hint,
         obfuscation_indicators=obfuscation,
         api_capabilities=dict(capabilities),
+        packer_matches=parsed.packer_matches,
     )
 
 
@@ -294,22 +298,32 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
 # ---------------------------------------------------------------------------
 
 
-def _parse_pe(
-    blob: bytes,
-) -> tuple[
-    list[PESection],
-    list[ImportRow],
-    list[str],
-    list[dict[str, Any]],
-    str | None,
-    list[str],
-]:
-    """Return sections, imports, exports, resources, packer_hint, obfuscation."""
+@dataclass
+class _PEParse:
+    """What one PE parse yields.
+
+    Was a six-tuple, which was already at the limit of what a positional return
+    can carry legibly; the packer catalog needed a seventh element and that is
+    where a tuple stops being readable at the call site. One unpack point, so
+    the conversion is contained.
+    """
+
+    sections: list[PESection] = field(default_factory=list)
+    imports: list[ImportRow] = field(default_factory=list)
+    exports: list[str] = field(default_factory=list)
+    embedded: list[dict[str, Any]] = field(default_factory=list)
+    packer_hint: str | None = None
+    obfuscation: list[str] = field(default_factory=list)
+    packer_matches: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _parse_pe(blob: bytes) -> _PEParse:
+    """Parse a PE into the report's static section. Never raises."""
     try:
         import pefile  # type: ignore[import-not-found]
     except ImportError:
         logger.warning("pe_extractor: pefile unavailable, skipping PE parse")
-        return [], [], [], [], None, []
+        return _PEParse()
 
     try:
         pe = pefile.PE(data=blob, fast_load=True)
@@ -322,15 +336,28 @@ def _parse_pe(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("pe_extractor: PE parse failed (%s)", exc)
-        return [], [], [], [], None, []
+        return _PEParse()
 
     sections = _pe_sections(pe)
     imports = _pe_imports(pe)
-    exports = _pe_exports(pe)
-    embedded = _pe_resources(pe)
-    packer_hint = _pe_packer_hint(pe, sections)
-    obfuscation = _pe_obfuscation_indicators(sections, imports)
-    return sections, imports, exports, embedded, packer_hint, obfuscation
+    packer_matches = _pe_packer_matches(pe, sections, blob)
+    # Prefer the catalog's top hit for the display string, but keep the built-in
+    # check as the fallback so removing the data file degrades to the previous
+    # behaviour rather than to nothing.
+    packer_hint = (
+        f"{packer_matches[0]['name']} ({packer_matches[0]['kind']})"
+        if packer_matches
+        else _pe_packer_hint(pe, sections)
+    )
+    return _PEParse(
+        sections=sections,
+        imports=imports,
+        exports=_pe_exports(pe),
+        embedded=_pe_resources(pe),
+        packer_hint=packer_hint,
+        obfuscation=_pe_obfuscation_indicators(sections, imports),
+        packer_matches=packer_matches,
+    )
 
 
 def _pe_sections(pe: Any) -> list[PESection]:
@@ -482,7 +509,119 @@ def _pe_resources(pe: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _packer_signatures() -> list[dict[str, Any]]:
+    """Load the packer catalog, or ``[]`` to fall back to the built-in checks."""
+    try:
+        import json as _json
+
+        from maljan.core.config import get_settings
+        from maljan.core.paths import resolve_data
+
+        cfg = get_settings().preprocessing
+        if not getattr(cfg, "use_packer_signatures", False):
+            return []
+        path = resolve_data(cfg.packer_signatures_path)
+        if not path.is_file():
+            return []
+        doc = _json.loads(path.read_text(encoding="utf-8"))
+        rows = doc.get("packers") if isinstance(doc, dict) else None
+        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+    except Exception as exc:  # noqa: BLE001 — a missing catalog costs depth, not the parse
+        logger.debug("pe_extractor: packer catalog unavailable (%s)", exc)
+        return []
+
+
+def _pe_packer_matches(pe: Any, sections: list[PESection], blob: bytes) -> list[dict[str, Any]]:
+    """Identify packers/protectors, ranked by how much the evidence is worth.
+
+    Four methods, deliberately not weighted equally:
+
+    * **Section name** — strongest. ``UPX0`` in a section header is not an
+      accident.
+    * **Entry-point section** — strong. Execution starting anywhere but the
+      first code section is what an unpacking stub looks like.
+    * **String** — weakest, and the reason ranking matters at all. ``UPX!``
+      appears in every scanner's signature table, including Maljan's own data
+      files; a string-only match must never reach the confidence of a
+      structural one.
+
+    Returns rows sorted most-confident first, so ``packer_hint`` can be derived
+    from ``[0]`` without re-deciding anything.
+    """
+    signatures = _packer_signatures()
+    if not signatures:
+        return []
+
+    section_names = {s.name.lower() for s in sections}
+    ep_section = ""
+    try:
+        ep = int(getattr(getattr(pe, "OPTIONAL_HEADER", None), "AddressOfEntryPoint", 0) or 0)
+        for sect in getattr(pe, "sections", []) or []:
+            start = int(getattr(sect, "VirtualAddress", 0) or 0)
+            size = int(getattr(sect, "Misc_VirtualSize", 0) or 0)
+            if start <= ep < start + max(size, 1):
+                ep_section = (sect.Name or b"").decode("utf-8", errors="replace").strip("\x00 ")
+                break
+    except Exception:  # noqa: BLE001
+        ep_section = ""
+
+    head = blob[: 2 * 1024 * 1024]
+    out: list[dict[str, Any]] = []
+    for row in signatures:
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        sect_hits = [
+            s
+            for s in (row.get("sections") or [])
+            if isinstance(s, str) and s.lower() in section_names
+        ]
+        ep_hits = [
+            s
+            for s in (row.get("ep_sections") or [])
+            if isinstance(s, str) and ep_section and s.lower() == ep_section.lower()
+        ]
+        str_hits = [
+            s
+            for s in (row.get("strings") or [])
+            if isinstance(s, str) and s.encode("utf-8", errors="ignore") in head
+        ]
+        if not (sect_hits or ep_hits or str_hits):
+            continue
+
+        confidence = min(
+            0.95,
+            0.25 * len(sect_hits) + 0.20 * len(ep_hits) + 0.10 * len(str_hits),
+        )
+        # A lone string is a hint, not an identification.
+        if sect_hits or ep_hits:
+            confidence = max(confidence, 0.60)
+        else:
+            confidence = min(confidence, 0.45)
+
+        methods = []
+        if sect_hits:
+            methods.append("section")
+        if ep_hits:
+            methods.append("entry_point")
+        if str_hits:
+            methods.append("string")
+        out.append(
+            {
+                "name": name,
+                "kind": str(row.get("kind") or "packer"),
+                "confidence": round(confidence, 3),
+                "method": "+".join(methods),
+                "evidence": (sect_hits + ep_hits + str_hits)[:5],
+            }
+        )
+
+    out.sort(key=lambda r: float(r["confidence"]), reverse=True)
+    return out
+
+
 def _pe_packer_hint(pe: Any, sections: list[PESection]) -> str | None:
+    """Built-in fallback used when no packer catalog is loaded."""
     for sect in sections:
         if sect.name.lower().startswith("upx"):
             return "UPX"
@@ -828,7 +967,7 @@ def carve_payloads(blob: bytes) -> list[tuple[str, bytes]]:
     sections: list[PESection] = []
     if blob[:2] == b"MZ":
         try:
-            sections = _parse_pe(blob)[0]
+            sections = _parse_pe(blob).sections
         except Exception:  # noqa: BLE001 — carving must never break the judge
             sections = []
     out: list[tuple[str, bytes]] = []
