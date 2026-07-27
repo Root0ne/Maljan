@@ -1435,11 +1435,17 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     from maljan.analysis.family_feature_rag import (
                         to_report_dicts as _rag_to_report_dicts,
                     )
+                    from maljan.core.paths import resolve_data
                     from maljan.extractors.pe_extractor import build_static_analysis
                     from maljan.memory.family_fingerprint_index import load_family_index
 
                     _static = build_static_analysis(sample_path=str(_host))
-                    _index = load_family_index(_cfg2.preprocessing.family_fingerprint_catalog_path)
+                    # resolve_data, not the raw config string: the default is the
+                    # relative "data/family_fingerprints_v1.json", which otherwise
+                    # resolves against the process CWD rather than the repo root.
+                    _index = load_family_index(
+                        str(resolve_data(_cfg2.preprocessing.family_fingerprint_catalog_path))
+                    )
                     if _static is not None and _index is not None:
                         _cands = retrieve_candidates(
                             build_sample_profile_text(_static),
@@ -1469,11 +1475,16 @@ def make_judge_node(container: ServiceContainer) -> Any:
                         to_report_dicts as _attck_to_report_dicts,
                     )
                     from maljan.analysis.family_feature_rag import build_sample_profile_text
+                    from maljan.core.paths import resolve_data
                     from maljan.extractors.pe_extractor import build_static_analysis
                     from maljan.memory.attck_case_index import load_attck_case_index
 
                     _static3 = build_static_analysis(sample_path=str(_host3))
-                    _index3 = load_attck_case_index(_cfg3.preprocessing.attck_case_corpus_path)
+                    # See the family-RAG block above: relative paths must be
+                    # resolved against the repo root, not the CWD.
+                    _index3 = load_attck_case_index(
+                        str(resolve_data(_cfg3.preprocessing.attck_case_corpus_path))
+                    )
                     if _static3 is not None and _index3 is not None:
                         _techs = retrieve_techniques(
                             build_sample_profile_text(_static3),

@@ -282,7 +282,18 @@ class ATTCKValidator:
         min_alignment: float = HALLUCINATION_SCORE_THRESHOLD,
         swap_valid: bool = True,
         skip_agents: frozenset[str] = frozenset(
-            {"yara_layer", "sigma_layer", "network_dga", "lolbin"}
+            # Every deterministic Layer-0 source belongs here. ``import_capability``
+            # and ``tool_artifact`` were missing, so the autocorrector was free to
+            # rewrite IDs that came straight from a rule match — the exact thing the
+            # docstring below says must not happen.
+            {
+                "yara_layer",
+                "sigma_layer",
+                "network_dga",
+                "lolbin",
+                "import_capability",
+                "tool_artifact",
+            }
         ),
     ) -> int:
         """Deterministically re-ground each LLM claim's technique_id in place.

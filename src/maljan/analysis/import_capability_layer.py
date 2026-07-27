@@ -108,6 +108,10 @@ def build_import_capability_isr(static: Any) -> AgentISR | None:
                 evidence_ref="; ".join(evidence),
                 confidence=_CONF_WITH_IOC if has_ioc else _CONF_BASE,
                 technique_id="T1071",
+                # T1055 and T1486 below already declared this; T1071 did not, so
+                # it fell through to the cascade's MITRE-catalog lookup instead of
+                # answering the platform question directly.
+                rule_platforms=["windows"],
             )
         )
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,12 @@ _SPARSE_IMPORT_THRESHOLD = 15
 _MIN_STRING_LENGTH = 6
 _MAX_STRINGS_KEPT = 200
 _MAX_IOC_STRINGS = 80
+
+# Memo for ``build_static_analysis`` — see its docstring for why the key is a
+# (path, mtime, size) triple rather than the path alone.
+_MEMO_LOCK = threading.Lock()
+_MEMO: dict[tuple[str, int, int], StaticAnalysis | None] = {}
+_MEMO_MAX_ENTRIES = 4
 
 # DLL→function classifier — extend rather than replace.
 _SUSPICIOUS_IMPORTS: dict[str, str] = {
@@ -107,6 +114,32 @@ _SUSPICIOUS_IMPORTS: dict[str, str] = {
 }
 
 
+def classify_import(function: str) -> tuple[str | None, bool]:
+    """Return ``(behaviour_category, is_suspicious)`` for one imported symbol.
+
+    ``category`` and ``is_suspicious`` used to be the same fact —
+    ``is_suspicious=bool(category)`` — which was correct while the table held
+    51 hand-picked names that a human had already decided were interesting.
+
+    They are separated here because the table is about to get an order of
+    magnitude larger. Categorising ``RegOpenKeyExA`` is useful (it tells the
+    prompt and the ATT&CK mapper what the binary touches); calling it
+    *suspicious* is not, and if every import in a benign PE is flagged then
+    four consumers quietly stop working: the report's "Suspicious Imports"
+    table becomes the whole import table, the suspicious-first sort that
+    decides which rows survive the prompt's row cap becomes a no-op, the
+    family-RAG profile text saturates, and the import-capability layer's
+    ``is_suspicious`` gate stops filtering anything.
+
+    So a category is assigned to everything recognised, while suspicion is
+    reserved for the ``high``/``medium`` tiers. The hardcoded table below is
+    the fallback used when no data asset is present; every one of its entries
+    is suspicious by construction, which is the invariant the tests pin.
+    """
+    category = _SUSPICIOUS_IMPORTS.get(function)
+    return category, bool(category)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -116,13 +149,57 @@ def build_static_analysis(
     *,
     sample_path: str | None,
 ) -> StaticAnalysis | None:
-    """Return ``StaticAnalysis`` for ``sample_path`` or ``None`` if unreadable."""
+    """Return ``StaticAnalysis`` for ``sample_path`` or ``None`` if unreadable.
+
+    Memoized. One analysis calls this **nine** times — three inside the judge
+    node alone (import-capability Layer 0, the family-feature RAG hint and the
+    ATT&CK-case RAG hint), plus the analyst node, the report builder and three
+    sites in the static analyst. Each call used to re-read the file from disk
+    and re-run ``pefile`` from scratch, which was merely wasteful when this
+    module only classified 51 imports and became a real latency cliff once
+    carving and per-string IOC classification were added on top.
+
+    The key is ``(resolved_path, st_mtime_ns, st_size)`` rather than the path
+    alone, for two reasons: the Ghidra container mirror means one logical
+    sample is visible at two different paths, and a stale entry for a path
+    whose contents changed would be worse than no cache at all.
+    """
     if not sample_path:
         return None
     path = Path(sample_path)
     if not (path.exists() and path.is_file()):
         logger.warning("pe_extractor: %s does not exist", sample_path)
         return None
+    try:
+        stat = path.stat()
+        key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    except OSError as exc:
+        logger.warning("pe_extractor: stat failed (%s)", exc)
+        return None
+
+    with _MEMO_LOCK:
+        if key in _MEMO:
+            return _MEMO[key]
+
+    result = _build_static_analysis_uncached(path)
+
+    with _MEMO_LOCK:
+        # Bounded to a handful of entries: an analysis only ever works on one
+        # sample, and the extra slots exist for the container-mirror path and
+        # for carved children, not for a long history.
+        if len(_MEMO) >= _MEMO_MAX_ENTRIES:
+            _MEMO.clear()
+        _MEMO[key] = result
+    return result
+
+
+def reset_static_analysis_cache() -> None:
+    """Clear the memo (test hook; also called on worker recycle)."""
+    with _MEMO_LOCK:
+        _MEMO.clear()
+
+
+def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
     try:
         blob = path.read_bytes()
     except OSError as exc:
@@ -258,12 +335,12 @@ def _pe_imports(pe: Any) -> list[ImportRow]:
             fn = (imp.name or b"").decode("utf-8", errors="replace") if imp.name else None
             if not fn:
                 fn = f"Ordinal_{getattr(imp, 'ordinal', '?')}"
-            category = _SUSPICIOUS_IMPORTS.get(fn)
+            category, suspicious = classify_import(fn)
             rows.append(
                 ImportRow(
                     dll=dll,
                     function=fn,
-                    is_suspicious=bool(category),
+                    is_suspicious=suspicious,
                     category=category,
                 )
             )
