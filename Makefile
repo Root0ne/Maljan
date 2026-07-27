@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra
 
 test:
 	uv run pytest tests/ -q
@@ -64,6 +64,13 @@ benchmark-tram:
 
 prepare-attck:
 	uv run python scripts/prepare_attck_malware_fixtures.py
+
+# Regenerate the Windows API behaviour map and the API->ATT&CK map. The curated
+# lists live in the script, not the JSON — the JSON is the artifact. Validates
+# every technique ID against data/attck_valid_ids.json and refuses to write on
+# any mismatch, so a typo fails loudly here rather than silently never firing.
+prepare-api-db:
+	uv run python scripts/build_api_capability_db.py
 
 benchmark-attck:
 	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware

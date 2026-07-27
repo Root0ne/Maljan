@@ -186,6 +186,27 @@ Base path: `/api/v1`
 
 ---
 
+## Static-analysis data assets
+
+Deterministic detection is data-driven. These live under `data/`, are loaded
+lazily, are cached per path, and **every one of them degrades to a built-in
+fallback when absent** — a missing file costs depth, never a run.
+
+| Asset | What it drives |
+|---|---|
+| `api_behaviour_map_v1.json` | Windows API → behaviour category, ~680 names / 13 categories. Each category carries a `tier`; only `high`/`medium` mark an import *suspicious*, so categorising `RegOpenKeyExA` does not mean accusing it. |
+| `api_attck_map_v1.json` | Windows API → ATT&CK, 46 techniques. This is what gives a **sandbox-less run real technique coverage**: with CAPE unreachable the Sigma corpus (2651 rules) is telemetry-gated and contributes nothing. |
+| `tool_artifacts_v1.json` | Offensive-tool / RAT byte markers. The only source of a **malware family name without a sandbox**. |
+| `packer_signatures_v1.json` | Packer / protector identification, ranked: section name > entry point > string. |
+| `language_signatures_v1.json` | Source-language and runtime fingerprints, scored rather than substring-matched. |
+
+The first two are generated — the curated lists live in the builder, not the
+JSON, so a reader can see *why* an API is classified the way it is:
+
+```bash
+make prepare-api-db   # validates every ATT&CK ID before writing
+```
+
 ## Development
 
 ```bash
