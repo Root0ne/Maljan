@@ -199,6 +199,12 @@ make typecheck
 # Full quality gate
 make check
 
+# The gate covers every Python directory in the repo — src/, tests/, apps/api/,
+# the two MCP sidecars and scripts/. It used to be src/ and tests/ only, which
+# meant the FastAPI app and the arq worker were never type-checked anywhere,
+# and a sidecar could sit unformatted for weeks because pre-commit only ever
+# sees staged files.
+
 # If `git commit` prints "`pre-commit` not found. Did you forget to activate
 # your virtualenv?", the installed hook has a stale absolute interpreter path
 # baked into it (it happens whenever the venv is recreated, or when the

@@ -15,18 +15,30 @@ test-unit:
 test-integration:
 	uv run pytest tests/integration/ -q
 
+# Everything Python in the repo, not just the library. `src/ tests/` left the
+# FastAPI app, the arq worker, the MCP sidecars and scripts/ outside the gate:
+# pre-commit still ran ruff over them because it works on staged files, so the
+# only way to drift was to go a long time without being staged — which is
+# exactly what network-mcp/server.py did, unformatted since 8e3370c and unnoticed
+# because nothing ever looked at the whole tree.
+PY_SOURCES = src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+
 lint:
-	uv run ruff check src/ tests/
+	uv run ruff check $(PY_SOURCES)
 
 format:
-	uv run ruff check --fix src/ tests/
-	uv run ruff format src/ tests/
+	uv run ruff check --fix $(PY_SOURCES)
+	uv run ruff format $(PY_SOURCES)
 
 format-check:
-	uv run ruff format --check src/ tests/
+	uv run ruff format --check $(PY_SOURCES)
 
+# apps/api/ included deliberately: the worker and the report service hold this
+# branch's most consequential fixes and had never once been type-checked, in the
+# Makefile or in pre-commit. It costs ~51 extra files and found one missing
+# annotation.
 typecheck:
-	uv run mypy src/
+	uv run mypy src/ apps/api/
 
 # Full local quality gate (mirrors CI)
 check: lint format-check typecheck test

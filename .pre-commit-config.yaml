@@ -37,6 +37,9 @@ repos:
         name: mypy
         language: system
         entry: uv run mypy
-        args: ["src/"]
+        # Kept in step with the Makefile's `typecheck` target. `src/` alone left
+        # the FastAPI app and the arq worker unchecked in both places at once,
+        # so nothing anywhere type-checked the code that runs an analysis.
+        args: ["src/", "apps/api/"]
         pass_filenames: false
         types: [python]

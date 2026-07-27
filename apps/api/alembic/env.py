@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import Base
 from app.models import *  # noqa: F401, F403
 from sqlalchemy import pool
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Alembic Config object
@@ -40,7 +41,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection):
+def do_run_migrations(connection: Connection) -> None:
     """Run migrations with a given connection."""
     context.configure(connection=connection, target_metadata=target_metadata)
 
