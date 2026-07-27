@@ -7,8 +7,13 @@ import { entropyClass, formatBytes } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
 import type { StringIOC, StringIOCKind } from "@/types/malware-report";
 
+/* Ordered by what an analyst reaches for first, not alphabetically. `secret`
+ * and `crypto_wallet` sit high because a leaked credential is the one finding
+ * that changes what someone does in the next five minutes. */
 const STRING_KINDS: (StringIOCKind | "all")[] = [
   "all",
+  "secret",
+  "crypto_wallet",
   "url",
   "domain",
   "ip",

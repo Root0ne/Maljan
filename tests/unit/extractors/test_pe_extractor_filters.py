@@ -71,9 +71,27 @@ _NON_DOMAIN_CASES = [
 _REAL_DOMAIN_CASES = [
     "google.com",
     "evil.example.net",
-    "c2-server.malware.tld",
+    # Was "c2-server.malware.tld" until 2026-07-27. `.tld` is not a TLD — it is
+    # documentation shorthand — and the filter now checks the last label against
+    # a real list. Moved to a TLD that exists rather than loosened, since
+    # loosening it to keep the fixture green would have re-admitted the .NET
+    # namespaces the check was added to reject.
+    "c2-server.malware.top",
     "api.example.io",
     "sub.deep.example.co.uk",
+    "888kafa.com",
+    "cdn.evil-host.ru",
+]
+
+# Dotted identifiers that are shaped exactly like hostnames. Every one of these
+# was emitted as a `domain` IOC before the positive TLD check landed.
+_NAMESPACE_CASES = [
+    "System.Collections.Generic",
+    "System.Net",
+    "System.IO",
+    "System.Runtime.InteropServices",
+    "Microsoft.Win32",
+    "System.Text.RegularExpressions",
 ]
 
 
@@ -89,6 +107,15 @@ def test_non_domain_filenames_are_rejected(filename: str) -> None:
 def test_real_domains_pass(fqdn: str) -> None:
     """Genuine FQDNs continue to pass the heuristic."""
     assert _looks_like_domain(fqdn) is True, f"{fqdn!r} was incorrectly rejected"
+
+
+@pytest.mark.parametrize("identifier", _NAMESPACE_CASES)
+def test_dotted_identifiers_are_not_domains(identifier: str) -> None:
+    """A .NET namespace is dot-separated labels ending in something that can
+    look like a TLD. Every one of these was reported as a C2 domain."""
+    assert _looks_like_domain(identifier) is False, (
+        f"{identifier!r} was incorrectly accepted as a domain"
+    )
 
 
 def test_trailing_dot_rejected() -> None:

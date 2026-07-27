@@ -160,6 +160,13 @@ class StringIOC(BaseModel):
         "domain",
         "email",
         "command",
+        # Leaked credentials (API keys, tokens, private-key headers) and
+        # cryptocurrency addresses. Typed rather than dumped into "other"
+        # because build_consolidated_iocs and the STIX renderer both filter by
+        # kind, so an untyped indicator is silently absent from the IOC table
+        # and the exported bundle — the two places a responder would look.
+        "secret",
+        "crypto_wallet",
         "other",
     ]
     notes: str | None = None

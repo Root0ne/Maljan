@@ -528,6 +528,11 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
             "mutex": "Mutex",
             "email": "Email",
             "command": "Command",
+            # Without these two, a leaked AWS key lands in the table as an
+            # untyped "String" — present, but indistinguishable from a version
+            # banner, and therefore useless to whoever has to act on it.
+            "secret": "Leaked Credential",
+            "crypto_wallet": "Cryptocurrency Address",
         }
         for s in report.static.interesting_strings:
             ioc_type = _kind_to_type.get(s.kind, "String")

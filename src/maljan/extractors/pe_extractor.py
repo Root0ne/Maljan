@@ -22,6 +22,7 @@ import math
 import re
 import threading
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -42,8 +43,11 @@ _HIGH_ENTROPY_THRESHOLD = 7.0
 # dynamic-API-resolution / API-hiding rather than ordinary delay-loading.
 _SPARSE_IMPORT_THRESHOLD = 15
 _MIN_STRING_LENGTH = 6
-_MAX_STRINGS_KEPT = 200
-_MAX_IOC_STRINGS = 80
+# How many printable runs the scan will look at before giving up. A runaway
+# guard, not an output budget — see ``_iter_strings``. Real PEs routinely carry
+# tens of thousands of runs and the interesting ones are rarely at the front.
+_MAX_STRINGS_SCANNED = 200_000
+_MAX_IOC_STRINGS = 120
 
 # Memo for ``build_static_analysis`` — see its docstring for why the key is a
 # (path, mtime, size) triple rather than the path alone.
@@ -740,49 +744,137 @@ _DOMAIN_RE = re.compile(
 )
 _MUTEX_RE = re.compile(rb"\\BaseNamedObjects\\[A-Za-z0-9_\-]+")
 _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
+# UTF-16LE runs. Windows binaries are full of wide strings — every ...W API call
+# site, every resource string — and the ASCII scan above cannot see them,
+# because the interleaved NULs break every run at the first character. Matching
+# the pattern and dropping the NULs recovers a whole class of C2 hosts and file
+# paths that were previously invisible.
+_WIDE_RE = re.compile(rb"(?:[\x20-\x7e]\x00){%d,}" % _MIN_STRING_LENGTH)
+
+# Credentials and wallets. These are the highest-value strings in a stealer and
+# were not extracted at all.
+_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("aws_access_key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("slack_token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
+    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("telegram_bot_token", re.compile(r"\b\d{8,10}:[A-Za-z0-9_\-]{35}\b")),
+    ("discord_webhook", re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[\w\-]+")),
+    ("private_key_header", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+)
+_WALLET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bitcoin", re.compile(r"\b(?:bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b")),
+    ("ethereum", re.compile(r"\b0x[a-fA-F0-9]{40}\b")),
+    ("monero", re.compile(r"\b4[0-9AB][1-9A-HJ-NP-Za-km-z]{93}\b")),
+)
+_ONION_RE = re.compile(r"\b[a-z2-7]{16,56}\.onion\b")
+
+# Per-kind budgets, replacing a single global cap.
+#
+# The old code kept one 80-slot budget and filled it in extraction order — url,
+# ip, registry, path, email, mutex, and domain *last*. A binary with a few dozen
+# embedded file paths therefore exhausted the budget before a single domain was
+# considered, and the C2 host — the thing an analyst actually wants — was
+# dropped in favour of `C:\Windows\System32\...`. Quotas make the failure mode
+# per-kind and survivable instead of global and silent.
+_IOC_QUOTAS: dict[str, int] = {
+    "url": 25,
+    "domain": 25,
+    "ip": 20,
+    "secret": 15,
+    "crypto_wallet": 10,
+    "registry": 20,
+    "mutex": 10,
+    "email": 10,
+    "path": 20,
+}
+
+
+def _iter_strings(blob: bytes) -> Iterator[str]:
+    """Yield printable ASCII then UTF-16LE runs, in one pass each.
+
+    This replaces seven independent full-blob regex passes. The old shape was
+    workable at seven patterns; at the dozen below it would have meant scanning
+    the whole binary a dozen times over, at every one of this module's call
+    sites.
+
+    A generator rather than a list, and bounded by ``_MAX_STRINGS_SCANNED``
+    rather than by ``_MAX_STRINGS_KEPT``. Those two are not the same number and
+    conflating them is a real bug: a mid-size PE holds tens of thousands of
+    printable runs, so a scan that stops after the first couple of hundred sees
+    only the beginning of the file. The C2 host is rarely in the first two
+    hundred strings — the import thunks and the CRT banner are. The scan bound
+    exists to stop a pathological input, not to shape the output; the per-kind
+    quotas do that, and the caller stops early once they are all full.
+    """
+    scanned = 0
+    for match in _PRINTABLE_RE.finditer(blob):
+        yield match.group().decode("ascii", errors="ignore")
+        scanned += 1
+        if scanned >= _MAX_STRINGS_SCANNED:
+            return
+    for match in _WIDE_RE.finditer(blob):
+        yield match.group()[::2].decode("ascii", errors="ignore")
+        scanned += 1
+        if scanned >= _MAX_STRINGS_SCANNED:
+            return
 
 
 def _extract_string_iocs(blob: bytes) -> list[StringIOC]:
     """Scan binary strings for typed indicators of compromise."""
     iocs: list[StringIOC] = []
     seen: set[tuple[str, str]] = set()
+    per_kind: Counter[str] = Counter()
 
-    def _add(kind: str, value: bytes) -> None:
-        try:
-            decoded = value.decode("utf-8", errors="replace").strip("\x00")
-        except Exception:  # noqa: BLE001
-            return
+    def _add(kind: str, decoded: str, notes: str | None = None) -> None:
+        decoded = decoded.strip("\x00").strip()
         if len(decoded) < _MIN_STRING_LENGTH:
             return
         key = (kind, decoded.lower())
         if key in seen:
             return
+        if per_kind[kind] >= _IOC_QUOTAS.get(kind, 10):
+            return
         seen.add(key)
-        if len(iocs) < _MAX_IOC_STRINGS:
-            iocs.append(StringIOC(value=decoded, kind=kind))  # type: ignore[arg-type]
+        per_kind[kind] += 1
+        iocs.append(StringIOC(value=decoded, kind=kind, notes=notes))  # type: ignore[arg-type]
 
-    for match in _URL_RE.findall(blob):
-        _add("url", match)
-    for match in _IP_RE.findall(blob):
-        # 127.0.0.1 / 0.0.0.0 / RFC1918 filtered as noise
-        ip = match.decode("ascii", errors="ignore")
-        if not _is_meaningful_ip(ip):
-            continue
-        _add("ip", match)
-    for match in _REG_RE.findall(blob):
-        _add("registry", match)
-    for match in _PATH_RE.findall(blob):
-        _add("path", match)
-    for match in _EMAIL_RE.findall(blob):
-        _add("email", match)
-    for match in _MUTEX_RE.findall(blob):
-        _add("mutex", match)
-    for match in _DOMAIN_RE.findall(blob):
-        text = match.decode("ascii", errors="ignore")
-        if _looks_like_domain(text):
-            _add("domain", match)
+    def _all_quotas_full() -> bool:
+        return all(per_kind[kind] >= quota for kind, quota in _IOC_QUOTAS.items())
 
-    return iocs
+    for text in _iter_strings(blob):
+        # Nothing left to learn — stop walking the binary.
+        if _all_quotas_full():
+            break
+        for match in _URL_RE.findall(text.encode("ascii", errors="ignore")):
+            _add("url", match.decode("ascii", errors="ignore"))
+        for match in _IP_RE.findall(text.encode("ascii", errors="ignore")):
+            ip = match.decode("ascii", errors="ignore")
+            # 127.0.0.1 / 0.0.0.0 / RFC1918 filtered as noise
+            if _is_meaningful_ip(ip):
+                _add("ip", ip)
+        for match in _REG_RE.findall(text.encode("ascii", errors="ignore")):
+            _add("registry", match.decode("ascii", errors="ignore"))
+        for match in _PATH_RE.findall(text.encode("ascii", errors="ignore")):
+            _add("path", match.decode("ascii", errors="ignore"))
+        for match in _EMAIL_RE.findall(text.encode("ascii", errors="ignore")):
+            _add("email", match.decode("ascii", errors="ignore"))
+        for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
+            _add("mutex", match.decode("ascii", errors="ignore"))
+        for match in _DOMAIN_RE.findall(text.encode("ascii", errors="ignore")):
+            candidate = match.decode("ascii", errors="ignore")
+            if _looks_like_domain(candidate):
+                _add("domain", candidate)
+        for label, pattern in _SECRET_PATTERNS:
+            for hit in pattern.findall(text):
+                _add("secret", hit, notes=label)
+        for label, pattern in _WALLET_PATTERNS:
+            for hit in pattern.findall(text):
+                _add("crypto_wallet", hit, notes=label)
+        for hit in _ONION_RE.findall(text):
+            _add("domain", hit, notes="tor_hidden_service")
+
+    return iocs[:_MAX_IOC_STRINGS]
 
 
 def _is_meaningful_ip(ip: str) -> bool:
@@ -910,6 +1002,197 @@ _NON_DOMAIN_SUFFIXES: tuple[str, ...] = (
 )
 
 
+# Framework namespace roots. Deliberately excludes every word that is also a
+# plausible registrable name — no "com", "net", "org", "google", "android",
+# "core", "base" — because this set is used to *reject*, and a false entry here
+# silently discards a real C2 host. `System.Net` must go; `google.com` must not.
+_NAMESPACE_TOKENS = frozenset(
+    {
+        "system",
+        "microsoft",
+        "windows",
+        "runtime",
+        "collections",
+        "generic",
+        "reflection",
+        "diagnostics",
+        "threading",
+        "interopservices",
+        "componentmodel",
+        "globalization",
+        "serialization",
+        "regularexpressions",
+        "javax",
+        "mscorlib",
+        "winforms",
+        "presentationframework",
+    }
+)
+
+# Second-level labels of multi-part public suffixes. `example.co.uk` is a real
+# hostname whose second-level label is two characters, so the minimum-length
+# check below has to know about them.
+_MULTIPART_TLD_SECOND_LEVELS = frozenset(
+    {"co", "com", "net", "org", "ac", "gov", "edu", "mil", "or", "ne", "in", "web"}
+)
+
+# A positive TLD check, complementing the negative suffix list. Without one,
+# every dotted identifier whose last label happens to be alphabetic reads as a
+# hostname — the concrete example being `System.Collections.Generic`, which was
+# emitted as a `domain` IOC on every .NET sample.
+#
+# Deliberately not the full IANA list: the goal is to reject compile artefacts,
+# and a curated set of TLDs that actually appear in malware C2 does that with a
+# far smaller false-negative surface than trying to be exhaustive would create
+# false positives.
+_KNOWN_TLDS = frozenset(
+    {
+        # generic
+        "com",
+        "net",
+        "org",
+        "info",
+        "biz",
+        "io",
+        "co",
+        "app",
+        "dev",
+        "xyz",
+        "site",
+        "online",
+        "store",
+        "shop",
+        "club",
+        "space",
+        "website",
+        "tech",
+        "live",
+        "life",
+        "world",
+        "today",
+        "top",
+        "icu",
+        "cyou",
+        "monster",
+        "click",
+        "link",
+        "fun",
+        "pw",
+        "cc",
+        "tv",
+        "me",
+        "ws",
+        "su",
+        "sbs",
+        "digital",
+        "cloud",
+        "email",
+        "network",
+        "systems",
+        "services",
+        "host",
+        "press",
+        "wiki",
+        "art",
+        "blog",
+        "page",
+        "rest",
+        "zone",
+        "run",
+        "bar",
+        # ccTLDs that show up in real C2
+        "ru",
+        "cn",
+        "br",
+        "in",
+        "ir",
+        "ua",
+        "pl",
+        "de",
+        "fr",
+        "uk",
+        "nl",
+        "it",
+        "es",
+        "tr",
+        "jp",
+        "kr",
+        "vn",
+        "id",
+        "th",
+        "my",
+        "ph",
+        "hk",
+        "tw",
+        "sg",
+        "za",
+        "ng",
+        "ke",
+        "eg",
+        "sa",
+        "ae",
+        "il",
+        "gr",
+        "pt",
+        "ro",
+        "cz",
+        "sk",
+        "hu",
+        "bg",
+        "rs",
+        "hr",
+        "si",
+        "lt",
+        "lv",
+        "ee",
+        "fi",
+        "se",
+        "no",
+        "dk",
+        "be",
+        "at",
+        "ch",
+        "ie",
+        "us",
+        "ca",
+        "mx",
+        "ar",
+        "cl",
+        "pe",
+        "ve",
+        "au",
+        "nz",
+        "kz",
+        "by",
+        "md",
+        "ge",
+        "am",
+        "az",
+        "uz",
+        "pk",
+        "bd",
+        "lk",
+        "np",
+        "tk",
+        "ml",
+        "ga",
+        "cf",
+        "gq",
+        "to",
+        "st",
+        "cx",
+        "nu",
+        "im",
+        "gg",
+        "je",
+        # ".onion" is deliberately absent. Hidden services have a fixed address
+        # shape that a dedicated pattern validates, and routing them through the
+        # generic domain path would accept any `word.onion` while losing the
+        # note that says what it is.
+    }
+)
+
+
 def _looks_like_domain(text: str) -> bool:
     """Filter out obvious non-domain matches (filenames, version strings)."""
     if text.startswith(".") or text.endswith("."):
@@ -921,4 +1204,31 @@ def _looks_like_domain(text: str) -> bool:
         return False
     if len(text) < 5:
         return False
+
+    labels = lower.split(".")
+    if len(labels) < 2:
+        return False
+
+    # Positive TLD check. A hostname ends in a real TLD; `Collections.Generic`
+    # does not.
+    if labels[-1] not in _KNOWN_TLDS:
+        return False
+
+    # Namespace shape. Most .NET identifiers die on the TLD check already
+    # (`System.Collections.Generic` — "generic" is not a TLD), but the ones
+    # whose last segment happens to be a real TLD survive it: `System.Net`,
+    # `System.IO`, `Microsoft.Web`. Two signals together catch those without
+    # touching real hostnames — a framework root among the non-TLD labels, and
+    # PascalCase, which dotted identifiers use and hostnames in binaries
+    # essentially never do.
+    if any(label in _NAMESPACE_TOKENS for label in labels[:-1]) and text[:1].isupper():
+        return False
+
+    # A one-character second-level label is a version fragment, not a
+    # registrable name. Two characters are allowed only for the second level of
+    # a multi-part public suffix such as `example.co.uk`.
+    sld = labels[-2]
+    if len(sld) < 2 or (len(sld) == 2 and sld not in _MULTIPART_TLD_SECOND_LEVELS):
+        return False
+
     return True

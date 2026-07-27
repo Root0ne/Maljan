@@ -307,6 +307,12 @@ def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
         return f"[windows-registry-key:key = '{value}']"
     if ioc.kind == "path":
         return f"[file:name = '{value}']"
+    # "secret" and "crypto_wallet" reach here and are deliberately not patterned.
+    # STIX 2.1 has no SCO for a leaked credential or a wallet address, and
+    # inventing a custom object would produce a bundle that no consumer can
+    # ingest — worse than omitting it, because it looks importable and is not.
+    # Both kinds are carried in the consolidated IOC table instead, where they
+    # are typed and readable.
     return None
 
 
