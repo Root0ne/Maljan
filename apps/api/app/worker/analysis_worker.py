@@ -991,14 +991,24 @@ def _extract_mitre(result: dict) -> list | None:
 
     techniques = []
     for obj in stix.get("objects", []):
-        if obj.get("type") == "attack-pattern":
-            techniques.append(
-                {
-                    "technique_id": obj.get("external_references", [{}])[0].get("external_id", ""),
-                    "name": obj.get("name", ""),
-                    "description": obj.get("description", ""),
-                }
-            )
+        if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
+            continue
+        # ``[{}]`` as a default only covers a *missing* key. An attack-pattern
+        # carrying ``"external_references": []`` — which the model emits
+        # routinely — got past that default and then died on ``[0]``, taking a
+        # completed analysis down with it: two consecutive live runs failed
+        # with ``IndexError: list index out of range`` *after* every analyst,
+        # the negotiation and the judge had finished. Losing a technique ID is
+        # a missing field; losing the run is not.
+        refs = obj.get("external_references")
+        first = refs[0] if isinstance(refs, list) and refs and isinstance(refs[0], dict) else {}
+        techniques.append(
+            {
+                "technique_id": first.get("external_id", ""),
+                "name": obj.get("name", ""),
+                "description": obj.get("description", ""),
+            }
+        )
     return techniques if techniques else None
 
 
