@@ -252,6 +252,93 @@ def unsupported_os_reason(sample_path: str | Path | None) -> str | None:
     return _FOREIGN_EXTENSIONS.get(path.suffix.lower())
 
 
+# Formats the pipeline accepts but cannot open. Distinct from
+# ``_FOREIGN_FILE_TYPES``, which rejects the run outright: these are *plausible*
+# Windows malware carriers, so refusing them would be wrong — but the analysis
+# they receive is a raw-byte string sweep and nothing else, and saying so is the
+# difference between a thin report and a dishonest one.
+_UNPARSED_CONTAINER_EXTENSIONS: dict[str, str] = {
+    ".doc": "OLE2 document",
+    ".docm": "Office macro document",
+    ".dotm": "Office macro template",
+    ".xls": "OLE2 spreadsheet",
+    ".xlsm": "Office macro spreadsheet",
+    ".xlsb": "Office binary spreadsheet",
+    ".ppt": "OLE2 presentation",
+    ".pptm": "Office macro presentation",
+    ".rtf": "RTF document",
+    ".pdf": "PDF document",
+    ".one": "OneNote notebook",
+    ".ps1": "PowerShell script",
+    ".vbs": "VBScript",
+    ".vbe": "encoded VBScript",
+    ".js": "JScript",
+    ".jse": "encoded JScript",
+    ".hta": "HTML application",
+    ".wsf": "Windows Script File",
+    ".bat": "batch script",
+    ".cmd": "batch script",
+    ".lnk": "Windows shortcut",
+    ".chm": "compiled HTML help",
+    ".msi": "Windows Installer package",
+    ".jar": "Java archive",
+    ".zip": "ZIP archive",
+    ".7z": "7-Zip archive",
+    ".rar": "RAR archive",
+    ".iso": "disc image",
+    ".img": "disc image",
+    ".vhd": "virtual disk",
+}
+
+_UNPARSED_CONTAINER_TYPES: dict[str, str] = {
+    "pdf": "PDF document",
+    "zip": "ZIP archive",
+    "zip/jar": "Java archive",
+    "zip/zip": "ZIP archive",
+}
+
+
+def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
+    """Say so when the sample's container was never opened.
+
+    A ``.docm`` is accepted by the upload allow-list and is not rejected by
+    ``unsupported_os_reason`` — correctly, since macro documents are among the
+    most common Windows malware carriers. But ``build_static_analysis`` returns
+    empty sections, imports and exports for it, and only the raw-byte IOC sweep
+    runs. The analysis completes, the report renders, and nothing anywhere says
+    that the macro stream — the entire payload — was never read.
+
+    That is the gap this closes. Not by refusing the sample, which would be
+    worse, but by returning a degradation reason so the report caps its own
+    confidence and states plainly what it did not look at.
+    """
+    if not sample_path:
+        return None
+    path = Path(sample_path)
+    try:
+        if not path.is_file():
+            return None
+        with path.open("rb") as fh:
+            header = fh.read(16)
+    except OSError:
+        return None
+
+    # A real PE or ELF was parsed properly; nothing to declare.
+    detected = _detect_file_type(path, header).lower()
+    if detected in {"pe", "elf"}:
+        return None
+
+    label = _UNPARSED_CONTAINER_TYPES.get(detected) or _UNPARSED_CONTAINER_EXTENSIONS.get(
+        path.suffix.lower()
+    )
+    if not label:
+        return None
+    return (
+        f"{label} container was not parsed — no format-aware extraction exists for it; "
+        "findings come from a raw-byte string sweep only"
+    )
+
+
 def _guess_mime(path: Path) -> str | None:
     """Use ``filetype`` if available, otherwise rough suffix-based mapping."""
     try:

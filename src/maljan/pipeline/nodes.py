@@ -1323,6 +1323,19 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 _degradation_reasons.append(
                     "no sandbox report (dynamic detonation unavailable) — static-only evidence"
                 )
+            # A container we accept but cannot open. A .docm reaches here
+            # legitimately — macro documents are among the commonest Windows
+            # carriers, so rejecting them would be wrong — but the only analysis
+            # it receives is a raw-byte string sweep, and without this the report
+            # renders a confident verdict over an unread payload.
+            try:
+                from maljan.extractors.sample_identity import unparsed_container_reason
+
+                _container_reason = unparsed_container_reason(state.get("sample_path"))
+                if _container_reason:
+                    _degradation_reasons.append(_container_reason)
+            except Exception as _e:  # noqa: BLE001
+                logger.debug("container-format check skipped (%s)", _e)
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             if _empty_analysts:
