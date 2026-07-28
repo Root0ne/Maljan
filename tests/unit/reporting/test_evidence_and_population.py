@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from maljan.reporting.builder import _build_version_history, build_consolidated_iocs, defang
-from maljan.reporting.evidence_bundles import bundle_for, is_empty
+from maljan.reporting.evidence_bundles import SECTIONS, bundle_for, is_empty
 from maljan.reporting.models import (
     FileHashes,
     ImportRow,
@@ -189,3 +189,128 @@ class TestBundleIsolation:
     def test_executive_summary_bundle_never_empty_with_verdict(self) -> None:
         r = _report(verdict="Malware")
         assert not is_empty(bundle_for("executive_summary", r))
+
+
+class TestTheComposerCanFalsifyAWrongClaim:
+    """The grounding defect observed on 2026-07-28, and the guards against it.
+
+    A conclusion asserted the sample was a .NET executable calling
+    ``_CorExeMain`` from ``mscoree.dll``. The report's own identity section said
+    "Microsoft Visual C++ 2015-2022" and its import table named eleven native
+    DLLs, none of them ``mscoree``. The claim came from the static analyst; the
+    conclusion bundle passed it through and carried only
+    verdict/severity/confidence/degraded as facts, so nothing in the prompt was
+    capable of contradicting it.
+
+    Bundle isolation is what keeps each call small enough for the local model to
+    stay coherent. It must not also remove the evidence that falsifies a wrong
+    claim — those are different things.
+    """
+
+    @staticmethod
+    def _native_report() -> MalwareReport:
+        return MalwareReport(
+            identity=SampleIdentity(
+                hashes=FileHashes(sha256="a" * 64),
+                file_type="PE",
+                language_or_compiler="Microsoft Visual C++ 2015-2022 (C/C++)",
+            ),
+            static=StaticAnalysis(
+                pdb_path=r"E:\build\Release\BdUserHost.pdb",
+                imports=[
+                    ImportRow(dll="kernel32.dll", function="CreateFileW"),
+                    ImportRow(dll="advapi32.dll", function="OpenProcessToken"),
+                    ImportRow(dll="kernel32.dll", function="ReadFile"),
+                ],
+            ),
+        )
+
+    def test_the_conclusion_can_see_what_the_binary_is(self) -> None:
+        bundle = bundle_for("conclusion", self._native_report())
+        binary = bundle["binary"]
+        assert "Microsoft Visual C++" in (binary["language_or_compiler"] or "")
+        assert binary["imported_dlls"] == ["advapi32.dll", "kernel32.dll"]
+        assert "BdUserHost" in binary["pdb_path"]
+        assert "mscoree" not in " ".join(binary["imported_dlls"])
+
+    def test_every_section_carries_it_not_just_the_introduction(self) -> None:
+        report = self._native_report()
+        for section in SECTIONS:
+            binary = bundle_for(section, report).get("binary") or {}
+            assert binary.get("language_or_compiler"), f"{section} cannot check the compiler"
+
+    def test_the_binary_block_does_not_defeat_skip_on_empty(self) -> None:
+        """The regression this refactor exists to avoid.
+
+        ``is_empty`` is what makes the Composer state a section's absence rather
+        than invent one. Folding an always-present block into ``facts`` would
+        make every bundle look non-empty and turn skip-on-empty into
+        write-something-anyway for every section — the exact opposite of the
+        cardinal rule.
+        """
+        empty_subject = bundle_for("ransom_note", self._native_report())
+        assert empty_subject["binary"], "the block is present"
+        assert is_empty(empty_subject), "yet the section is still correctly skipped"
+
+    def test_a_section_with_real_evidence_is_not_skipped(self) -> None:
+        report = self._native_report()
+        assert report.static is not None
+        report.static.packer_hint = "UPX (packer)"
+        assert not is_empty(bundle_for("packing_obfuscation", report))
+
+
+class TestTechnicalSectionsSeeTheirOwnMeasurements:
+    """Every generic technical-spine section carried ``facts: {}`` until
+    2026-07-28 — each wrote prose about a subject the report had already
+    measured deterministically, without being shown the measurement.
+    """
+
+    @staticmethod
+    def _measured() -> MalwareReport:
+        return _report(
+            static=StaticAnalysis(
+                packer_matches=[{"name": "UPX", "confidence": 0.85, "method": "section"}],
+                obfuscation_indicators=["high-entropy sections"],
+                api_capabilities={"discovery": 27, "crypto": 15, "anti_debug": 10},
+                api_technique_hits=[
+                    {"technique_id": "T1083", "name": "File Discovery", "confidence": 0.5},
+                    {"technique_id": "T1622", "name": "Debugger Evasion", "confidence": 0.5},
+                ],
+                imports=[
+                    ImportRow(dll="crypt32.dll", function="CryptEncrypt", category="crypto"),
+                    ImportRow(dll="kernel32.dll", function="FindFirstFileW", category="discovery"),
+                    ImportRow(
+                        dll="kernel32.dll", function="IsDebuggerPresent", category="anti_debug"
+                    ),
+                ],
+            )
+        )
+
+    def test_the_packing_section_sees_the_packer_detector(self) -> None:
+        facts = bundle_for("packing_obfuscation", self._measured())["facts"]
+        assert any("UPX" in m for m in facts["packer_matches"])
+
+    def test_no_packer_is_stated_rather_than_omitted(self) -> None:
+        """An absent key reads as "not measured"; "no packer was identified" is
+        itself a finding."""
+        facts = bundle_for("packing_obfuscation", _report(static=StaticAnalysis()))["facts"]
+        assert facts["packer_detected"] is False
+
+    def test_the_discovery_section_sees_discovery_apis_only(self) -> None:
+        facts = bundle_for("discovery", self._measured())["facts"]
+        assert facts["discovery_api_count"] == 27
+        assert facts["discovery_imports"] == ["FindFirstFileW"]
+        assert facts["discovery_techniques"] == ["T1083"], "and not the evasion technique"
+
+    def test_the_evasion_section_sees_evasion_techniques_only(self) -> None:
+        facts = bundle_for("evasion_antiforensics", self._measured())["facts"]
+        assert facts["evasion_techniques"] == ["T1622"]
+        assert facts["anti_debug_api_count"] == 10
+
+    def test_the_encryption_section_sees_crypto_imports_only(self) -> None:
+        facts = bundle_for("encryption_scheme", self._measured())["facts"]
+        assert facts["crypto_imports"] == ["CryptEncrypt"]
+        assert facts["crypto_api_count"] == 15
+
+    def test_a_report_without_static_analysis_does_not_raise(self) -> None:
+        assert bundle_for("discovery", _report())["facts"] == {}

@@ -208,3 +208,70 @@ class TestHelpers:
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-q"])
+
+
+class TestFactsOutrankClaimsInThePrompt:
+    """The prompt half of the 2026-07-28 grounding fix.
+
+    Bundle isolation is what keeps each call small enough for the local model
+    to stay coherent, and it was also removing the evidence that falsifies a
+    wrong claim. Both blocks used to arrive under one undifferentiated
+    "evidence" heading with no stated precedence, so a static-analyst claim of
+    ".NET / _CorExeMain" had nothing above it to lose to.
+    """
+
+    def test_the_binary_block_is_rendered_and_labelled_as_outranking(self) -> None:
+        text = _bundle_text(
+            "conclusion",
+            {
+                "binary": {
+                    "language_or_compiler": "Microsoft Visual C++ 2015-2022 (C/C++)",
+                    "imported_dlls": ["kernel32.dll", "advapi32.dll"],
+                },
+                "facts": {"verdict": "Malware"},
+                "claims": [{"claim": "Sample is a .NET loader", "evidence_ref": "static:entry"}],
+                "tool_outputs": [],
+            },
+        )
+        assert "BINARY FACTS" in text
+        assert "outrank" in text
+        assert "Microsoft Visual C++" in text
+        assert "kernel32.dll" in text
+        # The contradicting claim is still shown — the model is told to prefer
+        # the fact, not kept ignorant of the disagreement.
+        assert ".NET loader" in text
+        assert text.index("BINARY FACTS") < text.index("ANALYST CLAIMS")
+
+    def test_the_system_prompt_states_the_precedence(self) -> None:
+        from maljan.reporting.composer import _SYSTEM
+
+        lowered = _SYSTEM.lower()
+        assert "outrank" in lowered
+        assert "deterministic facts" in lowered
+
+    def test_duplicate_keys_are_not_printed_twice(self) -> None:
+        """The introduction repeats identity in ``facts`` because identity is
+        its subject; the shared block must not restate it."""
+        text = _bundle_text(
+            "introduction",
+            {
+                "binary": {"file_type": "PE", "language_or_compiler": "Rust"},
+                "facts": {"file_type": "PE", "language_or_compiler": "Rust", "category": "loader"},
+                "claims": [],
+                "tool_outputs": [],
+            },
+        )
+        assert text.count("Rust") == 1
+        assert text.count("file_type") == 1
+
+    def test_an_all_duplicate_block_prints_no_empty_heading(self) -> None:
+        text = _bundle_text(
+            "introduction",
+            {
+                "binary": {"file_type": "PE"},
+                "facts": {"file_type": "PE"},
+                "claims": [],
+                "tool_outputs": [],
+            },
+        )
+        assert "BINARY FACTS" not in text

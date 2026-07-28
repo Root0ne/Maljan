@@ -65,15 +65,26 @@ class _C2Out(BaseModel):
     channels: list[C2Channel] = Field(default_factory=list)
 
 
+# Rule 2 is the one that was missing, and its absence was not theoretical: on
+# 2026-07-28 a conclusion asserted the sample was a .NET executable calling
+# `_CorExeMain` from `mscoree.dll`, repeating a static-analyst claim, on a
+# binary whose DETERMINISTIC FACTS said "Microsoft Visual C++ 2015-2022" and
+# listed eleven native DLLs with no `mscoree`. Both blocks arrived under one
+# "evidence" heading with no stated precedence, so the model had no reason to
+# prefer the parser over another model.
 _SYSTEM = (
     "You are a senior malware reverse engineer writing ONE section of a technical "
     "analysis report. STRICT RULES:\n"
     "1. Use ONLY the evidence provided below. Do NOT invent capabilities, function "
     "names, flags, crypto details, C2 endpoints, or file names.\n"
-    "2. If the evidence does not support a field, leave it empty/null. Never guess.\n"
-    "3. Be concise and technical; cite concrete artifacts (function name, API, "
+    "2. DETERMINISTIC FACTS come from parsers and always outrank ANALYST CLAIMS, "
+    "which are another model's output. If a claim contradicts a fact, the fact is "
+    "correct: do not repeat the claim, and do not try to reconcile the two. Say "
+    "what the facts support.\n"
+    "3. If the evidence does not support a field, leave it empty/null. Never guess.\n"
+    "4. Be concise and technical; cite concrete artifacts (function name, API, "
     "string, tool output) where possible.\n"
-    "4. Output MUST conform to the provided JSON schema."
+    "5. Output MUST conform to the provided JSON schema."
 )
 
 # Narrative technical subsections authored as free prose (TechnicalSubsection).
@@ -88,7 +99,22 @@ _PROSE_SECTIONS: dict[str, str] = {
 def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
     """Render an evidence bundle into a compact prompt body."""
     lines: list[str] = [f"SECTION: {section}", ""]
+    # First, and labelled as outranking everything below it. This block is the
+    # same on every section and is deliberately NOT part of ``facts``: the
+    # skip-on-empty check keys off ``facts``, and folding an always-present
+    # block into it would make every bundle look non-empty and turn "state the
+    # absence" into "write something anyway" for every section.
     facts = bundle.get("facts") or {}
+    binary = bundle.get("binary") or {}
+    if binary:
+        # Keys the section already carries in ``facts`` are dropped rather than
+        # printed twice — the introduction deliberately repeats identity there
+        # because identity is its subject.
+        rows = [(k, v) for k, v in binary.items() if k not in facts and v not in (None, "", [], {})]
+        if rows:
+            lines.append("BINARY FACTS (from parsers — these outrank any claim below):")
+            lines.extend(f"- {k}: {v}" for k, v in rows)
+            lines.append("")
     if facts:
         lines.append("DETERMINISTIC FACTS:")
         for k, v in facts.items():
