@@ -459,3 +459,19 @@ class TestTheComposedSectionsReachTheReport:
         report.technical_analysis = TechnicalAnalysis()
         md = MarkdownRenderer().render(report)
         assert "## Technical Analysis" not in md
+
+    def test_the_querying_process_is_named(self) -> None:
+        """The last producer-without-consumer field on the report models. Only
+        populated from sandbox telemetry, so usually empty — but when a dropped
+        child resolves the C2 rather than the parent, this is the finding, and
+        the domains table had no column for it."""
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+
+        report = _report()
+        report.network = NetworkIOCs(
+            domains=[NetworkDomain(fqdn="c2.example.net", queried_pids=[4812, 5120])]
+        )
+        md = MarkdownRenderer().render(report)
+        assert "Queried by" in md
+        assert "4812" in md
+        assert "5120" in md

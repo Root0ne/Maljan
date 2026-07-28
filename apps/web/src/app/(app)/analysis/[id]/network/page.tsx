@@ -318,6 +318,14 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
               {domain.resolved_ips.join(", ")}
             </div>
           )}
+          {/* Sandbox telemetry only, so usually absent — but when a dropped
+              child resolves the C2 rather than the parent, this is the story. */}
+          {domain.queried_pids.length > 0 && (
+            <div className="text-xs text-text-secondary mt-1">
+              <span className="text-text-muted">Queried by PID: </span>
+              <span className="font-mono">{domain.queried_pids.join(", ")}</span>
+            </div>
+          )}
         </div>
         {rep ? (
           <ReputationBadge rep={rep} />
