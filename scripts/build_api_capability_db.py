@@ -303,6 +303,41 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "CertFindCertificateInStore",
             "CertEnumCertificatesInStore",
             "PFXImportCertStore",
+            # Authenticode / catalog verification. Added 2026-07-28 after a real
+            # sample showed 14 of these imported and none of them recognised.
+            # Malware reads trust state as often as it forges it: checking its
+            # own signature is a standard "am I being tampered with" probe, and
+            # the catalog APIs are how a loader decides whether a DLL it is
+            # about to sideload will trip WDAC. Kept in `crypto` rather than a
+            # new category on purpose — the cert-store APIs above already live
+            # here, and every new category name dilutes the family-RAG
+            # vocabulary described at the top of this file.
+            "WinVerifyTrust",
+            "WinVerifyTrustEx",
+            "CryptCATAdminAcquireContext",
+            "CryptCATAdminAcquireContext2",
+            "CryptCATAdminCalcHashFromFileHandle",
+            "CryptCATAdminCalcHashFromFileHandle2",
+            "CryptCATAdminEnumCatalogFromHash",
+            "CryptCATAdminReleaseCatalogContext",
+            "CryptCATAdminReleaseContext",
+            "CryptCATCatalogInfoFromContext",
+            "CryptQueryObject",
+            "CryptMsgOpenToDecode",
+            "CryptMsgGetParam",
+            "CryptMsgClose",
+            "CertGetNameStringA",
+            "CertGetNameStringW",
+            "CertGetCertificateChain",
+            "CertVerifyCertificateChainPolicy",
+            "CertFreeCertificateChain",
+            "CertDuplicateCertificateContext",
+            "CertFreeCertificateContext",
+            "CertFreeCRLContext",
+            "CertFreeCTLContext",
+            "CertCloseStore",
+            "CertNameToStrA",
+            "CertNameToStrW",
         ],
     ),
     "filesystem": (
@@ -386,6 +421,23 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "SHFileOperationA",
             "SHFileOperationW",
             "CreateIoCompletionPort",
+            # The Ex/By-handle spellings. `FindFirstFileW` was already here but
+            # `FindFirstFileExW` was not, so a binary that enumerates
+            # directories through the newer call looked like it touched no
+            # files at all — the same one-letter blindness the A/W folding fixed
+            # on the lookup side.
+            "FindFirstFileExA",
+            "FindFirstFileExW",
+            "FindFirstFileNameW",
+            "GetFinalPathNameByHandleA",
+            "GetFinalPathNameByHandleW",
+            "GetFileInformationByHandle",
+            "GetFileInformationByHandleEx",
+            "SetFileInformationByHandle",
+            "LockFile",
+            "LockFileEx",
+            "UnlockFile",
+            "UnlockFileEx",
         ],
     ),
     "registry": (
@@ -482,6 +534,30 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "CoImpersonateClient",
             "OpenSCManagerA",
             "OpenSCManagerW",
+            # ACL *modification*. Only `SetNamedSecurityInfoA` was here — not
+            # even its own W spelling — which left T1222 with no import-side
+            # evidence at all. Writing a DACL is genuinely unusual for ordinary
+            # software; the read-side spellings are deliberately filed under
+            # `discovery` at informational tier instead, because inspecting
+            # permissions is something every security-aware program does.
+            "SetNamedSecurityInfoW",
+            "SetFileSecurityA",
+            "SetFileSecurityW",
+            "SetKernelObjectSecurity",
+            "SetUserObjectSecurity",
+            "SetSecurityInfo",
+            "SetSecurityDescriptorDacl",
+            "SetSecurityDescriptorOwner",
+            "SetEntriesInAclA",
+            "SetEntriesInAclW",
+            "AddAccessAllowedAce",
+            "AddAccessAllowedAceEx",
+            "AddAccessDeniedAce",
+            "AddAce",
+            "DeleteAce",
+            "InitializeSecurityDescriptor",
+            "MakeAbsoluteSD",
+            "MakeSelfRelativeSD",
         ],
     ),
     "execution": (
@@ -535,6 +611,21 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "IDispatch",
             "WScriptShell",
             "ScriptControl",
+            # Module search-path control. These are the DLL search-order
+            # hijacking primitives (T1574.001) — and also exactly how hardened
+            # software removes the CWD from its own search path. An import
+            # table cannot tell `SetDllDirectoryW(L"")` from
+            # `SetDllDirectoryW(attacker_path)`, so they are categorised here
+            # for the histogram and the prompt but deliberately given NO
+            # entry in WINDOWS_ATTCK below. Claiming T1574.001 from a call that
+            # is at least as often defensive would be the same firehose that
+            # got T1129 and T1218 dropped.
+            "SetDllDirectoryA",
+            "SetDllDirectoryW",
+            "AddDllDirectory",
+            "RemoveDllDirectory",
+            "SetDefaultDllDirectories",
+            "SetSearchPathMode",
         ],
     ),
     # --------------------------------------------------------------- new four
@@ -617,6 +708,57 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "WTSQuerySessionInformationA",
             "GetLastInputInfo",
             "GetCursorPos",
+            # SID and ACL *inspection*. `GetSidSubAuthority` + friends is the
+            # canonical "am I SYSTEM / am I elevated" probe, and
+            # `LookupAccountSid` is account discovery by another name. Kept at
+            # informational tier: reading permissions is ubiquitous, only the
+            # pattern carries signal. The write-side spellings live in
+            # `privilege` at high tier.
+            "GetFileSecurityA",
+            "GetFileSecurityW",
+            "GetNamedSecurityInfoA",
+            "GetNamedSecurityInfoW",
+            "GetSecurityInfo",
+            "GetKernelObjectSecurity",
+            "GetSecurityDescriptorDacl",
+            "GetSecurityDescriptorOwner",
+            "GetSecurityDescriptorGroup",
+            "GetAclInformation",
+            "GetAce",
+            "GetSidIdentifierAuthority",
+            "GetSidSubAuthority",
+            "GetSidSubAuthorityCount",
+            "GetLengthSid",
+            "AllocateAndInitializeSid",
+            "FreeSid",
+            "EqualSid",
+            "IsValidSid",
+            "CopySid",
+            "ConvertSidToStringSidA",
+            "ConvertSidToStringSidW",
+            "ConvertStringSidToSidA",
+            "ConvertStringSidToSidW",
+            "CheckTokenMembership",
+            # Host and device enumeration. `QueryDosDevice` doubles as an
+            # anti-VM probe (\\.\VBoxGuest and friends) but is filed here
+            # rather than in anti_debug, which is high tier — the call alone
+            # does not prove the intent.
+            "QueryDosDeviceA",
+            "QueryDosDeviceW",
+            "ExpandEnvironmentStringsA",
+            "ExpandEnvironmentStringsW",
+            "GetFileVersionInfoA",
+            "GetFileVersionInfoW",
+            "GetFileVersionInfoSizeA",
+            "GetFileVersionInfoSizeW",
+            "VerQueryValueA",
+            "VerQueryValueW",
+            "ProcessIdToSessionId",
+            "WTSGetActiveConsoleSessionId",
+            "GetMappedFileNameA",
+            "GetMappedFileNameW",
+            "K32GetMappedFileNameW",
+            "K32GetModuleFileNameExW",
         ],
     ),
     "persistence": (
@@ -1234,6 +1376,31 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "NtDeleteKey",
             "RegRestoreKeyA",
             "RegLoadKeyA",
+        ],
+    },
+    {
+        # Only the write-side APIs appear here. The read-side spellings
+        # (GetFileSecurity, GetAclInformation, GetAce) are categorised under
+        # `discovery` and deliberately excluded: reading a DACL is what every
+        # security-aware program does, and mapping it to T1222 would fire on
+        # most signed software in the corpus.
+        "technique_id": "T1222",
+        "name": "File and Directory Permissions Modification",
+        "min_apis": 2,
+        "confidence_base": 0.42,
+        "confidence_max": 0.60,
+        "apis": [
+            "SetFileSecurityA",
+            "SetFileSecurityW",
+            "SetNamedSecurityInfoA",
+            "SetNamedSecurityInfoW",
+            "SetSecurityInfo",
+            "SetEntriesInAclA",
+            "SetEntriesInAclW",
+            "SetSecurityDescriptorDacl",
+            "AddAccessAllowedAce",
+            "AddAccessDeniedAce",
+            "DeleteAce",
         ],
     },
     {

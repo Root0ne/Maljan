@@ -481,6 +481,29 @@
       ]
     },
     {
+      "technique_id": "T1222",
+      "name": "File and Directory Permissions Modification",
+      "min_apis": 2,
+      "confidence_base": 0.42,
+      "confidence_max": 0.6,
+      "apis": [
+        "AddAccessAllowedAce",
+        "AddAccessDeniedAce",
+        "DeleteAce",
+        "SetEntriesInAclA",
+        "SetEntriesInAclW",
+        "SetFileSecurityA",
+        "SetFileSecurityW",
+        "SetNamedSecurityInfoA",
+        "SetNamedSecurityInfoW",
+        "SetSecurityDescriptorDacl",
+        "SetSecurityInfo"
+      ],
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
       "technique_id": "T1562.001",
       "name": "Impair Defenses: Disable or Modify Tools",
       "min_apis": 2,

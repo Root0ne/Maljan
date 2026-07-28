@@ -273,3 +273,88 @@ class TestTheCatalogDegradesInsteadOfFailing:
         missing = str(tmp_path / "nope.json")
         assert load_api_behaviour_db(missing) is None
         assert load_api_behaviour_db(missing) is None
+
+
+class TestReadingPermissionsIsNotModifyingThem:
+    """The asymmetry added on 2026-07-28, and the reason it is an asymmetry.
+
+    A real sample — a signed security product — imported fourteen ACL/SID
+    functions and Maljan categorised none of them. Wiring them all in at one
+    tier would have been the easy fix and the wrong one: ``GetFileSecurityW``
+    is what every security-aware program calls, while ``SetFileSecurityW`` is
+    someone rewriting a DACL. Filed apart on purpose, and this class is what
+    stops a later edit from quietly collapsing them back together.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def test_writing_a_dacl_is_high_tier_and_suspicious(self) -> None:
+        for api in ("SetFileSecurityW", "SetEntriesInAclW", "SetSecurityInfo"):
+            category, suspicious = classify_import(api)
+            assert category == "privilege", api
+            assert suspicious is True, api
+
+    def test_reading_a_dacl_is_categorised_but_not_suspicious(self) -> None:
+        for api in ("GetFileSecurityW", "GetAclInformation", "GetAce", "GetSidSubAuthority"):
+            category, suspicious = classify_import(api)
+            assert category == "discovery", api
+            assert suspicious is False, api
+
+    def test_t1222_fires_on_writes_only(self) -> None:
+        table = load_api_attck_map(_ATTCK)
+        assert table is not None
+
+        writes = {
+            rule.technique_id for rule, _ in table.match({"SetFileSecurityW", "SetEntriesInAclW"})
+        }
+        assert "T1222" in writes
+
+        reads = {
+            rule.technique_id
+            for rule, _ in table.match({"GetFileSecurityW", "GetAclInformation", "GetAce"})
+        }
+        assert "T1222" not in reads
+
+
+class TestSearchPathControlIsCategorisedButNeverClaimed:
+    """``SetDllDirectoryW`` is the DLL search-order hijacking primitive and it
+    is also how hardened software removes the CWD from its own search path.
+    An import table cannot tell the two apart, so the API is categorised — it
+    belongs in the histogram and the analyst prompt — but no ATT&CK rule may
+    name it. This is the same discipline that got T1129 and T1218 dropped.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def test_the_apis_are_categorised(self) -> None:
+        for api in ("SetDllDirectoryW", "AddDllDirectory", "SetDefaultDllDirectories"):
+            category, _suspicious = classify_import(api)
+            assert category == "execution", api
+
+    def test_no_technique_claims_them(self) -> None:
+        table = load_api_attck_map(_ATTCK)
+        assert table is not None
+        named = {api.lower() for rule in table.techniques for api in rule.apis}
+        for api in ("setdlldirectorya", "setdlldirectoryw", "adddlldirectory"):
+            assert api not in named, api
+        assert "T1574.001" not in {rule.technique_id for rule in table.techniques}
+
+
+class TestTheOneLetterAndOneSuffixBlindSpots:
+    """Both gaps were found by diffing against another analyser on a real
+    sample, and both looked like depth problems until read closely: the table
+    simply did not carry the spelling the binary happened to import.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def test_the_ex_spelling_of_a_covered_call_is_covered(self) -> None:
+        assert classify_import("FindFirstFileW")[0] == "filesystem"
+        assert classify_import("FindFirstFileExW")[0] == "filesystem"
+
+    def test_authenticode_verification_is_recognised(self) -> None:
+        for api in ("WinVerifyTrust", "CryptCATAdminAcquireContext", "CryptQueryObject"):
+            assert classify_import(api)[0] == "crypto", api
