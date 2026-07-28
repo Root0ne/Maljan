@@ -79,12 +79,14 @@ _SYSTEM = (
     "names, flags, crypto details, C2 endpoints, or file names.\n"
     "2. DETERMINISTIC FACTS come from parsers and always outrank ANALYST CLAIMS, "
     "which are another model's output. If a claim contradicts a fact, the fact is "
-    "correct: do not repeat the claim, and do not try to reconcile the two. Say "
-    "what the facts support.\n"
-    "3. If the evidence does not support a field, leave it empty/null. Never guess.\n"
-    "4. Be concise and technical; cite concrete artifacts (function name, API, "
+    "correct: DROP the claim entirely. Do not repeat it, do not hedge it, and do "
+    "NOT reconcile the two into a statement that accommodates both.\n"
+    "3. A fact marked 'complete list' is exhaustive. Anything absent from it is "
+    "absent from the binary, and a claim that relies on it is false.\n"
+    "4. If the evidence does not support a field, leave it empty/null. Never guess.\n"
+    "5. Be concise and technical; cite concrete artifacts (function name, API, "
     "string, tool output) where possible.\n"
-    "5. Output MUST conform to the provided JSON schema."
+    "6. Output MUST conform to the provided JSON schema."
 )
 
 # Narrative technical subsections authored as free prose (TechnicalSubsection).

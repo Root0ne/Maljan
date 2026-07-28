@@ -127,6 +127,9 @@ def _filter_tool_outputs(
     return picked
 
 
+_MAX_DLLS = 24
+
+
 def binary_facts(report: MalwareReport) -> dict[str, Any]:
     """What the binary demonstrably *is*, straight from the parsers.
 
@@ -171,7 +174,26 @@ def binary_facts(report: MalwareReport) -> dict[str, Any]:
         # BdUserHost — a native product — while the prose claimed .NET.
         facts["pdb_path"] = static.pdb_path
     if dlls:
-        facts["imported_dlls"] = sorted(dlls)[:24]
+        ordered = sorted(dlls)
+        # Completeness is stated, and only when it is true. The first pass at
+        # this shipped the list unqualified, and the model treated absence from
+        # it as unproven: it kept a static-analyst claim that the binary loads
+        # `mscoree.dll` while the list plainly did not contain it, and
+        # reconciled the two into "a VC++ binary that is also a .NET wrapper".
+        # A truncated list must NOT be called complete — that would trade one
+        # wrong inference for a worse one.
+        if len(ordered) <= _MAX_DLLS:
+            facts[f"imported_dlls (complete list, {len(ordered)} total)"] = ordered
+        else:
+            facts[f"imported_dlls (first {_MAX_DLLS} of {len(ordered)}, NOT exhaustive)"] = ordered[
+                :_MAX_DLLS
+            ]
+        # Stated as its own fact rather than left to be inferred from the list.
+        # Deliberately named for what is actually measured: a binary that does
+        # not import the CLR shim is not thereby proven managed-code-free, but
+        # "does not import mscoree.dll" is exactly true and is what refutes the
+        # specific claim that it calls `_CorExeMain` from it.
+        facts["imports_dotnet_runtime (mscoree.dll)"] = "mscoree.dll" in dlls
     return facts
 
 

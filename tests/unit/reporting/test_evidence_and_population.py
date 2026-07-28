@@ -229,9 +229,12 @@ class TestTheComposerCanFalsifyAWrongClaim:
         bundle = bundle_for("conclusion", self._native_report())
         binary = bundle["binary"]
         assert "Microsoft Visual C++" in (binary["language_or_compiler"] or "")
-        assert binary["imported_dlls"] == ["advapi32.dll", "kernel32.dll"]
+        dll_key = next(k for k in binary if k.startswith("imported_dlls"))
+        assert "complete list, 2 total" in dll_key
+        assert binary[dll_key] == ["advapi32.dll", "kernel32.dll"]
+        assert binary["imports_dotnet_runtime (mscoree.dll)"] is False
         assert "BdUserHost" in binary["pdb_path"]
-        assert "mscoree" not in " ".join(binary["imported_dlls"])
+        assert "mscoree" not in " ".join(binary[dll_key])
 
     def test_every_section_carries_it_not_just_the_introduction(self) -> None:
         report = self._native_report()
@@ -314,3 +317,52 @@ class TestTechnicalSectionsSeeTheirOwnMeasurements:
 
     def test_a_report_without_static_analysis_does_not_raise(self) -> None:
         assert bundle_for("discovery", _report())["facts"] == {}
+
+
+class TestAbsenceMustBeProvableNotJustUnstated:
+    """The residual failure after the first grounding pass.
+
+    With the identity facts in the prompt the conclusion correctly opened with
+    "compiled with Microsoft Visual C++ 2015-2022" and "not packed" — and then
+    kept the static analyst's claim that the binary loads ``mscoree.dll``,
+    reconciling the two into "a VC++ binary that is also a .NET wrapper". The
+    DLL list refuted the claim, but nothing said the list was exhaustive, so
+    absence from it was not treated as absence.
+    """
+
+    @staticmethod
+    def _with_dlls(n: int) -> MalwareReport:
+        return MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+            static=StaticAnalysis(
+                imports=[ImportRow(dll=f"lib{i:03d}.dll", function=f"Fn{i}") for i in range(n)]
+            ),
+        )
+
+    def test_a_short_list_is_declared_complete(self) -> None:
+        binary = bundle_for("conclusion", self._with_dlls(3))["binary"]
+        key = next(k for k in binary if k.startswith("imported_dlls"))
+        assert "complete list, 3 total" in key
+
+    def test_a_truncated_list_is_never_declared_complete(self) -> None:
+        """Trading one wrong inference for a worse one: telling the model an
+        abridged list is exhaustive would license it to deny real imports."""
+        binary = bundle_for("conclusion", self._with_dlls(40))["binary"]
+        key = next(k for k in binary if k.startswith("imported_dlls"))
+        assert "complete" not in key
+        assert "NOT exhaustive" in key
+        assert len(binary[key]) == 24
+
+    def test_the_clr_shim_absence_is_its_own_fact(self) -> None:
+        binary = bundle_for("conclusion", self._with_dlls(3))["binary"]
+        assert binary["imports_dotnet_runtime (mscoree.dll)"] is False
+
+    def test_a_real_dotnet_binary_is_not_denied(self) -> None:
+        """The fact is named for what is measured. A binary that does import the
+        CLR shim must read True, or the fix would create the opposite error."""
+        report = MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+            static=StaticAnalysis(imports=[ImportRow(dll="mscoree.dll", function="_CorExeMain")]),
+        )
+        binary = bundle_for("conclusion", report)["binary"]
+        assert binary["imports_dotnet_runtime (mscoree.dll)"] is True
