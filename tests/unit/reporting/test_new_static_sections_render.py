@@ -426,3 +426,36 @@ class TestTheComposedSectionsReachTheReport:
         report.conclusion = Conclusion(text="A commodity loader.", sophistication_rating="low")
         html = HtmlRenderer().render(report, embed_figures=False)
         assert "commodity loader" in html
+
+    def test_composed_prose_is_marked_as_unverified(self) -> None:
+        """The first report rendered after the composer output became visible
+        asserted the sample was a .NET executable calling `_CorExeMain` from
+        `mscoree.dll`. The same report's identity section said Microsoft Visual
+        C++ and its import table contained no `mscoree`.
+
+        The prose is written from evidence bundles and never cross-checked
+        against the report it lands in, and it reads exactly like the
+        deterministic sections above it. Marking it is the same concession the
+        "(unverified)" family badge makes.
+        """
+        from maljan.reporting.models import Conclusion, TechnicalAnalysis, TechnicalSubsection
+
+        report = _report()
+        report.intro_background = "Background prose."
+        report.conclusion = Conclusion(text="A commodity loader.")
+        report.technical_analysis = TechnicalAnalysis(
+            discovery=TechnicalSubsection(title="Discovery", body="It enumerates files.")
+        )
+        md = MarkdownRenderer().render(report)
+        assert md.count("Composed by the report LLM") == 3, "every composed section must say so"
+        assert "verify" in md.lower()
+
+    def test_the_note_alone_does_not_create_a_section(self) -> None:
+        """Adding the note must not turn an empty TechnicalAnalysis into a
+        rendered heading — the emptiness check compares against the note too."""
+        from maljan.reporting.models import TechnicalAnalysis
+
+        report = _report()
+        report.technical_analysis = TechnicalAnalysis()
+        md = MarkdownRenderer().render(report)
+        assert "## Technical Analysis" not in md

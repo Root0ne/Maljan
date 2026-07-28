@@ -657,16 +657,33 @@ class MarkdownRenderer:
     # sections — so a run with the composer disabled produces exactly the
     # report it produced before.
 
+    # Every composed section carries this. The first report rendered after the
+    # composer output became visible asserted the sample was a .NET executable
+    # calling `_CorExeMain` from `mscoree.dll`; the same report's identity
+    # section said Microsoft Visual C++ and its import table contained no
+    # `mscoree` at all. The prose is written from evidence bundles and is not
+    # checked against the report it sits in, and a reader has no way to know
+    # that from the prose alone — it reads exactly like the deterministic
+    # sections above it. Same convention as the "(unverified)" family badge.
+    _COMPOSED_NOTE = (
+        "_Composed by the report LLM from the evidence bundles. Not "
+        "cross-checked against the deterministic sections above — verify "
+        "against them before quoting._"
+    )
+
     def _section_intro_background(self, report: MalwareReport) -> str:
         if not report.intro_background:
             return ""
-        return f"## Introduction & Background\n\n{report.intro_background.strip()}"
+        return (
+            "## Introduction & Background\n\n"
+            f"{self._COMPOSED_NOTE}\n\n{report.intro_background.strip()}"
+        )
 
     def _section_technical_analysis(self, report: MalwareReport) -> str:
         ta = report.technical_analysis
         if ta is None:
             return ""
-        lines: list[str] = ["## Technical Analysis", ""]
+        lines: list[str] = ["## Technical Analysis", "", self._COMPOSED_NOTE, ""]
 
         for attr in (
             "packing_obfuscation",
@@ -774,8 +791,9 @@ class MarkdownRenderer:
                 lines.append("")
 
         body = "\n".join(lines).rstrip()
-        # Heading alone means the composer produced nothing usable.
-        return "" if body == "## Technical Analysis" else body
+        # Heading and note alone mean the composer produced nothing usable.
+        empty = "\n".join(["## Technical Analysis", "", self._COMPOSED_NOTE]).rstrip()
+        return "" if body == empty else body
 
     def _section_c2_channels(self, report: MalwareReport) -> str:
         if not report.c2_channels:
@@ -794,7 +812,7 @@ class MarkdownRenderer:
         concl = report.conclusion
         if concl is None or not concl.text:
             return ""
-        lines = ["## Conclusion", ""]
+        lines = ["## Conclusion", "", self._COMPOSED_NOTE, ""]
         if concl.sophistication_rating:
             lines.append(f"**Sophistication**: {concl.sophistication_rating}")
             lines.append("")
