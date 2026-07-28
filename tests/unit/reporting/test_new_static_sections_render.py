@@ -23,6 +23,7 @@ from maljan.reporting.models import (
     FamilyAttribution,
     FileHashes,
     MalwareReport,
+    PESection,
     SampleIdentity,
     StaticAnalysis,
 )
@@ -168,3 +169,52 @@ class TestTheFamilyEvidenceIsShown:
     def test_no_artifacts_means_no_empty_table(self) -> None:
         md = _render(None, family="Emotet", family_confidence=0.8)
         assert "Offensive-tool artifacts" not in md
+
+
+class TestASectionCanBeFoundInTheFile:
+    """``PESection.raw_offset`` is PointerToRawData. It was extracted, stored
+    on the model and declared in the TypeScript interface, and printed by
+    neither renderer — a field with a producer and no consumer, which is the
+    same shape as the dead ``api_technique_hits`` the audit found.
+
+    It matters here specifically: the carved-payload table reports a file
+    offset, and the section table was the only thing that could say which
+    section that offset falls in. Without the column the two tables sat next to
+    each other and could not be joined.
+    """
+
+    def test_the_section_table_carries_the_file_offset(self) -> None:
+        md = _render(
+            StaticAnalysis(
+                sections=[
+                    PESection(
+                        name=".text",
+                        virtual_address="0x1000",
+                        virtual_size=8192,
+                        raw_size=8192,
+                        raw_offset=1024,
+                        entropy=6.1,
+                    )
+                ]
+            )
+        )
+        assert "Raw offset" in md, "the column header"
+        assert "0x400" in md, "1024 as hex, so it can be pasted into a hex editor"
+
+    def test_a_section_without_one_does_not_break_the_row(self) -> None:
+        """Reports written before the field existed deserialise with None."""
+        md = _render(
+            StaticAnalysis(
+                sections=[
+                    PESection(
+                        name=".rdata",
+                        virtual_address="0x3000",
+                        virtual_size=512,
+                        raw_size=512,
+                        entropy=4.2,
+                    )
+                ]
+            )
+        )
+        assert ".rdata" in md
+        assert "Raw offset" in md

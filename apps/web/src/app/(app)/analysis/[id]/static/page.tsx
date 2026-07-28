@@ -257,6 +257,10 @@ export default function StaticTab() {
                 <Th>VA</Th>
                 <Th>Virtual Size</Th>
                 <Th>Raw Size</Th>
+                {/* PointerToRawData. The carved-payload table above reports a
+                    file offset; without this column there is nothing on the
+                    page to match it against. */}
+                <Th>Raw Offset</Th>
                 <Th>Entropy</Th>
                 <Th>Characteristics</Th>
               </tr>
@@ -280,6 +284,11 @@ export default function StaticTab() {
                   </td>
                   <td className="px-4 py-2 text-xs text-text-secondary">
                     {formatBytes(s.raw_size)}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {typeof s.raw_offset === "number"
+                      ? `0x${s.raw_offset.toString(16)}`
+                      : "-"}
                   </td>
                   <td className={`px-4 py-2 text-xs font-mono ${entropyClass(s.entropy)}`}>
                     {s.entropy.toFixed(3)}

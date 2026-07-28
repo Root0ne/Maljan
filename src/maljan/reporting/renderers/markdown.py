@@ -236,15 +236,21 @@ class MarkdownRenderer:
         if static.sections:
             lines.append("### Sections")
             lines.append("")
-            lines.append("| Name | VA | Virtual size | Raw size | Entropy | Notes |")
-            lines.append("|---|---|---|---|---|---|")
+            # Raw offset is PointerToRawData. It was extracted and stored from
+            # the start and printed nowhere, which made the carved-payload table
+            # below harder to use than it needed to be: those rows carry a file
+            # offset, and without this column there is nothing to match it
+            # against to say which section a payload came out of.
+            lines.append("| Name | VA | Virtual size | Raw size | Raw offset | Entropy | Notes |")
+            lines.append("|---|---|---|---|---|---|---|")
             for sec in static.sections:
                 flag = "[HIGH ENTROPY]" if sec.entropy > 7.0 else ""
                 if sec.is_suspicious and not flag:
                     flag = "[SUSPICIOUS]"
+                raw_offset = f"0x{sec.raw_offset:x}" if isinstance(sec.raw_offset, int) else "-"
                 lines.append(
                     f"| `{sec.name}` | {sec.virtual_address} | {sec.virtual_size} | "
-                    f"{sec.raw_size} | {sec.entropy:.2f} | {flag} |"
+                    f"{sec.raw_size} | {raw_offset} | {sec.entropy:.2f} | {flag} |"
                 )
             lines.append("")
 
