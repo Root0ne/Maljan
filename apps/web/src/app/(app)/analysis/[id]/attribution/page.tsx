@@ -215,19 +215,7 @@ export default function AttributionTab() {
                         : "-"}
                     </td>
                     <td className="px-4 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {(m.markers ?? []).slice(0, 6).map((marker) => (
-                          <code
-                            key={marker}
-                            className="px-1.5 py-0.5 rounded bg-bg-active font-mono text-[11px] text-status-blue"
-                          >
-                            {marker}
-                          </code>
-                        ))}
-                        {(m.markers ?? []).length === 0 && (
-                          <span className="text-text-muted">-</span>
-                        )}
-                      </div>
+                      <Markers items={(m.markers ?? []).slice(0, 6)} />
                     </td>
                   </tr>
                 ))}

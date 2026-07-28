@@ -340,3 +340,76 @@ class TestComputedSignalsThatWereNeverPrinted:
         )
         md = MarkdownRenderer().render(report)
         assert "4d5a90000300000004000000" in md, "a .doc starting MZ is the whole finding"
+
+
+class TestTheComposedSectionsReachTheReport:
+    """``composer_enabled`` defaults to True and the composer spends an LLM
+    call per prose section, with a 120 s timeout each. Until 2026-07-28 no
+    renderer read a single field it wrote — not markdown, not HTML, not PDF,
+    not the API, not the UI. Every one of those calls was billed and discarded.
+
+    This is the most expensive instance of the producer-without-consumer bug in
+    the repo, and the least visible: a run with the composer on and a run with
+    it off produced byte-identical reports.
+    """
+
+    def test_the_prose_sections_and_their_evidence_refs_render(self) -> None:
+        from maljan.reporting.models import TechnicalAnalysis, TechnicalSubsection
+
+        report = _report()
+        report.technical_analysis = TechnicalAnalysis(
+            packing_obfuscation=TechnicalSubsection(
+                title="Packing & Obfuscation",
+                body="The sample is UPX-packed with a modified header.",
+                evidence_refs=["static:sections", "yara:UPX_mod"],
+            )
+        )
+        md = MarkdownRenderer().render(report)
+        assert "## Technical Analysis" in md
+        assert "UPX-packed with a modified header" in md
+        assert "static:sections" in md, "prose without refs is indistinguishable from invention"
+
+    def test_the_spared_processes_are_shown_not_just_the_killed_ones(self) -> None:
+        """The exclusions are often the more identifying half of the list."""
+        from maljan.reporting.models import ServiceProcessKill, TechnicalAnalysis
+
+        report = _report()
+        report.technical_analysis = TechnicalAnalysis(
+            service_process_kill=ServiceProcessKill(
+                kill_list=["sqlservr.exe"], white_list=["explorer.exe"], mechanism="taskkill"
+            )
+        )
+        md = MarkdownRenderer().render(report)
+        assert "sqlservr.exe" in md
+        assert "explorer.exe" in md
+
+    def test_c2_channels_render(self) -> None:
+        from maljan.reporting.models import C2Channel
+
+        report = _report()
+        report.c2_channels = [
+            C2Channel(name="primary", protocol="HTTPS", encryption="RC4", beacon_format="JSON")
+        ]
+        md = MarkdownRenderer().render(report)
+        assert "## C2 Channels" in md
+        assert "RC4" in md
+
+    def test_the_conclusion_and_its_sophistication_rating_render(self) -> None:
+        from maljan.reporting.models import Conclusion
+
+        report = _report()
+        report.conclusion = Conclusion(text="A commodity loader.", sophistication_rating="low")
+        md = MarkdownRenderer().render(report)
+        assert "## Conclusion" in md
+        assert "commodity loader" in md
+        assert "low" in md
+
+    def test_a_run_without_the_composer_is_unchanged(self) -> None:
+        """The sections must vanish entirely rather than render as empty
+        headings, so disabling the composer produces the report it always did.
+        """
+        md = MarkdownRenderer().render(_report())
+        assert "## Technical Analysis" not in md
+        assert "## C2 Channels" not in md
+        assert "## Conclusion" not in md
+        assert "## Introduction & Background" not in md

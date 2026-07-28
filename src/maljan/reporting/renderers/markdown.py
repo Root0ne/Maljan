@@ -73,6 +73,16 @@ class MarkdownRenderer:
                 "defensive_recommendations",
                 lambda: self._section_defensive_recommendations(report.defensive_recommendations),
             ),
+            # The composer runs by default (`composer_enabled = True`) and
+            # spends an LLM call per prose section. Until 2026-07-28 no renderer
+            # read a single field it wrote, so every one of those calls was
+            # billed and discarded. These four sections are that output.
+            self._safe_section("intro_background", lambda: self._section_intro_background(report)),
+            self._safe_section(
+                "technical_analysis", lambda: self._section_technical_analysis(report)
+            ),
+            self._safe_section("c2_channels", lambda: self._section_c2_channels(report)),
+            self._safe_section("conclusion", lambda: self._section_conclusion(report)),
             self._safe_section("references", lambda: self._section_references(report)),
             self._safe_section(
                 "run_summary", lambda: self._section_run_summary(report.run_summary)
@@ -639,6 +649,157 @@ class MarkdownRenderer:
             lines.append(f"_Rationale_: {rec.rationale}")
             lines.append("")
         return "\n".join(lines).rstrip()
+
+    # ------------------------------------------------------------------
+    # Composed long-form sections
+    # ------------------------------------------------------------------
+    # Each returns "" when its field is empty, and `render` drops empty
+    # sections — so a run with the composer disabled produces exactly the
+    # report it produced before.
+
+    def _section_intro_background(self, report: MalwareReport) -> str:
+        if not report.intro_background:
+            return ""
+        return f"## Introduction & Background\n\n{report.intro_background.strip()}"
+
+    def _section_technical_analysis(self, report: MalwareReport) -> str:
+        ta = report.technical_analysis
+        if ta is None:
+            return ""
+        lines: list[str] = ["## Technical Analysis", ""]
+
+        for attr in (
+            "packing_obfuscation",
+            "string_resolution",
+            "discovery",
+            "persistence_detail",
+            "message_packet_structure",
+            "evasion_antiforensics",
+        ):
+            sub = getattr(ta, attr, None)
+            if sub is None or not sub.body:
+                continue
+            lines.append(f"### {sub.title or attr.replace('_', ' ').title()}")
+            lines.append("")
+            lines.append(sub.body.strip())
+            if sub.evidence_refs:
+                # Without these the prose is indistinguishable from an LLM
+                # writing plausibly, which is the failure the whole grounding
+                # apparatus exists to prevent.
+                refs = ", ".join(f"`{r}`" for r in sub.evidence_refs[:8])
+                lines.append("")
+                lines.append(f"_Evidence: {refs}_")
+            lines.append("")
+
+        if ta.cli_flags:
+            lines.append("### Command-line Flags")
+            lines.append("")
+            lines.append("| Flag | Meaning |")
+            lines.append("|---|---|")
+            for flag in ta.cli_flags[:20]:
+                lines.append(f"| `{flag.flag}` | {flag.description or '-'} |")
+            lines.append("")
+
+        spk = ta.service_process_kill
+        if spk is not None and (spk.kill_list or spk.white_list or spk.mechanism):
+            lines.append("### Services & Processes Terminated")
+            lines.append("")
+            if spk.mechanism:
+                lines.append(f"**Mechanism**: {spk.mechanism}")
+                lines.append("")
+            if spk.kill_list:
+                lines.append("**Kill list**: " + ", ".join(f"`{x}`" for x in spk.kill_list[:30]))
+                lines.append("")
+            if spk.white_list:
+                # The exclusions are often the more identifying half: a list
+                # that spares the attacker's own tooling names it.
+                lines.append("**Spared**: " + ", ".join(f"`{x}`" for x in spk.white_list[:30]))
+                lines.append("")
+
+        if ta.shadow_copy_destruction:
+            lines.append("### Shadow Copy Destruction")
+            lines.append("")
+            for cmd in ta.shadow_copy_destruction[:10]:
+                lines.append(f"- `{cmd}`")
+            lines.append("")
+
+        enc = ta.encryption_scheme
+        if enc is not None:
+            rows = [
+                ("Cipher", enc.cipher),
+                ("Mode", enc.mode),
+                ("Library", enc.library),
+                ("Key source", enc.key_source),
+                ("Key management", enc.key_management),
+                ("IV", enc.iv),
+                ("File marker", enc.file_marker),
+                ("Extension", enc.extension),
+                ("Partial-encryption threshold", enc.partial_threshold),
+                (
+                    "Per-file key",
+                    None if enc.per_file_key is None else ("yes" if enc.per_file_key else "no"),
+                ),
+            ]
+            present = [(label, value) for label, value in rows if value]
+            if present:
+                lines.append("### Encryption Scheme")
+                lines.append("")
+                lines.append("| Property | Value |")
+                lines.append("|---|---|")
+                for label, value in present:
+                    lines.append(f"| {label} | {value} |")
+                lines.append("")
+
+        note = ta.ransom_note
+        if note is not None and (note.filename or note.verbatim_content or note.sections):
+            lines.append("### Ransom Note")
+            lines.append("")
+            if note.filename:
+                lines.append(f"**Filename**: `{note.filename}`")
+                lines.append("")
+            if note.company_id_hash:
+                lines.append(f"**Victim/company ID**: `{note.company_id_hash}`")
+                lines.append("")
+            if note.verbatim_content:
+                # Fenced, not inlined: note text routinely contains markdown
+                # characters and onion URLs, and the verbatim wording is what
+                # links one incident to another.
+                lines.append("```text")
+                lines.append(note.verbatim_content.strip()[:4000])
+                lines.append("```")
+                lines.append("")
+            elif note.sections:
+                for part in note.sections[:10]:
+                    lines.append(f"- {part}")
+                lines.append("")
+
+        body = "\n".join(lines).rstrip()
+        # Heading alone means the composer produced nothing usable.
+        return "" if body == "## Technical Analysis" else body
+
+    def _section_c2_channels(self, report: MalwareReport) -> str:
+        if not report.c2_channels:
+            return ""
+        lines = ["## C2 Channels", ""]
+        lines.append("| Channel | Protocol | Encryption | Packet layout | Beacon format |")
+        lines.append("|---|---|---|---|---|")
+        for ch in report.c2_channels[:10]:
+            lines.append(
+                f"| {ch.name} | {ch.protocol or '-'} | {ch.encryption or '-'} "
+                f"| {ch.packet_layout or '-'} | {ch.beacon_format or '-'} |"
+            )
+        return "\n".join(lines)
+
+    def _section_conclusion(self, report: MalwareReport) -> str:
+        concl = report.conclusion
+        if concl is None or not concl.text:
+            return ""
+        lines = ["## Conclusion", ""]
+        if concl.sophistication_rating:
+            lines.append(f"**Sophistication**: {concl.sophistication_rating}")
+            lines.append("")
+        lines.append(concl.text.strip())
+        return "\n".join(lines)
 
     def _section_references(self, report: MalwareReport) -> str:
         lines = ["## References", ""]
