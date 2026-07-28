@@ -193,6 +193,12 @@ class StaticAnalysis(BaseModel):
     # T1027 over-claim cap keys on "is this really packed", and a bare
     # non-None string cannot answer that.
     packer_matches: list[dict[str, Any]] = Field(default_factory=list)
+    # The linker's debug PDB path, e.g.
+    # ``E:\build-dir\CODRU-CL23M-SOURCES\bin\Win32\Release\BdUserHost.pdb``.
+    # One field carrying the build machine's layout, the internal project name,
+    # the architecture and the build configuration — and the internal name is
+    # often the family's own before the industry picked one.
+    pdb_path: str | None = None
     obfuscation_indicators: list[str] = Field(default_factory=list)
     # {behaviour_category: count} over the resolved import table. Cheap to carry
     # and it saves every consumer — prompt, report, family RAG — from

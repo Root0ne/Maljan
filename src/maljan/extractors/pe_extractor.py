@@ -290,6 +290,7 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
         obfuscation_indicators=obfuscation,
         api_capabilities=dict(capabilities),
         packer_matches=parsed.packer_matches,
+        pdb_path=parsed.pdb_path,
     )
 
 
@@ -315,6 +316,7 @@ class _PEParse:
     packer_hint: str | None = None
     obfuscation: list[str] = field(default_factory=list)
     packer_matches: list[dict[str, Any]] = field(default_factory=list)
+    pdb_path: str | None = None
 
 
 def _parse_pe(blob: bytes) -> _PEParse:
@@ -332,6 +334,8 @@ def _parse_pe(blob: bytes) -> _PEParse:
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"],
+                # DEBUG carries the PDB path — see _pe_pdb_path.
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
             ]
         )
     except Exception as exc:  # noqa: BLE001
@@ -357,6 +361,7 @@ def _parse_pe(blob: bytes) -> _PEParse:
         packer_hint=packer_hint,
         obfuscation=_pe_obfuscation_indicators(sections, imports),
         packer_matches=packer_matches,
+        pdb_path=_pe_pdb_path(pe),
     )
 
 
@@ -507,6 +512,36 @@ def _pe_resources(pe: Any) -> list[dict[str, Any]]:
                         }
                     )
     return out
+
+
+def _pe_pdb_path(pe: Any) -> str | None:
+    """The debug PDB path the linker left in the binary.
+
+    One of the highest-value single strings in a PE and Maljan was not reading
+    it. A real example from the audited sample:
+
+        E:\\xml-data\\build-dir\\CODRU-CL23M-SOURCES\\bin\\Win32\\Release\\BdUserHost.pdb
+
+    That is the build machine's drive layout, the internal project name, the
+    target architecture and the build configuration — from one field. Malware
+    authors leave it in constantly, and the internal name is frequently the
+    family's own name before anyone in the industry chose one for it.
+
+    Read from the CodeView (RSDS/NB10) debug entry. Absent in stripped or
+    release-hardened binaries, which is itself mildly informative.
+    """
+    for entry in getattr(pe, "DIRECTORY_ENTRY_DEBUG", []) or []:
+        data = getattr(entry, "entry", None)
+        raw = getattr(data, "PdbFileName", None)
+        if not raw:
+            continue
+        try:
+            decoded = bytes(raw).decode("utf-8", errors="replace").strip("\x00").strip()
+        except Exception:  # noqa: BLE001
+            continue
+        if decoded:
+            return decoded
+    return None
 
 
 def _packer_signatures() -> list[dict[str, Any]]:

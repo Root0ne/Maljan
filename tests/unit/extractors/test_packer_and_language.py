@@ -120,3 +120,61 @@ class TestPlatformDisambiguation:
 
     def test_no_hint_is_still_unknown(self) -> None:
         assert _infer_platform("unknown", None, None, None) == "unknown"
+
+
+class TestThePdbPathIsExtracted:
+    """The single highest-value string in a PE, and Maljan was not reading it.
+
+    Found by diffing Qu1cksc0pe's report for the same sample, which contained
+    ``E:\\xml-data\\build-dir\\CODRU-CL23M-SOURCES\\bin\\Win32\\Release\\BdUserHost.pdb``
+    where Maljan's had nothing. One field carrying the build machine's drive
+    layout, the internal project name, the target architecture and the build
+    configuration — and the internal name is frequently the family's own, before
+    anyone in the industry chose one for it.
+
+    Required adding IMAGE_DIRECTORY_ENTRY_DEBUG to the directories `_parse_pe`
+    asks pefile for; it previously requested only IMPORT, EXPORT and RESOURCE,
+    so the data was never parsed at all.
+    """
+
+    def test_the_debug_directory_is_requested(self) -> None:
+        import inspect
+
+        from maljan.extractors import pe_extractor
+
+        source = inspect.getsource(pe_extractor._parse_pe)
+        assert "IMAGE_DIRECTORY_ENTRY_DEBUG" in source, (
+            "without this directory the PDB path is never parsed"
+        )
+
+    def test_a_codeview_entry_is_read(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.extractors.pe_extractor import _pe_pdb_path
+
+        pe = SimpleNamespace(
+            DIRECTORY_ENTRY_DEBUG=[
+                SimpleNamespace(
+                    entry=SimpleNamespace(PdbFileName=b"E:\\build\\Release\\Payload.pdb\x00")
+                )
+            ]
+        )
+        assert _pe_pdb_path(pe) == "E:\\build\\Release\\Payload.pdb"
+
+    def test_a_stripped_binary_yields_none(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.extractors.pe_extractor import _pe_pdb_path
+
+        assert _pe_pdb_path(SimpleNamespace()) is None
+        assert _pe_pdb_path(SimpleNamespace(DIRECTORY_ENTRY_DEBUG=[])) is None
+
+    def test_a_malformed_entry_does_not_raise(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.extractors.pe_extractor import _pe_pdb_path
+
+        pe = SimpleNamespace(
+            DIRECTORY_ENTRY_DEBUG=[SimpleNamespace(entry=SimpleNamespace(PdbFileName=None))]
+        )
+        assert _pe_pdb_path(pe) is None

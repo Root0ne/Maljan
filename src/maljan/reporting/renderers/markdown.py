@@ -200,6 +200,9 @@ class MarkdownRenderer:
         if static.obfuscation_indicators:
             lines.append("**Obfuscation indicators**: " + ", ".join(static.obfuscation_indicators))
             lines.append("")
+        if static.pdb_path:
+            lines.append(f"**Debug PDB path**: `{static.pdb_path}`")
+            lines.append("")
 
         if static.api_capabilities:
             ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])

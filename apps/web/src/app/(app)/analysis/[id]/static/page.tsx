@@ -208,6 +208,12 @@ export default function StaticTab() {
               </div>
             )
           )}
+          {staticData.pdb_path && (
+            <div className="text-sm text-text-primary mt-1">
+              <span className="text-text-muted">Debug PDB:</span>{" "}
+              <span className="font-mono text-xs break-all">{staticData.pdb_path}</span>
+            </div>
+          )}
           {capabilityProfile.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {capabilityProfile.map(([cat, count]) => (
