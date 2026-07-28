@@ -229,6 +229,36 @@ export const MALWARE_REPORT: MalwareReport = {
         markers: ["Pastebin_URL", "AsyncRAT_Config"],
       },
     ],
+    // The other three evidence sources, dead in the UI for the same reason.
+    function_hash_matches: [
+      {
+        family: "AgentTesla",
+        confidence: 0.83,
+        shared_functions: 12,
+        example_functions: ["sub_401A20", "sub_4032F0"],
+        match_method: "normalized_opcode_hash",
+        source: "ltm",
+      },
+    ],
+    family_rag_candidates: [
+      {
+        family: "FormBook",
+        similarity: 0.612,
+        malware_category: "stealer",
+        sample_count: 34,
+        match_method: "static_feature_rag",
+        source: "fingerprint_catalog",
+      },
+    ],
+    attck_case_candidates: [
+      {
+        technique_id: "T1055",
+        support: 7,
+        similarity: 0.548,
+        match_method: "case_rag",
+        source: "attck_case_corpus",
+      },
+    ],
   },
   executive_summary:
     "The sample injects into a running process, establishes Run-key persistence and beacons to a newly registered domain over HTTPS.",

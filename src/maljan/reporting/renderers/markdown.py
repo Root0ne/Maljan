@@ -539,6 +539,56 @@ class MarkdownRenderer:
                     f"| {match.get('kind', '-')} "
                     f"| {float(match.get('confidence') or 0.0):.2f} | {markers} |"
                 )
+        # The other three evidence sources behind the same name. All three were
+        # produced by the judge, carried through AnalysisState and stored on the
+        # model, and printed by no renderer — so the report showed a family and
+        # withheld every deterministic reason for it. Function-hash matches are
+        # the strongest of the four: an exact normalized-opcode hash shared with
+        # a previously analysed sample is code reuse, not resemblance.
+        if attr.function_hash_matches:
+            lines.append("")
+            lines.append("**Function-hash matches (shared code with prior samples):**")
+            lines.append("")
+            lines.append("| Family | Confidence | Shared functions | Example functions |")
+            lines.append("|---|---|---|---|")
+            for match in attr.function_hash_matches[:10]:
+                examples = (
+                    ", ".join(f"`{f}`" for f in (match.get("example_functions") or [])[:3]) or "-"
+                )
+                lines.append(
+                    f"| {match.get('family', '?')} "
+                    f"| {float(match.get('confidence') or 0.0):.2f} "
+                    f"| {match.get('shared_functions', '-')} | {examples} |"
+                )
+        if attr.family_rag_candidates:
+            lines.append("")
+            lines.append("**Family-feature RAG candidates (static-feature similarity):**")
+            lines.append("")
+            lines.append("| Family | Similarity | Category | Samples in catalog |")
+            lines.append("|---|---|---|---|")
+            for cand in attr.family_rag_candidates[:10]:
+                lines.append(
+                    f"| {cand.get('family', '?')} "
+                    f"| {float(cand.get('similarity') or 0.0):.3f} "
+                    f"| {cand.get('malware_category', '-')} "
+                    f"| {cand.get('sample_count', '-')} |"
+                )
+        if attr.attck_case_candidates:
+            lines.append("")
+            lines.append("**ATT&CK case priors (techniques recurring in similar prior cases):**")
+            lines.append("")
+            lines.append(
+                "_Advisory only — these are priors from past runs, not evidence from this sample._"
+            )
+            lines.append("")
+            lines.append("| Technique | Support | Similarity |")
+            lines.append("|---|---|---|")
+            for cand in attr.attck_case_candidates[:10]:
+                lines.append(
+                    f"| {cand.get('technique_id', '?')} "
+                    f"| {cand.get('support', '-')} "
+                    f"| {float(cand.get('similarity') or 0.0):.3f} |"
+                )
         if attr.similar_samples:
             lines.append("")
             lines.append("**Similar samples (LTM nearest neighbours):**")

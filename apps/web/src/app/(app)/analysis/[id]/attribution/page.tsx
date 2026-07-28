@@ -58,8 +58,11 @@ export default function AttributionTab() {
   const familyConfidencePct = Math.round(attribution.family_confidence * 100);
   const malwareCategory = report?.malware_report?.malware_category;
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
-  // Absent on every report written before 2026-07-28, hence the fallback.
+  // Absent on every report written before 2026-07-28, hence the fallbacks.
   const toolArtifacts = attribution.tool_artifact_matches ?? [];
+  const hashMatches = attribution.function_hash_matches ?? [];
+  const ragCandidates = attribution.family_rag_candidates ?? [];
+  const casePriors = attribution.attck_case_candidates ?? [];
   // Wave 4 (D11 UI completion): when the family came back ungrounded the
   // builder already zeroed the confidence. Render the name as muted +
   // strikethrough + "(unverified)" suffix instead of bold so it's clearly
@@ -123,6 +126,56 @@ export default function AttributionTab() {
           </div>
         )}
       </div>
+
+      {hashMatches.length > 0 && (
+        <EvidenceTable
+          title={`Function-Hash Matches (${hashMatches.length})`}
+          note="Exact normalized-opcode hashes shared with previously analysed samples. The strongest of the four evidence sources here: this is code reuse, not resemblance."
+          headers={["Family", "Conf.", "Shared fns", "Example functions"]}
+          rows={hashMatches.map((m, i) => ({
+            key: `${m.family}-${i}`,
+            cells: [
+              <span className="text-text-primary">{m.family}</span>,
+              <span className="font-mono">{fmt(m.confidence, 2)}</span>,
+              <span className="font-mono">{m.shared_functions ?? "-"}</span>,
+              <Markers items={(m.example_functions ?? []).slice(0, 4)} />,
+            ],
+          }))}
+        />
+      )}
+
+      {ragCandidates.length > 0 && (
+        <EvidenceTable
+          title={`Family-Feature RAG Candidates (${ragCandidates.length})`}
+          note="Families retrieved by static-feature similarity to a reference fingerprint catalog. Retrieval, not proof — shown because the verdict LLM weighed it."
+          headers={["Family", "Similarity", "Category", "Samples"]}
+          rows={ragCandidates.map((c, i) => ({
+            key: `${c.family}-${i}`,
+            cells: [
+              <span className="text-text-primary">{c.family}</span>,
+              <span className="font-mono">{fmt(c.similarity, 3)}</span>,
+              <span>{c.malware_category || "-"}</span>,
+              <span className="font-mono">{c.sample_count ?? "-"}</span>,
+            ],
+          }))}
+        />
+      )}
+
+      {casePriors.length > 0 && (
+        <EvidenceTable
+          title={`ATT&CK Case Priors (${casePriors.length})`}
+          note="Techniques that recur in behaviourally-similar prior cases from Maljan's own memory. Advisory only — these describe past runs, not this sample."
+          headers={["Technique", "Support", "Similarity"]}
+          rows={casePriors.map((c, i) => ({
+            key: `${c.technique_id}-${i}`,
+            cells: [
+              <span className="font-mono text-status-blue">{c.technique_id}</span>,
+              <span className="font-mono">{c.support ?? "-"}</span>,
+              <span className="font-mono">{fmt(c.similarity, 3)}</span>,
+            ],
+          }))}
+        />
+      )}
 
       {toolArtifacts.length > 0 && (
         <div className="bg-bg-surface border border-border rounded">
@@ -216,6 +269,80 @@ export default function AttributionTab() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function fmt(value: number | null | undefined, digits: number): string {
+  return typeof value === "number" ? value.toFixed(digits) : "-";
+}
+
+function Markers({ items }: { items: string[] }) {
+  if (items.length === 0) return <span className="text-text-muted">-</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((item) => (
+        <code
+          key={item}
+          className="px-1.5 py-0.5 rounded bg-bg-active font-mono text-[11px] text-status-blue"
+        >
+          {item}
+        </code>
+      ))}
+    </div>
+  );
+}
+
+/** Three of the four attribution evidence sources render the same shape, so
+ *  they share one component rather than three near-identical tables. The
+ *  offensive-tool table stays hand-rolled: its Markers column and its
+ *  sandbox-independence note make it the odd one out. */
+function EvidenceTable({
+  title,
+  note,
+  headers,
+  rows,
+}: {
+  title: string;
+  note: string;
+  headers: string[];
+  rows: { key: string; cells: React.ReactNode[] }[];
+}) {
+  return (
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          {title}
+        </h2>
+        <p className="mt-1 text-[11px] text-text-muted">{note}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-text-muted border-b border-border-light">
+              {headers.map((h) => (
+                <th key={h} className="px-4 py-2 font-medium">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-light">
+            {rows.map((row) => (
+              <tr key={row.key}>
+                {row.cells.map((cell, i) => (
+                  <td
+                    key={`${row.key}-${headers[i]}`}
+                    className="px-4 py-2 text-text-secondary"
+                  >
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

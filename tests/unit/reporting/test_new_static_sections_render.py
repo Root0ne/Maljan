@@ -218,3 +218,60 @@ class TestASectionCanBeFoundInTheFile:
         )
         assert ".rdata" in md
         assert "Raw offset" in md
+
+
+class TestTheFamilyNameShowsItsWorking:
+    """``tool_artifact_matches`` had three siblings on ``FamilyAttribution``
+    and all three were dead in the same way: produced by the judge, carried
+    through ``AnalysisState``, stored on the model, printed by no renderer.
+
+    The effect was a report that named a family and withheld every
+    deterministic reason for it — the exact position the grounding flag exists
+    to warn about, reached silently.
+    """
+
+    def test_function_hash_matches_are_rendered(self) -> None:
+        md = _render(
+            None,
+            family="AgentTesla",
+            family_confidence=0.8,
+            function_hash_matches=[
+                {
+                    "family": "AgentTesla",
+                    "confidence": 0.83,
+                    "shared_functions": 12,
+                    "example_functions": ["sub_401A20"],
+                }
+            ],
+        )
+        assert "Function-hash matches" in md
+        assert "sub_401A20" in md, "an unnamed match cannot be checked"
+        assert "0.83" in md
+
+    def test_family_rag_candidates_are_rendered(self) -> None:
+        md = _render(
+            None,
+            family_rag_candidates=[
+                {"family": "FormBook", "similarity": 0.612, "malware_category": "stealer"}
+            ],
+        )
+        assert "Family-feature RAG candidates" in md
+        assert "FormBook" in md
+        assert "0.612" in md
+
+    def test_attck_case_priors_are_labelled_advisory(self) -> None:
+        """They describe prior runs, not this sample. Rendering them beside
+        real evidence without saying so would be the more harmful bug."""
+        md = _render(
+            None,
+            attck_case_candidates=[{"technique_id": "T1055", "support": 7, "similarity": 0.548}],
+        )
+        assert "ATT&CK case priors" in md
+        assert "T1055" in md
+        assert "Advisory only" in md
+
+    def test_nothing_is_printed_when_there_is_no_evidence(self) -> None:
+        md = _render(None)
+        assert "Function-hash matches" not in md
+        assert "Family-feature RAG candidates" not in md
+        assert "ATT&CK case priors" not in md

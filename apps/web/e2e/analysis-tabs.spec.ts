@@ -124,6 +124,31 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("AsyncRAT_Config")).toBeVisible();
   });
 
+  test("/attribution shows all four evidence sources, not just the name", async ({
+    sessionPage: page,
+  }) => {
+    /* The byte markers were one of four sibling fields on FamilyAttribution;
+     * the other three were dead in exactly the same way. A family name with no
+     * visible derivation is the failure this guards against — the tab used to
+     * show a verdict and withhold every deterministic reason for it. */
+    await page.goto(`/analysis/${JOB_ID}/attribution`);
+
+    await expect(
+      page.getByRole("heading", { name: /Function-Hash Matches/i })
+    ).toBeVisible();
+    await expect(page.getByText("sub_401A20")).toBeVisible();
+
+    await expect(
+      page.getByRole("heading", { name: /Family-Feature RAG Candidates/i })
+    ).toBeVisible();
+    await expect(page.getByText("FormBook")).toBeVisible();
+
+    await expect(
+      page.getByRole("heading", { name: /ATT&CK Case Priors/i })
+    ).toBeVisible();
+    await expect(page.getByText("T1055", { exact: true })).toBeVisible();
+  });
+
   test("/live renders the running view", async ({ sessionPage: page }) => {
     /* Not in the table above because it is the one tab that needs the opposite
      * job state: on a completed run it deliberately says there is nothing live
