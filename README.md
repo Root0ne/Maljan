@@ -207,6 +207,18 @@ JSON, so a reader can see *why* an API is classified the way it is:
 make prepare-api-db   # validates every ATT&CK ID before writing
 ```
 
+**Restart the worker after regenerating.** `data/` is bind-mounted, so the
+container sees the new file immediately — but each asset is cached per path in
+the loading process, and the arq worker is long-lived. It keeps serving the
+catalog it read on first use, and the run looks successful while classifying
+against stale data. Editing a data asset without
+
+```bash
+docker compose restart worker
+```
+
+is indistinguishable, in the report, from not having edited it at all.
+
 ## Development
 
 ```bash

@@ -58,6 +58,8 @@ export default function AttributionTab() {
   const familyConfidencePct = Math.round(attribution.family_confidence * 100);
   const malwareCategory = report?.malware_report?.malware_category;
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
+  // Absent on every report written before 2026-07-28, hence the fallback.
+  const toolArtifacts = attribution.tool_artifact_matches ?? [];
   // Wave 4 (D11 UI completion): when the family came back ungrounded the
   // builder already zeroed the confidence. Render the name as muted +
   // strikethrough + "(unverified)" suffix instead of bold so it's clearly
@@ -121,6 +123,67 @@ export default function AttributionTab() {
           </div>
         )}
       </div>
+
+      {toolArtifacts.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Offensive-Tool Artifacts ({toolArtifacts.length})
+            </h2>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Byte markers matched in the sample itself or in a carved payload.
+              Unlike every other family source, this one does not need a sandbox
+              — it is what names the family when CAPE is unreachable.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-text-muted border-b border-border-light">
+                  <th className="px-4 py-2 font-medium">Tool</th>
+                  <th className="px-4 py-2 font-medium">Family</th>
+                  <th className="px-4 py-2 font-medium">Kind</th>
+                  <th className="px-4 py-2 font-medium">Conf.</th>
+                  <th className="px-4 py-2 font-medium">Markers</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-light">
+                {toolArtifacts.map((m, i) => (
+                  <tr key={`${m.tool}-${i}`}>
+                    <td className="px-4 py-2 text-text-primary">{m.tool}</td>
+                    <td className="px-4 py-2 text-text-secondary">
+                      {m.family || "-"}
+                    </td>
+                    <td className="px-4 py-2 text-text-secondary">
+                      {m.kind || "-"}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-text-secondary">
+                      {typeof m.confidence === "number"
+                        ? m.confidence.toFixed(2)
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {(m.markers ?? []).slice(0, 6).map((marker) => (
+                          <code
+                            key={marker}
+                            className="px-1.5 py-0.5 rounded bg-bg-active font-mono text-[11px] text-status-blue"
+                          >
+                            {marker}
+                          </code>
+                        ))}
+                        {(m.markers ?? []).length === 0 && (
+                          <span className="text-text-muted">-</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
