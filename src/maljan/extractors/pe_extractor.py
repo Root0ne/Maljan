@@ -996,7 +996,14 @@ def _shannon_entropy(data: bytes) -> float:
 _URL_RE = re.compile(rb"https?://[A-Za-z0-9._\-/?=&%:#~+]+")
 _IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _REG_RE = re.compile(rb"HK(?:LM|CU|CR|U|CC)[\\\\][A-Za-z0-9_\-\\\\ ./]+")
-_PATH_RE = re.compile(rb"(?:[A-Za-z]:\\\\|/)[A-Za-z0-9_\-./\\\\ ]+")
+# NB the single backslashes. This pattern used to read ``[A-Za-z]:\\\\`` and
+# ``[...\\\\ ]``, which in a raw bytes literal is an escaped backslash *pair* —
+# so it only ever matched paths written with doubled separators, i.e. paths that
+# had already been JSON- or C-escaped. A plain ``C:\Users\victim\svchost.exe``,
+# which is how a path actually appears in a binary, matched nothing. On a
+# Windows-focused analyzer that meant filesystem IOCs were quietly missing from
+# every report unless the sample happened to embed escaped text.
+_PATH_RE = re.compile(rb"(?:[A-Za-z]:[\\/]|/)[A-Za-z0-9_\-./\\ ]+")
 _EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _DOMAIN_RE = re.compile(
     rb"(?<![A-Za-z0-9.])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9.])"
@@ -1115,7 +1122,9 @@ def _extract_string_iocs(blob: bytes) -> list[StringIOC]:
         for match in _REG_RE.findall(text.encode("ascii", errors="ignore")):
             _add("registry", match.decode("ascii", errors="ignore"))
         for match in _PATH_RE.findall(text.encode("ascii", errors="ignore")):
-            _add("path", match.decode("ascii", errors="ignore"))
+            candidate = match.decode("ascii", errors="ignore")
+            if _looks_like_path(candidate):
+                _add("path", candidate)
         for match in _EMAIL_RE.findall(text.encode("ascii", errors="ignore")):
             _add("email", match.decode("ascii", errors="ignore"))
         for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
@@ -1452,6 +1461,96 @@ _KNOWN_TLDS = frozenset(
 )
 
 
+def _looks_like_path(text: str) -> bool:
+    """Reject path *fragments*, which the regex produces in bulk.
+
+    Found by reading real output rather than by reasoning about it. A scan of
+    one sample returned ``/Users``, ``/rd_lee``, ``/.vscode``, ``/extensions``,
+    ``/plugin``, ``/const``, ``/errors`` — and ``/Vundo.gen``, ``/Ryuk.P``,
+    ``/Obfuse.VAL``, which are AV signature names lifted out of an embedded
+    definition database. All of them are what ``/[A-Za-z0-9_...]+`` matches when
+    it meets ordinary text containing a slash.
+
+    They were not merely ugly. ``path`` has a 20-slot quota, and filling it with
+    single-segment fragments is exactly the starvation the quotas were added to
+    prevent — one noisy kind crowding out the useful ones.
+
+    A path earns its slot by having structure: a Windows drive letter, or at
+    least two separators. ``/Users`` has neither; ``C:\\Users\\x`` and
+    ``/etc/cron.d/persistence`` each have one.
+
+    A file extension deliberately does *not* qualify a single-separator string.
+    That exemption was tried and admitted ``/Vundo.gen`` and ``/Obfuse.VAL`` —
+    AV signature names, which are ``/Word.ext`` shaped and were being reported
+    as filesystem IOCs. A genuinely interesting path essentially always has a
+    directory in it.
+    """
+    stripped = text.strip()
+    if len(stripped) < 6:
+        return False
+    # A slice of a URL is not a path. The regex happily starts matching in the
+    # middle of `https://host/x` and yields `s://host/x`, which was appearing in
+    # reports beside the URL it was carved out of — the same indicator twice,
+    # once mangled.
+    if "://" in stripped:
+        return False
+    # A drive letter is unambiguous.
+    if len(stripped) > 2 and stripped[1] == ":" and stripped[0].isalpha():
+        return True
+    return (stripped.count("/") + stripped.count("\\")) >= 2
+
+
+# Second-level labels that are code, not hostnames. `self.id` was reported as a
+# C2 domain: `.id` is Indonesia's ccTLD and `self` clears every structural check
+# there is. No rule about shape can separate `self.id` from `evil.id`, so the
+# only honest fix is a short list of the identifiers that actually collide.
+_CODE_IDENTIFIER_LABELS = frozenset(
+    {
+        "self",
+        "this",
+        "cls",
+        "obj",
+        "item",
+        "items",
+        "data",
+        "value",
+        "values",
+        "result",
+        "results",
+        "config",
+        "options",
+        "props",
+        "state",
+        "error",
+        "errors",
+        "args",
+        "kwargs",
+        "ctx",
+        "req",
+        "res",
+        "response",
+        "request",
+        "index",
+        "length",
+        "name",
+        "type",
+        "target",
+        "source",
+        "parent",
+        "child",
+        "node",
+        "root",
+        "next",
+        "prev",
+        "key",
+        "keys",
+        "attr",
+        "attrs",
+        "meta",
+    }
+)
+
+
 def _looks_like_domain(text: str) -> bool:
     """Filter out obvious non-domain matches (filenames, version strings)."""
     if text.startswith(".") or text.endswith("."):
@@ -1489,5 +1588,21 @@ def _looks_like_domain(text: str) -> bool:
     sld = labels[-2]
     if len(sld) < 2 or (len(sld) == 2 and sld not in _MULTIPART_TLD_SECOND_LEVELS):
         return False
+
+    # `self.id`, `data.io`, `result.co` — a code identifier followed by a short
+    # ccTLD. Only applied to two-label candidates: `self.example.com` is a
+    # perfectly ordinary hostname and must survive.
+    if len(labels) == 2 and sld in _CODE_IDENTIFIER_LABELS:
+        return False
+
+    # `MyApplication.app`, `DataContract.io` — a CamelCase identifier wearing a
+    # real TLD. Hostnames embedded in binaries are written lowercase; an
+    # internal capital is the mark of a type or assembly name. Checked on the
+    # original text because the comparison above is lowercased, and only for
+    # two-label candidates, so `cdn.MyCorp.com` is left alone.
+    if len(labels) == 2:
+        original_sld = text.split(".")[0]
+        if any(ch.isupper() for ch in original_sld[1:]):
+            return False
 
     return True

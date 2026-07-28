@@ -50,6 +50,40 @@ _VALID_TIERS = frozenset({"high", "medium", "informational"})
 _CONFIDENCE_CEILING = 0.65
 
 
+def _variants(name: str) -> tuple[str, ...]:
+    """``name`` plus its ANSI/wide sibling.
+
+    Win32 ships most string-taking APIs twice — ``GetSystemDirectoryA`` and
+    ``GetSystemDirectoryW`` — and an import table contains whichever one the
+    binary was compiled against. A curated table naturally ends up listing one
+    of each pair, so half the real imports miss.
+
+    Measured on a live sample: 13 of 136 uncategorised imports were nothing but
+    the other spelling of a name already in the catalog —
+    ``GetWindowsDirectoryW``, ``LookupAccountSidW``, ``RegGetValueW`` and so on.
+
+    Resolved here rather than by writing both spellings into the JSON. Doubling
+    the asset would double what a reviewer has to read and leave the next
+    contributor one forgotten suffix away from the same bug.
+    """
+    lowered = name.lower()
+    if lowered.endswith("w"):
+        return (lowered, lowered[:-1] + "a")
+    if lowered.endswith("a"):
+        return (lowered, lowered[:-1] + "w")
+    return (lowered,)
+
+
+def _canonical(name: str) -> str:
+    """Fold an API name to one key shared by its ANSI and wide spellings.
+
+    ``GetUserNameA`` and ``GetUserNameW`` are one capability, and counting them
+    as two is how a single import talks its way past ``min_apis``.
+    """
+    lowered = name.lower()
+    return lowered[:-1] if lowered.endswith(("a", "w")) else lowered
+
+
 @dataclass(frozen=True)
 class ApiBehaviourDB:
     """API name → (behaviour category, is_suspicious)."""
@@ -61,7 +95,10 @@ class ApiBehaviourDB:
     def classify(self, function: str) -> tuple[str | None, bool]:
         hit = self.by_name.get(function)
         if hit is None:
-            hit = self.by_name_lower.get(function.lower())
+            for candidate in _variants(function):
+                hit = self.by_name_lower.get(candidate)
+                if hit is not None:
+                    break
         if hit is None:
             return None, False
         return hit
@@ -104,16 +141,34 @@ class ApiAttckMap:
     relevant_apis_lower: frozenset[str]
 
     def match(self, imported: set[str]) -> list[tuple[TechniqueRule, list[str]]]:
-        """Return ``[(rule, matched_apis)]`` for every rule that clears ``min_apis``.
+        """Return ``[(rule, matched_imports)]`` for every rule clearing ``min_apis``.
 
-        ``imported`` is matched case-insensitively; the returned names are the
-        canonical spellings from the table so evidence strings stay consistent
-        regardless of how the import table spelled them.
+        Counts the *imports the binary actually has*, in the spelling it has
+        them, rather than the rule entries they touched. The distinction is not
+        cosmetic: a rule listing both ``GetUserNameA`` and ``GetUserNameW`` is
+        described by a single import under ANSI/wide normalisation, and counting
+        rule entries let one ``GetUserNameA`` clear ``min_apis=2`` on its own —
+        precisely the "coincidence, not capability" promotion the threshold
+        exists to stop. Caught by the test that asserts a lone GetUserNameA
+        maps to nothing.
+
+        Reporting the imported spelling also keeps the evidence honest: the
+        report cites what is in the binary, not what the catalog happens to
+        call it.
         """
-        lowered = {name.lower() for name in imported}
+        # canonical (A/W-folded) name -> the spelling the binary actually uses
+        by_canonical: dict[str, str] = {}
+        for name in imported:
+            by_canonical.setdefault(_canonical(name), name)
+
         out: list[tuple[TechniqueRule, list[str]]] = []
         for rule in self.techniques:
-            matched = sorted(api for api in rule.apis if api.lower() in lowered)
+            rule_canonicals = {_canonical(api) for api in rule.apis}
+            matched = sorted(
+                original
+                for canonical, original in by_canonical.items()
+                if canonical in rule_canonicals
+            )
             if len(matched) >= rule.min_apis:
                 out.append((rule, matched))
         return out

@@ -148,3 +148,123 @@ class TestTheExistingKindsAreUnchanged:
 
     def test_an_empty_blob_is_handled(self) -> None:
         assert _extract_string_iocs(b"") == []
+
+
+class TestPathFragmentsAreNotPaths:
+    """Found by reading real output, not by reasoning about it.
+
+    One sample returned ``/Users``, ``/rd_lee``, ``/.vscode``, ``/extensions``,
+    ``/plugin``, ``/const``, ``/errors`` as ``path`` IOCs — plus ``/Vundo.gen``,
+    ``/Ryuk.P`` and ``/Obfuse.VAL``, which are AV signature names lifted out of
+    an embedded definition database. All of them are what ``/[A-Za-z0-9_...]+``
+    matches when it meets ordinary text containing a slash.
+
+    They were not merely ugly: ``path`` has a 20-slot quota, so the fragments
+    crowded out real paths — the starvation the quotas were introduced to stop,
+    reappearing inside a single kind.
+    """
+
+    def test_a_single_segment_is_not_a_path(self) -> None:
+        blob = b"".join(_pad(p) for p in [b"/Users", b"/extensions", b"/const", b"/errors"])
+        assert not _kinds(blob).get("path")
+
+    def test_an_av_signature_name_is_not_a_path(self) -> None:
+        blob = _pad(b"/Vundo.gen") + _pad(b"/Ryuk.P") + _pad(b"/Obfuse.VAL")
+        assert not _kinds(blob).get("path")
+
+    def test_a_windows_path_survives(self) -> None:
+        blob = _pad(rb"C:\Users\victim\AppData\Roaming\svchost.exe")
+        assert _kinds(blob).get("path")
+
+    def test_a_posix_path_survives(self) -> None:
+        assert _kinds(_pad(b"/etc/cron.d/persistence")).get("path")
+
+    def test_one_separator_plus_an_extension_does_not_qualify(self) -> None:
+        """The exemption that was tried and reverted: it readmitted every AV
+        signature name, which is exactly ``/Word.ext`` shaped."""
+        assert not _kinds(_pad(b"/payload.dll")).get("path")
+        assert _kinds(_pad(b"/tmp/payload.dll")).get("path")
+
+    def test_a_real_single_backslash_windows_path_is_extracted(self) -> None:
+        """``_PATH_RE`` required *doubled* backslashes, so a plain
+        ``C:\\Users\\...`` — how a path actually appears in a binary — matched
+        nothing at all. Windows filesystem IOCs were missing from every report
+        unless the sample happened to embed escaped text."""
+        found = _kinds(_pad(rb"C:\Users\victim\AppData\Roaming\svchost.exe")).get("path", [])
+        assert found, "single-backslash Windows paths must be extracted"
+        assert "svchost.exe" in found[0]
+
+
+class TestCodeIdentifiersAreNotDomains:
+    """``self.id`` was reported as a C2 domain.
+
+    ``.id`` is Indonesia's ccTLD and ``self`` clears every structural check
+    there is — length, label count, TLD validity, casing. No rule about *shape*
+    separates ``self.id`` from ``evil.id``, so the honest fix is a short list of
+    the identifiers that actually collide, applied only to two-label candidates.
+    """
+
+    def test_self_dot_id_is_not_a_domain(self) -> None:
+        assert not _kinds(_pad(b"self.id")).get("domain")
+
+    def test_other_common_identifiers(self) -> None:
+        blob = b"".join(_pad(s) for s in [b"result.io", b"config.co", b"data.me"])
+        assert not _kinds(blob).get("domain")
+
+    def test_a_three_label_host_starting_with_one_survives(self) -> None:
+        """`self.example.com` is an ordinary hostname."""
+        assert "self.example.com" in _kinds(_pad(b"self.example.com")).get("domain", [])
+
+    def test_a_real_short_cctld_domain_survives(self) -> None:
+        assert "evil-panel.id" in _kinds(_pad(b"evil-panel.id")).get("domain", [])
+
+
+class TestTheReAnalysedSample:
+    """Locked in from re-running a sample that had already been analysed.
+
+    Its stored report listed 13 ``interesting_strings``. Every one was noise:
+    ``/requestedPrivileges``, ``/security``, ``/trustInfo``, ``/assembly`` — XML
+    manifest element names — and nine .NET namespaces (``System.Net.Http``,
+    ``System.Reflection``, …) reported as **domains**.
+
+    What the report did *not* contain was the sample's actual staging URL, a
+    Google Drive download link. The binary is .NET, so its strings are wide, and
+    the ASCII-only scan could not see it. Thirteen indicators, none real, and
+    the one that mattered was missing.
+    """
+
+    def test_xml_manifest_elements_are_not_paths(self) -> None:
+        blob = b"".join(
+            _pad(p) for p in [b"/requestedPrivileges", b"/security", b"/trustInfo", b"/assembly"]
+        )
+        assert not _kinds(blob).get("path")
+
+    def test_dotnet_namespaces_are_not_domains(self) -> None:
+        blob = b"".join(
+            _pad(n)
+            for n in [
+                b"System.Net.Http",
+                b"System.Threading.Tasks",
+                b"System.Reflection",
+                b"System.Runtime.InteropServices",
+            ]
+        )
+        assert not _kinds(blob).get("domain")
+
+    def test_an_assembly_name_is_not_a_domain(self) -> None:
+        """`MyApplication.app` — CamelCase wearing a real TLD."""
+        assert not _kinds(_pad(b"MyApplication.app")).get("domain")
+
+    def test_the_wide_staging_url_is_found(self) -> None:
+        """The indicator the old report missed entirely."""
+        url = "https://drive.google.com/uc?export=download&id=1VDmK_scFxGROc"
+        blob = b"\x00\x00" + url.encode("utf-16-le") + b"\x00\x00"
+        found = _kinds(blob)
+        assert url in found.get("url", [])
+        assert "drive.google.com" in found.get("domain", [])
+
+    def test_a_url_slice_is_not_also_reported_as_a_path(self) -> None:
+        """`s://drive.google.com/uc` appeared beside the URL it was carved from
+        — the same indicator twice, once mangled."""
+        blob = _pad(b"https://drive.google.com/uc?export=download")
+        assert not _kinds(blob).get("path")

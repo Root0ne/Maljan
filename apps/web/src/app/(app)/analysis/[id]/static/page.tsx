@@ -41,6 +41,24 @@ export default function StaticTab() {
       : staticData.imports;
   }, [staticData, showSuspiciousOnly]);
 
+  const carvedPayloads = useMemo(
+    () => (staticData?.embedded_resources ?? []).filter((r) => r.carved),
+    [staticData],
+  );
+  const packerMatches = useMemo(() => staticData?.packer_matches ?? [], [staticData]);
+  const techniqueHits = useMemo(
+    () =>
+      [...(staticData?.api_technique_hits ?? [])].sort(
+        (a, b) => (b.confidence ?? 0) - (a.confidence ?? 0),
+      ),
+    [staticData],
+  );
+  const capabilityProfile = useMemo(
+    () =>
+      Object.entries(staticData?.api_capabilities ?? {}).sort((a, b) => b[1] - a[1]),
+    [staticData],
+  );
+
   const filteredStrings: StringIOC[] = useMemo(() => {
     if (!staticData) return [];
     return stringKind === "all"
@@ -63,14 +81,143 @@ export default function StaticTab() {
 
   return (
     <div className="space-y-4">
-      {(staticData.packer_hint || staticData.obfuscation_indicators.length > 0) && (
+      {/* Carved payloads lead the page. A nested executable inside a dropper
+        * is the actual malware, and it was invisible here — `embedded_resources`
+        * was in the type and rendered nowhere. */}
+      {carvedPayloads.length > 0 && (
+        <div className="bg-bg-surface border border-status-red/40 rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-status-red uppercase tracking-wider">
+              Carved payloads ({carvedPayloads.length})
+            </h2>
+            <p className="text-[11px] text-text-muted mt-1">
+              Executables found inside the sample — appended past the last section, or
+              embedded in a resource. Scanned by the signature layer separately.
+            </p>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Type</Th>
+                <Th>Location</Th>
+                <Th>Size</Th>
+                <Th>Entropy</Th>
+                <Th>SHA-256</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {carvedPayloads.map((p, i) => (
+                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                  <td className="px-4 py-2 text-xs font-mono text-status-red">{p.type ?? "-"}</td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {p.id ?? "-"}
+                    {p.source && <span className="text-text-muted"> ({p.source})</span>}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {typeof p.size === "number" ? formatBytes(p.size) : "-"}
+                  </td>
+                  <td
+                    className={`px-4 py-2 text-xs font-mono ${
+                      typeof p.entropy === "number" ? entropyClass(p.entropy) : "text-text-muted"
+                    }`}
+                  >
+                    {typeof p.entropy === "number" ? p.entropy.toFixed(2) : "-"}
+                  </td>
+                  <td
+                    className="px-4 py-2 text-xs font-mono text-text-muted truncate max-w-[16rem]"
+                    title={p.sha256 ?? ""}
+                  >
+                    {p.sha256 ? `${p.sha256.slice(0, 24)}…` : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {techniqueHits.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              ATT&amp;CK from imports ({techniqueHits.length})
+            </h2>
+            <p className="text-[11px] text-text-muted mt-1">
+              Derived from the import table alone — no sandbox, no model. This is the
+              audit trail behind the capability matrix.
+            </p>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Technique</Th>
+                <Th>Name</Th>
+                <Th>Confidence</Th>
+                <Th>Imports</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {techniqueHits.map((h, i) => (
+                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                  <td className="px-4 py-2 text-xs font-mono text-accent">
+                    {h.technique_id ?? "-"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-primary">{h.name ?? "-"}</td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {typeof h.confidence === "number" ? h.confidence.toFixed(2) : "-"}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-muted">
+                    {(h.matched_apis ?? []).slice(0, 4).join(", ")}
+                    {(h.matched_apis ?? []).length > 4 &&
+                      ` +${(h.matched_apis ?? []).length - 4}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(staticData.packer_hint ||
+        staticData.obfuscation_indicators.length > 0 ||
+        packerMatches.length > 0 ||
+        capabilityProfile.length > 0) && (
         <div className="bg-bg-surface border border-border rounded p-4">
           <div className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
             Packer / Obfuscation
           </div>
-          {staticData.packer_hint && (
-            <div className="text-sm text-text-primary mb-1">
-              <span className="text-text-muted">Packer hint:</span> {staticData.packer_hint}
+          {/* Ranked matches beat the bare hint: a reader needs to know whether
+            * the detector saw a section name or just a string. */}
+          {packerMatches.length > 0 ? (
+            <div className="space-y-1 mb-2">
+              {packerMatches.map((pm, i) => (
+                <div key={i} className="text-sm text-text-primary">
+                  {pm.name}
+                  {pm.kind && <span className="text-text-muted"> ({pm.kind})</span>}
+                  <span className="text-text-muted text-xs ml-2 font-mono">
+                    {typeof pm.confidence === "number" ? pm.confidence.toFixed(2) : "-"}
+                    {pm.method ? ` · ${pm.method}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            staticData.packer_hint && (
+              <div className="text-sm text-text-primary mb-1">
+                <span className="text-text-muted">Packer hint:</span> {staticData.packer_hint}
+              </div>
+            )
+          )}
+          {capabilityProfile.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {capabilityProfile.map(([cat, count]) => (
+                <span
+                  key={cat}
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
+                >
+                  {cat} ×{count}
+                </span>
+              ))}
             </div>
           )}
           {staticData.obfuscation_indicators.length > 0 && (

@@ -181,11 +181,53 @@ class MarkdownRenderer:
             lines.append("_No static analysis available (sample bytes unreachable)._")
             return "\n".join(lines)
 
-        if static.packer_hint:
+        if static.packer_matches:
+            lines.append("**Packer / protector**:")
+            lines.append("")
+            lines.append("| Name | Kind | Confidence | Evidence |")
+            lines.append("|---|---|---|---|")
+            for pm in static.packer_matches[:6]:
+                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4]) or "-"
+                lines.append(
+                    f"| {pm.get('name', '?')} | {pm.get('kind', '-')} | "
+                    f"{float(pm.get('confidence') or 0.0):.2f} ({pm.get('method', '-')}) "
+                    f"| {evidence} |"
+                )
+            lines.append("")
+        elif static.packer_hint:
             lines.append(f"**Packer hint**: {static.packer_hint}")
             lines.append("")
         if static.obfuscation_indicators:
             lines.append("**Obfuscation indicators**: " + ", ".join(static.obfuscation_indicators))
+            lines.append("")
+
+        if static.api_capabilities:
+            ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
+            lines.append(
+                "**Import capability profile**: "
+                + ", ".join(f"{cat} ×{count}" for cat, count in ordered)
+            )
+            lines.append("")
+
+        if static.api_technique_hits:
+            lines.append("### ATT&CK Techniques Derived From Imports")
+            lines.append("")
+            lines.append(
+                "_Deterministic: each row is the import table alone — no sandbox, "
+                "no model. This is the audit trail behind the capability matrix._"
+            )
+            lines.append("")
+            lines.append("| Technique | Name | Confidence | Imports |")
+            lines.append("|---|---|---|---|")
+            for hit in sorted(
+                static.api_technique_hits,
+                key=lambda h: -float(h.get("confidence") or 0.0),
+            )[:25]:
+                apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
+                lines.append(
+                    f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
+                    f"| {float(hit.get('confidence') or 0.0):.2f} | {apis} |"
+                )
             lines.append("")
 
         if static.sections:
@@ -232,7 +274,28 @@ class MarkdownRenderer:
         if static.embedded_resources:
             lines.append("### Embedded Resources")
             lines.append("")
-            for res in static.embedded_resources[:20]:
+            carved = [r for r in static.embedded_resources if r.get("carved")]
+            plain = [r for r in static.embedded_resources if not r.get("carved")]
+
+            # Carved payloads get a table of their own. They are a different
+            # kind of finding from a resource directory entry — a nested
+            # executable is the actual malware in a dropper — and a reader needs
+            # the offset and hash to go and look at it, neither of which
+            # survives a one-line bullet.
+            if carved:
+                lines.append("**Carved payloads** — nested executables found inside the sample:")
+                lines.append("")
+                lines.append("| Type | Location | Size | Entropy | SHA-256 |")
+                lines.append("|---|---|---|---|---|")
+                for res in carved[:10]:
+                    lines.append(
+                        f"| {res.get('type', '?')} | `{res.get('id', '?')}` "
+                        f"({res.get('source', '-')}) | {res.get('size', 0)} bytes "
+                        f"| {res.get('entropy', 0.0)} | `{str(res.get('sha256', ''))[:32]}…` |"
+                    )
+                lines.append("")
+
+            for res in plain[:20]:
                 kind = res.get("type") or res.get("kind") or "resource"
                 size = res.get("size")
                 size_part = f" ({size} bytes)" if size else ""
@@ -449,6 +512,24 @@ class MarkdownRenderer:
             lines.append(f"**Actor**: {attr.actor}")
         if attr.campaign:
             lines.append(f"**Campaign**: {attr.campaign}")
+        # The evidence behind the family name on a run with no sandbox. Without
+        # it the reader sees "Family: CobaltStrike" and has nothing to check it
+        # against — which is the same position a sandbox-derived family left
+        # them in, and the reason to show the markers rather than just the
+        # conclusion.
+        if attr.tool_artifact_matches:
+            lines.append("")
+            lines.append("**Offensive-tool artifacts (static byte markers):**")
+            lines.append("")
+            lines.append("| Tool | Family | Kind | Confidence | Markers |")
+            lines.append("|---|---|---|---|---|")
+            for match in attr.tool_artifact_matches[:10]:
+                markers = ", ".join(f"`{m}`" for m in (match.get("markers") or [])[:4]) or "-"
+                lines.append(
+                    f"| {match.get('tool', '?')} | {match.get('family', '-')} "
+                    f"| {match.get('kind', '-')} "
+                    f"| {float(match.get('confidence') or 0.0):.2f} | {markers} |"
+                )
         if attr.similar_samples:
             lines.append("")
             lines.append("**Similar samples (LTM nearest neighbours):**")

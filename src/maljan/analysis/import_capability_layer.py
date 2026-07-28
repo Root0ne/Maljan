@@ -116,6 +116,11 @@ def _table_driven_claims(static: Any, net_iocs: list[tuple[str, str]]) -> list[C
 
     Returns ``[]`` when no catalog is loaded, which is the signal for the caller
     to fall back to the three hand-written techniques below.
+
+    Also writes ``static.api_technique_hits`` — the audit trail. A reader who
+    sees T1056.001 in the report has no way to check the reasoning unless the
+    exact imports that produced it are recorded somewhere, and the ISR's
+    evidence string is truncated for the prompt.
     """
     catalog = _attck_map()
     if catalog is None:
@@ -125,6 +130,7 @@ def _table_driven_claims(static: Any, net_iocs: list[tuple[str, str]]) -> list[C
     if not imported:
         return []
 
+    audit: list[dict[str, Any]] = []
     claims: list[ClaimEvidence] = []
     for rule, matched in catalog.match(imported):
         evidence = ", ".join(matched[:_MAX_EVIDENCE])
@@ -149,6 +155,20 @@ def _table_driven_claims(static: Any, net_iocs: list[tuple[str, str]]) -> list[C
                 rule_platforms=list(rule.platforms),
             )
         )
+        audit.append(
+            {
+                "technique_id": rule.technique_id,
+                "name": rule.name,
+                "confidence": confidence,
+                "matched_apis": matched,
+            }
+        )
+
+    # Best-effort: the audit trail is worth having and never worth a failure.
+    try:
+        static.api_technique_hits = audit
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("import-capability: could not record the audit trail (%s)", exc)
     return claims
 
 
