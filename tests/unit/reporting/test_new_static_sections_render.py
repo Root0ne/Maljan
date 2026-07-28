@@ -413,3 +413,16 @@ class TestTheComposedSectionsReachTheReport:
         assert "## C2 Channels" not in md
         assert "## Conclusion" not in md
         assert "## Introduction & Background" not in md
+
+    def test_the_html_export_inherits_the_fix(self) -> None:
+        """HtmlRenderer builds from MarkdownRenderer and PdfRenderer from that,
+        so all three formats were losing the composer output together and all
+        three are fixed by one change. Worth pinning: if HTML ever grows its own
+        section list, this is what notices."""
+        from maljan.reporting.models import Conclusion
+        from maljan.reporting.renderers.html import HtmlRenderer
+
+        report = _report()
+        report.conclusion = Conclusion(text="A commodity loader.", sophistication_rating="low")
+        html = HtmlRenderer().render(report, embed_figures=False)
+        assert "commodity loader" in html
