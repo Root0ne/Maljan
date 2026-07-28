@@ -132,13 +132,14 @@ export default function AttributionTab() {
           title={`Function-Hash Matches (${hashMatches.length})`}
           note="Exact normalized-opcode hashes shared with previously analysed samples. The strongest of the four evidence sources here: this is code reuse, not resemblance."
           headers={["Family", "Conf.", "Shared fns", "Example functions"]}
+          columnClass={["text-text-primary", "font-mono", "font-mono", ""]}
           rows={hashMatches.map((m, i) => ({
             key: `${m.family}-${i}`,
             cells: [
-              <span className="text-text-primary">{m.family}</span>,
-              <span className="font-mono">{fmt(m.confidence, 2)}</span>,
-              <span className="font-mono">{m.shared_functions ?? "-"}</span>,
-              <Markers items={(m.example_functions ?? []).slice(0, 4)} />,
+              m.family,
+              fmt(m.confidence, 2),
+              m.shared_functions ?? "-",
+              <Markers key="fns" items={(m.example_functions ?? []).slice(0, 4)} />,
             ],
           }))}
         />
@@ -149,13 +150,14 @@ export default function AttributionTab() {
           title={`Family-Feature RAG Candidates (${ragCandidates.length})`}
           note="Families retrieved by static-feature similarity to a reference fingerprint catalog. Retrieval, not proof — shown because the verdict LLM weighed it."
           headers={["Family", "Similarity", "Category", "Samples"]}
+          columnClass={["text-text-primary", "font-mono", "", "font-mono"]}
           rows={ragCandidates.map((c, i) => ({
             key: `${c.family}-${i}`,
             cells: [
-              <span className="text-text-primary">{c.family}</span>,
-              <span className="font-mono">{fmt(c.similarity, 3)}</span>,
-              <span>{c.malware_category || "-"}</span>,
-              <span className="font-mono">{c.sample_count ?? "-"}</span>,
+              c.family,
+              fmt(c.similarity, 3),
+              c.malware_category || "-",
+              c.sample_count ?? "-",
             ],
           }))}
         />
@@ -166,13 +168,10 @@ export default function AttributionTab() {
           title={`ATT&CK Case Priors (${casePriors.length})`}
           note="Techniques that recur in behaviourally-similar prior cases from Maljan's own memory. Advisory only — these describe past runs, not this sample."
           headers={["Technique", "Support", "Similarity"]}
+          columnClass={["font-mono text-status-blue", "font-mono", "font-mono"]}
           rows={casePriors.map((c, i) => ({
             key: `${c.technique_id}-${i}`,
-            cells: [
-              <span className="font-mono text-status-blue">{c.technique_id}</span>,
-              <span className="font-mono">{c.support ?? "-"}</span>,
-              <span className="font-mono">{fmt(c.similarity, 3)}</span>,
-            ],
+            cells: [c.technique_id, c.support ?? "-", fmt(c.similarity, 3)],
           }))}
         />
       )}
@@ -302,11 +301,16 @@ function EvidenceTable({
   title,
   note,
   headers,
+  columnClass,
   rows,
 }: {
   title: string;
   note: string;
   headers: string[];
+  /** Per-column cell classes. Styling lives here rather than in the cell
+   *  values so callers can pass plain strings and numbers — an array of bare
+   *  JSX spans would need a key on every one of them. */
+  columnClass?: string[];
   rows: { key: string; cells: React.ReactNode[] }[];
 }) {
   return (
@@ -334,7 +338,7 @@ function EvidenceTable({
                 {row.cells.map((cell, i) => (
                   <td
                     key={`${row.key}-${headers[i]}`}
-                    className="px-4 py-2 text-text-secondary"
+                    className={`px-4 py-2 text-text-secondary ${columnClass?.[i] ?? ""}`}
                   >
                     {cell}
                   </td>

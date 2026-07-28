@@ -128,6 +128,11 @@ class MarkdownRenderer:
             lines.append(f"| Compile timestamp | {ident.compile_timestamp.isoformat()} |")
         if ident.language_or_compiler:
             lines.append(f"| Language / compiler | {ident.language_or_compiler} |")
+        # Extracted since the model existed and printed nowhere. It is what
+        # lets a reader disagree with `file_type`: a .doc whose first bytes are
+        # `4d5a` is the finding, and the type string alone hides it.
+        if ident.magic_bytes:
+            lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
         lines.append(f"| Signed | {'yes' if ident.signing.is_signed else 'no'} |")
         if ident.signing.signer_subject:
             lines.append(f"| Signer | {ident.signing.signer_subject} |")
@@ -738,7 +743,20 @@ def _signature_row(sig: SandboxSignature) -> str:
 
 def _domain_row(d: NetworkDomain) -> str:
     flag = "yes" if d.is_suspicious else "no"
-    reason = d.reason or "-"
+    # DGA score and the homograph verdict were computed by network_extractor
+    # and rendered nowhere. Folded into the reason column rather than given
+    # their own columns, because they are only ever interesting when they fire
+    # and an always-present "DGA: -" column would push the resolved IPs off the
+    # side of the table for every ordinary domain.
+    notes = [d.reason] if d.reason else []
+    if isinstance(d.dga_score, int | float) and d.dga_score > 0:
+        notes.append(f"DGA score {float(d.dga_score):.2f}")
+    if d.is_punycode:
+        # A punycode label that renders as a familiar brand is the whole point
+        # of registering it; saying only "punycode" would bury the finding.
+        target = f" impersonating `{d.homograph_target}`" if d.homograph_target else ""
+        notes.append(f"punycode{target}")
+    reason = "; ".join(notes) or "-"
     ips = ", ".join(d.resolved_ips[:4]) or "-"
     return f"| `{d.fqdn}` | {flag} | {reason} | {ips} |"
 

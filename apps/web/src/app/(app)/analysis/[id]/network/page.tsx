@@ -285,6 +285,29 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
                 SUSP
               </span>
             )}
+            {/* Both computed by network_extractor and displayed nowhere until
+                2026-07-28. A punycode label is registered precisely so it reads
+                as a brand it is not, so the badge names the brand rather than
+                just saying "punycode". */}
+            {domain.is_punycode && (
+              <span
+                className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange shrink-0"
+                title={
+                  domain.homograph_target
+                    ? `Renders like ${domain.homograph_target}`
+                    : undefined
+                }
+              >
+                {domain.homograph_target
+                  ? `LOOKS LIKE ${domain.homograph_target}`
+                  : "PUNYCODE"}
+              </span>
+            )}
+            {typeof domain.dga_score === "number" && domain.dga_score > 0 && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary font-mono shrink-0">
+                DGA {domain.dga_score.toFixed(2)}
+              </span>
+            )}
           </div>
           {domain.reason && (
             <div className="text-xs text-text-muted mt-1">{domain.reason}</div>

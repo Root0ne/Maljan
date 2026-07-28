@@ -275,3 +275,68 @@ class TestTheFamilyNameShowsItsWorking:
         assert "Function-hash matches" not in md
         assert "Family-feature RAG candidates" not in md
         assert "ATT&CK case priors" not in md
+
+
+class TestComputedSignalsThatWereNeverPrinted:
+    """Three more producer-without-consumer fields, found by sweeping every
+    field on every report model for a reader rather than by noticing one.
+
+    ``dga_score``, ``is_punycode`` and ``homograph_target`` are all written by
+    ``network_extractor`` and were read by no renderer and no UI. The homograph
+    one is the worst of them: the extractor works out that a punycode label
+    renders as a familiar brand, which is the entire reason such a domain gets
+    registered, and the report printed the raw FQDN with no note.
+    """
+
+    def test_a_homograph_domain_names_what_it_imitates(self) -> None:
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+
+        report = _report()
+        report.network = NetworkIOCs(
+            domains=[
+                NetworkDomain(
+                    fqdn="xn--pple-43d.com",
+                    is_suspicious=True,
+                    is_punycode=True,
+                    homograph_target="apple.com",
+                )
+            ]
+        )
+        md = MarkdownRenderer().render(report)
+        assert "xn--pple-43d.com" in md
+        assert "apple.com" in md, "the imitated brand is the finding"
+        assert "punycode" in md
+
+    def test_a_dga_score_reaches_the_reader(self) -> None:
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+
+        report = _report()
+        report.network = NetworkIOCs(
+            domains=[NetworkDomain(fqdn="kqxvbnzp.info", is_suspicious=True, dga_score=0.87)]
+        )
+        md = MarkdownRenderer().render(report)
+        assert "0.87" in md
+
+    def test_an_ordinary_domain_gains_no_noise(self) -> None:
+        """The reason column is shared, so a clean domain must stay clean."""
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+
+        report = _report()
+        report.network = NetworkIOCs(domains=[NetworkDomain(fqdn="example.com")])
+        md = MarkdownRenderer().render(report)
+        assert "example.com" in md
+        assert "DGA score" not in md
+        assert "punycode" not in md
+
+    def test_magic_bytes_let_a_reader_disagree_with_the_file_type(self) -> None:
+        from maljan.reporting.models import FileHashes, SampleIdentity
+
+        report = _report()
+        report.identity = SampleIdentity(
+            hashes=FileHashes(sha256="a" * 64),
+            file_name="invoice.doc",
+            file_type="Microsoft Word",
+            magic_bytes="4d5a90000300000004000000",
+        )
+        md = MarkdownRenderer().render(report)
+        assert "4d5a90000300000004000000" in md, "a .doc starting MZ is the whole finding"
