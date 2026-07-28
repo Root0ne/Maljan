@@ -380,7 +380,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "GetFileAttributesA",
             "GetFileAttributesW",
             "SetFileAttributesA",
-            "SetFileAttributesW",
             "GetFileAttributesExA",
             "SetFileTime",
             "GetFileTime",
@@ -433,7 +432,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "GetFinalPathNameByHandleW",
             "GetFileInformationByHandle",
             "GetFileInformationByHandleEx",
-            "SetFileInformationByHandle",
             "LockFile",
             "LockFileEx",
             "UnlockFile",
@@ -526,7 +524,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "SetSecurityDescriptorDacl",
             "SetSecurityInfo",
             "SetNamedSecurityInfoA",
-            "GetSecurityInfo",
             "ConvertStringSecurityDescriptorToSecurityDescriptorA",
             "NtAdjustPrivilegesToken",
             "RtlAdjustPrivilege",
@@ -545,8 +542,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "SetFileSecurityW",
             "SetKernelObjectSecurity",
             "SetUserObjectSecurity",
-            "SetSecurityInfo",
-            "SetSecurityDescriptorDacl",
             "SetSecurityDescriptorOwner",
             "SetEntriesInAclA",
             "SetEntriesInAclW",
@@ -555,7 +550,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "AddAccessDeniedAce",
             "AddAce",
             "DeleteAce",
-            "InitializeSecurityDescriptor",
             "MakeAbsoluteSD",
             "MakeSelfRelativeSD",
         ],
@@ -729,7 +723,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "GetSidSubAuthority",
             "GetSidSubAuthorityCount",
             "GetLengthSid",
-            "AllocateAndInitializeSid",
             "FreeSid",
             "EqualSid",
             "IsValidSid",
@@ -738,7 +731,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "ConvertSidToStringSidW",
             "ConvertStringSidToSidA",
             "ConvertStringSidToSidW",
-            "CheckTokenMembership",
             # Host and device enumeration. `QueryDosDevice` doubles as an
             # anti-VM probe (\\.\VBoxGuest and friends) but is filed here
             # rather than in anti_debug, which is high tier — the call alone
@@ -787,7 +779,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "ITaskFolder",
             "CoTaskMemAlloc",
             "SHSetValueW",
-            "CreateProcessAsUserW",
             "RegisterEventSourceA",
             "ReportEventA",
             "WriteProfileStringA",
@@ -1785,6 +1776,21 @@ def _validate() -> list[str]:
         if tid in seen:
             problems.append(f"duplicate technique {tid}")
         seen.add(tid)
+
+    # An API in two categories has no defined tier. The consumer is a reverse
+    # index — one dict, one entry per name — so whichever category is built last
+    # silently wins, and the two categories rarely share a tier: on 2026-07-28
+    # CheckTokenMembership sat in both `privilege` (high, therefore suspicious)
+    # and `discovery` (informational, therefore not), which meant the import's
+    # suspicion depended on dict ordering rather than on anything about the
+    # import. Ambiguity here is not a style problem, it is nondeterminism.
+    owners: dict[str, list[str]] = {}
+    for category, (_tier, apis) in WINDOWS_CATEGORIES.items():
+        for api in apis:
+            owners.setdefault(api.lower(), []).append(category)
+    for api, cats in sorted(owners.items()):
+        if len(cats) > 1:
+            problems.append(f"{api!r} claimed by more than one category: {sorted(cats)}")
 
     return problems
 

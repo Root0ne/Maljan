@@ -352,7 +352,6 @@
           "SetCurrentDirectoryA",
           "SetEndOfFile",
           "SetFileAttributesA",
-          "SetFileAttributesW",
           "SetFileInformationByHandle",
           "SetFilePointer",
           "SetFilePointerEx",
@@ -437,7 +436,6 @@
           "DeleteAce",
           "DuplicateToken",
           "DuplicateTokenEx",
-          "GetSecurityInfo",
           "GetTokenInformation",
           "ImpersonateLoggedOnUser",
           "ImpersonateNamedPipeClient",
@@ -536,8 +534,6 @@
       "discovery": {
         "tier": "informational",
         "apis": [
-          "AllocateAndInitializeSid",
-          "CheckTokenMembership",
           "ConvertSidToStringSidA",
           "ConvertSidToStringSidW",
           "ConvertStringSidToSidA",
@@ -670,7 +666,6 @@
           "CreateMutexA",
           "CreateMutexExA",
           "CreateMutexW",
-          "CreateProcessAsUserW",
           "CreateSemaphoreA",
           "CreateServiceA",
           "CreateServiceW",

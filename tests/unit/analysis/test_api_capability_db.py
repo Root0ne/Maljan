@@ -358,3 +358,42 @@ class TestTheOneLetterAndOneSuffixBlindSpots:
     def test_authenticode_verification_is_recognised(self) -> None:
         for api in ("WinVerifyTrust", "CryptCATAdminAcquireContext", "CryptQueryObject"):
             assert classify_import(api)[0] == "crypto", api
+
+
+class TestEveryApiHasExactlyOneOwner:
+    """The consumer is a reverse index — one dict, one entry per name — so an
+    API listed under two categories has no defined tier: whichever category is
+    built last wins.
+
+    This was not hypothetical. ``CheckTokenMembership`` was added to
+    ``discovery`` on 2026-07-28 while already sitting in ``privilege``, and the
+    two disagree about tier: high means the import is flagged suspicious,
+    informational means it is not. The flag therefore depended on dict ordering
+    rather than on anything about the import. The builder rejects this now; this
+    test is the same guard on the shipped artifact, because the JSON is
+    hand-editable and the builder is not in the run path.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def test_no_api_is_claimed_by_two_categories(self) -> None:
+        raw = json.loads(Path(_BEHAVIOUR).read_text(encoding="utf-8"))
+        windows = raw["platforms"]["windows"]
+
+        owners: dict[str, list[str]] = {}
+        for category, block in windows.items():
+            for api in block["apis"]:
+                owners.setdefault(api.lower(), []).append(category)
+
+        ambiguous = {api: cats for api, cats in owners.items() if len(cats) > 1}
+        assert not ambiguous, f"APIs with no defined tier: {ambiguous}"
+
+    def test_the_shipped_artifact_matches_the_builders_own_count(self) -> None:
+        """A guard against editing the JSON and forgetting the builder, which
+        would make the reviewable Python source a lie."""
+        raw = json.loads(Path(_BEHAVIOUR).read_text(encoding="utf-8"))
+        windows = raw["platforms"]["windows"]
+        total = sum(len(block["apis"]) for block in windows.values())
+        assert total > 700, f"catalog shrank unexpectedly to {total}"
+        assert len(windows) == 13
