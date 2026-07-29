@@ -277,6 +277,15 @@ services:
       - ../apps:/app/apps
       - ../data:/app/data
       - ../tests:/app/tests
+      # Derived caches, not source data — but expensive enough that losing them
+      # is a production problem rather than a warm-up. Two things live here: the
+      # 40 MB ATT&CK STIX bundle (re-downloaded from MITRE when absent), and the
+      # ATT&CK embedding cache, whose absence costs the judge node +1.3 GB of
+      # resident memory and 105 s on the first analysis — measured 2026-07-28.
+      # Without this volume both are rebuilt on every container recreation,
+      # because /root is in the container's writable layer and a rebuild
+      # discards it.
+      - attck_cache:/root/.cache/maljan
     depends_on:
       postgres:
         condition: service_healthy
@@ -321,4 +330,6 @@ volumes:
   minio_data:
     driver: local
   ghidra_projects:
+    driver: local
+  attck_cache:
     driver: local
