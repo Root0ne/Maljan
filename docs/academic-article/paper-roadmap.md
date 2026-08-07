@@ -95,18 +95,20 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
 
 ### 3.1 Runs offline tonight
 
-- [ ] **Static Layer-0 contribution study** `[cheap]`
-      209 real PE samples on disk; `yara_layer`, `import_capability_layer`,
-      `tool_artifact_layer` need no LLM and no sandbox. Measure per-source technique yield,
-      cross-source overlap, and each source's unique contribution (leave-one-out).
-      → directly answers **E.5**
-- [ ] **Cascade weight-sensitivity analysis** `[cheap]`
-      Feed those tuples to `TTPCascadeEngine`; vary `LAYER_WEIGHTS` and the corroboration
-      multipliers over plausible ranges and report whether the ranking and the
-      `is_corroborated` decisions are stable. → first real answer to **E.1**'s "the constants
-      are plausible and unjustified"
-      *Honest scope: 3 of 6 layers. Sigma (2,651 rules), LOLBin and network-DGA need a sandbox
-      report, so this is a* static *Layer-0 ablation and will be named that way.*
+- [x] **Static Layer-0 contribution study** `[done]` → `tests/evaluation/layer0_contribution.json`
+      209 PE samples, 189 produced evidence. yara fires on **89.5%** (812 techniques, 79.8%
+      unique), import-capability on **52.6%** (694, 76.5% unique), and **tool_artifact on 2.4%
+      — 5 samples, 5 techniques in the whole corpus**, while sharing yara's cascade domain so
+      it cannot add corroboration either. **87.9% of techniques are single-domain**; only 163
+      of 1,347 get any corroboration from the static layers. → **E.5** answered for 3 of 6
+- [x] **Cascade weight-sensitivity analysis** `[done]`
+      Five perturbations including flat-0.5 and inverting yara↔network. Top-10 ranking changes
+      on 10.6–27.5% of samples; **the corroborated set changes on 0.0% in every perturbation.**
+      That is structural, not a corpus artifact: `is_corroborated = len(contributing_layers)
+      >= 2` never consults `LAYER_WEIGHTS`. So the label the report surfaces most prominently
+      is independent of all five weights, and even inverting the most- and least-trusted layer
+      leaves the ranking untouched on ~72% of samples. → **E.1** partially answered
+      *Scope: 3 of 6 layers. Sigma, LOLBin and network-DGA need a sandbox report — `[CAPE]`.*
 
 ### 3.2 Needs llama-server — not tonight
 
