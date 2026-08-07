@@ -215,16 +215,23 @@ class TestJudgeAgentExtractConfidence:
         result = JudgeAgent._extract_confidence_from_text(text)
         assert result == pytest.approx(0.78)
 
-    def test_clamps_above_one(self) -> None:
-        text = "confidence: 1.5"
-        result = JudgeAgent._extract_confidence_from_text(text)
-        assert result == 1.0
+    # 2026-08-07: the next three used to assert clamping and a 0.5 default.
+    # Both were changed deliberately, because together they shipped a false
+    # consensus: clamping accepted *any* number on the line, so
+    # "Confidence: 0.95 (based on 3 agents)" scanned in reverse, hit the 3,
+    # clamped it to 1.0 and ended the negotiation on a number that was never a
+    # score. Clamping is what made the wrong token look legitimate, so a value
+    # outside [0,1] is now evidence the model ignored the contract rather than
+    # something to be repaired into range. And the 0.5 default was
+    # indistinguishable from a real 0.5 while sitting permanently below
+    # CONSENSUS_THRESHOLD, so no run could ever converge.
+    # See tests/unit/agents/test_mediator_confidence_extraction.py.
 
-    def test_clamps_below_zero(self) -> None:
-        text = "confidence: -0.3"
-        result = JudgeAgent._extract_confidence_from_text(text)
-        assert result == 0.0
+    def test_rejects_above_one_instead_of_clamping(self) -> None:
+        assert JudgeAgent._extract_confidence_from_text("confidence: 1.5") is None
 
-    def test_defaults_to_0_5_when_not_found(self) -> None:
-        result = JudgeAgent._extract_confidence_from_text("No score mentioned here.")
-        assert result == 0.5
+    def test_rejects_below_zero_instead_of_clamping(self) -> None:
+        assert JudgeAgent._extract_confidence_from_text("confidence: -0.3") is None
+
+    def test_returns_none_when_not_found(self) -> None:
+        assert JudgeAgent._extract_confidence_from_text("No score mentioned here.") is None

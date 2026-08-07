@@ -51,6 +51,7 @@ Phase 7.1 additions (Dynamic Schema Pruning):
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +76,24 @@ if TYPE_CHECKING:
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
 
+# What we assume when the mediator's agreement score cannot be read at all.
+# Deliberately below CONSENSUS_THRESHOLD: an unreadable mediator must not be
+# able to end the negotiation, and must not be mistakable for a real score.
+_UNREADABLE_AGREEMENT = 0.0
+
+# ``agreement_confidence: 0.95`` / ``**confidence**= 95%`` / ``"confidence": 0.9``
+# / ``The confidence score is: 0.78``.
+#
+# A short run of anything-but-a-separator is allowed between the key and the
+# ``:``/``=`` so ordinary phrasing parses, but the number must follow the
+# separator **immediately**. That is the whole point: "Confidence: 0.95 (based
+# on 3 agents)" must yield 0.95, never the 3 — see
+# ``_extract_confidence_from_text`` for the false consensus that produced.
+_AGREEMENT_RE = re.compile(
+    r"confidence[^\n:=]{0,24}?[:=]\s*(\d*\.?\d+)\s*(%?)",
+    re.IGNORECASE,
+)
+
 
 class JudgeAgent:
     """Chief controller responsible for mediation, consensus detection, and final verdict.
@@ -85,9 +104,17 @@ class JudgeAgent:
         bundle = judge.give_verdict(reports, history, attck_validator=validator)
     """
 
-    def __init__(self, llm: BaseChatModel, category_backend: str = "keyword") -> None:
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        category_backend: str = "keyword",
+        config: Any | None = None,
+    ) -> None:
         self.llm = llm
         self.logger = logger.getChild("judge")
+        # Read by ``_supports_structured_output``. Optional so standalone use
+        # (tests, scripts) still works; the container passes the real one.
+        self._config = config
         # Backend for the §7.1 schema-pruning category inference. Default
         # "keyword" keeps the deterministic substring path (zero behaviour
         # change); "semantic"/"hybrid" route through the embedding classifier.
@@ -313,6 +340,11 @@ class JudgeAgent:
                 "- agreement_confidence reflects ONLY agent alignment, NOT how "
                 "suspicious the sample looks. Two analysts unanimously saying "
                 "nothing is still high alignment (1.0).\n"
+                "- Your LAST line MUST be exactly 'agreement_confidence: <number>' "
+                "with a decimal between 0.0 and 1.0 — no percent sign, no words, "
+                "no range. Nothing may follow it. When this line is missing or "
+                "unreadable the run is treated as no-consensus and every analyst "
+                "is made to revise again, so it is not optional.\n"
                 "- The downstream Judge alone decides Malware/Benign/Suspicious. "
                 + (
                     "You have Threat Intelligence tools to verify disputed "
@@ -615,23 +647,7 @@ class JudgeAgent:
         feature that will never work. The capability table lives in
         ``maljan.llm.registry``.
         """
-        # Sniff the active provider name; the fallback is harmless if we
-        # can't determine it.
-        try:
-            from maljan.core.container import ServiceContainer  # noqa: F401 (typing only)
-            from maljan.llm.registry import provider_capabilities
-
-            cfg = getattr(self, "_config", None)
-            provider_name = (
-                cfg.llm.provider
-                if cfg is not None
-                else getattr(self.llm, "_llm_type", "openai") or "openai"
-            )
-            caps = provider_capabilities(str(provider_name))
-        except Exception:
-            caps = {"supports_structured_output": True}
-
-        if not caps.get("supports_structured_output", True):
+        if not self._supports_structured_output():
             self.logger.info(
                 "Provider lacks structured-output support; using text fallback "
                 "for mediator verdict extraction."
@@ -1014,16 +1030,69 @@ class JudgeAgent:
             self.logger.warning("_build_schema_hint failed (%s). Skipping schema pruning.", exc)
             return ""
 
+    def _supports_structured_output(self) -> bool:
+        """Whether ``with_structured_output`` is worth attempting for mediation.
+
+        Two independent reasons this is not a one-line capability lookup:
+
+        * **The provider name.** ``self._config`` was read here but never
+          assigned — ``JudgeAgent`` took no config — so the name always came
+          from ``ChatOpenAI._llm_type``, which is ``"openai-chat"``. That is
+          absent from ``PROVIDER_CAPABILITIES``, so the unknown-provider
+          default (``False``) applied to *every* provider, including the ones
+          the table says support it. Config now wins, and the ``-chat`` suffix
+          is stripped as a backstop when no config was passed.
+
+        * **A local server is not the vendor API.** ``openai`` is marked as
+          supporting structured output, and against api.openai.com it does.
+          Against a local OpenAI-compatible server it is a different animal:
+          measured 2026-07-29 on llama-server/Qwen3.6-35B, one mediator
+          extraction ran **13+ minutes without completing**, where the text
+          path does the same job in ~3. So a custom ``base_url`` disables it —
+          a measured decision now, rather than the accident above.
+        """
+        cfg = getattr(self, "_config", None)
+        try:
+            from maljan.llm.registry import provider_capabilities
+
+            if cfg is None:
+                raw = str(getattr(self.llm, "_llm_type", "") or "openai")
+                # "openai-chat" -> "openai"; harmless for names without a suffix.
+                provider_name = raw.split("-")[0]
+            else:
+                provider_name = str(cfg.llm.provider)
+                base_url = getattr(cfg.llm.openai, "base_url", None)
+                if provider_name == "openai" and base_url:
+                    return False
+            return bool(provider_capabilities(provider_name).get("supports_structured_output"))
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("Structured-output capability check failed (%s); assuming no.", exc)
+            return False
+
     def _fallback_mediate(
         self,
         reasoning_text: str,
     ) -> MediatorVerdict:
         """Plain-text fallback when structured output is unavailable.
 
-        Extracts confidence from the reasoning text using regex and returns
-        a minimal MediatorVerdict.
+        Not really a fallback: the capability check in
+        ``_extract_mediator_verdict`` routes every provider here, so this is
+        the only path that decides consensus in production.
         """
         confidence = self._extract_confidence_from_text(reasoning_text)
+        if confidence is None:
+            # Previously this returned a hardcoded 0.5, indistinguishable from
+            # a mediator that genuinely scored 0.5 and logged nowhere. Since
+            # 0.5 < CONSENSUS_THRESHOLD it also meant the negotiation loop
+            # could never converge: the 2026-07-29 run showed exactly
+            # ``confidence=0.50`` every round and burned all five revisions.
+            # An unreadable log is now loud, and still cannot end the loop.
+            self.logger.warning(
+                "Mediator agreement score not found in the reasoning log; "
+                "treating as no-consensus. First 200 chars: %r",
+                reasoning_text.strip()[:200],
+            )
+            confidence = _UNREADABLE_AGREEMENT
         return MediatorVerdict(
             contradictions=[],
             resolution_summary=reasoning_text[:500],
@@ -1031,17 +1100,31 @@ class JudgeAgent:
         )
 
     @staticmethod
-    def _extract_confidence_from_text(text: str) -> float:
-        """Last-resort regex extraction for providers that ignore structured output."""
-        for line in reversed(text.strip().splitlines()):
-            if "confidence" in line.lower():
-                parts = line.replace(":", " ").split()
-                for part in reversed(parts):
-                    try:
-                        return max(0.0, min(1.0, float(part)))
-                    except ValueError:
-                        continue
-        return 0.5
+    def _extract_confidence_from_text(text: str) -> float | None:
+        """Read the mediator's agreement score, or ``None`` if it is not there.
+
+        The number must sit **adjacent to the key** — the previous version
+        accepted any token on any line mentioning "confidence" and clamped it
+        into range, so ``"Confidence: 0.95 (based on 3 agents)"`` scanned in
+        reverse, hit ``3``, clamped to 1.0 and declared instant consensus off
+        a number that was never a score. Out-of-range values are therefore
+        rejected rather than clamped: clamping is what made the wrong token
+        look legitimate.
+
+        The reasoning prompt asks for ``agreement_confidence``; the bare word
+        is accepted too because the model does not always echo the key.
+        """
+        matches = _AGREEMENT_RE.findall(text or "")
+        for raw, pct in reversed(matches):  # the model's last word wins
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            if pct:
+                value /= 100.0
+            if 0.0 <= value <= 1.0:
+                return value
+        return None
 
     @staticmethod
     def _build_memory_context(

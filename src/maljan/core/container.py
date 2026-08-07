@@ -276,6 +276,10 @@ class ServiceContainer:
                 cached = JudgeAgent(
                     llm=llm,
                     category_backend=self.config.preprocessing.category_inference_backend,
+                    # Without this the judge's structured-output capability
+                    # check fell back to ``ChatOpenAI._llm_type`` and misread
+                    # every provider — see _supports_structured_output.
+                    config=self.config,
                 )
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 self._judge_agent_cache[role] = cached
