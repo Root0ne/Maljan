@@ -12,6 +12,50 @@
 
 ---
 
+## Read this first — what happened overnight (2026-08-08, 02:00–03:00)
+
+No LLM and no sandbox were started; the resource watch logged zero CRITICAL and zero ALERT lines
+all night with ~21 GB free throughout (`logs/overnight-watch.log`).
+
+**Done:**
+
+- **Seven literature themes** researched with live search and **every cited source fetched**, not
+  recalled → `research-briefs/incoming/R{2..8}.claude-web.md`
+- **Citation audit** of both external reports → `incoming/CITATION-AUDIT.claude-web.md`
+- **Novelty ledger** — the review's actual product → `research-briefs/novelty-ledger.md`
+- **The one experiment that could run offline** — static Layer-0 contribution + cascade weight
+  sensitivity over 209 real PEs → §1.10 in the findings log, `layer0_contribution.json`
+- **findings-log.md** corrected and expanded (§1.5 novelty, §1.5.1, §3.1, §3.3, §3.4, new §1.10,
+  ten verified references, changelog)
+- **This roadmap and the contribution map** updated to the verdicts; **Part F now recommends a
+  framing** instead of surveying options
+
+**The three things worth knowing before anything else:**
+
+1. **Two framing candidates fell to prior art.** Describe-then-map is `arXiv:2401.12178`
+   (Jan 2024) in general form; binary→ATT&CK is `arXiv:2602.06325` at 93.25% precision. Neither
+   kills the work — both mean we cite rather than claim.
+2. **The literature's prior now runs against our multi-agent design.** Two 2026 equal-budget
+   studies, one on 7–8B models, find single agents match or beat debate. Both name heterogeneous
+   evidence channels as the exception, which is our defence — and a hypothesis until E.2 is run.
+   That makes E.2 the paper's central experiment rather than an ablation we owed.
+3. **The cascade weights move nothing that matters.** Five perturbations, including inverting the
+   most- and least-trusted layers: the corroborated set changed on **0.0%** of samples, because
+   `is_corroborated` never reads the weights. Meanwhile `tool_artifact` fires on 2.4% of samples
+   and contributes five techniques across the whole corpus.
+
+**Recommendation on the table (Part F):** lead with negative results and measurement, on the
+drift study's empirical spine, with the rank-vs-gate metric / auto-correction regression /
+degenerate-loop pathology as the sharpest chapter. Five claims survive the review and every one
+is a measurement result; the four architectural claims are unmeasured. That is a decision for
+you, not for me — everything needed to make it is in `research-briefs/novelty-ledger.md`.
+
+**Nothing left that does not need llama-server or CAPE.** The cheapest next items are all
+`[LLM]`-gated except two: checking whether three external datasets are publicly released, and
+reading *Chasing Shadows* in full to self-audit against its nine pitfalls.
+
+---
+
 ## 0. Where this actually stands
 
 Two things changed on 2026-08-08 and they govern everything below.
