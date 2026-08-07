@@ -79,7 +79,7 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 - [x] R3 — multi-agent consensus `[done]` → `incoming/R3.claude-web.md`
 - [x] R4 — grounding, hallucination, calibration `[done]` → `incoming/R4.claude-web.md`
 - [x] R6 — evaluation methodology and ground truth `[done]` → `incoming/R6.claude-web.md`
-- [ ] R7 — local, small, open-weight deployment `[cheap]`
+- [x] R7 — local, small, open-weight deployment `[done]` → `incoming/R7.claude-web.md`
 - [ ] R8 — CTI report / STIX generation `[cheap]`
 - [ ] R1 — verify `R1.model-b.md`'s UNCERTAIN citations rather than redo it `[cheap]`
 - [ ] Citation audit of `ALL8.model-a.md` — real / misattributed / not found `[cheap]`
