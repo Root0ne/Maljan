@@ -100,3 +100,6 @@ _GITHUB_SETUP.txt
 # Playwright run artefacts (screenshots, traces, error contexts from failed runs)
 apps/web/test-results/
 apps/web/playwright-report/
+
+# Overnight watch output (machine-local, not project history)
+logs/
