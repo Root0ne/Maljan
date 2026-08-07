@@ -76,7 +76,7 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 
 - [x] R2 — ATT&CK technique mapping `[done]` → `incoming/R2.claude-web.md`
 - [x] R5 — RAG for malware / CTI `[done]` → `incoming/R5.claude-web.md`
-- [ ] R3 — multi-agent consensus `[cheap]`
+- [x] R3 — multi-agent consensus `[done]` → `incoming/R3.claude-web.md`
 - [ ] R4 — grounding, hallucination, calibration `[cheap]`
 - [ ] R6 — evaluation methodology and ground truth `[cheap]`
 - [ ] R7 — local, small, open-weight deployment `[cheap]`
@@ -113,9 +113,15 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
 - [ ] **Full cascade ablation** `[LLM]` — flat union vs cascade on the n=210 corpus. Blocked
       twice over: needs the LLM, and the per-sample results of the original run were never
       stored, so the corpus must be re-analysed. → **E.1**
-- [ ] **Negotiated consensus vs single judge pass at equal token budget** `[LLM]`
-      N≫1, CIs, scored on TTP F1 and grounding. The mechanism is in the project's own name and
-      has no evidence. → **E.2**, and our own N1 forbids claiming it works without this
+- [ ] **Negotiated consensus vs single judge pass at equal token budget** `[LLM]` **← now the
+      paper's central experiment, not housekeeping.** R3 found the field's prior is *against*
+      multi-agent: `arXiv:2604.02460` (Stanford) and `arXiv:2605.00914` both show single
+      agents match or beat multi-agent at equal budget, the latter on 7–8B models — our
+      scale — at 2.1–3.4× the tokens. Both scope their result to *homogeneous* agents
+      decomposing *one* context, which is our defence: ours are heterogeneous evidence
+      channels, the case both papers name as the exception. Follow their design: three arms
+      (negotiated / single-agent-all-evidence / noise control), equal tokens, N≫1, CIs,
+      token cost reported. → **E.2**
 - [ ] **Frontier arm** `[LLM]` `[decide]` — identical pipeline, one frontier endpoint, nothing
       else changed. `arXiv:2606.18166` found parameter size is the *only* significant predictor
       of F1 in ATT&CK classification (ρ=0.85, p=0.014), which makes our single-model design a
