@@ -219,6 +219,69 @@ positioning.
   the provably-safe sub-operation (invalid→valid), not extended to ambiguous valid→valid edits.
   Harness: `tests/evaluation/eval_autocorrect_ablation.py`.
 
+### 1.5.3 Case-prior retrieval as a technique-candidate source — `NEGATIVE` (the retriever works; the query never reaches it)
+- **Motivation.** §4 U2 shipped an ATT&CK case-prior RAG: embed 1,733 ATT&CK-labelled prior
+  cases, retrieve the behaviourally-nearest neighbours for the sample, aggregate their
+  `technique_ids` into a ranked CANDIDATE list, hand it to the static analyst as evidence. It has
+  been `use_attck_case_rag = False` since it landed, justified as "absent a corpus it degrades to
+  a no-op" — a statement about deployment, not about whether it works. The one measurement that
+  touched it (the U3 A/B, n=19) switched the **family** RAG on in the same arm and read out final
+  technique F1, so it could not have detected this retriever's effect in either direction.
+- **Method (the control is the finding).** The corpus is severely non-uniform: T1129 appears in
+  71% of cases, T1027 in 67%, and there are only **77 distinct techniques** in total. A
+  recommender that ignores the query entirely and returns the globally most frequent K therefore
+  scores well *by construction*. So the comparison is not RAG-vs-nothing but **RAG vs a
+  frequency prior at equal budget** (K = `attck_case_rag_max_techniques` = 8), with random
+  selection from the 77 as a floor. Two query regimes, because they are not the same experiment:
+  *native* (query = another case's own `summary_text` — the optimistic ceiling) and *runtime*
+  (query = `build_sample_profile_text`, literally what production sends, scored against
+  independent family-level ATT&CK ground truth for 15 labelled samples).
+- **Leakage control.** 742 of the 1,733 cases (43%) share a **byte-identical** `summary_text`
+  with another case, so plain leave-one-out hands 43% of queries their own twin — a retrieval
+  problem nobody has in production. Reported with near-duplicate neighbours (cosine ≥ 0.99)
+  suppressed; the naive figure (F1 0.697) is also in the artifact for contrast.
+- **Result.**
+
+  | regime | query | retrieval F1 | frequency prior | random |
+  |---|---|---|---|---|
+  | native (dedup) | corpus `summary_text` | **0.620** | 0.424 | 0.078 |
+  | runtime (n=15) | `build_sample_profile_text` | **0.111** | **0.123** | — |
+
+- **Finding.** The index is *not* the problem — given a query in its own vocabulary it beats the
+  prior by +0.20 F1 with hit@1 = 0.90. But with the query production actually sends it is
+  **indistinguishable from, and on F1 slightly below, printing the eight most common techniques
+  in the corpus and never looking at the sample.** The cause is mechanical, not a tuning
+  shortfall: the corpus renders capa rule sentences and lowercase API names ("allocate RW
+  memory"; "closehandle"), while the runtime profile renders import-category counts and CamelCase
+  ("capabilities: execution x5"; "GetProcAddress"). The only text the two share is the
+  boilerplate — which is why **all 15 queries land at 0.78–0.90 similarity regardless of
+  content**, and why `attck_case_rag_min_score = 0.35` is inert, filtering nothing. A variant
+  querying with only the lowercased import segment (the one overlapping vocabulary) was tried and
+  did **not** close the gap (F1 0.090).
+- **Correction to the record.** The U2 entry's end-to-end verification — "an injection+network
+  static profile retrieves T1055 / T1055.003 at 0.90" — read a number that carries no
+  information: 0.90 is what *every* query scores here, correct or not. A single anecdotal
+  retrieval at a plausible-looking similarity is not evidence when the score distribution has not
+  been characterised. The pre-existing "vocabulary overlaps but does not perfectly match" caveat
+  was directionally right and quantitatively far too generous.
+- **Decision.** Stays OFF — now on evidence rather than on absence of a corpus. Enabling it would
+  be **worse than a no-op**: an analyst shown a technique list that tracks corpus frequency rather
+  than this sample reads it as corroboration, which is the same false-corroboration mechanism the
+  dataless-revision fix had to remove elsewhere in the pipeline. Re-open when the corpus is
+  rebuilt in `build_sample_profile_text`'s vocabulary (or the query in capa's); the harness
+  re-runs in ~2 min and answers it.
+- **Takeaway (paper).** Three transferable points. (i) For a retrieval component over a skewed
+  label distribution, the mandatory baseline is the **label-frequency prior at equal budget** —
+  against "no retrieval" this component looks strong, against the prior it is negative. (ii)
+  **Retriever quality and query/corpus vocabulary parity are separable failure modes**, and the
+  usual isolated-retrieval metric measures only the first; the ceiling-vs-runtime split is what
+  localises the fault. (iii) A similarity floor tuned on scores that do not separate good matches
+  from bad ones is decoration, not a gate — the same conclusion §1.5.1 reached for the semantic
+  backend, reached independently here. Harness: `tests/evaluation/eval_attck_case_rag.py`;
+  artifact: `tests/evaluation/attck_case_rag_retrieval.json`; the harness's own scoring
+  arithmetic is unit-tested (`test_attck_case_rag_scoring.py`) because it decides a shipped
+  default.
+
 ### 1.6 Deterministic STIX validity + honest reporting — `IMPLEMENTED`
 - **What.** Two deterministic output-quality passes that harden the machine-readable (STIX 2.1
   bundle) and human-readable (Markdown report) artifacts, in the same "deterministic layer
@@ -849,9 +912,12 @@ equal-budget A/B (§3.6), and the MaLAware-style narrative-quality harness (§3.
   regex-parsed from `mitre_attack_id`; category from the yara_* family-class columns) with a
   `--max-per-family` cap so the runtime index does not embed all ~74k labelled rows. Built the vendored
   `data/attck_case_corpus_v1.json` (the config default path → turnkey): **1,733 cases, 77 distinct
-  ATT&CK techniques** (cap 6/family to keep the artifact ~1.3 MB). End-to-end verified with fastembed
-  BGE-384 — an injection+network static
-  profile retrieves T1055 / T1055.003 (process injection) at 0.90 plus related evasion TTPs.
+  ATT&CK techniques** (cap 6/family to keep the artifact ~1.3 MB). ~~End-to-end verified with fastembed
+  BGE-384 — an injection+network static profile retrieves T1055 / T1055.003 (process injection) at
+  0.90 plus related evasion TTPs.~~ **Retracted 2026-08-08 (see §1.5.3):** that check proved nothing —
+  0.90 is what *every* runtime query scores against this corpus, correct or not, because the query and
+  the corpus share only their boilerplate. Measured against a frequency-prior control, the candidate
+  list is no better than ignoring the sample; the thread is resolved `NEGATIVE` in §1.5.3.
   **Caveats:** the ATT&CK labels are capa's *static* inference (not authoritative ground truth, but a
   large real labelled corpus); MABEL ships no binaries (features-only — safe to download, no live
   malware); the `--csv`-style summary vocabulary overlaps but does not perfectly match
@@ -977,6 +1043,27 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-08 §1.5.3 — the ATT&CK case-prior RAG is NEGATIVE, and the reason is the query, not the
+  retriever.** Measured the U2 case-prior RAG in isolation for the first time (the only prior evidence,
+  the n=19 U3 A/B, confounded it with the family RAG). Built
+  `tests/evaluation/eval_attck_case_rag.py` around the control the skewed corpus demands — a
+  **label-frequency prior at equal budget** (T1129 is in 71% of the 1,733 cases; 77 distinct techniques
+  total), with random selection as a floor. **Result:** with a corpus-native query the retriever is
+  genuinely good (F1 **0.620** vs prior 0.424 vs random 0.078, hit@1 0.90, near-duplicates suppressed);
+  with the query production actually sends (`build_sample_profile_text`, 15 labelled samples) it is
+  F1 **0.111 vs the prior's 0.123** — no better than ignoring the sample. Cause is a vocabulary
+  mismatch, not tuning: capa sentences + lowercase APIs in the corpus vs import-category counts +
+  CamelCase in the query, so **all 15 queries score 0.78–0.90 regardless of content** and
+  `attck_case_rag_min_score` filters nothing. A vocabulary-matched query variant did not close the gap
+  (F1 0.090). **Retracted** the U2 entry's "retrieves T1055 at 0.90" verification — 0.90 is the score
+  of everything here. **Also found** that 742/1,733 cases share a byte-identical `summary_text`, so
+  naive leave-one-out (F1 0.697) hands 43% of queries their own twin; the deduplicated figure is the
+  reported one. `use_attck_case_rag` stays **off — now on evidence**, and `config.py` records why,
+  including why `family_fingerprint_catalog_path` points at the 21-family bootstrap rather than the
+  278/318-family catalogs beside it (the A/B that found no gain ran on the big one). 2227 unit tests
+  pass (+17: the harness's own scoring arithmetic is tested, because it decides a shipped default);
+  ruff/mypy clean.
 
 - **2026-07-13 Depth-restore E2E validation — CORE CONFIRMED (6.3× deeper, zero re-prefill, zero
   timeout); multi-chunk + revision-round E2E still UNVERIFIED (a healthy run was killed on a
