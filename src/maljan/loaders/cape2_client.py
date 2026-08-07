@@ -59,7 +59,12 @@ class CAPEv2Client:
         base_url:    CAPEv2 server URL (e.g. "http://localhost:8000").
         api_token:   CAPEv2 REST API authentication token. May be empty
                      for unauthenticated local instances.
-        timeout:     Default HTTP request timeout in seconds.
+        timeout:     Default HTTP request timeout in seconds. Sized for the
+                     small JSON status/report calls.
+        upload_timeout: Deadline for the sample upload specifically, which is
+                     orders of magnitude larger than a status check. Never
+                     narrower than ``timeout`` — an operator who raised the
+                     global value meant it.
     """
 
     def __init__(
@@ -67,6 +72,7 @@ class CAPEv2Client:
         base_url: str,
         api_token: Any = "",
         timeout: int = 30,
+        upload_timeout: int = 300,
     ) -> None:
         try:
             import httpx  # noqa: F401
@@ -84,6 +90,7 @@ class CAPEv2Client:
 
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._upload_timeout = max(int(upload_timeout), int(timeout))
         self._headers: dict[str, str] = {}
         if token_value:
             self._headers["Authorization"] = f"Token {token_value}"
@@ -116,9 +123,21 @@ class CAPEv2Client:
         logger.info("CAPEv2Client: submitting '%s' to %s", path.name, self._base_url)
         with open(path, "rb") as f:
             try:
+                # Its own deadline. The client-wide ``timeout`` is sized for
+                # ``GET /apiv2/tasks/view/<id>/`` — a few hundred bytes of JSON
+                # — and a sample upload is orders of magnitude larger while
+                # competing with whatever the sandbox is already running. On
+                # 2026-08-07 that mismatch produced "Submission request failed:
+                # timed out" 35 s in, and the run silently lost its sandbox.
+                #
+                # Deliberately no retry, unlike ``wait_for_completion``: this
+                # POST is not idempotent, a request that timed out client-side
+                # may still have been accepted, and a blind retry would burn a
+                # second detonation slot on a one-VM instance.
                 response = self._http.post(
                     "/apiv2/tasks/create/file/",
                     files={"file": (path.name, f, "application/octet-stream")},
+                    timeout=self._upload_timeout,
                 )
             except Exception as exc:
                 raise SandboxError(f"Submission request failed: {exc}") from exc
