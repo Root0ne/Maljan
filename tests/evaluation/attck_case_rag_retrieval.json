@@ -1,0 +1,303 @@
+{
+  "schema": "maljan-attck-case-rag-retrieval/v1",
+  "corpus": "data/attck_case_corpus_v1.json",
+  "params": {
+    "top_k": 5,
+    "min_score": 0.35,
+    "max_techniques": 8
+  },
+  "native": {
+    "cases": 1733,
+    "distinct_techniques": 77,
+    "duplicate_summary_texts": 486,
+    "exclude_above": 0.99,
+    "rag": {
+      "all_neighbours": {
+        "abstained": 0,
+        "hit_at_1": 0.9238,
+        "top_neighbour_similarity": {
+          "mean": 0.9847,
+          "p05": 0.9485,
+          "p50": 0.995,
+          "p95": 1.0
+        },
+        "precision": 0.7122,
+        "recall": 0.8038,
+        "f1": 0.6968
+      },
+      "novel": {
+        "abstained": 0,
+        "hit_at_1": 0.9008,
+        "top_neighbour_similarity": {
+          "mean": 0.9719,
+          "p05": 0.9406,
+          "p50": 0.9751,
+          "p95": 0.9896
+        },
+        "precision": 0.6269,
+        "recall": 0.7491,
+        "f1": 0.6204
+      }
+    },
+    "frequency_prior": {
+      "precision": 0.4204,
+      "recall": 0.6398,
+      "f1": 0.4242
+    },
+    "random_baseline": {
+      "precision": 0.0863,
+      "recall": 0.1001,
+      "f1": 0.0778
+    },
+    "frequency_prior_techniques": [
+      "T1129",
+      "T1027",
+      "T1082",
+      "T1083",
+      "T1012",
+      "T1059",
+      "T1497.001",
+      "T1222"
+    ]
+  },
+  "runtime": {
+    "samples": 15,
+    "top_neighbour_similarity": {
+      "cleared_min_score": 15,
+      "cleared_fraction": 1.0,
+      "mean": 0.8574,
+      "min": 0.7786,
+      "max": 0.9007
+    },
+    "rag_shipped_query": {
+      "precision": 0.2517,
+      "recall": 0.0762,
+      "f1": 0.1108
+    },
+    "rag_vocabulary_matched_query": {
+      "precision": 0.2833,
+      "recall": 0.0619,
+      "f1": 0.0902
+    },
+    "rag_vocabulary_matched_similarity": {
+      "cleared_min_score": 15,
+      "cleared_fraction": 1.0,
+      "mean": 0.8681,
+      "min": 0.7786,
+      "max": 0.9152
+    },
+    "frequency_prior": {
+      "precision": 0.2333,
+      "recall": 0.0875,
+      "f1": 0.1228
+    },
+    "per_sample": [
+      {
+        "sample": "007257bf103de117",
+        "family": "Pony",
+        "top_similarity": 0.8553,
+        "predicted": [
+          "T1027",
+          "T1129",
+          "T1027.002"
+        ],
+        "precision": 0.0
+      },
+      {
+        "sample": "08cb598a06ac7af5",
+        "family": "DarkComet",
+        "top_similarity": 0.8645,
+        "predicted": [
+          "T1012",
+          "T1027",
+          "T1082",
+          "T1083",
+          "T1547.001",
+          "T1027.005",
+          "T1033",
+          "T1070.004"
+        ],
+        "precision": 0.375
+      },
+      {
+        "sample": "113936749f6b08da",
+        "family": "DarkComet",
+        "top_similarity": 0.8843,
+        "predicted": [
+          "T1027.002",
+          "T1497.001"
+        ],
+        "precision": 0.5
+      },
+      {
+        "sample": "23e3757121ff1a0c",
+        "family": "Pony",
+        "top_similarity": 0.9007,
+        "predicted": [
+          "T1027.002",
+          "T1497.001"
+        ],
+        "precision": 0.0
+      },
+      {
+        "sample": "2ccb45525205729f",
+        "family": "Emotet",
+        "top_similarity": 0.893,
+        "predicted": [
+          "T1027",
+          "T1129",
+          "T1059",
+          "T1082",
+          "T1083"
+        ],
+        "precision": 0.0
+      },
+      {
+        "sample": "0014daeadce3a907",
+        "family": "TrickBot",
+        "top_similarity": 0.8872,
+        "predicted": [
+          "T1027",
+          "T1027.002",
+          "T1497.001",
+          "T1129",
+          "T1027.005"
+        ],
+        "precision": 0.4
+      },
+      {
+        "sample": "29f9c88b451d133d",
+        "family": "TrickBot",
+        "top_similarity": 0.8927,
+        "predicted": [
+          "T1027",
+          "T1129",
+          "T1497.001",
+          "T1082",
+          "T1027.005",
+          "T1012",
+          "T1083",
+          "T1547.001"
+        ],
+        "precision": 0.5
+      },
+      {
+        "sample": "737ff2b259449c91",
+        "family": "AZORult",
+        "top_similarity": 0.7786,
+        "predicted": [
+          "T1027.002",
+          "T1497.001",
+          "T1027",
+          "T1129"
+        ],
+        "precision": 0.0
+      },
+      {
+        "sample": "2a7176a246d4d510",
+        "family": "IcedID",
+        "top_similarity": 0.8402,
+        "predicted": [
+          "T1497.001",
+          "T1027",
+          "T1027.005",
+          "T1129",
+          "T1213"
+        ],
+        "precision": 0.0
+      },
+      {
+        "sample": "40722bb73834f975",
+        "family": "IcedID",
+        "top_similarity": 0.8673,
+        "predicted": [
+          "T1129",
+          "T1057",
+          "T1027",
+          "T1082",
+          "T1083",
+          "T1518",
+          "T1055",
+          "T1055.003"
+        ],
+        "precision": 0.125
+      },
+      {
+        "sample": "43b1ea9d28fbd3c5",
+        "family": "NanoCore",
+        "top_similarity": 0.8857,
+        "predicted": [
+          "T1027",
+          "T1129",
+          "T1057",
+          "T1134",
+          "T1082",
+          "T1083",
+          "T1497.001",
+          "T1055"
+        ],
+        "precision": 0.125
+      },
+      {
+        "sample": "b34d5f7238532645",
+        "family": "NanoCore",
+        "top_similarity": 0.7786,
+        "predicted": [
+          "T1027.002",
+          "T1497.001",
+          "T1027",
+          "T1129"
+        ],
+        "precision": 0.25
+      },
+      {
+        "sample": "1940ba18ed66dd2f",
+        "family": "Amadey",
+        "top_similarity": 0.8568,
+        "predicted": [
+          "T1027",
+          "T1129",
+          "T1082",
+          "T1083",
+          "T1140",
+          "T1505.004",
+          "T1112",
+          "T1222"
+        ],
+        "precision": 0.625
+      },
+      {
+        "sample": "3efa9fdaaa74aaa5",
+        "family": "Amadey",
+        "top_similarity": 0.7859,
+        "predicted": [
+          "T1027",
+          "T1027.002",
+          "T1129",
+          "T1497.001",
+          "T1059",
+          "T1082",
+          "T1083",
+          "T1614"
+        ],
+        "precision": 0.5
+      },
+      {
+        "sample": "2395de00a23d65cb",
+        "family": "njrat",
+        "top_similarity": 0.8896,
+        "predicted": [
+          "T1027",
+          "T1497.001",
+          "T1129",
+          "T1027.005",
+          "T1082",
+          "T1083",
+          "T1562.009",
+          "T1057"
+        ],
+        "precision": 0.375
+      }
+    ]
+  }
+}
