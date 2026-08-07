@@ -9,6 +9,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from arq import ArqRedis
+from arq.jobs import Job as ArqJob
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -95,7 +96,7 @@ class AnalysisService:
         # caller into believing the analysis was accepted.
         try:
             arq = await self._get_arq_redis()
-            await arq.enqueue_job("run_analysis", str(job.id))
+            await _enqueue_analysis(arq, job.id)
         except Exception as exc:
             job.status = "failed"
             job.error_message = f"Failed to enqueue job: {exc}"
@@ -199,6 +200,11 @@ class AnalysisService:
             # Cooperative-cancellation flag. TTL keeps abandoned keys from
             # accumulating; it outlives any realistic single analysis.
             await redis_conn.set(f"analysis:{job_id}:cancel", "1", ex=86_400)
+            # The cooperative flag only reaches a job that is already running.
+            # A job still queued — or scheduled for retry — has to be removed
+            # from arq as well, or it starts later as if nothing happened. See
+            # ``_abort_queued_analysis`` for the live evidence.
+            await _abort_queued_analysis(redis_conn, job_id)
             await redis_conn.publish(f"analysis:{job_id}", message)
             await redis_conn.xadd(
                 f"analysis:{job_id}:events",
@@ -262,3 +268,41 @@ class AnalysisService:
             "verdict_distribution": verdict_counts,
             "avg_duration_seconds": round(float(avg_duration), 1) if avg_duration else None,
         }
+
+
+async def _enqueue_analysis(arq: Any, job_id: uuid.UUID) -> Any:
+    """Queue ``run_analysis`` under **our** job id.
+
+    Without ``_job_id`` arq mints a random identity that nothing else in the
+    system knows, which is why a cancelled job could not be reached in the
+    queue afterwards: ``cancel_job`` marked the row and set a cooperative flag,
+    but the queued work carried on existing under a name we never recorded.
+
+    Making the ids equal also makes enqueueing idempotent — arq refuses a
+    second job with an id it already holds, so one analysis cannot end up
+    queued twice under two identities.
+    """
+    return await arq.enqueue_job("run_analysis", str(job_id), _job_id=str(job_id))
+
+
+async def _abort_queued_analysis(redis_conn: Any, job_id: uuid.UUID) -> None:
+    """Remove the queued/scheduled arq job for ``job_id``. Never raises.
+
+    Observed 2026-08-07, hours after a cancel: the arq job was still holding an
+    ``in-progress`` lock (ttl ~4h) *and* was still scheduled for retry. With
+    ``max_jobs = 1`` that blocked every later submission, and had the retry
+    fired it would have re-run a cancelled analysis — which cannot even save a
+    report, because ``analysis_reports.job_id`` is unique.
+
+    Best-effort by design: the DB row is already ``cancelled`` before this runs,
+    so a Redis hiccup must not turn a successful cancel into a 500.
+    """
+    try:
+        await ArqJob(str(job_id), redis_conn).abort(timeout=0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "cancel_job: could not abort queued arq job %s (%s); "
+            "the cooperative cancel flag still applies.",
+            job_id,
+            exc,
+        )
