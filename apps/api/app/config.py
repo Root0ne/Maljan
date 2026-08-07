@@ -329,6 +329,21 @@ class APISettings(BaseSettings):
         # MUST set DEBUG=False *and* a real MinIO secret.
         if self.debug or _is_test_env():
             return
+
+        # Same contract as the MinIO placeholder below, and it was the one
+        # missing: ``auth_disabled`` makes ``get_current_user`` return the dev
+        # admin for *every* request without inspecting the token at all
+        # (deps.py). The pytest guard above is not a production guard — a
+        # ``.env`` carried from a dev box to a real deployment would serve an
+        # unauthenticated admin API and nothing would say so.
+        if self.auth_disabled:
+            raise ValueError(
+                "AUTH_DISABLED is set with DEBUG=False. The auth bypass serves "
+                "every request as the dev admin user and is for local "
+                "development only. Unset AUTH_DISABLED before running in "
+                "non-debug mode."
+            )
+
         secret = (
             self.minio_secret_key.get_secret_value()
             if isinstance(self.minio_secret_key, SecretStr)
