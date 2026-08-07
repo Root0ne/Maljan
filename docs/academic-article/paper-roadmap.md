@@ -77,7 +77,7 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 - [x] R2 — ATT&CK technique mapping `[done]` → `incoming/R2.claude-web.md`
 - [x] R5 — RAG for malware / CTI `[done]` → `incoming/R5.claude-web.md`
 - [x] R3 — multi-agent consensus `[done]` → `incoming/R3.claude-web.md`
-- [ ] R4 — grounding, hallucination, calibration `[cheap]`
+- [x] R4 — grounding, hallucination, calibration `[done]` → `incoming/R4.claude-web.md`
 - [ ] R6 — evaluation methodology and ground truth `[cheap]`
 - [ ] R7 — local, small, open-weight deployment `[cheap]`
 - [ ] R8 — CTI report / STIX generation `[cheap]`
@@ -151,6 +151,13 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
 
 - [ ] **Baseline with no LLM at all** `[CAPE]` — CAPE's own signature-derived TTPs on the same
       samples. Without one baseline, "F1 0.08" has no referent. → **E.4**
+- [ ] **Does verbal confidence predict correctness in our pipeline?** `[LLM]`
+      `arXiv:2606.29490` finds an LLM's reported confidence tracks its readiness to commit, not
+      whether it is right, while calibrated log-probs track correctness. Our ISR claims and the
+      cascade both run on the reported number. Score past claims against ground truth and check
+      whether the number separates correct from wrong. Cheapest high-value experiment in R4: if
+      it replicates, it justifies every deterministic gate in the system, and it converges with
+      tonight's finding that the layer weights move almost nothing.
 - [ ] **Human evaluation** `[decide]` — the report is the product and no analyst has scored
       one. N5 showed readability is the LLM narrator's *only* edge, and readability is exactly
       what needs human judgement. → **E.7**
