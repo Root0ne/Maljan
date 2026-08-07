@@ -301,7 +301,29 @@ class ReportComposer:
         payload = safe_parse_json(_message_text(raw))
         if not payload:
             return None
-        return schema.model_validate(payload)
+        return schema.model_validate(_unwrap_section_envelope(payload, schema))
+
+
+def _unwrap_section_envelope(payload: Any, schema: type[BaseModel]) -> Any:
+    """Strip a ``{"<section>": {...}}`` wrapper the model added around its answer.
+
+    Skipping structured output on local servers promoted the manual parse from
+    a rare fallback to the primary path, and that exposed this: the prompt says
+    "SECTION: ransom_note", so the model answers ``{"ransom_note": {...}}``.
+    Validating that envelope against the inner schema fails on every structured
+    section — ``extra="forbid"`` is deliberate and stays.
+
+    Only an unambiguous envelope is opened: exactly one key, that key is not a
+    real field, and the value is an object. A single key holding a scalar
+    (``{"encryption_scheme": "RC4, XOR"}`` — the other live payload) carries no
+    object to recover, so it is left to fail rather than guessed at.
+    """
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return payload
+    ((key, value),) = payload.items()
+    if key in schema.model_fields or not isinstance(value, dict):
+        return payload
+    return value
 
 
 def _message_text(msg: Any) -> str:
