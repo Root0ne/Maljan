@@ -638,6 +638,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 run_summary=pipeline_result.get("run_summary"),
                 malware_report=pipeline_result.get("malware_report"),
             )
+            # A re-run supersedes its predecessor. ``analysis_reports.job_id``
+            # is unique and this path only ever inserted, so an arq retry --
+            # which arq schedules on its own -- reached the end of a full
+            # analysis and threw the result away on a UniqueViolationError.
+            await _supersede_previous_report(db, job.id)
             db.add(report)
             await db.flush()
 
@@ -1247,3 +1252,40 @@ class WorkerSettings:
     job_timeout = 28800
     max_tries = 1  # Don't retry failed analyses automatically
     health_check_interval = 30
+
+
+async def _supersede_previous_report(db: Any, job_id: Any) -> None:
+    """Drop any existing report row for ``job_id`` so a re-run can persist.
+
+    One report per job remains the right constraint — a job has one current
+    result, not a history — so a second run replaces rather than accumulates.
+    ``agent_findings`` and ``agent_messages`` are ``ondelete="CASCADE"``, which
+    is what we want here: their contents describe the superseded analysis and
+    would otherwise stay attached to a report that no longer exists.
+
+    The delete is flushed before the caller adds the new row; leaving both in
+    one flush puts two rows with the same ``job_id`` in the same statement
+    batch and collides exactly as before.
+
+    Never raises. The analysis is already finished by the time this runs, and a
+    failed pre-check must not be the thing that loses its result — the insert
+    below will surface any real problem on its own.
+    """
+    try:
+        from app.models.report import AnalysisReport
+
+        existing = (
+            await db.execute(select(AnalysisReport).where(AnalysisReport.job_id == job_id))
+        ).scalar_one_or_none()
+        if existing is None:
+            return
+        logger.warning(
+            "Report for job %s already exists (id=%s); superseding it with this run.",
+            job_id,
+            getattr(existing, "id", "<unknown>"),
+            extra={"job_id": str(job_id), "component": "report"},
+        )
+        await db.delete(existing)
+        await db.flush()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not check for a previous report on job %s (%s).", job_id, exc)
