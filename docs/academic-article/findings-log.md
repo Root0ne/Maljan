@@ -13,7 +13,7 @@
 >
 > **Honesty rules for this log:** record confounds and sample sizes; keep negative
 > results; do not inflate single-run probes into "studies"; cite the prior work each
-> finding builds on or contradicts. Last updated: 2026-06-23.
+> finding builds on or contradicts. Last updated: 2026-08-08.
 
 ---
 
@@ -131,11 +131,22 @@ positioning.
   *ID-existence/assignment* sub-task; the model keeps only what it is good at (describing
   behaviour). Its own failure mode is lexical (keyword, no synonyms), which is why
   assignment is **gated** (only override invalid or strictly-worse-aligned IDs), not blind.
-- **Novelty / principle.** A concrete instance of "LLM proposes, deterministic layer
-  disposes" applied to the *label-assignment* step itself: separate **description**
-  (model) from **taxonomy mapping** (deterministic retrieval). The project already had
-  this index but used it only *advisorily* (validation summary injected into the judge
-  prompt); the contribution is making it **authoritative** for ID assignment.
+- **Novelty / principle — corrected 2026-08-08.** The design is a concrete instance of
+  "LLM proposes, deterministic layer disposes" applied to the *label-assignment* step
+  itself: separate **description** (model) from **taxonomy mapping** (deterministic
+  retrieval). The project already had this index but used it only *advisorily*; the
+  change was making it **authoritative** for ID assignment. That remains an accurate
+  description of the engineering — but it is **not a new idea**.
+  `Infer-Retrieve-Rank` [6] (Jan 2024) publishes the general program: multi-step
+  interactions between LMs and retrievers that decouple the LM's inference from direct
+  assignment over a many-thousand-class label space, reaching SOTA on three benchmarks
+  with tens of labelled examples and no finetuning. TechniqueRAG [7] and its hierarchical
+  successor apply retrieve-then-rerank to ATT&CK specifically.
+  **What is defensibly ours is narrower.** Ours is *stricter*: in Infer-Retrieve-Rank and
+  TechniqueRAG the LM still ranks or selects among retrieved candidates, whereas here the
+  model never emits an ID at all and any override is gated to the provably-safe
+  invalid→valid case (§1.5.2). A domain instantiation with a design refinement — **cite [6]
+  prominently and position against it; do not lead a paper with this.**
 - **Artifacts.** `correct_isr_reports` in `src/maljan/memory/attck_validator.py` (over the
   TF-IDF `src/maljan/memory/attck_index.py`); wired in `src/maljan/pipeline/nodes.py`
   before cascade; `tests/unit/test_attck_memory.py` (6 correction tests). Config-gated
@@ -177,6 +188,15 @@ positioning.
   all (+0.115)**, because semantic surfaces better candidates that TF-IDF then validates
   decisively (wrong picks score ~0.13). Absolute top-1 ≈ 0.20–0.23 reflects the known difficulty
   of zero-shot single-sentence → technique on TRAM2 (no fine-tuning, 697-way retrieval).
+- **Literature position (2026-08-08) — the conclusion is not ours; the decomposition is.**
+  The Büchel SoK [5] (USENIX Security 2025) re-evaluated 40+ TTP-extraction systems in a unified
+  setting and reports that *"traditional NLP approaches (possibly counterintuitively) outperform
+  modern embedder-based and generative approaches in realistic settings."* That is a stronger,
+  more general form of what this section found for the gating axis, published before it. Our
+  result must be positioned as a **mechanistic refinement** of that insight, not as a discovery:
+  the SoK says embedders lose; we say *why and where* — they rank better and gate worse, the two
+  are separable axes, and composing the per-axis winners beats either. The review found no other
+  work reporting ranking and gate quality as distinct metrics (`MEDIUM` confidence).
 - **Decision.** Hybrid dominates both pure backends on both axes, so it is the **default**
   (`attck_index_backend = "hybrid"`); its TF-IDF gate keeps the existing 0.08 threshold valid.
   `fastembed` is already loaded in production (long-term memory), so the marginal cost is one
@@ -504,6 +524,50 @@ positioning.
   signal. Net: deterministic FP↓ and calibration↑ with no valid-signal regression (verified by
   the existing + new extractor/enrichment test suites).
 
+### 1.10 What the static Layer-0 sources contribute, and whether the cascade weights matter — `EXPERIMENTAL`
+- **Motivation.** The TTP cascade is the concrete instantiation of "deterministic layer
+  disposes", and neither half of it had been measured: not the sources feeding it, and not the
+  eleven constants inside it (`LAYER_WEIGHTS` 0.90…0.20, cross-layer multipliers 1.00…1.90).
+  The §3.1 review made this urgent rather than merely untidy — weighting evidence by source
+  reliability and discounting non-independent sources is **Dempster–Shafer theory**, so "our
+  constants are plausible" is not a defence when a principled formalism already exists.
+- **Method.** Three of the six Layer-0 sources read only the sample bytes and its parsed PE, so
+  they run with no LLM and no sandbox: `yara_layer`, `import_capability_layer`,
+  `tool_artifact_layer`. Run over **209 real PE samples** (189 produced evidence), then the same
+  ISR tuples fed to `TTPCascadeEngine` under five weight perturbations — flat 0.5, inverted
+  yara↔network, compressed ×0.25 toward 0.5, stretched ×1.75, and yara demoted 0.90→0.45.
+  Harness `tests/evaluation/eval_layer0_contribution.py`; pure helpers unit-tested in
+  `test_layer0_contribution_scoring.py`; artifact `tests/evaluation/layer0_contribution.json`.
+- **Result — source contribution.**
+
+  | source | fires on | techniques emitted | unique to it |
+  |---|---|---|---|
+  | `yara_layer` | **89.5%** (187/209) | 812 | 79.8% |
+  | `import_capability` | **52.6%** (110/209) | 694 | 76.5% |
+  | `tool_artifact` | **2.4%** (5/209) | **5** | 80% (4 techniques) |
+
+- **Result — corroboration ceiling.** 1,184 techniques were seen by exactly one domain and 163
+  by two: **87.9% of techniques are single-source** before the sandbox is in play.
+- **Result — weight sensitivity.** Across all five perturbations the top-10 ranking changed on
+  **10.6–27.5%** of samples and the corroborated set changed on **0.0%**, every time.
+- **Findings.** (i) **`tool_artifact` is effectively inert** — 5 techniques across 209 samples,
+  and because it emits `domain="yara"` it cannot contribute an independent layer even when it
+  fires. Reporting per *source* rather than per *domain* would have made three sources look like
+  three layers; the two views differ by exactly one technique across the corpus, and only the
+  domain view governs `is_corroborated`. (ii) **The weights are far less load-bearing than they
+  look.** The 0.0% is structural, not a corpus artifact: `is_corroborated` is
+  `len(contributing_layers) >= 2` and never consults `LAYER_WEIGHTS`, so the label the report
+  displays most prominently is independent of all five constants — and inverting the most- and
+  least-trusted layers leaves the ranking identical on ~72% of samples. This defends the
+  constants against "arbitrary" and simultaneously raises why they exist at all.
+- **Honest scope.** Three of six layers. Sigma (2,651 rules), LOLBin and network-DGA consume a
+  sandbox report and are `[CAPE]`-gated; they are also the layers weighted *below* yara, so
+  their absence does not flatter the result. This is a **static** Layer-0 ablation and is named
+  that way. The full cascade ablation (flat union vs cascade, end-to-end) still needs the LLM.
+- **Incidental.** The eval's own unit tests found a defect in it: a whitespace-only
+  `technique_id` survived the `NONE` filter and entered the sets as an empty-string "technique"
+  that would then appear corroborated across every source that also had one.
+
 ---
 
 ## 2. Empirical systems findings (local deployment)
@@ -566,6 +630,50 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   is its **evaluation protocol** (multi-metric vs human-written references) for
   scoring LLM-generated malware narratives, and independent validation that 7–9B
   local models suffice for the narration task.
+
+**Expanded 2026-08-08 after a systematic, citation-verified review.** The four entries above
+were the whole of our prior-art position; the field is considerably more crowded, and four of
+its results bear directly on claims this log had recorded as contributions. Full working papers
+in [`research-briefs/incoming/`](../../docs/academic-article/research-briefs/incoming/); the
+per-claim verdicts are in [`research-briefs/novelty-ledger.md`](research-briefs/novelty-ledger.md).
+
+- **Büchel et al. SoK [5]** (USENIX Security 2025) — 40+ systems re-evaluated in one setting.
+  Reports a performance ceiling nobody has crossed, that traditional NLP beats embedder and
+  generative approaches in realistic settings, and that dataset quality and ontological
+  ambiguity are the field's blockers. Binds §1.5.1 (see there).
+- **Infer-Retrieve-Rank [6]** (2024, general ML) — the general form of describe-then-map.
+  Demotes §1.5's novelty claim to a domain instantiation.
+- **TechniqueRAG [7]** (ACL Findings 2025) and its hierarchical successor — retrieve-then-rerank
+  for ATT&CK; the latter cuts the candidate space 77.5% by filtering at tactic level first.
+- **TTPDetect [8]** (2026) — an LLM agent mapping **stripped malware binaries** to ATT&CK at
+  93.25% function-level precision, with a deterministic retrieval pre-pass feeding an LLM
+  reasoner. Architecturally our shape, and it removes "binary evidence rather than report prose"
+  as a positioning claim. It also built a decompiled-function↔TTP dataset, which supersedes the
+  §4 `SURVEY` conclusion that no such corpus exists.
+- **Chasing Shadows [9]** (NDSS 2026, with Arp of *Dos and Don'ts*) — all 72 LLM-security papers
+  from 2023–2024, **every one** containing at least one of nine pitfalls and only 15.7%
+  acknowledged. Places §3.4 inside a named tradition rather than ahead of it.
+- **Bertalanič & Fortuna [10]** and **Tran & Kiela [11]** (both 2026) — at equal token budget,
+  single agents match or beat multi-agent debate; the former on 7–8B models at 2.1–3.4× the
+  tokens, naming *sycophantic conformity* (modal adoption up to 85.5%) among its failure modes.
+  Both scope the result to *homogeneous* agents on one context and name heterogeneous or
+  degraded-context settings as the exception — which is the entire defence of our architecture,
+  and is a hypothesis until the equal-budget ablation is run.
+- **REx86 [12]** (ACSAC 2025) — local open-weight RE assistant, motivated explicitly by
+  closed-network confidentiality, with a 43-participant user study. Removes "confidentiality as
+  a first-class constraint" from our contribution list.
+- **Ng & Milani Fard [13]** (SecDev 2026) — a published negative RAG result in malware analysis:
+  retrieval degrades explanation quality because the task is signal extraction, not knowledge
+  retrieval. §1.5.3 is therefore the *second* such result, by a different mechanism.
+- **Dempster–Shafer evidence theory** — weighting sources by reliability and discounting
+  non-independent ones is decades old. The TTP cascade is an ad-hoc instance of it, which makes
+  its unmeasured constants harder to defend, not easier. See §1.10.
+
+**Method note worth keeping (paper-relevant).** Four of these were found only by searching an
+**adjacent field's** vocabulary: Infer-Retrieve-Rank indexes as general ML, TTPDetect as binary
+analysis, the cascade's formalism as sensor fusion, and the narrative result as data-to-text NLG.
+A search confined to the subfield a claim *sounds* like will miss the work that owns it — and in
+this review it did, until corrected.
 
 ### 3.2 View-decomposition for small-model static analysis — `EXPERIMENTAL` → `INCONCLUSIVE`
 - **Question.** Given identical evidence, does focused per-view sub-prompting
@@ -635,6 +743,14 @@ ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
   (under-specified 600+ label space × autoregressive self-reinforcement), plus the
   finding that the obvious mitigation (sampler penalties) is necessary-but-insufficient,
   and a clean fix (offload the taxonomy lookup to deterministic retrieval).
+- **Literature position (2026-08-08).** The *hallucinated-ID* concern is well represented —
+  TTPrint [8] retains only candidates supported by both localised evidence and the MITRE
+  definition, and constrained decoding is the standard remedy. What the review found no
+  precedent for is this pathology as a **budget-exhaustion** failure, nor the finding that
+  sampler penalties are necessary-but-insufficient against it. Stands as `OURS` with `MEDIUM`
+  confidence (an absence, not a proof). The expected reviewer response — *"constrained decoding
+  solves this"* — is correct, and the contribution is precisely that the cheaper mitigation a
+  practitioner reaches for first does not.
 
 ### 3.4 Negative methodological finding: single-run claim-count is not a valid instrument — `NEGATIVE`
 - Running the §3.2 A/B three times under different decoding budgets produced
@@ -1015,6 +1131,44 @@ Only work we directly built on or positioned against — kept deliberately short
 4. Saha et al. *MaLAware: Automating the Comprehension of Malicious Software Behaviours
    using LLMs.* MSR 2025. arXiv:2504.01145. — narrative-quality evaluation protocol (§4).
 
+*Added 2026-08-08. Every entry below was verified by fetching its abstract page; see
+`research-briefs/incoming/` for per-citation confidence and `CITATION-AUDIT.claude-web.md` for
+what was checked and what was not.*
+
+5. Büchel, Paladini, Longari, Carminati, Zanero, Binyamini, Engelberg, Klein, Guizzardi,
+   Caselli, Continella, van Steen, Peter, van Ede. *SoK: Automated TTP Extraction from CTI
+   Reports – Are We There Yet?* USENIX Security 2025, pp. 4621–4641. — binds §1.5.1; the field's
+   own statement of its comparability and dataset problems.
+6. D'Oosterlinck, Khattab, Remy, Demeester, Develder, Potts. *In-Context Learning for Extreme
+   Multi-Label Classification.* arXiv:2401.12178. — `Infer-Retrieve-Rank`; the general form of
+   §1.5's describe-then-map.
+7. Lekssays, Shukla, Sencar, Parvez. *TechniqueRAG: Retrieval Augmented Generation for
+   Adversarial Technique Annotation in CTI Text.* ACL Findings 2025. arXiv:2505.11988. — with
+   the hierarchical successor arXiv:2604.14166 (tactic-first filtering, −77.5% candidate space).
+8. *Identifying Adversary Tactics and Techniques in Malware Binaries with an LLM Agent*
+   (TTPDetect), Purdue. arXiv:2602.06325. — stripped binaries → ATT&CK; supersedes the §4
+   `SURVEY` claim that no decompiled-code↔ATT&CK corpus exists.
+9. Evertz, Risse, Neuer, Müller, Normann, Sapia, Gupta, Pape, Shaw, Srivastav, Wressnegger,
+   Quiring, Eisenhofer, Arp, Schönherr. *Chasing Shadows: Pitfalls in LLM Security Research.*
+   NDSS 2026. arXiv:2512.09549. — places §3.4 in a named tradition; living appendix at
+   llmpitfalls.org.
+10. Bertalanič, Fortuna. *The Cost of Consensus: Isolated Self-Correction Prevails Over Unguided
+    Homogeneous Multi-Agent Debate.* arXiv:2605.00914. — equal-budget negative result on 7–8B
+    models; names sycophantic conformity.
+11. Tran, Kiela. *Single-Agent LLMs Outperform Multi-Agent Systems on Multi-Hop Reasoning Under
+    Equal Thinking Token Budgets.* arXiv:2604.02460. — the Data-Processing-Inequality argument,
+    and the degraded-context exception our architecture depends on.
+12. Lea, Ghawaly, Richard III, Ali-Gombe, Case. *REx86: A Local Large Language Model for
+    Assisting in x86 Assembly Reverse Engineering.* ACSAC 2025. arXiv:2510.20975. —
+    confidentiality as the stated design constraint; n=43 user study.
+13. Ng, Milani Fard. *Evaluating Retrieval-Augmented Generation for Explainable Malware
+    Analysis.* Poster, ACM SecDev 2026. arXiv:2605.03140. — the first published negative RAG
+    result in malware analysis; §1.5.3 is the second, by a different mechanism.
+14. Metz, Spolaôr, Cherman, Monard. *Comparing published multi-label classifier performance
+    measures to the ones obtained by a simple multi-label baseline classifier.* arXiv:1503.06952.
+    — the label-only baseline our §1.5.3 frequency prior instantiates; finds published results
+    routinely failing to beat it.
+
 **Datasets used** (URLs accessed 2026-06-08; the full nine-source survey with per-source
 verdicts is the §4 `SURVEY` table above):
 
@@ -1043,6 +1197,32 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-08 (overnight) — systematic literature review across 8 themes, and the first
+  measurement of the cascade.** Ran the full review myself with live search and **fetched every
+  citation** rather than recalling it, after discovering the briefs sent to the external models
+  were the truncated version (no novelty-adversarial instruction, no output format). Results are
+  in `research-briefs/incoming/R{2..8}.claude-web.md`, audited in `CITATION-AUDIT.claude-web.md`,
+  and reduced to per-claim verdicts in `research-briefs/novelty-ledger.md`:
+  **5 `OURS` · 6 `REFINEMENT` · 4 `PRIOR ART` · 4 `UNMEASURED`.**
+  **Two framing candidates fell to prior art in one night** — describe-then-map is
+  Infer-Retrieve-Rank [6] (Jan 2024) in general form (§1.5 corrected), and binary→ATT&CK is
+  TTPDetect [8] at 93.25% function-level precision. §1.5.1's conclusion is a **mechanistic
+  refinement** of the Büchel SoK [5], not a discovery. §3.4 sits inside the tradition Chasing
+  Shadows [9] names. Confidentiality-as-constraint belongs to REx86 [12]. A published negative
+  RAG result in malware analysis already exists [13], so §1.5.3 is the second.
+  **What survives as ours:** the rank-vs-gate metric (§1.5.1), the auto-correction regression
+  (§1.5.2), the degenerate-ID loop (§3.3), the completion-under-budget effect (§1.7.1), and the
+  n=210 drift study — all measurement results, none architectural.
+  **New §1.10:** the first measurement of the cascade. Over 209 real PEs, `tool_artifact` fires
+  on 2.4% and emits 5 techniques total while sharing yara's domain; 87.9% of techniques are
+  single-source; and across five weight perturbations the top-10 ranking moves on 10.6–27.5% of
+  samples while **the corroborated set moves on 0.0%** — structural, because `is_corroborated`
+  never consults the weights. Also recorded: the cascade is an ad-hoc instance of Dempster–Shafer
+  fusion, which makes its unmeasured constants harder to defend.
+  **Method note:** four of the decisive papers were found only by searching an *adjacent* field's
+  vocabulary. That is now a standing rule for the remaining work. 2238 unit tests pass (+20);
+  ruff/mypy clean; no LLM or sandbox was started.
 
 - **2026-08-08 §1.5.3 — the ATT&CK case-prior RAG is NEGATIVE, and the reason is the query, not the
   retriever.** Measured the U2 case-prior RAG in isolation for the first time (the only prior evidence,

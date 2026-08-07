@@ -190,10 +190,10 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
 - [ ] Strengthen E1 from "no significant drift" to an **equivalence bound** `[cheap]` —
       overlapping CIs are not evidence of absence; a TOST-style δ turns the same numbers into a
       positive claim
-- [ ] Update `findings-log.md`: expand §3.1 prior art, bind §1.5.1 to the Büchel SoK as a
+- [x] Update `findings-log.md` `[done]` — §3.1 expanded with 10 verified references, §1.5.1 bound to the Büchel SoK as a
       *mechanistic refinement* rather than a discovery, add Infer-Retrieve-Rank and TTPDetect
       to §1.5/§1.5.3 and **narrow the claims** — never silently drop them, `[cheap]`
-- [ ] Update `literature-review-brief.md` Parts B / E / F to the ledger `[cheap]`
+- [x] Update `literature-review-brief.md` Parts B / E / F `[done]` — Part F now recommends **F3 + F4 spine, F2 remnant as the sharpest chapter**
 - [ ] `[decide]` **Pick the framing** — see §5
 - [ ] Related-work section from the ledger `[cheap]`
 - [ ] LaTeX skeleton, then the paper — **last**, once §3 and the framing are settled

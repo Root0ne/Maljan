@@ -84,6 +84,13 @@ Status vocabulary is the findings-log's: `IMPLEMENTED` (in code, tested) / `EXPE
 (measured, note N) / `OBSERVED` (reproducible, not formally studied) / `NEGATIVE` (tested, does
 not help) / `UNMEASURED` (shipped but no evidence — added here, and the honest label for several).
 
+> **Updated 2026-08-08 after the review ran.** Novelty verdicts now live in
+> [`research-briefs/novelty-ledger.md`](research-briefs/novelty-ledger.md):
+> **5 `OURS` · 6 `REFINEMENT` · 4 `PRIOR ART` · 4 `UNMEASURED`.** Two of the framings this
+> document was written to test — describe-then-map (C5) and the binary input modality — turned
+> out to be prior art. Every surviving claim is a *measurement* result; every architectural claim
+> is unmeasured. The tables below are annotated rather than rewritten, so the change is visible.
+
 ### B.1 Positioning
 
 | # | Claim | Status | Evidence |
@@ -98,9 +105,9 @@ not help) / `UNMEASURED` (shipped but no evidence — added here, and the honest
 | **C2** | Two-tier attribution: exact normalized-opcode-hash code-reuse (high precision) + semantic RAG (high recall), with an anti-FP instruction-count floor | `IMPLEMENTED` | §1.2; **UNMEASURED** |
 | **C3** | Falsification-before-confidence: a specific claim may exceed 0.8 confidence only if actively falsified via emulation/dataflow; ≥2 independent evidence loci required | `IMPLEMENTED` | §1.3; **UNMEASURED** |
 | **C4** | *"Use a tool ≠ expose it to the model"* — 20-tool curated allowlist for the model, remaining high-value tools driven deterministically from code | `IMPLEMENTED` + `EXPERIMENTAL` | §1.4, §2.2 (~201 schemas ≈ 22k tokens; small model degrades before that scale) |
-| **C5** | **Describe-then-map**: the ID-recall sub-task is removed from the model entirely — the analyst describes behaviour, a deterministic retrieval index assigns the ATT&CK ID | `IMPLEMENTED` + measured | §1.5, §1.5.1, §1.5.2 — **the strongest contribution** |
-| **C5a** | Ranking quality and gate quality are *separate axes* of a retrieval-based label assigner; composing per-axis winners (semantic rank + TF-IDF gate) beats either pure backend on both | `EXPERIMENTAL` N=4,913 | §1.5.1 (TRAM2): hybrid top-3 0.392 & gate +0.115 vs TF-IDF 0.329/+0.085, semantic 0.392/+0.019 |
-| **C6** | Multi-layer TTP cascade: per-layer trust weights (yara .90 → network .20) × cross-layer corroboration multipliers, with deterministic Layer-0 pooled by max and LLM layers by mean | `IMPLEMENTED` | `ttp_cascade.py`; **UNMEASURED — see E.1, this is the biggest hole** |
+| **C5** | **Describe-then-map**: the ID-recall sub-task is removed from the model entirely — the analyst describes behaviour, a deterministic retrieval index assigns the ATT&CK ID | `IMPLEMENTED` + measured | §1.5, §1.5.1, §1.5.2 — ~~the strongest contribution~~ **`PRIOR ART`: `arXiv:2401.12178` (Infer-Retrieve-Rank, Jan 2024) publishes the general form. Ours is stricter — the model never emits an ID — but this is a domain instantiation, not a new idea.** |
+| **C5a** | Ranking quality and gate quality are *separate axes* of a retrieval-based label assigner; composing per-axis winners (semantic rank + TF-IDF gate) beats either pure backend on both | `EXPERIMENTAL` N=4,913 | §1.5.1 (TRAM2): hybrid top-3 0.392 & gate +0.115 vs TF-IDF 0.329/+0.085, semantic 0.392/+0.019. **`OURS`** — but the *conclusion* (embedders lose in realistic settings) is the Büchel SoK's; ours is the mechanism |
+| **C6** | Multi-layer TTP cascade: per-layer trust weights (yara .90 → network .20) × cross-layer corroboration multipliers, with deterministic Layer-0 pooled by max and LLM layers by mean | `IMPLEMENTED` + partly measured | §1.10 measured the static half: **the corroborated set is invariant under every weight perturbation (0.0%)** because `is_corroborated` never reads the weights. Also `REFINEMENT` — evidence-independence weighting is Dempster–Shafer. Full ablation still `UNMEASURED` |
 | **C7** | Deterministic CTI integrity + calibrated honesty: STIX 2.1 referential-integrity pass, cascade-reconciled bundle, `DEGRADED RUN` banner, "not determined" instead of a fake 0.00-confidence family | `IMPLEMENTED` | §1.6; **UNMEASURED as a quality claim** |
 | **C8** | Category-driven STIX schema pruning: an advisory prompt hint whose measured benefit is **completion under a time budget**, not mapping accuracy | `EXPERIMENTAL` n=17 paired | §1.7.1 — empty-fallback bundles 6/17 → 1/17 |
 
@@ -452,7 +459,16 @@ constitute closing the gap, and what the likely counter-argument from a reviewer
 These are independent of the literature. A reviewer will find them whether or not any related
 work exists. Ordered by how badly they hurt the paper.
 
-### E.1 The cascade — the core adjudication mechanism — has never been ablated `CRITICAL`
+### E.1 The cascade — the core adjudication mechanism — was never ablated `PARTLY ANSWERED 2026-08-08`
+
+> **Update.** The static half is now measured (§1.10). Across five weight perturbations the
+> top-10 ranking moved on 10.6–27.5% of samples and **the corroborated set moved on 0.0%**,
+> because `is_corroborated` never consults `LAYER_WEIGHTS`. So the constants are far less
+> load-bearing than they look — which answers "arbitrary" and raises "then why". The review also
+> found that evidence-independence weighting is **Dempster–Shafer theory**, so the constants now
+> need positioning against a formalism as well as a measurement. The end-to-end ablation (flat
+> union vs cascade) still needs the LLM. Original text below.
+
 
 `ttp_cascade.py` is the concrete instantiation of "deterministic layer disposes": layer weights
 (yara 0.90 … network 0.20), cross-layer corroboration multipliers (1.00 → 1.90), max-pooling for
@@ -464,7 +480,15 @@ central mechanism is the least evidenced one.
 *Needed:* an ablation on the n=210 corpus — flat union vs cascade, and a weight-sensitivity
 analysis showing the conclusion is not an artifact of the chosen constants.
 
-### E.2 Multi-agent negotiation is unevaluated `CRITICAL`
+### E.2 Multi-agent negotiation is unevaluated `CRITICAL — now the paper's central experiment`
+
+> **Update.** R3 found the field's prior runs *against* us: `arXiv:2604.02460` (Stanford) and
+> `arXiv:2605.00914` both show single agents match or beat multi-agent debate at equal token
+> budget, the latter on 7–8B models at 2.1–3.4× the tokens. Both scope their result to
+> *homogeneous* agents on one context and name heterogeneous or degraded-context settings as the
+> exception — which is our defence and is a hypothesis, not a result. This stops being an
+> ablation we owe and becomes the experiment the paper is about. Original text below.
+
 
 The judge/mediator consensus loop is in the project's own framing ("structured consensus") and
 there is no experiment showing it improves anything over a single judge pass. Its cost is
@@ -493,17 +517,21 @@ has no referent — the number could be excellent or terrible for the task.
 *Needed:* at minimum, CAPE-signature-derived TTPs as a zero-LLM baseline on the same samples;
 ideally also one frontier-model arm to separate *architecture* from *model capability*.
 
-### E.5 Layer-0 sources are individually unmeasured `MODERATE`
+### E.5 Layer-0 sources are individually unmeasured `ANSWERED for 3 of 6, 2026-08-08`
 
-2,651 Sigma rules, 30 YARA rules, 778-API capability map — no per-source contribution analysis.
-Which layers actually carry the corroboration signal? A leave-one-layer-out study is cheap
-(deterministic, no LLM) and directly supports C6.
+Done for the three static sources (§1.10): yara fires on 89.5% (812 techniques, 79.8% unique),
+import-capability on 52.6% (694, 76.5%), and **`tool_artifact` on 2.4% — 5 techniques across 209
+samples**, while sharing yara's cascade domain so it cannot add corroboration either. **87.9% of
+techniques are single-domain.** Sigma (2,651 rules), LOLBin and network-DGA consume a sandbox
+report and remain `[CAPE]`-gated.
 
-### E.6 The YARA corpus is thin `MODERATE`
+### E.6 The YARA corpus is thin `MODERATE — and now measured as load-bearing`
 
-30 in-house rules against 2,651 Sigma rules. If YARA carries the highest cascade weight (0.90),
-30 rules is a narrow base for the layer trusted most. Flagged in the backlog as pending a licence
-review.
+30 in-house rules against 2,651 Sigma rules, carrying the highest cascade weight (0.90). §1.10
+shows this layer **fires on 89.5% of samples and supplies 79.8% of its techniques uniquely** —
+so the thinnest rule base in the system is also the one doing the most work. Demoting its weight
+from 0.90 to 0.45 changed no corroboration decision and the top-10 ranking on 23.3% of samples,
+which bounds the risk but does not remove it. Pending a licence review.
 
 ### E.7 No human evaluation `MODERATE`
 
@@ -521,16 +549,34 @@ us say "architecture" instead of "this model".
 
 ## Part F — Candidate paper framings
 
-Recording these now so the literature review can be read against a concrete target. Not a
-decision.
+**Rewritten 2026-08-08 after the review.** The original table asked which framing the literature
+would support. Two of the four candidates lost their central claim to prior art in one night, and
+the survivors are all measurement results.
 
-| Framing | Core claim | Rests on | Risk |
+| Framing | Core claim | Rests on | Status after the review |
 |---|---|---|---|
-| **F1 — System paper** | A local-first multi-agent architecture producing attributable CTI, with "LLM proposes, deterministic layer disposes" as the organising principle | C0, C4, C5, C6, C7 + E1/E2/E3 evidence | The unmeasured mechanisms (E.1, E.2) are load-bearing |
-| **F2 — Describe-then-map** | Removing taxonomy recall from a small model and giving it to deterministic retrieval; ranking vs gating as separate axes; auto-correction's regression | C5, C5a, N4, N7 | Narrower, but the best-evidenced story we have today |
-| **F3 — Negative-results / methodology paper** | How LLM-for-malware evaluation goes wrong: invalid instruments, budget artifacts, missing frequency-prior baselines, RAG that answers from its corpus, LLM narratives losing to templates | N1, N2, N3, N5, N6 + §1.5.3 | Venues for negative results are fewer; but this material is unusually strong and honest |
-| **F4 — Empirical drift study** | LLM-based static malware analysis is temporally stable across 7 years where trained classifiers drift | E1 | Needs the trained-classifier comparison arm to land the contrast |
+| **F1 — System paper** | A local-first multi-agent architecture producing attributable CTI, organised by "LLM proposes, deterministic layer disposes" | C0, C4, C6, C7 | **Gated.** C6 partly measured and now needs positioning against Dempster–Shafer; C7 narrowed to a repair pass that eLLM-CTI's validity metric does not obviously cover; C2/C3 unmeasured against measured competitors. Needs E.1–E.4. |
+| **F2 — Describe-then-map** | Removing taxonomy recall from a small model and giving it to deterministic retrieval | ~~C5~~, C5a, N4, N7 | **Broken as stated.** C5 is `PRIOR ART` (`arXiv:2401.12178`). Rebuildable around C5a + N4 + N7 — the rank-vs-gate metric, the auto-correction regression, the degenerate-loop pathology — with C5 demoted to a cited instantiation. |
+| **F3 — Negative results / measurement** | How LLM-for-malware evaluation goes wrong: invalid instruments, budget artifacts, missing frequency-prior baselines, a retriever that answers from its corpus, LLM narratives losing to templates, cascade constants that move nothing | N1, N2, N3, N5, N6, §1.5.3, §1.10 | **Strongest, and stronger than before.** §1.10 adds a self-directed negative result about our own mechanism. Must cite the tradition (Chasing Shadows, Arp et al.) and present as worked examples with numbers. |
+| **F4 — Drift study** | LLM-based static malware analysis is temporally stable across 7 years where trained classifiers drift | E1 | **Alive and uncontested** — no LLM-based drift study found. Needs an equivalence bound (overlapping CIs are not evidence of absence) and, to land the contrast, a trained-classifier arm. |
 
-**Current honest read:** F2 and F3 are supported *today*. F1 is the ambition and needs E.1–E.4.
-F4 needs a comparison arm. The literature review should be read primarily as a test of which of
-these is actually novel.
+### The recommendation this review produces
+
+**F3 with F4 as its empirical spine, and the F2 remnant (C5a, N4, N7) as its sharpest chapter.**
+
+The argument writes itself from the ledger: five claims survive as ours and every one is a result
+about *how things fail or how to measure them* — the gate-separation metric, the auto-correction
+regression, the degenerate-ID loop, the completion-under-budget effect, and the drift study. Four
+architectural claims cannot be defended because they were never measured. A paper that leads with
+architecture would be arguing from its weakest position against measured competitors; a paper that
+leads with measurement is arguing from its strongest, and the system becomes the apparatus that
+produced the measurements rather than the claim under test.
+
+**F1 remains the ambition.** Three of the four unmeasured claims are one experiment away (C7's is
+`[cheap]`), and E.1/E.2 would convert the cascade and the negotiation from liabilities into the
+system paper's core. That is the next decision point, and it is gated on llama-server, not on more
+reading.
+
+**What would change this recommendation:** if E.2 returns a *positive* equal-budget result for
+heterogeneous evidence-channel decomposition — against a literature prior that predicts otherwise
+— that is a strong enough finding to carry F1 on its own.
