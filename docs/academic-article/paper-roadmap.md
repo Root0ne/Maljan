@@ -78,7 +78,7 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 - [x] R5 — RAG for malware / CTI `[done]` → `incoming/R5.claude-web.md`
 - [x] R3 — multi-agent consensus `[done]` → `incoming/R3.claude-web.md`
 - [x] R4 — grounding, hallucination, calibration `[done]` → `incoming/R4.claude-web.md`
-- [ ] R6 — evaluation methodology and ground truth `[cheap]`
+- [x] R6 — evaluation methodology and ground truth `[done]` → `incoming/R6.claude-web.md`
 - [ ] R7 — local, small, open-weight deployment `[cheap]`
 - [ ] R8 — CTI report / STIX generation `[cheap]`
 - [ ] R1 — verify `R1.model-b.md`'s UNCERTAIN citations rather than redo it `[cheap]`
@@ -170,6 +170,16 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
 
 ## 4. Write-up
 
+- [ ] **Self-audit against *Chasing Shadows*' nine pitfalls** `[cheap]` — NDSS'26,
+      `arXiv:2512.09549`, artifacts released and a living appendix at `llmpitfalls.org`. It
+      surveyed all 72 LLM-security papers from 2023–2024 and found **every one** contains at
+      least one pitfall, with only 15.7% acknowledged. Highest value-per-hour item in the
+      review: it is what a 2026 security reviewer is now primed to look for, and the findings
+      log already holds most of our answers. **The nine pitfalls are not in the abstract — the
+      full paper must be read.**
+- [ ] Strengthen E1 from "no significant drift" to an **equivalence bound** `[cheap]` —
+      overlapping CIs are not evidence of absence; a TOST-style δ turns the same numbers into a
+      positive claim
 - [ ] Update `findings-log.md`: expand §3.1 prior art, bind §1.5.1 to the Büchel SoK as a
       *mechanistic refinement* rather than a discovery, add Infer-Retrieve-Rank and TTPDetect
       to §1.5/§1.5.3 and **narrow the claims** — never silently drop them, `[cheap]`
