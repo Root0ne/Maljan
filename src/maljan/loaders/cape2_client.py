@@ -164,7 +164,7 @@ class CAPEv2Client:
 
         Raises:
             SandboxTimeoutError: When timeout_seconds elapses.
-            SandboxError:        On HTTP or API errors.
+            SandboxError:        On a permanent API error (auth, unknown task).
         """
         terminal = {"reported", "failed", "aborted"}
         deadline = time.monotonic() + timeout_seconds
@@ -176,15 +176,58 @@ class CAPEv2Client:
             poll_interval_seconds,
         )
 
+        # A poll failure is not a task failure. This loop exists to wait out a
+        # busy sandbox, and the characteristic symptom of a busy CAPE — single
+        # VM here, detonations serialised — is a slow or refused API response.
+        # Re-raising on the first hiccup meant the retry loop died exactly when
+        # it was needed: on 2026-07-29 a 1200s wait ended after 127s with
+        # "Poll request failed: timed out", discarding ~18 minutes of budget
+        # and silently degrading the run to static-only. Transient errors are
+        # now absorbed and the deadline alone decides when to give up.
+        last_error: str | None = None
+        consecutive_errors = 0
+
         while time.monotonic() < deadline:
+            transient: str | None = None
+            status = ""
             try:
                 response = self._http.get(f"/apiv2/tasks/view/{task_id}/")
+                code = int(response.status_code)
+                if code >= 500 or code == 429:
+                    # "Come back later" — a loaded CAPE, not a verdict.
+                    transient = f"HTTP {code}: {response.text[:120]}"
+                else:
+                    # Other 4xx are verdicts: a bad token or a deleted task
+                    # will still be bad in twenty minutes, so abort rather
+                    # than burn the budget. Propagates past this handler.
+                    self._raise_for_status(response, "poll")
+                    data = response.json()
+                    status = str(data.get("data", {}).get("status", "unknown"))
+            except SandboxError:
+                raise
             except Exception as exc:
-                raise SandboxError(f"Poll request failed: {exc}") from exc
+                # Transport-level: timeout, connection reset, unparsable body.
+                transient = f"{type(exc).__name__}: {exc}"
 
-            self._raise_for_status(response, "poll")
-            data = response.json()
-            status = data.get("data", {}).get("status", "unknown")
+            if transient is not None:
+                last_error = transient
+                consecutive_errors += 1
+                logger.warning(
+                    "CAPEv2Client: poll %d for task %s failed transiently (%s); retrying.",
+                    consecutive_errors,
+                    task_id,
+                    transient,
+                )
+                time.sleep(poll_interval_seconds)
+                continue
+
+            if consecutive_errors:
+                logger.info(
+                    "CAPEv2Client: task %s reachable again after %d failed poll(s).",
+                    task_id,
+                    consecutive_errors,
+                )
+                consecutive_errors = 0
 
             logger.debug("CAPEv2Client: task %s status=%s.", task_id, status)
 
@@ -194,7 +237,10 @@ class CAPEv2Client:
 
             time.sleep(poll_interval_seconds)
 
-        raise SandboxTimeoutError(f"Task {task_id} did not complete within {timeout_seconds}s.")
+        suffix = f" Last poll error: {last_error}" if last_error else ""
+        raise SandboxTimeoutError(
+            f"Task {task_id} did not complete within {timeout_seconds}s.{suffix}"
+        )
 
     def fetch_report(self, task_id: str) -> SubmissionResult:
         """Fetch the full JSON report for a completed task.
