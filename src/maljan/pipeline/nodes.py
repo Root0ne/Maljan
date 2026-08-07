@@ -554,6 +554,34 @@ def make_analyst_node(
 # ---------------------------------------------------------------------------
 
 
+def _revision_input_is_absent(
+    state: AnalysisState,
+    container: ServiceContainer,
+    agent_name: str,
+) -> bool:
+    """True when ``agent_name`` has no data to revise against.
+
+    Deliberately the *same* signal the analyst node uses before the initial
+    pass, so an analyst cannot be skipped on round 0 and then resurrected on
+    round 1. ``_is_placeholder_only`` carries the static carve-out with it:
+    static falls back to a metadata-only prompt rather than being skipped.
+
+    Fails **open**. A loader that raises tells us nothing about whether data
+    exists, and silently deleting an analyst on a transient Qdrant blip is a
+    far worse failure than one wasted revise call.
+    """
+    try:
+        chunks = container.load_chunked(state.get("file_hash", ""), agent_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "_revision_input_is_absent: load_chunked failed for '%s' (%s); revising anyway.",
+            agent_name,
+            exc,
+        )
+        return False
+    return not chunks or _is_placeholder_only(chunks, agent_name)
+
+
 def _build_revision_context(
     state: AnalysisState,
     container: ServiceContainer,
@@ -792,6 +820,26 @@ def make_revision_node(container: ServiceContainer) -> Any:
             }
 
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
+            # Same guard the analyst node applies before the initial pass. It
+            # was missing here, so every negotiation round re-ran the analysts
+            # that had just been skipped for having nothing to analyse. The
+            # cost was never the wasted minutes: ``peer_reports`` below hands
+            # the agent what its peers said, so an analyst with no evidence of
+            # its own has nothing to write but static's findings — returned
+            # tagged ``domain="dynamic"``. ``is_corroborated`` is
+            # ``len(contributing_layers) >= 2``, so that echo promotes a
+            # single-layer static finding to CORROBORATED and enters at
+            # LAYER_WEIGHTS["dynamic"]=0.45, above static's own 0.35.
+            # Measured 2026-07-29 with CAPE unreachable: the sycophancy
+            # detector flagged static vs dynamic at sim=1.000.
+            if _revision_input_is_absent(state, container, name):
+                logger.info(
+                    "Agent '%s': no data to revise — keeping its report and "
+                    "contributing no claims (round %d).",
+                    name,
+                    iteration,
+                )
+                return original_reports.get(name, ""), _empty_isr(name, revision_round=iteration)
             data = _build_revision_context(state, container, name)
             agent = container.get_agent(name)
             own_report = original_reports.get(name, "")
