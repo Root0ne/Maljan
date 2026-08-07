@@ -80,7 +80,7 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 - [x] R4 — grounding, hallucination, calibration `[done]` → `incoming/R4.claude-web.md`
 - [x] R6 — evaluation methodology and ground truth `[done]` → `incoming/R6.claude-web.md`
 - [x] R7 — local, small, open-weight deployment `[done]` → `incoming/R7.claude-web.md`
-- [ ] R8 — CTI report / STIX generation `[cheap]`
+- [x] R8 — CTI report / STIX generation `[done]` → `incoming/R8.claude-web.md`
 - [ ] R1 — verify `R1.model-b.md`'s UNCERTAIN citations rather than redo it `[cheap]`
 - [ ] Citation audit of `ALL8.model-a.md` — real / misattributed / not found `[cheap]`
 - [ ] `novelty-ledger.md` — every claim → prior work → verdict → which arm found it `[cheap]`
@@ -158,6 +158,16 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
       whether the number separates correct from wrong. Cheapest high-value experiment in R4: if
       it replicates, it justifies every deterministic gate in the system, and it converges with
       tonight's finding that the layer weights move almost nothing.
+- [ ] **Measure C7 with the OASIS cti-stix-validator** `[cheap]` once bundles exist —
+      integrity pass on vs off, scored by an external standard validator rather than our own
+      checks. Turns a design description into a number using someone else's instrument, which
+      is what our own N1 says to do. eLLM-CTI already measures STIX *validity*, so what is left
+      to claim is the *repair* pass, and only if measured.
+- [ ] **Check three external corpora for public release** `[cheap]` — TTPDetect's
+      decompiled-function↔TTP dataset (`arXiv:2602.06325`), the 150-report STIX 2.1 + ATT&CK
+      dataset (`arXiv:2607.23312`, whose best annotator is our own Qwen3.6 family), and REx86's
+      released dataset/adapters (`arXiv:2510.20975`). Each would answer "your ground truth is
+      your own" (E.4). This is the top practical action in R2, R6 and R8 alike.
 - [ ] **Human evaluation** `[decide]` — the report is the product and no analyst has scored
       one. N5 showed readability is the LLM narrator's *only* edge, and readability is exactly
       what needs human judgement. → **E.7**
