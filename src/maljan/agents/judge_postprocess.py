@@ -261,6 +261,11 @@ def postprocess_judge_bundle(
         if not obj.get("name") or obj.get("name") == tid:
             obj["name"] = name
 
+    # ── REP-03: reconcile the bundle against the cascade ────────────
+    if valid_technique_ids is not None:
+        objects = _reconcile_with_cascade(objects, valid_technique_ids)
+        bundle_dict["objects"] = objects
+
     # ── Final integrity pass: empty-pattern drop, dedup, dangling-ref sweep ──
     before = len(objects)
     objects = enforce_bundle_integrity(objects)
@@ -620,3 +625,112 @@ def build_evidence_corpus(
             corpus.add(s.lower())
 
     return corpus
+
+
+def _reconcile_with_cascade(objects: list[Any], valid_technique_ids: frozenset[str]) -> list[Any]:
+    """REP-03 — make the bundle carry exactly the cascade's technique set.
+
+    REP-01 and REP-02 both key off a technique ID the LLM has to have supplied:
+    the orphan drop is ``if tid and tid not in valid_ids``, so a ``None`` tid
+    survives, and the reference back-fill only runs once a tid resolves. When
+    the model answers with prose names and no IDs anywhere, both are no-ops —
+    and nothing in the pipeline ever *added* the techniques it left out, so the
+    bundle was only ever a filtered view of the model's output.
+
+    Measured on one sample, 2026-08-07: the run where the verdict LLM succeeded
+    produced 5 attack-patterns with **zero** external_ids, against 39 techniques
+    in the same report's ttp_mappings; the run where it timed out and fell back
+    to the deterministic builder produced 33, all with IDs. The fallback was the
+    better artefact, which is the wrong way round.
+
+    Two directions, both necessary:
+
+    * An ``attack-pattern`` whose technique ID cannot be resolved is dropped.
+      Without an ``external_id`` there is no ATT&CK mapping — the object claims
+      a technique without naming one, and a consumer cannot act on it.
+    * Every cascade technique missing from the bundle is added, carrying the
+      same ``external_references`` shape the deterministic fallback emits.
+
+    ``objects`` is returned as a new list; relationships pointing at dropped
+    patterns go with them (the integrity pass would sweep them anyway, but
+    leaving dangling refs for it to find hides *why* they dangle).
+    """
+    malware_ids = [
+        o.get("id") for o in objects if isinstance(o, dict) and o.get("type") == "malware"
+    ]
+    malware_id = next((m for m in malware_ids if isinstance(m, str)), None)
+
+    kept: list[Any] = []
+    dropped_ap_ids: set[str] = set()
+    present: set[str] = set()
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
+            kept.append(obj)
+            continue
+        tid = _attack_pattern_technique_id(obj)
+        if not tid:
+            ap_id = obj.get("id")
+            if isinstance(ap_id, str):
+                dropped_ap_ids.add(ap_id)
+            logger.warning(
+                "judge_postprocess: dropping attack-pattern with no resolvable "
+                "technique id (name=%r) — an ATT&CK mapping without an ID is unusable.",
+                obj.get("name", "<unnamed>"),
+            )
+            continue
+        present.add(tid)
+        kept.append(obj)
+
+    if dropped_ap_ids:
+        kept = [
+            o
+            for o in kept
+            if not (
+                isinstance(o, dict)
+                and o.get("type") == "relationship"
+                and (o.get("source_ref") in dropped_ap_ids or o.get("target_ref") in dropped_ap_ids)
+            )
+        ]
+
+    missing = sorted(valid_technique_ids - present)
+    for tid in missing:
+        name = _technique_display_name(tid)
+        if not name and tid in _MITRE_LOOKUP:
+            name = _MITRE_LOOKUP[tid][0]
+        url = (
+            _MITRE_LOOKUP[tid][1]
+            if tid in _MITRE_LOOKUP
+            else f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
+        )
+        ap_id = f"attack-pattern--{uuid.uuid5(_MITRE_NS, tid)}"
+        kept.append(
+            {
+                "type": "attack-pattern",
+                "id": ap_id,
+                "name": name or tid,
+                "external_references": [
+                    {"source_name": "mitre-attack", "external_id": tid, "url": url}
+                ],
+            }
+        )
+        if malware_id:
+            kept.append(
+                {
+                    "type": "relationship",
+                    "id": f"relationship--{uuid.uuid5(_MITRE_NS, f'{malware_id}:{tid}')}",
+                    "relationship_type": "uses",
+                    "source_ref": malware_id,
+                    "target_ref": ap_id,
+                    "x_maljan_technique_id": tid,
+                }
+            )
+
+    if missing:
+        logger.info(
+            "judge_postprocess: added %d cascade technique(s) the verdict LLM omitted "
+            "from the bundle (%s%s).",
+            len(missing),
+            ", ".join(missing[:6]),
+            "…" if len(missing) > 6 else "",
+        )
+    return kept
