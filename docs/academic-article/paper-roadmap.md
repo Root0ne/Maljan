@@ -81,9 +81,9 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 - [x] R6 — evaluation methodology and ground truth `[done]` → `incoming/R6.claude-web.md`
 - [x] R7 — local, small, open-weight deployment `[done]` → `incoming/R7.claude-web.md`
 - [x] R8 — CTI report / STIX generation `[done]` → `incoming/R8.claude-web.md`
-- [ ] R1 — verify `R1.model-b.md`'s UNCERTAIN citations rather than redo it `[cheap]`
-- [ ] Citation audit of `ALL8.model-a.md` — real / misattributed / not found `[cheap]`
-- [ ] `novelty-ledger.md` — every claim → prior work → verdict → which arm found it `[cheap]`
+- [x] R1 — verified `R1.model-b.md`'s key citations `[done]` → `incoming/CITATION-AUDIT.claude-web.md`
+- [x] Citation audit of `ALL8.model-a.md` `[done]` — no fabricated papers, but Reddit/LinkedIn/Facebook cited as evidence; lead generator only
+- [x] `novelty-ledger.md` `[done]` → **5 OURS · 6 REFINEMENT · 4 PRIOR ART · 4 UNMEASURED**
 
 **Standing rule, learned the hard way on R2:** search each claim in the vocabulary of at least
 one *adjacent* field. Infer-Retrieve-Rank indexes as general ML; TTPDetect indexes as binary
