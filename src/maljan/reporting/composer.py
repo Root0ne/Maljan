@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
+from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.reporting.evidence_bundles import bundle_for, is_empty
 from maljan.reporting.models import (
     C2Channel,
@@ -42,6 +43,10 @@ from maljan.utils.json_cleaner import safe_parse_json
 # ---------------------------------------------------------------------------
 # Per-section output schemas
 # ---------------------------------------------------------------------------
+
+
+class _StructuredOutputUnavailable(Exception):
+    """The endpoint cannot do structured output; take the manual-parse path."""
 
 
 class _ProseOut(BaseModel):
@@ -265,7 +270,13 @@ class ReportComposer:
     async def _invoke(
         self, messages: list[BaseMessage], schema: type[BaseModel]
     ) -> BaseModel | None:
+        # Skipped outright on endpoints where structured output does not work
+        # — see ``structured_output_supported``. The per-section timeout below
+        # bounds the damage here, unlike the narrative round, but paying it on
+        # every one of eight sections is still eight timeouts nobody needs.
         try:
+            if not structured_output_supported_for_llm(self.llm):
+                raise _StructuredOutputUnavailable
             structured = self.llm.with_structured_output(schema)
             result = await retry_on_connection_error(
                 lambda: structured.ainvoke(messages), what="ReportComposer structured"

@@ -44,6 +44,13 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Wall-clock ceiling for the single narrative LLM round in the report node.
+# Generous — the deterministic report is already built by then and the prose is
+# the last thing standing between a finished analysis and the operator — but
+# finite, which it was not. See the call site for the 30-minute silence this
+# bounds.
+_NARRATIVE_TIMEOUT_SECONDS = 600
+
 
 def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     """Build an empty placeholder ISR (e.g. for mock or error paths)."""
@@ -1906,7 +1913,22 @@ def make_report_node(container: ServiceContainer) -> Any:
 
         if narrative_agent is not None:
             try:
-                narrative_output = await narrative_agent.generate(report)
+                # Bounded, like every ReportComposer section below it. This
+                # await had no deadline of its own, so the only limit was the
+                # provider's ``request_timeout`` (1800s) times the three
+                # attempts in ``retry_on_connection_error``. Measured live
+                # 2026-08-07: the report node went silent at 17:25:54 and did
+                # not speak again until 17:55:54, on attempt 1 of 3 — a job
+                # that looked alive purely because of the worker heartbeat.
+                narrative_output = await asyncio.wait_for(
+                    narrative_agent.generate(report), timeout=_NARRATIVE_TIMEOUT_SECONDS
+                )
+            except TimeoutError:
+                logger.error(
+                    "report_node: NarrativeAgent exceeded %ds; using fallback narrative.",
+                    _NARRATIVE_TIMEOUT_SECONDS,
+                )
+                narrative_output = None
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: NarrativeAgent.generate raised (%s); using fallback.",

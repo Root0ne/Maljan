@@ -194,3 +194,65 @@ class LLMProviderRegistry:
             temperature=temp,
             **kwargs,
         )
+
+
+def structured_output_supported(config: Any | None = None, llm: Any | None = None) -> bool:
+    """Whether ``with_structured_output`` is worth attempting against this endpoint.
+
+    A property of the endpoint, not of the caller, which is why it lives here
+    rather than in each of the three places that ask. Two things it decides:
+
+    * **The provider name.** LangChain reports ``ChatOpenAI._llm_type`` as
+      ``"openai-chat"``, which is absent from ``PROVIDER_CAPABILITIES``, so a
+      caller that sniffed the model object got the unknown-provider default for
+      *every* provider. Config wins when present; the ``-chat`` suffix is
+      stripped as a backstop when it is not.
+
+    * **A local server is not the vendor API.** ``openai`` supports structured
+      output against api.openai.com. Against a local OpenAI-compatible server
+      it is a different animal: measured 2026-08-07, a NarrativeAgent
+      structured call against llama-server/Qwen3.6-35B hung for the full
+      ``request_timeout`` of 1800 s and was about to do it twice more, with no
+      log line in between, while the plain text path does the same job in
+      minutes. So a custom ``base_url`` disables it.
+
+    Never raises, and refuses when it cannot tell: knowing nothing about the
+    endpoint is not a reason to gamble half an hour of a job on it.
+    """
+    try:
+        if config is not None:
+            provider_name = str(config.llm.provider)
+            base_url = getattr(config.llm.openai, "base_url", None)
+            if provider_name == "openai" and base_url:
+                return False
+        elif llm is not None:
+            # "openai-chat" -> "openai"; harmless for names without a suffix.
+            provider_name = str(getattr(llm, "_llm_type", "") or "").split("-")[0]
+            if not provider_name:
+                return False
+        else:
+            return False
+        return bool(
+            PROVIDER_CAPABILITIES.get(provider_name, {}).get("supports_structured_output", False)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("structured-output capability check failed (%s); assuming no.", exc)
+        return False
+
+
+def structured_output_supported_for_llm(llm: Any) -> bool:
+    """``structured_output_supported`` for callers that hold no config.
+
+    ``NarrativeAgent`` and ``ReportComposer`` are constructed with a model and
+    nothing else, but the answer depends on the configured endpoint, not on the
+    model object — sniffing ``_llm_type`` alone cannot tell a local
+    OpenAI-compatible server from api.openai.com. Reads the settings, and falls
+    back to what the model object can say if that is unavailable.
+    """
+    try:
+        from maljan.core.config import get_settings
+
+        return structured_output_supported(get_settings(), llm)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("structured-output settings lookup failed (%s); sniffing the model.", exc)
+        return structured_output_supported(None, llm)

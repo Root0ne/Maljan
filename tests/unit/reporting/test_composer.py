@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -66,7 +67,13 @@ def _compose(
 ) -> _FakeLLM:
     llm = _FakeLLM(by_schema)
     comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
-    asyncio.run(comp.compose(report, isr))
+    # These tests exercise the structured-output path, which the composer now
+    # asks about before taking (see ``structured_output_supported``). This
+    # repo's own .env points at a local llama-server, where it does not work,
+    # so without this the suite would silently test the manual-parse fallback
+    # instead and ``_FakeLLM.ainvoke`` would raise.
+    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=True):
+        asyncio.run(comp.compose(report, isr))
     return llm
 
 

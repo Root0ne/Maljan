@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
+from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.reporting.models import DefensiveRecommendation, MalwareReport
 from maljan.utils.json_cleaner import safe_parse_json
 
@@ -234,26 +235,33 @@ class NarrativeAgent:
         """
         messages = self._build_prompt(report)
 
-        try:
-            structured = self.llm.with_structured_output(NarrativeOutput)
-            result = await retry_on_connection_error(
-                lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
-            )
-            if isinstance(result, NarrativeOutput):
-                return result
-            # Some providers return a dict — coerce defensively.
-            if isinstance(result, dict):
-                return NarrativeOutput.model_validate(result)
-            logger.warning(
-                "NarrativeAgent: unexpected structured-output type %s; "
-                "falling back to manual parse.",
-                type(result).__name__,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "NarrativeAgent: structured_output path failed (%s); trying manual JSON parse.",
-                exc,
-            )
+        # Skip the structured path entirely on endpoints where it does not
+        # work. Measured live 2026-08-07: against llama-server this call hung
+        # for the full 1800s ``request_timeout`` and was about to retry twice
+        # more, producing 90 minutes of a silent report node. The manual-parse
+        # path below is what actually serves local servers, and it is reached
+        # in seconds instead of an hour and a half.
+        if structured_output_supported_for_llm(self.llm):
+            try:
+                structured = self.llm.with_structured_output(NarrativeOutput)
+                result = await retry_on_connection_error(
+                    lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
+                )
+                if isinstance(result, NarrativeOutput):
+                    return result
+                # Some providers return a dict — coerce defensively.
+                if isinstance(result, dict):
+                    return NarrativeOutput.model_validate(result)
+                logger.warning(
+                    "NarrativeAgent: unexpected structured-output type %s; "
+                    "falling back to manual parse.",
+                    type(result).__name__,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "NarrativeAgent: structured_output path failed (%s); trying manual JSON parse.",
+                    exc,
+                )
 
         # Manual-parse fallback. Useful for local llama.cpp servers that
         # occasionally return text wrapped in ```json fences. A dropped socket

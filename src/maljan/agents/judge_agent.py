@@ -1031,43 +1031,18 @@ class JudgeAgent:
             return ""
 
     def _supports_structured_output(self) -> bool:
-        """Whether ``with_structured_output`` is worth attempting for mediation.
+        """Delegates to the registry — see ``structured_output_supported``.
 
-        Two independent reasons this is not a one-line capability lookup:
-
-        * **The provider name.** ``self._config`` was read here but never
-          assigned — ``JudgeAgent`` took no config — so the name always came
-          from ``ChatOpenAI._llm_type``, which is ``"openai-chat"``. That is
-          absent from ``PROVIDER_CAPABILITIES``, so the unknown-provider
-          default (``False``) applied to *every* provider, including the ones
-          the table says support it. Config now wins, and the ``-chat`` suffix
-          is stripped as a backstop when no config was passed.
-
-        * **A local server is not the vendor API.** ``openai`` is marked as
-          supporting structured output, and against api.openai.com it does.
-          Against a local OpenAI-compatible server it is a different animal:
-          measured 2026-07-29 on llama-server/Qwen3.6-35B, one mediator
-          extraction ran **13+ minutes without completing**, where the text
-          path does the same job in ~3. So a custom ``base_url`` disables it —
-          a measured decision now, rather than the accident above.
+        ``self._config`` was read here but never assigned (``JudgeAgent`` took
+        no config), so the provider name came from ``ChatOpenAI._llm_type`` =
+        ``"openai-chat"``, absent from ``PROVIDER_CAPABILITIES``, and every
+        provider got the unknown-provider default. The container passes the
+        config now, and the decision itself is shared with the two other
+        callers that were making it independently.
         """
-        cfg = getattr(self, "_config", None)
-        try:
-            from maljan.llm.registry import provider_capabilities
+        from maljan.llm.registry import structured_output_supported
 
-            if cfg is None:
-                raw = str(getattr(self.llm, "_llm_type", "") or "openai")
-                # "openai-chat" -> "openai"; harmless for names without a suffix.
-                provider_name = raw.split("-")[0]
-            else:
-                provider_name = str(cfg.llm.provider)
-                base_url = getattr(cfg.llm.openai, "base_url", None)
-                if provider_name == "openai" and base_url:
-                    return False
-            return bool(provider_capabilities(provider_name).get("supports_structured_output"))
-        except Exception as exc:  # noqa: BLE001
-            self.logger.debug("Structured-output capability check failed (%s); assuming no.", exc)
-            return False
+        return structured_output_supported(getattr(self, "_config", None), self.llm)
 
     def _fallback_mediate(
         self,

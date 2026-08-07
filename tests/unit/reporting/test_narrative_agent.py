@@ -225,9 +225,25 @@ def _mock_llm_with_structured(result: Any, structured_side_effect: Any = None) -
     return llm
 
 
+@pytest.fixture
+def structured_output_endpoint(monkeypatch: Any) -> None:
+    """Assert the endpoint can do structured output.
+
+    The agent now asks before taking that path (see
+    ``structured_output_supported``), and this repo's own .env points at a
+    local llama-server, where it cannot. Tests that exercise the structured
+    path must say which world they are in rather than inherit the developer's
+    configuration.
+    """
+    monkeypatch.setattr(
+        "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+        lambda _llm: True,
+    )
+
+
 class TestNarrativeAgentSuccess:
     @pytest.mark.asyncio
-    async def test_returns_structured_output(self) -> None:
+    async def test_returns_structured_output(self, structured_output_endpoint: None) -> None:
         report = _make_report()
         expected = _valid_narrative()
         llm = _mock_llm_with_structured(expected)
