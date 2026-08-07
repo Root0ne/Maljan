@@ -155,6 +155,24 @@ need to know what Maljan is beyond what the brief says. Each asks the user's fou
 > not certain a paper exists, say so explicitly rather than producing a plausible-looking
 > citation — a fabricated reference is worse than an admitted gap. Distinguish clearly between
 > "I found no work on this" and "no work exists". Answer in the output format given at the end.
+>
+> Three standing instructions, because they decide whether the answer is usable:
+>
+> **(a) Treat the "Our position" paragraph as a claim under test, not as background.** Do not
+> assume it is novel, correct, or even accurately described. Your most valuable possible answer
+> is "prior work X already does this" — state that bluntly when you find it. We are not looking
+> to be validated.
+>
+> **(b) Tag every paper by model tier** (frontier-cloud / open-weight-local / both, with
+> parameter count) and report direct local-vs-frontier comparisons **only where a paper actually
+> ran one**. Never construct or estimate a comparison the papers do not contain. If few systems
+> are evaluated on local open-weight models, quantify that scarcity — it is itself a finding.
+>
+> **(c) Derive methodological critique from the catalogue, never assert it.** Flag per paper
+> whether it reports confidence intervals, repeats, a baseline (and which), an equal-budget
+> control, and a statistical test. A countable claim ("3 of 15 report CIs; 0 report a
+> frequency-prior baseline") is defensible in print; a bare "the field lacks rigour" is an
+> opinion. Name the papers that *do* get it right — those are the methodological references.
 
 ---
 
@@ -334,6 +352,11 @@ We measured KV-cache scaling (≈10.85 KiB/token; context length barely moves sy
 hybrid-offload MoE — the cost is the offloaded weights) and recorded a negative result on
 speculative decoding for this architecture.
 
+**Note on standing instruction (b).** In this brief the local-vs-frontier comparison *is* the
+question, so pursue it as the primary axis rather than as an incidental tag. The prohibition
+still holds in its important half: report comparisons the papers actually ran, and where none
+exist say so — do not estimate what a local model "would" achieve on a frontier-only benchmark.
+
 **Answer these:**
 1. What does the literature say about small/local LLMs for security analysis? Which tasks are
    reported to work at 7–35B open-weight scale and which are not?
@@ -385,7 +408,16 @@ For each system/paper (aim for 8–20):
   - Model used: frontier-cloud / open-weight-local / both — and size
   - Evaluated on: dataset, N, ground truth
   - Headline result (as the paper states it, with the metric named)
+  - Rigor flags: CIs? | repeats (N)? | baseline (which)? | equal-budget control? | stat test?
   - Confidence that this paper exists as cited: HIGH / MEDIUM / LOW
+
+### 1b. Rigor tally
+Count across the papers above: how many report CIs, repeats, any baseline, an equal-budget
+control, a statistical test. Name the 2-3 most methodologically rigorous papers explicitly.
+
+### 1c. Model-tier tally
+How many systems are evaluated on frontier-cloud models only, on open-weight local models, on
+both. List any paper that ran a direct local-vs-frontier comparison — or state that none did.
 
 ## 2. Gaps in the literature
 For each gap:
@@ -396,8 +428,12 @@ For each gap:
   - Confidence: HIGH / MEDIUM / LOW
 
 ## 3. Does the described approach close these gaps?
-Per gap: CLOSED / PARTIALLY / NOT CLOSED — with a one-paragraph justification and, where
-partial, the precise missing piece.
+Per gap, in this order:
+- **Prior work claiming a similar solution:** [citations] — or `NONE FOUND`, plus how you
+  searched for it. Do this BEFORE judging novelty; a reinvention found here is the single most
+  useful thing you can report.
+- **Verdict:** CLOSED / PARTIALLY / NOT CLOSED / ALREADY DONE BY PRIOR WORK
+- One-paragraph justification; where partial, name the precise missing piece.
 
 ## 4. How to extend to close the remaining gaps
 Ranked by (research value ÷ effort). For each: what to build or measure, what result would

@@ -11,12 +11,18 @@ SRC = Path("docs/academic-article/literature-review-brief.md")
 OUT = Path("docs/academic-article/research-briefs")
 text = SRC.read_text(encoding="utf-8")
 
-# Preamble: the blockquote right after "**Preamble to paste before every brief:**"
-pre = re.search(r"\*\*Preamble to paste before every brief:\*\*\n\n((?:> .*\n)+)", text)
+# Preamble: the blockquote right after "**Preamble to paste before every brief:**".
+# ``>``-only lines are blank paragraph separators inside the quote and must be matched too —
+# a ``> .*`` pattern stops dead at the first one, which silently truncated the preamble to its
+# first paragraph and dropped the standing instructions.
+pre = re.search(r"\*\*Preamble to paste before every brief:\*\*\n\n((?:>.*\n)+)", text)
+assert pre is not None, "preamble block not found"
 preamble = "\n".join(
     line[2:] if line.startswith("> ") else line[1:].strip()
     for line in pre.group(1).rstrip().split("\n")
 )
+# Cheap guard against the same class of silent truncation returning.
+assert "standing instructions" in preamble, "preamble truncated — check the blockquote regex"
 
 # Output format: the fenced block under Part D
 fmt = re.search(r"## Part D — Required output format.*?\n```markdown\n(.*?)\n```", text, re.S)
