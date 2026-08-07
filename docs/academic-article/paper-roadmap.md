@@ -75,7 +75,7 @@ come from [research-briefs/novelty-ledger.md](research-briefs/novelty-ledger.md)
 ## 2. Literature review
 
 - [x] R2 — ATT&CK technique mapping `[done]` → `incoming/R2.claude-web.md`
-- [ ] R5 — RAG for malware / CTI `[cheap]`
+- [x] R5 — RAG for malware / CTI `[done]` → `incoming/R5.claude-web.md`
 - [ ] R3 — multi-agent consensus `[cheap]`
 - [ ] R4 — grounding, hallucination, calibration `[cheap]`
 - [ ] R6 — evaluation methodology and ground truth `[cheap]`
