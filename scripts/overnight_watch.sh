@@ -65,7 +65,7 @@ roadmap_progress() {
 }
 
 log "START watch pid=$$ interval=${INTERVAL}s warn=${WARN_MB}MB floor=${FLOOR_MB}MB"
-log "INVARIANT expecting 0 maljan containers and llama-server inactive all night"
+log "INVARIANT expecting 0 maljan containers and llama-server inactive for this run"
 
 critical_latched=0
 
@@ -87,7 +87,7 @@ while [ ! -f "$DONE" ]; do
 
     # The invariant is a separate line so a morning grep for ALERT finds it.
     if [ "$ctrs" -ne 0 ] || [ "$llama" = "active" ]; then
-        log "ALERT invariant broken — containers=${ctrs} llama=${llama}; heavy services were not supposed to run tonight"
+        log "ALERT invariant broken — containers=${ctrs} llama=${llama}; heavy services were not supposed to run in this session"
     fi
 
     if [ "$level" = "CRITICAL" ] && [ "$critical_latched" -eq 0 ]; then

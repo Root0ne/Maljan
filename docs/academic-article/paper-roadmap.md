@@ -56,6 +56,59 @@ reading *Chasing Shadows* in full to self-audit against its nine pitfalls.
 
 ---
 
+## Tonight's queue (2026-08-08, evening) — LLM-free, ordered
+
+**llama-server is deliberately NOT started.** 18 GB free against a 16.2 GB server leaves ~1.8 GB
+headroom, and an unattended freeze is the one failure the standing instruction names. B1–B3 are
+prepared instead, to run in one command with the author present.
+
+- [x] **Q1 — Resolve the six load-bearing unknowns** `[done]` — **4 of 6 resolved, 2 blocked.**
+      (a) **MEASURED, and better than hoped.** `arXiv:2604.02460` §5.3 runs controlled degradation
+      across four methods and finds a **crossover**: single-agent leads at mild degradation,
+      multi-agent wins at heavy (α=0.7) — **on Qwen3-30B-A3B, our own model class**. Our defence
+      is an established crossover, not a hopeful reading, and E.2's job is to locate which side of
+      it a malware pipeline sits on.
+      (b) **Corrects what I wrote.** FAX is **post-hoc** (draft → verify → regenerate) *and*
+      graduated (retained / removed-or-rewritten / expressed-with-uncertainty). My "we cap, they
+      filter" distinction was wrong. What survives is **timing**: ours is a precondition at
+      claim-emission, theirs an audit after drafting. Smaller claim, and the supported one.
+      (c) **Blocked** — eLLM-CTI is paywalled (ScienceDirect `S0167739X26001482`); whether its
+      STIX-accuracy metric covers referential integrity stays open, so C7's repair claim is
+      unresolved against it. Authors identified for a future request: Psarrou, Bountakas,
+      Eleutheriou, Ellinitakis, Fysarakis, Lekidis, Spanoudakis.
+      (d) **Read.** `arXiv:2503.23175` (Mezzi, Massacci, Tuma) — 350 threat reports, 3 SOTA LLMs,
+      zero-shot/few-shot/fine-tuned: *"LLMs cannot guarantee sufficient performance on real-size
+      reports"*, inconsistent and **overconfident**, and few-shot/fine-tuning only partially help.
+      **Supports our negatives**, converges with Kumaran on overconfidence and with the Büchel SoK
+      on the ceiling. Springer version exists (`10.1007/978-3-032-00627-1_17`).
+      (e) **Narrows our reframing, and raises B2's value.** Kumaran's suite is MCQ + open-ended QA
+      (SimpleQA, MMLU-Pro, SuperGPQA-hard, HLE) — **no structured or evidence-cited outputs**, and
+      no discussion of generalisation. So B2 is an **extension, not a replication**.
+      (f) **Blocked** — USENIX returns 403 for both the SoK PDF and the slides.
+- [x] ~~**Q1 — Resolve the six load-bearing unknowns.**~~ Each is a question a paper claim depends on,
+      left open by the review because I could only read abstracts:
+      (a) `arXiv:2604.02460` — is the degraded-context exception **measured or argued**? *Our whole
+      multi-agent defence rests on it.*
+      (b) FAX `arXiv:2605.27879` — verification **mandatory before assertion**, or a post-hoc
+      filter? *Decides whether C3's graded cap is a real difference.*
+      (c) eLLM-CTI — does its STIX-accuracy metric cover **referential integrity**? *Decides
+      whether C7's repair claim survives at all.*
+      (d) `arXiv:2503.23175` *LLMs Are Unreliable for CTI* — unread, and it either supports our
+      negatives or contradicts our positives.
+      (e) Kumaran `arXiv:2606.29490` — does it hold for **structured, evidence-cited** claims?
+      (f) Büchel SoK — per-system numbers, CIs, or a gate-style metric?
+- [ ] **Q2 — P8: scope the four over-general claims** to the evaluated model, per the pitfall
+      self-audit. Pure writing.
+- [ ] **Q3 — P9: pin model identity** — GGUF digest, engine commit, exact revision. Reading +
+      writing; makes §2.1's sampler finding reproducible.
+- [ ] **Q4 — Draft the Results/Evaluation section** for the paper from the measured record. The
+      first paper prose after related-work, and the natural home for everything measured in the
+      last two days.
+- [ ] **Q5 — Prepare B1 to run in one command** — harness written and unit-tested against fixtures,
+      so the only thing left when the author is present is starting llama-server.
+
+---
+
 ## 0. Where this actually stands
 
 Two things changed on 2026-08-08 and they govern everything below.
