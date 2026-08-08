@@ -207,11 +207,24 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
       checks. Turns a design description into a number using someone else's instrument, which
       is what our own N1 says to do. eLLM-CTI already measures STIX *validity*, so what is left
       to claim is the *repair* pass, and only if measured.
-- [ ] **Check three external corpora for public release** `[cheap]` — TTPDetect's
-      decompiled-function↔TTP dataset (`arXiv:2602.06325`), the 150-report STIX 2.1 + ATT&CK
-      dataset (`arXiv:2607.23312`, whose best annotator is our own Qwen3.6 family), and REx86's
-      released dataset/adapters (`arXiv:2510.20975`). Each would answer "your ground truth is
-      your own" (E.4). This is the top practical action in R2, R6 and R8 alike.
+- [x] **External corpus availability — checked 2026-08-08** `[done]`
+
+      | corpus | task | released? |
+      |---|---|---|
+      | TTPDetect Datasets I & II (`arXiv:2602.06325`) | **binary→ATT&CK** | **No** — the full text contains no availability statement of any kind |
+      | 150-report STIX 2.1 + ATT&CK (`arXiv:2607.23312`) | prose→ATT&CK | **Not yet** — *"will be made publicly available upon acceptance"*, no repository named |
+      | TTPrint-Bench / TRAM-Clean (`arXiv:2605.25836`) | prose→ATT&CK | **Unknown** — nothing in the abstract; needs the PDF |
+      | **AnnoCTR** (`arXiv:2404.07765`, LREC-COLING 2024) | prose→ATT&CK entities + techniques | **Yes** — CC-BY-SA, on GitHub |
+      | **REx86** (`arXiv:2510.20975`, ACSAC 2025) | assembly comprehension (*not* ATT&CK) | **Yes** — `github.com/dlea8/REx86`, `zenodo.org/records/15420461` |
+
+      **Consequence, and it is a real constraint: no external binary→ATT&CK ground truth is
+      obtainable today.** E.4 cannot be closed by borrowing someone's corpus for our actual task.
+      Three options, in order of cost: (i) use **AnnoCTR** as an external check of the *mapping
+      component* alone, which is prose-side but is somebody else's ground truth and directly
+      answers "your ground truth is your own"; (ii) watch `arXiv:2607.23312` for acceptance;
+      (iii) email the TTPDetect authors. REx86's release is real but its task is assembly
+      comprehension, so it is a baseline for the static analyst's *comprehension*, not for TTP
+      mapping.
 - [ ] **Human evaluation** `[decide]` — the report is the product and no analyst has scored
       one. N5 showed readability is the LLM narrator's *only* edge, and readability is exactly
       what needs human judgement. → **E.7**
