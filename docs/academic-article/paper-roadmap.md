@@ -202,11 +202,16 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
       whether the number separates correct from wrong. Cheapest high-value experiment in R4: if
       it replicates, it justifies every deterministic gate in the system, and it converges with
       tonight's finding that the layer weights move almost nothing.
-- [ ] **Measure C7 with the OASIS cti-stix-validator** `[cheap]` once bundles exist —
-      integrity pass on vs off, scored by an external standard validator rather than our own
-      checks. Turns a design description into a number using someone else's instrument, which
-      is what our own N1 says to do. eLLM-CTI already measures STIX *validity*, so what is left
-      to claim is the *repair* pass, and only if measured.
+- [x] **Measure C7 with the OASIS cti-stix-validator** `[done]` — and it found two real
+      defects our own checks had no opinion about: **no `spec_version` on any SDO** (required in
+      2.1, so no bundle we ever emitted was identifiable as 2.1) and **`null` properties plus
+      empty arrays** (13 errors on a four-object probe). Both fixed; the current emitter now
+      validates **clean, 0 errors**. Near-miss recorded: the validator's PyPI wheel ships
+      without its schemas and called a textbook-valid bundle invalid, so the harness now probes
+      a known-good bundle before grading anything.
+      **Still open `[LLM]`:** how often the pass fires on real output and what it recovers that
+      rejection would discard — the archived bundles predate the fix and the defect classes come
+      from LLM generation.
 - [x] **External corpus availability — checked 2026-08-08** `[done]`
 
       | corpus | task | released? |

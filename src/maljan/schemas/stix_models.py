@@ -76,11 +76,74 @@ EvidenceBasis = Literal[
 # ---------------------------------------------------------------------------
 
 
-class STIXObject(BaseModel):
-    """Base generic properties for all STIX Domain Objects (SDOs)."""
+class _SpecConformantModel(BaseModel):
+    """Serialises the way STIX 2.1 requires, rather than the way pydantic defaults to.
+
+    Two spec rules pydantic will happily break for you, both found on 2026-08-08 when
+    the OASIS ``cti-stix-validator`` was pointed at our output for the first time:
+
+    * **null properties are not allowed in STIX** — an absent optional property must be
+      omitted, not serialised as ``null``. Pydantic emits ``"description": null``.
+    * **empty arrays are not allowed** — a list-valued property that is present must be
+      non-empty. Our ``malware_types`` and ``indicator_types`` default to ``[]``.
+
+    Overriding the dump methods rather than fixing call sites is deliberate: the bundle
+    is serialised in several places (renderer, API, long-term memory) and a rule that
+    holds only where somebody remembered to pass a flag is not a rule.
+    """
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("exclude_none", True)
+        cleaned = _drop_empty_sequences(super().model_dump(**kwargs))
+        assert isinstance(cleaned, dict)  # noqa: S101 - a model always dumps to a mapping
+        return cleaned
+
+    def model_dump_json(self, **kwargs: Any) -> str:
+        import json as _json
+
+        kwargs.setdefault("exclude_none", True)
+        kwargs.pop("mode", None)
+        return _json.dumps(self.model_dump(mode="json", **kwargs))
+
+
+def _drop_empty_sequences(value: Any) -> Any:
+    """Recursively remove empty lists/dicts, which STIX forbids as present properties.
+
+    Applied to the dumped structure rather than to the model, so a field that is
+    *meaningfully* empty in Python still round-trips through the object graph and only
+    disappears at the wire format — which is the only place the spec has an opinion.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _drop_empty_sequences(v)
+            for k, v in value.items()
+            if not (isinstance(v, list | dict) and not v)
+        }
+    if isinstance(value, list):
+        return [_drop_empty_sequences(v) for v in value]
+    return value
+
+
+class STIXObject(_SpecConformantModel):
+    """Base generic properties for all STIX Domain Objects (SDOs).
+
+    ``spec_version`` is **required** on every SDO in STIX 2.1 — it moved from the
+    bundle (where 2.0 put it) onto the objects themselves. We emitted it nowhere, so
+    every bundle this project ever produced was, strictly, not identifiable as 2.1:
+    a consumer applying the spec falls back to 2.0 semantics, and the OASIS
+    ``cti-stix-validator`` refuses the object outright.
+
+    Found on 2026-08-08 by running that validator over four bundles from real runs,
+    while measuring something else entirely (`tests/evaluation/eval_stix_integrity.py`).
+    Our own integrity pass has opinions about empty patterns, duplicate
+    attack-patterns and dangling references, and no opinion at all about this — which
+    is the argument for grading output with someone else's instrument, demonstrated
+    on ourselves.
+    """
 
     type: str
     id: str
+    spec_version: Literal["2.1"] = "2.1"
     created: datetime = Field(default_factory=get_utcnow)
     modified: datetime = Field(default_factory=get_utcnow)
 
@@ -254,7 +317,7 @@ _BundleObject = (
 )
 
 
-class Bundle(BaseModel):
+class Bundle(_SpecConformantModel):
     """STIX 2.1 Bundle container for transferring multiple objects.
 
     The objects list accepts both plain Relationship and

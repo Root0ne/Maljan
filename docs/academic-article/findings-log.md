@@ -358,6 +358,36 @@ positioning.
   `stix_renderer.py`); `src/maljan/reporting/{models.py,builder.py,renderers/markdown.py}`;
   `src/maljan/pipeline/nodes.py`. Tests in `tests/unit/test_judge_postprocess.py` (integrity) and
   `tests/unit/reporting/test_renderers_markdown.py` (honesty signals).
+- **Measured externally, and it found two defects our own checks could not (2026-08-08).**
+  §1.6 described the integrity pass without ever grading its output, and the literature review
+  narrowed the claim: eLLM-CTI already contributes a *STIX accuracy* metric, and the **OASIS
+  `cti-stix-validator` has existed all along**. Our own §3.4 says to measure with someone else's
+  instrument, so we did — and the instrument immediately failed us in two ways the integrity
+  pass has no opinion about:
+  1. **No `spec_version` on any object.** In STIX 2.1 it is *required* on every SDO (it moved
+     off the bundle, where 2.0 put it). We emitted it nowhere, so strictly **every bundle this
+     project produced was not identifiable as 2.1** — a conforming consumer falls back to 2.0
+     semantics and the validator refuses the object outright.
+  2. **`null` properties and empty arrays.** STIX forbids both as *present* properties; pydantic
+     emits `"description": null` and `"malware_types": []` by default. **13 validator errors on
+     a four-object probe bundle.**
+  Both are fixed: `spec_version: Literal["2.1"]` on the SDO base, and a `_SpecConformantModel`
+  base overriding the dump methods so the rule holds at every serialisation site rather than
+  wherever someone remembered a flag. **A bundle built from the production models now validates
+  clean — 0 errors, 0 referential warnings.** Pinned by `tests/unit/reporting/test_stix_spec_version.py`.
+  **The point worth keeping is how they were found.** The integrity pass checks empty patterns,
+  duplicate attack-patterns and dangling references, and had no opinion about either defect;
+  the standard validator saw both in seconds. That is §3.4's own argument about measurement
+  instruments, arriving at our own expense.
+  **A methodological near-miss, recorded because it was close.** The validator's PyPI wheel
+  **ships without the OASIS JSON schemas** and ignores `schema_dir` for the core-schema lookup,
+  so it initially reported *every* bundle — including a textbook-valid one — as invalid. Had the
+  harness not probed a known-good bundle first, this section would now contain a confident and
+  entirely wrong finding. `eval_stix_integrity.py` therefore refuses to run until the instrument
+  proves itself.
+  **Still unmeasured:** how often the pass fires on real output, and what it recovers that
+  rejection would discard. The four archived bundles available are pre-fix, and the defect
+  classes the pass targets come from LLM generation, so this needs `[LLM]` runs.
 - **CTI polish (wave 2).** Three further low-risk correctness passes: (i) the integrity pass also
   drops syntactically malformed STIX patterns (conservative bracket+comparator shape check — no
   grammar parser, no over-dropping); (ii) attack-pattern display names are back-filled from the
