@@ -103,3 +103,6 @@ apps/web/playwright-report/
 
 # Overnight watch output (machine-local, not project history)
 logs/
+
+# External corpora — fetched by eval scripts, never vendored
+data/external/

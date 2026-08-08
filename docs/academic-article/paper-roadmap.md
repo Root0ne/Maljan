@@ -237,14 +237,14 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
 
 ## 4. Write-up
 
-- [ ] **Self-audit against *Chasing Shadows*' nine pitfalls** `[cheap]` — NDSS'26,
+- [x] **Self-audit against *Chasing Shadows*' nine pitfalls** `[done]` → `self-audit-pitfalls.md` — P6/P8/P9 exposed, P2/P4 clear, three cheap write-up fixes fall out. `[cheap]` — NDSS'26,
       `arXiv:2512.09549`, artifacts released and a living appendix at `llmpitfalls.org`. It
       surveyed all 72 LLM-security papers from 2023–2024 and found **every one** contains at
       least one pitfall, with only 15.7% acknowledged. Highest value-per-hour item in the
       review: it is what a 2026 security reviewer is now primed to look for, and the findings
       log already holds most of our answers. **The nine pitfalls are not in the abstract — the
       full paper must be read.**
-- [ ] Strengthen E1 from "no significant drift" to an **equivalence bound** `[cheap]` —
+- [x] E1 **equivalence bound** `[done]` — |drift| ≤ 0.040 F1 over 7 years at 95%, powered only for δ ≥ 0.05; exposed a data-retention defect (per-sample F1s were never stored). `[cheap]` —
       overlapping CIs are not evidence of absence; a TOST-style δ turns the same numbers into a
       positive claim
 - [x] Update `findings-log.md` `[done]` — §3.1 expanded with 10 verified references, §1.5.1 bound to the Büchel SoK as a
@@ -252,7 +252,7 @@ analysis. Searching only the subfield a claim sounds like will miss the paper th
       to §1.5/§1.5.3 and **narrow the claims** — never silently drop them, `[cheap]`
 - [x] Update `literature-review-brief.md` Parts B / E / F `[done]` — Part F now recommends **F3 + F4 spine, F2 remnant as the sharpest chapter**
 - [ ] `[decide]` **Pick the framing** — see §5
-- [ ] Related-work section from the ledger `[cheap]`
+- [x] Related-work section from the ledger `[done]` → `related-work.md` — five subsections, each ending in what we do *not* claim
 - [ ] LaTeX skeleton, then the paper — **last**, once §3 and the framing are settled
 
 ---

@@ -1,0 +1,68 @@
+{
+  "schema": "maljan-annoctr-mapping/v1",
+  "corpus": {
+    "name": "AnnoCTR (Lange et al., LREC-COLING 2024), CC-BY-SA 4.0",
+    "splits": [
+      "train",
+      "dev",
+      "test"
+    ],
+    "pairs_scored": 3289,
+    "labels_outside_our_attck_bundle": 48
+  },
+  "embedding_backend": "embedding backend: REAL fastembed BGE (related=0.696 vs unrelated=0.568)",
+  "annoctr": {
+    "tfidf": {
+      "n": 3289.0,
+      "top1": 0.09364548494983277,
+      "top3": 0.18273031316509578,
+      "mrr": 0.1472737407520011,
+      "mean_correct_score": 0.3370239889834904,
+      "mean_wrong_top1_score": 0.20213568882248734,
+      "gate_separation": 0.13488830016100306
+    },
+    "semantic": {
+      "n": 3289.0,
+      "top1": 0.123137731833384,
+      "top3": 0.21374277896017027,
+      "mrr": 0.17605148474713678,
+      "mean_correct_score": 0.7460240587217714,
+      "mean_wrong_top1_score": 0.6845078158330427,
+      "gate_separation": 0.0615162428887287
+    },
+    "hybrid": {
+      "n": 3289.0,
+      "top1": 0.123137731833384,
+      "top3": 0.21374277896017027,
+      "mrr": 0.17605148474713678,
+      "mean_correct_score": 0.2714052118596483,
+      "mean_wrong_top1_score": 0.10306561929892619,
+      "gate_separation": 0.1683395925607221
+    }
+  },
+  "tram2_reference": {
+    "tfidf": {
+      "top1": 0.205,
+      "top3": 0.329,
+      "mrr": 0.274,
+      "gate_separation": 0.085
+    },
+    "semantic": {
+      "top1": 0.23,
+      "top3": 0.392,
+      "mrr": 0.319,
+      "gate_separation": 0.019
+    },
+    "hybrid": {
+      "top1": 0.23,
+      "top3": 0.392,
+      "mrr": 0.319,
+      "gate_separation": 0.115
+    }
+  },
+  "replication": {
+    "ranking_order_holds": true,
+    "gate_order_holds": true,
+    "hybrid_wins_both_axes": true
+  }
+}

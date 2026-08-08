@@ -188,6 +188,35 @@ positioning.
   all (+0.115)**, because semantic surfaces better candidates that TF-IDF then validates
   decisively (wrong picks score ~0.13). Absolute top-1 ≈ 0.20–0.23 reflects the known difficulty
   of zero-shot single-sentence → technique on TRAM2 (no fine-tuning, 697-way retrieval).
+- **External replication on AnnoCTR (2026-08-08) — the claim now rests on two corpora.**
+  The TRAM2 result had a specific vulnerability: its sentences are short and were annotated *for*
+  technique classification, so a lexical gate has an easy job — the sentence often names the
+  behaviour in ATT&CK's own words. If the gate separation were an artifact of that register
+  rather than a property of the method, the claim would not survive real report prose.
+  **AnnoCTR** [15] (Lange et al., LREC-COLING 2024, CC-BY-SA 4.0) is a different task by
+  different annotators over different documents: expert *entity linking* in running threat-report
+  prose, so the evidence text is whatever the analyst actually wrote around the mention.
+  **3,289 technique-linked mentions** scored (48 labels dropped as absent from our ATT&CK
+  bundle), metrics reused verbatim from `eval_technique_mapping._evaluate` — a replication that
+  redefines its measure is not one.
+
+  | backend | top-1 | top-3 | MRR | gate separation | *TRAM2 gate sep* |
+  |---|---|---|---|---|---|
+  | TF-IDF | 0.094 | 0.183 | 0.147 | **+0.135** | *+0.085* |
+  | semantic | 0.123 | **0.214** | 0.176 | +0.062 | *+0.019* |
+  | **hybrid** | 0.123 | **0.214** | 0.176 | **+0.168** | *+0.115* |
+
+  **All three orderings replicate.** Semantic ranks better than TF-IDF (+3.1pp top-3); the gate
+  ordering is hybrid > TF-IDF > semantic exactly as on TRAM2; and the hybrid wins both axes. The
+  separations are uniformly *larger* here, which is consistent with the harder corpus spreading
+  the scores rather than with the effect being register-bound.
+  **Honest reading.** Absolute accuracy is much lower than on TRAM2 (top-1 0.09–0.12 vs
+  0.21–0.23) because entity linking in unconstrained prose over a 697-technique space is a
+  harder task than sentence classification — the numbers are not comparable across corpora and
+  are not presented as such. What replicates is the **ordering**, which is the whole claim.
+  Harness `tests/evaluation/eval_annoctr_mapping.py`; helpers unit-tested in
+  `test_annoctr_mapping_scoring.py`; artifact `tests/evaluation/annoctr_mapping.json`. The
+  corpus is fetched into a gitignored `data/external/`, never vendored.
 - **Literature position (2026-08-08) — the conclusion is not ours; the decomposition is.**
   The Büchel SoK [5] (USENIX Security 2025) re-evaluated 40+ TTP-extraction systems in a unified
   setting and reports that *"traditional NLP approaches (possibly counterintuitively) outperform
@@ -962,6 +991,26 @@ equal-budget A/B (§3.6), and the MaLAware-style narrative-quality harness (§3.
     | 2026 | 30 | 0.121 | 0.042 | 0.055 | [0.033, 0.079] | 0.000 |
 
     Earliest→latest drift **delta = -0.004 F1** (2020 0.059 → 2026 0.055).
+  - **Equivalence bound (added 2026-08-08) — and a data-retention defect it exposed.**
+    "All CIs overlap" is an absence of significance, not evidence of absence, and a reviewer
+    primed by [9] will say so. Turning it into a positive claim needs a bound, so:
+    approximating each cohort's SE from its bootstrap CI half-width, the 2020-vs-2026
+    difference is **-0.004 F1 with a 95% CI of [-0.040, +0.032]** — i.e. **|drift| ≤ 0.040 F1
+    over seven years at 95%**, and the largest pairwise cohort gap (2021→2026, -0.034) sits
+    inside that bound. That is a positive, citable statement where "no significant drift" was
+    not.
+    **Three honest limits ship with it.** (i) The study was powered to detect roughly
+    **δ ≥ 0.05 F1** at 80%; anything smaller was never observable, so the bound is the claim and
+    "no drift" is not. (ii) The bound is **large relative to the measurement** — ±0.040 on a
+    base F1 of 0.055–0.089 is ±57%, so temporal stability is established only in the coarse
+    sense the low absolute recall permits. (iii) The SEs are **reconstructed** from CI
+    half-widths under a normality assumption, and the bootstrap CIs are mildly asymmetric
+    (2020: -0.025/+0.030), so the arithmetic is an approximation of the one we should have been
+    able to do directly.
+    **The defect:** the n=210 run recorded per-cohort aggregates but **not per-sample F1s**, so
+    a proper TOST is impossible without re-analysing the corpus (45–70 h). Future evaluation
+    runs must persist per-sample scores — the cost of not doing so is that a null result cannot
+    be upgraded into an equivalence claim afterwards.
   - **Findings.** (i) **No measurable concept drift.** The earliest→latest delta (-0.004) is
     negligible and the per-cohort F1 CIs all overlap (the band is 0.055–0.089 with no monotonic
     trend; 2021 is the peak, 2026 the floor, but 2026's CI [0.033, 0.079] contains 2020's mean) —
@@ -1168,6 +1217,9 @@ what was checked and what was not.*
     measures to the ones obtained by a simple multi-label baseline classifier.* arXiv:1503.06952.
     — the label-only baseline our §1.5.3 frequency prior instantiates; finds published results
     routinely failing to beat it.
+15. Lange, Adel, et al. *AnnoCTR: A Dataset for Detecting and Linking Entities, Tactics, and
+    Techniques in Cyber Threat Reports.* LREC-COLING 2024. arXiv:2404.07765. CC-BY-SA 4.0. —
+    the independent corpus on which §1.5.1's rank-vs-gate ordering replicates.
 
 **Datasets used** (URLs accessed 2026-06-08; the full nine-source survey with per-source
 verdicts is the §4 `SURVEY` table above):
