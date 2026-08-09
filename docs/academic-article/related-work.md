@@ -8,6 +8,15 @@
 > **Organising principle:** each subsection ends by stating plainly what this work does *not*
 > claim. Four of our original contribution candidates are prior art, and a related-work section
 > that hides that is the one a reviewer breaks.
+>
+> **Revised 2026-08-09 after the A4 counter-search.** Three claims this draft originally presented
+> as ours — the rank-versus-gate separation, the auto-correction asymmetry, and the degenerate-loop
+> mitigation — turned out to be domain instances of results already established in **IR score
+> calibration**, **grammatical error correction** and **neural text degeneration**. None was
+> refuted; each keeps a mechanism worth reporting. The sentences that claimed novelty have been
+> rewritten rather than deleted, and where an earlier draft was wrong this file now says so in
+> place. §5's temporal paragraph was also re-framed: its axis is *input era*, not
+> training-recency, and the earlier text conflated them.
 
 ---
 
@@ -39,17 +48,49 @@ labelled examples. Ours is stricter than [6] and than [7]: in both of those the 
 still ranks or selects among retrieved candidates, whereas here it never emits an identifier and
 any correction is gated to the provably-safe invalid→valid case. **We do not claim the idea.**
 
-What we contribute is a decomposition of the SoK's insight. [5] reports that embedders lose;
-we measure *where* and *why*. Ranking quality and gate quality are separable axes: dense
-embeddings rank better while their scores barely separate a correct pick from a wrong one, and a
-lexical index ranks worse while gating cleanly. Composing the per-axis winners beats either pure
-backend on both, measured on TRAM2 (N=4,913) and replicated on the independently annotated
-AnnoCTR corpus [15]. We found no prior work reporting these as distinct metrics.
+What we contribute is a decomposition of the SoK's insight. [5] reports that embedders lose; we
+measure *where*. Ranking quality and gate quality behave as separable axes here: dense embeddings
+rank better while their scores barely separate a correct pick from a wrong one, and a lexical
+index ranks worse while gating cleanly. Composing the per-axis winners beats either pure backend
+on both, measured on TRAM2 (N=4,913) and replicated on the independently annotated AnnoCTR
+corpus [15].
 
-We also report a negative result about correction policy. Auto-correcting *valid but
-weakly-aligned* identifiers damages 38% of already-correct labels to recover 21% of wrong ones,
-and the alignment gate cannot separate the two cases. Every retrieve-then-rerank system has an
-implicit override policy; we found none that reports its cost.
+**The separation itself is not ours, and an earlier draft of this section claimed it was.**
+Abdallah et al. [16] evaluate retrieval **confidence** — AUROC for predicting query success — as a
+dimension explicitly distinct from retrieval effectiveness, find calibration "consistently weak
+across model families", and conclude raw scores are "unreliable for downstream routing without
+additional calibration". That is the general statement, over more retrievers than we test. What
+remains ours is narrower and specific: the **inversion** — that in this task the *lexical* backend
+is the better gate while the *semantic* one is the better ranker, so the two axes have different
+winners and can be composed. We found that inversion neither asserted nor excluded elsewhere,
+which is a weaker absence than the one we first claimed, and we say so.
+
+We also report a result about correction policy. Auto-correcting *valid but weakly-aligned*
+identifiers damages 38% of already-correct labels to recover 21% of wrong ones. **The asymmetry is
+not a discovery**: grammatical error correction has studied over-correction for years and
+evaluates with F0.5 precisely because a false correction costs more than a missed one [17], and
+recent work targets the failure directly. Our contribution is the *mechanism* in this setting:
+correct-but-weak and wrong-but-valid identifiers are **not separable by an alignment score**, so
+the valid→valid swap cannot be safely tuned at any error rate — which is why the shipped policy is
+restricted to the invalid→valid case, where zero regression holds by construction rather than by
+tuning.
+
+Finally, the failure that motivates removing identifier recall in the first place. Asked for an
+ATT&CK identifier it does not know, the model enters a degenerate loop, proposing and re-proposing
+wrong identifiers until the budget is gone. **The loop is not novel and neither is the inadequacy
+of the obvious remedy:** neural text degeneration is a studied phenomenon with an established
+account rooted in self-reinforcement and training-data repetition [18], and the limits of a
+uniform repetition penalty are known — it damages tokens that legitimately recur. We reproduce
+that here and can add one engine-level detail, that the server honours `repeat_penalty` while
+silently ignoring three sibling parameters, which converts a tight loop into a slower enumeration
+without fixing it.
+
+What we can contribute is the **consequence**. The degeneration literature measures repetition
+rate and text quality; here the budget is exhausted inside an operational deadline, the verdict
+stage times out, and the analyst receives an **empty STIX bundle** — degeneration as a failure to
+*deliver*, not a failure of prose. We measure that channel directly (§1.7.1: empty bundles 6/17
+versus 1/17). Constrained decoding would also solve the original loop, and we say so; the point is
+that the cheaper mitigation a practitioner reaches for first does not.
 
 ## 2. LLM agents over binaries
 
@@ -163,11 +204,20 @@ an advisory prompt hint whose measurable effect was **completion under an operat
 budget** rather than mapping accuracy, reducing empty fallback bundles from 6/17 to 1/17; we
 found no work measuring generation completion as a channel through which prompt changes act.
 
-Finally, concept drift for LLM-based malware analysis appears unstudied. Across 210 dated real
-binaries spanning 2020–2026 we measure an earliest-to-latest F1 difference of -0.004, bounding
-drift at ≤0.040 F1 over seven years at 95% confidence, with the study powered to detect
-δ ≥ 0.05. We state the bound rather than claiming absence, and note that its width relative to
-an absolute F1 of 0.055–0.089 makes the stability claim a coarse one.
+Finally, temporal stability — and here the axis matters more than the result. There is a
+substantial literature on **temporal generalisation** in language models, and its finding is
+degradation: performance falls as evaluation moves away from the training period, and scale does
+not close the gap [19]. That work varies the **distance between training time and test time**.
+Our study varies something else. The model is **fixed**, and what changes is **the era of the
+input binary** — which is concept drift in the malware-detection sense, applied to an LLM analyst,
+rather than temporal misalignment of the model itself.
+
+On that axis we find no LLM-based equivalent. Across 210 dated real binaries spanning 2020–2026 we
+measure an earliest-to-latest F1 difference of −0.004, bounding drift at ≤0.040 F1 over seven
+years at 95% confidence, with the study powered to detect δ ≥ 0.05. We state the bound rather than
+claiming absence, and note that its width relative to an absolute F1 of 0.055–0.089 makes the
+stability claim a coarse one. The prior from [19] runs the other way, which is what makes a null
+worth reporting here — provided, as above, that the axis is named.
 
 ## Scope of every empirical statement above
 
@@ -197,3 +247,18 @@ replication. Systems named without a bracketed number — TRAM, rcATT, TTPDrill,
 AttacKG, LADDER, PhishDebate, LongFuncEval, ReCopilot, LLM4Decompile, Nova — are cited via the
 verified sources that discuss them and **must be resolved to their own records before
 submission**; see the citation audit for which were fetched directly and which were not.
+
+**[16]–[19] were added on 2026-08-09 by the A4 adjacent-field counter-search, and their
+verification status differs — deliberately recorded rather than smoothed over:**
+
+| # | Source | Verified how |
+|---|---|---|
+| [16] | Abdallah, Holdcroft, Ali & Jatowt, *Are LLM-Based Retrievers Worth Their Cost?*, `arXiv:2604.03676` | **Abstract fetched and read.** The quoted claims are from it |
+| [17] | Grammatical error correction's over-correction literature and the F0.5 convention | **Search results only.** Named, checkable candidates: *Leveraging What's Overfixed: Post-Correction via LLM Grammatical Error Overcorrection*; *Edit-Wise Preference Optimization for GEC* (COLING 2025). **Must be read in full and resolved to specific records before submission** |
+| [18] | Neural text degeneration: Welleck et al., `arXiv:1908.04319`; *Repetition In Repetition Out*, `arXiv:2310.10226` (NeurIPS'23); *Rethinking Repetition Problems of LLMs in Code Generation*, `arXiv:2505.10402` | **Search results only.** Same requirement |
+| [19] | Temporal generalisation: Lazaridou et al., *Mind the Gap* (NeurIPS'21); TemporalWiki `arXiv:2204.14211`; TARDIS `arXiv:2503.18693` | **Search results only.** Same requirement |
+
+Acting on [17]–[19] now is conservative because each one *demotes* a claim of ours — the safe
+direction. Citing them in a submitted paper on this basis would not be, and the standing rule from
+the 2026-08-08 citation audit applies: a search summary is a lead, not a source. That audit exists
+because one fabricated a claim.
