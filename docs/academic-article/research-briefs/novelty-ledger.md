@@ -145,26 +145,38 @@ instance of an adjacent field's established result. Pending full-text confirmati
 
 ## What the ledger implies for the paper
 
-*Rewritten 2026-08-09 after A4.*
+*Rewritten 2026-08-09 after A4, then again the same day after B1, B2 and their counter-searches.*
 
-1. **Lead with measurement, not architecture.** Unchanged, and now the only option: two `OURS`
-   rows remain and both are measurement results. Four architectural claims are unmeasured.
-2. **Three framings have now died.** Describe-then-map and the binary modality fell to prior art
-   on 08-08; the **F2 remnant** — the chapter Part F called the sharpest, built on C5a + N4 + N7 —
-   demoted wholesale on 08-09. F1 remains gated on B1 and C3.
-3. **A `REFINEMENT` is still publishable, and this is the honest way to publish it.** All three
-   demoted rows keep a real contribution: C5a keeps the measured *inversion* between which backend
-   ranks and which gates; N4 keeps **non-separability by alignment score**; N7 keeps degeneration
-   as a **delivery** failure. What changes is the sentence that introduces them — "we find" becomes
-   "we confirm in a new domain, and add the mechanism".
-4. **The adjacent-field rule has now paid for itself seven times.** Infer-Retrieve-Rank (general
-   ML), TTPDetect (binary analysis), Dempster–Shafer (sensor fusion), template-vs-neural (NLG),
-   and now GEC over-correction, neural text degeneration, and IR score calibration. Every one
-   would have been missed by searching security terms alone. **It is the single highest-yield
-   habit in this review** and should be described as a method in the paper, not just used.
-5. **Three claims are one experiment away from surviving** — C6, C3 and C7 (B4/B5/C3 in the queue).
-6. **The remaining `OURS` rows are still absences.** C8 and E1 survived one counter-search each.
-   Before submission each deserves a second, by a different route — and E1's must be run against
-   the *input-era* framing, not the temporal-misalignment one, or it will search the wrong field.
-5. **Every `OURS` is an absence.** Before any of the five reaches a submitted paper, it needs one
-   targeted manual search from a different angle — ideally by someone who wants it to be false.
+1. **Lead with measurement, not architecture.** Now the only option: **two** `OURS` rows remain
+   (C8, E1), both measurement results, and three architectural claims are still unmeasured.
+2. **Three framings have died.** Describe-then-map and the binary modality fell to prior art on
+   08-08; the **F2 remnant** — the chapter Part F called the sharpest, built on C5a + N4 + N7 —
+   demoted wholesale on 08-09. F1 was gated on B1 returning positive; **B1 returned negative**, so
+   F1 is closed unless C3 reopens it.
+3. **A `REFINEMENT` is still publishable, and this is the honest way to publish it.** Every demoted
+   row keeps a real contribution: C5a the measured *inversion* between which backend ranks and
+   which gates; N4 **non-separability by alignment score**; N7 degeneration as a **delivery**
+   failure; N9 the **noise control** the ensemble framing does not address; N10 the fact that a
+   *system consumes* the discretized number, which is a mechanism for §1.10 rather than a
+   restatement of it. What changes is the introducing sentence — "we find" becomes "we confirm in
+   a new domain, and add the mechanism".
+4. **The adjacent-field rule has now paid for itself nine times.** Infer-Retrieve-Rank (general ML),
+   TTPDetect (binary analysis), Dempster–Shafer (sensor fusion), template-vs-neural (NLG), GEC
+   over-correction, neural text degeneration, IR score calibration, and now **confidence
+   elicitation** and **ensemble learning**. Every one would have been missed by searching security
+   terms alone. **It is the single highest-yield habit in this review**, and it should be described
+   as a *method* in the paper rather than merely used.
+5. **The rule's cost, which is the number worth reporting.** Across two passes it demoted **five of
+   seven** rows that had been entered as ours — three of five at A4, then two of two the same day.
+   The second pair survived **about sixty minutes**. That is not a story about carelessness; the
+   rows were entered with evidence and a stated confidence. It is a measurement of how unreliable
+   "we found no prior work" is when the search stays inside one field's vocabulary.
+6. **One demotion was a self-inconsistency, not a discovery.** N9's own findings-log entry already
+   called it a *replication*, which is by definition not `OURS`. The ledger row contradicted a text
+   written an hour earlier. **A claim register needs to be checked against the evidence log, not
+   only against the literature.**
+7. **Two claims are one experiment away** — C3 (B5) and C7 (B4, running). C6 is partly answered by
+   B3, also running.
+8. **The two survivors are still absences.** C8 and E1 have had one counter-search each. Each needs
+   a second by a different route before submission — and **E1's must use the *input-era* framing,
+   not temporal misalignment**, or it will search the wrong field and come back falsely clean.
