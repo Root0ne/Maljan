@@ -504,6 +504,55 @@ def arm_block(arm: str, scores: list[ArmScore]) -> list[str]:
     ]
 
 
+def completeness_block(
+    scores: list[ArmScore], arms: tuple[str, ...], expected_per_arm: int
+) -> list[str]:
+    """Per-arm generation loss, and whether it is differential.
+
+    This is not bookkeeping. A per-call timeout hits a 4-call arm roughly four
+    times as often as a 1-call arm, so `negotiated` and `noise` lose generations
+    that `single` keeps — and the ones they lose are the *hard* samples, the
+    degenerate decodes. Left unstated, that is survivorship bias flattering the
+    multi-call arms in their marginal tables.
+
+    Two things follow and both are said out loud. The **paired** comparisons are
+    safe by construction, because they only pair generations present in both
+    arms. The **marginal** tables are not: they are computed over different
+    sample sets whenever loss is differential.
+
+    The loss is also a *result*. An arm that needs four calls to produce one
+    answer fails whenever any one of them does, which is a real operational
+    property of the topology — the same channel §1.7.1 measured as completion
+    under a time budget.
+    """
+    counts = {arm: sum(1 for s in scores if s.arm == arm) for arm in arms}
+    lost = {arm: expected_per_arm - n for arm, n in counts.items()}
+    lines = [
+        "## Generation completeness",
+        "",
+        "| arm | completed | lost | calls/generation |",
+        "|---|---|---|---|",
+    ]
+    for arm in arms:
+        calls = next((s.calls for s in scores if s.arm == arm), 0)
+        lines.append(f"| {arm} | {counts[arm]}/{expected_per_arm} | {lost[arm]} | {calls} |")
+    lines.append("")
+    if len(set(lost.values())) > 1:
+        worst = max(lost, key=lambda a: lost[a])
+        lines += [
+            f"**Loss is differential — `{worst}` lost the most ({lost[worst]}).** A per-call",
+            "timeout hits a multi-call arm proportionally more often, and the generations it",
+            "removes are the degenerate ones. The **paired** comparisons below are unaffected",
+            "(they pair only generations present in both arms); the **marginal** tables above",
+            "are computed over different sample sets and should be read with that in mind.",
+            "The loss itself is a property of the topology, not only of the harness.",
+            "",
+        ]
+    else:
+        lines += ["Loss is equal across arms; the marginal tables are directly comparable.", ""]
+    return lines
+
+
 def paired_block(scores: list[ArmScore], left: str, right: str) -> list[str]:
     """Paired F1 delta with a bootstrap CI — the sensitive comparison, because
     every arm saw the same samples in the same order."""
@@ -643,6 +692,7 @@ def main_async(repeats: int, budget: int, smoke: bool, checkpoint: Path) -> None
         "  aggregating rather than reconciling.",
         "",
     ]
+    lines += completeness_block(scores, arms, len(built) * repeats)
     for arm in arms:
         lines += arm_block(arm, [s for s in scores if s.arm == arm])
     lines += ["## Paired comparisons", ""]
