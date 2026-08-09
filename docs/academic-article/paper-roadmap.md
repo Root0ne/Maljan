@@ -158,14 +158,22 @@ which side of that crossover a malware pipeline sits on.
 
 - [ ] **B0 — Pre-flight** — restart the watcher → confirm ≥ 20 GB free →
       `systemctl --user start maljan-llama` → wait for `slots_idle=1`
-- [ ] **B1 — E.2 consensus ablation — the paper's central experiment** `[LLM]`
-      Design taken from Bertalanič & Fortuna (`arXiv:2605.00914`), not invented here: **three
-      arms** — (1) negotiated multi-agent consensus, today's behaviour; (2) a single judge given
-      **all evidence** at once; (3) a **stochastic noise control** (one analyst fed irrelevant
-      evidence). **Equal total token budget**, N≫1, mean ± bootstrap CI, **token cost reported**.
-      Pre-registered hypothesis, written up either way: *heterogeneous evidence-channel
-      decomposition survives the equal-budget control that homogeneous debate fails.*
-      → **E.2**, and it decides D3
+- [x] **B1 — E.2 consensus ablation** `[done]` **2026-08-09** → **§3.7**, `consensus_ablation.md`
+      **The defence did not hold.** n=25 per arm, all arms complete, equal budget B=2400.
+      | comparison | mean F1 delta | 95% CI | verdict |
+      |---|---|---|---|
+      | `negotiated` − `single` | **−0.016** | [−0.084, +0.050] | **no separation**, at **3.2× tokens** |
+      | `negotiated` − `noise` | **+0.061** | [+0.012, +0.110] | mediator **reconciles**, not inert |
+      Heterogeneous evidence channels — the exception the literature named, and our whole defence —
+      **did not rescue the multi-agent design**. The token ratio (1039 vs 325) lands inside
+      Bertalanič & Fortuna's reported 2.1–3.4×, so this **replicates** them in a new domain.
+      The arms fail differently: decomposition buys recall (0.432 vs 0.416), pays precision
+      (0.370 vs 0.413) — an F1-only reading hides that.
+      **Bounding limit:** one mediator pass, not production's multi-round negotiation with revision
+      and dissent. This tests decompose-then-reconcile, **not** iterated negotiation. Channels are
+      also clean, and `arXiv:2604.02460`'s crossover favours single agents exactly there —
+      degrading them is the direct follow-up. → **E.2 answered; F1 closes; D3 resolves toward F3**
+
 - [ ] **B2 — Does verbal confidence predict correctness?** `[LLM]`
       `arXiv:2606.29490` finds reported confidence tracks an LLM's *readiness to commit*, not
       whether it is right. Our ISR claims and the whole cascade run on that number. Score claims
@@ -372,8 +380,35 @@ wait for `slots_idle=1` → the three `MCP__CAPE__*` lines → one clean run on 
 `systemctl --user restart maljan-llama` clears it: the same call did not return in 300+ s before a
 restart and took 46.1 s after.
 
-**Memory.** llama-server alone holds ~16.2 GB and an analysis grows to ~8.5 GB against 30 GB
-total. Do not start a heavy analysis with the desktop stack already loaded.
+**Memory — corrected and sharpened by the B1 run, 2026-08-09.** The old note ("llama-server holds
+~16.2 GB") describes a *steady state that does not exist*. Measured across one 75-generation batch:
+
+| moment | llama RSS | avail | note |
+|---|---|---|---|
+| fresh load | ~9.6 GB effective | 9–12 GB | weights are mmap'd file pages, largely shared with page cache |
+| ~40 generations in | 14.9 GB | 5–6 GB | KV cache accumulating |
+| ~64 generations in | **17.4 GB** | **3.5 GB** | **machine swapping, 3.9 GB out** |
+
+**The KV cache grows with cumulative requests under `-c 131072 --context-shift on`; it does not
+plateau.** A long eval batch therefore needs **periodic llama-server restarts**, not just a memory
+floor. Restarting is nearly free — the GGUF is in page cache, so a restart takes ~30 s and returns
+the cache to empty. Checkpointed harnesses make it lossless.
+
+**Watch the swap-out *rate*, not swap *used*.** Two thresholds failed on this run, both by
+measuring the wrong quantity:
+- a 3 GB available floor fired **too late** — the system was already 3.9 GB into swap by the time
+  available reached 3.5 GB;
+- a "swap used > 500 MB" check fired **too early** — residual swap after a pressure episode is
+  harmless, because pages stay parked until touched. Confirmed by `pswpout` not advancing at all
+  over 5 s while 4.5 GB sat in swap.
+
+The right pair is **`pswpout` delta** (real writes to swap) plus a **4 GB available** early
+warning, which trips before the kernel starts evicting rather than after.
+
+**Consequence for C3, which is the tightest item in the queue.** n=100 with the CAPE dynamic path
+means llama (growing past 17 GB unchecked) *plus* an arq analysis at ~8.5 GB. That does not fit,
+and a memory floor alone will not save it. **C3 must be run in batches with a llama restart
+between them**, and the checkpoint written per sample so a restart costs one generation at most.
 
 **Standing rule, learned the hard way on R2:** search each claim in the vocabulary of at least one
 *adjacent* field. Searching only the subfield a claim sounds like will miss the paper that owns it.

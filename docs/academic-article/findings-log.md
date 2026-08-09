@@ -1095,6 +1095,84 @@ this review it did, until corrected.
   34/60. The fix for a full clean run is `llama-server --parallel N` *with* the views run
   sequentially, or a faster decode host — recorded for the eventual complete-corpus run.
 
+### 3.7 Negotiated consensus vs a single agent at equal token budget — `EXPERIMENTAL` / `NEGATIVE`
+
+- **Why this is the load-bearing experiment.** The project's own framing rests on multi-agent
+  negotiation, and by 2026-08-08 the literature's prior had turned against it: `arXiv:2604.02460`
+  (Stanford) and `arXiv:2605.00914` both find single agents match or beat multi-agent debate at
+  equal budget, the latter on 7–8B models — our scale — at 2.1–3.4× the tokens. **Both scope that
+  result to *homogeneous* agents decomposing *one* context, and both name heterogeneous evidence
+  channels as the exception.** Ours are heterogeneous evidence channels. That was our defence, and
+  this experiment was pre-registered to test it either way.
+- **Design, taken from Bertalanič & Fortuna rather than invented here.** Three arms over 5 fixture
+  families × 5 repeats:
+  - **`single`** — one call, all channels concatenated, full budget B.
+  - **`negotiated`** — K=3 channel analysts (static / dynamic / network), one channel each, then a
+    mediator that reconciles their claims. **K+1 = 4 calls at B/4**, so the mediator is paid for
+    out of the same budget.
+  - **`noise`** — `negotiated`, but one analyst is fed a *different sample's* channel. Their
+    stochastic control: if this scores like `negotiated`, the negotiation is aggregating rather
+    than reconciling.
+  Evidence never names a technique id — each artifact *implies* its technique — and the harness
+  aborts if a ground-truth id leaks, because the metric is accuracy against that ground truth.
+  B=2400, temp per production, `enable_thinking=false` applied identically to every arm.
+  Harness `tests/evaluation/eval_consensus_ablation.py`; 40 scoring unit tests.
+- **Result (n=25 per arm, all arms 25/25 complete — no differential generation loss).**
+
+  | arm | precision | recall | F1 | invalid-id rate | techniques | output tokens | calls |
+  |---|---|---|---|---|---|---|---|
+  | `single` | 0.413 | 0.416 | **0.414** | 0.077 | 5.04 | **325** | 1 |
+  | `negotiated` | 0.370 | **0.432** | 0.398 | 0.061 | 5.88 | 1039 | 4 |
+  | `noise` | 0.326 | 0.352 | 0.337 | 0.028 | 5.60 | 1027 | 4 |
+
+  Paired (every arm saw the same samples in the same order):
+
+  | comparison | mean F1 delta | 95% bootstrap CI | sign test |
+  |---|---|---|---|
+  | `negotiated` − `single` | **−0.016** | **[−0.084, +0.050]** — includes 0 | 10 / 11 / 4 ties |
+  | `negotiated` − `noise` | **+0.061** | **[+0.012, +0.110]** — excludes 0 | 13 / 7 / 5 ties |
+
+- **Finding 1 — the defence does not hold.** At equal token budget, channel-decomposed negotiation
+  **does not beat a single agent given the same evidence**: the paired delta is −0.016 with a CI
+  spanning zero and a sign test at 10–11. The exception the literature named — heterogeneous
+  evidence channels — **did not rescue the multi-agent design here.** And the cost is real:
+  **3.2× the output tokens** (1039 vs 325), landing squarely inside Bertalanič & Fortuna's reported
+  2.1–3.4× range. This replicates their result in a new domain rather than contradicting it.
+- **Finding 2 — but the mechanism is not inert, and this is what stops the result being a
+  dismissal.** `negotiated` beats `noise` by **+0.061 with a CI excluding zero**. Corrupting one
+  analyst's evidence measurably degrades the outcome, so the mediator is **reconciling**, not
+  merely averaging three opinions. The honest statement is therefore narrow and specific: *the
+  negotiation does something; it does not do something worth 3.2× the tokens against a single
+  agent with the same evidence.*
+- **Finding 3 — the arms fail differently, which the F1 tie hides.** `negotiated` trades precision
+  for recall (0.370 / 0.432 against `single`'s 0.413 / 0.416) and surfaces more techniques per
+  sample (5.88 vs 5.04). Decomposition widens coverage and pays for it in precision — the same
+  shape §3.6 found for view-decomposition, arrived at by a different route. If recall is the
+  operational priority the arms are **not** equivalent, and an F1-only reading would miss that.
+- **A curiosity worth not over-reading.** Invalid-id rate runs *opposite* to F1: `noise` is lowest
+  (0.028) and worst; `single` is highest (0.077) and best. Fewer invalid ids here tracks saying
+  less and hedging more, not being more correct. It is a reminder that a clean-looking safety
+  metric can move against quality.
+
+- **Scope, and one limit that materially bounds the claim.**
+  1. **This tested single-round consensus, not the production negotiation.** The harness runs
+     K analysts then **one** mediator pass. Production negotiation is **multi-round** with
+     revision, dissent tracking and sycophancy detection. So this measures *decompose-by-channel
+     then reconcile*; it does **not** test iterated negotiation, and the write-up must not claim
+     it refutes that. Testing the full loop is a separate experiment.
+  2. n=25 per arm over 5 synthetic fixture families, one model (§2.0). The CI excludes a delta
+     larger than ±0.084 F1 but cannot exclude a small one.
+  3. Evidence is constructed, not extracted from real samples — deliberately, so ground truth is
+     exact and no id leaks, but it means channel quality is uniform in a way real evidence is not.
+     `arXiv:2604.02460`'s crossover is at *heavy degradation* (α=0.7); our channels are clean, so
+     this run sits on the side of the crossover where single agents are predicted to win — and
+     they did. **Degrading the channels is the obvious follow-up and would test the crossover
+     directly.**
+- **Consequence for the paper.** F1 (the system paper) was gated on this returning positive. It
+  did not. The framing decision (D3) resolves toward **F3 — negative results and measurement** —
+  with this as a headline result rather than a disappointment: a pre-registered test of our own
+  architecture's central claim, run to the literature's own design, reported against us.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
@@ -1458,6 +1536,28 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-09 — B1 ran, and the multi-agent defence did not survive it (queue item B1).** New
+  **§3.7**. Pre-registered, three arms, equal token budget, n=25 each, design taken from Bertalanič
+  & Fortuna including their stochastic noise control.
+  - **`negotiated` − `single`: −0.016 F1, CI [−0.084, +0.050], sign test 10–11.** No separation, at
+    **3.2× the output tokens** (1039 vs 325) — inside the 2.1–3.4× range that literature reports.
+    **The heterogeneous-evidence-channel exception did not rescue the design.**
+  - **`negotiated` − `noise`: +0.061 F1, CI excludes 0.** The mediator *reconciles* rather than
+    averages; the mechanism is real, it is just not worth 3.2× the tokens against a single agent
+    with the same evidence.
+  - The arms fail *differently*: decomposition buys recall (0.432 vs 0.416) and pays precision
+    (0.370 vs 0.413), the same trade §3.6 found by another route. An F1-only reading hides it.
+  - **Bounding limit, stated before anyone asks:** the harness runs **one** mediator pass, while
+    production negotiation is **multi-round with revision and dissent**. This tests
+    decompose-then-reconcile, **not** iterated negotiation, and must not be written as refuting the
+    latter. Also: channels are clean, and `arXiv:2604.02460`'s crossover favours single agents
+    exactly there — degrading the channels is the direct follow-up.
+
+  **F1 (the system paper) was gated on this returning positive.** It did not, so D3 resolves toward
+  **F3**. That is not a consolation prize: a pre-registered test of our own architecture's central
+  claim, run to the literature's design and reported against us, is the strongest single item the
+  measurement framing has.
 
 - **2026-08-09 — an eval harness's safety cap was inert, and only a visible hang exposed it.**
   While running B1 the batch sat **14+ minutes on a single call with zero skips**, under a harness
