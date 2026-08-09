@@ -64,6 +64,7 @@ from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
 from maljan.schemas.isr_models import AgentISR
@@ -122,6 +123,10 @@ class JudgeAgent:
         # Per-run token ledger (findings-log §4 Item 1); attached by the
         # container in get_judge_agent(). None when run standalone.
         self.token_ledger: TokenLedger | None = None
+        # Per-run truncation ledger (pitfall P6); same lifecycle. The judge is
+        # where ``judge_max_tokens`` binds and where the STIX integrity pass
+        # runs, so this is the most load-bearing attachment point of the three.
+        self.truncation_ledger: TruncationLedger | None = None
 
     async def _initialize_mcp_client(self) -> None:
         if getattr(self, "tools", None):
@@ -217,6 +222,7 @@ class JudgeAgent:
                 timeout=float(no_tools_timeout),
             )
             record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
+            record_judge_response(getattr(self, "truncation_ledger", None), response)
             return str(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
@@ -618,6 +624,7 @@ class JudgeAgent:
                 data,
                 evidence_corpus=evidence_corpus,
                 valid_technique_ids=valid_tids,
+                ledger=getattr(self, "truncation_ledger", None),
             )
             return Bundle.model_validate(data)
         except Exception as e:

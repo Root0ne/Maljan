@@ -36,6 +36,7 @@ class MCPLangChainToolkit:
         transport: str = "stdio",
         http_url: str = "",
         http_headers: dict[str, str] | None = None,
+        truncation_ledger: Any | None = None,
     ):
         self.server_params = server_params
         self.transport = (transport or "stdio").lower()
@@ -46,6 +47,9 @@ class MCPLangChainToolkit:
         self._tools: list[BaseTool] = []
         self._output_guardrail = output_guardrail
         self._max_output_chars = max_output_chars
+        # Optional TruncationLedger (pitfall P6). Typed loosely so this module
+        # keeps no core import it does not otherwise need; None disables counting.
+        self._truncation_ledger = truncation_ledger
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -284,26 +288,60 @@ class MCPLangChainToolkit:
           1. Call ``_output_guardrail`` (e.g. FunctionSummarizer) when available.
           2. Fall back to simple character truncation otherwise.
 
+        Every outcome — including the pass-through — is recorded on
+        ``_truncation_ledger`` when one is attached. The pass-through matters as
+        much as the cut: pitfall P6 asks for truncation *frequency*, and a
+        frequency needs its denominator.
+
         Args:
             output: Raw tool output text.
 
         Returns:
             Potentially shortened output.
         """
-        if len(output) <= self._max_output_chars:
+        chars_in = len(output)
+
+        if chars_in <= self._max_output_chars:
+            self._record_guardrail(chars_in, chars_in, over_limit=False)
             return output
 
         logger.warning(
             "Tool output exceeds limit (%d > %d chars). Applying guardrail.",
-            len(output),
+            chars_in,
             self._max_output_chars,
         )
 
         if self._output_guardrail is not None:
             try:
-                return self._output_guardrail(output)
+                summarised = self._output_guardrail(output)
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s — falling back to truncation.", exc)
+            else:
+                self._record_guardrail(chars_in, len(summarised), over_limit=True, summarised=True)
+                return summarised
 
         # Fallback: simple truncation with a marker
-        return output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        result = output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        self._record_guardrail(chars_in, len(result), over_limit=True, hard_truncated=True)
+        return result
+
+    def _record_guardrail(
+        self,
+        chars_in: int,
+        chars_kept: int,
+        *,
+        over_limit: bool,
+        summarised: bool = False,
+        hard_truncated: bool = False,
+    ) -> None:
+        """Record one guardrail decision; no-op without a ledger, never raises."""
+        from maljan.core.truncation_ledger import record_guardrail_outcome
+
+        record_guardrail_outcome(
+            getattr(self, "_truncation_ledger", None),
+            chars_in=chars_in,
+            chars_kept=chars_kept,
+            over_limit=over_limit,
+            summarised=summarised,
+            hard_truncated=hard_truncated,
+        )

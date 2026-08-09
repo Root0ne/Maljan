@@ -692,35 +692,53 @@ file is byte-identical to the published artifact. The calibration dataset being 
 noting: importance-matrix quantisation is a lossy transform whose result depends on its
 calibration text, and most work reporting a quant level does not say which imatrix produced it.
 
-**Engine — pinned by hash, because the commit is not recoverable.** This is P9 happening to us:
+**Engine — commit recovered, but not from the running binary.** The artifact itself is mute:
 
 ```
 $ llama-server --version
 version: 0 (unknown)
-$ cat common/build-info.cpp
+$ cat ~/maljan-llm-build/ik_llama.cpp/common/build-info.cpp
 int LLAMA_BUILD_NUMBER = 0;
 char const *LLAMA_COMMIT = "unknown";
 ```
 
-The source tree at `~/maljan-llm-build/ik_llama.cpp` **is not a git checkout** — no `.git`, only
-a `.gitignore` and `.gitmodules` left behind — so CMake's build-info step had no commit to record
-and wrote `unknown`. The exact upstream commit therefore **cannot be recovered from the artifact**,
-and no amount of writing fixes that. What can be pinned, and now is:
+The build tree at `~/maljan-llm-build/ik_llama.cpp` **is not a git checkout** — no `.git`, only a
+`.gitignore` and `.gitmodules` left behind — so CMake's build-info step had no commit to record.
+The commit was recovered from a **second** copy of the same sources, the shallow clone vendored in
+this repository at `external/ik_llama.cpp`, and then *proved* to describe the build tree:
 
 | field | value |
 |---|---|
+| **engine source commit** | **`eb570eb96689c235933b813693ca28ab9d3d26de`** |
+| commit subject / date | *"MTP: Avoid per step SSM copy (#1778)"*, 2026-05-11T18:15:55+03:00 |
+| upstream | `https://github.com/ikawrakow/ik_llama.cpp`, reachable on `origin/main` (clone is depth 1) |
 | **engine binary sha256** | `7737b2a90e33e2afc364801df13d33d506864a3390d6d61b92a11a029450542d` |
-| **source-tree content hash** | `5911b1281d4774bcf89ae1d3b657a7888e48e97da0610d2149374fe8fc2c15b8` |
-| source hash covers | 837 files — `*.c/cpp/h/hpp/cu/cuh/metal` + `CMakeLists.txt`, build dirs excluded, `LC_ALL=C sort`ed |
-| source snapshot date | 2026-05-11 (file mtimes) |
 | binary built | 2026-07-05 22:02 +03 |
 | compiler | `cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0`, target `x86_64-linux-gnu` |
-| **upstream anchor** | vendored `github-data/pull_requests` tops out at **PR #630**; the snapshot postdates #630 |
+| build-tree source hash | `5911b1281d4774bcf89ae1d3b657a7888e48e97da0610d2149374fe8fc2c15b8` (837 files, `LC_ALL=C sort`ed, build dirs excluded) |
 
-A content hash over the compiled sources is arguably the *better* identifier: a commit names a
-revision, this names the bytes that were actually built. The reproduction recipe is therefore
-"clone ik_llama.cpp at the first commit after PR #630, verify the source hash, build with the
-compiler above" — weaker than a commit id, and stated as such.
+**How the correspondence was established, since it is the part a reader has to trust.** Both trees
+were enumerated with the same recipe — `*.c/cpp/h/hpp/cu/cuh/metal` plus `CMakeLists.txt`, build
+directories pruned — giving **identical file lists of 837 sources**. Comparing them file by file
+with CR stripped, **exactly one file differs: `common/build-info.cpp`**, which is generated at
+build time and is precisely the file that holds `unknown` in the copy and `eb570eb` in the clone.
+Every other source byte is the same. So the Linux CUDA binary that produced every LLM result in
+this work was compiled from commit `eb570eb9`.
+
+Two details are worth keeping rather than smoothing over. First, the vendored clone's own
+generated build-info reads `LLAMA_COMPILER = "MSVC 19.44.35225.0"`, `LLAMA_BUILD_TARGET = "x64"` —
+i.e. the *same source* was also built once on Windows; the serving binary is the Linux CUDA one in
+the table above. Second, the trees differ in line endings throughout (`git diff --stat` on the
+clone reports 1,967 files changed with **737,043 insertions and 737,043 deletions** — equal counts,
+the signature of CRLF↔LF, not of edited code), which is why the naive content hashes disagree and
+the normalised comparison is the one that means anything.
+
+**The reproducibility lesson survives, in a narrower and more accurate form.** The running binary
+could not identify itself. Recovering its provenance required a second copy of the sources to exist
+by luck, plus a byte-level proof that the two correspond. Had `external/ik_llama.cpp` not been
+vendored, or had it drifted, the engine behind §2.1's sampler finding would genuinely have been
+unrecoverable. **Build provenance must be captured at build time**; reconstructing it afterwards
+worked here and is not a method anyone should rely on.
 
 **Serving configuration**, from the systemd unit (`~/.config/systemd/user/maljan-llama.service`):
 
@@ -1432,15 +1450,26 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
   HuggingFace download etag, HF revision hash, retrieval timestamp, quantiser, base model,
   file_type, and the **named imatrix calibration dataset**, which is more than the quant level
   most papers report. Three things came out of it that are not bookkeeping:
-  - **The engine commit is unrecoverable.** `llama-server --version` → `version: 0 (unknown)`;
-    `build-info.cpp` → `LLAMA_COMMIT = "unknown"`. The source tree at `~/maljan-llm-build` has a
-    `.gitignore` and a `.gitmodules` but **no `.git`**, so CMake had nothing to record. §2.1's
-    sampler finding — one of our own results — is therefore not reproducible against a named
-    revision. Pinned instead by binary sha256, a content hash over the 837 compiled source files,
-    compiler, build date, and an upstream anchor (vendored `github-data` tops out at PR #630).
-    The transferable lesson is the one worth publishing: **build provenance must be captured at
-    build time; it cannot be reconstructed afterwards** — and this project reports engine-level
-    detail almost nobody reports and still lost it.
+  - **The engine commit is `eb570eb96689c235933b813693ca28ab9d3d26de`** — but the running binary
+    cannot say so. `llama-server --version` → `version: 0 (unknown)`; `build-info.cpp` →
+    `LLAMA_COMMIT = "unknown"`, because the build tree at `~/maljan-llm-build` has a `.gitignore`
+    and a `.gitmodules` but **no `.git`**, so CMake had nothing to record.
+
+    **Correction, same day.** My first pass concluded the commit was *unrecoverable* and pinned
+    the engine by hashes alone. That was wrong, and wrong in an avoidable way: I searched the
+    build tree and stopped, without checking whether the sources existed anywhere else. They do —
+    `external/ik_llama.cpp`, a depth-1 clone vendored in this repository. It surfaced by accident,
+    from a pytest collection error while running the suite for A3.
+
+    The correspondence is proved, not assumed: identical file lists of **837 sources**, and
+    comparing them file by file with CR stripped, **exactly one differs — `common/build-info.cpp`**,
+    the generated file itself. Also retracted: the "upstream anchor at PR #630" from the vendored
+    `github-data` directory. The commit references **PR #1778**, so that directory is a stale
+    artifact and was never a version anchor.
+
+    The lesson survives in a narrower form. Recovery needed a second copy of the sources to exist
+    by luck plus a byte-level proof. **Build provenance must be captured at build time**;
+    reconstructing it worked here and is not a method to rely on.
   - **The GGUF confirms the hybrid recurrent architecture from the file itself.** `ssm.*` keys plus
     `full_attention_interval=4` over 40 blocks, 256 experts / 8 active. The 2026-08-07 re-prefill
     timeouts were previously an inference from behaviour; the mechanism is now read off the model.

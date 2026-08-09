@@ -66,21 +66,33 @@ which side of that crossover a malware pipeline sits on.
       etag), HF revision `cfd350fd…1f0d`, retrieved 2026-05-11, quantised by Unsloth over
       `Qwen/Qwen3.6-35B-A3B`, and the **imatrix calibration dataset is named** — most papers
       reporting a quant level cannot say which imatrix produced it.
-      **Engine cannot be closed, and that is P9 happening to us:** `llama-server --version` prints
-      `version: 0 (unknown)` because the source tree was never a git checkout, so the upstream
-      commit is **unrecoverable from the artifact**. Pinned instead by binary sha256, a content
-      hash over the 837 compiled sources, compiler, build date, and an upstream anchor at PR #630.
+      **Engine closed too, but not by the artifact.** `llama-server --version` prints
+      `version: 0 (unknown)` because the build tree was never a git checkout. The commit —
+      **`eb570eb96689c235933b813693ca28ab9d3d26de`** (*"MTP: Avoid per step SSM copy (#1778)"*) —
+      was recovered from the depth-1 clone vendored at `external/ik_llama.cpp` and **proved** to
+      describe the build: identical 837-file source lists, and with CR stripped **exactly one file
+      differs — the generated `common/build-info.cpp`**.
+      *Corrected the same day:* my first pass called the commit unrecoverable and pinned hashes
+      only. I had searched the build tree and stopped. Also retracted: the "upstream anchor at
+      PR #630" — the commit references **PR #1778**, so that vendored directory is stale.
       Two things fell out that are not bookkeeping: the GGUF **proves the hybrid recurrent
       architecture** (SSM keys + `full_attention_interval=4`) that explains the 2026-08-07
       re-prefill timeouts, and **we serve at half the model's native context** (262,144 → 131,072),
       which is P6's problem. Also found: the documented launch command (`--n-cpu-moe 36`) is **not**
-      the one the service runs (30 blocks, not 36). → **P9 stays `PARTIAL`, permanently, for the
-      engine**
-- [ ] **A3 — P6 instrumentation, before any run** `[cheap]`
-      Counters into `src/maljan/analysis/run_summary.py`: `static_max_chars` truncations, dropped
-      chunks, `max_steps` hits, judge token-ceiling hits — and, for C7, how many times the STIX
-      integrity pass **fired** and how many objects it **recovered**. Pure helpers unit-tested to
-      the repo's `test_*_scoring.py` pattern. → **P6**, **C7**
+      the one the service runs (30 blocks, not 36). → **P9 `PARTIAL`** — everything is identified,
+      but the binary could not identify itself and recovery depended on luck
+- [x] **A3 — P6 instrumentation, before any run** `[done]` **2026-08-09**
+      New `src/maljan/core/truncation_ledger.py`, built to the `TokenLedger` pattern: one
+      thread-safe instance per run on the container, snapshotted into `RunSummary.truncation` by
+      the judge node, rendered as a **Bounds Hit** table. Counts tool-output guardrail decisions
+      (pass-through / summarised / hard-truncated + chars dropped), ReAct step-cap hits, judge
+      token-cap hits, and — for C7 — how often the STIX integrity pass **fires** and what it
+      removes, attributed by reason. Instrumented at both guardrail copies (`mcp_client` and the
+      production `ghidra_http_client`) and both integrity-pass call sites (judge post-process and
+      the extended renderer), or the aggregate would undercount.
+      **The denominator is the point:** pass-throughs are counted too, so the rate is not computed
+      against the wrong base. **45 unit tests**, including that telemetry never raises and that
+      concurrent analysts do not lose counts. → **P6** measured at **C7**, **C7** at **B4**
 - [ ] **A4 — Counter-search the five `OURS` rows** `[cheap]`
       The ledger's own closing item: every `OURS` is a *searched absence*, not a proof. One
       targeted search each for C5a / N4 / N7 / C8 / E1, **in the vocabulary of an adjacent
@@ -96,7 +108,9 @@ which side of that crossover a malware pipeline sits on.
 - [ ] **A6 — Frontier-arm plumbing** `[cheap]`
       Config path for a second endpoint, a **hard cost ceiling**, and a dry run against a stub.
       Done now, the frontier arm is one flag at B8 and C6.
-- [ ] **A7 — `make check` clean** `[cheap]` — baseline **2238 passed / 12 skipped** (Qdrant down)
+- [ ] **A7 — `make check` clean** `[cheap]` — baseline **2268 passed / 12 skipped** (Qdrant down).
+      *The "2238" carried in the old roadmap was stale by 30 tests*; measured directly on
+      2026-08-09 by running the suite with A3's two new files excluded. After A3: **2313 / 12**.
 
 ## B — llama-server, fixture-based (one slot, sequential)
 
@@ -256,6 +270,30 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | **F2 Describe-then-map** | ~~C5~~, C5a, N4, N7 | **Broken as stated** — rebuildable as F3's sharpest chapter |
 | **F3 Negative results / methodology** | N1–N8, §1.5.3, §1.10 | **Strongest today**, and unusually honest |
 | **F4 Drift study** | E1 | **Uncontested**; needs C5's baseline arm to land the contrast |
+
+---
+
+## How each item is verified
+
+- **`make check` after every item** — lint, format, mypy, full suite. Baseline **2268 / 12
+  skipped** (Qdrant down); **2313 / 12** after A3.
+- **Pure helpers behind any reported number are unit-tested**, apart from the pipeline — the
+  repo's `test_*_scoring.py` convention. If arithmetic decides a default or a claim, it is tested.
+- **Before any heavy step, check the STOP sentinel** (`logs/overnight-watch.STOP`). The watcher
+  writes it below 3 GB free and kills nothing.
+- **One commit per item**, with `findings-log.md` and this file updated in the same commit.
+- **Every outcome is written up**, including the ones that cost a claim. A negative B1 is a
+  result; A4 demoting an `OURS` row is a result.
+
+### Acceptance criteria for the load-bearing items
+
+| item | criterion |
+|---|---|
+| **B1** | Do the arms separate at equal budget? If not, **that is the result** and F1 closes |
+| **C3** | Does C6 leave `UNMEASURED`, and were per-sample results written to disk? |
+| **C5** | Is there a baseline number? After this, every F1 in the paper has a referent |
+| **C6** | Is the frontier-vs-local difference measured? P8's empirical half closes here |
+| **C7** | Are truncation frequency *and* impact reported? P6 → `CLEAR` |
 
 ---
 

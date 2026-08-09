@@ -29,7 +29,7 @@
 | P6 | Context Truncation | `EXPOSED` | Truncation mechanisms everywhere, **frequency never reported** |
 | P7 | Prompt Sensitivity | `PARTIAL` | A structured prompt-variation study exists; production prompts are fixed and unvaried |
 | P8 | Surrogate Fallacy | `EXPOSED` → `PARTIAL` | One model, one machine. Four claims **scoped 2026-08-09**; the confound itself stands until the frontier arm (C6) runs |
-| P9 | Model Ambiguity | `PARTIAL` | Model **fully pinned 2026-08-09** (digest + HF revision + imatrix dataset). The **engine commit is unrecoverable** — the build recorded `unknown`; pinned by binary and source hash instead |
+| P9 | Model Ambiguity | `PARTIAL` | Model **and engine both pinned 2026-08-09** (GGUF digest + HF revision + imatrix dataset; engine commit `eb570eb9`). Off `CLEAR` because the running binary reports `unknown` — the commit was recovered from a second copy of the sources, not from the artifact |
 
 **Three actionable items** fall out: report truncation frequency (P6), scope the generalising
 claims (P8), and pin the exact model and engine revisions (P9). None requires an experiment.
@@ -245,20 +245,30 @@ dataset is named** (`unsloth_calibration_Qwen3.6-35B-A3B.txt`, 510 entries / 76 
 Importance-matrix quantisation is a lossy transform whose result depends on its calibration text;
 most papers reporting a quant level cannot say which imatrix produced it.
 
-**Engine — cannot be closed, and this is P9 happening to us.** `llama-server --version` prints
-`version: 0 (unknown)` and `build-info.cpp` holds `LLAMA_COMMIT = "unknown"`, because the source
-tree is not a git checkout and CMake had no commit to record. **The upstream commit is not
-recoverable from the artifact.** Pinned instead: engine binary **sha256 `7737b2a9…542d`**, a
-**content hash over the 837 compiled source files** (`5911b128…15b8`), the compiler
-(`cc 15.2.0`), the build date (2026-07-05), and an upstream anchor — the vendored `github-data`
-tops out at **PR #630**. A hash of the bytes actually built is arguably a *better* identifier
-than a revision name; it is nonetheless weaker as a *reproduction* instruction, and the paper
-says so rather than implying a commit was recorded.
+**Engine — closed, but not by the artifact.** `llama-server --version` prints `version: 0
+(unknown)` and `build-info.cpp` holds `LLAMA_COMMIT = "unknown"`, because the build tree is not a
+git checkout and CMake had no commit to record. The commit was recovered from a **second copy of
+the same sources** — the depth-1 clone vendored at `external/ik_llama.cpp` — and *proved* to
+describe the build: identical file lists of **837 sources**, and comparing them with CR stripped,
+**exactly one file differs, `common/build-info.cpp`**, which is the generated file itself.
 
-**Verdict: `PARTIAL`, and it stays `PARTIAL` permanently for the engine.** The lesson is the
-transferable part and belongs in the write-up: this project reports engine-level detail almost
-nobody reports — and *still* lost the engine commit, to a `git clone` that was never a clone.
-Build provenance has to be captured at build time; it cannot be reconstructed afterwards.
+**Engine source commit: `eb570eb96689c235933b813693ca28ab9d3d26de`** (*"MTP: Avoid per step SSM
+copy (#1778)"*, `github.com/ikawrakow/ik_llama.cpp`, on `origin/main`), binary sha256
+`7737b2a9…542d`, built 2026-07-05 with `cc 15.2.0`.
+
+**Verdict: `PARTIAL`.** Both halves are now identified to the byte, which is more than this
+literature usually manages. What keeps it off `CLEAR` is not a missing field but the way the
+field was obtained: the running binary could not name itself, and recovery depended on a second
+copy existing by luck. **Build provenance must be captured at build time.** Reconstructing it
+worked here; it is not a method to rely on, and the paper says so rather than presenting a clean
+identifier as though it had been recorded properly.
+
+*Correction, 2026-08-09:* this row first concluded the commit was **unrecoverable** and pinned the
+engine by hashes alone. That was wrong — I searched the build tree and stopped, without checking
+whether the sources existed elsewhere in the project. The vendored clone surfaced by accident,
+from a pytest collection error. Also retracted: the "upstream anchor at PR #630" read off the
+vendored `github-data` directory. The commit references **PR #1778**, so that directory is a stale
+artifact and never was a version anchor.
 
 **Action:** ~~record the model file digest and engine commit~~ — **done in §2.0**; emitting the
 provenance block with every run is folded into **A3**.
@@ -274,10 +284,11 @@ Nothing in the results. Three things in the write-up, all cheap:
 2. **P8** — ~~scope four claims to the evaluated model by exact identifier~~ **done 2026-08-09**;
    the architecture/model confound is now stated explicitly in `related-work.md` and stays open
    until C6.
-3. **P9** — ~~pin the model digest and engine commit~~ **done 2026-08-09** for the model; the
-   engine commit turned out to be **unrecoverable** (the build recorded `unknown`), so it is
-   pinned by binary and source-tree hash and the paper says so plainly. The transferable lesson:
-   build provenance must be captured at build time — it cannot be reconstructed afterwards.
+3. **P9** — ~~pin the model digest and engine commit~~ **done 2026-08-09**, both. The engine
+   commit (`eb570eb9`) had to be recovered from a second copy of the sources because the running
+   binary reports `unknown`, and the paper says that rather than presenting the identifier as
+   though it had been recorded properly. The transferable lesson: build provenance must be
+   captured at build time.
 
 And one thing to say out loud rather than assume a reviewer will notice: **P2 and P4 are clear
 in a way most papers in this survey are not** — no LLM scored any result here, and augmenting

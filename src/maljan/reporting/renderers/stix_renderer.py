@@ -62,7 +62,21 @@ class ExtendedSTIXRenderer:
     input bundle is treated as immutable.
     """
 
-    def render(self, report: MalwareReport, base_bundle: Bundle | None = None) -> Bundle:
+    def render(
+        self,
+        report: MalwareReport,
+        base_bundle: Bundle | None = None,
+        *,
+        ledger: Any | None = None,
+    ) -> Bundle:
+        """Render the extended bundle.
+
+        ``ledger`` is an optional ``TruncationLedger``; the integrity pass at the
+        end records what it removed there, which is the measurement C7 needs
+        (queue item B4). This is the *second* place the pass runs — the judge's
+        own post-process is the first — so both must report or the aggregate
+        undercounts.
+        """
         objects: list[Any] = []
 
         # 1) Preserve everything the judge already emitted.
@@ -241,7 +255,7 @@ class ExtendedSTIXRenderer:
         # upstream drops. See judge_postprocess.enforce_bundle_integrity.
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
-        return Bundle(objects=enforce_bundle_integrity(objects))
+        return Bundle(objects=enforce_bundle_integrity(objects, ledger=ledger))
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:

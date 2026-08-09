@@ -365,6 +365,7 @@ class StaticAnalyst(BaseAnalyst):
                 auth_token=cfg.mcp.ghidra.auth_token,
                 output_guardrail=output_guardrail,
                 max_output_chars=max_chars,
+                truncation_ledger=getattr(self, "truncation_ledger", None),
             )
 
             self._run_async(client.initialize())
@@ -403,6 +404,7 @@ class StaticAnalyst(BaseAnalyst):
             server_params,
             output_guardrail=output_guardrail,
             max_output_chars=max_chars,
+            truncation_ledger=getattr(self, "truncation_ledger", None),
         )
 
         self._run_async(toolkit.initialize())

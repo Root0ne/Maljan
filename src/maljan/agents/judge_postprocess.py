@@ -99,6 +99,8 @@ def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
     evidence_corpus: set[str] | None = None,
     valid_technique_ids: frozenset[str] | None = None,
+    *,
+    ledger: Any | None = None,
 ) -> dict[str, Any]:
     """Apply J-01 / J-02 / REP-01 fixes in place; return the same dict.
 
@@ -268,7 +270,7 @@ def postprocess_judge_bundle(
 
     # ── Final integrity pass: empty-pattern drop, dedup, dangling-ref sweep ──
     before = len(objects)
-    objects = enforce_bundle_integrity(objects)
+    objects = enforce_bundle_integrity(objects, ledger=ledger)
     bundle_dict["objects"] = objects
     if len(objects) != before:
         logger.info(
@@ -506,7 +508,11 @@ def _is_wellformed_pattern(indicator: Any) -> bool:
     return pat.startswith("[") and pat.endswith("]") and "=" in pat
 
 
-def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
+def enforce_bundle_integrity(
+    objects: list[Any],
+    *,
+    ledger: Any | None = None,
+) -> list[Any]:
     """Make a STIX object list internally valid and non-redundant, in place-ish.
 
     Works on both parsed dicts (judge bundle) and pydantic SDOs (extended
@@ -517,13 +523,26 @@ def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
       4. Drop relationships whose source/target is not in the bundle, and
          deduplicate identical relationships.
       5. Trim object_refs (Report/Note) to objects that still exist.
+
+    Args:
+        objects: The bundle contents to repair.
+        ledger:  Optional :class:`~maljan.core.truncation_ledger.TruncationLedger`.
+                 C7 claims repairing beats rejecting; that needs a number for how
+                 often this pass fires and what it removes, and nothing counted it
+                 before (queue item A3, measured at B4). Typed loosely to keep this
+                 module free of a core import it does not otherwise need.
     """
+    _objects_in = len(objects)
+    _dropped: dict[str, int] = {}
+
     # 1) drop indicators with an empty or syntactically malformed pattern. The
     # shape check is deliberately conservative — a STIX comparison expression is
     # wrapped in brackets and contains a comparator — so it keeps every pattern
     # this codebase emits and only rejects truncated/garbage LLM output (no full
     # grammar parser, hence no over-dropping).
+    _before = len(objects)
     objects = [o for o in objects if _otype(o) != "indicator" or _is_wellformed_pattern(o)]
+    _dropped["empty_pattern"] = _before - len(objects)
 
     remap: dict[str, str] = {}
 
@@ -541,6 +560,7 @@ def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
             if tid and isinstance(_oid(o), str):
                 seen_tid[tid] = _oid(o)
         kept.append(o)
+    _dropped["duplicate_attack_pattern"] = len(objects) - len(kept)
     objects = kept
 
     # 3) indicator dedup by (pattern_type, pattern)
@@ -557,6 +577,7 @@ def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
             if isinstance(_oid(o), str):
                 seen_pat[key] = _oid(o)
         kept.append(o)
+    _dropped["duplicate_indicator"] = len(objects) - len(kept)
     objects = kept
 
     # apply remap so refs to deduped objects point at the kept ones
@@ -565,17 +586,23 @@ def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
     # 4) drop dangling + duplicate relationships
     ids = {_oid(o) for o in objects}
     seen_rel: set[tuple[str, str, str]] = set()
+    _dangling = 0
+    _dup_rel = 0
     kept = []
     for o in objects:
         if _otype(o) == "relationship":
             src, tgt = _oget(o, "source_ref"), _oget(o, "target_ref")
             if src not in ids or tgt not in ids:
+                _dangling += 1
                 continue
             rkey = (str(_oget(o, "relationship_type", "")), str(src), str(tgt))
             if rkey in seen_rel:
+                _dup_rel += 1
                 continue
             seen_rel.add(rkey)
         kept.append(o)
+    _dropped["dangling_relationship"] = _dangling
+    _dropped["duplicate_relationship"] = _dup_rel
     objects = kept
 
     # 5) trim object_refs to surviving objects
@@ -584,6 +611,16 @@ def enforce_bundle_integrity(objects: list[Any]) -> list[Any]:
         refs = _oget(o, "object_refs")
         if isinstance(refs, list):
             _oset(o, "object_refs", [r for r in refs if r in ids])
+
+    if ledger is not None:
+        try:
+            ledger.record_integrity_pass(
+                objects_in=_objects_in,
+                objects_out=len(objects),
+                dropped=_dropped,
+            )
+        except Exception:  # noqa: BLE001 — telemetry must never break a bundle
+            pass
 
     return objects
 

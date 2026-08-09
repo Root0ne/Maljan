@@ -1437,6 +1437,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
                     .set_token_usage(container.get_token_ledger().snapshot())
+                    .set_truncation(container.get_truncation_ledger().snapshot())
                     .build()
                 )
                 run_summary_dict = summary.to_dict()
@@ -2009,7 +2010,9 @@ def make_report_node(container: ServiceContainer) -> Any:
                 )
                 base = None
             try:
-                extended_bundle = ExtendedSTIXRenderer().render(report, base)
+                extended_bundle = ExtendedSTIXRenderer().render(
+                    report, base, ledger=container.get_truncation_ledger()
+                )
                 extended_dump = extended_bundle.model_dump(mode="json")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: extended STIX render failed (%s).", exc)

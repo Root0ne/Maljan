@@ -659,6 +659,9 @@ class BaseAnalyst(ABC):
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
+        # Per-run truncation ledger (pitfall P6, findings-log §2.0). Same
+        # lifecycle as token_ledger; None disables counting.
+        self.truncation_ledger: Any | None = None
         # Report-reshaping Phase 1: durable capture of the ReAct tool loop's
         # ToolMessages (decompile/crypto/emulate/dataflow) so the report
         # Composer can ground deep sections instead of hallucinating. Populated
@@ -996,7 +999,9 @@ class BaseAnalyst(ABC):
         # model once on the accumulated conversation with a directive to stop
         # tool-calling and synthesise now, so the gathered evidence becomes real
         # claims instead of a useless "need more steps" non-answer.
-        if tool_call_count > 0 and (not content.strip() or _RECURSION_STOP_RE.search(content)):
+        hit_step_cap = bool(_RECURSION_STOP_RE.search(content))
+        self._record_react_loop(hit_step_cap=hit_step_cap)
+        if tool_call_count > 0 and (not content.strip() or hit_step_cap):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
                 "(messages=%d); forcing synthesis from gathered tool output.",
@@ -1008,6 +1013,21 @@ class BaseAnalyst(ABC):
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 return synthesized
         return content
+
+    def _record_react_loop(self, *, hit_step_cap: bool) -> None:
+        """Count one ReAct loop and whether it exhausted its step budget.
+
+        Pitfall P6 asks for truncation *frequency*, so every loop is counted,
+        not only the ones that hit the cap. Never raises — telemetry must not
+        break an analysis.
+        """
+        ledger = getattr(self, "truncation_ledger", None)
+        if ledger is None:
+            return
+        try:
+            ledger.record_react_loop(hit_step_cap=hit_step_cap)
+        except Exception:  # noqa: BLE001
+            return
 
     def _capture_tool_evidence(self, msgs: list) -> list[CapturedToolOutput]:
         """Pair each tool call with its result from the ReAct message stream.

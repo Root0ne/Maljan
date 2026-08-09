@@ -102,6 +102,42 @@ class TokenUsageMetrics:
 
 
 @dataclass
+class TruncationMetrics:
+    """Per-run tally of every bound this run hit (pitfall P6).
+
+    *Chasing Shadows* asks papers to "report truncation frequency and performance
+    impacts". Truncation is designed into this pipeline — capped tool output, a
+    capped ReAct loop, a capped judge, all inside a context window that is itself
+    half the model's native 262,144 (findings-log §2.0) — and until 2026-08-09
+    none of it was counted.
+
+    The last three fields are not truncation: they record what the STIX integrity
+    pass removed, because C7 claims repairing beats rejecting and that claim needs
+    a number (queue item B4).
+    """
+
+    tool_output_calls: int
+    tool_output_over_limit: int
+    tool_output_summarised: int
+    tool_output_hard_truncated: int
+    tool_output_chars_dropped: int
+    react_invocations: int
+    react_step_cap_hits: int
+    judge_invocations: int
+    judge_token_cap_hits: int
+    integrity_invocations: int
+    integrity_objects_removed: int
+    integrity_dropped: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def any_bound_hit(self) -> bool:
+        """The per-run P6 headline: did anything get cut at all?"""
+        return bool(
+            self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
+        )
+
+
+@dataclass
 class CascadeMetrics:
     """Summary of three-layer TTP cascade results."""
 
@@ -168,6 +204,7 @@ class RunSummary:
     cascade: CascadeMetrics | None
     elapsed_seconds: float
     tokens: TokenUsageMetrics | None = None
+    truncation: TruncationMetrics | None = None
     timestamp: float = field(default_factory=time.time)
     degraded_mode: bool = False
     degradation_reasons: list[str] = field(default_factory=list)
@@ -332,6 +369,29 @@ class RunSummary:
                 "",
             ]
 
+        if self.truncation:
+            trunc = self.truncation
+            lines += [
+                "## Bounds Hit",
+                "",
+                "| Bound | Hits / calls |",
+                "|---|---|",
+                f"| Tool output over limit | {trunc.tool_output_over_limit}"
+                f" / {trunc.tool_output_calls} |",
+                f"| — summarised | {trunc.tool_output_summarised} |",
+                f"| — hard truncated | {trunc.tool_output_hard_truncated} |",
+                f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
+                f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
+                f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
+                f"| STIX objects repaired away | {trunc.integrity_objects_removed} |",
+                "",
+            ]
+            if any(trunc.integrity_dropped.values()):
+                reasons = ", ".join(
+                    f"{k}={v}" for k, v in sorted(trunc.integrity_dropped.items()) if v
+                )
+                lines += [f"STIX integrity removals: {reasons}", ""]
+
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
@@ -402,6 +462,24 @@ class RunSummary:
                 "estimated_calls": self.tokens.estimated_calls,
             }
 
+        if self.truncation:
+            t = self.truncation
+            result["truncation"] = {
+                "tool_output_calls": t.tool_output_calls,
+                "tool_output_over_limit": t.tool_output_over_limit,
+                "tool_output_summarised": t.tool_output_summarised,
+                "tool_output_hard_truncated": t.tool_output_hard_truncated,
+                "tool_output_chars_dropped": t.tool_output_chars_dropped,
+                "react_invocations": t.react_invocations,
+                "react_step_cap_hits": t.react_step_cap_hits,
+                "judge_invocations": t.judge_invocations,
+                "judge_token_cap_hits": t.judge_token_cap_hits,
+                "integrity_invocations": t.integrity_invocations,
+                "integrity_objects_removed": t.integrity_objects_removed,
+                "integrity_dropped": dict(t.integrity_dropped),
+                "any_bound_hit": t.any_bound_hit,
+            }
+
         return result
 
 
@@ -442,6 +520,7 @@ class RunSummaryBuilder:
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
+        self._truncation: TruncationMetrics | None = None
 
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
@@ -468,6 +547,42 @@ class RunSummaryBuilder:
             total_tokens=int(snapshot.get("total_tokens", 0)),
             llm_calls=int(snapshot.get("llm_calls", 0)),
             estimated_calls=int(snapshot.get("estimated_calls", 0)),
+        )
+        return self
+
+    def set_truncation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record bound-hits from a ``TruncationLedger.snapshot()`` (pitfall P6).
+
+        Unlike ``set_token_usage``, a snapshot with **zero** hits is still
+        recorded when anything was measured at all: "nothing was truncated on
+        this run" is the answer P6 asks for just as much as a nonzero count is,
+        and dropping it would leave the aggregate unable to tell *no truncation*
+        from *not instrumented*.
+        """
+        if not snapshot:
+            return self
+        measured = (
+            int(snapshot.get("tool_output_calls", 0))
+            or int(snapshot.get("react_invocations", 0))
+            or int(snapshot.get("judge_invocations", 0))
+            or int(snapshot.get("integrity_invocations", 0))
+        )
+        if not measured:
+            return self
+        dropped = snapshot.get("integrity_dropped")
+        self._truncation = TruncationMetrics(
+            tool_output_calls=int(snapshot.get("tool_output_calls", 0)),
+            tool_output_over_limit=int(snapshot.get("tool_output_over_limit", 0)),
+            tool_output_summarised=int(snapshot.get("tool_output_summarised", 0)),
+            tool_output_hard_truncated=int(snapshot.get("tool_output_hard_truncated", 0)),
+            tool_output_chars_dropped=int(snapshot.get("tool_output_chars_dropped", 0)),
+            react_invocations=int(snapshot.get("react_invocations", 0)),
+            react_step_cap_hits=int(snapshot.get("react_step_cap_hits", 0)),
+            judge_invocations=int(snapshot.get("judge_invocations", 0)),
+            judge_token_cap_hits=int(snapshot.get("judge_token_cap_hits", 0)),
+            integrity_invocations=int(snapshot.get("integrity_invocations", 0)),
+            integrity_objects_removed=int(snapshot.get("integrity_objects_removed", 0)),
+            integrity_dropped=dict(dropped) if isinstance(dropped, dict) else {},
         )
         return self
 
@@ -682,6 +797,7 @@ class RunSummaryBuilder:
             cascade=self._cascade,
             elapsed_seconds=time.time() - self._start_time,
             tokens=self._tokens,
+            truncation=self._truncation,
             degraded_mode=self._degraded_mode,
             degradation_reasons=self._degradation_reasons,
             failed_analysts=self._failed_analysts,

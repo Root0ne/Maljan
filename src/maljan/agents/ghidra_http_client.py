@@ -31,6 +31,7 @@ class GhidraHTTPClient:
         auth_token: str = "",
         output_guardrail: Any | None = None,
         max_output_chars: int = 8000,
+        truncation_ledger: Any | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
@@ -38,6 +39,9 @@ class GhidraHTTPClient:
         self._schema: list[dict[str, Any]] = []
         self._output_guardrail = output_guardrail
         self._max_output_chars = max_output_chars
+        # Optional TruncationLedger (pitfall P6); None disables counting. This is
+        # the production Ghidra transport, so this is where the numbers come from.
+        self._truncation_ledger = truncation_ledger
         # Single long-lived AsyncClient — re-using the connection pool across
         # tool calls cuts TLS/TCP handshake overhead and avoids the previous
         # "new client per tool call" anti-pattern.
@@ -241,20 +245,52 @@ class GhidraHTTPClient:
         return f"[{cat}] {clean}"
 
     def _apply_output_guardrail(self, output: str) -> str:
-        """Limit tool output size to prevent LLM context overflow."""
-        if len(output) <= self._max_output_chars:
+        """Limit tool output size to prevent LLM context overflow.
+
+        Every outcome is recorded on ``_truncation_ledger`` when one is attached,
+        including the pass-through: pitfall P6 asks for truncation *frequency*,
+        and a frequency needs its denominator.
+        """
+        from maljan.core.truncation_ledger import record_guardrail_outcome
+
+        chars_in = len(output)
+
+        if chars_in <= self._max_output_chars:
+            record_guardrail_outcome(
+                self._truncation_ledger,
+                chars_in=chars_in,
+                chars_kept=chars_in,
+                over_limit=False,
+            )
             return output
 
         logger.warning(
             "Ghidra tool output exceeds limit (%d > %d chars). Applying guardrail.",
-            len(output),
+            chars_in,
             self._max_output_chars,
         )
 
         if self._output_guardrail is not None:
             try:
-                return self._output_guardrail(output)  # type: ignore[no-any-return]
+                summarised: str = self._output_guardrail(output)
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s - falling back to truncation.", exc)
+            else:
+                record_guardrail_outcome(
+                    self._truncation_ledger,
+                    chars_in=chars_in,
+                    chars_kept=len(summarised),
+                    over_limit=True,
+                    summarised=True,
+                )
+                return summarised
 
-        return output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        result = output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        record_guardrail_outcome(
+            self._truncation_ledger,
+            chars_in=chars_in,
+            chars_kept=len(result),
+            over_limit=True,
+            hard_truncated=True,
+        )
+        return result

@@ -38,6 +38,7 @@ from maljan.core.config import Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
+from maljan.core.truncation_ledger import TruncationLedger
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
@@ -115,6 +116,11 @@ class ServiceContainer:
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()
+
+        # Per-run truncation ledger (pitfall P6). Same lifecycle as the token
+        # ledger: written to at every bound, snapshotted by the judge node.
+        # Truncation is designed into this pipeline and has never been counted.
+        self._truncation_ledger = TruncationLedger()
 
         logger.info(
             "ServiceContainer initialized (mock=%s, agents=%s, parsers=%s)",
@@ -251,6 +257,10 @@ class ServiceContainer:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
         return self._token_ledger
 
+    def get_truncation_ledger(self) -> TruncationLedger:
+        """Return the per-run truncation ledger (pitfall P6)."""
+        return self._truncation_ledger
+
     def get_agent(self, name: str) -> BaseAnalyst:
         with self._lock:
             cached = self._agent_cache.get(name)
@@ -258,6 +268,7 @@ class ServiceContainer:
                 cached = self.agent_registry.create(name, self.get_agent_llm(name))
                 # Wire the per-run token ledger so the agent's LLM calls are tallied.
                 cached.token_ledger = getattr(self, "_token_ledger", None)
+                cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 # Hand the agent a way back to this container. The static
                 # analyst used to construct a *whole new* ServiceContainer on
                 # every failed MCP init — per chunk, so up to ten of them per
@@ -282,6 +293,7 @@ class ServiceContainer:
                     config=self.config,
                 )
                 cached.token_ledger = getattr(self, "_token_ledger", None)
+                cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 self._judge_agent_cache[role] = cached
             return cached
 
