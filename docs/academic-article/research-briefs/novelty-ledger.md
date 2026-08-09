@@ -16,15 +16,41 @@
 
 ## Summary
 
-**Revised 2026-08-09 after the adversarial counter-search (queue item A4). Three of the five
-`OURS` rows did not survive it.**
+**Revised 2026-08-09 twice: first after the adversarial counter-search (A4), then again after the
+B-layer measurements (B1, B2).**
 
 | verdict | count | claims |
 |---|---|---|
 | `OURS` | **2** | C8, E1 |
-| `REFINEMENT` | **9** | N1, N5, N6, C6(partly), C3, "false corroboration", **+ C5a, N4, N7** |
+| `OURS` — *new, not yet counter-searched* | **2** | **N9** (E.2 equal-budget negative), **N10** (confidence is degenerate) |
+| `REFINEMENT` | **9** | N1, N5, N6, C6(partly), C3, "false corroboration", C5a, N4, N7 |
 | `PRIOR ART` | **4** | C5, binary→ATT&CK modality, local/confidentiality framing, honest degradation |
-| `UNMEASURED` — cannot claim | **4** | C1, C2, C6, C7 |
+| `UNMEASURED` — cannot claim | **3** | C1, C2, C7 *(C6 partly answered by B3, pending)* |
+
+### New rows from the B layer, 2026-08-09
+
+| # | Claim | Evidence | Status |
+|---|---|---|---|
+| **N9** | **Heterogeneous evidence-channel decomposition does not beat a single agent at equal token budget** — the exception the multi-agent literature names does not hold here. −0.016 F1, CI [−0.084, +0.050], at **3.2× the tokens**. But a stochastic noise control **separates** (+0.061, CI excludes 0), so the mediator reconciles rather than averages | §3.7, n=25/arm | `OURS` pending counter-search |
+| **N10** | **The self-reported confidence a cascade consumes is nearly a constant, not merely miscalibrated.** AUC 0.550; all 210 claims in one bin [0.8, 1.0); one channel at **exactly 1.000** throughout; another **below chance** (0.428). Overconfidence +0.613 | §3.8, n=210 claims | `OURS` pending counter-search |
+
+**N9 is the more valuable of the two**, and not because it is positive — it is a *replication*
+of `arXiv:2604.02460` and `arXiv:2605.00914` in a new domain, produced by testing our own
+architecture's central claim against their design and reporting it against us. **N10 is a
+sharpening of Kumaran** (`arXiv:2606.29490`) rather than a replication: he found confidence tracks
+commitment rather than correctness on unstructured QA; we find that on structured, evidence-cited
+claims it barely varies at all. A miscalibrated score can be recalibrated; a constant cannot.
+
+**Both rows are `OURS` only provisionally.** By this ledger's own closing rule — and by what A4
+cost us — neither is a searched absence until somebody tries to falsify it from an adjacent field.
+For N9 that means multi-agent/debate ablation literature; for N10, confidence elicitation and
+verbalised-uncertainty work outside security. **Do this before either reaches a draft.**
+
+**C3 is now in trouble for a new reason.** It was `REFINEMENT` of FAX and `UNMEASURED`. B2 makes
+the measurement question sharper: a falsification-graded confidence *cap* keyed to a value that is
+0.98 for almost everything is a cap that almost never binds. **B5 now tests whether the cap does
+anything given that its input does not** — a better question than the one it was queued for, and
+one where either answer is publishable.
 
 **Read plainly:** the strongest surviving story is *negative results and measurement*, not
 architecture. Four architectural claims cannot be defended because they were never measured, and
