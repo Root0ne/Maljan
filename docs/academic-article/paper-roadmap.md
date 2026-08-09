@@ -200,10 +200,24 @@ which side of that crossover a malware pipeline sits on.
       rejection would discard? The archived bundles predate the `spec_version` fix and the defect
       classes come from LLM generation, so fresh bundles are required. A3's counters measure it.
       → **C7**
-- [ ] **B5 — C3 ablation** `[LLM]`
-      Falsification-before-confidence graded cap **on vs off**. FAX (`arXiv:2605.27879`) is a
-      *measured* binary method — our unmeasured graded variant cannot be claimed against it.
-      Moves C3 out of `UNMEASURED`.
+- [ ] **B5 — C3 ablation** `[cheap]` **+** `[LLM]` — *reframed twice, by B2 and by reading the code*
+      **What C3 actually is.** `extractors/capability_matrix._cap_unsupported_confidence`: a
+      deterministic cap to **0.40**, applied *only* to **T1027 / T1140** (obfuscation) and
+      **T1055** (injection) plus sub-techniques, *only* when the technique's **sole contributing
+      layer is `static`** (the LLM/import layer), and *only* when the corresponding static evidence
+      flag is absent.
+      **B2 changes what the experiment is for.** The input confidence is ~0.98 for essentially
+      everything (§3.8), and the cap drops qualifying claims to 0.40. So the cap is not a
+      refinement on top of a graded score — **it is very nearly the only source of grading in the
+      system for those three techniques.** That reframes the question from "does the graded cap
+      beat a binary filter" to **"how often does the only grading mechanism actually fire?"**
+      **And half of it needs no LLM.** The cap is deterministic; what varies is whether its three
+      preconditions hold. Firing rate is countable over the 209-PE static corpus by extending
+      `eval_layer0_contribution.py`, which is **server-free**. Only the downstream question — does
+      a capped claim change the verdict — needs the judge.
+      *Do the cheap half first; if the cap almost never fires, the LLM half is nearly moot and that
+      is itself the answer.*
+
 - [ ] **B6 — C1 ablation** `[LLM]`
       Sink-reachability prompt steering **on vs off**. R1 found no competing claim, so C1 may
       survive if measured — and cannot be claimed at all if it isn't.
