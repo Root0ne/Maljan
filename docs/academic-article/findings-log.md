@@ -662,7 +662,97 @@ positioning.
 
 Hardware: RTX 5060 (8 GiB VRAM), 31 GiB system RAM, Windows 11 + WSL2/Docker.
 Model: Qwen3.6-35B-A3B (MoE, 35B total / ≈3B active), IQ3_K_R4 quant, served by
-ik_llama.cpp `llama-server` with hybrid CPU/GPU offload (`--n-cpu-moe`).
+ik_llama.cpp `llama-server` with hybrid CPU/GPU offload.
+
+### 2.0 Model and engine provenance — `IMPLEMENTED` (P9), recorded 2026-08-09
+
+> **Why this section exists.** *Chasing Shadows*' pitfall **P9 (Model Ambiguity)** asks for
+> details sufficient for precise identification: model ID, snapshot, commit, quantization. §2.1
+> below reports a **sampler behaviour of this specific engine build** as a finding, and that
+> finding is not reproducible without the identifiers here. This is also the reproducibility
+> appendix's source of truth (queue item E5).
+
+**Model — fully pinned.**
+
+| field | value |
+|---|---|
+| file | `models/Qwen3.6-35B-A3B-IQ3_K_R4.gguf`, 15,340,250,080 bytes |
+| **sha256** | `d0de70ef693eb2af1a3803d4fb2c93cf375db19b0a5e0fb2cae79c1678cbc4ea` |
+| **HF revision** | `cfd350fde08a91e4017d22db422e9ad1eac71f0d` |
+| retrieved | **2026-05-11 20:39:17 UTC** |
+| `general.architecture` | `qwen35moe` |
+| `general.quantized_by` | **Unsloth** (`general.repo_url = https://huggingface.co/unsloth`) |
+| base model | `https://huggingface.co/Qwen/Qwen3.6-35B-A3B`, Apache-2.0 |
+| `general.file_type` / `quantization_version` | `339` / `2` |
+| **imatrix** | `Qwen3.6-35B-A3B-GGUF/imatrix_unsloth.gguf`, dataset `unsloth_calibration_Qwen3.6-35B-A3B.txt`, 510 entries / 76 chunks |
+| tokenizer | GPT-2 BPE, `pre = qwen35`, 248,320 tokens, `add_bos_token = false` |
+
+The sha256 was computed here **and** matches the HuggingFace download etag independently, so the
+file is byte-identical to the published artifact. The calibration dataset being *named* is worth
+noting: importance-matrix quantisation is a lossy transform whose result depends on its
+calibration text, and most work reporting a quant level does not say which imatrix produced it.
+
+**Engine — pinned by hash, because the commit is not recoverable.** This is P9 happening to us:
+
+```
+$ llama-server --version
+version: 0 (unknown)
+$ cat common/build-info.cpp
+int LLAMA_BUILD_NUMBER = 0;
+char const *LLAMA_COMMIT = "unknown";
+```
+
+The source tree at `~/maljan-llm-build/ik_llama.cpp` **is not a git checkout** — no `.git`, only
+a `.gitignore` and `.gitmodules` left behind — so CMake's build-info step had no commit to record
+and wrote `unknown`. The exact upstream commit therefore **cannot be recovered from the artifact**,
+and no amount of writing fixes that. What can be pinned, and now is:
+
+| field | value |
+|---|---|
+| **engine binary sha256** | `7737b2a90e33e2afc364801df13d33d506864a3390d6d61b92a11a029450542d` |
+| **source-tree content hash** | `5911b1281d4774bcf89ae1d3b657a7888e48e97da0610d2149374fe8fc2c15b8` |
+| source hash covers | 837 files — `*.c/cpp/h/hpp/cu/cuh/metal` + `CMakeLists.txt`, build dirs excluded, `LC_ALL=C sort`ed |
+| source snapshot date | 2026-05-11 (file mtimes) |
+| binary built | 2026-07-05 22:02 +03 |
+| compiler | `cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0`, target `x86_64-linux-gnu` |
+| **upstream anchor** | vendored `github-data/pull_requests` tops out at **PR #630**; the snapshot postdates #630 |
+
+A content hash over the compiled sources is arguably the *better* identifier: a commit names a
+revision, this names the bytes that were actually built. The reproduction recipe is therefore
+"clone ik_llama.cpp at the first commit after PR #630, verify the source hash, build with the
+compiler above" — weaker than a commit id, and stated as such.
+
+**Serving configuration**, from the systemd unit (`~/.config/systemd/user/maljan-llama.service`):
+
+```
+llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf -c 131072 -t 16 -fa on \
+  -ctk q8_0 -ctv q8_0 -ngl 999 \
+  -ot "blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU" \
+  --context-shift on --jinja --alias qwen3.6-35b-a3b --host 0.0.0.0 --port 8080
+```
+
+**Two things this dump settled that are not bookkeeping:**
+
+1. **The architecture is hybrid recurrent/attention, and the GGUF proves it.** `ssm.conv_kernel=4`,
+   `ssm.state_size=128`, `ssm.group_count=16`, `ssm.time_step_rank=32`, `ssm.inner_size=4096`,
+   alongside `full_attention_interval=4` — i.e. full attention every fourth of 40 blocks, linear
+   recurrent state in between; 256 experts, 8 active. This is the documented mechanism behind the
+   re-prefill behaviour that caused the 2026-08-07 timeouts: a recurrent state cannot be restored
+   from a partial cache the way a pure-attention KV cache can, so parallel analysts sharing one
+   server slot force full re-prefills. That was previously an inference from behaviour; it is now
+   read off the model file.
+2. **We serve at half the model's native context.** `qwen35moe.context_length = 262144`; we run
+   `-c 131072`. §2.1 records why (the 262k config wedged under sustained load), but the
+   consequence belongs to **P6**: every truncation bound in the system sits under a window that is
+   itself a deliberate halving. A2 records the number; **A3** counts how often it binds.
+
+**One reproducibility defect found while doing this.** `.serena/memories/suggested_commands.md`
+documents the launch as `--n-cpu-moe 36`, but the service actually runs
+`-ot "blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU"` — that regex matches blocks **10–39**, so
+**30** blocks' experts go to CPU, not 36, and blocks 0–9 keep theirs on GPU. The documented
+command and the running command are different deployments. Every §2 throughput and memory number
+was produced by the *service*, so the numbers stand; the documentation is what is wrong, and it is
+exactly the kind of drift P9 exists to catch. Fixing that doc is E5's job.
 
 ### 2.1 KV-cache scaling is dominated by weight offload, not context — `EXPERIMENTAL`
 - **Measured (boot-time, `-ctk q8_0 -ctv q8_0 -fa on`).** KV ≈ **10.85 KiB/token**
@@ -1336,6 +1426,32 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-09 — P9: the model is pinned; the engine commit is gone (queue item A2).** New
+  **§2.0**. The model half closed cleanly — GGUF sha256 computed here *and* matching the
+  HuggingFace download etag, HF revision hash, retrieval timestamp, quantiser, base model,
+  file_type, and the **named imatrix calibration dataset**, which is more than the quant level
+  most papers report. Three things came out of it that are not bookkeeping:
+  - **The engine commit is unrecoverable.** `llama-server --version` → `version: 0 (unknown)`;
+    `build-info.cpp` → `LLAMA_COMMIT = "unknown"`. The source tree at `~/maljan-llm-build` has a
+    `.gitignore` and a `.gitmodules` but **no `.git`**, so CMake had nothing to record. §2.1's
+    sampler finding — one of our own results — is therefore not reproducible against a named
+    revision. Pinned instead by binary sha256, a content hash over the 837 compiled source files,
+    compiler, build date, and an upstream anchor (vendored `github-data` tops out at PR #630).
+    The transferable lesson is the one worth publishing: **build provenance must be captured at
+    build time; it cannot be reconstructed afterwards** — and this project reports engine-level
+    detail almost nobody reports and still lost it.
+  - **The GGUF confirms the hybrid recurrent architecture from the file itself.** `ssm.*` keys plus
+    `full_attention_interval=4` over 40 blocks, 256 experts / 8 active. The 2026-08-07 re-prefill
+    timeouts were previously an inference from behaviour; the mechanism is now read off the model.
+  - **We serve at half the model's native context** — `context_length = 262144`, we run
+    `-c 131072` (§2.1 records why). Every truncation bound in the system therefore sits under a
+    window that is itself a deliberate halving. A3 counts how often it binds.
+
+  Also found, and it is a genuine reproducibility defect: `.serena/memories/suggested_commands.md`
+  documents `--n-cpu-moe 36`, while the service runs an `-ot` regex matching blocks **10–39** —
+  **30** blocks, not 36. Every §2 number came from the service, so the numbers stand and the
+  documentation is what is wrong. Fixing it is E5's job.
 
 - **2026-08-09 — P8: four claims scoped to what actually produced them (queue item A1).** The
   self-audit found four entries phrased more generally than one model on one machine supports.

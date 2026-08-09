@@ -29,7 +29,7 @@
 | P6 | Context Truncation | `EXPOSED` | Truncation mechanisms everywhere, **frequency never reported** |
 | P7 | Prompt Sensitivity | `PARTIAL` | A structured prompt-variation study exists; production prompts are fixed and unvaried |
 | P8 | Surrogate Fallacy | `EXPOSED` → `PARTIAL` | One model, one machine. Four claims **scoped 2026-08-09**; the confound itself stands until the frontier arm (C6) runs |
-| P9 | Model Ambiguity | `PARTIAL` | Unusually complete model reporting; missing exact snapshot and engine commit |
+| P9 | Model Ambiguity | `PARTIAL` | Model **fully pinned 2026-08-09** (digest + HF revision + imatrix dataset). The **engine commit is unrecoverable** — the build recorded `unknown`; pinned by binary and source hash instead |
 
 **Three actionable items** fall out: report truncation frequency (P6), scope the generalising
 claims (P8), and pin the exact model and engine revisions (P9). None requires an experiment.
@@ -234,11 +234,34 @@ CPU/GPU), the **context size** (`-c 131072`), decoding settings where they matte
 (`repeat_penalty` honored, `repetition_penalty`/`frequency_penalty`/`presence_penalty` silently
 ignored) — engine-level detail almost nobody reports.
 
-**Missing:** the exact model snapshot/revision hash, the ik_llama.cpp **commit**, and the GGUF
-file digest. Without them the sampler quirk above is not reproducible, which is ironic given it
-is one of our findings.
+**Resolved for the model, structurally unresolvable for the engine (2026-08-09, queue item A2).**
+Full record in `findings-log.md` **§2.0**.
 
-**Action:** record the model file digest and engine commit in `RunSummary`. `[cheap]`.
+**Model — closed.** GGUF **sha256 `d0de70ef…c4ea`** (computed here *and* matching the HuggingFace
+download etag, so the file is byte-identical to the published artifact), **HF revision
+`cfd350fd…1f0d`**, retrieved 2026-05-11 20:39:17 UTC, `general.quantized_by = Unsloth` over base
+`Qwen/Qwen3.6-35B-A3B` (Apache-2.0), `file_type 339`, and — unusually — the **imatrix calibration
+dataset is named** (`unsloth_calibration_Qwen3.6-35B-A3B.txt`, 510 entries / 76 chunks).
+Importance-matrix quantisation is a lossy transform whose result depends on its calibration text;
+most papers reporting a quant level cannot say which imatrix produced it.
+
+**Engine — cannot be closed, and this is P9 happening to us.** `llama-server --version` prints
+`version: 0 (unknown)` and `build-info.cpp` holds `LLAMA_COMMIT = "unknown"`, because the source
+tree is not a git checkout and CMake had no commit to record. **The upstream commit is not
+recoverable from the artifact.** Pinned instead: engine binary **sha256 `7737b2a9…542d`**, a
+**content hash over the 837 compiled source files** (`5911b128…15b8`), the compiler
+(`cc 15.2.0`), the build date (2026-07-05), and an upstream anchor — the vendored `github-data`
+tops out at **PR #630**. A hash of the bytes actually built is arguably a *better* identifier
+than a revision name; it is nonetheless weaker as a *reproduction* instruction, and the paper
+says so rather than implying a commit was recorded.
+
+**Verdict: `PARTIAL`, and it stays `PARTIAL` permanently for the engine.** The lesson is the
+transferable part and belongs in the write-up: this project reports engine-level detail almost
+nobody reports — and *still* lost the engine commit, to a `git clone` that was never a clone.
+Build provenance has to be captured at build time; it cannot be reconstructed afterwards.
+
+**Action:** ~~record the model file digest and engine commit~~ — **done in §2.0**; emitting the
+provenance block with every run is folded into **A3**.
 
 ---
 
@@ -251,7 +274,10 @@ Nothing in the results. Three things in the write-up, all cheap:
 2. **P8** — ~~scope four claims to the evaluated model by exact identifier~~ **done 2026-08-09**;
    the architecture/model confound is now stated explicitly in `related-work.md` and stays open
    until C6.
-3. **P9** — pin the model digest and engine commit.
+3. **P9** — ~~pin the model digest and engine commit~~ **done 2026-08-09** for the model; the
+   engine commit turned out to be **unrecoverable** (the build recorded `unknown`), so it is
+   pinned by binary and source-tree hash and the paper says so plainly. The transferable lesson:
+   build provenance must be captured at build time — it cannot be reconstructed afterwards.
 
 And one thing to say out loud rather than assume a reviewer will notice: **P2 and P4 are clear
 in a way most papers in this survey are not** — no LLM scored any result here, and augmenting

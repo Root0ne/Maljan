@@ -61,11 +61,21 @@ which side of that crossover a malware pipeline sits on.
       had mis-recorded it as model-bound, when the real limits are the retrieval index and a
       stated dominance assumption. **P8 `EXPOSED` → `PARTIAL`**; the empirical half stays open
       until **C6**.
-- [ ] **A2 — P9: pin model identity** `[cheap]`
-      GGUF file **sha256**, ik_llama.cpp **commit**, model revision → into `findings-log.md` §2.1
-      *and* into a provenance block emitted with every run. §2.1's sampler finding
-      (`repeat_penalty` honored, the other three silently ignored) is not reproducible without
-      them, which is ironic given it is one of our results. → **P9**
+- [x] **A2 — P9: pin model identity** `[done]` **2026-08-09** → new **§2.0** in the findings log
+      **Model closed.** GGUF sha256 `d0de70ef…c4ea` (computed here *and* matching the HuggingFace
+      etag), HF revision `cfd350fd…1f0d`, retrieved 2026-05-11, quantised by Unsloth over
+      `Qwen/Qwen3.6-35B-A3B`, and the **imatrix calibration dataset is named** — most papers
+      reporting a quant level cannot say which imatrix produced it.
+      **Engine cannot be closed, and that is P9 happening to us:** `llama-server --version` prints
+      `version: 0 (unknown)` because the source tree was never a git checkout, so the upstream
+      commit is **unrecoverable from the artifact**. Pinned instead by binary sha256, a content
+      hash over the 837 compiled sources, compiler, build date, and an upstream anchor at PR #630.
+      Two things fell out that are not bookkeeping: the GGUF **proves the hybrid recurrent
+      architecture** (SSM keys + `full_attention_interval=4`) that explains the 2026-08-07
+      re-prefill timeouts, and **we serve at half the model's native context** (262,144 → 131,072),
+      which is P6's problem. Also found: the documented launch command (`--n-cpu-moe 36`) is **not**
+      the one the service runs (30 blocks, not 36). → **P9 stays `PARTIAL`, permanently, for the
+      engine**
 - [ ] **A3 — P6 instrumentation, before any run** `[cheap]`
       Counters into `src/maljan/analysis/run_summary.py`: `static_max_chars` truncations, dropped
       chunks, `max_steps` hits, judge token-ceiling hits — and, for C7, how many times the STIX
