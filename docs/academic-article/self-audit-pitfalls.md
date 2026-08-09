@@ -28,7 +28,7 @@
 | P5 | Spurious Correlations | `PARTIAL` | Two found and published; no systematic perturbation testing |
 | P6 | Context Truncation | `EXPOSED` | Truncation mechanisms everywhere, **frequency never reported** |
 | P7 | Prompt Sensitivity | `PARTIAL` | A structured prompt-variation study exists; production prompts are fixed and unvaried |
-| P8 | Surrogate Fallacy | `EXPOSED` | One model, one machine — known, stated, but several claims are phrased more generally than the evidence |
+| P8 | Surrogate Fallacy | `EXPOSED` → `PARTIAL` | One model, one machine. Four claims **scoped 2026-08-09**; the confound itself stands until the frontier arm (C6) runs |
 | P9 | Model Ambiguity | `PARTIAL` | Unusually complete model reporting; missing exact snapshot and engine commit |
 
 **Three actionable items** fall out: report truncation frequency (P6), scope the generalising
@@ -184,24 +184,41 @@ bites once a second model exists.
 > *"Findings from specific LLMs are often inappropriately generalized to other, often large and
 > more capable models or even to entire classes of language models."*
 
-**Known, stated as E.8 — and several claims are still phrased more generally than the evidence
+**Known, stated as E.8 — and several claims were phrased more generally than the evidence
 supports.** Every LLM result in this work is **Qwen3.6-35B-A3B (IQ3_K_R4) on one machine**.
 
-Claims that need scoping language before submission:
+Claims that needed scoping language, and what each one's evidence actually covers:
 
-| claim | currently reads | evidence actually covers |
-|---|---|---|
-| §3.3 degenerate ID loop | "a small-model pathology" | one model, reproducible across two prompt structures |
-| §3.5 narrative quality | "the LLM narrator's only edge is readability" | one model, 5 fixtures × 3 repeats |
-| §1.7.1 hint → completion | framed as an operational property | one model under one 600 s ceiling — this one *is* caveated |
-| §1.5.2 autocorrect regression | a property of the correction policy | measured on one index and one model's outputs |
+| claim | read as | evidence actually covers | scoped |
+|---|---|---|---|
+| §3.3 degenerate ID loop | "a small-model pathology" | one model, reproducible across two runs and two prompt structures; **the sampler half is a property of the *engine*, not the model** | ✅ 2026-08-09 |
+| §3.5 narrative quality | "the LLM narrator's only edge is readability" | one model, 5 fixtures × 3 repeats; and "structural compliance" is a **format proxy, not readability** | ✅ 2026-08-09 |
+| §1.7.1 hint → completion | an operational property | one model at ~40 tok/s under one 600 s ceiling — this one *was* already caveated; only the identifier was missing | ✅ 2026-08-09 |
+| §1.5.2 autocorrect regression | a property of the correction policy | **not a model limit at all** — the harness is server-free; see below | ✅ 2026-08-09 |
+
+**Correction to this audit's first pass (2026-08-09).** The row above originally read *"measured
+on one index and one model's outputs"*. The second half is wrong: `eval_autocorrect_ablation.py`
+runs **server-free** and the three input error modes are **injected at 100% each, rate-free** —
+they are a simulation, not any model's observed error distribution. The real limits are (i) one
+retrieval index, whose gate §1.5.1 shows varies by +0.062 to +0.168 across backends, and (ii) a
+stated assumption that correct inputs dominate. Getting this wrong mattered in a specific way:
+it would have attached a model caveat to the one result that does not need one, while leaving
+the index dependency — the limit that actually binds — unstated. What survives unconditionally
+is the structural claim: correct-but-weak and wrong-but-valid IDs are not separable by an
+alignment score, so the valid→valid swap cannot be tuned safely at any error rate.
 
 `arXiv:2606.18166` makes this sharper rather than softer: if **parameter size is the only
 significant predictor** of performance on the nearest task, then single-model findings are
 exactly the kind the pitfall warns about.
 
-**Action:** scope every claim to the evaluated model by exact identifier, and either run the
-frontier arm (E.4/E.8) or state plainly that the architecture/model confound is unresolved.
+**Verdict after scoping: `PARTIAL`.** The write-up half is done — all four claims now carry their
+scope at the point of claim, `related-work.md` carries a section-level scope statement, and the
+distinction between *negatives obtained under a favourable configuration* (which travel) and
+*positives bounded by this model's speed* (which may not) is stated. The **empirical** half is
+not done and cannot be closed by writing: the architecture/model confound stands until the
+frontier arm runs. That is queue item **C6**, funded and scheduled. Until it lands, the honest
+statement is the one now in `related-work.md` — single-model findings are not properties of an
+architecture.
 
 ## P9 — Model Ambiguity `PARTIAL`
 
@@ -231,8 +248,9 @@ Nothing in the results. Three things in the write-up, all cheap:
 
 1. **P6** — instrument and report truncation frequency; the mechanism is designed-in and the
    data is already produced, only uncounted.
-2. **P8** — scope four claims to the evaluated model by exact identifier, and state the
-   architecture/model confound explicitly rather than leaving it to E.8.
+2. **P8** — ~~scope four claims to the evaluated model by exact identifier~~ **done 2026-08-09**;
+   the architecture/model confound is now stated explicitly in `related-work.md` and stays open
+   until C6.
 3. **P9** — pin the model digest and engine commit.
 
 And one thing to say out loud rather than assume a reviewer will notice: **P2 and P4 are clear

@@ -13,7 +13,7 @@
 >
 > **Honesty rules for this log:** record confounds and sample sizes; keep negative
 > results; do not inflate single-run probes into "studies"; cite the prior work each
-> finding builds on or contradicts. Last updated: 2026-08-08.
+> finding builds on or contradicts. Last updated: 2026-08-09.
 
 ---
 
@@ -267,6 +267,23 @@ positioning.
   the end-to-end ablation is what exposed a 38% regression. Auto-correction should be confined to
   the provably-safe sub-operation (invalid→valid), not extended to ambiguous valid→valid edits.
   Harness: `tests/evaluation/eval_autocorrect_ablation.py`.
+- **Scope of the claim (P8, 2026-08-09).** This ablation is **server-free** — no LLM ran — so
+  unlike §3.3/§3.5 the binding limit is *not* the model. It is two other things, and the
+  self-audit's first pass mis-stated them. **(i) One index.** The 38% damage figure is a
+  property of the **production hybrid backend's alignment gate** on TRAM2 evidence sentences:
+  short real evidence often has weak lexical overlap with the correct technique, so a wrong
+  candidate out-scores it. A different retriever, a different corpus, or a different gate
+  threshold would move that number, and §1.5.1's own result — the three backends separate on
+  gate quality by +0.062 to +0.168 — says they would move it a lot. **(ii) Simulated, not
+  observed, error modes.** The three input scenarios are injected at 100% each and are
+  deliberately rate-free; they are not this or any model's measured error distribution. The
+  *directional* conclusion (the swap path is net-negative) therefore rests on one further
+  assumption stated in the entry — that correct inputs dominate — which holds for any usable
+  model but is an assumption, not a measurement. What survives unconditionally is the
+  **structural** claim, and it is the transferable one: correct-but-weak and wrong-but-valid IDs
+  are *not separable by an alignment score*, so a valid→valid swap cannot be tuned safely no
+  matter what the error rates turn out to be. The invalid→valid restriction is zero-regression
+  **by construction** (a valid ID is never invalid), which needs no empirical scope at all.
 
 ### 1.5.3 Case-prior retrieval as a technique-candidate source — `NEGATIVE` (the retriever works; the query never reaches it)
 - **Motivation.** §4 U2 shipped an ATT&CK case-prior RAG: embed 1,733 ATT&CK-labelled prior
@@ -499,6 +516,18 @@ positioning.
   faster model or no timeout the OFF arm would more often complete and the gap would shrink. Absolute
   F1 is tiny by construction: GT is each family's *full-lifetime* ATT&CK set (24–55 techniques) vs a
   one-paragraph single verdict, so recall is floored; only the paired delta is meaningful.
+- **Scope, pinned (P8, 2026-08-09).** The paragraph above already caveats the right thing — this
+  is the one of the four claims that did — so this adds the identifier rather than the argument:
+  **Qwen3.6-35B-A3B, IQ3_K_R4, ik_llama.cpp `llama-server`, temp=0, one machine, one 600 s judge
+  ceiling** (full identity in §2.1), n=17 paired families. Two things are worth separating for the
+  write-up. The **accuracy** claim is *negative and safely general*: the exact-F1 CI includes 0, so
+  we assert no mapping benefit, and a negative under a favourable configuration is the easier
+  direction to defend. The **completion** claim (6/17 → 1/17 empty bundles) is the positive one and
+  is bounded by the model's generation speed against a fixed wall clock — it is a claim about *this
+  model at ~40 tok/s under a 600 s ceiling*, and the C6 frontier arm is expected to shrink or erase
+  it. That is not a weakness of the finding; it is the finding. The transferable statement is the
+  takeaway already written below: an "advisory, low-impact" prompt addition can act through an
+  unmeasured channel, so completion and bundle shape must be measured alongside F1.
 - **Takeaways (paper + product).** (i) An "advisory, low-impact" prompt addition can have a
   first-order effect through an *unmeasured channel* (completion/latency), invisible to a pure
   mapping-quality metric — measure bundle shape and completion, not just F1. (ii) The
@@ -798,10 +827,24 @@ this review it did, until corrected.
   budget and does **not** make the small model converge on a correct ID. This is the
   empirical justification for fix (ii): penalty tuning alone is insufficient; the
   ID-recall task must be removed, not merely damped.
-- **Why it is paper-worthy.** A concrete, reproducible small-model pathology
+- **Why it is paper-worthy.** A concrete, reproducible pathology
   (under-specified 600+ label space × autoregressive self-reinforcement), plus the
   finding that the obvious mitigation (sampler penalties) is necessary-but-insufficient,
   and a clean fix (offload the taxonomy lookup to deterministic retrieval).
+- **Scope of the claim (P8, 2026-08-09).** Everything above is measured on **one model on one
+  machine**: Qwen3.6-35B-A3B, IQ3_K_R4, served by ik_llama.cpp `llama-server` (exact revision,
+  GGUF digest and engine commit in §2.1). Within that scope it is robust — reproduced across
+  **two independent experiment runs and two prompt structures**. What the evidence does *not*
+  support is the phrase this entry previously used, *"a small-model pathology"*: that
+  generalises one model to a class. The mechanism (large label space × autoregressive
+  self-reinforcement) plausibly transfers, but plausibility is not measurement, and
+  `arXiv:2606.18166` — parameter size the only significant predictor of ATT&CK-classification
+  F1, ρ=0.85, p=0.014 — is a direct reason to expect model-to-model variation here. **The
+  sampler half is narrower still and is a property of the *engine*, not the model:**
+  `repeat_penalty` honored while `repetition_penalty` / `frequency_penalty` /
+  `presence_penalty` are silently ignored is an ik_llama.cpp behaviour at the pinned commit,
+  and says nothing about llama.cpp upstream, vLLM or a hosted endpoint. Generalisation is
+  **E.8**, open until the frontier arm runs.
 - **Literature position (2026-08-08).** The *hallucinated-ID* concern is well represented —
   TTPrint [8] retains only candidates supported by both localised evidence and the MITRE
   definition, and constrained decoding is the standard remedy. What the review found no
@@ -859,11 +902,25 @@ this review it did, until corrected.
   zero hallucination) — the MaLAware premise that a small local model narrates without inventing
   capabilities **holds**. But on the faithfulness+coverage F1 the **deterministic template is the
   stronger baseline** (it covers every evidence technique by construction → recall 1.0; the LLM
-  omits some → 0.853). The LLM's *only* edge is **structural/readability compliance (0.73 vs
-  0.00)** — i.e. the justification for the LLM narrator is human-readable prose, **not** accuracy
-  or coverage, where the deterministic template is at least as good. A useful negative-ish result:
-  don't pay for an LLM narrative on faithfulness grounds; pay for it only if readable prose is the
-  product. (This supersedes the earlier n=1 smoke, which was an uninformative tie.)
+  omits some → 0.853). The LLM's *only* edge **in this measurement** is **structural/readability
+  compliance (0.73 vs 0.00)** — i.e. the justification for the LLM narrator is human-readable
+  prose, **not** accuracy or coverage, where the deterministic template is at least as good. A
+  useful negative-ish result: don't pay for an LLM narrative on faithfulness grounds; pay for it
+  only if readable prose is the product. (This supersedes the earlier n=1 smoke, which was an
+  uninformative tie.)
+- **Scope of the claim (P8, 2026-08-09).** **n=15 — 5 fixture families × 3 repeats — on one model
+  on one machine**: Qwen3.6-35B-A3B, IQ3_K_R4, ik_llama.cpp `llama-server`, `enable_thinking=false`
+  (full identity in §2.1). Three limits follow and none of them is cosmetic. (i) The **coverage**
+  gap is the finding most likely to be model-dependent: recall 0.853 is this model omitting
+  techniques under a pinned `max_tokens`, and a model that omits fewer would narrow or close the
+  −0.111 F1 delta. (ii) The **faithfulness** result — precision 1.000, zero hallucinated
+  techniques in both arms — is the more robust half, but 15 narrations is a thin base for
+  "never invents", and the correct reading is *no hallucination was observed at n=15*, not
+  *hallucination does not occur*. (iii) "**Structural compliance**" is a code-computed proxy
+  (length / paragraph count / parenthesised-ID format), **not readability**; that the template
+  scores 0.000 on it means the template ignores a format rule, not that its prose is unreadable.
+  Whether readable prose is actually the LLM's edge is **E.7**, and no human analyst has scored
+  a report. Generalisation across models is **E.8**, open.
 
 ### 3.6 View-decomposition — config-gated mechanism + a valid (equal-budget) study — `IMPLEMENTED`
 - **Question.** §3.2 left this `INCONCLUSIVE`: does splitting an analyst's evidence into N
@@ -1279,6 +1336,33 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-09 — P8: four claims scoped to what actually produced them (queue item A1).** The
+  self-audit found four entries phrased more generally than one model on one machine supports.
+  Each now carries a **Scope of the claim** bullet naming the evaluated model, and
+  `related-work.md` gained a section-level scope statement. Two of the four turned out to be
+  about something other than the model, which is the part worth keeping:
+  - **§3.3** — the *sampler* finding (`repeat_penalty` honored, three siblings silently ignored)
+    is a property of the **ik_llama.cpp engine at the pinned commit**, not of Qwen and not of
+    small models. It says nothing about llama.cpp upstream, vLLM or a hosted endpoint. The
+    phrase "a small-model pathology" is retracted; the pathology is measured on one model.
+  - **§1.5.2** — **this audit's own first pass was wrong about this row.** It recorded the limit
+    as "one index and one model's outputs"; the harness is **server-free** and the three error
+    modes are **injected at 100%, rate-free**. The binding limits are the retrieval index (whose
+    gate §1.5.1 shows varies by +0.062 to +0.168 across backends) and a stated dominance
+    assumption — not the model. Mis-stating it would have attached a caveat to the one result
+    that does not need one while leaving the limit that actually binds unwritten.
+  - **§3.5** — "structural compliance 0.73 vs 0.00" is a **format proxy** (length, paragraph
+    count, parenthesised IDs), *not* readability. The template scoring 0.000 means it ignores a
+    format rule, not that its prose is unreadable. Whether readable prose is the LLM's real edge
+    is E.7, and no human analyst has scored a report.
+  - **§1.7.1** — already correctly caveated; only the exact identifier was missing. Its
+    *negative* half (no mapping benefit, CI includes 0) travels further than its *positive* half
+    (6/17 → 1/17 completion), which is bounded by this model's ~40 tok/s against a 600 s ceiling
+    and is expected to shrink under the C6 frontier arm.
+
+  P8 moves `EXPOSED` → `PARTIAL`: the write-up half is closed, the architecture/model confound
+  is not and cannot be closed by writing. That is C6.
 
 - **2026-08-08 (overnight) — systematic literature review across 8 themes, and the first
   measurement of the cascade.** Ran the full review myself with live search and **fetched every

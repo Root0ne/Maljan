@@ -169,6 +169,24 @@ drift at ≤0.040 F1 over seven years at 95% confidence, with the study powered 
 δ ≥ 0.05. We state the bound rather than claiming absence, and note that its width relative to
 an absolute F1 of 0.055–0.089 makes the stability claim a coarse one.
 
+## Scope of every empirical statement above
+
+Each of our results cited in this section was produced on **one model on one machine**:
+Qwen3.6-35B-A3B at IQ3_K_R4 quantisation, served by ik_llama.cpp `llama-server` on a single
+RTX 5060 / 31 GiB host, with the exact model revision, GGUF digest and engine commit recorded in
+the reproducibility appendix. Where a statement concerns retrieval or the deterministic cascade
+rather than generation, no model was involved at all and the binding limit is the index and the
+corpus instead; those are marked at the point of claim.
+
+We state this here rather than only in Threats to Validity because [9]'s **surrogate fallacy** is
+the pitfall this work is most exposed to, and because the nearest external evidence sharpens it:
+in an ATT&CK-classification study across models, **parameter size was the only statistically
+significant predictor of F1** (ρ=0.85, p=0.014) while prompt strategy, chain-of-thought and
+temperature were not. Single-model findings are therefore exactly the kind that should not be
+read as properties of an architecture. Where a result is a *negative* obtained under a
+configuration favourable to the alternative, it travels further than a positive; we say which is
+which at each claim.
+
 ---
 
 ## Reference note

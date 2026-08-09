@@ -54,10 +54,13 @@ which side of that crossover a malware pipeline sits on.
 - [ ] **A0 — Collapse the queue into this file** `[cheap]`
       Migrate the old §2/§3/§4 checkboxes here with dependencies written down. Record the
       n=100 + CAPE decision in long-term memory. *(This item is what produced this file.)*
-- [ ] **A1 — P8: scope the four over-general claims** `[cheap]`
-      `findings-log.md` §3.3, §3.5, §1.7.1, §1.5.2 and `related-work.md`. Each is bound to the
-      exact evaluated model — *Qwen3.6-35B-A3B (IQ3_K_R4), ik_llama.cpp, one machine*. Pure
-      writing. → **P8**
+- [x] **A1 — P8: scope the four over-general claims** `[done]` **2026-08-09**
+      All four now carry a *Scope of the claim* bullet; `related-work.md` gained a section-level
+      scope statement. Two were not about the model at all: **§3.3's sampler finding is an
+      ik_llama.cpp engine property**, and **§1.5.2 is server-free** — this audit's own first pass
+      had mis-recorded it as model-bound, when the real limits are the retrieval index and a
+      stated dominance assumption. **P8 `EXPOSED` → `PARTIAL`**; the empirical half stays open
+      until **C6**.
 - [ ] **A2 — P9: pin model identity** `[cheap]`
       GGUF file **sha256**, ik_llama.cpp **commit**, model revision → into `findings-log.md` §2.1
       *and* into a provenance block emitted with every run. §2.1's sampler finding
