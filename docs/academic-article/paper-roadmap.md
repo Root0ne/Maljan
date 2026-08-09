@@ -111,18 +111,30 @@ which side of that crossover a malware pipeline sits on.
       C5a + N4 + N7, and all three demoted. **D3 must re-decide on that basis.** GEC and
       degeneration rows are demotions *pending full-text confirmation*; demotion is the safe
       direction, but each must be read before the paper cites it.
-- [ ] **A5 — Build the B1 harness** `[cheap]`
-      `tests/evaluation/eval_consensus_ablation.py`, skeleton from
-      [eval_view_decomposition.py](tests/evaluation/eval_view_decomposition.py) — the equal-budget
-      pattern is already correct there (monolithic = 1 call at B, N-view = N calls at B/N).
-      Fixtures from `tests/evaluation/fixtures/` (5 families). Written and unit-tested with no
-      server running.
+- [x] **A5 — Build the B1 harness** `[done]` **2026-08-09** →
+      `tests/evaluation/eval_consensus_ablation.py` + **36 unit tests**
+      Three arms — `single` (all channels, 1 call at B), `negotiated` (K channel analysts **plus
+      the mediator**, K+1 calls at B/(K+1)), `noise` (negotiated with one analyst fed another
+      sample's channel, Bertalanič & Fortuna's stochastic control). Metrics: precision / recall /
+      F1 against fixture ground truth, invalid-id rate, estimated token cost; mean ± bootstrap CI
+      plus **paired** F1 deltas, since every arm sees the same samples in the same order.
+      **The design decision that mattered:** `eval_view_decomposition`'s bundles annotate each
+      artifact with `[associated technique: T1234]`. That is fine there — it scores *grounding*.
+      Here the metric is **accuracy against ground truth**, so a leak would let every arm score
+      perfectly by copying. This harness builds its own evidence from a technique→artifact map in
+      which each artifact *implies* its technique without naming it, and **aborts at startup if
+      any id leaks**. Verified: 5 fixtures × 3 channels, 5 artifacts each, **zero leaks**, budget
+      split exact (2400 = 4 × 600).
+      Two more traps closed by tests: an **empty prediction scores 0 precision**, not 1 — saying
+      nothing is the degenerate equal-budget strategy and must not win a column; and the
+      **mediator is paid out of the same budget**, or `negotiated` quietly outspends `single`.
 - [ ] **A6 — Frontier-arm plumbing** `[cheap]`
       Config path for a second endpoint, a **hard cost ceiling**, and a dry run against a stub.
       Done now, the frontier arm is one flag at B8 and C6.
 - [ ] **A7 — `make check` clean** `[cheap]` — baseline **2268 passed / 12 skipped** (Qdrant down).
       *The "2238" carried in the old roadmap was stale by 30 tests*; measured directly on
-      2026-08-09 by running the suite with A3's two new files excluded. After A3: **2313 / 12**.
+      2026-08-09 by running the suite with A3's two new files excluded. After A3: **2313 / 12**;
+      after A5: **2349 / 12**.
 
 ## B — llama-server, fixture-based (one slot, sequential)
 
@@ -303,7 +315,7 @@ have not run yet.
 ## How each item is verified
 
 - **`make check` after every item** — lint, format, mypy, full suite. Baseline **2268 / 12
-  skipped** (Qdrant down); **2313 / 12** after A3.
+  skipped** (Qdrant down); **2313 / 12** after A3, **2349 / 12** after A5.
 - **Pure helpers behind any reported number are unit-tested**, apart from the pipeline — the
   repo's `test_*_scoring.py` convention. If arithmetic decides a default or a claim, it is tested.
 - **Before any heavy step, check the STOP sentinel** (`logs/overnight-watch.STOP`). The watcher
