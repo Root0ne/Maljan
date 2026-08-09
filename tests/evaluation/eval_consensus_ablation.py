@@ -78,6 +78,11 @@ _DEFAULT_BUDGET = 2400
 
 _TID_RE = re.compile(r"T\d{4}(?:\.\d{3})?")
 
+# Per-call wall-clock cap for eval runs. A legitimate 600-token answer takes
+# ~15 s at ~40 tok/s, so this is 8x headroom and anything past it is a
+# degenerate decode (§3.3) that should be skipped rather than waited on.
+_CALL_TIMEOUT_S = 120
+
 # The three heterogeneous evidence channels. Fixed at three so every arm's
 # budget arithmetic is identical across samples, and chosen so that all five
 # fixtures populate all three — an empty channel would hand `single` a free
@@ -406,6 +411,34 @@ def load_samples() -> list[tuple[str, list[str]]]:
 # ---------------------------------------------------------------------------
 
 
+def bind_eval_llm(agent: Any, *, timeout_s: int = _CALL_TIMEOUT_S) -> None:
+    """Configure an agent's LLM for evaluation. Applied identically to every arm.
+
+    Two settings, and for the first one the *mechanism* is the whole point.
+
+    **The timeout must be bound as a per-request kwarg, not assigned to
+    ``request_timeout``.** ``ChatOpenAI`` builds its HTTP client at construction
+    from ``request_timeout``, which this project's provider sets to **1800 s**
+    (`llm/openai_provider.py`). Assigning the attribute afterwards does not
+    rebuild that client, so the cap silently never applies. Learned the
+    expensive way on 2026-08-09: a B1 call ran **14+ minutes with a "180 s" cap
+    set** and never raised, because the real ceiling was still half an hour.
+    ``bind(timeout=...)`` puts it in the request payload, which the OpenAI SDK
+    honours per call — so a degenerate decode now surfaces as a skip.
+
+    Second, ``enable_thinking=false``: otherwise this reasoning model spends the
+    whole cap inside ``<think>``, which the server strips into
+    ``reasoning_content``, leaving an empty answer (§3.6).
+    """
+    try:
+        agent.llm = agent.llm.bind(
+            timeout=timeout_s,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+    except Exception as exc:  # noqa: BLE001 — a provider may reject either kwarg
+        print(f"  WARNING: could not bind eval LLM settings ({exc}); running unbounded.")
+
+
 def _estimate_output_tokens(text: str) -> int:
     """~4 chars/token, the same convention as ``token_ledger.estimate_tokens``."""
     return max(1, len(text) // 4) if text else 0
@@ -554,19 +587,7 @@ def main_async(repeats: int, budget: int, smoke: bool, checkpoint: Path) -> None
 
     container = ServiceContainer(get_settings(), mock=False)
     agent = container.get_agent("static")
-    # Eval-only, and applied identically to every arm so the equal-budget A/B
-    # stays fair: fail a stuck decode fast, and suppress chain-of-thought so the
-    # model answers instead of spending the cap inside <think> (see §3.6).
-    try:
-        agent.llm.request_timeout = 180  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        agent.llm = agent.llm.bind(  # type: ignore[attr-defined]
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}}
-        )
-    except Exception:  # noqa: BLE001
-        pass
+    bind_eval_llm(agent)
 
     def _record(
         arm: str, sid: str, r: int, text: str, truth: list[str], tokens: int, calls: int

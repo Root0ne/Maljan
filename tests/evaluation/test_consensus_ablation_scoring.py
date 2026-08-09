@@ -21,6 +21,7 @@ import pytest
 
 from tests.evaluation.eval_consensus_ablation import (
     CHANNELS,
+    bind_eval_llm,
     bootstrap_ci,
     build_channels,
     extract_tids,
@@ -129,6 +130,71 @@ class TestEqualBudget:
 
     def test_zero_calls_does_not_divide_by_zero(self) -> None:
         assert per_call_budget(2400, 0) == 2400
+
+
+class _FakeLLM:
+    """Records what was bound, and screams if someone assigns request_timeout."""
+
+    def __init__(self) -> None:
+        self.bound: dict[str, object] = {}
+        self.assigned_request_timeout: object = None
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == "request_timeout":
+            object.__setattr__(self, "assigned_request_timeout", value)
+        object.__setattr__(self, name, value)
+
+    def bind(self, **kwargs: object) -> _FakeLLM:
+        out = _FakeLLM()
+        out.bound = {**self.bound, **kwargs}
+        return out
+
+
+class _FakeAgent:
+    def __init__(self) -> None:
+        self.llm = _FakeLLM()
+
+
+class TestTheEvalTimeoutActuallyBinds:
+    """The regression test for a cap that silently did nothing.
+
+    On 2026-08-09 a B1 batch sat 14+ minutes on one call under a harness that
+    set ``agent.llm.request_timeout = 180``. ChatOpenAI builds its HTTP client
+    at construction from that field — 1800 s here — and assigning it afterwards
+    never rebuilds the client, so the cap was inert and no call was ever
+    skipped. A limit that silently does nothing looks exactly like a limit that
+    was never needed, which is why this needs a test rather than care.
+    """
+
+    def test_the_timeout_is_bound_as_a_request_kwarg(self) -> None:
+        agent = _FakeAgent()
+        bind_eval_llm(agent, timeout_s=120)
+        assert agent.llm.bound.get("timeout") == 120
+
+    def test_it_does_not_assign_request_timeout(self) -> None:
+        """That is the exact mechanism that failed; assigning it again would
+        reintroduce the bug while still looking like a fix."""
+        agent = _FakeAgent()
+        bind_eval_llm(agent, timeout_s=120)
+        assert agent.llm.assigned_request_timeout is None
+
+    def test_thinking_is_disabled_in_the_same_bind(self) -> None:
+        """Both settings must survive one bind — a second bind on the result
+        would be easy to write and easy to get wrong."""
+        agent = _FakeAgent()
+        bind_eval_llm(agent)
+        extra = agent.llm.bound.get("extra_body")
+        assert isinstance(extra, dict)
+        assert extra["chat_template_kwargs"]["enable_thinking"] is False
+
+    def test_a_provider_that_rejects_the_kwargs_does_not_kill_the_run(self) -> None:
+        class Hostile:
+            def bind(self, **_: object) -> object:
+                raise TypeError("unexpected keyword argument")
+
+        agent = _FakeAgent()
+        agent.llm = Hostile()  # type: ignore[assignment]
+        bind_eval_llm(agent)  # must warn, not raise
 
 
 class TestExtractTids:

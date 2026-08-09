@@ -304,24 +304,22 @@ def main_async(
 
     container = ServiceContainer(get_settings(), mock=False)
     agent = container.get_agent("static")
-    # Eval-only: the production request_timeout (1800s) is sized for the static
-    # ReAct budget; here a single degenerate/stuck text decode would stall the
-    # whole batch for 15 min. Fail it fast so the run keeps moving.
-    try:
-        agent.llm.request_timeout = 180  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001
-        pass
-    # Eval-only: disable the local reasoning model's chain-of-thought so it
-    # emits the CLAIM block directly instead of spending the whole token budget
-    # inside <think> (which the server strips into reasoning_content, leaving an
-    # empty answer + frequent timeouts). Applied identically to every arm, so
-    # the equal-budget A/B stays fair; it just makes the model usable here.
-    try:
-        agent.llm = agent.llm.bind(  # type: ignore[attr-defined]
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}}
-        )
-    except Exception:  # noqa: BLE001
-        pass
+    # Eval-only, applied identically to every arm so the equal-budget A/B stays
+    # fair. See ``eval_consensus_ablation.bind_eval_llm`` for why the timeout has
+    # to be a per-request bind kwarg.
+    #
+    # 2026-08-09 CORRECTION. This block previously did
+    # ``agent.llm.request_timeout = 180`` and a comment claiming it made a stuck
+    # decode "fail fast". **It did not.** ChatOpenAI builds its HTTP client at
+    # construction from request_timeout — 1800 s here (llm/openai_provider.py) —
+    # and assigning the attribute afterwards never rebuilds that client, so the
+    # cap was inert. Found while B1 sat 14+ minutes on one call under a "180 s"
+    # cap. The §3.6 numbers stand: the timeout was a convenience for aborting
+    # bad decodes, not a measurement parameter, and every arm shared whatever
+    # ceiling was really in force. What was wrong was the comment.
+    from tests.evaluation.eval_consensus_ablation import bind_eval_llm
+
+    bind_eval_llm(agent)
 
     def _record(arm: str, sid: str, r: int, isr: Any, bundle: str) -> None:
         tids = _cited_tids(isr.claims)

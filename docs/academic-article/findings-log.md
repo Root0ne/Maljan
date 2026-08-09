@@ -1459,6 +1459,32 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-08-09 — an eval harness's safety cap was inert, and only a visible hang exposed it.**
+  While running B1 the batch sat **14+ minutes on a single call with zero skips**, under a harness
+  that set `agent.llm.request_timeout = 180`. Zero skips is the tell: a real 180 s cap would have
+  fired and moved on.
+
+  **Root cause.** `ChatOpenAI` constructs its HTTP client **at init** from `request_timeout`, and
+  this project's provider sets **1800 s** there (`llm/openai_provider.py`, sized for the static
+  ReAct budget). Assigning the attribute afterwards does not rebuild that client, so the eval cap
+  never applied and every call ran under a half-hour ceiling. The fix is to bind the timeout as a
+  **per-request kwarg** — `bind(timeout=120)` — which the OpenAI SDK honours per call.
+
+  **`eval_view_decomposition.py` carried the identical bug, and it produced §3.6.** Its comment
+  claimed the cap made a stuck decode "fail fast". It did not. **The §3.6 numbers stand**: the
+  timeout was a convenience for aborting bad decodes, not a measurement parameter, and whatever
+  ceiling was really in force applied identically to every arm. What was wrong was the comment,
+  and it has been corrected in place rather than quietly deleted.
+
+  **Why this belongs in the paper and not just in a commit.** It is a clean instance of §3.4/N1's
+  thesis — *the instrument was not what the code said it was* — found in our own tooling, and it
+  is the second such instance this week after the `stix2-validator` near-miss, where a wheel
+  shipped without its schemas and called a textbook-valid bundle invalid. Both were caught only
+  because something was checked that did not have to be: there, a known-good bundle; here, the
+  absence of skips. The transferable rule is narrow and cheap: **an eval harness's safety limits
+  need a test that proves they fire**, because a limit that silently does nothing looks exactly
+  like a limit that was never needed.
+
 - **2026-08-09 — the "YARA corpus" is not YARA, and that matters more than its licence
   (queue item D2).** E.6 was blocked pending a licence review of "the 30 YARA rules that carry the
   highest cascade weight (0.90)". Both halves of that sentence needed checking, and only one

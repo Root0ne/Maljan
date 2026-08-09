@@ -60,6 +60,7 @@ from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
 from tests.evaluation.eval_consensus_ablation import (
     CHANNELS,
+    bind_eval_llm,
     bootstrap_ci,
     build_channels,
     channel_prompt,
@@ -339,16 +340,7 @@ def main_async(repeats: int, budget: int, smoke: bool, checkpoint: Path) -> None
 
     container = ServiceContainer(get_settings(), mock=False)
     agent = container.get_agent("static")
-    try:
-        agent.llm.request_timeout = 180  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        agent.llm = agent.llm.bind(  # type: ignore[attr-defined]
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}}
-        )
-    except Exception:  # noqa: BLE001
-        pass
+    bind_eval_llm(agent)
 
     per_call = per_call_budget(budget, 1)
     print(
