@@ -1173,6 +1173,68 @@ this review it did, until corrected.
   with this as a headline result rather than a disappointment: a pre-registered test of our own
   architecture's central claim, run to the literature's own design, reported against us.
 
+### 3.8 The confidence number the cascade runs on is nearly a constant — `EXPERIMENTAL` / `NEGATIVE`
+
+- **Why this matters more than a calibration curve.** `ClaimEvidence.confidence` is a self-reported
+  number on every ISR claim, and the cascade consumes it. `arXiv:2606.29490` (Kumaran et al.)
+  found verbal confidence tracks an LLM's *readiness to commit* rather than correctness — but Q1's
+  full-text read established their suite is MCQ and open-ended QA with **no structured or
+  evidence-cited outputs**. This is the extension to exactly that: claims that must cite an
+  artifact. Harness `tests/evaluation/eval_confidence_calibration.py`, 28 scoring unit tests.
+- **Method.** The three heterogeneous channels from §3.7, 5 fixtures × 5 repeats, one analyst call
+  per channel. Each claim's `technique_id` is scored against the fixture's ground-truth set; the
+  pair `(stated confidence, correct)` is the unit of analysis. **210 claims scored, 4 excluded and
+  counted** (no technique id or no confidence — excluded silently would bias the sample toward
+  what the model was willing to name).
+- **Result.**
+
+  | scope | n | correct | **AUC** | separation | accuracy | mean confidence | overconfidence |
+  |---|---|---|---|---|---|---|---|
+  | **all** | 210 | 78 | **0.550** | +0.014 | 0.371 | **0.984** | **+0.613** |
+  | static | 56 | 14 | 0.648 | +0.043 | 0.250 | 0.961 | +0.711 |
+  | dynamic | 84 | 51 | **0.500** | +0.000 | 0.607 | **1.000** | +0.393 |
+  | network | 70 | 13 | **0.428** | **−0.022** | 0.186 | 0.984 | +0.798 |
+
+- **Finding 1 — the number barely ranks correctness.** AUC **0.550** against a chance baseline of
+  0.500. Kumaran's result replicates in a setting their suite did not cover.
+- **Finding 2, and it is stronger than "miscalibrated" — the signal is nearly degenerate.** **All
+  210 claims fall in a single reliability bin, [0.8, 1.0).** On the `dynamic` channel every claim
+  carries confidence **exactly 1.000** (CI [1.000, 1.000]), so its AUC of 0.500 is not a
+  measurement of poor discrimination — **a constant cannot discriminate at all**. This is a
+  different failure from bad calibration: a miscalibrated-but-informative score can be recalibrated,
+  a constant cannot.
+- **Finding 3 — on one channel it is worse than uninformative.** `network` scores **AUC 0.428 with
+  separation −0.022**: below chance, i.e. the model is *slightly more confident when it is wrong*.
+  Small, and inside the noise at n=70, but it rules out the charitable reading that the number is
+  merely weak-but-positive everywhere.
+- **Finding 4 — overconfidence is large and tracks difficulty inversely.** Stated 0.984 against
+  0.371 observed: **+0.613**. Worst on the channel it is worst at (`network`, +0.798, accuracy
+  0.186). This corroborates `arXiv:2503.23175`'s "overconfident" finding on 350 real threat reports
+  and extends it to per-claim structured output.
+
+- **Instrument check, run before believing any of the above.** `parse_structured_claims` assigns a
+  **default confidence of 0.5** when the model omits `CONFIDENCE:` or the value fails to parse, and
+  the free-text fallback path assigns 0.5 as well. Had the model not emitted confidences, this
+  study would have measured *our parser* and found a perfect constant. **It did not:** every one of
+  the 210 claims sits in [0.8, 1.0), so the 0.5 default — which would land in the [0.4, 0.6) bin —
+  **never fired once**. The values are the model's own. Recording the check because the result
+  would be worthless without it, and because §3.4/N1 is the section arguing exactly this point.
+
+- **What this justifies, and what it costs.** Every deterministic gate downstream — the alignment
+  gate (§1.5.1), the cascade's corroboration requirement, the invalid→valid autocorrect restriction
+  (§1.5.2) — is doing work the confidence number cannot do. It also **converges with §1.10**: the
+  cascade weights moved the corroborated set on 0.0% of samples, and one reason the
+  confidence-driven parts of the cascade move so little is that their input carries almost no
+  information. Against that, **C3 (falsification-before-confidence) is in trouble**: a graded cap
+  keyed to a value that is 0.98 for everything is a cap that almost never binds. B5 should now be
+  read as testing whether the *cap* does anything, given that the *input* does not.
+- **Scope.** 210 claims over 5 synthetic fixture families, one model (§2.0), one analyst prompt per
+  channel. The channels are clean and the evidence is constructed, so the low absolute accuracy
+  (0.371) partly reflects the model over-producing claims against a 5-technique ground truth —
+  but AUC and separation are scale-free and unaffected by that. **Not yet counter-searched**: by
+  the A4 rule this finding is a searched absence only after someone tries to falsify it from an
+  adjacent field, and that has not been done.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
@@ -1536,6 +1598,27 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-09 — B2: the confidence number the cascade runs on is nearly a constant (queue item
+  B2).** New **§3.8**. 210 scored claims, 4 excluded and counted.
+  - **AUC 0.550** against a 0.500 chance baseline — Kumaran's finding replicates in a setting his
+    suite did not cover (structured, evidence-cited claims).
+  - **Stronger than "miscalibrated": nearly degenerate.** All 210 claims fall in **one** reliability
+    bin, [0.8, 1.0); on the `dynamic` channel every claim is **exactly 1.000**, so its AUC of 0.500
+    is arithmetic, not discrimination. A miscalibrated score can be recalibrated; a constant cannot.
+  - **`network` is below chance** — AUC 0.428, separation −0.022: slightly *more* confident when
+    wrong. Small at n=70, but it kills the charitable reading.
+  - **Overconfidence +0.613** (0.984 stated vs 0.371 observed), worst where accuracy is worst
+    (network +0.798). Corroborates `arXiv:2503.23175` and extends it to per-claim output.
+  - **Instrument check first.** Both ISR parse paths default confidence to **0.5**, so a silent
+    model would have made this a study of our own parser returning a perfect constant. Every claim
+    landed in [0.8, 1.0) and the 0.5 default **never fired**, so the values are the model's own.
+    Recorded because the result would be worthless without it.
+  - **Consequence for C3.** A falsification-graded confidence cap keyed to a number that is 0.98
+    for everything is a cap that almost never binds. **B5 now tests whether the cap does anything
+    given that its input does not** — a sharper question than the one it was queued for.
+  - Not yet counter-searched; by the A4 rule it is not an `OURS` candidate until someone tries to
+    falsify it from an adjacent field.
 
 - **2026-08-09 — B1 ran, and the multi-agent defence did not survive it (queue item B1).** New
   **§3.7**. Pre-registered, three arms, equal token budget, n=25 each, design taken from Bertalanič

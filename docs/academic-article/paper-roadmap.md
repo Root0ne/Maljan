@@ -174,12 +174,24 @@ which side of that crossover a malware pipeline sits on.
       also clean, and `arXiv:2604.02460`'s crossover favours single agents exactly there —
       degrading them is the direct follow-up. → **E.2 answered; F1 closes; D3 resolves toward F3**
 
-- [ ] **B2 — Does verbal confidence predict correctness?** `[LLM]`
-      `arXiv:2606.29490` finds reported confidence tracks an LLM's *readiness to commit*, not
-      whether it is right. Our ISR claims and the whole cascade run on that number. Score claims
-      from the fixture runs against ground truth; measure **AUC + separation**. If it replicates
-      it justifies every deterministic gate in the system, and it converges with §1.10's finding
-      that the layer weights move nothing. → **C3**, R4
+- [x] **B2 — Does verbal confidence predict correctness?** `[done]` **2026-08-09** → **§3.8**
+      **The number is nearly a constant.** 210 scored claims (4 excluded and counted).
+      | scope | AUC | separation | mean conf | accuracy | overconfidence |
+      |---|---|---|---|---|---|
+      | all | **0.550** | +0.014 | 0.984 | 0.371 | **+0.613** |
+      | static | 0.648 | +0.043 | 0.961 | 0.250 | +0.711 |
+      | dynamic | **0.500** | +0.000 | **1.000** | 0.607 | +0.393 |
+      | network | **0.428** | **−0.022** | 0.984 | 0.186 | +0.798 |
+      Kumaran replicates in a setting his suite did not cover — and **worse than
+      miscalibrated**: all 210 claims sit in **one** bin [0.8, 1.0), `dynamic` is **exactly 1.000**
+      throughout (so its AUC 0.500 is arithmetic, not discrimination), and `network` is **below
+      chance**. A miscalibrated score can be recalibrated; a constant cannot.
+      **Instrument check ran first:** both ISR parse paths default confidence to **0.5**, so a
+      silent model would have made this a study of our own parser. The default **never fired** —
+      every claim is ≥0.8. The values are the model's own.
+      → justifies every deterministic gate; converges with §1.10; **sharpens B5**, which now tests
+      whether C3's cap does anything given that its input does not
+
 - [ ] **B3 — Layer-0 LLM arm** `[LLM]`
       Does removing a deterministic layer change the **final verdict**, not just the cascade
       arithmetic? §1.10 measured only the arithmetic. → **E.5**
