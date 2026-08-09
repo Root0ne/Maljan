@@ -69,7 +69,12 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
 from maljan.core.truncation_ledger import TruncationLedger
-from tests.evaluation.eval_consensus_ablation import bootstrap_ci, load_samples, mean
+from tests.evaluation.eval_consensus_ablation import (
+    bind_eval_llm,
+    bootstrap_ci,
+    load_samples,
+    mean,
+)
 
 _OUT_FILE = _REPO_ROOT / "tests" / "evaluation" / "layer0_verdict.md"
 _JSON_FILE = _REPO_ROOT / "tests" / "evaluation" / "layer0_verdict.json"
@@ -93,19 +98,64 @@ ARMS: tuple[str, ...] = ("all", *(f"no_{name}" for name, _ in SOURCES))
 # ---------------------------------------------------------------------------
 
 
-def assign_to_sources(technique_ids: list[str]) -> dict[str, list[str]]:
-    """Round-robin the ground truth across the three sources.
+def assign_to_sources(technique_ids: list[str], *, overlap: bool = False) -> dict[str, list[str]]:
+    """Distribute the ground truth across the three sources.
 
-    Round-robin rather than a fixed split so no source is systematically given
-    the "easy" techniques, and deterministic so every arm sees the same
-    assignment. See the module docstring: this equalises contribution on
-    purpose, which is what makes the mechanism measurable and what stops the
-    result being an estimate of real-world impact.
+    Two conditions, because they answer different questions and the first one
+    alone answers the weaker of the two.
+
+    **disjoint** (default) — round-robin, each technique claimed by exactly one
+    source. Removing a source then simply removes its techniques, so the arms
+    measure *does a lost technique reach the bundle*. Round-robin rather than a
+    contiguous split so no source is systematically handed the easy techniques.
+    **This condition produces zero corroborated techniques by construction**,
+    which is what makes it too weak to speak to §1.10.
+
+    **overlap** — each technique is claimed by **two** sources, alternating
+    between two deliberately chosen pairs:
+
+    * ``yara_layer`` + ``import_capability_layer`` — domains ``yara`` and
+      ``static``, i.e. **two distinct domains → corroborated**.
+    * ``yara_layer`` + ``tool_artifact_layer`` — **both emit on domain
+      ``yara``**, so the cascade sees one domain and the technique is **not
+      corroborated even though two independent detectors agreed**.
+
+    That second pair is not a contrivance. It is what the production layers do,
+    and it makes §1.10's structural finding *demonstrable* rather than inferred:
+    corroboration is keyed to the domain tag, not to detector independence, so
+    a second detector that happens to share a tag contributes nothing to the
+    label the report surfaces most prominently.
+
+    **One consequence of this design must be read as construction, not
+    measurement.** ``yara_layer`` appears in *both* pairs, so removing it
+    destroys **all** corroboration by arithmetic — the ``no_yara_layer`` arm is
+    baked in and proves nothing on its own. That mirrors production, where
+    §1.10 measured yara firing on 89.5% of samples against import-capability's
+    52.6%, but it means the informative arms are the other two:
+
+    * ``no_import_capability_layer`` — the techniques survive (yara still claims
+      them) but **lose their corroboration**. This is the arm that tests whether
+      corroboration loss alone reaches the verdict.
+    * ``no_tool_artifact_layer`` — its techniques are also claimed by yara and it
+      contributed **no** corroboration to begin with, so the prediction is
+      **no change at all**. Falsifiable, and the sharpest test in the set.
     """
     out: dict[str, list[str]] = {name: [] for name, _ in SOURCES}
     names = [name for name, _ in SOURCES]
+    if not overlap:
+        for i, tid in enumerate(technique_ids):
+            out[names[i % len(names)]].append(str(tid).upper())
+        return out
+
+    # Alternate the two pairs so both the cross-domain and the same-domain case
+    # appear in every sample rather than splitting by sample.
+    pairs = (
+        ("yara_layer", "import_capability_layer"),  # distinct domains -> corroborated
+        ("yara_layer", "tool_artifact_layer"),  # SAME domain -> not corroborated
+    )
     for i, tid in enumerate(technique_ids):
-        out[names[i % len(names)]].append(str(tid).upper())
+        for name in pairs[i % len(pairs)]:
+            out[name].append(str(tid).upper())
     return out
 
 
@@ -306,7 +356,7 @@ async def _run_one(container: Any, judge: Any, isr_reports: dict[str, Any]) -> t
     return bundle, ledger.snapshot()
 
 
-def main_async(repeats: int, smoke: bool, checkpoint: Path) -> None:
+def main_async(repeats: int, smoke: bool, overlap: bool, checkpoint: Path) -> None:
     samples = load_samples()
     if smoke:
         samples = samples[:1]
@@ -327,13 +377,22 @@ def main_async(repeats: int, smoke: bool, checkpoint: Path) -> None:
 
     container = ServiceContainer(get_settings(), mock=False)
     judge = container.get_judge_agent()
+    # The B1 lesson, applied to the judge path this time. Production gives the
+    # verdict a 600 s wall clock and an 1800 s request timeout, both sized for a
+    # real analysis; here a single degenerate decode would hold the batch for ten
+    # minutes and there are 60 of them. 300 s is generous for an 8192-token
+    # bundle at ~40 tok/s and cuts a runaway. See
+    # ``eval_consensus_ablation.bind_eval_llm`` for why this must be a bound
+    # per-request kwarg rather than an attribute assignment.
+    bind_eval_llm(judge, timeout_s=300)
     print(
-        f"{len(samples)} sample(s), arms={list(ARMS)}, repeats={repeats}.",
+        f"{len(samples)} sample(s), arms={list(ARMS)}, repeats={repeats}, "
+        f"condition={'overlap' if overlap else 'disjoint'}.",
         flush=True,
     )
 
     for sid, truth in samples:
-        assignment = assign_to_sources(truth)
+        assignment = assign_to_sources(truth, overlap=overlap)
         for rep in range(repeats):
             for arm in ARMS:
                 key = f"{arm}:{sid}:{rep}"
@@ -366,8 +425,22 @@ def main_async(repeats: int, smoke: bool, checkpoint: Path) -> None:
                     flush=True,
                 )
 
+    condition = "overlap" if overlap else "disjoint"
     lines = [
         "# B3 + B4 — layer removal at the verdict, and what the integrity pass does",
+        "",
+        f"**Condition: `{condition}`.** In `disjoint` each technique is claimed by exactly one",
+        "source, so **nothing is ever corroborated** and the arms only measure whether a lost",
+        "technique reaches the bundle. In `overlap` each technique is claimed by two sources —",
+        "alternating `yara`+`import_capability` (**distinct domains → corroborated**) and",
+        "`yara`+`tool_artifact` (**same domain → NOT corroborated even though two detectors**",
+        "**agreed**), which is what makes §1.10's structural finding demonstrable, not inferred.",
+        "",
+        "**Read `no_yara_layer` as construction, not measurement.** yara appears in both pairs, so",
+        "removing it destroys all corroboration by arithmetic. The informative arms are",
+        "`no_import_capability_layer` (techniques survive via yara but **lose corroboration**) and",
+        "`no_tool_artifact_layer` (**predicted: no change at all** — its techniques are also",
+        "in yara and it contributed no corroboration to begin with).",
         "",
         "- Input ISRs are **synthesised deterministically** from the fixture ground truth, so the",
         "  only variable between arms is which Layer-0 source exists.",
@@ -397,9 +470,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="B3/B4 layer removal at the verdict.")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument(
+        "--overlap",
+        action="store_true",
+        help="Each technique claimed by TWO sources, so corroboration exists and layer "
+        "removal can cost it. The disjoint default produces zero corroborated techniques.",
+    )
     ap.add_argument("--checkpoint", type=Path, default=_DEFAULT_CHECKPOINT)
     args = ap.parse_args()
-    main_async(args.repeats, args.smoke, args.checkpoint)
+    main_async(args.repeats, args.smoke, args.overlap, args.checkpoint)
 
 
 if __name__ == "__main__":
