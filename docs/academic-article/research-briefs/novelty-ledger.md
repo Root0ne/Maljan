@@ -22,29 +22,30 @@ B-layer measurements (B1, B2).**
 | verdict | count | claims |
 |---|---|---|
 | `OURS` | **2** | C8, E1 |
-| `OURS` — *new, not yet counter-searched* | **2** | **N9** (E.2 equal-budget negative), **N10** (confidence is degenerate) |
-| `REFINEMENT` | **9** | N1, N5, N6, C6(partly), C3, "false corroboration", C5a, N4, N7 |
+| `REFINEMENT` | **11** | N1, N5, N6, C6(partly), C3, "false corroboration", C5a, N4, N7, **+ N9, N10** |
 | `PRIOR ART` | **4** | C5, binary→ATT&CK modality, local/confidentiality framing, honest degradation |
 | `UNMEASURED` — cannot claim | **3** | C1, C2, C7 *(C6 partly answered by B3, pending)* |
 
-### New rows from the B layer, 2026-08-09
+### New rows from the B layer, 2026-08-09 — **both counter-searched the same day, both demoted**
 
-| # | Claim | Evidence | Status |
+They were entered as `OURS pending counter-search`. The counter-search ran within the hour, and
+neither survived it. Recording the sequence rather than the endpoint, because the speed is the
+point: **an unchecked `OURS` row survived about sixty minutes.**
+
+| # | Claim | Adjacent field that owns it | What is left to us |
 |---|---|---|---|
-| **N9** | **Heterogeneous evidence-channel decomposition does not beat a single agent at equal token budget** — the exception the multi-agent literature names does not hold here. −0.016 F1, CI [−0.084, +0.050], at **3.2× the tokens**. But a stochastic noise control **separates** (+0.061, CI excludes 0), so the mediator reconciles rather than averages | §3.7, n=25/arm | `OURS` pending counter-search |
-| **N10** | **The self-reported confidence a cascade consumes is nearly a constant, not merely miscalibrated.** AUC 0.550; all 210 claims in one bin [0.8, 1.0); one channel at **exactly 1.000** throughout; another **below chance** (0.428). Overconfidence +0.613 | §3.8, n=210 claims | `OURS` pending counter-search |
+| **N10** | The self-reported confidence a cascade consumes is nearly a constant — AUC 0.550, all 210 claims in one bin, one channel at exactly 1.000 throughout | **Confidence elicitation.** `arXiv:2603.09309` (Dai & Wang, *Rescaling Confidence*) — **abstract fetched and verified** — reports verbalized confidence is *"heavily discretized, with more than 78% of responses concentrating on just three round-number values"*, across **six LLMs and three datasets**. The phenomenon has a published name — **discretization** — and their evidence is far broader than our one model and five fixtures. Also `arXiv:2306.13063` (Xiong et al.) on overconfidence | **The consequence, not the phenomenon.** Their subject is scale design and metacognition. Ours is a *system that consumes the number*: the cascade's gates are keyed to a value that turns out to be discretized to near-constancy, which is why its confidence-driven parts move nothing (converges with §1.10). Also possibly the **below-chance channel** (AUC 0.428 on `network`) — not seen in their abstract, but n=70 and weak |
+| **N9** | Heterogeneous evidence-channel decomposition does not beat a single agent at equal token budget | **Ensemble learning.** *Deep Ensembles Work, But Are They Necessary?* (`arXiv:2202.06985`) finds ensembles perform about the same as a **larger single model under a fixed parameter budget**, i.e. diversity buys no more than capacity alone. Same shape: a committee of specialists does not beat one model at matched budget | **The substrate genuinely differs** and the demotion is weaker for it: theirs is *independently trained* models under a *parameter* budget; ours is *one* model prompted N ways under a *token* budget. What is left is the domain instance plus the **noise control** — corrupting one channel costs +0.061 F1 with a CI excluding zero, so the mediator reconciles rather than averages, which the ensemble framing does not address |
 
-**N9 is the more valuable of the two**, and not because it is positive — it is a *replication*
-of `arXiv:2604.02460` and `arXiv:2605.00914` in a new domain, produced by testing our own
-architecture's central claim against their design and reporting it against us. **N10 is a
-sharpening of Kumaran** (`arXiv:2606.29490`) rather than a replication: he found confidence tracks
-commitment rather than correctness on unstructured QA; we find that on structured, evidence-cited
-claims it barely varies at all. A miscalibrated score can be recalibrated; a constant cannot.
+**And a self-inconsistency this exposed.** §3.7 already described N9 as *"a replication of
+`arXiv:2604.02460` and `arXiv:2605.00914` in a new domain"* — and a replication is by definition
+not `OURS`. The ledger row contradicted the findings-log entry written an hour earlier. The
+ensemble literature adds a second, older precedent, but the row was mis-verdicted before that
+search ran, by me, against my own text.
 
-**Both rows are `OURS` only provisionally.** By this ledger's own closing rule — and by what A4
-cost us — neither is a searched absence until somebody tries to falsify it from an adjacent field.
-For N9 that means multi-agent/debate ablation literature; for N10, confidence elicitation and
-verbalised-uncertainty work outside security. **Do this before either reaches a draft.**
+**Verification status.** N10's demotion is confirmed by fetching the abstract. N9's rests on
+search results naming a real, checkable paper and is a **demotion pending full-text confirmation**
+— the conservative direction, but it must be read before the paper cites it.
 
 **C3 is now in trouble for a new reason.** It was `REFINEMENT` of FAX and `UNMEASURED`. B2 makes
 the measurement question sharper: a falsification-graded confidence *cap* keyed to a value that is

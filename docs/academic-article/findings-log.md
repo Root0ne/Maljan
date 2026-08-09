@@ -1231,9 +1231,23 @@ this review it did, until corrected.
 - **Scope.** 210 claims over 5 synthetic fixture families, one model (§2.0), one analyst prompt per
   channel. The channels are clean and the evidence is constructed, so the low absolute accuracy
   (0.371) partly reflects the model over-producing claims against a 5-technique ground truth —
-  but AUC and separation are scale-free and unaffected by that. **Not yet counter-searched**: by
-  the A4 rule this finding is a searched absence only after someone tries to falsify it from an
-  adjacent field, and that has not been done.
+  but AUC and separation are scale-free and unaffected by that.
+- **Counter-searched the same day, and the phenomenon is published (2026-08-09).** Searched under
+  **confidence elicitation** rather than security. `arXiv:2603.09309` (Dai & Wang, *Rescaling
+  Confidence: What Scale Design Reveals About LLM Metacognition*) — **abstract fetched and
+  verified** — reports that verbalized confidence is *"heavily discretized, with more than 78% of
+  responses concentrating on just three round-number values"*, across **six LLMs and three
+  datasets**. The effect has a name in that literature — **discretization** — and their evidence
+  is much broader than ours. Our `dynamic` channel sitting at exactly 1.000 throughout is an
+  instance of it, not a discovery of it. See also `arXiv:2306.13063` (Xiong et al.) on
+  overconfidence in elicited confidence.
+  **What remains ours is the consequence, not the phenomenon.** That literature studies scale
+  design and metacognition; this is a *system that consumes the number*. The cascade's gates, the
+  corroboration logic and C3's graded cap are all keyed to a value that turns out to be discretized
+  to near-constancy — which is a mechanism for §1.10's result rather than a restatement of it.
+  Possibly also ours: the **below-chance channel** (`network`, AUC 0.428), which their abstract
+  does not mention; but n=70 and weak, so it is a lead, not a claim.
+  Ledger: **`OURS` → `REFINEMENT`**, about an hour after it was entered.
 
 ---
 
