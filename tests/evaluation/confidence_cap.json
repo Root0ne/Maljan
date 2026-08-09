@@ -1,0 +1,1528 @@
+{
+  "summary": {
+    "samples": 189,
+    "techniques_total": 1348,
+    "gated_techniques": 306,
+    "gated_share_of_all": 0.227,
+    "gated_and_sole_static": 25,
+    "capped": 11,
+    "cap_fire_rate_among_gated": 0.0359,
+    "cap_fire_rate_among_eligible": 0.44,
+    "capped_share_of_all_techniques": 0.0082,
+    "samples_with_any_cap": 11
+  },
+  "per_sample": [
+    {
+      "sample": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa.exe",
+      "total_techniques": 14,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c.exe",
+      "total_techniques": 12,
+      "gated_techniques": 3,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6.exe",
+      "total_techniques": 22,
+      "gated_techniques": 3,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.08
+    },
+    {
+      "sample": "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941.exe",
+      "total_techniques": 10,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e.exe",
+      "total_techniques": 17,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.08
+    },
+    {
+      "sample": "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7.exe",
+      "total_techniques": 4,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "0666d502503180e9534e95ede6d365c6cac1f53422cd2412677ab2a462e2fa3c.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "07f553c7e997169afc8a192d0484441cea752f8154ec0e54dc756946aeed6049.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "0809998772b4599b9dc190b7a69d282c8c938992f12ddc6d25a3c04559872580.exe",
+      "total_techniques": 9,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "084f69c0e0826309f75cfda262d0ef36e87dc2b73a12170dad23492117758cda.dll",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "08cb598a06ac7af5e79b41b4ce3bd4b2d6c37c1cbaa7c3e1e785f3038e08da3a.exe",
+      "total_techniques": 27,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "08e362bf1810b2e4a97771b2890295d3c7dca17a112e0c82020e501d8fc6711d.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "08edc97f63cc5d7ac7ce2fa46811098fd03404bca7a7030d7e17cfc00038052a.exe",
+      "total_techniques": 4,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "0ed974de469222788be4db09ddf1720ea96a39e959df8eda85e6dcccb73e4a59.exe",
+      "total_techniques": 7,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "107300e84cf6a2b217ba019499dd33e965ec03ec70009a4361d1c067264d282f.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d.exe",
+      "total_techniques": 7,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "121a8901094eb205730a3a7f3e176335bf000600c2af96e75c887d61b5e1fbe3.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "123b6141959b472dbbf2f0e8fd0d1316d35866efe23ce8a354e3b0dacafa8fde.exe",
+      "total_techniques": 6,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "17e503aef3804c0513838fb4ae3e00f323b1260bf753d99dbf0ae415ba54de11.exe",
+      "total_techniques": 7,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "1857f37001c2c96b7cfb6850dace37d19f9b5bedf49038ca93d2f421444b1816.dll",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "1940ba18ed66dd2f1c3d4dbd2fbf6cf3438bcdee1e108982fb557461106a8073.exe",
+      "total_techniques": 17,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "1a8921a7a0baedb853e8e618e81a372aafc403ac1961e3abe2740bf30c5e6aa2.exe",
+      "total_techniques": 8,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "1aab32f769ba3b4e2c651fb2f34acc5d5f251ff0b2972a5ea1fd8367b8274c06.exe",
+      "total_techniques": 26,
+      "gated_techniques": 3,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "1ab39bc014f6b6124fbd72d6f6390af9dbb0b67b50112e911c508b81318a3c8d.exe",
+      "total_techniques": 7,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "21b19d07a414ad1ff7443c21c6530d1164c6c1eae56d3619a422d3f311b580b7.exe",
+      "total_techniques": 13,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "21c3b30041dc16f6fb0fe758c4cd1767e272133ff45dd21aee22506e6d9199aa.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "21c9472e24da9f476eafe7f8435e93657a9fffed15b75e56f7d45d12f9f1eb86.dll",
+      "total_techniques": 11,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "21ed24d2d6935439ae3e18b6778d8e1c6387cfbc162f0a047f4df9a00d87fbc9.exe",
+      "total_techniques": 3,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2371d8edbb2a1245b01cc06a870ddca49acb3be47b25e0fddc5d1b0032780bdf.exe",
+      "total_techniques": 3,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2395de00a23d65cb4eb0805b96fb8f326f5045413b0d19185727e302b0133bcf.exe",
+      "total_techniques": 9,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab.exe",
+      "total_techniques": 9,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578.exe",
+      "total_techniques": 14,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2a07b1741dbf216a188938d0fec870f8395374f760c6bf452f0a0479e975b018.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2a6c6d3bd8f0d37255de8ddd78ce0c686b45488ca274f1c7b1588512c0327742.exe",
+      "total_techniques": 5,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "2d8a45f0de92aeb5fc5495c2df0072a00e4d2215b0b2c1ccfd1580d752e32f27.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "31b7e9cf7298ce261b96222c4fae3ff09aee381883d0ecc095b8bca3fbe3e544.exe",
+      "total_techniques": 5,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "32cc6624192e6882d959793c887ef9e116aedc68ceef1ec8d4dbf11609d00d02.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "35b2775aa41701dbe69c8f2e983bfeb81b296aa0bb585c0fda8a0011683bc693.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "36ca73fac0f3955bf525b4c7c72f1a5630be6f66f5726801ca3976829f8ce94b.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "38dfeabf5526511effa346e9ced2145d4d2b1ffbc065146d3869e27fc235cd99.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "3a311fa2632d70ba58f402a83270f3111ebd0074fe45ecfad273ebb8aecdd328.exe",
+      "total_techniques": 14,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "3a544ee360c3c495535e7ad51c96a7a07adbc4e60cdfc6d1f45cad2087b1ffc7.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "3a613ceef615508f56436debf235f4f3fa4df4c3ab7f5a29eff0b78924593ebb.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "3efa9fdaaa74aaa54f0c90937d948bfc1159a3f920d94bd713bd5b2a69336d95.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "40bcf1b92cac08e72eb025659bb892a41926ebd655f448ff5544ece312986987.exe",
+      "total_techniques": 9,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "433aa1a20e6ecbe0a72255ec7528f2a4cd7ce42ae5973e1f1b69ec26f9d767ab.exe",
+      "total_techniques": 6,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "43b1ea9d28fbd3c57dd563eb2097aa6555489795d3f060f2d03192b057878a39.exe",
+      "total_techniques": 8,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4565983c56ad07456e1fedc689887813df0f0fbff3bb716e687347d53526d88b.exe",
+      "total_techniques": 33,
+      "gated_techniques": 4,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4593213d8126635e53fd87ed0e553e2b412cb218fbf69be7a78a6bf0d05a0777.exe",
+      "total_techniques": 16,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "45e972e4f9cd2cf0b0200741081df634ee3e29a5109d7632ff4739df0ed9ad25.exe",
+      "total_techniques": 8,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4a0e6efe7da756a13dd1f1f7fe3a9a24f62e03ac4181e56a9b1e9e46045ff036.exe",
+      "total_techniques": 2,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4af88f5467e746369b32d26fbd469e25c3867b138d9ac3126c6874f642590596.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4b66489da4e9b7073a0432c07b55205453f3f65c427f871c7114ff2ad1dd3713.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4b67e4cea7a978c9a6a73d6217d2d55ee7d6ce3c2b5e6e6a4f59b5e5deb5a4e2.exe",
+      "total_techniques": 19,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4cf2b612939359977df51a32d2f63e2cb0c6c601e114b8e4812bd548d1db85fe.exe",
+      "total_techniques": 18,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4e0f7777fd3ba58bb20f7ceaebaff50b6dcc3191cf27519d83b5ad3db30b8f5e.exe",
+      "total_techniques": 8,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "4f62613ea4bd6d30bc3a4ba8dd3e3b386419d1895253f880a7861fe43d90ebe7.dll",
+      "total_techniques": 13,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "52b6f57b2e7a9fc832227cc0ae02794e506358a295dadcf75387755a1b84b1ea.exe",
+      "total_techniques": 7,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5307df2391a231e16c5ef9ff68e136e40b28415e168230977ade7bba5bed1380.exe",
+      "total_techniques": 25,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "53aefcb31cf737d2af9779bea562b358bb08c876bb68fbe5614c1084decb6728.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5534f625a95609442b9ca37fe7373204a53f55db1543f2e9e140eeb3f4f96ccd.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "55447bf55024b04dba81aea93e4980a015b16a0cbc80a14e46ae820146c65acb.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "56deefa3e5f170c045ab28f8db2f5a0cac6038e6516662f3b277082320f441be.exe",
+      "total_techniques": 5,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5925ecddcc4b4ea9017aad9abe70dfc47bb6aa63bd01a84536a8cd3cc039d781.exe",
+      "total_techniques": 7,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5beefafe5567bd6707eed0bd46ed653a71816ffe4491e4c205dd899bbf002849.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5bfd0fcebd3e1ec9dcd472c4597165c6787c56ecc77eaa4855c5e918e6812cd3.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5c1e7e7b83bc21cebd4ce833cac790ddc3c1f5d1c872fd009aed09b541764b91.exe",
+      "total_techniques": 10,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "5dbda634d2ac2fa1c53a15b77ad8c0772d578e004fa98fea7668c6082f00b1a6.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "6006ab5e4fbab4d984c251d0b683040058df4ba02c51af93049617c17bb9586e.dll",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "640d4390b574d98cd36bd206a65fceec9c322b4008a915519f55a8d39265c78c.exe",
+      "total_techniques": 9,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "64dddbb15d568f1eb31c8e6b41ab7d2c9207ee990c98751151c75f320bf04efa.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "6584f13ecd514b59ef380f0fa106ef5f6ef53e2bb39e0da02947e83de62f6444.exe",
+      "total_techniques": 26,
+      "gated_techniques": 3,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "65e45942fd86dca630ae7fea45d6d7aeb231a2ab29572b7649212d2822cfc43f.exe",
+      "total_techniques": 8,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "66535813e58e078c4a56c502b6536725080aef5f17abf62f57348a574caccaf5.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "69947cfea7518aab0920c81530b9e643d0fd0a14b0686a5d13dc1500366f071d.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "6a915f0e2eaa35eb47d70a933a4d8822d65e64ebea485d9dcb5657f1f4bd1cf8.exe",
+      "total_techniques": 9,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "6cdd8396703edddaf4a0273aaa07ba21b015f94bebc1f9cba18e891dee562637.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "6da676db8e7ca7727cc19b92aa9e4beebbc82e41bb0ebf04e022edbaf090e333.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "6eca9859b0f441c63c622a58b57be1598e9ede0b0970a6bad1d29c4039d6b677.exe",
+      "total_techniques": 27,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "6ee825dd6d1382f588985abaaf023a0204f005a8eb6a53952a88ee71ad6b7221.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "720cb1059ddb3f22ab73de1b5730b3f491bdaa168c727f7cd85b76594b3003a1.exe",
+      "total_techniques": 19,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4.exe",
+      "total_techniques": 2,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "763c01498701ee85f3a9663053e10739c7b4ede30659d2ddbc3109a66fc434e2.exe",
+      "total_techniques": 6,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "77940063fcd0f276c574ea55967eb0834939e8d201922be88ffc53309351a3d1.exe",
+      "total_techniques": 9,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "77db3b54666b168d13a308be378cad1b8bb84db621f8055a03471a254d4c79ed.exe",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "77fa111600d55f4f47e458ff3958e050ff1b9b1a4d42592d7e0dce1f5ed1ef8c.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "7b1c5147c903892f8888f91c98097c89e419ddcc89958a33e294e6dd192b6d4e.dll",
+      "total_techniques": 11,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "7f45cfd690f1e5b13399e616b33d3f1a22b06d8dce32904d4a1513c20cb742d8.exe",
+      "total_techniques": 2,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "7faba2fe65c014143a60ef7ef4ec1c24933bec883f3d959cea44e039e01036cc.exe",
+      "total_techniques": 9,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8104c9434708bb354ccf032cb8e5a589b296e10318d56d1fd4d0d149d8c78ed6.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8163f93e88a9ab0e3f8bd03a7923c56e8968f717397912ea114cc0e38af41353.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "82c683a7f6e0b4a99a6d3ab519d539a3b0651953c7a71f5309b9d08e4daa7c3c.exe",
+      "total_techniques": 20,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "83cf1604ba4a10f1d20e4a20884a00ea7c0b57b2353930b0e2f9c2bda71ade99.exe",
+      "total_techniques": 12,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "87e4d0e94f94dd01a4c6e30f6ee7b612bc6dad0581075bf43fef6f24053e6676.exe",
+      "total_techniques": 6,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "88d8aa69350b8516857c2fee3de800dc7e8afefd5660f27d3fadde51c349fdac.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8a279783229e688a2324c224904473431cc5cab7e6b8538ac8256877cfd58384.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393.exe",
+      "total_techniques": 6,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8b6eb3aac560528cabc96363f81df8595b15db7a9ae20b1486b8fff6ebfbaa7a.exe",
+      "total_techniques": 8,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8cd7d6ad6c2ef4704a7b4e090c31e43fb32ed02ca81007c190dbb4938c9e526d.exe",
+      "total_techniques": 6,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "8f6502f9cc4e6916a6481bf77b2e52473143f39a6fb258186edbb146e577fa65.exe",
+      "total_techniques": 6,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "90b52bcddab0daf79a483788dd0bc954a820ebc0882deb6fb11a69e36bf61614.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "923bb69535e27f3493f6253abd93a1c0a9bd08bcf18dbc27d4d8d381a9220bed.exe",
+      "total_techniques": 5,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "948c821b3a3f5b1ee3a8c49a15c449224be9b0e3c13b5876b5ffc67470424267.exe",
+      "total_techniques": 2,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "94d6af90cfb0d9ae767eb3f6a41f1ad583a3fb1e2108fdc6de7706a922855fe5.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "95b999ce29d2e82dfe33e33261634d449466671debf78c2ebb4747e3434a1d9e.exe",
+      "total_techniques": 3,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "964e7b311e933799477fd793aa4e7721af35fe5c494fd9d995a6a620b162e516.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9860b2cdf23fc044bf7c6715197068b3cf6349f7ffb5e95dfd0229f212c40e63.exe",
+      "total_techniques": 6,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9929f1d675a2190594aef5ec37ab22af416879539d8ffb5c80194d2d3e8edcc3.exe",
+      "total_techniques": 27,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9b0dbc01aa6c7f30a59ec59a0f184dc6ee7c91baa5732192b5d191ff1687a58a.exe",
+      "total_techniques": 4,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9c9a646099da045731162e08f6d04b1c386d81005580f27406fd2ae78ce237c1.exe",
+      "total_techniques": 8,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9d0a5b6d215e8b25ebd13b8a3833040284d73a13381ed263ed313fffe3ab4377.exe",
+      "total_techniques": 10,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9d415566304ae74289ed9cfacbbeddd15e56d61bc3bc8d955f9db99dd543adb5.dll",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "9da7c4d51a2d18aa3e79bfe0c2fa6fb1a6e1754c73985bce90c4c5c1a90e41d3.dll",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "a06d2f622eb4e0403f8a8198898d2ae1d26b5f897cedadcb68cc95b888dc7525.exe",
+      "total_techniques": 8,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "a1439e46019a544b1dd5712b8e2f72c5e35c278964a8f093e7d436f15b333d63.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "a352b9eb373fe914888128f3e6e72cab5a5193cbe491af45304ed7985c9dff8f.dll",
+      "total_techniques": 12,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "a3ae935dad0de2657b032a70d1908f622b3cf54fc53f01a69d5f086e21ad4d9a.exe",
+      "total_techniques": 9,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64.exe",
+      "total_techniques": 3,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "a7c4aae68e13b16ed7d916ba7cde189381e597934b05a26d113a97c8ae8afdbf.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "a9b8879292fbf7bd63b7880cf9e1084040aa1c9adaf0b0f2d05e721696aae161.exe",
+      "total_techniques": 25,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "aad35a5504c45513c4dd2488a13848d3ddbad34e0ebca7dbce4949d4b17651a2.exe",
+      "total_techniques": 6,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "aba7133b1ccdb78338fe271d73689bac4f40251b8fc194a9b86253a71e4017cc.exe",
+      "total_techniques": 11,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "af8fda4ee7c3a1a2fa35e6feb4416de3d9ff6b1869df2b1550557f96c49c45e5.dll",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b073bd6963c36cd4ea37acf1ccd75d418ac3e293a51e8accebc96a97215ddf81.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b1969c15d0e57234d397e64698a4b66f33d52e902a3aaf440b4f6a809a4b6524.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b34d5f723853264502eb255218c41fcd86396a3d15025484836182b0c97d5531.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b86731e235e2e628d9ddfda63dfd59df5266b069531e81e8a67e56ee3798190f.dll",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c.exe",
+      "total_techniques": 10,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b906fffb5dfe57a4a0704e2a89803ce0af2f9e6dc16338fab258051f1c8c4c0e.exe",
+      "total_techniques": 27,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b946960a201ceb50e3b9b7585c7cc7c57adf228c0358772f3870d7ddd53d35bf.dll",
+      "total_techniques": 5,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "b9b052dfb2f19bf15aaba81f07861234f91a72a5c38d83c176a7a4dcdbb2e8c1.exe",
+      "total_techniques": 32,
+      "gated_techniques": 4,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "bb8e116358583fd0a8b9658837d0c9bc9501e9860be9febb9a97d91f3ebc4c52.exe",
+      "total_techniques": 14,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "bf158ab1720e6a0da531b99de882c8c4c32eb5be8a0b1be6483156c561070641.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "bfddf1832640408e64d941058b3030aafd9f945bb5c821641ca833fba4401590.dll",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c12a1b39a379333a188cae48cabda5eaecfed024220bf6495aca025498d6c0fd.exe",
+      "total_techniques": 10,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c2bee3616cf5c0f19ecc5738ee39a8c3d0d0523c2178177b86563d5a3d758d0f.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c3c465c8670333252fe74404324a72ddf5f151b13c1fcb219beb4e88da4926b2.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c3e21f7b2bfc3da5e77b37f6556fb985e4402551bac45636a7488664e67d477f.exe",
+      "total_techniques": 16,
+      "gated_techniques": 3,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c7b4796751027b3049df6c795519f861bc5ac50410324fdff9a315d498dddee9.exe",
+      "total_techniques": 9,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c999ea822a03c90b70c8f7d4fa58711725bd69f2b0252238404b6f11bda1bd21.exe",
+      "total_techniques": 8,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "c9da3969931b59d99a6b21cfabd2677c6c58b848d0a6b19b8c1a9112a2e61e21.exe",
+      "total_techniques": 9,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "cb1eee26a7d2050feb980eccb69d35c05b5a0d28821972df19d974b386d9e4fe.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "cb4e4d28e4ae4e4acaffb8087e80d9163089be1d1f08837e23d665e65d8f30fa.exe",
+      "total_techniques": 7,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "cc6f82015fc2e26a65da84db2dc0e41cc63f5ca735150a5ad55b9f474f0673f3.exe",
+      "total_techniques": 2,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "ceee57e508ebdb79ca13ec9f61253fc2a75505a0f79f49f85a3bad16d9fe2393.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "cf8500d31246c32f2437a84301d0c5de9bfcae445b60fc1bd87d62899f470cc7.dll",
+      "total_techniques": 3,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d06be7bd36b4cdd6ac12e3c7fb675515cd33ae9ea75a26e7dc7fc3a7db14caff.exe",
+      "total_techniques": 16,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d1071e745fe33dbfeea1d838e797ceea8323cec3acaf40cc9b9aef6fbf27469e.exe",
+      "total_techniques": 7,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d417e00241c31f0aa1892528fc941d9e1b817e855f11006ff7cd9619f3e34243.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d41a45ea425c13b2e97bbcd8192d87f34c063de0a16616c024f58a9b05ba3411.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d58a832f0f2ad0d394c07aefb0dd7ea8b925b10322e508496788a76ee864523a.exe",
+      "total_techniques": 6,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d634843da16ff74a676a748989cd01916cd86278dc96c0d45fa9872dd78ba251.exe",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "d999e7ee9fb086bf4109f9c1821d959fd8b038902fa6f8dff2c3beafc36bee7b.dll",
+      "total_techniques": 1,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "da0a4e16ef4baf46f27e666e9b4547cdf17eafad3caa235df6c29a52d3da8d0a.exe",
+      "total_techniques": 6,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc.exe",
+      "total_techniques": 2,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "dd426a8f168871393bec760724228c0584e80519c5069b4969a663846afdb88e.exe",
+      "total_techniques": 9,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "de3e53ef11c40625568ffbf773486d23efdbcc6831e1bca61915348940798ae9.exe",
+      "total_techniques": 15,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "dea612148b5f17340638f8d3939c519013c5e28eb1aaacc2c026a1cbb885314b.dll",
+      "total_techniques": 8,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e0cd2f267e4bbb3507a100f2ea798b996f023a63f77734c5e0752f8dbc77a4aa.exe",
+      "total_techniques": 12,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e0e2e3150774826aca0cb107291a48451907c32a7f5de02c409757a7a2def2c6.exe",
+      "total_techniques": 7,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e4569a594f5901d0817956fdee290b38e488d6caaf47848648b10c07c12206cb.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e6159ff62821d09c5b54837dc5a3f89a1f527fa969d5a6b1c10fb6a211aeeb0d.dll",
+      "total_techniques": 25,
+      "gated_techniques": 2,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.08
+    },
+    {
+      "sample": "e72be8b18b92fa5444ba5e3bf8f5b84a2a5386692f9a6e06d490b43d84f0024c.exe",
+      "total_techniques": 8,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e7fbd0f33ca20caae55da9423c81241c9bced4018456d5fbd27cc9f93f912310.exe",
+      "total_techniques": 2,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e828e55c7c7fb2ebbfcc527acdf728dd8e9cd219a1a64956151b61ef5ddb2436.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "e8d4ad02e8811033f3ce05547774f6e9650ee66cf3f9221df656b326b8bd039d.exe",
+      "total_techniques": 6,
+      "gated_techniques": 3,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "ed14a8886c207595360dbc904914f5113a656951d9aafc748d56d0e9b8f70742.exe",
+      "total_techniques": 3,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "ee0f0d5e812870bc71d54b378a8bc28598bddb1953c2b37021c202650858a636.exe",
+      "total_techniques": 4,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "ee3f6c3fe59b1f5925699e91f49ea5439c0daae112173a303d2c25dd36a42b35.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "eec9f3f49fe6d50c633c2cec1d18f4cb3d31d71e7c851fd52d83843c6e2bcd0f.exe",
+      "total_techniques": 5,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "ef32ef95268ba5534fdd8e75ef3c5663ffec9db01d9ea0f3a998a5869dc3106e.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "efbdd00df327459c9db2ffc79b2408f7f3c60e8ba5f8c5ffd0debaff986863a8.dll",
+      "total_techniques": 3,
+      "gated_techniques": 0,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "f63993a7e4dc3e4242509482ca4d9ee1cbd4c00d219503ecf5d139d763a42f35.exe",
+      "total_techniques": 13,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 1,
+      "mean_delta": 0.15
+    },
+    {
+      "sample": "f6439b324a4baabf6a71339bae0d8f784e5ae660c106f3af6b8690d8310e2fd6.exe",
+      "total_techniques": 2,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "f75668dcd2d8c554bde126315253439858d2155588b1889473a7df5914537f10.exe",
+      "total_techniques": 27,
+      "gated_techniques": 4,
+      "gated_sole_static": 1,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "f78238db552a2bcab1a68fcf3df9fbae50bba3c44d3bda6b7dddcfc007eee046.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "f7e80f5e92bd4d9267be950088a9f5b1117a873868329bba0e927701f87c8fec.exe",
+      "total_techniques": 1,
+      "gated_techniques": 1,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    },
+    {
+      "sample": "f805a1b598457129a8083bba30462360f4361c566d3ba6147d87e06e6fd2fa05.exe",
+      "total_techniques": 4,
+      "gated_techniques": 2,
+      "gated_sole_static": 0,
+      "capped": 0,
+      "mean_delta": 0.0
+    }
+  ]
+}

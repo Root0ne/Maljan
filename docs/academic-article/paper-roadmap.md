@@ -216,23 +216,20 @@ which side of that crossover a malware pipeline sits on.
       Worth keeping: the one defect class observed is §3.3/§1.7.1's budget exhaustion showing up in
       the *artifact* rather than the token stream.
 
-- [ ] **B5 — C3 ablation** `[cheap]` **+** `[LLM]` — *reframed twice, by B2 and by reading the code*
-      **What C3 actually is.** `extractors/capability_matrix._cap_unsupported_confidence`: a
-      deterministic cap to **0.40**, applied *only* to **T1027 / T1140** (obfuscation) and
-      **T1055** (injection) plus sub-techniques, *only* when the technique's **sole contributing
-      layer is `static`** (the LLM/import layer), and *only* when the corresponding static evidence
-      flag is absent.
-      **B2 changes what the experiment is for.** The input confidence is ~0.98 for essentially
-      everything (§3.8), and the cap drops qualifying claims to 0.40. So the cap is not a
-      refinement on top of a graded score — **it is very nearly the only source of grading in the
-      system for those three techniques.** That reframes the question from "does the graded cap
-      beat a binary filter" to **"how often does the only grading mechanism actually fire?"**
-      **And half of it needs no LLM.** The cap is deterministic; what varies is whether its three
-      preconditions hold. Firing rate is countable over the 209-PE static corpus by extending
-      `eval_layer0_contribution.py`, which is **server-free**. Only the downstream question — does
-      a capped claim change the verdict — needs the judge.
-      *Do the cheap half first; if the cap almost never fires, the LLM half is nearly moot and that
-      is itself the answer.*
+- [~] **B5 — C3 ablation** — **cheap half `[done]` 2026-08-09** → **§3.11**; LLM half still open
+      **The only grading mechanism fires on 0.82% of techniques.** 189 samples, 1,348 techniques.
+      Gated techniques are *common* (306, 22.7%) and the evidence check is *decisive* when reached
+      (44% of eligible get capped) — the bottleneck is the **sole-static precondition**, and the
+      source breakdown says why: **257 of 306 gated techniques (84%) come from `yara_layer` alone**,
+      so there is no static claim to discipline. Not "disarmed by a redundant detector" — the
+      population it targets barely exists on this evidence. Corpus-wide: **11 capped, 11/189
+      samples (5.8%)**.
+      **Third leg of one story.** §3.8 the confidence value is near-constant · §3.9 the corroborated
+      set does not reach the verdict · §3.11 the mechanism that grades confidence is a near-no-op.
+      **The whole confidence-and-trust apparatus produces almost no differentiated signal.**
+      **Bounding limit:** no LLM analyst in this run, so the `static` domain is under-populated
+      relative to production — 25 eligible is a **lower bound** and the real rate will be higher.
+      The LLM half (`[LLM]`) measures that and remains queued.
 
 - [ ] **B6 — C1 ablation** `[LLM]` **+ needs the Ghidra container** — *mis-tagged until 2026-08-09*
       Sink-reachability steering has a clean config gate (`use_sink_reachability`, default True),

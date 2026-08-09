@@ -1333,6 +1333,76 @@ this review it did, until corrected.
   §3.3 and §1.7.1 describe from the other side — generation running out of budget mid-structure. It
   is the same phenomenon showing up in the emitted artifact rather than in the token stream.
 
+### 3.11 The only grading mechanism fires on 0.82% of techniques — `EXPERIMENTAL` / `NEGATIVE`
+
+- **Why this was worth measuring, and why the question changed.** C3 ("falsification before
+  confidence") is concretely `_cap_unsupported_confidence`: a deterministic drop to **0.40**,
+  applied only to **T1027 / T1140** (obfuscation) and **T1055** (injection) plus sub-techniques,
+  only when the technique's **sole contributing layer is `static`**, and only when the matching
+  static evidence flag is absent. §3.8 showed the incoming confidence is ~0.98 for essentially
+  everything, so for those techniques **this cap is very nearly the only source of grading in the
+  system**. The question therefore stopped being "is a graded cap better than a binary filter" and
+  became **"how often does the only grading mechanism fire?"**
+- **Method — no LLM required, and the ablation is exact.** `_static_evidence_flags(None)` returns
+  `(True, True)` ("no static picture to contradict the LLM, do not cap"), so `static=None` is a
+  true cap-OFF arm with everything else identical. Both arms run over the **189 samples with
+  evidence** from the 218-PE corpus; any confidence delta is the cap's.
+  Harness `tests/evaluation/eval_confidence_cap.py`, 30 scoring unit tests.
+- **Result.**
+
+  | quantity | value |
+  |---|---|
+  | samples with evidence | 189 |
+  | techniques total | 1,348 |
+  | gated techniques (T1027/T1140/T1055 + subs) | **306 (22.7% of all)** |
+  | …of which sole-layer `static` — cap eligible | **25 (8.2% of gated)** |
+  | **capped** | **11** |
+  | fire rate among eligible | **44.0%** |
+  | fire rate among gated | 3.6% |
+  | **capped share of all techniques** | **0.82%** |
+  | samples where the cap fired at least once | **11 / 189 (5.8%)** |
+
+- **Where the mechanism actually stops, measured rather than inferred.** The gated techniques are
+  *common* — 22.7% of everything — and the evidence check is *decisive* when reached (44% of
+  eligible claims get capped). The bottleneck is the **sole-static precondition**, and the reason
+  is not the one that suggests itself:
+
+  | who claims the 306 gated techniques | count |
+  |---|---|
+  | `yara_layer` alone | **257 (84%)** |
+  | `import_capability` alone | 25 |
+  | both | 24 |
+
+  **In 84% of cases there is no static-layer claim to discipline at all** — the deterministic
+  signature layer found the technique independently. So the cap is not being *exempted by
+  corroboration*; the population it targets barely exists on this evidence. (My first reading of
+  the summary numbers was that yara and static co-claim and the corroboration exempts them. The
+  source breakdown says otherwise, and the difference matters: one story is "the cap is disarmed by
+  a redundant detector", the other is "the cap has almost nothing to act on".)
+- **Finding.** The system's only grading mechanism moves **0.82% of techniques** and touches
+  **5.8% of samples**. It is not broken — when it is reachable it fires on 44% of eligible claims,
+  which is a real filter — but at corpus scale it is very nearly a no-op.
+- **This is the third leg of the same story, and together they are the strongest negative in the
+  work.** §3.8: the confidence value is discretized to near-constancy. §3.9: the corroborated set
+  does not reach the verdict. §3.11: the one mechanism that grades confidence fires on under 1% of
+  techniques. **The confidence-and-trust apparatus — a graded score, a corroboration cascade with
+  five weights and a falsification cap — produces almost no differentiated signal end to end.**
+  That is a coherent, measured result about a real system, and it is the paper's material.
+- **The scope limit that bounds this specific number, and it is significant.** This run exercises
+  the **static Layer-0 sources only** — yara, import-capability, tool-artifact — with **no LLM
+  analyst in the loop**. In production the `static` domain *also* carries the LLM static analyst's
+  claims, which is the population the cap was written for (the docstring says the local model
+  "keeps over-claiming obfuscation from ordinary dynamic-API-resolution"). **So 25 eligible
+  techniques is a lower bound, and the true firing rate with the LLM arm attached will be higher.**
+  The honest claim is: *on deterministic evidence the cap is nearly inert*, and the LLM-arm
+  measurement is queued.
+- **A documented inversion this result puts a size to.** `_static_evidence_flags` carries a comment
+  noting that the cap fires when static evidence does *not* support a claim, so **a better packer
+  detector makes the cap fire less often** — improving detection would have produced *more*
+  high-confidence hallucinated T1027, and a confidence threshold on packer matches is what breaks
+  that. This measurement bounds the exposure: the inversion acts on at most the 25-claim eligible
+  population, i.e. under 2% of techniques. Real, but small.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
