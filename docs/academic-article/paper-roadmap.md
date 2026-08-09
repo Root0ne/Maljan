@@ -218,9 +218,19 @@ which side of that crossover a malware pipeline sits on.
       *Do the cheap half first; if the cap almost never fires, the LLM half is nearly moot and that
       is itself the answer.*
 
-- [ ] **B6 — C1 ablation** `[LLM]`
-      Sink-reachability prompt steering **on vs off**. R1 found no competing claim, so C1 may
-      survive if measured — and cannot be claimed at all if it isn't.
+- [ ] **B6 — C1 ablation** `[LLM]` **+ needs the Ghidra container** — *mis-tagged until 2026-08-09*
+      Sink-reachability steering has a clean config gate (`use_sink_reachability`, default True),
+      so the ablation itself is simple. What is not simple is the input: the module is pure and
+      deterministic, but it consumes a **call graph from Ghidra MCP `get_full_call_graph`**. There
+      is no fixture path — a synthetic call graph would test the ranking code, not the claim.
+      **So B6 cannot run alongside B1–B5 on llama alone; it needs `make docker-up` for Ghidra.**
+      Schedule it with the service-heavy items rather than with the fixture harnesses.
+      *Note for the write-up:* the module's own docstring says a binary without named sink callees
+      (a stripped, statically linked ELF) yields an **empty hint** and the analyst falls back
+      silently. The ablation must therefore report **how often the hint is non-empty at all**,
+      or a null result will be indistinguishable from a feature that never fired — the same trap
+      B5 was reframed around.
+
 - [ ] **B7 — C2 tier contribution** `[LLM]`
       Opcode-hash tier vs semantic-RAG tier, separately. AsmRAG (`arXiv:2604.23196`, 40,000
       binaries, F1 95–96%) means an unmeasured two-tier design is indefensible.
