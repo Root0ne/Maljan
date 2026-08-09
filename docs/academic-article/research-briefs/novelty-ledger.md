@@ -16,10 +16,13 @@
 
 ## Summary
 
+**Revised 2026-08-09 after the adversarial counter-search (queue item A4). Three of the five
+`OURS` rows did not survive it.**
+
 | verdict | count | claims |
 |---|---|---|
-| `OURS` | **5** | C5a, N4, N7, C8, E1 |
-| `REFINEMENT` | **6** | N1, N5, N6, C6(partly), C3, "false corroboration" |
+| `OURS` | **2** | C8, E1 |
+| `REFINEMENT` | **9** | N1, N5, N6, C6(partly), C3, "false corroboration", **+ C5a, N4, N7** |
 | `PRIOR ART` | **4** | C5, binary→ATT&CK modality, local/confidentiality framing, honest degradation |
 | `UNMEASURED` — cannot claim | **4** | C1, C2, C6, C7 |
 
@@ -27,19 +30,59 @@
 architecture. Four architectural claims cannot be defended because they were never measured, and
 the two candidates we were building a framing on both fell to prior art in a single night.
 
+**And now a third thing.** Part F recommended the F2 remnant — **C5a + N4 + N7** — as the paper's
+"sharpest chapter". A4 searched each of those three in the vocabulary of an adjacent field, and
+**all three demoted to `REFINEMENT`**. None was refuted; each turned out to be a domain instance
+of something a neighbouring field already knows. The refinements are real and worth publishing —
+but the chapter can no longer be introduced as three novel findings, and **D3 must re-decide the
+framing on that basis**.
+
+### What A4 actually did
+
+The ledger's own closing item said every `OURS` is *a searched absence, not a proof*, and asked
+for one targeted search each **from a different angle, ideally by someone who wants it to be
+false**. That is what this was. The searches deliberately used the adjacent field's vocabulary:
+auto-correction → **grammatical error correction**; degenerate loop → **neural text
+degeneration**; rank-vs-gate → **IR score calibration**; drift → **temporal generalization of
+LMs**; hint-to-completion → **inference latency / prompt compression**.
+
+**Evidence standard, stated because it varies by row.** Only `arXiv:2604.03676` was confirmed by
+fetching the source (abstract). The GEC and degeneration findings come from search results
+naming real, checkable papers, and are recorded here as *demotions pending full-text
+confirmation* — the demotion is the safe direction, so acting on them now is conservative, but
+**each must be read in full before the paper cites it**. That is the same rule the 2026-08-08
+citation audit imposed after a search summary fabricated a claim.
+
 ---
 
 ## The ledger
 
-### `OURS` — no prior work found
+### `OURS` — survived the counter-search
 
 | # | Claim | Searched against | Confidence | Notes |
 |---|---|---|---|---|
-| **C5a** | Retrieval **ranking** and **alignment-gating** are separate axes; composing per-axis winners beats either pure backend (N=4,913 TRAM2) | TechniqueRAG `2505.11988`, H-TechniqueRAG `2604.14166`, Semantic Ranking `2403.17068`, TTPrint `2605.25836` — none reports a gate-separation metric | `MEDIUM` | The Büchel SoK (USENIX Sec '25) already publishes the *conclusion* that traditional NLP out-gates embedders; ours is the **mechanistic refinement**, and must be positioned as such |
-| **N4** | Auto-correcting valid-but-weak technique IDs is net-negative: damages **38%** of correct IDs to recover **21%** of wrong ones, and the gate cannot separate them | LlmCorr `2402.13414` runs the opposite direction (LLM corrects an ML model); no ATT&CK system reports a correction-stage regression | `MEDIUM` | **Most transferable result we have.** Every retrieve-then-rerank system has an implicit override policy and none reports its cost |
-| **N7** | Degenerate technique-ID loop in a small model; sampler penalties convert a tight loop into a slow enumeration ramble — necessary but insufficient | Constrained decoding is the standard remedy; TTPrint verifies post-hoc. Nobody documents budget exhaustion as the failure | `MEDIUM` | Reviewer will say *"constrained decoding solves this"*. True — the contribution is that the cheaper mitigation practitioners reach for first does not |
-| **C8** | An advisory prompt hint's real effect is **completion under a time budget**, not mapping accuracy: empty bundles **6/17 → 1/17** | No CTI-generation work measures completion under an operational budget | `MEDIUM` | Strongest claim in R8. Caveat ships with it: operational, timeout-mediated, specific to a slow local model |
-| **E1** | 7-year drift study, n=210 dated real binaries: earliest→latest F1 delta **−0.004**, all CIs overlap; hallucination ≤0.011 | Drift evaluation is standard for trained classifiers; no LLM-based malware-analysis equivalent found | `MEDIUM` | Needs an **equivalence bound** — overlapping CIs are not evidence of absence |
+| **C8** | An advisory prompt hint's real effect is **completion under a time budget**, not mapping accuracy: empty bundles **6/17 → 1/17** | R8's CTI-generation sweep; **A4 adjacent field: inference latency / prompt compression** — `arXiv:2604.02985` (*Prompt Compression in the Wild*) measures latency, rate adherence and quality, and the wider literature optimises latency. None found measuring **completion rate under a hard wall-clock ceiling** as the channel a prompt change acts through | `MEDIUM` | Held. The distinction that survives the search: that field asks *how fast*, we ask *whether anything came out at all before the deadline*. Caveat ships with it — operational, timeout-mediated, specific to a slow local model (§1.7.1) |
+| **E1** | 7-year drift study, n=210 dated real binaries: earliest→latest F1 delta **−0.004**, bound ≤0.040 F1 at 95% | Drift evaluation for trained classifiers; **A4 adjacent field: temporal generalization of LMs** — Lazaridou et al. *Mind the Gap* (NeurIPS'21), TemporalWiki `2204.14211`, TARDIS `2503.18693`, and a 2025 survey of temporal drift in LLMs | `MEDIUM` | Held **but must be reframed**, see below |
+
+**E1's reframing, and it is not optional.** The temporal-LM literature is large and its finding is
+*degradation*. But it varies the **gap between training time and test time**, holding the input
+distribution's role implicit. Our study does the opposite: the model is **fixed**, and what varies
+is **the era of the input binary**. Those are different axes, and E1 is the second one — closer to
+concept drift in malware detection (TESSERACT/Pendlebury) applied to an LLM analyst than to
+temporal misalignment. Two consequences: the paper may **no longer say temporal effects in LLMs
+are unstudied** — it must cite this literature and distinguish the axis; and the field's prior of
+degradation makes our null **more** interesting, not less, provided the axis is stated plainly.
+
+### Demoted by the A4 counter-search, 2026-08-09
+
+*Each was `OURS` with `MEDIUM` confidence. None was refuted — each was found to be a domain
+instance of an adjacent field's established result. Pending full-text confirmation where noted.*
+
+| # | Was | Adjacent field that owns it | What is left to us |
+|---|---|---|---|
+| **C5a** | `OURS` | **IR score calibration.** `arXiv:2604.03676` (*Are LLM-Based Retrievers Worth Their Cost?*, Abdallah, Holdcroft, Ali, Jatowt) — **confirmed by fetching the abstract** — evaluates **confidence (AUROC) for predicting query success** as a dimension distinct from retrieval effectiveness, finds *"confidence calibration is consistently weak across model families"*, and concludes raw scores are *"unreliable for downstream routing without additional calibration"* | **The separate-axes framing is no longer ours** — that is their contribution, stated generally, over more retrievers than we test. What may remain: the specific **inversion** we measure (the *lexical* backend gates better while the *semantic* one ranks better) and composing the per-axis winners as a design. I found no paper reporting that inversion — and no paper excluding it either, so this is a weaker absence than C5a previously claimed |
+| **N4** | `OURS` | **Grammatical error correction.** Over-correction is a named, long-studied failure there, and **GEC evaluates with F0.5 precisely because a false correction costs more than a missed one** — the exact asymmetry our 38%-damaged / 21%-recovered result rediscovers. Recent work targets it directly (PoCO post-correction; edit-wise preference optimisation, COLING'25) | The **non-separability** finding: correct-but-weak and wrong-but-valid IDs cannot be told apart *by an alignment score*, so the valid→valid swap cannot be tuned safely at any error rate. Plus the provably-zero-regression restriction (a valid ID is never invalid). The *principle* is GEC's; the **mechanism and the security-domain instance** are ours. *Pending full-text confirmation* |
+| **N7** | `OURS` | **Neural text degeneration.** Welleck et al., *Neural Text Degeneration with Unlikelihood Training* (`1908.04319`); *Repetition In Repetition Out* (`2310.10226`, NeurIPS'23); and *Rethinking Repetition Problems of LLMs in Code Generation* (`2505.10402`), which states plainly that a uniform repetition penalty is **detrimental** for frequent tokens. "Sampler penalties are necessary but insufficient" is that field's settled position | The **operational consequence** in a structured-output security pipeline: the ramble exhausts the budget, the judge times out, and the deliverable is an **empty bundle** — degeneration as a *delivery* failure rather than a text-quality one. Plus the engine-specific finding that ik_llama honors `repeat_penalty` and silently ignores three siblings. *Pending full-text confirmation* |
 
 ### `REFINEMENT` — prior work owns the idea; we narrow it
 
@@ -75,14 +118,26 @@ the two candidates we were building a framing on both fell to prior art in a sin
 
 ## What the ledger implies for the paper
 
-1. **Lead with measurement, not architecture.** Five `OURS` rows are all results about how
-   things fail or how to measure them. Four architectural claims are unmeasured.
-2. **Two framings died in one night.** Describe-then-map and the binary modality are both prior
-   art. The roadmap's Part F must be rewritten around F3 (negative results / methodology) with
-   F1 gated on E.1 and E.2.
-3. **Three claims are one experiment away from surviving** — C6, C3 and C7. C7's is `[cheap]`.
-4. **The adjacent-field rule paid for itself four times.** Infer-Retrieve-Rank (general ML),
-   TTPDetect (binary analysis), Dempster–Shafer (sensor fusion), template-vs-neural (NLG). Every
-   single one would have been missed by searching security terms alone.
+*Rewritten 2026-08-09 after A4.*
+
+1. **Lead with measurement, not architecture.** Unchanged, and now the only option: two `OURS`
+   rows remain and both are measurement results. Four architectural claims are unmeasured.
+2. **Three framings have now died.** Describe-then-map and the binary modality fell to prior art
+   on 08-08; the **F2 remnant** — the chapter Part F called the sharpest, built on C5a + N4 + N7 —
+   demoted wholesale on 08-09. F1 remains gated on B1 and C3.
+3. **A `REFINEMENT` is still publishable, and this is the honest way to publish it.** All three
+   demoted rows keep a real contribution: C5a keeps the measured *inversion* between which backend
+   ranks and which gates; N4 keeps **non-separability by alignment score**; N7 keeps degeneration
+   as a **delivery** failure. What changes is the sentence that introduces them — "we find" becomes
+   "we confirm in a new domain, and add the mechanism".
+4. **The adjacent-field rule has now paid for itself seven times.** Infer-Retrieve-Rank (general
+   ML), TTPDetect (binary analysis), Dempster–Shafer (sensor fusion), template-vs-neural (NLG),
+   and now GEC over-correction, neural text degeneration, and IR score calibration. Every one
+   would have been missed by searching security terms alone. **It is the single highest-yield
+   habit in this review** and should be described as a method in the paper, not just used.
+5. **Three claims are one experiment away from surviving** — C6, C3 and C7 (B4/B5/C3 in the queue).
+6. **The remaining `OURS` rows are still absences.** C8 and E1 survived one counter-search each.
+   Before submission each deserves a second, by a different route — and E1's must be run against
+   the *input-era* framing, not the temporal-misalignment one, or it will search the wrong field.
 5. **Every `OURS` is an absence.** Before any of the five reaches a submitted paper, it needs one
    targeted manual search from a different angle — ideally by someone who wants it to be false.

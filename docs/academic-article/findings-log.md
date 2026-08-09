@@ -953,14 +953,28 @@ this review it did, until corrected.
   `presence_penalty` are silently ignored is an ik_llama.cpp behaviour at the pinned commit,
   and says nothing about llama.cpp upstream, vLLM or a hosted endpoint. Generalisation is
   **E.8**, open until the frontier arm runs.
-- **Literature position (2026-08-08).** The *hallucinated-ID* concern is well represented —
-  TTPrint [8] retains only candidates supported by both localised evidence and the MITRE
-  definition, and constrained decoding is the standard remedy. What the review found no
-  precedent for is this pathology as a **budget-exhaustion** failure, nor the finding that
-  sampler penalties are necessary-but-insufficient against it. Stands as `OURS` with `MEDIUM`
-  confidence (an absence, not a proof). The expected reviewer response — *"constrained decoding
-  solves this"* — is correct, and the contribution is precisely that the cheaper mitigation a
-  practitioner reaches for first does not.
+- **Literature position (2026-08-08, ~~`OURS`~~ **corrected 2026-08-09 → `REFINEMENT`**).** The
+  *hallucinated-ID* concern is well represented — TTPrint [8] retains only candidates supported by
+  both localised evidence and the MITRE definition, and constrained decoding is the standard
+  remedy. The 08-08 review found no precedent for the **budget-exhaustion** framing or for
+  "sampler penalties are necessary-but-insufficient", and recorded this as `OURS`.
+  **That was a security-vocabulary search, and the adjacent field owns half of it.** The A4
+  counter-search looked under **neural text degeneration** and found the insufficiency of
+  penalties is that field's settled position: Welleck et al., *Neural Text Degeneration with
+  Unlikelihood Training* (`arXiv:1908.04319`); *Repetition In Repetition Out* (`arXiv:2310.10226`,
+  NeurIPS'23), which attributes degeneration to self-reinforcement and training-data repetition;
+  and *Rethinking Repetition Problems of LLMs in Code Generation* (`arXiv:2505.10402`), which
+  states directly that a uniform repetition penalty is **detrimental** for frequently-recurring
+  tokens. Our "necessary but insufficient" is a rediscovery.
+  **What survives, and it is the more interesting half:** degeneration here is a **delivery**
+  failure, not a text-quality one. The ramble exhausts the generation budget, the judge overruns
+  its 600 s ceiling, and the analyst receives an **empty STIX bundle** — §1.7.1 measures exactly
+  that channel at 6/17 vs 1/17. The degeneration literature measures repetition rate and text
+  quality; none of it measures a structured deliverable failing to exist. Also ours, and narrower
+  still: the engine-level finding that ik_llama honors `repeat_penalty` while silently ignoring
+  `repetition_penalty` / `frequency_penalty` / `presence_penalty` (§2.0 pins the commit).
+  *The three degeneration papers are demotion evidence pending full-text confirmation; each must
+  be read before the paper cites it.*
 
 ### 3.4 Negative methodological finding: single-run claim-count is not a valid instrument — `NEGATIVE`
 - Running the §3.2 A/B three times under different decoding budgets produced
@@ -1444,6 +1458,58 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 ---
 
 ## Changelog (append new sessions here)
+
+- **2026-08-09 — the counter-search cost us three of five `OURS` rows (queue item A4).** The
+  novelty ledger's own closing item said every `OURS` is *a searched absence, not a proof*, and
+  asked for one hostile search each from a different angle. Done, deliberately in the **adjacent
+  field's vocabulary** rather than in security's. **Three of five did not survive.**
+
+  | row | adjacent field | outcome |
+  |---|---|---|
+  | **C5a** rank and gate are separate axes | IR score calibration | **→ `REFINEMENT`** |
+  | **N4** auto-correction is net-negative | grammatical error correction | **→ `REFINEMENT`** |
+  | **N7** degenerate ID loop | neural text degeneration | **→ `REFINEMENT`** |
+  | **C8** hint → completion, not accuracy | inference latency / prompt compression | **held** |
+  | **E1** 7-year drift, no measurable drift | temporal generalization of LMs | **held, reframed** |
+
+  - **C5a.** `arXiv:2604.03676` (*Are LLM-Based Retrievers Worth Their Cost?*, Abdallah et al.) —
+    **abstract fetched and confirmed** — evaluates **confidence via AUROC for predicting query
+    success** as a dimension explicitly distinct from retrieval effectiveness, reports that
+    *"confidence calibration is consistently weak across model families"*, and concludes raw scores
+    are *"unreliable for downstream routing without additional calibration"*. The separate-axes
+    framing is theirs, stated more generally and over more retrievers than we test. What may remain
+    ours is the **inversion** we measure — the *lexical* backend gates better while the *semantic*
+    one ranks better — which I found neither asserted nor excluded elsewhere. A search result
+    claiming BM25 was the best-calibrated retriever at AUROC@10 = 0.602 could **not** be verified
+    against the abstract and is **not** recorded as a finding.
+  - **N4.** Over-correction is a named, long-studied failure in GEC, and that field evaluates with
+    **F0.5 precisely because a false correction costs more than a missed one** — the same asymmetry
+    our 38%-damaged / 21%-recovered result rediscovers. What survives is the mechanism: correct-
+    but-weak and wrong-but-valid IDs are **not separable by an alignment score**, so the valid→valid
+    swap cannot be tuned safely at any error rate; plus the provably-zero-regression restriction.
+  - **N7.** See §3.3, corrected in place.
+  - **C8 held.** The latency literature (e.g. `arXiv:2604.02985`, *Prompt Compression in the Wild*)
+    asks **how fast**; §1.7.1 asks **whether anything was produced before the deadline at all**.
+  - **E1 held but must be reframed, and this is the substantive part.** There is a large temporal
+    literature — Lazaridou et al. *Mind the Gap* (NeurIPS'21), TemporalWiki (`2204.14211`), TARDIS
+    (`2503.18693`), a 2025 survey of temporal drift in LLMs — and its finding is *degradation*. But
+    it varies the **gap between training time and test time**. Ours holds the model **fixed** and
+    varies **the era of the input binary**: a different axis, closer to concept drift in malware
+    detection than to temporal misalignment. The paper may **no longer say temporal effects in LLMs
+    are unstudied**; it must cite this work and name the axis. The field's prior of degradation
+    makes our null *more* interesting, provided the distinction is stated plainly.
+
+  **Consequence for the paper, and it is not small.** Part F recommended the F2 remnant — C5a + N4
+  + N7 — as the sharpest chapter. All three demoted in one pass. None was refuted and each keeps a
+  real mechanism, so the chapter survives as *confirm-in-a-new-domain-and-add-the-mechanism*; what
+  it can no longer be is a headline. The framing decision (D3) is now genuinely binary and hangs on
+  B1. **Ledger: 5 `OURS` → 2.**
+
+  **Evidence standard, stated because it varies by row.** Only `2604.03676` was confirmed by
+  fetching. The GEC and degeneration rows rest on search results naming real, checkable papers and
+  are recorded as **demotions pending full-text confirmation** — demotion is the conservative
+  direction, so acting now is safe, but each must be read before it is cited. Same rule the
+  2026-08-08 citation audit imposed after a search summary fabricated an AISI claim.
 
 - **2026-08-09 — P9: the model is pinned; the engine commit is gone (queue item A2).** New
   **§2.0**. The model half closed cleanly — GGUF sha256 computed here *and* matching the

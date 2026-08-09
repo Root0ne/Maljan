@@ -16,15 +16,21 @@
 
 ## Where this stands
 
-**The ledger, which governs everything below:** **5 `OURS` · 6 `REFINEMENT` · 4 `PRIOR ART` ·
-4 `UNMEASURED`**. Every surviving claim is a *measurement* result; all four architectural claims
-are unmeasured, which is why the B and C layers exist. Two framing candidates —
-describe-then-map (`arXiv:2401.12178`) and binary→ATT&CK (`arXiv:2602.06325`) — fell to prior art
-on 2026-08-08, so we cite rather than claim.
+**The ledger, which governs everything below** *(revised 2026-08-09 after A4)*: **2 `OURS` ·
+9 `REFINEMENT` · 4 `PRIOR ART` · 4 `UNMEASURED`**. Both surviving claims are *measurement*
+results; all four architectural claims are unmeasured, which is why the B and C layers exist.
 
-**The self-audit exposes three rows:** P6 (truncation frequency never counted), P8 (four claims
-phrased more generally than one model, one machine supports), P9 (no GGUF digest, no engine
-commit). None needs an experiment; A1–A3 close them.
+**Three framings have died, not two.** Describe-then-map (`arXiv:2401.12178`) and binary→ATT&CK
+(`arXiv:2602.06325`) fell to prior art on 08-08. Then **A4 demoted the entire F2 remnant** — C5a,
+N4 and N7, the three claims Part F called the paper's sharpest chapter — to `REFINEMENT` against
+IR score calibration, grammatical error correction and neural text degeneration respectively. None
+was refuted; each is a domain instance of a neighbouring field's settled result, and each keeps a
+real mechanism. But the chapter can no longer be introduced as novel findings, and **D3 re-decides
+on that basis.**
+
+**The self-audit's three exposed rows are closed as far as writing can close them.** P6 is
+instrumented (A3) and will be reported at C7; P8's four claims are scoped (A1) with the empirical
+half at C6; P9's model and engine are both pinned (A2).
 
 **The one thing that decides the paper's shape is B1.** The literature's prior now runs *against*
 multi-agent designs: two 2026 equal-budget studies find single agents match or beat debate, one of
@@ -51,9 +57,9 @@ which side of that crossover a malware pipeline sits on.
 > marked P6 as `[cheap]` *once runs exist*; that is backwards. If the counters are not in place
 > first, the 100+ runs in B and C produce no truncation data and have to be repeated.
 
-- [ ] **A0 — Collapse the queue into this file** `[cheap]`
-      Migrate the old §2/§3/§4 checkboxes here with dependencies written down. Record the
-      n=100 + CAPE decision in long-term memory. *(This item is what produced this file.)*
+- [x] **A0 — Collapse the queue into this file** `[done]` **2026-08-09**
+      Old §2/§3/§4 checkboxes migrated here with dependencies written down; the n=100 + CAPE
+      decision recorded in long-term memory. *(This item is what produced this file.)*
 - [x] **A1 — P8: scope the four over-general claims** `[done]` **2026-08-09**
       All four now carry a *Scope of the claim* bullet; `related-work.md` gained a section-level
       scope statement. Two were not about the model at all: **§3.3's sampler finding is an
@@ -93,12 +99,18 @@ which side of that crossover a malware pipeline sits on.
       **The denominator is the point:** pass-throughs are counted too, so the rate is not computed
       against the wrong base. **45 unit tests**, including that telemetry never raises and that
       concurrent analysts do not lose counts. → **P6** measured at **C7**, **C7** at **B4**
-- [ ] **A4 — Counter-search the five `OURS` rows** `[cheap]`
-      The ledger's own closing item: every `OURS` is a *searched absence*, not a proof. One
-      targeted search each for C5a / N4 / N7 / C8 / E1, **in the vocabulary of an adjacent
-      field** — the rule that has already paid for itself four times (Infer-Retrieve-Rank indexes
-      as general ML, TTPDetect as binary analysis, Dempster–Shafer as sensor fusion,
-      template-vs-neural as NLG). Anything found demotes a row.
+- [x] **A4 — Counter-search the five `OURS` rows** `[done]` **2026-08-09** — **three demoted**
+      | row | adjacent field | outcome |
+      |---|---|---|
+      | **C5a** | IR score calibration | **→ `REFINEMENT`.** `arXiv:2604.03676` (abstract fetched and confirmed) evaluates confidence/AUROC as a dimension distinct from retrieval effectiveness; the separate-axes framing is theirs. Ours may keep the measured **inversion** (lexical gates better, semantic ranks better) |
+      | **N4** | grammatical error correction | **→ `REFINEMENT`.** Over-correction is a named failure there and **F0.5 exists precisely because false corrections cost more than misses**. Ours keeps **non-separability by alignment score** |
+      | **N7** | neural text degeneration | **→ `REFINEMENT`.** "Penalties are necessary but insufficient" is settled there. Ours keeps degeneration as a **delivery** failure — ramble → timeout → empty bundle |
+      | **C8** | inference latency / prompt compression | **HELD.** That field asks *how fast*; we ask *whether anything came out before the deadline* |
+      | **E1** | temporal generalization of LMs | **HELD but must be reframed** — that literature varies the **train/test gap**; we hold the model fixed and vary the **input's era**. Different axis, and the paper may no longer call temporal effects unstudied |
+      **Ledger: 5 `OURS` → 2.** This hits the framing directly — Part F's "sharpest chapter" was
+      C5a + N4 + N7, and all three demoted. **D3 must re-decide on that basis.** GEC and
+      degeneration rows are demotions *pending full-text confirmation*; demotion is the safe
+      direction, but each must be read before the paper cites it.
 - [ ] **A5 — Build the B1 harness** `[cheap]`
       `tests/evaluation/eval_consensus_ablation.py`, skeleton from
       [eval_view_decomposition.py](tests/evaluation/eval_view_decomposition.py) — the equal-budget
@@ -210,11 +222,16 @@ which side of that crossover a malware pipeline sits on.
       The 30 in-house rules carry the highest cascade weight (0.90) and their publishability is
       unsettled. → **E.6**
 - [ ] **D3 — Lock the framing** `[decide]` — once B1, C3 and C5 are in
-      Today's recommendation is **F3 (negative results / measurement) on the F4 (drift) spine,
-      with the F2 remnant — C5a, N4, N7 — as the sharpest chapter.** But **a positive B1 carries
-      F1 (the system paper) on its own**: an equal-budget win for heterogeneous evidence channels,
-      against a literature prior predicting the opposite, is a strong enough finding to lead with.
-      That is why the framing locks *after* B1, not now.
+      **The old recommendation is void.** It was F3 on an F4 spine *with the F2 remnant (C5a, N4,
+      N7) as the sharpest chapter* — and A4 demoted all three of those to `REFINEMENT`. The
+      decision is now binary and hangs on one experiment:
+      - **B1 positive** → **F1**, the system paper. An equal-budget win for heterogeneous evidence
+        channels, against a literature prior predicting the opposite, leads on its own.
+      - **B1 negative or null** → **F3 on an F4 spine**, where the contribution is the *method*
+        — adjacent-field counter-search, instrument-validity failures, frequency-prior baselines,
+        and a set of honest negatives — rather than any single finding. A4 is itself evidence for
+        that framing: a review discipline that demoted three of its own authors' claims.
+      Both are publishable. Do not lock before B1.
 - [ ] **D4 — Finalise the ledger and the self-audit** — update the four `UNMEASURED` rows with
       their results; re-issue the P6/P8/P9 verdicts
 
@@ -245,31 +262,41 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | C3 | Falsification-before-confidence protocol | **unmeasured** | `REFINEMENT` of FAX | **B5**, B2 |
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
 | C5 | Describe-then-map | §1.5.1/§1.5.2 measured | **PRIOR ART** `2401.12178` | cite only |
-| C5a | Rank and gate are separate axes | N=4,913 TRAM2 **+ AnnoCTR** | **OURS** | A4 confirms |
+| C5a | Rank and gate are separate axes | N=4,913 TRAM2 **+ AnnoCTR** | **REFINEMENT** — `2604.03676` owns the framing | keeps the *inversion* |
 | C6 | Multi-layer corroboration cascade | §1.10 partial | `UNMEASURED` | **C3**, C2 |
 | C7 | Deterministic STIX integrity + honest degradation | emitter fixed, pass unmeasured | `UNMEASURED` | **B4** |
-| C8 | Schema-pruning hint → completion, not accuracy | n=17 paired | **OURS** | A4 confirms |
+| C8 | Schema-pruning hint → completion, not accuracy | n=17 paired | **OURS** — held at A4 | second search before submission |
 | N1 | Claim-count is an invalid instrument | measured | `REFINEMENT` | E1 |
 | N2 | Equal-budget view decomposition trades grounding for volume | n≈8–9/arm | `REFINEMENT` | E1 |
 | N3 | Zero-shot semantic category inference loses to keywords | N=101 | `REFINEMENT` | E1 |
-| N4 | Auto-correction damages 38% to recover 21% | measured | **OURS** | A4 confirms |
+| N4 | Auto-correction damages 38% to recover 21% | measured | **REFINEMENT** — GEC over-correction | keeps non-separability |
 | N5 | Deterministic template beats LLM narrative on faithfulness | n=15 | `REFINEMENT` | D1 informs |
 | N6 | Working retriever, unreachable query; frequency prior wins | measured | `REFINEMENT` | E1 |
-| N7 | Degenerate ID loop; sampler penalties insufficient | reproducible | **OURS** | A4 confirms |
+| N7 | Degenerate ID loop; sampler penalties insufficient | reproducible | **REFINEMENT** — text degeneration | keeps *delivery* failure |
 | N8 | No speculative-decoding gain on A3B MoE | measured | `PRIOR ART`-adjacent | appendix |
-| E1 | 7-year drift study, n=210, no measurable drift | n=210, bound ≤0.040 F1 | **OURS** | A4 confirms |
+| E1 | 7-year drift study, n=210, no measurable drift | n=210, bound ≤0.040 F1 | **OURS** — held at A4 | must reframe: *input-era*, not train/test gap |
 | E2 | KV scaling on hybrid-offload MoE | measured | — | appendix |
 | E3 | ~201-tool catalogue infeasible at 3B | measured | open gap | E1 |
 | — | binary→ATT&CK input modality | — | **PRIOR ART** `2602.06325` | cite only |
 
 ## Framing
 
+*Revised 2026-08-09 after A4.*
+
 | Framing | Rests on | Status |
 |---|---|---|
-| **F1 System paper** | C0, C4, C6, C7 | **Gated on B1 and C3.** A positive B1 carries it alone |
-| **F2 Describe-then-map** | ~~C5~~, C5a, N4, N7 | **Broken as stated** — rebuildable as F3's sharpest chapter |
-| **F3 Negative results / methodology** | N1–N8, §1.5.3, §1.10 | **Strongest today**, and unusually honest |
-| **F4 Drift study** | E1 | **Uncontested**; needs C5's baseline arm to land the contrast |
+| **F1 System paper** | C0, C4, C6, C7 | **Gated on B1 and C3.** A positive B1 carries it alone — and after A4 this is the **only route to a paper led by something novel** |
+| **F2 Describe-then-map** | ~~C5~~, ~~C5a~~, ~~N4~~, ~~N7~~ | **Gone.** C5 was prior art; A4 demoted the remaining three to `REFINEMENT`. Survives as a *confirm-and-add-mechanism* chapter, not a headline |
+| **F3 Negative results / methodology** | N1–N8, §1.5.3, §1.10 | **Still the strongest today**, and A4 made it *more* honest, not less. But it now leads with refinements plus genuine negatives rather than with novelty |
+| **F4 Drift study** | E1 | **Held at A4**, and must be reframed as **input-era** drift, not train/test misalignment. Needs C5's baseline arm to land the contrast |
+
+**What A4 changed about the decision.** Before it, F3-on-an-F4-spine was recommended partly
+because the F2 remnant gave it a sharp chapter. That chapter is now three refinements. So the
+question at D3 is starker than it was: **either B1 returns positive and F1 becomes viable, or the
+paper is a measurement-and-negative-results paper whose novelty is the method** — the
+adjacent-field search discipline, the instrument-validity failures, and the negatives — rather
+than any single finding. Both are publishable. Only one of them is decided by an experiment we
+have not run yet.
 
 ---
 
