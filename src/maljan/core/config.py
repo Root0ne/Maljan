@@ -100,6 +100,32 @@ class AgentLLMConfig(BaseModel):
     temperature: float | None = None
 
 
+class FrontierConfig(BaseModel):
+    """The frontier comparison arm (findings-log E.8, queue items B8 / C6).
+
+    **Evaluation only.** Nothing in the analysis pipeline reads this; only the
+    eval harnesses do, through ``maljan.core.frontier``. The arm exists to close
+    pitfall **P8** — every LLM result in this work is one model on one machine,
+    and `arXiv:2606.18166` found parameter size to be the only significant
+    predictor of F1 on the nearest task, which makes the architecture/model
+    confound a live threat to validity rather than a formality.
+
+    ``max_spend_usd`` is a **hard** ceiling checked before every call, and the
+    per-million-token rates are what make it enforceable. Leaving the rates at
+    zero disables the arm rather than making it free — a meter that cannot price
+    a call cannot refuse one. Set them from the provider's published pricing.
+    """
+
+    enabled: bool = False
+    base_url: str | None = None
+    api_key: SecretStr | None = None
+    model: str = ""
+    # Deliberately small. Raising it should be a decision, not a default.
+    max_spend_usd: float = 25.0
+    input_usd_per_mtok: float = 0.0
+    output_usd_per_mtok: float = 0.0
+
+
 class LLMConfig(BaseModel):
     """Top-level LLM configuration grouping provider selection and per-provider settings.
 
@@ -112,6 +138,8 @@ class LLMConfig(BaseModel):
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
+    # Evaluation-only comparison endpoint; see FrontierConfig.
+    frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
 

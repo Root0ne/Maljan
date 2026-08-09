@@ -128,13 +128,27 @@ which side of that crossover a malware pipeline sits on.
       Two more traps closed by tests: an **empty prediction scores 0 precision**, not 1 — saying
       nothing is the degenerate equal-budget strategy and must not win a column; and the
       **mediator is paid out of the same budget**, or `negotiated` quietly outspends `single`.
-- [ ] **A6 — Frontier-arm plumbing** `[cheap]`
-      Config path for a second endpoint, a **hard cost ceiling**, and a dry run against a stub.
-      Done now, the frontier arm is one flag at B8 and C6.
-- [ ] **A7 — `make check` clean** `[cheap]` — baseline **2268 passed / 12 skipped** (Qdrant down).
-      *The "2238" carried in the old roadmap was stale by 30 tests*; measured directly on
-      2026-08-09 by running the suite with A3's two new files excluded. After A3: **2313 / 12**;
-      after A5: **2349 / 12**.
+- [x] **A6 — Frontier-arm plumbing** `[done]` **2026-08-09** → `src/maljan/core/frontier.py`,
+      `LLMConfig.frontier`, **27 unit tests**
+      No new provider code was needed — `OpenAIConfig.base_url` already supports OpenAI-compatible
+      endpoints. What was needed is the part that spends the author's money safely: a `CostMeter`
+      whose ceiling is checked **before** each call, not reconciled after, because a call already
+      made cannot be un-billed. Projections price output at the **full cap** (a degenerate decode
+      produces exactly that — §3.3), real cost is charged from observed `usage_metadata`, and a
+      response without usage is still charged from an estimate, because an uncharged call is a
+      hole in the ceiling.
+      **Zero pricing disables the arm rather than making it free** — a meter that cannot price a
+      call can never refuse one. The shipped default is disabled *and* unpriced, so a fresh clone
+      or CI is never one env var away from billing someone.
+      One real defect found by its own test: `$0.30 + $0.12 = 0.42000000000000004` in IEEE-754, so
+      a strict `>` refused a call landing exactly on a round limit. Fixed with a 1e-9 USD epsilon
+      — representation slack, not a spending allowance, and there is a test pinning that
+      distinction.
+- [x] **A7 — `make check` clean** `[done]` **2026-08-09** — **2376 passed / 12 skipped**, lint,
+      format and mypy clean. Baseline was **2268 / 12** (Qdrant down); *the "2238" carried in the
+      old roadmap was stale by 30 tests*, measured directly by running the suite with A3's new
+      files excluded. Progression: 2268 → **2313** (A3) → **2349** (A5) → **2376** (A6).
+      **The A layer is complete. Nothing below runs without a service.**
 
 ## B — llama-server, fixture-based (one slot, sequential)
 
