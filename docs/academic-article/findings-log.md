@@ -1249,6 +1249,90 @@ this review it did, until corrected.
   does not mention; but n=70 and weak, so it is a lead, not a claim.
   Ledger: **`OURS` → `REFINEMENT`**, about an hour after it was entered.
 
+### 3.9 The corroborated set does not reach the verdict — `EXPERIMENTAL` / `NEGATIVE`
+
+- **What §1.10 left open.** §1.10 showed the cascade *weights* never move the corroborated set:
+  `is_corroborated = len(contributing_layers) >= 2` does not consult `LAYER_WEIGHTS`, so five
+  perturbations moved it on **0.0%** of samples. That is a statement about the cascade's internals.
+  The open question is one level down: **does the corroborated set move the bundle the analyst
+  receives?** A signal can be computed correctly and still be ignored downstream.
+- **Method.** ISRs synthesised deterministically from the fixture ground truth; the only variable
+  between arms is which static Layer-0 source exists. Four arms × 5 fixtures × 3 repeats = **60
+  judge calls, 0 skipped**. Each technique is claimed by **two** sources, alternating
+  `yara`+`import_capability` (**distinct domains → corroborated**) and `yara`+`tool_artifact`
+  (**same domain → not corroborated even though two detectors agreed**). Harness
+  `tests/evaluation/eval_layer0_verdict.py`, 26 scoring unit tests.
+- **The manipulation worked — corroboration varied sharply across arms:**
+
+  | arm | corroborated techniques (of 5) |
+  |---|---|
+  | `all` | **3** |
+  | `no_tool_artifact_layer` | **3** |
+  | `no_yara_layer` | **0** |
+  | `no_import_capability_layer` | **0** |
+
+- **And the verdict did not move at all:**
+
+  | arm removed | verdict changed | mean Jaccard vs `all` | 95% CI | n |
+  |---|---|---|---|---|
+  | `yara_layer` | **0/15** | 1.000 | [1.000, 1.000] | 15 |
+  | `import_capability_layer` | **0/15** | 1.000 | [1.000, 1.000] | 15 |
+  | `tool_artifact_layer` | **0/15** | 1.000 | [1.000, 1.000] | 15 |
+
+- **Finding.** Corroboration swung from **3 techniques to 0** between arms and the final bundle's
+  technique set was **identical every time**. Taken with §1.10 the pair is:
+  *the weights do not move the corroborated set, and the corroborated set does not move the
+  bundle.* **On this evidence the corroboration apparatus is downstream-inert** — it is computed,
+  reported, and does not change what the analyst is given.
+- **What is *not* shown, stated plainly because the design guarantees part of the result.** Every
+  technique had **two** sources, so removing one always left another and **technique survival was
+  baked in**. B3 therefore does *not* show that losing evidence is harmless. What it shows is
+  narrower and still substantive: **corroboration *status* changed sharply and propagated nowhere.**
+  A design where a technique's only source is removed would test the other question, and the
+  disjoint condition — which produces 0 corroborated by construction — is the wrong tool for it.
+- **A second thing the design cannot separate.** `no_tool_artifact_layer` was pre-registered as
+  *predicted no change*, and it changed nothing — but so did the two arms that destroyed all
+  corroboration. The prediction was confirmed and is **uninformative**, because in a run where
+  nothing changes, "nothing changed" is not evidence for any particular mechanism.
+- **Scope.** 5 synthetic fixture families, one model (§2.0), one judge pass, equal source
+  contribution by construction. In production the rates are wildly uneven (§1.10: yara 89.5%,
+  import-capability 52.6%, tool-artifact 2.4%), so this measures the **mechanism**, not the
+  real-world cost of removing a layer. That needs C2's measured rates.
+- **Consequence.** C6 (multi-layer corroboration cascade) cannot be claimed as a contribution on
+  this evidence: the mechanism exists, is computed correctly, and does not reach the output. The
+  honest framing for the paper is that the cascade's *value*, if any, is in the ranking it produces
+  and in what it filters **before** the judge, not in the corroboration label — and that label is
+  the one the report surfaces most prominently.
+
+### 3.10 What the STIX integrity pass actually removes — `EXPERIMENTAL` (C7, partial)
+
+- **The measurement C7 needed.** A3 instrumented `enforce_bundle_integrity`; this is the first read
+  of those counters on **fresh** bundles (the archived ones predate the `spec_version` fix, and the
+  defect classes come from LLM generation).
+- **Result over the same 60 judge-generated bundles.**
+
+  | quantity | value |
+  |---|---|
+  | bundles generated | 60 |
+  | integrity pass ran | **60 / 60** |
+  | pass removed something | **3 (5.0%)** |
+  | objects removed, total | **3** |
+  | removal reasons | `empty_pattern` ×3 |
+
+- **Finding.** On clean, synthetic evidence the repair pass **almost never fires** — 5% of bundles,
+  one object each, and every removal is the same class: an indicator whose pattern was empty or
+  truncated, i.e. **generation stopping mid-pattern**. No duplicate attack-patterns, no duplicate
+  indicators, no dangling relationships.
+- **What that does to C7.** "Repairing beats rejecting" cannot be supported by a 5% firing rate on
+  three objects. But the result is not a refutation either, and the reason is in the input: this
+  evidence is *constructed and consistent*, so there is little for the pass to repair. **C7 needs a
+  population where the defects actually occur**, which is the CAPE-driven runs with real
+  sandbox evidence — queue item C-layer. Until then C7 stays `UNMEASURED`, now with a measured
+  lower bound rather than nothing.
+- **One thing worth keeping regardless.** The single defect class observed is exactly the failure
+  §3.3 and §1.7.1 describe from the other side — generation running out of budget mid-structure. It
+  is the same phenomenon showing up in the emitted artifact rather than in the token stream.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations

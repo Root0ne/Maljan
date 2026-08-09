@@ -192,14 +192,30 @@ which side of that crossover a malware pipeline sits on.
       → justifies every deterministic gate; converges with §1.10; **sharpens B5**, which now tests
       whether C3's cap does anything given that its input does not
 
-- [ ] **B3 — Layer-0 LLM arm** `[LLM]`
-      Does removing a deterministic layer change the **final verdict**, not just the cascade
-      arithmetic? §1.10 measured only the arithmetic. → **E.5**
-- [ ] **B4 — C7 LLM arm** `[LLM]`
-      How often does the integrity pass fire on real output, and what does it **recover** that
-      rejection would discard? The archived bundles predate the `spec_version` fix and the defect
-      classes come from LLM generation, so fresh bundles are required. A3's counters measure it.
-      → **C7**
+- [x] **B3 — Layer-0 LLM arm** `[done]` **2026-08-09** → **§3.9**
+      **The corroborated set does not reach the verdict.** 60 judge calls, 0 skipped. The
+      manipulation worked — corroboration swung **3 → 0** between arms — and the final bundle's
+      technique set was **identical every time** (0/15 changed on every arm, Jaccard 1.000,
+      CI [1.000, 1.000]).
+      With §1.10 the pair reads: *the weights do not move the corroborated set, and the corroborated
+      set does not move the bundle.* **The corroboration apparatus is downstream-inert on this
+      evidence.**
+      **Stated because the design guarantees part of it:** every technique had two sources, so
+      technique *survival* was baked in. B3 does **not** show that losing evidence is harmless — it
+      shows corroboration *status* changed sharply and propagated nowhere. Also: the pre-registered
+      `no_tool_artifact` prediction was confirmed and is **uninformative**, because in a run where
+      nothing changes, "nothing changed" supports no particular mechanism.
+      → **C6 cannot be claimed on this evidence**; E.5 answered for the mechanism, not the impact
+- [x] **B4 — C7 LLM arm** `[done]` **2026-08-09** → **§3.10**
+      Integrity pass ran on **60/60** bundles, removed something on **3 (5.0%)**, **3 objects
+      total**, every one an `empty_pattern` — an indicator whose pattern stopped mid-generation. No
+      duplicates, no dangling relationships.
+      "Repairing beats rejecting" cannot rest on that. Not a refutation either: the evidence here is
+      constructed and consistent, so there is little to repair. **C7 needs a population where the
+      defects occur — the CAPE runs.** Stays `UNMEASURED`, now with a measured lower bound.
+      Worth keeping: the one defect class observed is §3.3/§1.7.1's budget exhaustion showing up in
+      the *artifact* rather than the token stream.
+
 - [ ] **B5 — C3 ablation** `[cheap]` **+** `[LLM]` — *reframed twice, by B2 and by reading the code*
       **What C3 actually is.** `extractors/capability_matrix._cap_unsupported_confidence`: a
       deterministic cap to **0.40**, applied *only* to **T1027 / T1140** (obfuscation) and
