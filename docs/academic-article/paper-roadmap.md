@@ -244,9 +244,22 @@ which side of that crossover a malware pipeline sits on.
       LLM scoring in the paper costs that row, and unlabelled LLM scoring presented as human
       evaluation is not recoverable. So **E.7 remains an open limitation in the paper: no human
       analyst has scored a report.**
-- [ ] **D2 — YARA corpus licence review** `[decide]`
-      The 30 in-house rules carry the highest cascade weight (0.90) and their publishability is
-      unsettled. → **E.6**
+- [x] **D2 — YARA corpus licence review** `[done]` **2026-08-09** — **E.6 unblocked, and a
+      mis-description found that matters more than the licence did**
+      **Licence: clear.** `data/yara_ttp_rules.yaml` is 30 **in-house** rules; the `.yar` files in
+      the tree belong to **CAPEv2**, not us. Each rule is a list of literal substrings — Windows
+      API names, documented registry paths — which is public nomenclature, not third-party
+      creative expression. **Publishable verbatim** in E5.
+      **But they are not YARA rules.** No YARA syntax, no conditions, no modules: `YaraLayer` does
+      **case-insensitive literal substring matching**. Calling them YARA rules in a security venue
+      overstates the mechanism, and the naming is already load-bearing — the cascade gives the
+      `yara` domain the **highest weight (0.90)**, which reads as *an engine matched* when it means
+      *a string appeared*. Worse, the codebase uses **real** YARA elsewhere
+      (`detection_signatures.py` calls `yara.compile()` to validate rules Maljan *emits*), so one
+      word would do two jobs in one paper.
+      **Write-up action:** call it a **deterministic literal-pattern layer**; describe real YARA
+      separately as output validation. No code rename — that would break the layer names §1.10
+      already published under. → **E.6**
 - [ ] **D3 — Lock the framing** `[decide]` — once B1, C3 and C5 are in
       **The old recommendation is void.** It was F3 on an F4 spine *with the F2 remnant (C5a, N4,
       N7) as the sharpest chapter* — and A4 demoted all three of those to `REFINEMENT`. The

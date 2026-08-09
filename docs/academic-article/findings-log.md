@@ -1459,6 +1459,39 @@ Qwen3.6-35B-A3B (MoE) IQ3_K_R4; Qdrant; MITRE ATT&CK.
 
 ## Changelog (append new sessions here)
 
+- **2026-08-09 — the "YARA corpus" is not YARA, and that matters more than its licence
+  (queue item D2).** E.6 was blocked pending a licence review of "the 30 YARA rules that carry the
+  highest cascade weight (0.90)". Both halves of that sentence needed checking, and only one
+  survived.
+
+  **Licence: clear, and E.6 unblocks.** `data/yara_ttp_rules.yaml` is 30 **in-house** rules. Each
+  is a list of literal substrings — Windows API names (`VirtualAllocEx`, `NtUnmapViewOfSection`),
+  documented registry paths (`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`),
+  and short strings — mapped to an ATT&CK id with a confidence. No third-party rule corpus is
+  vendored: the `.yar` files in the tree belong to **CAPEv2**, not to us. Publicly documented
+  nomenclature is not third-party creative expression, so the corpus can be **published verbatim**
+  in the reproducibility appendix (E5).
+
+  **But they are not YARA rules, and the paper must not call them that.** There is no YARA syntax,
+  no condition language, no modules; `YaraLayer` matches **case-insensitive literal substrings**.
+  Three reasons this is a real problem rather than a quibble:
+  1. **It overstates the mechanism.** In a security venue "YARA rule" names a specific engine and
+     rule language. A reviewer who reads "30 YARA rules" and finds a substring matcher has found
+     us describing our own system inaccurately — the cheapest possible way to lose credibility.
+  2. **The naming is already load-bearing in an argument.** The cascade gives the `yara` domain the
+     **highest weight, 0.90**, which reads as *a YARA engine matched* when it means *a string
+     appeared*. §1.10's finding that `tool_artifact` shares yara's cascade domain is stated in that
+     same vocabulary.
+  3. **The codebase uses real YARA elsewhere.** `reporting/detection_signatures.py` calls
+     `yara.compile()` — to **validate rules Maljan generates as output**. One word would be doing
+     two jobs in the same paper.
+
+  **Action for the write-up:** call it a **deterministic literal-pattern layer**, state plainly that
+  the 0.90 weight attaches to a curated substring matcher over static strings, and describe real
+  YARA separately as an *output* validation step. No code change is implied — renaming
+  `yara_layer` and the cascade domain would touch the layer names §1.10 already published under,
+  which is a worse trade than being precise in prose.
+
 - **2026-08-09 — the counter-search cost us three of five `OURS` rows (queue item A4).** The
   novelty ledger's own closing item said every `OURS` is *a searched absence, not a proof*, and
   asked for one hostile search each from a different angle. Done, deliberately in the **adjacent
