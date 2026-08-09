@@ -63,7 +63,13 @@ sentence in the paper, not an experiment.
 > *"LLMs are used to annotate data with certain labels via classification or LLM-as-a-judge
 > procedures without further validation of correctness."*
 
-**We never used LLM-as-a-judge for scoring**, which is the common form of this failure. Every
+**We never used LLM-as-a-judge for scoring**, which is the common form of this failure. **Still
+true after the B layer, and worth re-checking rather than assuming** — the five harnesses added on
+2026-08-09 all score in code: B1 compares technique-id sets against fixture ground truth, B2 scores
+each claim's id against the same, B3/B4 diff bundles and read integrity counters, B5 diffs two runs
+of a production function. No model judged any result. The one planned exception is **D1, the
+readability assessment, which is LLM-based and for that reason does not enter the paper at all**
+(see the queue). Every
 evaluation harness scores deterministically: `TTPAccuracyMetrics` compares technique-id sets by
 exact match; narrative quality is grounding precision / coverage recall / structural compliance
 computed in code (§3.5); view decomposition scores invalid-id rate through the production
@@ -130,10 +136,25 @@ memory corpus with generated cases is obvious and we documented refusing it.
 The second is the more interesting: it was invisible to top-k accuracy and only appeared in the
 **score distribution**, which is a generalisable diagnostic.
 
+**A third instance, 2026-08-09 — and the diagnostic is the transferable part.** §3.8 found the
+ISR **confidence** channel sitting at ~0.98 regardless of content, with one channel at exactly
+1.000 throughout. That is the *same diagnostic* as instance 2, applied to a different score: look
+at the **distribution**, not the top-line metric. Both channels looked healthy by their headline
+number and were degenerate underneath.
+
+Strictly this is not a spurious correlation — the model is not adapting to an artifact, it is
+failing to vary at all — so it does not make P5 worse. It matters here because it is the second
+time the **score-distribution check** caught something no accuracy metric would have, which
+promotes that check from an anecdote to a method worth naming in the paper. *(The phenomenon
+itself is published — `arXiv:2603.09309`, "discretization" — see §3.8. What is ours is the
+diagnostic habit and the fact that a system was consuming the number.)*
+
 **Residual:** no *systematic* robustness testing. The pitfall recommends controlled
 perturbations; our only instance is the §1.10 weight-perturbation study, which perturbs our own
 constants rather than the input. Input perturbation (packed vs unpacked, stripped vs symbolised,
-renamed functions) is unrun and would be a real experiment.
+renamed functions) is unrun and would be a real experiment. **The B1 follow-up — degrading the
+evidence channels to locate `arXiv:2604.02460`'s crossover — is exactly such a perturbation and is
+now queued**, so this row has a concrete path off `PARTIAL` for the first time.
 
 ## P6 — Context Truncation `EXPOSED`
 
@@ -295,3 +316,29 @@ in a way most papers in this survey are not** — no LLM scored any result here,
 the memory corpus with generated cases was considered and refused with a citation. Against a
 baseline where only 15.7% of present pitfalls are discussed at all, having a document like this
 one is itself part of the answer.
+
+---
+
+## A tenth check this survey does not have, added 2026-08-09
+
+All nine pitfalls concern the relationship between a paper's **claims** and its **experiments**.
+Two failures this week sat a level below that — between the claim register and the **evidence
+log** — and neither would have been caught by any of the nine:
+
+1. **A claim was recorded as novel one hour after our own text called it a replication.** N9's
+   findings-log entry described it as *"a replication of `arXiv:2604.02460` and `arXiv:2605.00914`
+   in a new domain"*, while the ledger row said `OURS`. Catching that needed no literature search
+   at all — only reading the two documents against each other.
+2. **This audit mis-stated one of its own rows.** P8's first pass recorded §1.5.2's limitation as
+   "one model's outputs" when that harness is **server-free** and its error modes are injected.
+   Corrected the same day. The consequence was not cosmetic: it would have attached a model caveat
+   to the one result that does not need one, while leaving the limit that actually binds — the
+   retrieval index — unwritten.
+
+**The check: before a claim register is trusted, diff it against the evidence log.** It costs
+minutes, needs no external source, and here it caught two errors a literature search would have
+missed — one of which had already been written down correctly and was then contradicted.
+
+Worth a methods note in the paper, because it generalises: a project disciplined enough to keep
+both a findings log *and* a claim ledger has, by that very fact, created the conditions for the
+two to diverge.
