@@ -106,3 +106,9 @@ logs/
 
 # External corpora — fetched by eval scripts, never vendored
 data/external/
+
+# CAPE analysis reports fetched for the n=100 dynamic cohort. ~7 MB each,
+# ~660 MB for the cohort, and reproducible from the committed task ledger
+# (tests/evaluation/cape_task_ledger_n100.json) plus the instance. The ledger
+# is the artifact worth versioning; these are its bulky output.
+data/cape_reports/
