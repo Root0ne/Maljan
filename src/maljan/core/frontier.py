@@ -165,6 +165,13 @@ def frontier_ready(cfg: Any) -> tuple[bool, str]:
         return False, "frontier.model is unset"
     if not getattr(cfg, "base_url", None) and not getattr(cfg, "api_key", None):
         return False, "frontier needs base_url or api_key"
+    if getattr(cfg, "free_tier", False):
+        # Nothing to price and nothing to refuse. This is deliberately a
+        # separate branch rather than a zero-cost special case of the paid path:
+        # "the endpoint bills nothing" is a claim the operator makes explicitly
+        # and can be checked, whereas "the rates happen to be zero" is what an
+        # unconfigured paid endpoint also looks like. Token counting continues.
+        return True, ""
     rate_in = float(getattr(cfg, "input_usd_per_mtok", 0.0) or 0.0)
     rate_out = float(getattr(cfg, "output_usd_per_mtok", 0.0) or 0.0)
     if rate_in <= 0 and rate_out <= 0:

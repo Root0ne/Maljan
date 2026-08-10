@@ -125,6 +125,32 @@ class FrontierConfig(BaseModel):
     input_usd_per_mtok: float = 0.0
     output_usd_per_mtok: float = 0.0
 
+    # Set True only when the endpoint genuinely bills nothing (e.g. an
+    # OpenRouter ``:free`` model). It is an explicit acknowledgement, not a
+    # convenience: without it, zero pricing *disables* the arm, because a meter
+    # that cannot price a call can never refuse one. Declaring free_tier says
+    # "there is nothing to refuse", which is a different and checkable claim.
+    # Token counts are still recorded — the paper reports cost in tokens
+    # regardless of what the invoice says.
+    free_tier: bool = False
+
+    # Reasoning models (the frontier candidates are) emit a separate reasoning
+    # stream that the provider returns outside ``content``. It still consumes
+    # generation budget: a one-line answer measured 285 output tokens, most of
+    # them reasoning. For an equal-budget comparison that is a real confound, so
+    # the decision is recorded here rather than left implicit:
+    #
+    #   the cap is on TOTAL output tokens, reasoning included, and the harness
+    #   reports the reasoning/content split so a reader can see how much of the
+    #   frontier arm's budget went to thinking.
+    #
+    # Capping content only would hand the frontier arm more compute for the same
+    # nominal budget; hiding the split would make the comparison unreadable.
+    # (Note: OpenRouter's ``reasoning.exclude`` does NOT suppress generation — it
+    # stops returning the stream separately, and the text then leaks into
+    # ``content`` and exhausts the cap. Measured 2026-08-10. Leave it unset.)
+    count_reasoning_tokens: bool = True
+
 
 class LLMConfig(BaseModel):
     """Top-level LLM configuration grouping provider selection and per-provider settings.

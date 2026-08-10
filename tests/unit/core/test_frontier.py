@@ -42,6 +42,7 @@ class _Cfg:
         self.max_spend_usd = kw.get("max_spend_usd", 10.0)
         self.input_usd_per_mtok = kw.get("input_usd_per_mtok", 3.0)
         self.output_usd_per_mtok = kw.get("output_usd_per_mtok", 15.0)
+        self.free_tier = kw.get("free_tier", False)
 
 
 class TestUsdForTokens:
@@ -184,6 +185,29 @@ class TestFrontierReady:
         ready, reason = frontier_ready(_Cfg(input_usd_per_mtok=0.0, output_usd_per_mtok=0.0))
         assert not ready
         assert "pricing" in reason
+
+    def test_a_declared_free_tier_is_ready_without_pricing(self) -> None:
+        """An OpenRouter `:free` model genuinely bills nothing, so requiring
+        pricing would block a legitimate arm."""
+        ready, reason = frontier_ready(
+            _Cfg(free_tier=True, input_usd_per_mtok=0.0, output_usd_per_mtok=0.0)
+        )
+        assert ready, reason
+
+    def test_free_tier_is_an_explicit_claim_not_an_accident(self) -> None:
+        """This is the whole reason free_tier exists as its own flag: an
+        unconfigured PAID endpoint also has zero rates, and it must stay
+        blocked. Only an operator saying 'this bills nothing' unblocks it."""
+        ready, reason = frontier_ready(
+            _Cfg(free_tier=False, input_usd_per_mtok=0.0, output_usd_per_mtok=0.0)
+        )
+        assert not ready
+        assert "pricing" in reason
+
+    def test_free_tier_still_requires_a_model_and_an_endpoint(self) -> None:
+        """Declaring something free does not make it configured."""
+        assert not frontier_ready(_Cfg(free_tier=True, model=""))[0]
+        assert not frontier_ready(_Cfg(free_tier=True, base_url=None, api_key=None))[0]
 
     def test_a_zero_ceiling_is_rejected(self) -> None:
         ready, reason = frontier_ready(_Cfg(max_spend_usd=0.0))
