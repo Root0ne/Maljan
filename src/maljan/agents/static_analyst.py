@@ -485,8 +485,27 @@ class StaticAnalyst(BaseAnalyst):
                 # shared nothing. The switch is what makes the next two calls
                 # describe the file we were asked about.
                 name = program_name_from_load(loaded.text)
-                if name:
-                    http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
+                if not name:
+                    # A failed load answers **200** with
+                    # {"error": "Failed to load program from: ..."}, so
+                    # raise_for_status sees nothing wrong. Carrying on would
+                    # analyse and describe whichever program is still current —
+                    # a hint about a different binary, handed to the analyst as
+                    # guidance for this one. Measured 2026-08-10: once the
+                    # server began refusing loads, 66 consecutive samples
+                    # produced a call graph of identical length.
+                    #
+                    # No hint is better than a wrong hint; the analyst's
+                    # documented fallback is to proceed without one.
+                    self.logger.warning(
+                        "Sink-reachability pre-pass: load_program did not yield a program "
+                        "for '%s' (%s) — skipping the hint rather than describing whichever "
+                        "binary is still loaded.",
+                        file_path,
+                        " ".join(loaded.text.split())[:200],
+                    )
+                    return ""
+                http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
                 http.post(f"{base}/run_analysis", json={}).raise_for_status()
                 resp = http.get(
                     f"{base}/get_full_call_graph",

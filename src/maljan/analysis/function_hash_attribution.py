@@ -106,11 +106,20 @@ def fetch_bulk_function_hashes(
             try:
                 loaded = http.post(f"{base}/load_program", json={"file": file_path})
                 name = program_name_from_load(loaded.text)
-                if name:
-                    http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
-            except Exception:  # noqa: BLE001 - tolerated, the GET below is what matters
-                pass
+            except Exception:  # noqa: BLE001 - a transport failure is the same as no load
+                name = None
+            if not name:
+                # A refused load answers 200 with an `error` body. Hashing on
+                # regardless would attribute this sample to whichever binary is
+                # still current — the wrong family, stated confidently.
+                logger.warning(
+                    "function-hash fetch: load_program did not yield a program for %s; "
+                    "skipping attribution rather than hashing the previously loaded binary.",
+                    file_path,
+                )
+                return []
             try:
+                http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
                 http.post(f"{base}/run_analysis", json={})
             except Exception:  # noqa: BLE001 - tolerated
                 pass
