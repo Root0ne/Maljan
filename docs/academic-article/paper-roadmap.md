@@ -244,9 +244,20 @@ which side of that crossover a malware pipeline sits on.
       or a null result will be indistinguishable from a feature that never fired — the same trap
       B5 was reframed around.
 
-- [ ] **B7 — C2 tier contribution** `[LLM]`
-      Opcode-hash tier vs semantic-RAG tier, separately. AsmRAG (`arXiv:2604.23196`, 40,000
-      binaries, F1 95–96%) means an unmeasured two-tier design is indefensible.
+- [~] **B7 — C2 tier contribution** — **semantic tier already measured** → **§3.12**; opcode-hash
+      tier needs **Ghidra + Qdrant**, not llama
+      **Half of this was done and the queue did not know.** Two leakage-free artifacts already in
+      `tests/evaluation/` measure the family-feature RAG tier: retrieval in isolation
+      (**recall@5 0.199 vs 0.032 random — 6.3× chance**, 158 families / 629 samples) and an
+      end-to-end A/B (**n=19: F1 +0.0029, precision −0.0088**).
+      **It repeats §1.5.3 exactly** — a retriever that works six times better than chance in its own
+      terms moves the pipeline by +0.003 F1 while lowering precision. Two independent retrieval
+      components, both functional in isolation, both near-inert wired in.
+      **But n=19 with no CI** — the honest statement is *no effect detectable at n=19*, not *no
+      effect*. **Fold this arm into C3's n=100 cohort**; it costs nothing extra there.
+      **Remaining work:** the opcode-hash tier, which drives Ghidra MCP `get_bulk_function_hashes`
+      and writes to Qdrant. Schedule with the service-heavy items.
+
 - [ ] **B8 — Frontier arm on the fixture suite** `[LLM]` `[$]`
       Cheap sanity check before the big run: plumbing works, the cost ceiling holds, output parses.
 - [ ] **B9 — Commit the B layer**, update `findings-log.md`, stop llama-server

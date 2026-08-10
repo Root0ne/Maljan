@@ -1403,6 +1403,54 @@ this review it did, until corrected.
   that. This measurement bounds the exposure: the inversion acts on at most the 25-claim eligible
   population, i.e. under 2% of techniques. Real, but small.
 
+### 3.12 C2's semantic tier was already measured, and it repeats §1.5.3 — `NEGATIVE` (n=19, weak)
+
+- **Found, not run.** B7 was queued as if C2 were wholly unmeasured. It is not: two artifacts
+  already in the repo measure the **semantic (family-feature RAG) tier**, both leakage-free.
+  The roadmap and the ledger were both wrong about this, and the check that caught it was reading
+  the evaluation directory before writing a harness for it.
+- **Retrieval in isolation** (`family_rag_retrieval.json`) — Ultimate-RAT-Collection held-out
+  split, `a0`=train / `a1`=test, **158 families, 629 test samples**:
+
+  | metric | value |
+  |---|---|
+  | recall@1 | 0.083 |
+  | recall@3 | 0.159 |
+  | recall@5 | **0.199** |
+  | MRR | 0.122 |
+  | random baseline recall@5 | **0.032** |
+
+  **The retriever works.** recall@5 is **6.3× the random baseline** on a leakage-free split. This
+  is not a broken component.
+- **End to end** (`family_rag_ab.json`) — MABEL catalog, disjoint from the n=210 corpus, **n=19
+  paired**:
+
+  | metric | OFF | ON | delta |
+  |---|---|---|---|
+  | F1 | 0.0122 | 0.0151 | **+0.0029** |
+  | precision | 0.1316 | 0.1228 | **−0.0088** |
+  | recall | 0.0064 | 0.0081 | +0.0017 |
+  | hallucination rate | 0.000 | 0.000 | 0.000 |
+
+- **Finding, and it is the §1.5.3 shape exactly.** A retriever that is **six times better than
+  chance in its own terms** moves the end-to-end result by **+0.003 F1** — while *lowering*
+  precision. §1.5.3 found the same thing for the ATT&CK case-prior RAG: the index worked (native
+  F1 0.620 against a 0.424 frequency prior) and the production query never reached it.
+  **Two independently built retrieval components, both demonstrably functional in isolation, both
+  near-inert once wired into the pipeline.** That is no longer an anecdote about one component.
+- **What cannot be concluded, and the reason is sample size.** **n=19 with no confidence interval.**
+  A +0.003 F1 gain and a −0.009 precision loss at that n are consistent with noise. The honest
+  statement is *no effect detectable at n=19*, **not** *no effect*. Re-running this arm at the
+  n=100 cohort would settle it and costs nothing extra once C3 is running — it should be folded in.
+- **The other tier is genuinely unmeasured.** The **opcode-hash (function-hash) attribution tier**
+  has no evaluation artifact. It also cannot be measured on this machine as currently queued: it
+  drives **Ghidra MCP** `get_bulk_function_hashes` and stores into **Qdrant**, so it needs both
+  services — not llama-server. See the queue correction under B7.
+- **Consequence for C2.** The ledger row `UNMEASURED` is half wrong and is corrected: the semantic
+  tier is **measured and weakly negative**; the opcode-hash tier is unmeasured. C2 as a *two-tier*
+  claim still cannot be made — but for a sharper reason than "nobody looked": one tier demonstrably
+  contributes almost nothing at the sample size we have.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
