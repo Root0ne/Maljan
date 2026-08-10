@@ -1565,6 +1565,69 @@ behaviour `test_dynamic_degrades_without_cape.py` already pins.
 
 ---
 
+### 3.14 Ghidra was answering about the wrong binary — `IMPLEMENTED` (fixed), and a retrospective threat
+
+Found while measuring how often the sink-reachability hint fires (B6). It is the most consequential
+defect this project has recorded, and the only reason it was noticed is that a number repeated.
+
+**The mechanism.** `load_program` imports a binary and answers
+`{"success": true, "program": "<name>"}`. All three call sites read that as "Ghidra is now looking
+at this binary". The server keeps a **separate current program**, and `load_program` sets it only
+when nothing is current yet — the first load after a restart. Measured against the live container:
+
+```
+load A        -> {"success": true, "program": "A"}   current: A
+load B        -> {"success": true, "program": "B"}   current: A   <-- still A
+run_analysis  -> {"program": "A", "new_functions": 0}
+call graph    -> A's graph, byte-identical, for every sample
+```
+
+So from the **second sample of a container's lifetime onwards**, everything Ghidra-derived —
+decompilation, imports, strings, call graph, function hashes — described the first sample's binary
+while the report named the current one. No error, no warning, a plausible answer every time.
+
+**How it surfaced, which is the part worth keeping.** The B6 harness printed a hint length per
+sample and the first two were both **2,575 characters** — the same figure a third, unrelated sample
+had produced in an earlier session. Two binaries of 241 KB and 139 KB then turned out to share a
+call graph identical to the character (404,337 chars, 11,798 lines), and `run_analysis` named a
+*third* binary entirely, left current by an earlier session. A repeated constant where variation was
+expected was the whole signal; every individual response looked fine.
+
+**The fix** is one call after a successful load — `POST /switch_program?program=<name>`, genuinely a
+query parameter (a JSON body answers "Program name is required", which reads like a missing argument
+and is really a misplaced one). Applied at the HTTP client, the sink-reachability pre-pass, and the
+function-hash attribution pass; committed as `0720d34` with 11 regression tests.
+
+**What changed once it was fixed**, on the same samples:
+
+| | before | after |
+|---|---|---|
+| `run_analysis` functions | 5,074 (inherited) | **5** (the binary's own) |
+| priority-hint length | constant 2,575 | 1559 / 599 / 0 / 0 |
+| pre-pass seconds/sample | ~25 s | 0.5–6.5 s |
+
+**The retrospective threat, stated plainly.** `tests/evaluation/eval_temporal_drift.py` runs the
+full pipeline per sample against a **long-lived, shared Ghidra container and never restarts it**, so
+the recorded **n=210** static-only drift run meets the exact precondition for this bug. Whether it
+was actually affected cannot now be determined: **its per-sample outputs were not retained** — the
+report was rendered to a path on a machine this project no longer runs on. This is the E.1
+data-retention defect biting a second time, and it is why the n=100 cohort work stores per-sample
+results.
+
+The honest position: **the n=210 temporal-drift result is suspect and must be re-run before any
+claim rests on it.** The claim it supports is the earliest→latest F1 *delta*, and if every sample
+after the first was scored against one binary's static evidence, that delta measured sampling noise
+rather than drift. Two other Ghidra-dependent items are unaffected for a specific reason worth
+recording: §1.7.1's hint ablation runs on family *descriptions* with no binary in the loop, and
+§3.12's semantic-tier evaluation is retrieval over family features, not Ghidra output.
+
+**Why nothing caught it earlier.** Every unit test loads one program. The bug needs *two* loads in
+one server lifetime to appear, and a single-sample test is exactly what a developer writes. It is
+the same shape as §3.13's `token: null` — shared client code, correct against the one server it was
+exercised against, wrong the moment a second case appears.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
