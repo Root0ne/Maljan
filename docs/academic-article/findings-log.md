@@ -1453,6 +1453,118 @@ this review it did, until corrected.
 
 ---
 
+### 3.13 The dynamic path, measured for the first time: a client defect, and a queue — `OBSERVED` (C0/C1)
+
+First live contact with the CAPE MCP server, 2026-08-10, from the network the instance is on.
+Three things came out of it, and none of them were the thing that was being looked for.
+
+**(a) Every dynamic tool call had been broken, and the pipeline could not have noticed.**
+All **36** tools failed on the server's own validation:
+
+```
+1 validation error for call[verify_auth]
+token
+  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+```
+
+Every CAPE tool declares `token` as optional with `"default": ""`. `MCPLangChainToolkit` built its
+argument model with `... if required else None`, discarding the schema's declared default, and
+LangChain fills every declared field before invoking — so an argument the agent never mentioned
+reached the server as an **explicit null**. *Unset* and *null* are different statements and a field
+typed `str` rejects the second.
+
+The reason this survived to the first live call is the interesting part: **Ghidra, the only MCP
+server this pipeline had ever talked to, declares no optional parameter with a typed default**, so
+the same malformed argument dict was silently acceptable there. A defect in shared client code was
+invisible because only one of the two servers it serves was ever exercised. Fixed in `716a128` with
+seven regression tests built from the live schemas; the same probe then returned real data.
+
+**(b) What the instance actually is.** Unauthenticated, via the production client:
+
+| property | value |
+|---|---|
+| CAPE version | 2.5 |
+| analysis machines | **1** (`win10`, x64, `virbr0`) — status `poweroff` |
+| tasks total / pending / running | 15,189 / **10,348** / 0 |
+| tasks reported | **4,327** |
+| exit node | `inetsim` (simulated internet) |
+| host RAM / storage | 15 GB / 189 GB free of 457 |
+
+`SANDBOX__CAPE2_API_TOKEN` is **empty** and `verify_auth` reports `authenticated: false`, yet
+`get_cuckoo_status`, `list_machines`, `list_exitnodes`, `get_search_info`, **`search_task`** and
+**`get_task_iocs`** all answer anyway.
+
+**A measurement trap worth recording, because it produced a wrong reading before it was caught.**
+The instance **rate-limits**, and a throttled call returns exactly `{"error": true, "message": ""}`
+— *character for character* what an auth-refused call returns. A sweep that ran clean for 61
+queries began returning nothing but that, and the first reading of it was "these tools require a
+token". The discriminator is trivial once seen: re-call a tool that demonstrably worked minutes
+earlier. `get_cuckoo_status` failed the same way under throttling, which no auth story explains.
+Any harness that treats this string as a verdict will mis-classify a throttle as a capability.
+Two errors *are* real and distinguishable because they say something: `get_task_report` returns
+`"Reports directory does not exist"`, while **`get_task_iocs` returns 221 KB** of detections —
+family attribution (`DarkComet`) with the Yara rules behind it. That is the CAPE-native,
+LLM-free signal **C5** needs, and it arrives without a report directory.
+
+**(c) The queue looks decisive and is not — a conclusion this log had to retract.**
+One analysis VM behind **10,348 pending tasks**, nothing run since 2026-08-07, and the machine
+reading `poweroff`: the obvious reading is that submitting an n=100 cohort means entering the back
+of a queue nine days deep, and that reading was written here before it was tested. It is wrong.
+
+Two measurements, in the order they should have been taken:
+
+1. **Reuse is not a path.** Of **61** corpus hashes queried cleanly through `search_task`,
+   **3 were hits — 4.9%**, and all three are this project's own July/August test submissions
+   (task ids 5–12, 19042), not a pre-existing corpus. Whatever the other ~15,000 tasks are, they
+   are not our samples. At that rate the "fetch instead of submit" shortcut yields ~10 of the 100
+   samples needed.
+2. **Live submission is a path, and a fast one.** One Windows PE (`4565983c…`, 673 KB) submitted
+   through the pipeline's own `CAPEv2Client`:
+
+   | event | time |
+   |---|---|
+   | task created | 13:23:11 |
+   | **started** | 13:23:12 — **1 s later** |
+   | completed | 13:32:34 — **9 min 23 s** |
+
+   The comparison that explains the whole picture: task **17184** has been `pending` since
+   **2026-07-29** and was still pending while 19043 ran to completion beside it. **The backlog is
+   not a queue our work has to wait behind** — those tasks are never scheduled at all, consistent
+   with requesting a platform or machine tag this single `win10` instance cannot satisfy, which is
+   also why the corpus's ELF and APK members can never run here. A new Windows submission is
+   scheduled essentially immediately.
+
+**Consequence.** C3/C4/C5 are feasible by live submission: ~9.5 min per sample on one VM puts a
+100-sample cohort at roughly **16 hours** of sandbox time. The efficient shape is therefore to
+**decouple** — submit the cohort and let CAPE grind through it unattended, then run the pipeline
+against finished analyses — rather than interleaving detonation with LLM inference on a machine
+that cannot comfortably host both.
+
+**The methodological point is the retraction itself.** A 10,348-deep queue is exactly the kind of
+number that reads as an answer, and it was allowed to stand as one in this document for an hour.
+What overturned it cost a single submission and ten minutes. The same shape has now appeared four
+times in this project — the empty Ghidra call graph, the inert eval timeout, the cap's
+preconditions, and now this — and the rule that keeps catching it is the same: **before concluding
+that a mechanism cannot run, run it once.**
+
+**(d) An availability property the paper will have to state rather than assume.** The server stopped
+accepting new MCP sessions after a handful of abandoned SSE streams — a fresh `initialize()` timed
+out at 20 s while TCP connect still succeeded, and connections accumulated in `FIN-WAIT-2`. It
+recovered on its own **65 s** after the probing stopped, which is the useful half of the
+observation: the failure is self-clearing and caused by client behaviour, so the sweep harness
+checkpoints per hash and rebuilds a dead session instead of treating an outage as fatal. The
+abandoned streams were this author's (hand-rolled `curl` probes, since replaced by the production
+client). The dynamic path's availability is therefore not a constant and belongs in
+threats-to-validity rather than being assumed.
+
+The pipeline itself survives this, and that was checked rather than hoped: `MCPLangChainToolkit.initialize()`
+has no timeout of its own, but its only production caller wraps it — `_run_coro_blocking(toolkit.initialize(),
+hard_timeout=120.0, label="cape-mcp-init")` in `dynamic_analyst.py:112`. During today's outage an
+analysis would have failed over to static-only after 120 s rather than hanging, which is the
+behaviour `test_dynamic_degrades_without_cape.py` already pins.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
