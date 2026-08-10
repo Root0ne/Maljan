@@ -328,17 +328,45 @@ which side of that crossover a malware pipeline sits on.
       **Write-up action:** call it a **deterministic literal-pattern layer**; describe real YARA
       separately as output validation. No code rename — that would break the layer names §1.10
       already published under. → **E.6**
-- [ ] **D3 — Lock the framing** `[decide]` — once B1, C3 and C5 are in
-      **The old recommendation is void.** It was F3 on an F4 spine *with the F2 remnant (C5a, N4,
-      N7) as the sharpest chapter* — and A4 demoted all three of those to `REFINEMENT`. The
-      decision is now binary and hangs on one experiment:
-      - **B1 positive** → **F1**, the system paper. An equal-budget win for heterogeneous evidence
-        channels, against a literature prior predicting the opposite, leads on its own.
-      - **B1 negative or null** → **F3 on an F4 spine**, where the contribution is the *method*
-        — adjacent-field counter-search, instrument-validity failures, frequency-prior baselines,
-        and a set of honest negatives — rather than any single finding. A4 is itself evidence for
-        that framing: a review discipline that demoted three of its own authors' claims.
-      Both are publishable. Do not lock before B1.
+- [x] **D3 — Framing locked: F3 on an F4 spine** `[decided 2026-08-11]`
+      **B1 came back null** (§3.7: `negotiated − single` = **−0.016**, 95% CI **[−0.084, +0.050]**,
+      at **3.2× the tokens**). That closes **F1**: there is no equal-budget win for heterogeneous
+      evidence channels to lead with, and claiming one would require the interval to exclude zero.
+      The condition written here before the experiment is met, so the branch is taken as written.
+
+      **What replaces it is stronger than this entry anticipated.** The spine is no longer "a set of
+      honest negatives" — it is **measurement validity in LLM security pipelines**, and 2026-08-10
+      supplied the material that makes it a contribution rather than a confession. Three defects
+      were found in one day, all of the same species: the instrument returned a **plausible wrong
+      answer with no error anywhere**.
+
+      | defect | what it silently produced | §  |
+      |---|---|---|
+      | MCP client sent `null` for unset optional args | all 36 CAPE tools refused, pipeline unaware | 3.13 |
+      | `load_program` never switched Ghidra's current program | every sample after the first described the **first** binary | 3.14 |
+      | a refused load answers **HTTP 200** | hints and function hashes built from another binary | 3.14 |
+
+      Each was caught by the same cheap detector — **a number that repeated where variation was
+      expected**: an identical 2,575-char hint across unrelated samples, a call graph identical to
+      the character across binaries of 241 KB and 139 KB, 66 consecutive samples at 75,426 chars.
+      None was caught by a test suite of 1,981 passing tests, because each needs a *second* case in
+      one server lifetime and a unit test writes one.
+
+      That is the paper: **the failure modes that survive a green test suite, the detectors that
+      catch them, and what they cost when they do not.** The negatives (§3.7–§3.12) become evidence
+      for the thesis rather than the thesis itself — an instrument that cannot be trusted produces
+      exactly the near-zero effects this project kept measuring, and telling those two situations
+      apart is the skill the paper teaches.
+
+      **Two supports that were missing are now in place.** §3.15 shows the frequency-before-effect
+      discipline paying (the sink hint fires on 58%, so its ablation is interpretable, where §3.11's
+      cap fired on 0.82% and its was not). And **C5** finally anchors the numbers: CAPE alone scores
+      **F1 0.187** on the cohort, so every pipeline figure now has a reference instead of floating.
+
+      **Also retracted in the same period, and both belong in the paper:** the "10,348-deep queue
+      makes live submission impossible" reading (§3.13c — the backlog is never scheduled at all),
+      and the n=210 temporal-drift result (§3.14 — it meets the stale-program precondition and its
+      per-sample outputs were not retained, so it cannot be checked and must be re-run).
 - [ ] **D4 — Finalise the ledger and the self-audit** — update the four `UNMEASURED` rows with
       their results; re-issue the P6/P8/P9 verdicts
 
@@ -364,7 +392,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | # | Claim | Evidence | Verdict | Closed by |
 |---|---|---|---|---|
 | C0 | LLM-as-analyst vs LLM-for-a-trained-detector taxonomy | positioning | — | E3 |
-| C1 | Sink-reachability transferred JS→binary as prompt steering | **unmeasured** | `UNMEASURED` | **B6** |
+| C1 | Sink-reachability transferred JS→binary as prompt steering | **fires on 58.2%** (n=79, §3.15); effect not yet measured | `PARTIAL` | B6 second half |
 | C2 | Two-tier attribution (opcode-hash + semantic RAG) | **unmeasured** | `UNMEASURED` | **B7** |
 | C3 | Falsification-before-confidence protocol | **unmeasured** | `REFINEMENT` of FAX | **B5**, B2 |
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
@@ -381,7 +409,12 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | N6 | Working retriever, unreachable query; frequency prior wins | measured | `REFINEMENT` | E1 |
 | N7 | Degenerate ID loop; sampler penalties insufficient | reproducible | **REFINEMENT** — text degeneration | keeps *delivery* failure |
 | N8 | No speculative-decoding gain on A3B MoE | measured | `PRIOR ART`-adjacent | appendix |
-| E1 | 7-year drift study, n=210, no measurable drift | n=210, bound ≤0.040 F1 | **OURS** — held at A4 | must reframe: *input-era*, not train/test gap |
+| E1 | 7-year drift study, n=210, no measurable drift | n=210, bound ≤0.040 F1 | **SUSPECT — withdrawn pending re-run** | §3.14: meets the stale-program precondition; per-sample outputs not retained, so it cannot be checked |
+| M1 | An unset optional MCP argument reached the server as `null` | all 36 CAPE tools refused; pipeline unaware | **OURS** (instrument defect) | §3.13, fixed `716a128` |
+| M2 | A loaded Ghidra program never became the *current* one | every sample after the first described the **first** binary | **OURS** (instrument defect) | §3.14, fixed `0720d34` |
+| M3 | A refused load answers HTTP 200; the pre-pass carried on | hints and function hashes built from another binary | **OURS** (instrument defect) | §3.14, fixed `3eabf88` |
+| M4 | Repeated-constant detection catches stale-state bugs a green suite misses | 3 defects, 1,981 passing tests, 0 caught | **OURS** — the D3 spine | second counter-search before submission |
+| B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.187** [0.151, 0.223], n=24 | measured | C5 at n=100 |
 | E2 | KV scaling on hybrid-offload MoE | measured | — | appendix |
 | E3 | ~201-tool catalogue infeasible at 3B | measured | open gap | E1 |
 | — | binary→ATT&CK input modality | — | **PRIOR ART** `2602.06325` | cite only |
@@ -392,18 +425,29 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 
 | Framing | Rests on | Status |
 |---|---|---|
-| **F1 System paper** | C0, C4, C6, C7 | **Gated on B1 and C3.** A positive B1 carries it alone — and after A4 this is the **only route to a paper led by something novel** |
+| **F1 System paper** | C0, C4, C6, C7 | **Closed 2026-08-11.** B1 returned null: `negotiated − single` = −0.016, CI [−0.084, +0.050], at 3.2× tokens. There is no equal-budget win to lead with |
 | **F2 Describe-then-map** | ~~C5~~, ~~C5a~~, ~~N4~~, ~~N7~~ | **Gone.** C5 was prior art; A4 demoted the remaining three to `REFINEMENT`. Survives as a *confirm-and-add-mechanism* chapter, not a headline |
-| **F3 Negative results / methodology** | N1–N8, §1.5.3, §1.10 | **Still the strongest today**, and A4 made it *more* honest, not less. But it now leads with refinements plus genuine negatives rather than with novelty |
-| **F4 Drift study** | E1 | **Held at A4**, and must be reframed as **input-era** drift, not train/test misalignment. Needs C5's baseline arm to land the contrast |
+| **F3 Measurement validity + negative results** | **M1–M4**, N1–N8, §1.5.3, §1.10, §3.13–§3.15 | **LOCKED — this is the paper.** The spine is no longer "honest negatives"; it is the failure class those negatives came from |
+| **F4 Drift study** | ~~E1~~ | **Withdrawn as a spine.** E1 meets the stale-program precondition of §3.14 and its per-sample outputs were not retained, so it cannot be checked. It re-enters only if re-run |
 
-**What A4 changed about the decision.** Before it, F3-on-an-F4-spine was recommended partly
-because the F2 remnant gave it a sharp chapter. That chapter is now three refinements. So the
-question at D3 is starker than it was: **either B1 returns positive and F1 becomes viable, or the
-paper is a measurement-and-negative-results paper whose novelty is the method** — the
-adjacent-field search discipline, the instrument-validity failures, and the negatives — rather
-than any single finding. Both are publishable. Only one of them is decided by an experiment we
-have not run yet.
+**What decided it, and what changed underneath.** B1 was the gate written before the experiment,
+and it returned null, so F1 closes on its own terms. But the surviving framing is not the
+consolation prize this table described on 08-09. Between then and now, **three instrument defects
+were found in one day** (M1–M3), each producing a plausible wrong answer with no error anywhere,
+and each caught by the same cheap detector: a number that repeated where variation was expected.
+A suite of **1,981 passing tests caught none of them**, because every one needs a *second* case in
+a single server lifetime and a unit test writes one.
+
+That is a contribution with a shape: **the failure modes that survive a green test suite in an
+LLM-plus-tooling pipeline, the detectors that catch them cheaply, and what they cost when they do
+not** — E1's withdrawal being the price paid in this project. The negatives become evidence for the
+thesis rather than the thesis itself, because an untrustworthy instrument produces exactly the
+near-zero effects that kept turning up.
+
+**The two supports F3 previously lacked are now in place.** §3.15 demonstrates the
+frequency-before-effect rule paying (58% firing rate makes the sink-hint ablation interpretable;
+§3.11's 0.82% made its uninterpretable), and **C5** anchors every F1 in the paper against a
+no-LLM baseline of **0.187** — the thing the results section could not previously do.
 
 ---
 
