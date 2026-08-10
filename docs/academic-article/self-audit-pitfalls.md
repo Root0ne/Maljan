@@ -244,6 +244,20 @@ alignment score, so the valid→valid swap cannot be tuned safely at any error r
 significant predictor** of performance on the nearest task, then single-model findings are
 exactly the kind the pitfall warns about.
 
+**First cross-model data, 2026-08-11 — the row stays `PARTIAL`.** A second endpoint now exists and
+has run (§3.16): Nemotron-3-Super-120B-A12B against the local Qwen3.6-35B-A3B, same fixtures, same
+prompt, same 2400-token budget. The frontier arm scored **0.5025 [0.4101, 0.6178]** at n=9 against
+the local arm's **0.4136** at n=25 — an interval that contains the local mean, so **no separation is
+demonstrated, and none is refuted**. A 3.4× parameter advantage produced no obvious gap here, which
+is worth stating against a literature prior that predicts one, but n=9 cannot carry it.
+
+Two things follow for the write-up. The confound is **narrowed, not closed**: there is now a second
+model rather than a hypothetical one, and the scoped claims stand as scoped. And the honest limit is
+now a *sample-size* limit rather than a *no-second-model* limit — a better problem, and a
+quantified one, because the free tier caps at **50 requests/day**, making the n=100 cohort arm (C6)
+a two-day run or a $10 purchase. That belongs in the reproducibility appendix, since a reader
+reproducing C6 hits the same wall.
+
 **Verdict after scoping: `PARTIAL`.** The write-up half is done — all four claims now carry their
 scope at the point of claim, `related-work.md` carries a section-level scope statement, and the
 distinction between *negatives obtained under a favourable configuration* (which travel) and

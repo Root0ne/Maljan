@@ -1672,6 +1672,48 @@ analysis cost.
 
 ---
 
+### 3.16 A 120B frontier model does not separate from the local 35B — `EXPERIMENTAL` (B8, underpowered)
+
+The frontier arm exists to attack **P8**, the surrogate fallacy: every LLM result in this work comes
+from one model on one machine, and `arXiv:2606.18166` sharpens the worry by finding **parameter
+size the only statistically significant predictor** of ATT&CK-classification F1 (ρ=0.85, p=0.014)
+while prompt strategy, chain-of-thought and temperature were not.
+
+Same five fixtures, same `single`-arm prompt, same 2400-token output budget as §3.7:
+
+| arm | model | mean F1 | 95% CI | n |
+|---|---|---|---|---|
+| `single` | Qwen3.6-35B-A3B (IQ3_K_R4), local | 0.4136 | — | 25 |
+| frontier | Nemotron-3-Super-120B-A12B | **0.5025** | **[0.4101, 0.6178]** | **9** |
+
+**The honest reading is that nothing is established.** The frontier point estimate is higher, and
+its interval's lower bound (0.4101) sits *below* the local mean (0.4136) — so the difference is not
+demonstrated. Nor is equivalence: n=9 against n=25, with one fixture (`worm`) contributing a single
+observation, cannot support either claim. What it does say is that **a 3.4× parameter advantage did
+not produce an obvious gap on this task at equal token budget**, which is worth reporting precisely
+because the literature prior predicts one.
+
+**The reasoning fraction, however, is measured and stable.** Across 9 calls, **53.6%** of output
+tokens were reasoning (min 48.3%, max 59.7%) — and on a one-token answer ("T1055") it was **84%**:
+92 output tokens, 77 of them thinking. Capping *content* alone would hand the frontier arm roughly
+twice the generation for the same nominal budget, so `count_reasoning_tokens = True` is now
+measured rather than assumed. This is the methodological result of B8, and it does not depend on n.
+
+**Why n is 9 and not 25 — a planning constraint that belongs in the reproducibility appendix.**
+The OpenRouter free tier allows **50 model requests per day** (`X-RateLimit-Limit: 50`,
+`limit_source: openrouter_free_tier_daily`), and the run exhausted it mid-flight: 9 calls landed,
+16 returned HTTP 429. The cap resets daily at 03:00 local. **C6 as designed — the frontier arm over
+the n=100 cohort — needs 100+ calls and is therefore a two-day run on the free tier**, or ~$10 of
+credit to raise the ceiling. That is a scheduling fact, not a scientific one, but it decides
+whether C6 lands before the paper does.
+
+One sample from an earlier repeat is worth keeping: `infostealer_sample_1` once spent its **entire**
+2400-token budget, 61% of it on reasoning, emitted two technique IDs and finished on `length` —
+F1 0.000. That is §3.3's degenerate decode arriving through the reasoning stream rather than
+through a repetition loop, and it is exactly the failure an equal-budget comparison should surface.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as

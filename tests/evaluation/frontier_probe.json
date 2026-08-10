@@ -3,40 +3,49 @@
  "model": "nvidia/nemotron-3-super-120b-a12b:free",
  "budget_output_tokens": 2400,
  "summary": {
-  "n": 5,
-  "failed": 0,
-  "parsed": 5,
+  "n": 9,
+  "failed": 16,
+  "parsed": 9,
   "hit_cap": 0,
-  "mean_f1": 0.4191,
-  "mean_reasoning_fraction": 0.537,
+  "mean_f1": 0.5025,
+  "f1_ci95": [
+   0.4101,
+   0.6178
+  ],
+  "mean_reasoning_fraction": 0.536,
   "meter": {
    "limit_usd": 25.0,
    "spent_usd": 0.0,
    "remaining_usd": 25.0,
-   "calls": 5,
+   "calls": 9,
    "refusals": 0,
-   "input_tokens": 1056,
-   "output_tokens": 6779
+   "input_tokens": 1899,
+   "output_tokens": 13477
   }
  },
  "per_sample": [
   {
    "sample_id": "dropper_sample_1",
-   "seconds": 43.6,
+   "repeat": 0,
+   "seconds": 85.5,
    "input_tokens": 226,
-   "output_tokens": 1537,
-   "reasoning_tokens": 938,
-   "content_tokens": 599,
-   "reasoning_fraction": 0.61,
+   "output_tokens": 2137,
+   "reasoning_tokens": 1066,
+   "content_tokens": 1071,
+   "reasoning_fraction": 0.499,
    "finish_reason": "stop",
    "hit_cap": false,
-   "n_predicted": 5,
+   "n_predicted": 9,
    "predicted": [
     "T1027",
+    "T1027.002",
+    "T1140",
     "T1547.001",
+    "T1055",
     "T1055.002",
     "T1059.001",
-    "T1105"
+    "T1105",
+    "T1105.001"
    ],
    "truth": [
     "T1105",
@@ -45,19 +54,20 @@
     "T1059",
     "T1547"
    ],
-   "precision": 0.2,
-   "recall": 0.2,
-   "f1": 0.2,
+   "precision": 0.3333,
+   "recall": 0.6,
+   "f1": 0.4286,
    "parsed": true
   },
   {
    "sample_id": "infostealer_sample_1",
-   "seconds": 48.1,
+   "repeat": 0,
+   "seconds": 104.2,
    "input_tokens": 206,
-   "output_tokens": 1395,
-   "reasoning_tokens": 699,
-   "content_tokens": 696,
-   "reasoning_fraction": 0.501,
+   "output_tokens": 1294,
+   "reasoning_tokens": 625,
+   "content_tokens": 669,
+   "reasoning_fraction": 0.483,
    "finish_reason": "stop",
    "hit_cap": false,
    "n_predicted": 5,
@@ -66,7 +76,7 @@
     "T1003.001",
     "T1115",
     "T1071.001",
-    "T1567.002"
+    "T1041"
    ],
    "truth": [
     "T1003",
@@ -75,32 +85,31 @@
     "T1071",
     "T1041"
    ],
-   "precision": 0.2,
-   "recall": 0.2,
-   "f1": 0.2,
+   "precision": 0.4,
+   "recall": 0.4,
+   "f1": 0.4,
    "parsed": true
   },
   {
    "sample_id": "ransomware_sample_1",
-   "seconds": 58.5,
+   "repeat": 0,
+   "seconds": 58.7,
    "input_tokens": 204,
-   "output_tokens": 1435,
-   "reasoning_tokens": 627,
-   "content_tokens": 808,
-   "reasoning_fraction": 0.437,
+   "output_tokens": 1416,
+   "reasoning_tokens": 699,
+   "content_tokens": 717,
+   "reasoning_fraction": 0.494,
    "finish_reason": "stop",
    "hit_cap": false,
-   "n_predicted": 9,
+   "n_predicted": 7,
    "predicted": [
     "T1560.001",
-    "T1027",
+    "T1074.001",
     "T1486",
     "T1490",
     "T1489",
-    "T1562.001",
     "T1071.001",
-    "T1567.002",
-    "T1573.001"
+    "T1573"
    ],
    "truth": [
     "T1486",
@@ -109,28 +118,31 @@
     "T1071",
     "T1560"
    ],
-   "precision": 0.3333,
+   "precision": 0.4286,
    "recall": 0.6,
-   "f1": 0.4286,
+   "f1": 0.5,
    "parsed": true
   },
   {
    "sample_id": "rat_sample_1",
-   "seconds": 32.9,
+   "repeat": 0,
+   "seconds": 47.9,
    "input_tokens": 207,
-   "output_tokens": 1114,
-   "reasoning_tokens": 605,
-   "content_tokens": 509,
-   "reasoning_fraction": 0.543,
+   "output_tokens": 1267,
+   "reasoning_tokens": 733,
+   "content_tokens": 534,
+   "reasoning_fraction": 0.579,
    "finish_reason": "stop",
    "hit_cap": false,
-   "n_predicted": 5,
+   "n_predicted": 7,
    "predicted": [
     "T1082",
     "T1055",
+    "T1055.002",
+    "T1003",
     "T1003.001",
     "T1057",
-    "T1571"
+    "T1095"
    ],
    "truth": [
     "T1095",
@@ -139,28 +151,28 @@
     "T1082",
     "T1057"
    ],
-   "precision": 0.6,
-   "recall": 0.6,
-   "f1": 0.6,
+   "precision": 0.7143,
+   "recall": 1.0,
+   "f1": 0.8333,
    "parsed": true
   },
   {
    "sample_id": "worm_sample_1",
-   "seconds": 24.4,
+   "repeat": 0,
+   "seconds": 64.4,
    "input_tokens": 213,
-   "output_tokens": 1298,
-   "reasoning_tokens": 773,
-   "content_tokens": 525,
-   "reasoning_fraction": 0.596,
+   "output_tokens": 1911,
+   "reasoning_tokens": 1087,
+   "content_tokens": 824,
+   "reasoning_fraction": 0.569,
    "finish_reason": "stop",
    "hit_cap": false,
-   "n_predicted": 7,
+   "n_predicted": 6,
    "predicted": [
     "T1091",
+    "T1547.001",
     "T1021.002",
-    "T1543.003",
     "T1486",
-    "T1046",
     "T1210",
     "T1190"
    ],
@@ -171,10 +183,202 @@
     "T1486",
     "T1190"
    ],
-   "precision": 0.5714,
+   "precision": 0.6667,
    "recall": 0.8,
-   "f1": 0.6667,
+   "f1": 0.7273,
    "parsed": true
+  },
+  {
+   "sample_id": "dropper_sample_1",
+   "repeat": 1,
+   "seconds": 41.6,
+   "input_tokens": 226,
+   "output_tokens": 1499,
+   "reasoning_tokens": 895,
+   "content_tokens": 604,
+   "reasoning_fraction": 0.597,
+   "finish_reason": "stop",
+   "hit_cap": false,
+   "n_predicted": 7,
+   "predicted": [
+    "T1027",
+    "T1547.001",
+    "T1055",
+    "T1055.002",
+    "T1059.001",
+    "T1105",
+    "T1105.001"
+   ],
+   "truth": [
+    "T1105",
+    "T1140",
+    "T1055",
+    "T1059",
+    "T1547"
+   ],
+   "precision": 0.2857,
+   "recall": 0.4,
+   "f1": 0.3333,
+   "parsed": true
+  },
+  {
+   "sample_id": "infostealer_sample_1",
+   "repeat": 1,
+   "seconds": 49.7,
+   "input_tokens": 206,
+   "output_tokens": 1373,
+   "reasoning_tokens": 715,
+   "content_tokens": 658,
+   "reasoning_fraction": 0.521,
+   "finish_reason": "stop",
+   "hit_cap": false,
+   "n_predicted": 5,
+   "predicted": [
+    "T1056.001",
+    "T1003.001",
+    "T1115",
+    "T1071.001",
+    "T1041"
+   ],
+   "truth": [
+    "T1003",
+    "T1056",
+    "T1115",
+    "T1071",
+    "T1041"
+   ],
+   "precision": 0.4,
+   "recall": 0.4,
+   "f1": 0.4,
+   "parsed": true
+  },
+  {
+   "sample_id": "ransomware_sample_1",
+   "repeat": 1,
+   "seconds": 33.9,
+   "input_tokens": 204,
+   "output_tokens": 1487,
+   "reasoning_tokens": 819,
+   "content_tokens": 668,
+   "reasoning_fraction": 0.551,
+   "finish_reason": "stop",
+   "hit_cap": false,
+   "n_predicted": 7,
+   "predicted": [
+    "T1560.001",
+    "T1074.001",
+    "T1486",
+    "T1490",
+    "T1489",
+    "T1071.001",
+    "T1573.001"
+   ],
+   "truth": [
+    "T1486",
+    "T1490",
+    "T1489",
+    "T1071",
+    "T1560"
+   ],
+   "precision": 0.4286,
+   "recall": 0.6,
+   "f1": 0.5,
+   "parsed": true
+  },
+  {
+   "sample_id": "rat_sample_1",
+   "repeat": 1,
+   "seconds": 28.5,
+   "input_tokens": 207,
+   "output_tokens": 1093,
+   "reasoning_tokens": 578,
+   "content_tokens": 515,
+   "reasoning_fraction": 0.529,
+   "finish_reason": "stop",
+   "hit_cap": false,
+   "n_predicted": 5,
+   "predicted": [
+    "T1082",
+    "T1055.002",
+    "T1003.001",
+    "T1057",
+    "T1071"
+   ],
+   "truth": [
+    "T1095",
+    "T1055",
+    "T1003",
+    "T1082",
+    "T1057"
+   ],
+   "precision": 0.4,
+   "recall": 0.4,
+   "f1": 0.4,
+   "parsed": true
+  },
+  {
+   "sample_id": "worm_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "dropper_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "infostealer_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "ransomware_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "rat_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "worm_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "dropper_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "infostealer_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "ransomware_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "rat_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "worm_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "dropper_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "infostealer_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "ransomware_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "rat_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
+  },
+  {
+   "sample_id": "worm_sample_1",
+   "error": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1786406400000'}, 'limit_source': 'openrouter_free_tier_daily', 'remedy_hint': 'Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.', 'provider_name': None}}, 'user_id': 'user_3DMigADMssVcctCxNyWz6gv80kx'}"
   }
  ]
 }
