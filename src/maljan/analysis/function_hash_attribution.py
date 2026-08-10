@@ -90,13 +90,30 @@ def fetch_bulk_function_hashes(
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     try:
+        from maljan.analysis.ghidra_program import (
+            SWITCH_PARAM,
+            SWITCH_PATH,
+            program_name_from_load,
+        )
+
         with httpx.Client(timeout=timeout, headers=headers) as http:
-            # Best-effort load + analyse; another pre-pass may have done this.
-            for path, body in (("/load_program", {"file": file_path}), ("/run_analysis", {})):
-                try:
-                    http.post(f"{base}{path}", json=body)
-                except Exception:  # noqa: BLE001 - tolerated, the GET below is what matters
-                    pass
+            # Best-effort load + activate + analyse; another pre-pass may have
+            # done this. The activate step is not optional cleanup: a load only
+            # becomes Ghidra's *current* program when nothing is current yet, so
+            # without it `get_bulk_function_hashes` below returns the hashes of
+            # whichever binary the container looked at first — attributing this
+            # sample to another sample's functions, silently and plausibly.
+            try:
+                loaded = http.post(f"{base}/load_program", json={"file": file_path})
+                name = program_name_from_load(loaded.text)
+                if name:
+                    http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
+            except Exception:  # noqa: BLE001 - tolerated, the GET below is what matters
+                pass
+            try:
+                http.post(f"{base}/run_analysis", json={})
+            except Exception:  # noqa: BLE001 - tolerated
+                pass
 
             offset = 0
             for _ in range(max_pages):

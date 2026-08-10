@@ -468,8 +468,25 @@ class StaticAnalyst(BaseAnalyst):
             base = cfg.mcp.ghidra.url.rstrip("/")
             token = cfg.mcp.ghidra.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
+            from maljan.analysis.ghidra_program import (
+                SWITCH_PARAM,
+                SWITCH_PATH,
+                program_name_from_load,
+            )
+
             with httpx.Client(timeout=120.0, headers=headers) as http:
-                http.post(f"{base}/load_program", json={"file": file_path}).raise_for_status()
+                loaded = http.post(f"{base}/load_program", json={"file": file_path})
+                loaded.raise_for_status()
+                # Loading is not looking. `load_program` sets Ghidra's current
+                # program only when nothing is current yet, so from the second
+                # sample of a container's lifetime onwards this pre-pass was
+                # building its hint from the *first* binary — measured
+                # 2026-08-10 as byte-identical call graphs across samples that
+                # shared nothing. The switch is what makes the next two calls
+                # describe the file we were asked about.
+                name = program_name_from_load(loaded.text)
+                if name:
+                    http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
                 http.post(f"{base}/run_analysis", json={}).raise_for_status()
                 resp = http.get(
                     f"{base}/get_full_call_graph",

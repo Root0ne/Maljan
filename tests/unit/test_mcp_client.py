@@ -112,13 +112,25 @@ class TestCreateLangChainToolDictSchema:
         # All fields should be present
         assert len(fields) == 6
 
-        # Verify each field has the correct annotation
-        assert fields["str_field"].annotation is str
-        assert fields["int_field"].annotation is int
-        assert fields["float_field"].annotation is float
-        assert fields["bool_field"].annotation is bool
-        assert fields["list_field"].annotation is list
-        assert fields["dict_field"].annotation is dict
+        # Every field here is optional, and an optional field's annotation is
+        # nullable on purpose: LangChain fills unmentioned arguments before
+        # invoking, and a ReAct agent may emit an explicit `null`. Both have to
+        # be accepted here so the toolkit can drop them before the call rather
+        # than raise — the alternative sent `token: null` to the CAPE server and
+        # failed all 36 of its tools. The base type is what matters, so assert
+        # that rather than the exact annotation object.
+        expected = {
+            "str_field": str,
+            "int_field": int,
+            "float_field": float,
+            "bool_field": bool,
+            "list_field": list,
+            "dict_field": dict,
+        }
+        for name, base in expected.items():
+            annotation = fields[name].annotation
+            assert annotation == base | None, f"{name}: {annotation}"
+            assert not fields[name].is_required()
 
 
 class TestCreateLangChainToolEdgeCases:
@@ -190,12 +202,15 @@ class TestCreateLangChainToolEdgeCases:
         lc_tool = toolkit._create_langchain_tool(mcp_tool)
         fields = lc_tool.args_schema.model_fields
 
+        # Optional parameters are nullable by design — see
+        # test_mcp_schema_defaults.py for why an unmentioned argument must be
+        # accepted here and dropped before the call rather than rejected.
         assert "normal_param" in fields
-        assert fields["normal_param"].annotation is int
+        assert fields["normal_param"].annotation == int | None
 
         # broken_param should default to str
         assert "broken_param" in fields
-        assert fields["broken_param"].annotation is str
+        assert fields["broken_param"].annotation == str | None
 
     def test_missing_description_uses_fallback(self, toolkit: MCPLangChainToolkit) -> None:
         """Tool with None description should get a generated fallback."""
@@ -229,7 +244,7 @@ class TestCreateLangChainToolEdgeCases:
         fields = lc_tool.args_schema.model_fields
 
         assert "custom_field" in fields
-        assert fields["custom_field"].annotation is Any
+        assert fields["custom_field"].annotation == Any | None
 
 
 class TestCreateLangChainToolCAPEv2:
@@ -310,7 +325,13 @@ class TestCreateLangChainToolCAPEv2:
         assert fields["task_id"].is_required()
         assert fields["task_id"].annotation is int
         assert not fields["format"].is_required()
-        assert fields["format"].annotation is str
+        assert fields["format"].annotation == str | None
+        # This fixture declares no `default`, so there is nothing to inherit and
+        # None is correct — the toolkit then omits the argument entirely rather
+        # than sending a null. A schema that *does* declare one keeps it; that
+        # is pinned in test_mcp_schema_defaults.py against the live CAPE
+        # schemas, where a null `token` failed all 36 tools.
+        assert fields["format"].default is None
 
     def test_get_cuckoo_status_no_params(self, toolkit: MCPLangChainToolkit) -> None:
         """Validates a CAPEv2 status tool with no parameters."""

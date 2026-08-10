@@ -183,7 +183,54 @@ class GhidraHTTPClient:
                 f'"path": "{path}"}}'
             )
 
+        if path == "/load_program":
+            await self._activate_loaded_program(output)
+
         return self._apply_output_guardrail(output)
+
+    async def _activate_loaded_program(self, load_output: str) -> None:
+        """Make a freshly loaded program the *current* one.
+
+        ``load_program`` imports the binary and reports success, but it only
+        sets Ghidra's current program when nothing is current yet — the first
+        load after a restart. Every later load leaves the server looking at the
+        first binary of the container's lifetime, so an agent that loads its
+        sample and then decompiles, lists imports or walks the call graph is
+        reading a different file entirely, with no error anywhere to say so.
+
+        Measured 2026-08-10: two samples of 241 KB and 139 KB yielded call
+        graphs identical to the character until this call was added.
+
+        Best-effort by construction. A stale current program is a wrong answer;
+        an exception raised here would be a failed analysis, which is worse.
+        """
+        from maljan.analysis.ghidra_program import (
+            SWITCH_PARAM,
+            SWITCH_PATH,
+            program_name_from_load,
+            switch_is_confirmed,
+        )
+
+        name = program_name_from_load(load_output)
+        if not name:
+            return
+        try:
+            client = await self._get_http()
+            resp = await client.post(
+                f"{self.base_url}{SWITCH_PATH}",
+                params={SWITCH_PARAM: name},
+                json={},
+                headers={"Content-Type": "application/json"},
+            )
+            if not switch_is_confirmed(resp.text, name):
+                logger.warning(
+                    "Ghidra switch_program did not confirm '%s' (%s) — subsequent tool "
+                    "calls may read the previously loaded program.",
+                    name,
+                    resp.text[:160],
+                )
+        except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
+            logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
 
     def _compress_description(self, path: str, description: str) -> str:
         """Add a category tag and truncate to keep ReAct context lean.
