@@ -167,7 +167,9 @@ class MCPLangChainToolkit:
         """Convert an MCP Tool definition into a LangChain StructuredTool."""
 
         # Build Pydantic model from JSON schema dynamically
-        properties = {}
+        # (annotation, default) pairs for create_model. Annotations are nullable
+        # for optional parameters, so this cannot be narrowed to ``type``.
+        properties: dict[str, tuple[Any, Any]] = {}
         required = mcp_tool.inputSchema.get("required", [])
         schema_props = mcp_tool.inputSchema.get("properties", {})
 
@@ -187,10 +189,19 @@ class MCPLangChainToolkit:
             }
             py_type = type_mapping.get(prop_type_str, Any)
 
-            # Default value logic
-            default_val = ... if prop_name in required else None
+            if prop_name in required:
+                properties[prop_name] = (py_type, ...)
+                continue
 
-            properties[prop_name] = (py_type, default_val)
+            # An optional parameter carries the server's own declared default
+            # when it has one. Substituting ``None`` for it — as this did — is
+            # not the same statement: the CAPE server types every tool's
+            # ``token`` as ``str`` with ``"default": ""`` and rejects a null,
+            # so all 36 of its tools failed validation on the first live call.
+            # The annotation stays nullable so that an agent which emits an
+            # explicit ``null`` is tolerated here and dropped below, rather
+            # than raising inside LangChain's own argument parsing.
+            properties[prop_name] = (py_type | None, prop_schema.get("default", None))
 
         args_schema = create_model(f"{mcp_tool.name}Schema", **properties)  # type: ignore[call-overload]
 
@@ -201,8 +212,15 @@ class MCPLangChainToolkit:
                 # Structured marker so the agent prompt can detect "no session"
                 # without parsing free-form text.
                 return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+            # LangChain fills every declared field before invoking, so an
+            # argument the agent never mentioned still arrives here — as the
+            # schema default when there is one, and as ``None`` when there is
+            # not. Only the first is a value the caller meant; forwarding the
+            # second turns "unset" into "explicitly null" and denies the server
+            # the chance to apply its own default.
+            args = {k: v for k, v in kwargs.items() if v is not None or k in required}
             try:
-                result = await self.session.call_tool(tool_name, arguments=kwargs)
+                result = await self.session.call_tool(tool_name, arguments=args)
                 if result.isError:
                     return (
                         f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
