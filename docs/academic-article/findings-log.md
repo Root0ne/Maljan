@@ -1628,6 +1628,50 @@ exercised against, wrong the moment a second case appears.
 
 ---
 
+### 3.15 The sink-reachability hint fires on 58% of samples — `EXPERIMENTAL` (B6, first half)
+
+**Why frequency came before effect.** `sink_reachability`'s own docstring says it returns `""` for a
+binary with no named sink APIs, and the analyst then proceeds normally. If that were the common
+case, an on/off ablation reporting "no effect" would be indistinguishable from "the feature never
+ran" — the same confusion §3.11 hit with the confidence cap, where the mechanism turned out to fire
+on 0.82% of techniques. So the mechanism was counted before it was credited.
+
+**Result**, n=79 analysed of 93 attempted, Windows PE from the n=100 cohort, production pre-pass
+replicated exactly (`format=json&limit=20000`):
+
+| | |
+|---|---|
+| hint non-empty | **46 / 79 = 58.2%** |
+| hint chars when non-empty | 599 min / 2037 median / 2575 max |
+| distinct call-graph sizes | **50 / 79** |
+| samples hitting the 20,000-edge limit | 1 |
+| seconds/sample | 0.4 min / **10.0 median** / 17,765 max |
+| not measurable | 14 (8 connection errors, 6 read timeouts) |
+
+Per year the rate is unremarkable — 2022 3/3, 2024 5/13, 2023 12/14 — with no trend worth reading at
+these counts.
+
+**So the ablation is worth running.** The feature engages on a clear majority of samples, which
+means a null effect would be a statement about the *hint*, not about a mechanism that never fired.
+The other 42% are equally a result: for those binaries the pre-pass costs its analysis time and
+returns nothing, and the effect measurement must report the two groups separately rather than
+averaging a feature over samples it never touched.
+
+**The 50-distinct-graph-sizes row is not decoration.** It is the integrity check that the *first*
+run of this harness failed silently — 66 consecutive samples with a call graph of identical length
+(§3.14). Any future run of this measurement should report it, because "how many distinct outputs did
+N inputs produce" is the cheapest available detector for a stale-state bug, and this project has now
+been bitten by that class three times.
+
+**Two caveats stated rather than buried.** The 14 unmeasurable samples are recorded as *errors*, not
+as empty hints — counting a sample we failed to look at as "no hint" would have inflated the
+negative and is precisely the mistake §3.14 documents. And the 17,765-second maximum against a
+10-second median is one pathological binary, measured while the host was under memory pressure; it
+is an outlier in the measurement conditions, not a property of the sample worth reporting as
+analysis cost.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
