@@ -404,3 +404,30 @@ The generalisable form, and the reason this belongs in the paper rather than in 
 server that answered your question.** Every integration boundary here — MCP, Ghidra, the sandbox
 REST API — turned out to have a way of saying yes while doing something else, and the pipeline's
 own error handling was built for the failures that announce themselves.
+
+### Counter-search on this check, 2026-08-11 — it is a refinement, not a discovery
+
+The house rule is that a claim of novelty is a *searched absence*, so this one was searched before
+it was written up. It does not survive intact:
+
+* **The detector is a metamorphic relation.** "Distinct inputs should produce distinct outputs" is
+  an ordinary MR, and metamorphic testing exists precisely to check programs whose correct output
+  is unknown — see the ACM TOSEM survey on MR generation (`10.1145/3708521`). Nothing about the
+  *idea* is new.
+* **The inverse is already an eval-harness practice.** `arXiv:2603.05399` duplicates dataset items
+  to check that identical inputs score consistently. Same instinct, opposite direction.
+* **Output validity is already treated as a dimension separate from stability** — `arXiv:2603.15840`
+  (Riasat), confirmed by reading the paper rather than a search snippet.
+
+What survives is narrower and worth stating as such: **applying output cardinality as a reporting
+norm on an evaluation batch that crosses third-party tool servers**, where the failure is a
+successful-looking response rather than a wrong computation, together with three measured defect
+classes at three different integration boundaries and the price of not having it (a withdrawn
+n=210 study). That is a refinement with a concrete cost attached, not a new technique.
+
+*One note on how this search went, because it is the same lesson one level up.* A search summary
+asserted that a paper documented harness-level silent failures misattributed to the model and
+resolved by auditing platform source code — which would have been close prior art. **Both candidate
+papers were fetched and neither contained it.** The summary was a plausible synthesis, and citing
+it would have put a fabricated source in the ledger. A search result that answers is not the same
+as a source that said so.

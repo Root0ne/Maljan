@@ -413,7 +413,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | M1 | An unset optional MCP argument reached the server as `null` | all 36 CAPE tools refused; pipeline unaware | **OURS** (instrument defect) | §3.13, fixed `716a128` |
 | M2 | A loaded Ghidra program never became the *current* one | every sample after the first described the **first** binary | **OURS** (instrument defect) | §3.14, fixed `0720d34` |
 | M3 | A refused load answers HTTP 200; the pre-pass carried on | hints and function hashes built from another binary | **OURS** (instrument defect) | §3.14, fixed `3eabf88` |
-| M4 | Repeated-constant detection catches stale-state bugs a green suite misses | 3 defects, 1,981 passing tests, 0 caught | **OURS** — the D3 spine | second counter-search before submission |
+| M4 | Repeated-constant detection catches stale-state bugs a green suite misses | 3 defects, 1,981 passing tests, 0 caught | **REFINEMENT** — demoted 2026-08-11 by counter-search; the detector is a **metamorphic relation** (TOSEM `10.1145/3708521`), and `2603.05399` tests the inverse (identical inputs → consistent output). Ours keeps the *application*: an output-cardinality **reporting norm** for evaluation batches crossing third-party tool servers, with three measured defect classes and a withdrawn study as the cost | E1 |
 | B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.187** [0.151, 0.223], n=24 | measured | C5 at n=100 |
 | E2 | KV scaling on hybrid-offload MoE | measured | — | appendix |
 | E3 | ~201-tool catalogue infeasible at 3B | measured | open gap | E1 |
