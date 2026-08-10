@@ -181,6 +181,18 @@ chunks were dropped, or what fraction of runs hit `max_steps`. The data exists i
 **Action:** add truncation counters to `RunSummary` and report the distribution. `[cheap]` once
 runs exist — no new experiment, just instrumentation of runs we already do.
 
+*Progress, 2026-08-11.* The counters exist (`core/truncation_ledger.py`, A3) and record every
+guardrail decision including the pass-through, because a frequency needs its denominator. The
+distribution still awaits the cohort runs (C7), so this row stays `EXPOSED`.
+
+One truncation site was found that no part of this audit had listed: the sink-reachability
+pre-pass fetches the call graph with **`limit=20000` edges**, and a binary whose graph exceeds that
+is silently cut before the hint is computed. Measured at **1 of 79** samples (§3.15) — low, but it
+was zero in the sense that mattered: nobody was counting it. Two lessons for the P6 write-up. The
+enumeration of truncation sites was itself incomplete, so the paper should say how the list was
+built rather than presenting it as exhaustive; and the site was found by instrumenting a
+measurement for a different question, which is the ordinary way such things surface.
+
 ## P7 — Prompt Sensitivity `PARTIAL`
 
 > *"The prompt used to instruct the language models is fixed for all models and experiments or
@@ -342,3 +354,53 @@ missed — one of which had already been written down correctly and was then con
 Worth a methods note in the paper, because it generalises: a project disciplined enough to keep
 both a findings log *and* a claim ledger has, by that very fact, created the conditions for the
 two to diverge.
+
+---
+
+## An eleventh check, added 2026-08-10 — count the distinct outputs
+
+The nine pitfalls, and the tenth above, all assume the **instrument reports what it measured**.
+Three defects found on a single day violated that assumption, and none of them would have been
+caught by any of the eleven checks that existed that morning:
+
+| | the instrument did this | while reporting |
+|---|---|---|
+| **M1** | sent `null` for every unset optional MCP argument | nothing — all 36 CAPE tools refused, silently |
+| **M2** | left Ghidra's *current program* on the first binary ever loaded | `{"success": true, "program": "<the one you asked for>"}` |
+| **M3** | answered a refused load with **HTTP 200** and an `error` body | a call graph, a hint, and function hashes — of another binary |
+
+They share a shape worth naming: **a plausible wrong answer with no error anywhere**. Not a crash,
+not a stack trace, not a degraded score — output that looks exactly like output. M2 is the sharpest
+case: `load_program` returned success *with the correct program name in the response*, and the very
+next call operated on a different program entirely.
+
+**Why the test suite did not help.** All three survived **1,981 passing tests**. Not by accident:
+M2 and M3 require a *second* case in one server lifetime, and a unit test writes one. A suite that
+loads a single program, asserts on it, and tears down can never observe a context that fails to
+switch. The green suite was not wrong; it was answering a different question.
+
+**What did catch them, all three times, was arithmetic on the outputs:**
+
+- a priority hint of **2,575 characters** appearing for two unrelated samples — and for a third in
+  an earlier session;
+- call graphs of **404,337 characters, 11,798 lines**, identical to the character, for binaries of
+  241 KB and 139 KB;
+- **66 consecutive samples** at exactly 75,426 characters.
+
+**The check: before trusting a batch measurement, ask how many distinct outputs the N inputs
+produced.** If N samples yield far fewer than N distinct values on any dimension that should vary —
+output length, digest, element count — the instrument is repeating itself, and repetition is what a
+stale-state bug looks like from outside. It costs one line of code, needs no ground truth, and it is
+now reported alongside the result in §3.15 (**50 distinct call-graph sizes across 79 samples**).
+
+**What it cost not to have this.** §3.14 withdraws the **n=210 temporal-drift study**: it drove the
+full pipeline per sample against a long-lived shared Ghidra container that was never restarted,
+which is precisely M2's precondition, and its per-sample outputs were not retained — so whether it
+was affected cannot now be determined. A result that survived review, went into the ledger as
+`OURS`, and is now unusable, because nobody asked how many distinct answers the samples gave.
+
+The generalisable form, and the reason this belongs in the paper rather than in an issue tracker:
+**an LLM pipeline is mostly other people's servers, and a server that answers is not the same as a
+server that answered your question.** Every integration boundary here — MCP, Ghidra, the sandbox
+REST API — turned out to have a way of saying yes while doing something else, and the pipeline's
+own error handling was built for the failures that announce themselves.
