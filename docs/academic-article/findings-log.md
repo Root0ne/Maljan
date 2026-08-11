@@ -1691,27 +1691,54 @@ the 58.2%→56.7% movement above shows the size of the error that policy avoided
 under memory pressure; it is an artefact of the measurement conditions, not an analysis cost worth
 attributing to the sample.
 
-**The effect half does not fit this machine, and that is a measured statement.** The ablation is
-paired by construction — same sample, same binary, temp 0, `use_sink_reachability` the only
-difference — and each arm is a full static-analyst pass through the ReAct loop. **One arm was run
-and did not finish.** It ran **15 minutes** and was stopped by the memory guard at 3,974 MB
-available, because `llama-server` grows with cumulative requests rather than plateauing: **10.4 GB
-at the start of the pass, 14.8 GB fifteen minutes in**, on a 30 GB host already carrying a 6 GB
-Ghidra container and a desktop session.
+**The effect half was attempted twice, and what stopped it was not what it looked like.**
 
-So the honest arithmetic, rather than an attempt that quietly degrades: 55 samples carry a hint,
-paired arms make 110 passes, and at ~15 minutes each that is **~27 hours of wall clock during which
-the machine sits near its memory ceiling**. A defensible subset (12 samples, 24 passes) is still
-6–7 hours and still holds the host at 4–6 GB available throughout.
+*First attempt.* Killed by the memory guard at 15 minutes, 3,974 MB available. `llama-server` grows
+with cumulative requests rather than plateauing — **10.4 GB at the start of one pass, 14.8 GB
+fifteen minutes in** — on a 30 GB host already carrying Ghidra and a desktop.
 
-**What would make it feasible**, recorded so the next attempt does not rediscover it: restart
-`llama-server` between arms exactly as Ghidra already is (the growth is per-server-lifetime, not
-per-request, and temp 0 makes the restart measurement-neutral); stop the Ghidra container between
-LLM-heavy phases rather than leaving it resident; and serve at less than the configured 131,072
-context, which §2.0 already flags as half the model's native window and more than this workload
-uses. None of these is research — they are the difference between a study that runs and one that
-gets killed at minute fifteen. **C1 therefore stays `PARTIAL`: the mechanism's firing rate is
-measured, its effect is not, and the reason is stated rather than left as an empty cell.**
+*The lever that did not work.* Re-served at **64k context instead of 131k** on the reasoning that
+the KV cache would be bounded. It was not: llama peaked at **14.6 GB** against 14.8 GB before, for a
+**baseline of 10.1 GB against 10.4** — the growth follows the context a pass *actually consumes*,
+not the configured ceiling, and the baseline is CPU-resident expert weights that no context setting
+touches. Recorded because it is the obvious lever and it does not pull.
+
+*Second attempt, which completed and is the real result.* The arm finished in **1,677 s (28 min)**
+with **1 claim and zero technique IDs**, and the log says why:
+
+```
+20:58:12  ReAct loop starts, 20 tools
+21:00:01  loop completed: 19 tool calls, 41 messages, elapsed 109.5s
+21:00:01  "ended without a final answer ... forcing synthesis from gathered tool output"
+21:25:01  static no-tools fallback exceeded the 1530s hard cap
+```
+
+**The ReAct loop is not the expensive part — it took 109 seconds.** It exhausted its 40-step budget
+without concluding, which triggers a *forced synthesis*: one LLM call over everything the 19 tool
+calls gathered. That call ran **25 minutes and hit the 1,530 s hard cap**, and the analysis produced
+nothing.
+
+**Two bounds fired in sequence and the output was empty.** That is a P6 event of exactly the kind
+A3's ledger was built to count, and it is §1.7.1's shape in a new place — there, removing a hint
+made the judge overrun a 600 s ceiling and fall back to an empty bundle 6/17 times. Here the step
+cap and the time cap compose: exceeding the first *guarantees* an attempt at the second, and on a
+rich binary the second cannot finish. The fallback is not a safety net on this workload; it is a
+25-minute path to zero.
+
+**What this does to the ablation's cost.** A sample whose loop concludes is affordable. A sample
+whose loop exhausts 40 steps costs 28 minutes *per arm* and yields nothing to compare, so the pair
+is lost as well as the time. Until the fallback is bounded — or the step budget raised so rich
+chunks conclude inside it — the effect measurement cannot be scheduled honestly, because its unit
+cost is set by a failure path rather than by the measurement.
+
+**What would make it feasible**, recorded so the next attempt does not rediscover it — and note
+that the *memory* levers are the ones that turned out to matter least. Bounding the forced-synthesis
+fallback is first: a call that cannot finish inside its cap should be split or refused, not
+attempted for 25 minutes. Raising the step budget so a rich chunk concludes inside the loop removes
+the trigger entirely. Restarting `llama-server` between arms bounds the cumulative drift (temp 0
+makes it measurement-neutral) but does **not** lower the within-arm peak, and reducing the served
+context does neither. **C1 therefore stays `PARTIAL`: the mechanism's firing rate is measured, its
+effect is not, and the reason is a pipeline bound rather than a missing experiment.**
 
 **A note on what made the frequency half measurable at all, since it is the same lesson as §3.14 in
 a different coat.** Two attempts at this measurement took the host out of memory and cost the desktop session.
