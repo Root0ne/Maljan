@@ -50,6 +50,75 @@ _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 # 2026-06-23 live-UI audit runs; it is not a maljan/langchain in-tree literal.)
 _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 
+# Bounds for the forced-synthesis salvage (see ``_force_final_synthesis``).
+#
+# Below this many seconds the salvage is skipped rather than attempted: a call
+# that cannot finish still consumes the time it was given, and starting one with
+# nothing left is precisely how the hard cap came to fire on 2026-08-11.
+_SYNTHESIS_MIN_SECONDS = 60
+
+# Character budget for the conversation re-sent to the model. The measured
+# failure re-sent 19 tool outputs — the guardrail caps each at 6,000 chars, so
+# ~114,000 characters before the system prompt. Prefilling that and generating a
+# full structured answer did not finish in 25 minutes on the local 35B.
+_SYNTHESIS_MAX_CHARS = 16_000
+
+
+def _message_chars(m: object) -> int:
+    """Size of a message **as the server will see it**, not just its text.
+
+    An assistant turn that requests tools carries ``content == ""`` and puts the
+    whole request in ``tool_calls``, so measuring ``content`` alone reports zero
+    for exactly the messages a ReAct transcript is made of. A first cut of the
+    trim below did that and undercounted by roughly 4x: it dropped one message
+    from a conversation the server then reported at 38,868 tokens.
+    """
+    total = len(str(getattr(m, "content", "") or ""))
+    calls = getattr(m, "tool_calls", None)
+    if calls:
+        total += len(str(calls))
+    return total
+
+
+def _trim_for_synthesis(msgs: list, budget: int) -> list:
+    """Fit a ReAct conversation into ``budget`` characters, framing first.
+
+    Keeps the leading framing — the system prompt and the first human turn,
+    which carry the task and the output format — then fills the remainder with
+    the **most recent** messages. Late tool calls are the ones the model chose
+    after reading the early ones, so when something has to go, the oldest
+    evidence goes first.
+
+    The budget exists because of what long context costs *this* server, not for
+    tidiness: on the hybrid recurrent model a ~39k-token conversation drove
+    llama.cpp to write and erase a **63 MiB recurrent-state checkpoint every few
+    hundred tokens**, which is what turned a salvage call into a 25-minute one.
+
+    Returns ``msgs`` unchanged when it already fits, so the common case is
+    untouched and only a conversation that would not finish is altered.
+    """
+    if sum(_message_chars(m) for m in msgs) <= budget:
+        return msgs
+
+    head: list = []
+    rest: list = list(msgs)
+    # The framing is whatever precedes the first tool result, capped at two
+    # turns so a long opening cannot itself exhaust the budget.
+    while rest and len(head) < 2 and type(rest[0]).__name__ != "ToolMessage":
+        head.append(rest.pop(0))
+
+    used = sum(_message_chars(m) for m in head)
+    tail: list = []
+    for m in reversed(rest):
+        size = _message_chars(m)
+        if used + size > budget:
+            continue
+        tail.append(m)
+        used += size
+    tail.reverse()
+    return [*head, *tail]
+
+
 # Range constraints derived from the public MITRE ATT&CK Enterprise dataset.
 # Anything outside these bounds is treated as a hallucination.
 _TECHNIQUE_MIN: int = 1001
@@ -1009,7 +1078,12 @@ class BaseAnalyst(ABC):
                 tool_call_count,
                 len(msgs),
             )
-            synthesized = self._force_final_synthesis(msgs, timeout)
+            # `elapsed` is not decoration: without it the salvage receives a
+            # fresh copy of the full budget, and loop + salvage together overrun
+            # the hard cap the loop was already inside. Measured 2026-08-11:
+            # 109.5 s loop + a fresh 1,500 s synthesis = 1,677 s against a
+            # 1,530 s cap, and zero techniques out the other side.
+            synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 return synthesized
         return content
@@ -1077,7 +1151,7 @@ class BaseAnalyst(ABC):
         """Return the tool outputs captured by the most recent ReAct loop."""
         return list(self._last_tool_evidence)
 
-    def _force_final_synthesis(self, msgs: list, timeout: int) -> str:
+    def _force_final_synthesis(self, msgs: list, timeout: int, elapsed: float = 0.0) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
 
         LangGraph returns a "...need more steps..." stop message when the agent
@@ -1085,11 +1159,37 @@ class BaseAnalyst(ABC):
         tool result it gathered. Re-invoke the model once on the accumulated
         conversation with a hard directive to stop calling tools and write its
         final answer now, in the format the original system prompt requested.
-        Runs through the same timeout-guarded path as the no-tools fallback, and
-        is best-effort: on any failure it returns "" so the caller keeps the
-        original content.
+
+        **Bounded in both dimensions, and it was neither before.** Measured
+        2026-08-11 on a real binary: the loop spent its 40 steps in 109 s, this
+        method was handed the whole 41-message conversation and a *fresh* copy
+        of the full 1,500 s timeout, ran 25 minutes, hit the 1,530 s hard cap,
+        and the analysis produced zero techniques. Two bounds composed into
+        nothing — exceeding the step cap guaranteed an attempt at the time cap,
+        and on a rich binary that attempt could not finish.
+
+        So: synthesis gets what is *left* of the budget (a salvage that overruns
+        the deadline it was called to respect is not a salvage), skips entirely
+        when too little remains to be worth starting, and re-sends a conversation
+        trimmed to a character budget — the model cannot synthesise from context
+        it never finishes reading.
+
+        Best-effort throughout: on any failure it returns "" so the caller keeps
+        the original content.
         """
         from langchain_core.messages import HumanMessage
+
+        remaining = int(max(0.0, timeout - elapsed))
+        if remaining < _SYNTHESIS_MIN_SECONDS:
+            self.logger.warning(
+                "%s skipping forced synthesis: only %ds of the %ds budget left "
+                "(minimum %ds) — starting it is how the hard cap fires.",
+                self.name,
+                remaining,
+                timeout,
+                _SYNTHESIS_MIN_SECONDS,
+            )
+            return ""
 
         directive = HumanMessage(
             content=(
@@ -1101,8 +1201,17 @@ class BaseAnalyst(ABC):
                 "of asking for more steps."
             )
         )
+        trimmed = _trim_for_synthesis(msgs, _SYNTHESIS_MAX_CHARS)
+        if len(trimmed) < len(msgs):
+            self.logger.warning(
+                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
+                self.name,
+                len(msgs) - len(trimmed),
+                len(msgs),
+                _SYNTHESIS_MAX_CHARS,
+            )
         try:
-            return self._invoke_llm_with_timeout([*msgs, directive], timeout)
+            return self._invoke_llm_with_timeout([*trimmed, directive], remaining)
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
