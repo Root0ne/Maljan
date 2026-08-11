@@ -33,6 +33,10 @@ JOB_PID_FILE="${JOB_PID_FILE:-$LOG_DIR/night-job.pid}"
 WARN_MB="${WARN_MB:-6144}"
 KILL_MB="${KILL_MB:-4096}"
 INTERVAL="${INTERVAL:-10}"
+# Consecutive critical readings required before killing. At INTERVAL=10 this
+# tolerates ~30 s of transient pressure — long enough for a model load, far
+# short of a run that is genuinely eating the machine.
+KILL_STRIKES="${KILL_STRIKES:-3}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "$(ts) $*" >>"$LOG"; }
@@ -43,6 +47,7 @@ pswpout()  { awk '/pswpout/{print $2}' /proc/vmstat; }
 log "night-guard up: warn<${WARN_MB}MB kill<${KILL_MB}MB every ${INTERVAL}s"
 last_swap=$(pswpout)
 warned=0
+strikes=0
 
 while true; do
     mb=$(avail_mb)
@@ -58,7 +63,19 @@ while true; do
     fi
 
     if [ "$mb" -lt "$KILL_MB" ]; then
-        log "CRITICAL ${mb}MB available (<${KILL_MB}) — stopping the registered job"
+        # Sustained pressure is dangerous; a transient is not. Loading a 16 GB
+        # model drops MemAvailable by ~3 GB for about ten seconds, and on
+        # 2026-08-11 that cost a two-hour paired run its fourth restart — the
+        # guard, not the memory, was the thing ending the job. Require the
+        # condition to hold across consecutive checks before acting.
+        strikes=$((strikes + 1))
+        if [ "$strikes" -lt "$KILL_STRIKES" ]; then
+            log "CRITICAL ${mb}MB available (<${KILL_MB}) — strike ${strikes}/${KILL_STRIKES}, holding"
+            touch "$STOP"
+            sleep "$INTERVAL"
+            continue
+        fi
+        log "CRITICAL ${mb}MB available (<${KILL_MB}) for ${strikes} checks — stopping the registered job"
         touch "$STOP"
         if [ -f "$JOB_PID_FILE" ]; then
             pid=$(cat "$JOB_PID_FILE" 2>/dev/null || true)
@@ -75,6 +92,8 @@ while true; do
         sleep 60          # let the machine recover before judging it again
         continue
     fi
+
+    strikes=0
 
     if [ "$mb" -lt "$WARN_MB" ]; then
         [ "$warned" -eq 0 ] && log "LOW ${mb}MB available (<${WARN_MB}) — STOP sentinel laid"
