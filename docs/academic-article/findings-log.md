@@ -1691,8 +1691,30 @@ the 58.2%→56.7% movement above shows the size of the error that policy avoided
 under memory pressure; it is an artefact of the measurement conditions, not an analysis cost worth
 attributing to the sample.
 
-**A note on what made this measurable at all, since it is the same lesson as §3.14 in a different
-coat.** Two attempts at this measurement took the host out of memory and cost the desktop session.
+**The effect half does not fit this machine, and that is a measured statement.** The ablation is
+paired by construction — same sample, same binary, temp 0, `use_sink_reachability` the only
+difference — and each arm is a full static-analyst pass through the ReAct loop. **One arm was run
+and did not finish.** It ran **15 minutes** and was stopped by the memory guard at 3,974 MB
+available, because `llama-server` grows with cumulative requests rather than plateauing: **10.4 GB
+at the start of the pass, 14.8 GB fifteen minutes in**, on a 30 GB host already carrying a 6 GB
+Ghidra container and a desktop session.
+
+So the honest arithmetic, rather than an attempt that quietly degrades: 55 samples carry a hint,
+paired arms make 110 passes, and at ~15 minutes each that is **~27 hours of wall clock during which
+the machine sits near its memory ceiling**. A defensible subset (12 samples, 24 passes) is still
+6–7 hours and still holds the host at 4–6 GB available throughout.
+
+**What would make it feasible**, recorded so the next attempt does not rediscover it: restart
+`llama-server` between arms exactly as Ghidra already is (the growth is per-server-lifetime, not
+per-request, and temp 0 makes the restart measurement-neutral); stop the Ghidra container between
+LLM-heavy phases rather than leaving it resident; and serve at less than the configured 131,072
+context, which §2.0 already flags as half the model's native window and more than this workload
+uses. None of these is research — they are the difference between a study that runs and one that
+gets killed at minute fifteen. **C1 therefore stays `PARTIAL`: the mechanism's firing rate is
+measured, its effect is not, and the reason is stated rather than left as an empty cell.**
+
+**A note on what made the frequency half measurable at all, since it is the same lesson as §3.14 in
+a different coat.** Two attempts at this measurement took the host out of memory and cost the desktop session.
 The container ran with `-Xmx4g` — set, applied, verified in the running process's cmdline — and
 still reached 5.15 GB RSS, because that flag caps the *heap* while Ghidra's database is
 memory-mapped and its direct buffers are not. Nothing bounded the container, so the kernel's OOM
