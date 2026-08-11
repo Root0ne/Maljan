@@ -44,11 +44,19 @@ KILL_STRIKES="${KILL_STRIKES:-3}"
 # passed by the time it was measured. Declared work is not runaway work.
 GRACE="$LOG_DIR/night-job.grace"
 GRACE_MAX_AGE="${GRACE_MAX_AGE:-180}"
+# A declared allocation excuses low MemAvailable. It does NOT excuse an
+# exhausted swap file. On 2026-08-11 the grace window held three times while
+# swap ran to 100%, and the desktop session was killed — by the kernel's OOM
+# killer, which picks its victim by size and chose the editor. Once swap is
+# gone the machine has no headroom to wait in, so grace stops applying and the
+# guard acts. Grace is a reason to wait, never a reason to stop looking.
+SWAP_FLOOR_MB="${SWAP_FLOOR_MB:-1024}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "$(ts) $*" >>"$LOG"; }
 
 avail_mb() { awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo; }
+swapfree_mb() { awk '/SwapFree/{print int($2/1024)}' /proc/meminfo; }
 pswpout()  { awk '/pswpout/{print $2}' /proc/vmstat; }
 
 log "night-guard up: warn<${WARN_MB}MB kill<${KILL_MB}MB every ${INTERVAL}s"
@@ -77,13 +85,18 @@ while true; do
         # condition to hold across consecutive checks before acting.
         if [ -f "$GRACE" ]; then
             age=$(( $(date +%s) - $(stat -c %Y "$GRACE" 2>/dev/null || echo 0) ))
-            if [ "$age" -lt "$GRACE_MAX_AGE" ]; then
-                log "CRITICAL ${mb}MB — declared allocation in progress (${age}s), holding"
+            sfree=$(swapfree_mb)
+            if [ "$age" -lt "$GRACE_MAX_AGE" ] && [ "$sfree" -ge "$SWAP_FLOOR_MB" ]; then
+                log "CRITICAL ${mb}MB — declared allocation in progress (${age}s, swap ${sfree}MB free), holding"
                 touch "$STOP"
                 sleep "$INTERVAL"
                 continue
             fi
-            log "grace marker is ${age}s old (> ${GRACE_MAX_AGE}) — treating as stale"
+            if [ "$sfree" -lt "$SWAP_FLOOR_MB" ]; then
+                log "grace marker present (${age}s) but swap is down to ${sfree}MB (<${SWAP_FLOOR_MB}) — grace does not apply"
+            else
+                log "grace marker is ${age}s old (> ${GRACE_MAX_AGE}) — treating as stale"
+            fi
         fi
         strikes=$((strikes + 1))
         if [ "$strikes" -lt "$KILL_STRIKES" ]; then
