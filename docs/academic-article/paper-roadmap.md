@@ -393,7 +393,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 |---|---|---|---|---|
 | C0 | LLM-as-analyst vs LLM-for-a-trained-detector taxonomy | positioning | — | E3 |
 | C1 | Sink-reachability transferred JS→binary as prompt steering | **fires on 58.2%** (n=79, §3.15); effect not yet measured | `PARTIAL` | B6 second half |
-| C2 | Two-tier attribution (opcode-hash + semantic RAG) | **unmeasured** | `UNMEASURED` | **B7** |
+| C2 | Two-tier attribution (opcode-hash + semantic RAG) | semantic +0.003 F1 (§3.12); opcode-hash **fires 0/18** (§3.17) | **NEGATIVE — both tiers measured** | closed |
 | C3 | Falsification-before-confidence protocol | **unmeasured** | `REFINEMENT` of FAX | **B5**, B2 |
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
 | C5 | Describe-then-map | §1.5.1/§1.5.2 measured | **PRIOR ART** `2401.12178` | cite only |

@@ -1746,6 +1746,57 @@ through a repetition loop, and it is exactly the failure an equal-budget compari
 
 ---
 
+### 3.17 The opcode-hash attribution tier fires on nothing, for two separate reasons — `NEGATIVE` (B7)
+
+C2 claims a **two-tier** attribution design. §3.12 measured the semantic tier — a working retriever
+(6.3× chance) that moves the pipeline by +0.003 F1 — and left the opcode-hash tier as the one
+component in the project with no evaluation artifact at all. This is its first measurement, and it
+follows the same rule: ask whether the mechanism engages before asking what it is worth.
+
+**Result, 18 cohort samples:**
+
+| | |
+|---|---|
+| tier fires (any family asserted) | **0 / 18** |
+| functions hashed in total | **7,716** |
+| matches returned | **0** |
+| samples yielding ≤1 hashable function | **9 / 18** (5 yield zero) |
+| functions per sample | 0 min / **10 median** / 2,155 max |
+
+**Reason one: the corpus is three samples.** The Qdrant collection backing the tier holds **2,226
+points from 3 samples across 2 families** — and the "families" are `dropper` (2,199 functions) and
+`rat` (27), which are the pipeline's own generic category labels rather than malware families like
+Emotet or DarkComet. A tier that can only ever answer "dropper" or "rat", with 99% of its evidence
+from a single dropper, is not an attribution index; it is the residue of a few test runs. Nothing
+could match, so nothing did.
+
+**Reason two, which survives fixing the first.** Half the cohort yields nothing to query *with*.
+Functions are dropped below **8 instructions** — correctly, since tiny thunks and stubs normalise to
+the same opcode hash across unrelated binaries and matching them would manufacture family links —
+and against real packed samples that floor leaves **9 of 18 samples with one function or none**. The
+distribution is sharply bimodal: nine samples at ≤1, five above 700. Populating the corpus would fix
+reason one and leave reason two untouched for the packed half of any realistic corpus.
+
+**Consequence for C2.** Both tiers are now measured, and the two-tier claim cannot be made:
+
+* semantic tier — works in isolation, **+0.003 F1** end to end at n=19 (§3.12);
+* opcode-hash tier — **never fires**, on an empty-in-practice corpus, with a structural floor that
+  excludes half the samples regardless.
+
+The ledger row moves from `UNMEASURED` to a measured negative. And the shape repeats §1.5.3 and
+§3.12 for a **third** independently-built retrieval component: demonstrably reasonable in design,
+inert once wired to real inputs. Three is no longer an anecdote about one component — it is the
+project's most-replicated result, and it belongs in the paper as such rather than as three separate
+disappointments.
+
+**What would make this measurable rather than merely absent.** Seeding the corpus from the n=100
+cohort's own family labels would give the tier something to match, at which point the honest
+question becomes whether opcode-hash attribution beats the family-name lookup it would then be
+approximating. That is a different experiment and it is not queued; what is recorded here is that
+the tier as shipped contributes nothing.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
