@@ -1773,6 +1773,35 @@ enough to exhaust the step budget, returned zero techniques by construction.
 Reporting the negative result of this audit matters as much as the fix. "Nothing else was affected"
 is a claim, and it was checked the same way any other claim here is.
 
+**The fix is partial, and the paired run that proved it is the honest place to say so.** With the
+fix in, a 12-sample paired ablation was started. It produced **one complete pair and one failed
+arm** before the memory guard stopped it:
+
+| sample | arm | seconds | claims | technique IDs |
+|---|---|---|---|---|
+| `000ac83f` | hint **on** | 200.5 | 8 | **6** — T1027, T1055, T1057, T1102, T1105, T1134 |
+| `000ac83f` | hint **off** | 150.1 | 5 | **2** — T1027, T1055 |
+| `000b535a` | hint on | 1,545.2 | 1 | **0** — hit the 1,474 s cap |
+
+Two things follow, and the second matters more than the first.
+
+**One pair is not a result.** The on-arm found three times the techniques of the off-arm, and it
+also took 33% longer. Whether that is the hint working or the hint buying depth with time is exactly
+what §3.7's equal-budget discipline exists to separate, and n=1 cannot separate anything.
+
+**Input size is not the only driver of the timeout.** On `000b535a` the trim *fired* — 7 of 41
+messages dropped, conversation inside 16,000 characters — and synthesis still ran 24 minutes and
+failed. So the fix converts a guaranteed failure into a frequent success, not a solved problem, and
+the remaining cases are governed by something else: generation rate on this hybrid recurrent model
+varies from 162 tok/s down to **20 tok/s** across requests in the server's own timings. A bounded
+input does not help when the tokens themselves are eight times slower than the budget assumed.
+
+**One gap in the harness, recorded because it cost a diagnosis.** The ablation restarts
+`llama-server` between arms with its output sent to `/dev/null`, so when the second sample failed
+there was no server log for the instance that failed — the rates above are from an earlier
+instance's log and are indicative rather than matched. A measurement harness that suppresses the
+log of the thing it is measuring is the same class of mistake as the rest of this section.
+
 **What would make it feasible**, recorded so the next attempt does not rediscover it — and note
 that the *memory* levers are the ones that turned out to matter least. Bounding the forced-synthesis
 fallback is first: a call that cannot finish inside its cap should be split or refused, not

@@ -45,6 +45,57 @@ def restart_ghidra(base: str, token: str) -> None:
             time.sleep(3)
 
 
+def restart_llama() -> None:
+    """Reclaim llama-server's cumulative KV growth between arms.
+
+    It grows with cumulative requests rather than plateauing — 10.4 GB fresh,
+    16.1 GB after one arm — so a long paired run drifts into the host's
+    memory floor. temp 0 makes the restart measurement-neutral.
+    """
+    subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
+    time.sleep(5)
+    subprocess.Popen(
+        [
+            "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server",
+            "-m",
+            "/home/user/Belgeler/kingston/Projects/Maljan/models/Qwen3.6-35B-A3B-IQ3_K_R4.gguf",
+            "-c",
+            "65536",
+            "-t",
+            "16",
+            "-fa",
+            "on",
+            "-ctk",
+            "q8_0",
+            "-ctv",
+            "q8_0",
+            "-ngl",
+            "999",
+            "-ot",
+            r"blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU",
+            "--context-shift",
+            "on",
+            "--jinja",
+            "--alias",
+            "qwen3.6-35b-a3b",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8080",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(60):
+        try:
+            r = httpx.get("http://localhost:8080/health", timeout=5)
+            if r.json().get("status") == "ok":
+                return
+        except Exception:
+            pass
+        time.sleep(5)
+
+
 def run_arm(sha: str, hint_on: bool) -> dict:
     """One analyst pass. Returns claimed technique ids and cost."""
     from maljan.core.config import get_settings
@@ -97,6 +148,7 @@ def main() -> int:
             key = f"{sha}:{arm}"
             if key in state:
                 continue
+            restart_llama()
             try:
                 state[key] = run_arm(sha, hint_on=(arm == "on"))
             except Exception as e:  # noqa: BLE001 — a failed arm is data
