@@ -17,9 +17,16 @@ goes.
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
+
+# Both arms get the same wall-clock bound. Concluding arms finish in
+# 200-323 s (measured), so 600 s never truncates a working analysis; it only
+# stops a failing one from burning 25 minutes, and it does so symmetrically,
+# so the comparison between arms is untouched.
+os.environ.setdefault("REACT_AGENT_TIMEOUT_OVERRIDES__static", "600")
 from pathlib import Path
 
 sys.path.insert(0, "/home/user/Belgeler/kingston/Projects/Maljan")
@@ -52,6 +59,9 @@ def restart_llama() -> None:
     16.1 GB after one arm — so a long paired run drifts into the host's
     memory floor. temp 0 makes the restart measurement-neutral.
     """
+    # Tell the guard this drop is declared, not runaway (see night_guard.sh).
+    grace = "/home/user/Belgeler/kingston/Projects/Maljan/logs/night-job.grace"
+    open(grace, "w").close()
     subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
     time.sleep(5)
     subprocess.Popen(
@@ -90,6 +100,7 @@ def restart_llama() -> None:
         try:
             r = httpx.get("http://localhost:8080/health", timeout=5)
             if r.json().get("status") == "ok":
+                os.path.exists(grace) and os.remove(grace)
                 return
         except Exception:
             pass

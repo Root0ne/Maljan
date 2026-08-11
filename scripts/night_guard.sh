@@ -37,6 +37,13 @@ INTERVAL="${INTERVAL:-10}"
 # tolerates ~30 s of transient pressure — long enough for a model load, far
 # short of a run that is genuinely eating the machine.
 KILL_STRIKES="${KILL_STRIKES:-3}"
+# A job that is about to make a known large allocation (loading a 16 GB model
+# between arms) touches this file first and removes it after. While it is
+# fresh the guard warns but does not kill: on 2026-08-11 the strike counter
+# expired mid-load three times, ending a run for pressure that had already
+# passed by the time it was measured. Declared work is not runaway work.
+GRACE="$LOG_DIR/night-job.grace"
+GRACE_MAX_AGE="${GRACE_MAX_AGE:-180}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "$(ts) $*" >>"$LOG"; }
@@ -68,6 +75,16 @@ while true; do
         # 2026-08-11 that cost a two-hour paired run its fourth restart — the
         # guard, not the memory, was the thing ending the job. Require the
         # condition to hold across consecutive checks before acting.
+        if [ -f "$GRACE" ]; then
+            age=$(( $(date +%s) - $(stat -c %Y "$GRACE" 2>/dev/null || echo 0) ))
+            if [ "$age" -lt "$GRACE_MAX_AGE" ]; then
+                log "CRITICAL ${mb}MB — declared allocation in progress (${age}s), holding"
+                touch "$STOP"
+                sleep "$INTERVAL"
+                continue
+            fi
+            log "grace marker is ${age}s old (> ${GRACE_MAX_AGE}) — treating as stale"
+        fi
         strikes=$((strikes + 1))
         if [ "$strikes" -lt "$KILL_STRIKES" ]; then
             log "CRITICAL ${mb}MB available (<${KILL_MB}) — strike ${strikes}/${KILL_STRIKES}, holding"
