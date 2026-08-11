@@ -1761,6 +1761,18 @@ trying to run an experiment and refusing to accept its cost. The measured "this 
 machine" turned out to be "this pipeline produces nothing on a whole class of input", and the
 experiment was the instrument that surfaced it.
 
+**Blast radius, checked rather than assumed.** A defect that silently zeroed the static analyst on
+rich binaries could have contaminated earlier results, so the record was audited against it. It did
+not: §1.5.x is retrieval-only, §3.2/§3.6 state explicitly that they run the **text path only** with
+the Ghidra/CAPE ReAct loop excluded, §3.7–§3.9 and §3.11–§3.12 are fixture- or corpus-based with no
+tool loop, and §3.10 reads bundles the judge produced. **The one recorded result that drove the full
+pipeline per sample is the n=210 drift study — and it is already withdrawn (§3.14).** This gives it
+a *second, independent* reason to stay withdrawn: it ran on a pipeline that, on any binary rich
+enough to exhaust the step budget, returned zero techniques by construction.
+
+Reporting the negative result of this audit matters as much as the fix. "Nothing else was affected"
+is a claim, and it was checked the same way any other claim here is.
+
 **What would make it feasible**, recorded so the next attempt does not rediscover it — and note
 that the *memory* levers are the ones that turned out to matter least. Bounding the forced-synthesis
 fallback is first: a call that cannot finish inside its cap should be split or refused, not
