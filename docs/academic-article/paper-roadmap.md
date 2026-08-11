@@ -358,6 +358,22 @@ which side of that crossover a malware pipeline sits on.
       exactly the near-zero effects this project kept measuring, and telling those two situations
       apart is the skill the paper teaches.
 
+      **Narrowed 2026-08-11 by counter-search, and the narrowing is not cosmetic.** The *genus* is
+      already described: `arXiv:2606.14589` studies a production LLM agent runtime, documents 22
+      incidents over eight weeks, and defines exactly this meta-pattern — *"a failure whose error
+      signal never reaches a human in actionable form"* — with a five-class taxonomy our three
+      defects fall into without strain. The detector is an ordinary metamorphic relation. So the
+      contribution is **not** "silent failures exist at tool boundaries", which is known.
+
+      What is left, and what E1/E3 must claim instead: three mechanisms at three *different*
+      integration boundaries (MCP argument encoding, server-side current-program state, HTTP status
+      versus body); the setting — an **evaluation pipeline for security research**, where the
+      output is not a degraded user session but a *measurement that is wrong and looks right*; the
+      output-cardinality check reported **alongside the result** rather than run as a test; and the
+      cost, demonstrated rather than hypothesised — **E1 withdrawn**, because its per-sample outputs
+      were not retained and the question can no longer be asked of it. The taxonomies report
+      incidents; we report what an incident of this class does to a result already written down.
+
       **Two supports that were missing are now in place.** §3.15 shows the frequency-before-effect
       discipline paying (the sink hint fires on 58%, so its ablation is interpretable, where §3.11's
       cap fired on 0.82% and its was not). And **C5** finally anchors the numbers: CAPE alone scores

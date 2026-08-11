@@ -212,12 +212,47 @@ Our study varies something else. The model is **fixed**, and what changes is **t
 input binary** — which is concept drift in the malware-detection sense, applied to an LLM analyst,
 rather than temporal misalignment of the model itself.
 
-On that axis we find no LLM-based equivalent. Across 210 dated real binaries spanning 2020–2026 we
-measure an earliest-to-latest F1 difference of −0.004, bounding drift at ≤0.040 F1 over seven
-years at 95% confidence, with the study powered to detect δ ≥ 0.05. We state the bound rather than
-claiming absence, and note that its width relative to an absolute F1 of 0.055–0.089 makes the
-stability claim a coarse one. The prior from [19] runs the other way, which is what makes a null
-worth reporting here — provided, as above, that the axis is named.
+On that axis we find no LLM-based equivalent, and the axis is worth naming even though **we no
+longer have a result to report on it.** Our n=210 drift study is **withdrawn**: it drove the full
+pipeline per sample against a long-lived shared Ghidra server that was never restarted, which is
+the precondition for the stale-program defect described in §6, and its per-sample outputs were not
+retained, so whether it was affected cannot be determined after the fact. The earlier
+earliest-to-latest figure is not restated here. What survives is the framing — input-era drift is a
+distinct axis from temporal misalignment — and a re-run under the corrected instrument is required
+before any bound is claimed.
+
+## 6. Silent failure at tool boundaries
+
+The paper's methodological spine belongs to an area that already exists, and locating it there
+precisely matters more than claiming the ground.
+
+**The genus is described.** *When Errors Become Narratives* [20] studies a production LLM agent
+runtime over eight weeks, documents **22 incidents with root-cause postmortems**, and defines the
+meta-pattern as *"a failure whose error signal never reaches a human in actionable form"*,
+observed at least 28 times. Its five-class taxonomy — environment and platform quirks,
+design-assumption mismatches, error swallowing and dilution, chained hallucination, operational
+omission — covers our three defects without strain: an unset optional argument sent as `null` and a
+`load_program` that does not change what the server is looking at are **design-assumption
+mismatches**; a refused load answering HTTP 200 is **error swallowing**. Adjacent work reaches the
+same place from the interface side, finding that automatically generated MCP servers are often
+unfaithful to their source APIs and that minor response changes produce *"silent downstream
+reasoning failures rather than explicit, testable errors"* [21].
+
+**The detector is not new either.** "Distinct inputs should produce distinct outputs" is an
+ordinary metamorphic relation, and metamorphic testing exists precisely for programs whose correct
+output is unknown [22]; the inverse — duplicating dataset items to check that identical inputs
+score consistently — is already an eval-harness practice [23].
+
+**What we add is therefore narrow and stated narrowly.** Three instances of the described genus,
+drawn not from a user-facing assistant but from an **evaluation pipeline for security research**,
+where the consequence is neither a bad answer to a user nor a degraded session but **a measurement
+that is wrong and looks right**. We contribute: the three concrete mechanisms at three different
+integration boundaries (MCP argument encoding, server-side current-program state, HTTP status
+versus body); the output-cardinality check reported *alongside* the result rather than run as a
+test; and a demonstrated cost — one study withdrawn, because its per-sample outputs were not
+retained and the question can no longer be asked of it. The last of these is the part we have not
+seen elsewhere: the taxonomies report incidents, and we report what an incident of this class does
+to a result that has already been written down.
 
 ## Scope of every empirical statement above
 
@@ -258,7 +293,19 @@ verification status differs — deliberately recorded rather than smoothed over:
 | [18] | Neural text degeneration: Welleck et al., `arXiv:1908.04319`; *Repetition In Repetition Out*, `arXiv:2310.10226` (NeurIPS'23); *Rethinking Repetition Problems of LLMs in Code Generation*, `arXiv:2505.10402` | **Search results only.** Same requirement |
 | [19] | Temporal generalisation: Lazaridou et al., *Mind the Gap* (NeurIPS'21); TemporalWiki `arXiv:2204.14211`; TARDIS `arXiv:2503.18693` | **Search results only.** Same requirement |
 
-Acting on [17]–[19] now is conservative because each one *demotes* a claim of ours — the safe
+| [20] | Wei Wu, *When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime*, `arXiv:2606.14589` | **Abstract page fetched and read.** Title, sole author, the 22-incident/8-week scope, the *"error signal never reaches a human in actionable form"* definition and the five-class taxonomy are all from the paper. The full text has **not** been read, and the abstract does not itself claim coverage of HTTP-status-versus-body or stale-state failures — our mapping of M1–M3 onto its classes is **our reading and must be checked against the body before submission** |
+| [21] | *From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents*, `arXiv:2507.16044`; MCP tool-description quality and runtime-server studies (`arXiv:2607.11086`, `arXiv:2607.11098`) | **Search results only.** The "silent downstream reasoning failures rather than explicit, testable errors" phrasing comes from a search summary and must be located in the source |
+| [22] | Metamorphic testing; *Metamorphic Relation Generation: State of the Art and Research Directions*, ACM TOSEM `10.1145/3708521` | **Search results only.** The framework is textbook and the demotion it forces is safe, but the specific survey must be read before it is cited |
+| [23] | *Judge Reliability Harness: Stress Testing the Reliability of LLM Judges*, `arXiv:2603.05399` | **Search results only.** Cited for the duplicate-item consistency check; verify that this is what it does |
+
+Acting on [17]–[23] now is conservative because each one *demotes* a claim of ours — the safe
 direction. Citing them in a submitted paper on this basis would not be, and the standing rule from
 the 2026-08-08 citation audit applies: a search summary is a lead, not a source. That audit exists
 because one fabricated a claim.
+
+**And one nearly did again, 2026-08-11.** While counter-searching §6, a search summary asserted that
+a paper documented harness-level silent failures misattributed to the model and resolved by
+auditing platform source code — close and useful prior art, had it existed. **Both candidate papers
+were fetched and neither contained it.** The summary was a plausible synthesis of several results.
+The rule held only because it was applied; it is recorded here because the failure it prevents is
+the one this section is about, one level up.
