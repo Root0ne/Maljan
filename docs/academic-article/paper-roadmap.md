@@ -16,9 +16,26 @@
 
 ## Where this stands
 
-**The ledger, which governs everything below** *(revised 2026-08-09 after A4)*: **2 `OURS` ·
-9 `REFINEMENT` · 4 `PRIOR ART` · 4 `UNMEASURED`**. Both surviving claims are *measurement*
-results; all four architectural claims are unmeasured, which is why the B and C layers exist.
+**The ledger, which governs everything below** *(revised 2026-08-11 after B5–B8, D3, E3)*:
+**4 `OURS` · 10 `REFINEMENT` · 2 `PRIOR ART` (+1 adjacent) · 2 `UNMEASURED` · 1 `WITHDRAWN`**.
+
+What moved, and it is most of the table:
+
+* **The four architectural claims are no longer unmeasured.** C1 fires on **56.7%** of samples
+  (effect still open); C2 is a **measured negative** on both tiers; C3's cap fires on **0.82%** of
+  techniques; C7's integrity pass was read on 60 fresh bundles. Only **C6** (the cascade) still
+  waits on CAPE.
+* **The three `OURS` rows are new and none are architectural.** M1–M3 are instrument defects found
+  on 2026-08-10 — a `null` argument, a program that never became current, an HTTP 200 on a refused
+  load — joining C8. M4, the detector, was **counter-searched and demoted** the same week.
+* **E1 is withdrawn**, not demoted. The n=210 drift study meets M2's precondition and its per-sample
+  outputs were not retained, so it cannot be checked and is not restated anywhere.
+* **A baseline exists for the first time.** CAPE alone scores **F1 0.187** [0.151, 0.223] on the
+  cohort (B0), so pipeline figures now have a reference instead of floating.
+
+Three rows had drifted from the evidence log and were corrected in this pass — C1 still carried an
+interim 58.2%/n=79, C3 and C7 still read "unmeasured" after B5 and B4 had measured them. That is the
+tenth check earning its place a second time; the register and the log diverge by default.
 
 **Three framings have died, not two.** Describe-then-map (`arXiv:2401.12178`) and binary→ATT&CK
 (`arXiv:2602.06325`) fell to prior art on 08-08. Then **A4 demoted the entire F2 remnant** — C5a,
@@ -28,16 +45,19 @@ was refuted; each is a domain instance of a neighbouring field's settled result,
 real mechanism. But the chapter can no longer be introduced as novel findings, and **D3 re-decides
 on that basis.**
 
-**The self-audit's three exposed rows are closed as far as writing can close them.** P6 is
-instrumented (A3) and will be reported at C7; P8's four claims are scoped (A1) with the empirical
-half at C6; P9's model and engine are both pinned (A2).
+**The self-audit's three exposed rows.** P6 is instrumented (A3), has gained a truncation site
+nobody had listed (the 20,000-edge call-graph fetch, hit by 1 of 97 samples), and stays `EXPOSED`
+until the distribution is reported at C7. **P8 is now `PARTIAL` on evidence rather than on
+promises** — a second model has run (§3.16) and did not separate from the local one, so the limit
+is sample size, not the absence of a comparison. P9's model and engine are both pinned (A2).
 
-**The one thing that decides the paper's shape is B1.** The literature's prior now runs *against*
-multi-agent designs: two 2026 equal-budget studies find single agents match or beat debate, one of
-them on 7–8B models. Both name heterogeneous evidence channels as the exception, which is our
-defence and a hypothesis until B1 runs. `arXiv:2604.02460` §5.3 makes it sharper still — it finds
-a measured **crossover** at α=0.7 on Qwen3-30B-A3B, our own model class. B1's job is to locate
-which side of that crossover a malware pipeline sits on.
+**B1 has run, and it decided the paper's shape.** The result was null: `negotiated − single` =
+**−0.016**, 95% CI **[−0.084, +0.050]**, at **3.2× the tokens**. The literature's prior held — two
+2026 equal-budget studies find single agents match or beat debate, and `arXiv:2604.02460` §5.3
+locates a crossover at α=0.7 on our own model class. A malware pipeline sits on the side where
+heterogeneous channels do not pay for themselves at equal budget. **F1, the system paper, is
+closed; D3 locks F3 on that basis.** The remaining B1 follow-up — degrading the channels to find
+the crossover experimentally — is a refinement of a settled answer, not a route back.
 
 ### Decisions taken 2026-08-09
 
@@ -408,14 +428,14 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | # | Claim | Evidence | Verdict | Closed by |
 |---|---|---|---|---|
 | C0 | LLM-as-analyst vs LLM-for-a-trained-detector taxonomy | positioning | — | E3 |
-| C1 | Sink-reachability transferred JS→binary as prompt steering | **fires on 58.2%** (n=79, §3.15); effect not yet measured | `PARTIAL` | B6 second half |
+| C1 | Sink-reachability transferred JS→binary as prompt steering | **fires on 56.7%** (55/97, §3.15); effect not yet measured | `PARTIAL` | B6 second half |
 | C2 | Two-tier attribution (opcode-hash + semantic RAG) | semantic +0.003 F1 (§3.12); opcode-hash **fires 0/18** (§3.17) | **NEGATIVE — both tiers measured** | closed |
-| C3 | Falsification-before-confidence protocol | **unmeasured** | `REFINEMENT` of FAX | **B5**, B2 |
+| C3 | Falsification-before-confidence protocol | **measured**: the cap fires on **0.82%** of techniques (§3.11) | `REFINEMENT` of FAX — and now a measured near-null | closed |
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
 | C5 | Describe-then-map | §1.5.1/§1.5.2 measured | **PRIOR ART** `2401.12178` | cite only |
 | C5a | Rank and gate are separate axes | N=4,913 TRAM2 **+ AnnoCTR** | **REFINEMENT** — `2604.03676` owns the framing | keeps the *inversion* |
 | C6 | Multi-layer corroboration cascade | §1.10 partial | `UNMEASURED` | **C3**, C2 |
-| C7 | Deterministic STIX integrity + honest degradation | emitter fixed, pass unmeasured | `UNMEASURED` | **B4** |
+| C7 | Deterministic STIX integrity + honest degradation | **measured** on 60 fresh judge bundles (§3.10) | `PARTIAL` — firing rate known, truncation distribution awaits C7 runs | C7 |
 | C8 | Schema-pruning hint → completion, not accuracy | n=17 paired | **OURS** — held at A4 | second search before submission |
 | N1 | Claim-count is an invalid instrument | measured | `REFINEMENT` | E1 |
 | N2 | Equal-budget view decomposition trades grounding for volume | n≈8–9/arm | `REFINEMENT` | E1 |
