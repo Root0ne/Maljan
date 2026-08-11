@@ -1725,11 +1725,41 @@ cap and the time cap compose: exceeding the first *guarantees* an attempt at the
 rich binary the second cannot finish. The fallback is not a safety net on this workload; it is a
 25-minute path to zero.
 
-**What this does to the ablation's cost.** A sample whose loop concludes is affordable. A sample
-whose loop exhausts 40 steps costs 28 minutes *per arm* and yields nothing to compare, so the pair
-is lost as well as the time. Until the fallback is bounded — or the step budget raised so rich
-chunks conclude inside it — the effect measurement cannot be scheduled honestly, because its unit
-cost is set by a failure path rather than by the measurement.
+**This was a production defect, and fixing it is what made the ablation possible.** Three bounds
+were wrong at once, and the third was in the fix's own first cut:
+
+* **Time.** Synthesis received a *fresh* copy of the full 1,500 s timeout. 109.5 + 1500 overruns the
+  1,530 s hard cap by construction — the cap could not not fire. It now gets what is left, and is
+  skipped below a 60 s floor.
+* **Input.** The whole 41-message conversation was re-sent. It is now trimmed, keeping the framing
+  and the most recent evidence.
+* **Measurement.** The first trim counted `len(message.content)` — which is **zero** for the
+  assistant turns that request tools, i.e. for most of a ReAct transcript. It dropped one message
+  from a conversation llama.cpp then reported at **38,868 tokens**. Counting the `tool_calls`
+  payload too, and lowering the budget to 16k chars, made it bite.
+
+The budget is not tidiness. The server log shows what long context costs *this* model: at ~39k
+tokens llama.cpp wrote and erased a **63 MiB recurrent-state checkpoint every few hundred tokens**,
+which is the §2.0 hybrid-recurrent architecture showing up as a wall-clock cliff rather than as an
+error.
+
+**Verified on the same sample, before and after the fix:**
+
+| | before | after |
+|---|---|---|
+| wall clock | 1,677 s | **323 s** |
+| claims | 1 | **10** |
+| technique IDs | **0** | **5** (T1027, T1055, T1071, T1082, T1547) |
+| messages trimmed | 1 / 41 | 5 / 41 |
+
+A 5.2× speedup and, more to the point, **an analysis that produces something instead of nothing on
+a rich binary**. The ablation's unit cost is now set by the measurement rather than by a failure
+path, which puts a 12-sample paired run at roughly two hours instead of eleven.
+
+**Worth noting how this was found.** Not by a test — 1,993 of them passed throughout — but by
+trying to run an experiment and refusing to accept its cost. The measured "this does not fit the
+machine" turned out to be "this pipeline produces nothing on a whole class of input", and the
+experiment was the instrument that surfaced it.
 
 **What would make it feasible**, recorded so the next attempt does not rediscover it — and note
 that the *memory* levers are the ones that turned out to matter least. Bounding the forced-synthesis
