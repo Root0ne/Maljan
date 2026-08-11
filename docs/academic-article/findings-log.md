@@ -1917,6 +1917,55 @@ the tier as shipped contributes nothing.
 
 ---
 
+### 3.18 The paired sink-hint ablation is halted, and its failures are not attributable — `INCOMPLETE` (B6, second half)
+
+**Status: 10 of 24 arms complete, run stopped 2026-08-11 23:5x, not resumed.** Recorded here rather
+than left in a scratch file because the reason it stopped is itself a measurement-validity result.
+
+**What was collected.** Twelve samples drawn from the 55 with a non-empty hint (§3.15), two arms
+each, differing only in `use_sink_reachability`:
+
+| sample | hint off | hint on | disposition |
+|---|---|---|---|
+| `000ac83f` | 2 tid / 5 claims | 6 tid / 8 claims | usable, hint **+4** |
+| `000b535a` | 0 tid / 1 claim (625s) | 0 tid / 1 claim (1545s) | both arms dead |
+| `0014daea` | 6 tid / 10 claims | 0 tid / 5 claims | usable, hint **−6** |
+| `00162899` | 14 tid / **117 claims** | 1 tid / 1 claim | degenerate (§3.3), 8.4 claims/tid |
+| `00c66a68` | 0 tid / 1 claim (612s) | 0 tid / 1 claim (622s) | both arms dead |
+
+Two of five complete pairs are scoreable and they point in **opposite directions**. No result is
+claimed from this, and none should be: n=2 with deltas of +4 and −6 is not an underpowered estimate,
+it is an absence of one.
+
+**Why it cannot simply be resumed and finished.** The host was swapping when the last pair ran.
+`llama-server` had **2,289 MB of its own address space paged out** with the swap file at **8,191 /
+8,191 MB — fully exhausted**. A model generating from disk-backed pages is a different instrument
+from one generating from RAM, and the arm that failed did so by exceeding a 594-second synthesis
+budget on a prompt trimmed to 16,000 characters, which is otherwise inexplicable. The failure may
+belong to the pipeline; it may belong to the machine. **On the evidence retained, the question
+cannot be decided** — which is §4.5's lesson arriving a second time, in a new place: per-sample
+*outputs* were kept, but per-sample *host state* was not, and that is what the question needed.
+
+**The correction is to the harness, not to the analysis.** Any resumed run must record
+`MemAvailable`, `SwapFree`, and the model server's `VmSwap` **at the start and end of every arm**, so
+that a failed arm can afterwards be attributed to the pipeline or excluded as an artefact of the
+host. Screening after the fact is not possible; the state is gone the moment the arm ends.
+
+**A second, harder constraint.** The pipeline's working set — model server ~16 GB, analysis worker
+~8 GB, Ghidra JVM up to 6 GB — does not coexist with a desktop session on a 30 GB machine. This is
+not a threshold to tune. The 2026-08-11 event ended with the kernel's OOM killer terminating the
+user's editor *and* the ablation, because the memory guard had been given a grace window (for
+declared model loads) that checked marker age and nothing else. The guard now refuses to grant grace
+below a free-swap floor (`3a96171`), but that only changes which process dies. **The experiment
+requires an otherwise-idle machine**, and saying so is cheaper than a fourth threshold.
+
+**What §3.15 still supports.** The firing rate — 55/97 = 56.7% — stands; it was measured by the
+pre-pass alone and never depended on this run. C1's claim remains what it was before the ablation
+started: *measured to fire, effect unmeasured*. That is a weaker position than a null result and it
+is reported as such.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as

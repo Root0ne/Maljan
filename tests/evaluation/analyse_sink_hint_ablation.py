@@ -16,6 +16,15 @@ Symmetric failures — both arms hitting the wall-clock bound on the same sample
 are also excluded as pairs, and counted. They cost the pair but do not bias it,
 which is worth stating rather than hiding in an n.
 
+**A dead arm is screened against the host before it is called a failure.** On
+2026-08-11 an arm exceeded its synthesis budget on a 16,000-character prompt
+while the swap file was exhausted and the model server had 2.3 GB of itself
+paged out; generating from disk is not the same instrument as generating from
+RAM. Arms recorded with host state are excluded as `host_degraded` when free
+swap fell below the floor. Arms from before that instrumentation existed are
+excluded as `unattributable` — not as pipeline failures, because the data
+cannot support that reading and the honest label is the one that says so.
+
 Primary outcome is **distinct technique IDs**, because that is what the pipeline
 emits downstream. Claim count is reported alongside it, since an early pair
 showed the two moving in opposite directions and a single number would have
@@ -37,12 +46,33 @@ SEED = 20260811
 
 DEGENERATE_MIN_CLAIMS = 20
 DEGENERATE_RATIO = 4.0
+# Below this much free swap the model server generates from disk-backed pages,
+# and a timeout stops being a statement about the pipeline. Arms are screened
+# on it only when the host state was actually recorded; arms from before that
+# instrumentation existed are reported as unknown rather than assumed healthy.
+SWAP_FLOOR_MB = 1024
 
 
 def is_degenerate(arm: dict[str, Any]) -> bool:
     n = arm.get("n_claims") or 0
     t = len(arm.get("technique_ids") or [])
     return n >= DEGENERATE_MIN_CLAIMS and n / max(1, t) >= DEGENERATE_RATIO
+
+
+def is_dead(arm: dict[str, Any]) -> bool:
+    return not arm.get("technique_ids") and (arm.get("n_claims") or 0) <= 1
+
+
+def host_was_degraded(arm: dict[str, Any]) -> bool | None:
+    """True/False if the host state was recorded, None if it was not."""
+    swaps = [
+        m.get("SwapFree")
+        for m in (arm.get("host_mem_before"), arm.get("host_mem_after"))
+        if isinstance(m, dict) and m.get("SwapFree") is not None
+    ]
+    if not swaps:
+        return None
+    return min(swaps) < SWAP_FLOOR_MB
 
 
 def bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]:
@@ -66,7 +96,16 @@ def main() -> int:
         sha, _, side = key.rpartition(":")
         by_sample.setdefault(sha, {})[side] = arm
 
-    usable, excluded = [], {"incomplete": [], "failed_both": [], "degenerate": []}
+    usable, excluded = (
+        [],
+        {
+            "incomplete": [],
+            "host_degraded": [],
+            "failed_both": [],
+            "unattributable": [],
+            "degenerate": [],
+        },
+    )
     for sha, arms in by_sample.items():
         on, off = arms.get("on"), arms.get("off")
         if not on or not off:
@@ -75,8 +114,19 @@ def main() -> int:
         if "error" in on or "error" in off:
             excluded["incomplete"].append(sha)
             continue
-        on_dead = not on.get("technique_ids") and (on.get("n_claims") or 0) <= 1
-        off_dead = not off.get("technique_ids") and (off.get("n_claims") or 0) <= 1
+        on_dead, off_dead = is_dead(on), is_dead(off)
+        # A dead arm on a swapping host says nothing about the hint. Screen it
+        # out *before* the failed-both rule, so the two are never conflated:
+        # one is a pipeline failure, the other is a failure of the machine the
+        # pipeline was measured on, and only the first is a finding.
+        if on_dead or off_dead:
+            degraded = [host_was_degraded(a) for a in (on, off)]
+            if True in degraded:
+                excluded["host_degraded"].append(sha)
+                continue
+            if None in degraded:
+                excluded["unattributable"].append(sha)
+                continue
         if on_dead and off_dead:
             excluded["failed_both"].append(sha)
             continue

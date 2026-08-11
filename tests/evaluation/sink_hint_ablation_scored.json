@@ -1,0 +1,80 @@
+{
+ "schema": "maljan-sink-hint-ablation/v1",
+ "seed": 20260811,
+ "degenerate_rule": {
+  "min_claims": 20,
+  "claims_per_tid": 4.0
+ },
+ "excluded": {
+  "incomplete": [],
+  "host_degraded": [],
+  "failed_both": [],
+  "unattributable": [
+   "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6",
+   "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7"
+  ],
+  "degenerate": [
+   "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e"
+  ]
+ },
+ "summary": {
+  "n_pairs": 2,
+  "technique IDs": {
+   "mean": -1.0,
+   "ci95": [
+    -6.0,
+    4.0
+   ],
+   "includes_zero": true
+  },
+  "claims": {
+   "mean": -1.0,
+   "ci95": [
+    -5.0,
+    3.0
+   ],
+   "includes_zero": true
+  },
+  "seconds": {
+   "mean": 26.75,
+   "ci95": [
+    3.1,
+    50.4
+   ],
+   "includes_zero": false
+  },
+  "direction": {
+   "hint_better": 1,
+   "hint_worse": 1,
+   "tied": 0
+  }
+ },
+ "per_pair": [
+  {
+   "sha256": "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c",
+   "on": {
+    "tids": 6,
+    "claims": 8,
+    "seconds": 200.5
+   },
+   "off": {
+    "tids": 2,
+    "claims": 5,
+    "seconds": 150.1
+   }
+  },
+  {
+   "sha256": "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941",
+   "on": {
+    "tids": 0,
+    "claims": 5,
+    "seconds": 116.1
+   },
+   "off": {
+    "tids": 6,
+    "claims": 10,
+    "seconds": 113.0
+   }
+  }
+ ]
+}

@@ -107,6 +107,37 @@ def restart_llama() -> None:
         time.sleep(5)
 
 
+def host_memory() -> dict:
+    """MemAvailable, SwapFree, and how much of the model server is paged out.
+
+    Recorded at both ends of every arm because of what happened on 2026-08-11:
+    an arm exceeded a 594-second synthesis budget on a 16,000-character prompt
+    while the swap file was fully exhausted and `llama-server` had 2.3 GB of
+    itself on disk. Whether that failure belonged to the pipeline or to the
+    machine could not afterwards be decided — the host state was gone. A run
+    that keeps this can screen its own failures; one that does not, cannot.
+    """
+    out: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, _, rest = line.partition(":")
+            if key in ("MemAvailable", "SwapFree", "SwapTotal"):
+                out[key] = int(rest.split()[0]) // 1024
+    except OSError:
+        pass
+    try:
+        pid = subprocess.run(
+            ["pgrep", "-f", "llama-server"], capture_output=True, text=True, timeout=5
+        ).stdout.split()
+        if pid:
+            for line in Path(f"/proc/{pid[0]}/status").read_text().splitlines():
+                if line.startswith(("VmSwap:", "VmRSS:")):
+                    out["llama_" + line.split(":")[0][2:].lower()] = int(line.split()[1]) // 1024
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return out
+
+
 def run_arm(sha: str, hint_on: bool) -> dict:
     """One analyst pass. Returns claimed technique ids and cost."""
     from maljan.core.config import get_settings
@@ -129,9 +160,11 @@ def run_arm(sha: str, hint_on: bool) -> dict:
             "static": {"note": "binary available to Ghidra at analysis_file_path"},
         }
     )
+    mem_before = host_memory()
     t0 = time.time()
     isr = agent.analyze_isr(payload)
     dt = time.time() - t0
+    mem_after = host_memory()
     tids = sorted(
         {c.technique_id for c in getattr(isr, "claims", []) if getattr(c, "technique_id", None)}
     )
@@ -140,6 +173,8 @@ def run_arm(sha: str, hint_on: bool) -> dict:
         "n_claims": len(getattr(isr, "claims", [])),
         "technique_ids": tids,
         "hint_on": hint_on,
+        "host_mem_before": mem_before,
+        "host_mem_after": mem_after,
     }
 
 
