@@ -55,6 +55,36 @@ SWAP_FLOOR_MB="${SWAP_FLOOR_MB:-1024}"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "$(ts) $*" >>"$LOG"; }
 
+# Choose the OOM killer's victim in advance.
+#
+# Every mechanism above races the kernel: the guard samples every INTERVAL
+# seconds, and memory can be exhausted between two samples. When that happens
+# the kernel picks a victim by size, which on 2026-08-11 meant the user's
+# editor — the largest thing that was not the job actually at fault.
+#
+# oom_score_adj settles that in advance. Raising a score does not need root
+# (only lowering one does), so the heavy jobs volunteer themselves as the first
+# to die. This does not prevent the pressure; it makes the consequence land on
+# the work rather than on the desktop, which is the only part that is ours to
+# lose. Re-applied every pass because llama-server is restarted between arms
+# and each restart is a new PID.
+volunteer_as_oom_victim() {
+    local pid
+    for pid in $(pgrep -x llama-server 2>/dev/null); do
+        echo 1000 >"/proc/$pid/oom_score_adj" 2>/dev/null
+    done
+    if [ -f "$JOB_PID_FILE" ]; then
+        pid=$(cat "$JOB_PID_FILE" 2>/dev/null || true)
+        if [ -n "${pid:-}" ] && [ -d "/proc/$pid" ]; then
+            echo 1000 >"/proc/$pid/oom_score_adj" 2>/dev/null
+            # its children too: the analysis worker is where the growth is
+            for c in $(pgrep -P "$pid" 2>/dev/null); do
+                echo 1000 >"/proc/$c/oom_score_adj" 2>/dev/null
+            done
+        fi
+    fi
+}
+
 avail_mb() { awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo; }
 swapfree_mb() { awk '/SwapFree/{print int($2/1024)}' /proc/meminfo; }
 pswpout()  { awk '/pswpout/{print $2}' /proc/vmstat; }
@@ -65,6 +95,7 @@ warned=0
 strikes=0
 
 while true; do
+    volunteer_as_oom_victim
     mb=$(avail_mb)
     swap=$(pswpout)
     swap_delta=$((swap - last_swap))
