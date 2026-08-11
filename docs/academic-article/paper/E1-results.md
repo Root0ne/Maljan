@@ -92,7 +92,7 @@ interpreted at all.
 | mechanism | fires on | consequence |
 |---|---|---|
 | confidence cap (falsification-before-confidence) | **0.82%** of techniques | an ablation would measure nothing; the null is uninterpretable |
-| sink-reachability priority hint | **56.7%** of samples (55/97) | an ablation is interpretable, and was run |
+| sink-reachability priority hint | **56.7%** of samples (55/97) | an ablation would be interpretable; it was attempted and did not complete (§7) |
 | STIX integrity pass | measured over 60 fresh judge bundles | reported by removal reason |
 
 For the cap, the mechanism's own preconditions explain the rate: it applies to three technique
@@ -115,18 +115,34 @@ than correctness, and it means every deterministic gate keyed to that number is 
 
 ## 7. What the ablations cost, and what that revealed
 
-The sink-hint effect ablation is **incomplete**: one paired sample and one failed arm, reported in
-full rather than extrapolated.
+The sink-hint effect ablation is **incomplete and is not reported as a null**: it reached 10 of 24
+arms before the host ran out of memory, and stopped there.
 
-| sample | arm | seconds | technique IDs |
+| sample | hint off | hint on | disposition |
 |---|---|---|---|
-| `000ac83f` | hint on | 200.5 | 6 |
-| `000ac83f` | hint off | 150.1 | 2 |
-| `000b535a` | hint on | 1,545.2 | 0 — hit the cap |
+| `000ac83f` | 2 techniques / 150 s | 6 techniques / 200 s | scoreable, hint **+4** |
+| `0014daea` | 6 techniques / 113 s | 0 techniques / 116 s | scoreable, hint **−6** |
+| `00162899` | 14 techniques / **117 claims** | 1 / 1 | degenerate decode (§3.3), excluded |
+| `000b535a` | 0 / 1 (625 s) | 0 / 1 (1,545 s) | both arms dead |
+| `00c66a68` | 0 / 1 (612 s) | 0 / 1 (622 s) | both arms dead |
 
-One pair is not a result: the on-arm found three times the techniques *and* took 33% longer, and
-separating "the hint works" from "the hint buys depth with time" is what the equal-budget discipline
-exists for.
+Two scoreable pairs pointing in opposite directions is not an underpowered estimate; it is the
+absence of one, and the paired mean of −1.0 with a bootstrap interval of [−6, +4] should be read as
+nothing at all.
+
+**The four dead arms are the more useful part of this result, and they are reported as
+unattributable rather than as pipeline failures.** The last pair ran while the host's swap file was
+fully exhausted and the model server had **2.3 GB of its own address space paged out**; one arm then
+exceeded a 594-second budget on a prompt trimmed to 16,000 characters, which is inexplicable for a
+model generating from RAM and unsurprising for one generating from disk. Whether those arms failed
+because of the pipeline or because of the machine **cannot be determined from what was retained** —
+per-sample outputs were kept, per-sample *host state* was not.
+
+That is this paper's own §4.5 recurring against it, in a place we had not thought to look: the rule
+was written about the pipeline's outputs, and the thing that went unrecorded was the environment the
+measurement was taken in. The harness now captures `MemAvailable`, `SwapFree` and the model server's
+resident-versus-swapped split at both ends of every arm, and the scorer excludes arms whose host was
+degraded — a screen that can only ever be applied forward, never to data already collected.
 
 Running it, however, surfaced a production defect that the 1,995-test suite did not: on any binary
 rich enough to exhaust the 40-step ReAct budget, the analyst returned **zero techniques**, because

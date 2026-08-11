@@ -47,12 +47,12 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 |---|---|---|---|
 | 1 | Introduction | this file | draft below |
 | 2 | Background & Related Work | `../related-work.md` §§1–6 | written; [17]–[23] need full-text verification |
-| 3 | System, briefly | `findings-log.md` §1 | **to write** — deliberately short; the system is the setting, not the claim |
-| 4 | Measurement methodology | this file §"Methodology" | **to write** — equal budgets, paired designs, firing-rate-before-effect, output cardinality |
+| 3 | System, briefly | `E3-system.md` | written — deliberately short; the system is the setting, not the claim |
+| 4 | Measurement methodology | `E7-methodology.md` | written — equal budgets, paired designs, firing-rate-before-effect, output cardinality |
 | 5 | Results | `E1-results.md` | written |
-| 6 | Instrument failures | `E2` §"threat that materialised" + `../related-work.md` §6 | written in parts; needs its own section |
+| 6 | Instrument failures | `E6-instrument-failures.md` | written — the central chapter |
 | 7 | Threats to Validity | `E2-threats-to-validity.md` | written |
-| 8 | Conclusion | — | **to write** |
+| 8 | Conclusion | `E8-conclusion.md` | written |
 | A | Reproducibility | `E5-reproducibility.md` | written |
 
 ## Introduction (draft)
