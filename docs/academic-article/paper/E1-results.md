@@ -32,9 +32,11 @@ against nothing at all.
 means over per-sample F1; bars are 95% bootstrap intervals recomputed from the retained per-sample
 records with the seed fixed. The three equal-budget arms are the consensus study (§1); the noise
 control separates from both treatments, which is what licenses reading the treatments' overlap as a
-null rather than as an insensitive harness. The 120B arm (§2) is **not paired with the others** — it
-is the 9 of 25 fixtures whose output parsed, so its interval carries a survivorship caveat the figure
-cannot draw and its apparent lead should not be read as one.
+null rather than as an insensitive harness. The 120B arm (§2) is **not paired with the others** and
+its n is 9 rather than 25 because the free-tier daily quota was exhausted mid-run: the 16 missing
+calls returned HTTP 429, not bad output. The truncation is therefore by call order rather than by
+result — all five fixture families are represented, and what is missing is repeats — but the interval
+is wide, it overlaps every other arm, and the apparent lead should not be read as one.
 
 ## 1. Multi-agent consensus does not pay for itself at equal budget
 
@@ -69,6 +71,13 @@ The frontier interval contains the local mean, so **no separation is demonstrate
 refuted.** We report it because the literature's prior predicts otherwise: `arXiv:2606.18166` found
 parameter size the *only* statistically significant predictor of ATT&CK-classification F1 (ρ=0.85,
 p=0.014) on the nearest task. n=9 cannot settle that; it can only decline to confirm it.
+
+**Why n=9 and not 25, stated precisely.** The remaining 16 calls returned HTTP 429 — a free-tier
+daily quota of 50 requests, exhausted mid-run. They are not parse failures or refusals, and the
+distinction matters for how the arm is read: the sample is truncated by **call order**, not by
+outcome, so it carries no selection on result quality. All five fixture families appear; what is
+missing is repeats of them. This is a small and underpowered arm, and it is underpowered for a
+mundane reason we prefer to name than to leave the reader inferring a worse one.
 
 **A measurement that does not depend on n:** across the frontier arm's calls, **53.6% of output
 tokens were reasoning** (min 48.3%, max 59.7%), and on a one-token answer, 84% — 92 output tokens,
