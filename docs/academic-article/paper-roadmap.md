@@ -17,7 +17,7 @@
 ## Where this stands
 
 **The ledger, which governs everything below** *(revised 2026-08-11 after B5–B8, D3, E3)*:
-**4 `OURS` · 10 `REFINEMENT` · 2 `PRIOR ART` (+1 adjacent) · 2 `UNMEASURED` · 1 `WITHDRAWN`**.
+**5 `OURS` · 10 `REFINEMENT` · 2 `PRIOR ART` (+1 adjacent) · 2 `UNMEASURED` · 1 `WITHDRAWN`**.
 
 What moved, and it is most of the table:
 
@@ -25,9 +25,12 @@ What moved, and it is most of the table:
   (effect still open); C2 is a **measured negative** on both tiers; C3's cap fires on **0.82%** of
   techniques; C7's integrity pass was read on 60 fresh bundles. Only **C6** (the cascade) still
   waits on CAPE.
-* **The three `OURS` rows are new and none are architectural.** M1–M3 are instrument defects found
+* **The four new `OURS` rows are all instrument defects; none is architectural.** M1–M3 were found
   on 2026-08-10 — a `null` argument, a program that never became current, an HTTP 200 on a refused
-  load — joining C8. M4, the detector, was **counter-searched and demoted** the same week.
+  load — and M4 on 2026-08-11, two local safety bounds composing into an empty result. They join C8.
+  `M-DET`, the detector itself, was **counter-searched and demoted** the same week. That the only
+  novel rows this project holds are records of its own instrument breaking is the finding, not an
+  accident of bookkeeping.
 * **E1 is withdrawn**, not demoted. The n=210 drift study meets M2's precondition and its per-sample
   outputs were not retained, so it cannot be checked and is not restated anywhere.
 * **A baseline exists for the first time.** CAPE alone scores **F1 0.187** [0.151, 0.223] on the
@@ -369,7 +372,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       Each was caught by the same cheap detector — **a number that repeated where variation was
       expected**: an identical 2,575-char hint across unrelated samples, a call graph identical to
       the character across binaries of 241 KB and 139 KB, 66 consecutive samples at 75,426 chars.
-      None was caught by a test suite of 1,981 passing tests, because each needs a *second* case in
+      None was caught by a test suite of 1,995 passing tests, because each needs a *second* case in
       one server lifetime and a unit test writes one.
 
       That is the paper: **the failure modes that survive a green test suite, the detectors that
@@ -449,7 +452,8 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | M1 | An unset optional MCP argument reached the server as `null` | all 36 CAPE tools refused; pipeline unaware | **OURS** (instrument defect) | §3.13, fixed `716a128` |
 | M2 | A loaded Ghidra program never became the *current* one | every sample after the first described the **first** binary | **OURS** (instrument defect) | §3.14, fixed `0720d34` |
 | M3 | A refused load answers HTTP 200; the pre-pass carried on | hints and function hashes built from another binary | **OURS** (instrument defect) | §3.14, fixed `3eabf88` |
-| M4 | Repeated-constant detection catches stale-state bugs a green suite misses | 3 defects, 1,981 passing tests, 0 caught | **REFINEMENT** — demoted 2026-08-11 by counter-search; the detector is a **metamorphic relation** (TOSEM `10.1145/3708521`), and `2603.05399` tests the inverse (identical inputs → consistent output). Ours keeps the *application*: an output-cardinality **reporting norm** for evaluation batches crossing third-party tool servers, with three measured defect classes and a withdrawn study as the cost | E1 |
+| M4 | Two local safety bounds composed into an empty result | the 40-step ReAct salvage received a **fresh copy** of the time budget it was already inside; any binary rich enough to exhaust the step budget returned **zero techniques** at 28 min | **OURS** (composition defect) | §3.18, fixed `786dfe5` — verified 1,677s/0 tids → 323s/5 tids |
+| M-DET | Repeated-constant detection catches stale-state bugs a green suite misses | 4 defects, 1,995 passing tests, 0 caught | **REFINEMENT** — demoted 2026-08-11 by counter-search; the detector is a **metamorphic relation** (TOSEM `10.1145/3708521`), and `2603.05399` tests the inverse (identical inputs → consistent output). Ours keeps the *application*: an output-cardinality **reporting norm** for evaluation batches crossing third-party tool servers, with three measured defect classes and a withdrawn study as the cost | E1 |
 | B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.187** [0.151, 0.223], n=24 | measured | C5 at n=100 |
 | E2 | KV scaling on hybrid-offload MoE | measured | — | appendix |
 | E3 | ~201-tool catalogue infeasible at 3B | measured | open gap | E1 |
@@ -471,7 +475,7 @@ and it returned null, so F1 closes on its own terms. But the surviving framing i
 consolation prize this table described on 08-09. Between then and now, **three instrument defects
 were found in one day** (M1–M3), each producing a plausible wrong answer with no error anywhere,
 and each caught by the same cheap detector: a number that repeated where variation was expected.
-A suite of **1,981 passing tests caught none of them**, because every one needs a *second* case in
+A suite of **1,995 passing tests caught none of them**, because every one needs a *second* case in
 a single server lifetime and a unit test writes one.
 
 That is a contribution with a shape: **the failure modes that survive a green test suite in an
