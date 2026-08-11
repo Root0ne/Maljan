@@ -147,6 +147,30 @@ we accept rather than argue with:
    F1 0.187 [0.151, 0.223]** on our cohort (§C5). Every pipeline figure is read against that rather
    than against zero.
 
+## The host as an uncontrolled variable
+
+A threat we did not anticipate and met late: **the machine a measurement runs on is part of the
+instrument.** Our working set — model server ~16 GB, analysis worker ~8 GB, disassembly container up
+to 6 GB — does not fit a 31 GiB host alongside an interactive session. During a paired ablation the
+swap file was exhausted and the model server had 2.3 GB of its own address space paged out; an arm
+then exceeded a 594-second budget on a prompt trimmed to 16,000 characters. Whether that arm failed
+because of the pipeline or because of the host **cannot be determined**, because we recorded the
+pipeline's outputs and not the host's state.
+
+The affected arms are reported as `unattributable` rather than as failures, and the ablation is
+reported as incomplete rather than as a null. We flag three things a reader should take from this
+rather than from our fix:
+
+1. **Wall-clock bounds are host-dependent measurements wearing the costume of a system property.**
+   Any result in this paper that turns on a timeout — the salvage-path failure of §6, the timing
+   column of §7 — is a statement about this pipeline *on this machine under whatever load it had*.
+2. **The retention rule we adopted after the first failure did not cover this one.** §4.5 says to
+   retain per-sample outputs, and we did. The rule was written about the object under study, and what
+   went unrecorded was the environment the study ran in.
+3. **A screen for this can only be applied forward.** Arms already collected without host state
+   cannot be re-screened, which is the same structural problem that withdrew our drift study, in a
+   new variable.
+
 ## Scope
 
 Unless a statement says otherwise it was produced on one model, one machine, one quantisation and

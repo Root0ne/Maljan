@@ -66,6 +66,25 @@ The Ghidra container is capped at **6 GB** (`mem_limit`). Its JVM `-Xmx4g` bound
 the database is memory-mapped and measured RSS reached 5.15 GB against that nominal 4 GB cap. Two
 host lock-ups preceded this limit being added.
 
+**The working set does not fit alongside an interactive session, and that is a reproducibility fact
+rather than an operational one.** Model server ~16 GB, analysis worker ~8 GB, disassembly container
+up to 6 GB: on a 31 GiB host this leaves nothing for a desktop. When we ran a paired study without
+that headroom, the swap file was exhausted, the model server had **2.3 GB of its own address space
+paged out**, and one arm then exceeded a 594-second budget on a 16,000-character prompt. A model
+generating from disk-backed pages is a different instrument from one generating from RAM, and the
+timings it produces are not comparable to the rest of the table.
+
+Two consequences for anyone reproducing this work:
+
+* **Give the run the machine.** Long paired studies here are run against an otherwise-idle host. This
+  is not a performance recommendation; arms measured under memory pressure are not commensurable with
+  arms that were not.
+* **Record the host state per arm, not per study.** Our harnesses capture `MemAvailable`, `SwapFree`
+  and the model server's resident-versus-swapped split at both ends of every arm, and the scoring
+  script excludes arms whose host was degraded. This screen can only be applied forward: for arms
+  already collected without it, the state is gone and the honest label is `unattributable`. That is
+  the label our own halted ablation carries.
+
 ## 4. Data
 
 | artifact | what it is | committed |
@@ -130,9 +149,21 @@ of the runs in this paper were interrupted by the memory guard and resumed witho
 | sink-hint frequency (§4) | `eval_sink_hint_frequency.py` | Ghidra |
 | sink-hint ablation (§7) | `eval_sink_hint_ablation.py` | llama-server + Ghidra |
 | opcode-hash attribution (§3) | `eval_function_hash_attribution.py` | Ghidra + Qdrant |
+| every figure | `make_paper_figures.py` | **none** — reads the JSON the above emit |
 
-Two harness properties are deliberate and worth copying. Every sweep **restarts the server it
+**Figures are generated from the same retained records as the text.** The script recomputes intervals
+with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
+cannot drift apart without the script failing to reproduce one of them. This caught a live error: an
+ROC computed by naive descending sort returned AUC 0.458 against the 0.550 in our text, because 186
+of 210 claims are tied at confidence 1.0 and tie handling decides the entire estimate. The text was
+right and the first draft of the figure was wrong — which is the ordinary direction for this check to
+fire, and the reason for wiring it this way.
+
+Three harness properties are deliberate and worth copying. Every sweep **restarts the server it
 depends on between samples**, because a read timeout leaves the Ghidra JVM mid-analysis and every
 subsequent load is refused — a whole window of samples was lost to this before it was understood.
-And every sweep reports **how many distinct outputs the N inputs produced**, because that one line
-is the cheapest detector for the stale-state defects described in Threats to Validity.
+Every sweep reports **how many distinct outputs the N inputs produced**, because that one line is the
+cheapest detector for the stale-state defects described in Threats to Validity. And every sweep
+records the **host's memory state at both ends of each unit of work**, so that a failed unit can
+afterwards be attributed to the pipeline or excluded as an artefact of the machine — a question that
+cannot be reopened later, as §3 above describes.
