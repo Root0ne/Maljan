@@ -35,6 +35,12 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > direct consequence, because its per-sample outputs were not retained and the question can no longer
 > be asked of it.
 >
+> The same gap then recurred while this paper was being written, which we report rather than repair
+> quietly. A paired ablation halted when the host exhausted its memory, and four of its arms cannot
+> be attributed to the pipeline or to the machine — we had retained the pipeline's outputs, as our own
+> rule requires, but not the state of the host the measurement ran on. A retention rule written after
+> one failure is scoped to that failure.
+>
 > We contribute the measured negatives, the failure mechanisms with the boundary each occurred at,
 > the cheap detector that found them, and a no-LLM baseline (F1 0.187) against which all of it is
 > read. We argue that in a pipeline assembled from other people's servers, a server that answers is
