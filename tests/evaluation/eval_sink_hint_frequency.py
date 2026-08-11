@@ -41,8 +41,8 @@ _HEADERS = {"Authorization": f"Bearer {_CFG.auth_token}"} if _CFG.auth_token els
 CONTAINER_DIR = "/data/samples"
 MAX_FUNCS = 12
 LIMIT = 20000
-RESTART_EVERY = 20
-CALL_TIMEOUT = 420.0
+RESTART_EVERY = 1
+CALL_TIMEOUT = 300.0
 OUT = Path(
     "/tmp/claude-1000/-home-user-Belgeler-kingston-Projects-Maljan/"
     "797a8dd1-30c6-476b-be2d-9fe83a5a9f1e/scratchpad/b6_hint_rate.json"

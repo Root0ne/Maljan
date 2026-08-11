@@ -187,18 +187,6 @@
    "hint_nonempty": true,
    "seconds": 41.2
   },
-  "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8": {
-   "year": "2021",
-   "size": 911872,
-   "error": "ReadTimeout: timed out",
-   "seconds": 420.5
-  },
-  "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4": {
-   "year": "2021",
-   "size": 454656,
-   "error": "ReadTimeout: timed out",
-   "seconds": 420.5
-  },
   "a7c4aae68e13b16ed7d916ba7cde189381e597934b05a26d113a97c8ae8afdbf": {
    "year": "2021",
    "size": 532570,
@@ -308,72 +296,6 @@
    "hint_chars": 2055,
    "hint_nonempty": true,
    "seconds": 10.1
-  },
-  "6f2ec2f8dd5ec28adb7f652496ad75db346fa32372247ece6a69e15d30314b1b": {
-   "year": "2022",
-   "size": 5603840,
-   "error": "ReadTimeout: timed out",
-   "seconds": 485.6
-  },
-  "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc": {
-   "year": "2022",
-   "size": 524800,
-   "error": "ReadTimeout: timed out",
-   "seconds": 420.1
-  },
-  "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64": {
-   "year": "2022",
-   "size": 1666264,
-   "error": "ReadTimeout: timed out",
-   "seconds": 420.0
-  },
-  "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c": {
-   "year": "2022",
-   "size": 155648,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 136.1
-  },
-  "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9": {
-   "year": "2022",
-   "size": 214528,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
-  },
-  "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47": {
-   "year": "2022",
-   "size": 670835,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
-  },
-  "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe": {
-   "year": "2022",
-   "size": 165627,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
-  },
-  "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393": {
-   "year": "2022",
-   "size": 219136,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
-  },
-  "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969": {
-   "year": "2022",
-   "size": 1682432,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
-  },
-  "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7": {
-   "year": "2022",
-   "size": 184832,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
-  },
-  "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130": {
-   "year": "2022",
-   "size": 2776576,
-   "error": "ReadError: [Errno 104] Connection reset by peer",
-   "seconds": 135.2
   },
   "9c9a646099da045731162e08f6d04b1c386d81005580f27406fd2ae78ce237c1": {
    "year": "2022",
@@ -605,12 +527,6 @@
    "hint_chars": 0,
    "hint_nonempty": false,
    "seconds": 29.6
-  },
-  "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b": {
-   "year": "2024",
-   "size": 14720000,
-   "error": "ReadTimeout: timed out",
-   "seconds": 420.7
   },
   "c2bee3616cf5c0f19ecc5738ee39a8c3d0d0523c2178177b86563d5a3d758d0f": {
    "year": "2024",
@@ -952,6 +868,222 @@
    "hint_chars": 0,
    "hint_nonempty": false,
    "seconds": 16.6
+  },
+  "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8": {
+   "year": "2021",
+   "size": 911872,
+   "error": "ReadTimeout: timed out",
+   "seconds": 902.1
+  },
+  "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4": {
+   "year": "2021",
+   "size": 454656,
+   "program": "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4.exe",
+   "graph_chars": 42,
+   "graph_lines": 1,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 146.6
+  },
+  "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc": {
+   "year": "2022",
+   "size": 524800,
+   "program": "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc.exe",
+   "graph_chars": 23879,
+   "graph_lines": 785,
+   "hit_limit": false,
+   "hint_chars": 2036,
+   "hint_nonempty": true,
+   "seconds": 11.1
+  },
+  "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64": {
+   "year": "2022",
+   "size": 1666264,
+   "program": "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64.exe",
+   "graph_chars": 26820,
+   "graph_lines": 879,
+   "hit_limit": false,
+   "hint_chars": 2056,
+   "hint_nonempty": true,
+   "seconds": 12.2
+  },
+  "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c": {
+   "year": "2022",
+   "size": 155648,
+   "program": "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c.exe",
+   "graph_chars": 49960,
+   "graph_lines": 1727,
+   "hit_limit": false,
+   "hint_chars": 1957,
+   "hint_nonempty": true,
+   "seconds": 7.0
+  },
+  "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9": {
+   "year": "2022",
+   "size": 214528,
+   "program": "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9.exe",
+   "graph_chars": 7327,
+   "graph_lines": 235,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 5.3
+  },
+  "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47": {
+   "year": "2022",
+   "size": 670835,
+   "program": "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47.exe",
+   "graph_chars": 14668,
+   "graph_lines": 480,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 15.2
+  },
+  "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe": {
+   "year": "2022",
+   "size": 165627,
+   "program": "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe.exe",
+   "graph_chars": 4376,
+   "graph_lines": 125,
+   "hit_limit": false,
+   "hint_chars": 986,
+   "hint_nonempty": true,
+   "seconds": 14.3
+  },
+  "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393": {
+   "year": "2022",
+   "size": 219136,
+   "program": "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393.exe",
+   "graph_chars": 30581,
+   "graph_lines": 979,
+   "hit_limit": false,
+   "hint_chars": 2056,
+   "hint_nonempty": true,
+   "seconds": 13.3
+  },
+  "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969": {
+   "year": "2022",
+   "size": 1682432,
+   "program": "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969.exe",
+   "graph_chars": 44644,
+   "graph_lines": 1084,
+   "hit_limit": false,
+   "hint_chars": 2033,
+   "hint_nonempty": true,
+   "seconds": 10.4
+  },
+  "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7": {
+   "year": "2022",
+   "size": 184832,
+   "program": "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7.exe",
+   "graph_chars": 29470,
+   "graph_lines": 964,
+   "hit_limit": false,
+   "hint_chars": 2142,
+   "hint_nonempty": true,
+   "seconds": 11.0
+  },
+  "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130": {
+   "year": "2022",
+   "size": 2776576,
+   "program": "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130.exe",
+   "graph_chars": 2340,
+   "graph_lines": 74,
+   "hit_limit": false,
+   "hint_chars": 972,
+   "hint_nonempty": true,
+   "seconds": 3.1
+  },
+  "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b": {
+   "year": "2024",
+   "size": 14720000,
+   "program": "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b.exe",
+   "graph_chars": 558876,
+   "graph_lines": 19186,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 730.6
+  },
+  "87e4d0e94f94dd01a4c6e30f6ee7b612bc6dad0581075bf43fef6f24053e6676": {
+   "year": "2026",
+   "size": 161792,
+   "program": "87e4d0e94f94dd01a4c6e30f6ee7b612bc6dad0581075bf43fef6f24053e6676.exe",
+   "graph_chars": 42,
+   "graph_lines": 1,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 2.5
+  },
+  "32cc6624192e6882d959793c887ef9e116aedc68ceef1ec8d4dbf11609d00d02": {
+   "year": "2026",
+   "size": 33280,
+   "program": "32cc6624192e6882d959793c887ef9e116aedc68ceef1ec8d4dbf11609d00d02.exe",
+   "graph_chars": 42,
+   "graph_lines": 1,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 8.6
+  },
+  "8f6502f9cc4e6916a6481bf77b2e52473143f39a6fb258186edbb146e577fa65": {
+   "year": "2026",
+   "size": 28672,
+   "program": "8f6502f9cc4e6916a6481bf77b2e52473143f39a6fb258186edbb146e577fa65.exe",
+   "graph_chars": 42,
+   "graph_lines": 1,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 19.4
+  },
+  "a06d2f622eb4e0403f8a8198898d2ae1d26b5f897cedadcb68cc95b888dc7525": {
+   "year": "2026",
+   "size": 645314,
+   "program": "a06d2f622eb4e0403f8a8198898d2ae1d26b5f897cedadcb68cc95b888dc7525.exe",
+   "graph_chars": 15054,
+   "graph_lines": 522,
+   "hit_limit": false,
+   "hint_chars": 2168,
+   "hint_nonempty": true,
+   "seconds": 8.0
+  },
+  "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876": {
+   "year": "2023",
+   "size": 801792,
+   "program": "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876.exe",
+   "graph_chars": 42,
+   "graph_lines": 1,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 193.8
+  },
+  "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc": {
+   "year": "2020",
+   "size": 1540096,
+   "program": "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc.exe",
+   "graph_chars": 20,
+   "graph_lines": 1,
+   "hit_limit": false,
+   "hint_chars": 0,
+   "hint_nonempty": false,
+   "seconds": 159.5
+  },
+  "6f2ec2f8dd5ec28adb7f652496ad75db346fa32372247ece6a69e15d30314b1b": {
+   "year": "2022",
+   "size": 5603840,
+   "error": "ReadTimeout: timed out",
+   "seconds": 401.0
+  },
+  "cc6f82015fc2e26a65da84db2dc0e41cc63f5ca735150a5ad55b9f474f0673f3": {
+   "year": "2026",
+   "size": 207872,
+   "error": "RemoteProtocolError: Server disconnected without sending a response.",
+   "seconds": 18.5
   }
  }
 }

@@ -1636,20 +1636,41 @@ case, an on/off ablation reporting "no effect" would be indistinguishable from "
 ran" — the same confusion §3.11 hit with the confidence cap, where the mechanism turned out to fire
 on 0.82% of techniques. So the mechanism was counted before it was credited.
 
-**Result**, n=79 analysed of 93 attempted, Windows PE from the n=100 cohort, production pre-pass
+**Result — the full cohort, 2026-08-11.** All 100 Windows PE samples attempted, production pre-pass
 replicated exactly (`format=json&limit=20000`):
 
 | | |
 |---|---|
-| hint non-empty | **46 / 79 = 58.2%** |
-| hint chars when non-empty | 599 min / 2037 median / 2575 max |
-| distinct call-graph sizes | **50 / 79** |
+| hint non-empty | **55 / 97 = 56.7%** |
+| hint chars when non-empty | 599 min / 2036 median / 2575 max |
+| distinct call-graph sizes | **63 / 97** |
 | samples hitting the 20,000-edge limit | 1 |
-| seconds/sample | 0.4 min / **10.0 median** / 17,765 max |
-| not measurable | 14 (8 connection errors, 6 read timeouts) |
+| seconds/sample | 0.4 min / **10.6 median** / 17,765 max |
+| not measurable | **3** |
 
-Per year the rate is unremarkable — 2022 3/3, 2024 5/13, 2023 12/14 — with no trend worth reading at
-these counts.
+Per year: 2020 9/15, 2021 7/12, 2022 11/13, 2023 12/15, 2024 5/14, 2025 6/14, 2026 5/14. The spread
+(38% to 85%) is wider than the counts support reading as a trend.
+
+**The interim figure was 46/79 = 58.2%; the final is 56.7%.** Worth stating because the intervening
+14 samples were, at that point, recorded as unmeasurable — and the honest thing was to *say* they
+were unmeasurable rather than count them as empty hints. Had they been counted as empty, the
+reported rate would have been 46/93 = 49.5%, an eight-point error in the direction that flatters
+nothing and simply misleads.
+
+**What the 14 "unmeasurable" samples turned out to be, and why the first diagnosis was wrong.**
+They were read as pathological binaries — too big, too slow, memory-hungry. Classified individually
+on a fresh container each, **12 of 14 analysed normally**, in 4 to 148 seconds, peaking at 534–4,790
+MiB. Only **2** reached the container's ceiling. The failures were therefore not a property of those
+samples but of the **server state they inherited**: a read timeout leaves the JVM mid-analysis, and
+every subsequent load is refused, which is how 11 consecutive errors appeared in one window (§3.14).
+Restarting per sample recovered them.
+
+The two that remain, plus one connection drop, are a real and reportable limit: at a **6 GB
+container budget** the graph fetch does not complete. One of them (`6f2ec2f8dd5e`) *analyses* fine —
+93.9 s, 4,790 MiB — and only fails when the 20,000-edge call graph is retrieved afterwards, which
+locates the cost in the **extraction**, not the analysis. **3 of 100 samples are outside what this
+pre-pass can measure at that budget**, and that is the sentence the paper should carry rather than
+a silent n=97.
 
 **So the ablation is worth running.** The feature engages on a clear majority of samples, which
 means a null effect would be a statement about the *hint*, not about a mechanism that never fired.
@@ -1663,12 +1684,23 @@ run of this harness failed silently — 66 consecutive samples with a call graph
 N inputs produce" is the cheapest available detector for a stale-state bug, and this project has now
 been bitten by that class three times.
 
-**Two caveats stated rather than buried.** The 14 unmeasurable samples are recorded as *errors*, not
-as empty hints — counting a sample we failed to look at as "no hint" would have inflated the
-negative and is precisely the mistake §3.14 documents. And the 17,765-second maximum against a
-10-second median is one pathological binary, measured while the host was under memory pressure; it
-is an outlier in the measurement conditions, not a property of the sample worth reporting as
-analysis cost.
+**Two caveats stated rather than buried.** Unmeasurable samples are recorded as *errors*, never as
+empty hints — counting a sample we failed to look at as "no hint" would inflate the negative, and
+the 58.2%→56.7% movement above shows the size of the error that policy avoided. And the
+17,765-second maximum against a 10.6-second median is a single binary measured while the host was
+under memory pressure; it is an artefact of the measurement conditions, not an analysis cost worth
+attributing to the sample.
+
+**A note on what made this measurable at all, since it is the same lesson as §3.14 in a different
+coat.** Two attempts at this measurement took the host out of memory and cost the desktop session.
+The container ran with `-Xmx4g` — set, applied, verified in the running process's cmdline — and
+still reached 5.15 GB RSS, because that flag caps the *heap* while Ghidra's database is
+memory-mapped and its direct buffers are not. Nothing bounded the container, so the kernel's OOM
+killer chose the largest process on the machine, which was the editor. A `mem_limit: 6g` fixed it in
+one line: the same pathological sample now pins the container at exactly 6,144 MiB while the host
+stays at 14.7 GB free, and the harness records a clean error. **A limit that is set is not the same
+as a limit that binds** — which is, once more, an instrument reporting something other than what it
+was asked.
 
 ---
 
