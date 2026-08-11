@@ -112,3 +112,6 @@ data/external/
 # (tests/evaluation/cape_task_ledger_n100.json) plus the instance. The ledger
 # is the artifact worth versioning; these are its bulky output.
 data/cape_reports/
+
+# built paper artifacts (regenerate with build_paper.py)
+docs/academic-article/paper/build/
