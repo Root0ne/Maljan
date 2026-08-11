@@ -92,6 +92,21 @@ services:
       GHIDRA_MCP_PORT: 8089
     ports:
       - "${GHIDRA_MCP_PORT:-8089}:8089"
+    # A ceiling the kernel enforces, because the JVM's own does not bound the
+    # container. `-Xmx4g` caps the *heap*; Ghidra's database is memory-mapped and
+    # its direct buffers live outside it, so RSS was measured at 5.15 GB while
+    # the heap was nominally capped at 4. With no container limit, a binary whose
+    # analysis is pathological grows until the host runs out and the kernel's OOM
+    # killer picks the largest process — which on a desktop is the editor, not
+    # this container. That happened twice on 2026-08-10/11.
+    #
+    # 6g leaves the 4g heap its room plus off-heap headroom. Past it the
+    # container's own process dies, the HTTP call fails, and the harness records
+    # an error and moves on — which is the behaviour we want from a sample
+    # Ghidra cannot handle. Swap is pinned to the same value so the container
+    # cannot trade the limit for thrashing.
+    mem_limit: 6g
+    memswap_limit: 6g
     volumes:
       - ../data/samples:/data/samples:ro
       - ghidra_projects:/projects
