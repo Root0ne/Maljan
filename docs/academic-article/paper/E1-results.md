@@ -26,6 +26,16 @@ We report this first because without it a pipeline F1 is uninterpretable, and be
 the pipeline must clear to have contributed anything. Earlier drafts of this work reported F1 values
 against nothing at all.
 
+![Every arm on one F1 axis, against the baseline that gives the axis meaning.](figures/fig3-arms-against-baseline.pdf)
+
+**Figure 1: Every arm on one axis, with the baseline that makes the axis mean something.** Points are
+means over per-sample F1; bars are 95% bootstrap intervals recomputed from the retained per-sample
+records with the seed fixed. The three equal-budget arms are the consensus study (§1); the noise
+control separates from both treatments, which is what licenses reading the treatments' overlap as a
+null rather than as an insensitive harness. The 120B arm (§2) is **not paired with the others** — it
+is the 9 of 25 fixtures whose output parsed, so its interval carries a survivorship caveat the figure
+cannot draw and its apparent lead should not be read as one.
+
 ## 1. Multi-agent consensus does not pay for itself at equal budget
 
 Design after Bertalanič & Fortuna: three arms at an **equal total token budget**, including a
@@ -100,6 +110,14 @@ families, only when the sole contributing layer is `static`, and 84% of those cl
 so no static claim exists for it to discipline. We report the rate rather than an ablation, because
 an ablation over a mechanism that fires on 0.82% of cases produces a null that means nothing.
 
+![Firing rates decide which ablations can be read.](figures/fig4-firing-rate-before-effect.pdf)
+
+**Figure 2: Firing rate decides whether an ablation can be read at all.** Three of the four
+mechanisms the architecture was built around engage on almost nothing, and an ablation of any of them
+would return a null describing the cases where the mechanism never ran. Only the sink-reachability
+hint clears a rate at which an ablation would carry information — which is why it is the one we
+attempted, and §7 reports what happened when we did.
+
 ## 5. The corroboration cascade does not reach the verdict
 
 The multi-layer corroboration set — the design's central claim about evidence quality — was varied
@@ -109,9 +127,19 @@ The cascade's arithmetic runs; its output does not reach the decision.
 ## 6. Confidence is very nearly a constant
 
 Verbal confidence, which the cascade and the deterministic gates consume, discriminates correct from
-incorrect claims at **AUC 0.550** — near chance — and is concentrated on three round values. This
-matches `arXiv:2606.29490`'s finding that verbal confidence measures willingness to commit rather
-than correctness, and it means every deterministic gate keyed to that number is keyed to noise.
+incorrect claims at **AUC 0.550** — near chance — and is concentrated on a handful of round values.
+This matches `arXiv:2606.29490`'s finding that verbal confidence measures willingness to commit
+rather than correctness, and it means every deterministic gate keyed to that number is keyed to
+noise.
+
+![The confidence number every deterministic gate consumes, and its distribution.](figures/fig2-confidence-discrimination.pdf)
+
+**Figure 3: The number the gates consume barely orders anything.** Left, the ROC over 210 claims
+scored against resolved ground truth. Right, why: **186 of those 210 claims carry confidence exactly
+1.0**, so the score has almost no ordering to contribute. The estimate is rank-based with ties
+averaged, which for this distribution is not a detail — sorting the tied claims arbitrarily instead
+returns 0.458, and the difference between the two numbers is entirely an artefact of how 89% of the
+data is handled.
 
 ## 7. What the ablations cost, and what that revealed
 

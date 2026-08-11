@@ -114,6 +114,18 @@ vary — output length, digest, element count — the instrument is repeating it
 what stale state looks like from outside. It needs no ground truth and no oracle, which is what
 makes it usable exactly where correctness is hard to check.
 
+![Distinct outputs against inputs processed, measured and schematic.](figures/fig1-output-cardinality.pdf)
+
+**Figure 4: The whole detector, drawn.** Plot distinct outputs against inputs processed and a healthy
+instrument tracks the diagonal, while a stuck one goes flat — no ground truth required, because the
+diagnosis is in the shape. Left is measured: 63 distinct call-graph sizes across 97 samples, the
+staircase's flat treads being genuinely identical binaries rather than a fault.
+
+**The right panel is a schematic, and the reason is the argument of §6.4.** It depicts M3 — the run
+in which 66 consecutive samples returned a byte-identical 75,426-character call graph — and we cannot
+plot it, because that run predates the per-sample retention policy those very failures caused us to
+adopt. The most important curve in this paper is the one we are unable to draw.
+
 We now report it beside every batch result: 50 distinct call-graph sizes across 79 samples, then 63
 across 97.
 
