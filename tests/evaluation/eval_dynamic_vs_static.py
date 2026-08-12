@@ -227,6 +227,47 @@ def ubiquitous_domains(reports: dict[str, dict[str, Any]]) -> set[str]:
     return common
 
 
+# Degradation reasons the static-only arm is **supposed** to carry: they are the
+# manipulation restating itself. Removing the sandbox report necessarily leaves
+# the pipeline without dynamic detonation data and leaves the two analysts that
+# consume it with nothing to claim. Counting those as evidence that the arms
+# differ for uncontrolled reasons would flag every pair in the study and bury a
+# valid result under a caveat that describes the design working correctly.
+_TREATMENT_MARKERS = ("no sandbox report", "dynamic detonation unavailable")
+_TREATMENT_STARVED_ANALYSTS = {"dynamic", "network"}
+
+
+def incidental_reasons(reasons: list[str], arm: str) -> set[str]:
+    """Degradation this arm suffered that the manipulation does not explain.
+
+    For the dynamic arm every reason is incidental — nothing was withheld from
+    it. For the static-only arm, reasons naming the absent sandbox report are
+    the treatment, and an "analysts produced no claims" list is stripped of the
+    analysts that had nothing to consume; if that list names *only* those, the
+    reason is fully explained and drops out, and if it also names, say, the
+    static analyst, what remains is a real failure the pair must answer for.
+    """
+    out: set[str] = set()
+    for raw in reasons:
+        why = str(raw).strip()
+        if arm != "static_only":
+            out.add(why)
+            continue
+        low = why.lower()
+        if any(marker in low for marker in _TREATMENT_MARKERS):
+            continue
+        head, sep, tail = why.partition("analysts produced no claims:")
+        if sep and not head.strip():
+            named = {p.strip().lower() for p in tail.split(",") if p.strip()}
+            remaining = named - _TREATMENT_STARVED_ANALYSTS
+            if not remaining:
+                continue
+            out.add(f"analysts produced no claims: {', '.join(sorted(remaining))}")
+            continue
+        out.add(why)
+    return out
+
+
 def predicted_from_result(result: Any) -> set[str]:
     """The techniques this run predicted: ISR claims ∪ cascade-corroborated.
 
@@ -435,17 +476,31 @@ def summarise() -> int:
         print("no scoreable pairs")
         return 1
 
+    # Below this many pairs the bootstrap resamples a handful of values and
+    # returns an interval that looks tight because there is nothing to vary.
+    # At n=1 it is the observation twice over and would print "excludes 0" —
+    # a phrase that survives being copied into prose long after the n does.
+    INFERENCE_FLOOR = 5
+
     deltas = {k: [d[k] - s[k] for _, d, s in pairs] for k in ("f1", "recall", "precision")}
-    summary: dict[str, Any] = {"n_pairs": len(pairs)}
+    summary: dict[str, Any] = {"n_pairs": len(pairs), "inference_floor": INFERENCE_FLOOR}
+    interim = len(pairs) < INFERENCE_FLOOR
     print(f"\npaired deltas (dynamic − static-only), n={len(pairs)}")
+    if interim:
+        print(
+            f"  ** INTERIM: n < {INFERENCE_FLOOR}. The intervals below are degenerate and the "
+            "sign of the mean is not a result. Reported so the run can be watched, not cited. **"
+        )
     for k, vals in deltas.items():
         mean = sum(vals) / len(vals)
         lo, hi = bootstrap_ci(vals)
         summary[k] = {"mean": round(mean, 4), "ci95": [round(lo, 4), round(hi, 4)]}
-        print(
-            f"  {k:10s} {mean:+.4f}   95% CI [{lo:+.4f}, {hi:+.4f}]"
-            f"   {'includes 0' if lo <= 0 <= hi else 'excludes 0'}"
+        verdict = (
+            "interim, no inference"
+            if interim
+            else ("includes 0" if lo <= 0 <= hi else "excludes 0")
         )
+        print(f"  {k:10s} {mean:+.4f}   95% CI [{lo:+.4f}, {hi:+.4f}]   {verdict}")
 
     shares = [d["ubiquitous_share"] for _, d, _ in pairs if d.get("ubiquitous_share") is not None]
     if shares:
@@ -473,8 +528,14 @@ def summarise() -> int:
     recorded = [
         (d, s) for d, s in scored if "degradation_reasons" in d and "degradation_reasons" in s
     ]
+    # Compared on *incidental* reasons only. The static-only arm always carries
+    # "no sandbox report" — that is the manipulation, not a confound, and
+    # counting it would mark 100% of pairs contaminated by construction.
     mismatched = sum(
-        1 for d, s in recorded if set(d["degradation_reasons"]) != set(s["degradation_reasons"])
+        1
+        for d, s in recorded
+        if incidental_reasons(d["degradation_reasons"], "dynamic")
+        != incidental_reasons(s["degradation_reasons"], "static_only")
     )
     summary["degraded"] = deg
     summary["reason_mismatch"] = {"pairs_with_reasons": len(recorded), "differing": mismatched}
@@ -482,17 +543,26 @@ def summarise() -> int:
         f"\ndegraded arms: dynamic {deg['dynamic']}/{len(pairs)}, "
         f"static-only {deg['static_only']}/{len(pairs)}, both {deg['both']}"
     )
+    print(
+        "  the static-only arm is *expected* to report degradation: it has no sandbox report "
+        "because that is the treatment"
+    )
     if recorded:
         print(
-            f"  pairs whose two arms degraded for *different* reasons: "
-            f"{mismatched}/{len(recorded)} — that share of the delta is not the treatment"
+            f"  pairs differing in degradation the treatment does NOT explain: "
+            f"{mismatched}/{len(recorded)}"
+            f"{' — that share of the delta is not attributable' if mismatched else ''}"
         )
     reasons: dict[str, int] = {}
     for d, s in recorded:
-        for why in set(d["degradation_reasons"]) | set(s["degradation_reasons"]):
+        both = incidental_reasons(d["degradation_reasons"], "dynamic") | incidental_reasons(
+            s["degradation_reasons"], "static_only"
+        )
+        for why in both:
             reasons[why] = reasons.get(why, 0) + 1
     if reasons:
-        summary["degradation_reasons"] = reasons
+        summary["incidental_degradation_reasons"] = reasons
+        print("  incidental reasons (the treatment does not account for these):")
         for why, count in sorted(reasons.items(), key=lambda kv: -kv[1])[:6]:
             print(f"    {count:3d}  {why[:96]}")
 

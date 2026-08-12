@@ -28,11 +28,53 @@ import pytest
 
 from tests.evaluation.eval_dynamic_vs_static import (
     bootstrap_ci,
+    incidental_reasons,
     load_report,
     predicted_from_result,
     sample_domains,
     ubiquitous_domains,
 )
+
+
+class TestIncidentalDegradation:
+    """Separating degradation the treatment causes from degradation it doesn't.
+
+    The static-only arm reports degradation on **every** sample, because the
+    treatment is precisely that it has no sandbox report. A contamination check
+    that counted those would flag 100% of pairs and read as "this study cannot
+    attribute its delta" when the design is working exactly as intended.
+    """
+
+    def test_the_absent_sandbox_report_is_the_treatment_not_a_confound(self) -> None:
+        observed = [
+            "no sandbox report (dynamic detonation unavailable) — static-only evidence",
+            "analysts produced no claims: dynamic, network",
+        ]
+        assert incidental_reasons(observed, "static_only") == set()
+
+    def test_a_starved_analyst_list_keeps_the_analysts_that_were_not_starved(self) -> None:
+        """dynamic and network had nothing to consume. static did, so its
+        silence is a real failure and must survive the filter."""
+        observed = ["analysts produced no claims: dynamic, network, static"]
+        assert incidental_reasons(observed, "static_only") == {
+            "analysts produced no claims: static"
+        }
+
+    def test_an_unrelated_failure_survives(self) -> None:
+        observed = [
+            "no sandbox report (dynamic detonation unavailable)",
+            "container restart failed",
+        ]
+        assert incidental_reasons(observed, "static_only") == {"container restart failed"}
+
+    def test_nothing_is_excused_in_the_dynamic_arm(self) -> None:
+        """Nothing was withheld from it, so every reason it reports is real —
+        including one that mentions the sandbox, which would itself be a fault."""
+        observed = ["no sandbox report (dynamic detonation unavailable)"]
+        assert incidental_reasons(observed, "dynamic") == set(observed)
+
+    def test_no_reasons_is_an_empty_set(self) -> None:
+        assert incidental_reasons([], "static_only") == set()
 
 
 class TestPredictionExtraction:
