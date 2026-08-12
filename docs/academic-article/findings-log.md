@@ -1990,7 +1990,7 @@ the honest label is that we cannot say.
 
 ---
 
-### 3.19 A fix for one silent failure created another: the LLM narrative is dead in production — `NEGATIVE` (D1 prep)
+### 3.19 A fix for one silent failure created another: the LLM narrative was dead in production — `FIXED` (D1 prep)
 
 **Measured 2026-08-12, 5 fixtures x 3 repeats = 15 generations: the LLM narrative arm produced a
 schema-valid `NarrativeOutput` on 0 of 15.** Every failure carries **exactly 21 validation errors** —
@@ -2031,6 +2031,61 @@ nothing about what the model actually emitted. So the coercion that would repair
 paragraphs, recommendation-key mapping) cannot be designed from the run that found the defect; it
 needs one more generation captured raw. That is the third time in this project that the artefact
 needed to answer the next question was the one not retained.
+
+---
+
+### 3.20 The narrative comparison was scoring a degradation notice — `INTERNAL` (D1)
+
+**Repaired, then re-measured, 2026-08-12** (5 fixtures x 3 repeats = 15, same harness as §3.5):
+
+| metric | LLM narrative | deterministic "fallback" |
+|---|---|---|
+| grounding precision | 1.000 | 1.000 |
+| coverage recall | 0.920 [0.867, 0.973] | 1.000 |
+| F1 | 0.956 [0.926, 0.985] | **1.000** |
+| structural pass-rate | **1.000** | 0.000 |
+| fp_linter clean-rate | 0.800 | 1.000 |
+
+Paired **LLM − fallback F1 = −0.044, 95% CI [−0.074, −0.015]**, n=15; sign test fallback 6, ties 9,
+LLM 0. Against 2026-06-04 (−0.111 [−0.252, −0.030]) the gap has narrowed by more than half and the
+interval has tightened, which is what the duplicate-key repair bought.
+
+**But the retained prose shows the comparison is not what it appears to be.** With the text kept
+beside the score for the first time, the "deterministic fallback" arm reads:
+
+> *executive_summary*: "Sample classified as malware. Best-guess family: dropper. Pipeline reported
+> 5 ATT&CK techniques: T1105 (…), T1140 (…), T1055 (…). Confidence 0.80. This is an auto-generated
+> summary (no LLM available); review the detailed sections for evidence."
+>
+> *capabilities_narrative*: **"Detailed narrative was not generated because the analysis ran in
+> mock/offline mode or the narrative LLM call failed."**
+
+That is hardcoded in `apply_fallback_narrative` — not a fixture artefact. The arm is a **degradation
+notice**, and it wins `coverage_recall` **by construction**: the metric counts evidence technique IDs
+that appear in the text, and an exec summary that enumerates every ID surfaces all of them by
+definition. It scores 1.000 for listing what it declines to explain.
+
+So §3.5's phrasing — *"the deterministic template is the stronger baseline"* — overstates it, and the
+correction is worth more than the original claim. The template is not a competing narrator that beats
+the LLM; it is the **absence** of a narrator, announcing itself, measured by a metric that rewards
+enumeration over prose. A document scored against its own table of contents will lose.
+
+**D1's readability rubric — an LLM-based INTERNAL assessment, explicitly excluded from the paper.**
+Scored blind on the retained prose across the five families (structure, traceability, redundancy,
+actionability):
+
+| dimension | LLM narrative | deterministic arm |
+|---|---|---|
+| structure | 3–4 paragraphs, one per kill-chain phase, 1,003–1,168 chars | 1 paragraph, 219 chars, stating no narrative exists |
+| traceability | technique IDs parenthesised inline at the claim they support | IDs listed once in the summary, unlinked to evidence |
+| redundancy | summary and capabilities carry different content | nothing to repeat |
+| actionability | 4 specific recommendations, each with a technique and a detection pointer | 1 generic "hunt for the associated indicators" |
+
+There is no contest, and that is the point: **the only dimension on which the LLM narrator was ever
+justified is the one the faithfulness metric cannot see.** This assessment used an LLM as the rubric
+judge and therefore **does not enter the paper** — `self-audit-pitfalls.md` P2 is `CLEAR` on the
+strength of "LLM-as-a-judge was never used for scoring", and it stays that way. E.7 remains an
+acknowledged limitation in the paper: no human analyst scored a report.
 
 ---
 
