@@ -146,6 +146,16 @@ The multi-layer corroboration set — the design's central claim about evidence 
 from 3 corroborated techniques to 0. **The final verdict was identical in 0 of 15 cases changed.**
 The cascade's arithmetic runs; its output does not reach the decision.
 
+**We report a limit on this result that we found after obtaining it, and it is the kind that would
+normally go unstated.** The study varied **three of the cascade's six Layer-0 sources** — the three
+that need no sandbox. Measuring the other three over an archived cohort afterwards showed that one of
+them, the Sigma layer, **fires on 43 of 43 samples and contributes a technique no other dynamic
+source found on all 43**, at weight 0.55 — second only to YARA and above the static layers this study
+did vary. A null obtained while the second-heaviest contributor was absent is not yet a statement
+about the cascade. We therefore treat the finding as **provisional pending a six-source re-run**
+rather than as the settled result it appeared to be, and we would rather print that sentence than a
+cleaner one we could not defend.
+
 ## 6. Confidence is very nearly a constant
 
 Verbal confidence, which the cascade and the deterministic gates consume, discriminates correct from
