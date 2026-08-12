@@ -28,7 +28,7 @@
 | P5 | Spurious Correlations | `PARTIAL` | Two found and published; no systematic perturbation testing |
 | P6 | Context Truncation | `EXPOSED` | Truncation mechanisms everywhere, **frequency never reported** |
 | P7 | Prompt Sensitivity | `PARTIAL` | A structured prompt-variation study exists; production prompts are fixed and unvaried |
-| P8 | Surrogate Fallacy | `EXPOSED` → `PARTIAL` | One model, one machine. Four claims **scoped 2026-08-09**; the confound itself stands until the frontier arm (C6) runs |
+| P8 | Surrogate Fallacy | `EXPOSED` → `PARTIAL` | One model, one machine. Four claims **scoped 2026-08-09**. Frontier arm completed 2026-08-12 at n=25: paired ΔF1 **+0.003 [−0.077, +0.081]** — a 3.4× model does not separate. Remaining gap is **coverage** (fixtures, not the cohort) → C6 |
 | P9 | Model Ambiguity | `PARTIAL` | Model **and engine both pinned 2026-08-09** (GGUF digest + HF revision + imatrix dataset; engine commit `eb570eb9`). Off `CLEAR` because the running binary reports `unknown` — the commit was recovered from a second copy of the sources, not from the artifact |
 
 **Three actionable items** fall out: report truncation frequency (P6), scope the generalising
@@ -244,28 +244,46 @@ alignment score, so the valid→valid swap cannot be tuned safely at any error r
 significant predictor** of performance on the nearest task, then single-model findings are
 exactly the kind the pitfall warns about.
 
-**First cross-model data, 2026-08-11 — the row stays `PARTIAL`.** A second endpoint now exists and
-has run (§3.16): Nemotron-3-Super-120B-A12B against the local Qwen3.6-35B-A3B, same fixtures, same
-prompt, same 2400-token budget. The frontier arm scored **0.5025 [0.4101, 0.6178]** at n=9 against
-the local arm's **0.4136** at n=25 — an interval that contains the local mean, so **no separation is
-demonstrated, and none is refuted**. A 3.4× parameter advantage produced no obvious gap here, which
-is worth stating against a literature prior that predicts one, but n=9 cannot carry it.
+**Cross-model data, completed 2026-08-12 at full n — and it moved.** A second endpoint has run to
+completion (§3.16): Nemotron-3-Super-120B-A12B against the local Qwen3.6-35B-A3B, same five
+fixtures, same five repeats, same prompt, same 2400-token budget. Because both arms cover the same
+sample the comparison is **paired**:
 
-Two things follow for the write-up. The confound is **narrowed, not closed**: there is now a second
-model rather than a hypothetical one, and the scoped claims stand as scoped. And the honest limit is
-now a *sample-size* limit rather than a *no-second-model* limit — a better problem, and a
-quantified one, because the free tier caps at **50 requests/day**, making the n=100 cohort arm (C6)
-a two-day run or a $10 purchase. That belongs in the reproducibility appendix, since a reader
-reproducing C6 hits the same wall.
+> **frontier − local = +0.0026**, 95% CI **[−0.0770, +0.0814]**, n=25.
+> Frontier better on 12, worse on 13, tied on 0.
 
-**Verdict after scoping: `PARTIAL`.** The write-up half is done — all four claims now carry their
-scope at the point of claim, `related-work.md` carries a section-level scope statement, and the
-distinction between *negatives obtained under a favourable configuration* (which travel) and
-*positives bounded by this model's speed* (which may not) is stated. The **empirical** half is
-not done and cannot be closed by writing: the architecture/model confound stands until the
-frontier arm runs. That is queue item **C6**, funded and scheduled. Until it lands, the honest
-statement is the one now in `related-work.md` — single-model findings are not properties of an
-architecture.
+**The interim reading was wrong, and how it was wrong is the point.** At n=9 this arm scored
+**0.5025** and read as a lead over the local model's 0.4136. Completing the sample moved the estimate
+down by 0.086 — through the local mean and out the other side — and the direction across samples is a
+coin flip. Nothing was learned between the two runs except the remaining 16 calls, which had been
+truncated by a daily request quota rather than by anything about the samples. A difference read off
+an underpowered arm is not a weak result; it is an unreliable one, and this audit had it in front of
+it for a day.
+
+What follows for the confound. It is **substantially narrowed**: at equal budget on this task, a 3.4×
+parameter advantage produces no measurable separation, which is direct evidence *against* the
+surrogate fallacy's usual worry — that a bigger model would have changed the conclusions. The scoped
+claims stand as scoped, and the negatives now have a second model behind them.
+
+What remains is **coverage, not power**. This is five synthetic fixtures, not the n=100 malware
+cohort; C6 asks the same question against real samples, where evidence bundles are messier and longer
+and the two models may diverge in ways five fixtures cannot show. The free tier caps at **50
+requests/day**, so C6 is a two-day run or a $10 purchase — a scheduling fact for the reproducibility
+appendix, since a reader reproducing it hits the same wall.
+
+**Verdict: `PARTIAL`, and closer to `CLEAR` than at any earlier pass.** The write-up half is done —
+all four claims carry their scope at the point of claim, `related-work.md` carries a section-level
+scope statement, and the distinction between *negatives obtained under a favourable configuration*
+(which travel) and *positives bounded by this model's speed* (which may not) is stated. The empirical
+half is now **half done rather than absent**: a second model of 3.4× the size has been measured at
+full n on the fixture suite and does not separate, so "these findings are an artefact of a small
+quantised model" is no longer an open hypothesis — it is one the evidence points against.
+
+It stays `PARTIAL` for a reason we can name precisely, which is the only kind worth keeping open:
+the second model has been tested on **fixtures, not on the malware cohort**. C6 closes that. Until it
+lands the honest statement remains the one in `related-work.md` — single-model findings are not
+properties of an architecture — but the sentence now has a measured counterexample standing behind
+it rather than a promise.
 
 ## P9 — Model Ambiguity `PARTIAL`
 
