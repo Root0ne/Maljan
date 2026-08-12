@@ -318,6 +318,12 @@ async def run_arm(sha: str, report: dict[str, Any] | None, truth: set[str]) -> d
         "recall": round(m.recall, 4),
         "f1": round(m.f1, 4),
         "degraded": bool(result.get("degraded_mode")),
+        # *Why* it degraded, not just that it did. The first arm came back
+        # degraded, and a pair whose two arms degrade for different reasons is
+        # not measuring the sandbox report — it is measuring which analyst
+        # happened to fail. Recorded per arm so the confound is checkable
+        # instead of assumed away.
+        "degradation_reasons": [str(x) for x in (result.get("degradation_reasons") or [])],
         "host_mem_before": mem_before,
         "host_mem_after": mem_after,
     }
@@ -454,6 +460,41 @@ def summarise() -> int:
             f"{shares[0]:.1%} / {shares[len(shares) // 2]:.1%} / {shares[-1]:.1%} (min/median/max)"
         )
         print("  the dynamic arm's network evidence is that constant — read the delta with it")
+
+    # Degradation, read as a threat rather than a footnote. A pair whose arms
+    # degraded for different reasons is not a clean contrast: whatever the delta
+    # says, part of it is which analyst failed that hour.
+    scored = [(d, s) for _, d, s in pairs]
+    deg = {
+        "dynamic": sum(1 for d, _ in scored if d.get("degraded")),
+        "static_only": sum(1 for _, s in scored if s.get("degraded")),
+        "both": sum(1 for d, s in scored if d.get("degraded") and s.get("degraded")),
+    }
+    recorded = [
+        (d, s) for d, s in scored if "degradation_reasons" in d and "degradation_reasons" in s
+    ]
+    mismatched = sum(
+        1 for d, s in recorded if set(d["degradation_reasons"]) != set(s["degradation_reasons"])
+    )
+    summary["degraded"] = deg
+    summary["reason_mismatch"] = {"pairs_with_reasons": len(recorded), "differing": mismatched}
+    print(
+        f"\ndegraded arms: dynamic {deg['dynamic']}/{len(pairs)}, "
+        f"static-only {deg['static_only']}/{len(pairs)}, both {deg['both']}"
+    )
+    if recorded:
+        print(
+            f"  pairs whose two arms degraded for *different* reasons: "
+            f"{mismatched}/{len(recorded)} — that share of the delta is not the treatment"
+        )
+    reasons: dict[str, int] = {}
+    for d, s in recorded:
+        for why in set(d["degradation_reasons"]) | set(s["degradation_reasons"]):
+            reasons[why] = reasons.get(why, 0) + 1
+    if reasons:
+        summary["degradation_reasons"] = reasons
+        for why, count in sorted(reasons.items(), key=lambda kv: -kv[1])[:6]:
+            print(f"    {count:3d}  {why[:96]}")
 
     distinct = len({tuple(d["predicted"]) for _, d, _ in pairs})
     summary["distinct_dynamic_outputs"] = distinct
