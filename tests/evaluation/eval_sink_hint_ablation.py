@@ -63,9 +63,35 @@ def restart_llama() -> None:
     grace = "/home/user/Belgeler/kingston/Projects/Maljan/logs/night-job.grace"
     open(grace, "w").close()
     subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "reset-failed", "b6-llama.service"], capture_output=True)
     time.sleep(5)
+    # Launched as a transient systemd unit, NOT as a child of this process.
+    #
+    # This is the fix for the failure that ended three runs. Started with
+    # Popen, llama-server inherits the cgroup of whatever launched the
+    # harness — a terminal inside the editor — so its ~16 GB is charged to
+    # the editor's scope. When the kernel then OOMs inside that scope it
+    # takes the scope down with it:
+    #
+    #   task_memcg=/user.slice/.../snap.code.code-*.scope, task=llama-server
+    #   snap.code.code-*.scope: Failed with result 'oom-kill'
+    #
+    # Marking the process as the preferred victim (oom_score_adj) fixed *which
+    # process* dies and could not fix *whose accounting it dies inside*. A
+    # transient unit gives it its own cgroup, and MemoryMax makes the model
+    # server hit a wall of its own before the host has to arbitrate.
+    #
+    # Arguments below are unchanged, so arms collected before and after this
+    # change remain comparable; only the accounting boundary moved.
     subprocess.Popen(
         [
+            "systemd-run",
+            "--user",
+            "--unit=b6-llama",
+            "--collect",
+            "--property=MemoryMax=20G",
+            "--property=MemorySwapMax=2G",
+            "--setenv=CUDA_VISIBLE_DEVICES=0",
             "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server",
             "-m",
             "/home/user/Belgeler/kingston/Projects/Maljan/models/Qwen3.6-35B-A3B-IQ3_K_R4.gguf",
