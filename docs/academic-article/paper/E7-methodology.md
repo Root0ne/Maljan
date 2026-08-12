@@ -16,8 +16,8 @@ consensus study the noise arm separated clearly (0.3366 against 0.3975 and 0.413
 treatment did not, which distinguishes "no effect" from "no sensitivity".
 
 **For reasoning models the budget must cover reasoning.** Our frontier endpoint reports reasoning
-tokens separately from content, and **53.6%** of its output was reasoning on real prompts (84% on a
-one-token answer). Capping content alone would have granted it roughly twice the generation for the
+tokens separately from content, and **56.5%** of its output was reasoning across 25 real prompts
+(84% on a one-token answer). Capping content alone would have granted it roughly twice the generation for the
 same nominal budget.
 
 ## 4.2 Paired designs, bootstrap intervals, and never a single run

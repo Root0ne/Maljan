@@ -32,11 +32,9 @@ against nothing at all.
 means over per-sample F1; bars are 95% bootstrap intervals recomputed from the retained per-sample
 records with the seed fixed. The three equal-budget arms are the consensus study (§1); the noise
 control separates from both treatments, which is what licenses reading the treatments' overlap as a
-null rather than as an insensitive harness. The 120B arm (§2) is **not paired with the others** and
-its n is 9 rather than 25 because the free-tier daily quota was exhausted mid-run: the 16 missing
-calls returned HTTP 429, not bad output. The truncation is therefore by call order rather than by
-result — all five fixture families are represented, and what is missing is repeats — but the interval
-is wide, it overlaps every other arm, and the apparent lead should not be read as one.
+null rather than as an insensitive harness. The 120B arm (§2) runs the same fixtures and repeats at
+the same output budget, so it too is n=25; it lands on the local single-judge arm, and the paired
+difference between them is +0.003 with an interval eight times wider than the effect.
 
 ## 1. Multi-agent consensus does not pay for itself at equal budget
 
@@ -65,25 +63,33 @@ Same five fixtures, same prompt, same 2,400-token output budget:
 | arm | model | mean F1 | 95% CI | n |
 |---|---|---|---|---|
 | local | Qwen3.6-35B-A3B (IQ3_K_R4) | 0.4136 | — | 25 |
-| frontier | Nemotron-3-Super-120B-A12B | 0.5025 | [0.4101, 0.6178] | 9 |
+| frontier | Nemotron-3-Super-120B-A12B | 0.4162 | [0.3596, 0.4711] | 25 |
 
-The frontier interval contains the local mean, so **no separation is demonstrated — and none is
-refuted.** We report it because the literature's prior predicts otherwise: `arXiv:2606.18166` found
-parameter size the *only* statistically significant predictor of ATT&CK-classification F1 (ρ=0.85,
-p=0.014) on the nearest task. n=9 cannot settle that; it can only decline to confirm it.
+Both arms see the same five fixtures at the same five repeats, so the comparison is **paired**:
 
-**Why n=9 and not 25, stated precisely.** The remaining 16 calls returned HTTP 429 — a free-tier
-daily quota of 50 requests, exhausted mid-run. They are not parse failures or refusals, and the
-distinction matters for how the arm is read: the sample is truncated by **call order**, not by
-outcome, so it carries no selection on result quality. All five fixture families appear; what is
-missing is repeats of them. This is a small and underpowered arm, and it is underpowered for a
-mundane reason we prefer to name than to leave the reader inferring a worse one.
+> **frontier − local = +0.0026**, 95% CI **[−0.0770, +0.0814]**, n=25.
+> The frontier model is better on 12 of the 25 and worse on 13.
 
-**A measurement that does not depend on n:** across the frontier arm's calls, **53.6% of output
-tokens were reasoning** (min 48.3%, max 59.7%), and on a one-token answer, 84% — 92 output tokens,
-77 of them thinking. An equal-budget comparison must therefore cap *total* output including
-reasoning; capping content alone would hand the reasoning model roughly twice the generation for the
-same nominal budget.
+A 3.4× larger reasoning model, given the same evidence and the same output budget, lands within
+three thousandths of F1 of a 35B model quantised to run on one desktop GPU, and its direction across
+samples is a coin flip. We report it because the literature's prior predicts otherwise:
+`arXiv:2606.18166` found parameter size the *only* statistically significant predictor of
+ATT&CK-classification F1 (ρ=0.85, p=0.014) on the nearest task. On this task, at this budget, we do
+not reproduce that.
+
+**An earlier version of this arm reported 0.5025 and was wrong to suggest a lead.** That figure came
+from n=9, the run having been cut short by a daily request quota; the apparent advantage did not
+survive completing the sample. It is recorded here because it is the exact failure mode §4.2 warns
+about — a difference read off an underpowered arm — and because we caught it by finishing the run
+rather than by any insight.
+
+The completed run parsed **25 of 25** calls with no refusals and one hitting the output cap.
+
+**Where the larger model's budget went:** across the 25 calls, **56.5% of output tokens were
+reasoning**, and on a one-token answer, 84% — 92 output tokens, 77 of them thinking. An equal-budget
+comparison must therefore cap *total* output including reasoning; capping content alone would hand
+the reasoning model roughly twice the generation for the same nominal budget, and the null above
+would have been a win bought with tokens.
 
 ## 3. Three independently built retrieval components, all near-inert in production
 

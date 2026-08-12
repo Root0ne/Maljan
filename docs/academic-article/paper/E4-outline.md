@@ -25,7 +25,7 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > family-feature index, and an opcode-hash attribution tier — each work in isolation and contribute
 > +0.003 F1, lose to a frequency prior, and fire on 0 of 18 samples respectively. A deterministic
 > confidence cap fires on 0.82% of techniques. A 120B reasoning model did not separate from our local
-> 35B on identical fixtures at equal budget.
+> 35B on identical fixtures at equal budget (paired ΔF1 **+0.003**, 95% CI [−0.077, +0.081], n=25).
 >
 > More consequentially, four defects at tool-integration boundaries produced *silent wrong answers*:
 > unset optional arguments sent as `null`, a loaded program that never became the server's current

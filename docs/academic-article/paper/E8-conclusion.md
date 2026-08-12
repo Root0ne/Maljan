@@ -28,8 +28,9 @@ not from one unable to see anything.
 Two further negatives constrain how the rest should be read. Verbal confidence — the number the
 cascade and every deterministic gate consume — discriminates correct from incorrect claims at **AUC
 0.550**, so those gates are keyed to noise. And a 120B reasoning frontier model did not separate from
-our local 35B on identical fixtures at equal budget, which means the ceiling we kept attributing to
-model capacity is not obviously that.
+our local 35B on identical fixtures at equal budget — paired **ΔF1 +0.003**, 95% CI [−0.077, +0.081],
+n=25, better on 12 of 25 and worse on 13 — which means the ceiling we kept attributing to model
+capacity is not obviously that.
 
 ## 8.2 The nulls are interpretable only because firing rates came first
 

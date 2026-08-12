@@ -1824,7 +1824,7 @@ was asked.
 
 ---
 
-### 3.16 A 120B frontier model does not separate from the local 35B — `EXPERIMENTAL` (B8, underpowered)
+### 3.16 A 120B frontier model does not separate from the local 35B — `NEGATIVE` (B8, complete at n=25)
 
 The frontier arm exists to attack **P8**, the surrogate fallacy: every LLM result in this work comes
 from one model on one machine, and `arXiv:2606.18166` sharpens the worry by finding **parameter
@@ -1836,25 +1836,38 @@ Same five fixtures, same `single`-arm prompt, same 2400-token output budget as �
 | arm | model | mean F1 | 95% CI | n |
 |---|---|---|---|---|
 | `single` | Qwen3.6-35B-A3B (IQ3_K_R4), local | 0.4136 | — | 25 |
-| frontier | Nemotron-3-Super-120B-A12B | **0.5025** | **[0.4101, 0.6178]** | **9** |
+| frontier | Nemotron-3-Super-120B-A12B | **0.4162** | **[0.3596, 0.4711]** | **25** |
 
-**The honest reading is that nothing is established.** The frontier point estimate is higher, and
-its interval's lower bound (0.4101) sits *below* the local mean (0.4136) — so the difference is not
-demonstrated. Nor is equivalence: n=9 against n=25, with one fixture (`worm`) contributing a single
-observation, cannot support either claim. What it does say is that **a 3.4× parameter advantage did
-not produce an obvious gap on this task at equal token budget**, which is worth reporting precisely
-because the literature prior predicts one.
+Both arms cover the same five fixtures at the same five repeats, so the comparison is **paired**:
 
-**The reasoning fraction, however, is measured and stable.** Across 9 calls, **53.6%** of output
-tokens were reasoning (min 48.3%, max 59.7%) — and on a one-token answer ("T1055") it was **84%**:
+> **frontier − local = +0.0026**, 95% bootstrap CI **[−0.0770, +0.0814]**, n=25.
+> Frontier better on **12**, worse on **13**, tied on 0.
+
+**A 3.4× parameter advantage buys three thousandths of F1 and a coin flip on direction.** The
+interval is thirty times wider than the effect and the direction is split, so this is a null with
+enough power behind it to be worth stating: at this task and this budget we do not reproduce
+`arXiv:2606.18166`'s parameter-size prior.
+
+**The n=9 version of this row said 0.5025 and implied a lead. It was wrong.** That estimate came
+from a quota-truncated run, and completing the sample moved the point estimate down by 0.086 —
+through the local mean and out the other side. Nothing was learned between the two runs except the
+remaining 16 calls. It is the §3.7 lesson (a claim-count ranking that inverted when the budget
+changed) recurring in a second place: **a difference read off an underpowered arm is not a weak
+result, it is an unreliable one**, and the correction here was bought by finishing the run rather
+than by any insight.
+
+**The reasoning fraction is measured and stable.** Across 25 calls, **56.5%** of output
+tokens were reasoning — and on a one-token answer ("T1055") it was **84%**:
 92 output tokens, 77 of them thinking. Capping *content* alone would hand the frontier arm roughly
 twice the generation for the same nominal budget, so `count_reasoning_tokens = True` is now
 measured rather than assumed. This is the methodological result of B8, and it does not depend on n.
 
-**Why n is 9 and not 25 — a planning constraint that belongs in the reproducibility appendix.**
+**The quota constraint that truncated the first attempt, kept because it governs C6.**
 The OpenRouter free tier allows **50 model requests per day** (`X-RateLimit-Limit: 50`,
-`limit_source: openrouter_free_tier_daily`), and the run exhausted it mid-flight: 9 calls landed,
-16 returned HTTP 429. The cap resets daily at 03:00 local. **C6 as designed — the frontier arm over
+`limit_source: openrouter_free_tier_daily`), and the first run exhausted it mid-flight: 9 calls
+landed, 16 returned HTTP 429. The cap resets daily at 03:00 local, and the completed 25-call run
+above was taken from a fresh quota (25 of 25 parsed, 0 refusals, 1 hitting the output cap, $0
+spent against the $25 ceiling). **C6 as designed — the frontier arm over
 the n=100 cohort — needs 100+ calls and is therefore a two-day run on the free tier**, or ~$10 of
 credit to raise the ceiling. That is a scheduling fact, not a scientific one, but it decides
 whether C6 lands before the paper does.
