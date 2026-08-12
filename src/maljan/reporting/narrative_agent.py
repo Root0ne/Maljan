@@ -66,26 +66,98 @@ _SYSTEM_PROMPT = (
     "is a verdict/impact briefing ONLY — state the classification, the severity, "
     "the single most important risk, and the containment call to action. Do NOT "
     "enumerate individual techniques or restate the capability narrative here.\n"
-    "4. capabilities_narrative: 3-5 paragraphs (one item per paragraph). Each "
+    "4. capabilities_narrative: a JSON ARRAY of 3-5 strings, one string per "
+    "paragraph. Emit the key ONCE with a list value; do not repeat the key. Each "
     "paragraph covers a single kill-chain phase or capability cluster and its "
     "supporting evidence. This is the ONLY place technique detail belongs — do "
     "NOT repeat the executive_summary, and do NOT include defensive/remediation "
     "advice here (that belongs solely in defensive_recommendations).\n"
-    "5. defensive_recommendations: 3-8 entries. Priority P0 only for active "
-    "C2 / exfiltration / wiper-grade prevention. P1 for hardening, P2 for hunt "
-    "/ telemetry tasks. Each entry is a distinct, non-overlapping action; do not "
-    "duplicate an action already implied by the narrative prose. For EACH "
-    "recommendation you MUST set: (a) `technique_id` = the ATT&CK technique it "
-    "defends against, chosen from the 'Top ATT&CK techniques' list above (or "
-    "null only if none applies); (b) `detection` = CONCRETE, technical detection "
-    "guidance — name the specific API call, registry key, telemetry source "
-    "(e.g. Sysmon EventID 3 for network, EventID 13 for registry), or a "
-    "sigma/yara pointer. Do NOT write generic advice like 'monitor for "
-    "suspicious activity'; cite the exact observable.\n"
+    "5. defensive_recommendations: 3-8 entries. Each entry is a JSON object "
+    "with EXACTLY these six fields, and the first four are REQUIRED:\n"
+    "   - `category`: one of firewall, edr_hunting, registry_hardening, gpo, "
+    "patching, user_awareness, other\n"
+    "   - `action`: the concrete step to take\n"
+    "   - `rationale`: why this sample makes that step necessary\n"
+    "   - `priority`: P0, P1 or P2 — P0 only for active C2 / exfiltration / "
+    "wiper-grade prevention, P1 for hardening, P2 for hunt / telemetry tasks\n"
+    "   - `technique_id`: the ATT&CK technique it defends against, chosen from "
+    "the 'Top ATT&CK techniques' list above (null only if none applies)\n"
+    "   - `detection`: CONCRETE technical detection guidance — name the "
+    "specific API call, registry key, telemetry source (e.g. Sysmon EventID 3 "
+    "for network, EventID 13 for registry), or a sigma/yara pointer. Do NOT "
+    "write generic advice like 'monitor for suspicious activity'; cite the "
+    "exact observable.\n"
+    "   Each entry is a distinct, non-overlapping action; do not duplicate an "
+    "action already implied by the narrative prose.\n"
     "6. The three fields must NOT restate one another — a reader should be able "
     "to read all three with no repeated sentences.\n"
     "7. Output MUST conform to the provided JSON schema."
 )
+
+
+_LIST_FIELDS = ("capabilities_narrative", "defensive_recommendations")
+
+
+def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
+    """Parse the model's JSON without letting a repeated key overwrite the earlier one.
+
+    Measured 2026-08-12: asked for a 3-5 paragraph narrative, this model emits
+    ``capabilities_narrative`` **three times as separate keys of one object**
+    rather than once with an array. JSON says the last duplicate wins, so
+    ``json.loads`` silently reduced a three-paragraph narrative to a single
+    string, which then failed ``list[str]`` validation — and with structured
+    output disabled for local servers there was nothing left to catch it.
+
+    Collecting duplicates recovers exactly what the model meant to say. Returns
+    ``None`` when the text is not parseable JSON at all, leaving the ordinary
+    fence-stripping parser to try.
+    """
+    import json as _json
+
+    def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in pairs:
+            if key not in out:
+                out[key] = value
+                continue
+            existing = out[key]
+            if isinstance(existing, list):
+                existing.append(value)
+            else:
+                out[key] = [existing, value]
+        return out
+
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.split("```", 2)[1] if candidate.count("```") >= 2 else candidate
+        candidate = candidate.removeprefix("json").strip()
+    start, end = candidate.find("{"), candidate.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        parsed = _json.loads(candidate[start : end + 1], object_pairs_hook=_pairs)
+    except Exception:  # noqa: BLE001 — an unparseable body is the other path's problem
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _coerce_narrative_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalise shapes the schema accepts but the model reaches for differently.
+
+    Deliberately narrow. It repairs *shape*, never content: a single string
+    where a list is declared becomes a one-item list, and nothing invents a
+    field the model did not supply — a recommendation missing ``action`` still
+    fails validation, because a report that ships an invented remediation step
+    is worse than one that ships none.
+    """
+    out = dict(payload)
+    for field in _LIST_FIELDS:
+        value = out.get(field)
+        if isinstance(value, str):
+            out[field] = [value]
+        elif isinstance(value, dict):
+            out[field] = [value]
+    return out
 
 
 def _truncate(value: str, max_len: int) -> str:
@@ -277,10 +349,11 @@ class NarrativeAgent:
                     record_response_usage(self.token_ledger, raw)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
-            payload = safe_parse_json(_message_text(raw))
+            text = _message_text(raw)
+            payload = _parse_keeping_duplicate_keys(text) or safe_parse_json(text)
             if not payload:
                 return None
-            return NarrativeOutput.model_validate(payload)
+            return NarrativeOutput.model_validate(_coerce_narrative_payload(payload))
         except Exception as exc:  # noqa: BLE001
             # ``error``: reaching here means the report ships with no narrative
             # at all, which is a visible hole rather than a degraded detail.

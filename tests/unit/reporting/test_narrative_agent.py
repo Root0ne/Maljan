@@ -321,3 +321,73 @@ class TestMessageText:
         m = MagicMock()
         m.content = ["hello ", {"text": "world"}]
         assert _message_text(m) == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-key recovery and shape coercion (2026-08-12)
+#
+# The LLM narrative arm was producing schema-valid output on 0 of 15
+# generations. Two causes, both observed rather than guessed: the model emitted
+# ``capabilities_narrative`` three times as separate keys of one JSON object
+# (JSON's last-wins rule then reduced three paragraphs to one string), and the
+# prompt named only two of the six recommendation fields as required.
+# ---------------------------------------------------------------------------
+
+
+def test_repeated_key_becomes_a_list_instead_of_the_last_value_winning() -> None:
+    """The exact shape the model emits: one key, three times, in one object."""
+    from maljan.reporting.narrative_agent import _parse_keeping_duplicate_keys
+
+    raw = (
+        '{"executive_summary": "verdict",'
+        ' "capabilities_narrative": "phase one",'
+        ' "capabilities_narrative": "phase two",'
+        ' "capabilities_narrative": "phase three"}'
+    )
+    parsed = _parse_keeping_duplicate_keys(raw)
+    assert parsed is not None
+    assert parsed["capabilities_narrative"] == ["phase one", "phase two", "phase three"]
+    assert parsed["executive_summary"] == "verdict"
+
+
+def test_fenced_json_still_parses() -> None:
+    from maljan.reporting.narrative_agent import _parse_keeping_duplicate_keys
+
+    parsed = _parse_keeping_duplicate_keys('```json\n{"a": 1, "a": 2}\n```')
+    assert parsed == {"a": [1, 2]}
+
+
+def test_unparseable_text_defers_rather_than_raising() -> None:
+    from maljan.reporting.narrative_agent import _parse_keeping_duplicate_keys
+
+    assert _parse_keeping_duplicate_keys("I could not produce JSON.") is None
+
+
+def test_single_string_is_wrapped_for_a_list_field() -> None:
+    from maljan.reporting.narrative_agent import _coerce_narrative_payload
+
+    out = _coerce_narrative_payload({"capabilities_narrative": "one paragraph"})
+    assert out["capabilities_narrative"] == ["one paragraph"]
+
+
+def test_coercion_repairs_shape_but_never_invents_content() -> None:
+    """A recommendation missing its required fields must still fail validation.
+
+    Shipping an invented remediation step is worse than shipping none, so the
+    coercion is allowed to reshape a value and never to supply one.
+    """
+    import pydantic
+    import pytest
+
+    from maljan.reporting.narrative_agent import NarrativeOutput, _coerce_narrative_payload
+
+    payload = _coerce_narrative_payload(
+        {
+            "executive_summary": "x" * 200,
+            "capabilities_narrative": ["a", "b", "c"],
+            # what the model actually returned: the two optional fields only
+            "defensive_recommendations": [{"technique_id": "T1055", "detection": "Sysmon 8"}] * 3,
+        }
+    )
+    with pytest.raises(pydantic.ValidationError):
+        NarrativeOutput.model_validate(payload)
