@@ -48,7 +48,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import random
 import subprocess
 import sys
@@ -65,6 +64,7 @@ import httpx  # noqa: E402
 
 from tests.evaluation.eval_temporal_drift import (  # noqa: E402
     available_fixture_slugs,
+    extract_predicted_tids,
     load_ground_truth,
     resolve_fixture_slug,
 )
@@ -227,6 +227,22 @@ def ubiquitous_domains(reports: dict[str, dict[str, Any]]) -> set[str]:
     return common
 
 
+def predicted_from_result(result: Any) -> set[str]:
+    """The techniques this run predicted: ISR claims ∪ cascade-corroborated.
+
+    **Not** ``state["judge_report"]``, which `pipeline/state.py` declares as
+    ``str | None`` — a prose paragraph. Reading ``.get("ttp_mappings")`` off it
+    threw ``AttributeError`` after the first smoke arm had already spent twenty
+    minutes producing a perfectly good result, which is the whole argument for
+    smoke-testing a long study before launching it.
+
+    Delegates to C5's extractor rather than re-deriving the set, so the two
+    studies' F1 numbers are computed from the same definition and can be read
+    against each other. Ground truth already resolves the same way.
+    """
+    return extract_predicted_tids(result)
+
+
 def bootstrap_ci(values: list[float], iters: int = 4000) -> tuple[float, float]:
     vals = [float(v) for v in values]
     if len(vals) < 2:
@@ -292,12 +308,7 @@ async def run_arm(sha: str, report: dict[str, Any] | None, truth: set[str]) -> d
     seconds = round(time.time() - t0, 1)
     mem_after = host_memory()
 
-    predicted: set[str] = set()
-    for mapping in (result.get("judge_report") or {}).get("ttp_mappings") or []:
-        tid = str(mapping.get("technique_id") or "").strip().upper()
-        if tid and tid != "NONE":
-            predicted.add(tid)
-
+    predicted = {t for t in predicted_from_result(result) if t and t != "NONE"}
     m = TTPAccuracyMetrics(predicted_ttps=predicted, ground_truth_ttps=truth)
     return {
         "seconds": seconds,
@@ -352,13 +363,19 @@ async def main_async(limit: int) -> int:
     print(f"cohort: {len(shas)} samples with a verified report and resolved ground truth")
     print(f"cohort-ubiquitous domains (the sandbox's own telephony): {len(ubiquitous)}", flush=True)
 
+    # A failed arm stays in the checkpoint — it is data about the run — but it
+    # does **not** count as done, so a resume retries it. Treating an error row
+    # as complete would silently drop that sample from the paired study and the
+    # only trace would be a smaller n that nothing explains.
     done: set[str] = set()
     if CHECKPOINT.exists():
         for line in CHECKPOINT.read_text().splitlines():
             try:
-                done.add(json.loads(line)["key"])
+                row = json.loads(line)
             except Exception:  # noqa: BLE001
-                pass
+                continue
+            if "error" not in row and row.get("key"):
+                done.add(row["key"])
 
     for i, sha in enumerate(shas, 1):
         for arm in ("dynamic", "static_only"):
@@ -442,11 +459,26 @@ def summarise() -> int:
     summary["distinct_dynamic_outputs"] = distinct
     print(f"\noutput cardinality: {distinct} distinct technique sets across {len(pairs)} samples")
 
+    # The agent budgets the arms actually ran under, read from the live config
+    # rather than restated. A study that quietly throttled an analyst and did not
+    # say so is indistinguishable, on disk, from one that did not.
+    try:
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        budgets: dict[str, Any] = {
+            "react_agent_timeout": cfg.react_agent_timeout,
+            "react_agent_timeout_overrides": dict(cfg.react_agent_timeout_overrides),
+        }
+    except Exception as exc:  # noqa: BLE001 — provenance is recorded or its absence is
+        budgets = {"unavailable": f"{type(exc).__name__}"}
+
     OUT.write_text(
         json.dumps(
             {
                 "schema": "dynamic-vs-static/v1",
                 "seed": SEED,
+                "agent_budgets": budgets,
                 "summary": summary,
                 "per_pair": [{"sha256": s, "dynamic": d, "static_only": st} for s, d, st in pairs],
             },
@@ -464,7 +496,17 @@ def main() -> int:
     args = ap.parse_args()
     if args.summarise_only:
         return summarise()
-    os.environ.setdefault("REACT_AGENT_TIMEOUT_OVERRIDES__static", "600")
+    # **No timeout override.** This harness previously lowered the static
+    # analyst's cap from production's 1500 s to 600 s, copied from B6's harness
+    # without being weighed. It was measured on the first arm and reconsidered:
+    # the tighter cap kills the analyst's forced-synthesis fallback (466 s hard
+    # cap instead of ~1165 s), which suppresses static evidence in **both** arms.
+    # That does not bias a paired delta symmetrically — less static evidence
+    # leaves the dynamic channel less to compete with, so a throttled run would
+    # tend to overstate the very effect this study exists to measure. The run is
+    # slower at production settings and the achieved n is smaller; the checkpoint
+    # makes any n reportable, and an n that describes the deployed system is
+    # worth more than a larger one that describes a variant of it.
     return asyncio.run(main_async(args.limit))
 
 
