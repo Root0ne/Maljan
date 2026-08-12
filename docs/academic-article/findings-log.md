@@ -2139,7 +2139,12 @@ evidence — ours was not, and the check costs one `Counter`.
 
 ---
 
-### 3.22 The six-source verdict re-run is void, and the two runs disagree — `INVALID` (C3, attempt 1)
+### 3.22 The six-source verdict re-run is void, and the two runs disagree — `INVALID` (B3 re-run, attempt 1)
+
+> **Label corrected 2026-08-12.** This section was tagged `(C3, attempt 1)`. C3 is the queue's
+> *n=100 cascade ablation over the CAPE dynamic path*, which has never been run; this study is a
+> re-run of **B3** (the Layer-0 verdict arm, §3.9) and it serves claim **C6**. Read as written, the
+> old tag said a CAPE experiment had been attempted and voided. Same correction applied to §3.23.
 
 §3.21 showed §1.10's null rested on three of six Layer-0 sources, so the verdict study was re-run
 with all six. **The result cannot be used, and the reason is a precondition I broke rather than a
@@ -2173,13 +2178,14 @@ enough. **We record the disagreement rather than picking the reading we prefer.*
 
 **Consequences taken now.** §5 of the results stays `provisional` — the caveat added earlier stands
 and is now better understood: not merely "measured with three of six layers" but "and the six-layer
-re-run was void". C3 is **not** closed. A valid re-run needs fixtures carrying at least twelve
-techniques so six sources each hold two or more, and it needs the model server restarted between
-samples the way §3.18's harness does — this one does not restart, which is why it reached 17.8 GB.
+re-run was void". B3 is **not** closed, and neither is the claim it serves (C6). A valid re-run
+needs fixtures carrying at least twelve techniques so six sources each hold two or more, and it
+needs the model server restarted between samples the way §3.18's harness does — this one does not
+restart, which is why it reached 17.8 GB.
 
 ---
 
-### 3.23 Two Layer-0 sources are fed and decline — `MEASURED` (C3, attempt 2 design)
+### 3.23 Two Layer-0 sources are fed and decline — `MEASURED` (B3 re-run, attempt 2 — design)
 
 §3.22 prescribed the repair: fixtures with ≥12 techniques so **six** sources each hold two or
 more. Building it surfaced a prior question that the prescription assumed away — *do all six
@@ -2228,7 +2234,7 @@ the harness restarts the model server per fixture in its own transient cgroup, w
 Selected fixtures (seeded, re-derivable, from `ground_truth/attck_malware/`): `bazar` (51),
 `blackcat` (21), `jhuhugit` (20), `nanhaishu` (12), `sardonic` (25), `sliver` (23), `stonedrill`
 (15), `wannacry` (16). 8 fixtures × 5 arms × 2 conditions = **80 judge calls**. Harness and unit
-tests are in place; **the run has not been made yet**, so §5 stays `provisional` and C3 stays
+tests are in place; **the run has not been made yet**, so §5 stays `provisional` and B3 stays
 open.
 
 ---

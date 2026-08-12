@@ -215,7 +215,9 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       → justifies every deterministic gate; converges with §1.10; **sharpens B5**, which now tests
       whether C3's cap does anything given that its input does not
 
-- [x] **B3 — Layer-0 LLM arm** `[done]` **2026-08-09** → **§3.9**
+- [~] **B3 — Layer-0 LLM arm** `[done]` **2026-08-09** → **§3.9**; **re-opened** by §3.21,
+      attempt 1 void (§3.22), attempt 2 **built and unrun** (§3.23) — harness `[LLM]`, 80 judge
+      calls, no CAPE needed
       **The corroborated set does not reach the verdict.** 60 judge calls, 0 skipped. The
       manipulation worked — corroboration swung **3 → 0** between arms — and the final bundle's
       technique set was **identical every time** (0/15 changed on every arm, Jaccard 1.000,
@@ -437,7 +439,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
 | C5 | Describe-then-map | §1.5.1/§1.5.2 measured | **PRIOR ART** `2401.12178` | cite only |
 | C5a | Rank and gate are separate axes | N=4,913 TRAM2 **+ AnnoCTR** | **REFINEMENT** — `2604.03676` owns the framing | keeps the *inversion* |
-| C6 | Multi-layer corroboration cascade | §1.10's 0/15 null was measured with **three of six** Layer-0 sources; the missing `sigma_layer` fires on **43/43** and contributes uniquely on **43/43** (§3.21) | `UNMEASURED` — and the prior null is now known to be **based on an incomplete cascade** | C3 re-run, six layers |
+| C6 | Multi-layer corroboration cascade | §1.10's 0/15 null was measured with **three of six** Layer-0 sources; the missing `sigma_layer` fires on **43/43** and contributes uniquely on **43/43** (§3.21) | `UNMEASURED` — and the prior null is now known to be **based on an incomplete cascade** | B3 re-run, four firing layers (§3.23) |
 | C7 | Deterministic STIX integrity + honest degradation | **measured** on 60 fresh judge bundles (§3.10) | `PARTIAL` — firing rate known, truncation distribution awaits C7 runs | C7 |
 | C8 | Schema-pruning hint → completion, not accuracy | n=17 paired | **OURS** — held at A4 | second search before submission |
 | N1 | Claim-count is an invalid instrument | measured | `REFINEMENT` | E1 |
