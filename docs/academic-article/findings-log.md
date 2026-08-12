@@ -2179,6 +2179,60 @@ samples the way §3.18's harness does — this one does not restart, which is wh
 
 ---
 
+### 3.23 Two Layer-0 sources are fed and decline — `MEASURED` (C3, attempt 2 design)
+
+§3.22 prescribed the repair: fixtures with ≥12 techniques so **six** sources each hold two or
+more. Building it surfaced a prior question that the prescription assumed away — *do all six
+sources produce anything on this corpus at all?* They do not, and the distinction matters
+because the two ways of producing nothing call for opposite designs.
+
+Over the 43 archived reports, measured by running the production builders directly
+(`build_lolbin_isr`, `build_dga_isr(build_network_iocs(...))`, deterministic, no LLM):
+
+| source | claims produced | what it was given |
+|---|---|---|
+| `sigma_layer` | fires on **43/43**, unique technique credit 43/43 | — |
+| `lolbin` | **0/43** | median **3356** recorded API calls, median 2 processes (min 1, max 18) |
+| `network_dga` | **0/43** | **49–63** domains per sample, median 56 |
+
+Both return `None` **cleanly — no exception, no degraded path**. They are handed substantial
+evidence and decline it: no invocation in the process data matches a LOLBin, and none of the
+49–63 domains scores as algorithmically generated. That is consistent with §3.21's contamination
+finding, where 40 of 130 distinct domains are the analysis VM's own telephony — real vendor
+domains are exactly what a DGA scorer should reject.
+
+**The design consequence, and it departs from what §3.22 prescribed.** That section assumed the
+repair was a size fix and kept all six arms. Giving `lolbin` and `network_dga` an equal share of
+the ground truth would hand a mechanism evidence it never receives in this deployment, ablate it,
+and report the result as if it described the running system. So attempt 2 ablates the **four
+sources that fire** — `yara_layer`, `import_capability_layer`, `tool_artifact_layer`,
+`sigma_layer` — and the two exclusions travel in the run's JSON with the rate that justified
+them. This is the same firing-rate-before-effect rule applied in §3.15/§3.17; the departure is
+recorded here rather than made silently in the harness.
+
+**A second change is a structural repair, not a size fix.** The overlap condition previously
+alternated two pairs, `yara`+`import_capability` (cross-domain → corroborated) and
+`yara`+`tool_artifact` (same domain → **not** corroborated despite two detectors agreeing). yara
+appeared in both, so removing it destroyed all corroboration *by arithmetic* — the earlier
+write-up said as much and asked the reader to discount that arm. Adding a third pair,
+`sigma`+`import_capability`, gives a corroborated pair that does not involve yara, so
+`no_yara_layer` now leaves cross-domain agreement standing and becomes a measurement.
+`no_sigma_layer` mirrors it. All five arms are informative for the first time.
+
+**Preconditions now enforced rather than remembered.** The fixture floor is derived from
+`len(SOURCES)` (≥3 claims per source), not written as the literal `12` that would starve sources
+again the next time the list changes; a unit test states the starvation consequence directly; and
+the harness restarts the model server per fixture in its own transient cgroup, which is the
+§3.22 memory lesson.
+
+Selected fixtures (seeded, re-derivable, from `ground_truth/attck_malware/`): `bazar` (51),
+`blackcat` (21), `jhuhugit` (20), `nanhaishu` (12), `sardonic` (25), `sliver` (23), `stonedrill`
+(15), `wannacry` (16). 8 fixtures × 5 arms × 2 conditions = **80 judge calls**. Harness and unit
+tests are in place; **the run has not been made yet**, so §5 stays `provisional` and C3 stays
+open.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as

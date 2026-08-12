@@ -18,11 +18,13 @@ import pytest
 
 from tests.evaluation.eval_layer0_verdict import (
     ARMS,
+    EXCLUDED_SOURCES,
     SOURCES,
     assign_to_sources,
     build_isr_reports,
     bundle_technique_ids,
     jaccard,
+    load_large_fixtures,
     sources_for_arm,
     verdict_changed,
 )
@@ -42,31 +44,108 @@ class TestAssignment:
         """Round-robin rather than a contiguous split: a fixed split would give
         one source the first techniques of every fixture, confounding layer
         identity with whatever those techniques have in common.
-
-        The expected assignment tracks SOURCES, which grew from three to six
-        when the sandbox-fed layers were added — so five techniques now land one
-        per source rather than wrapping around.
         """
         assignment = assign_to_sources(["T1055", "T1071", "T1486", "T1490", "T1140"])
-        assert assignment["yara_layer"] == ["T1055"]
+        assert assignment["yara_layer"] == ["T1055", "T1140"]
         assert assignment["import_capability_layer"] == ["T1071"]
         assert assignment["tool_artifact_layer"] == ["T1486"]
         assert assignment["sigma_layer"] == ["T1490"]
-        assert assignment["lolbin"] == ["T1140"]
-        assert assignment["network_dga"] == []
 
-    def test_round_robin_wraps_across_all_six_sources(self) -> None:
-        """Seven techniques over six sources: the wrap must land on the first."""
-        tids = [f"T10{i}0" for i in range(1, 8)]
+    def test_round_robin_wraps_across_every_source(self) -> None:
+        """Five techniques over four sources: the wrap must land on the first."""
+        tids = [f"T10{i}0" for i in range(1, 6)]
         assignment = assign_to_sources(tids)
-        assert assignment["yara_layer"] == ["T1010", "T1070"]
-        assert [len(v) for v in assignment.values()] == [2, 1, 1, 1, 1, 1]
+        assert assignment["yara_layer"] == ["T1010", "T1050"]
+        assert [len(v) for v in assignment.values()] == [2, 1, 1, 1]
+
+    def test_a_fixture_smaller_than_the_source_count_starves_a_source(self) -> None:
+        """The defect that invalidated the six-source run, pinned as a property
+        rather than as history: below one technique per source, some removal arm
+        is byte-identical to ``all`` and its null is arithmetic. This is what
+        ``load_large_fixtures``'s floor exists to prevent, so if that floor is
+        ever lowered, this test states the consequence.
+        """
+        starved = assign_to_sources(["T1055", "T1071"])
+        assert sum(1 for v in starved.values() if not v) == len(SOURCES) - 2
 
     def test_ids_are_normalised(self) -> None:
         assert assign_to_sources(["t1055"])["yara_layer"] == ["T1055"]
 
     def test_an_empty_ground_truth_yields_empty_sources(self) -> None:
         assert all(not v for v in assign_to_sources([]).values())
+
+
+def _domains_claiming(reports: dict, tid: str) -> set[str]:
+    """The cascade domains that carry a claim for ``tid``. Corroboration is keyed
+    to this set's size, not to how many detectors agreed."""
+    return {
+        isr.domain for isr in reports.values() if any(c.technique_id == tid for c in isr.claims)
+    }
+
+
+class TestOverlapCondition:
+    """The condition that lets layer removal cost *corroboration* rather than
+    just techniques — and whose pairing decides which arms mean anything."""
+
+    def test_every_technique_is_claimed_by_exactly_two_sources(self) -> None:
+        tids = [f"T{2000 + i}" for i in range(12)]
+        assignment = assign_to_sources(tids, overlap=True)
+        for tid in tids:
+            assert sum(1 for v in assignment.values() if tid in v) == 2
+
+    def test_corroboration_survives_removing_yara(self) -> None:
+        """The repair, stated as a property. With only the yara-anchored pairs,
+        every corroborated technique died with yara and ``no_yara_layer`` was a
+        certainty rather than a measurement. The sigma+static pair must leave
+        cross-domain agreement standing when yara is gone.
+        """
+        tids = [f"T{2000 + i}" for i in range(12)]
+        assignment = assign_to_sources(tids, overlap=True)
+        reports = build_isr_reports(assignment, "no_yara_layer")
+        surviving = {tid for tid in tids if len(_domains_claiming(reports, tid)) >= 2}
+        assert surviving, "no cross-domain agreement survives without yara"
+
+    def test_the_same_domain_pair_never_corroborates(self) -> None:
+        """yara + tool_artifact agree, both emit on ``yara``, and the cascade
+        keys corroboration to the domain tag — so two detectors agreeing counts
+        once. This is the structural finding the experiment must exhibit."""
+        assignment = assign_to_sources([f"T{2000 + i}" for i in range(12)], overlap=True)
+        reports = build_isr_reports(assignment, "no_import_capability_layer")
+        for tid in {c.technique_id for r in reports.values() for c in r.claims}:
+            assert len(_domains_claiming(reports, tid)) == 1
+
+
+class TestFixtureFloor:
+    def test_every_selected_fixture_gives_each_source_at_least_three_claims(self) -> None:
+        for _sid, tids in load_large_fixtures(n=4):
+            assignment = assign_to_sources(tids)
+            assert min(len(v) for v in assignment.values()) >= 3
+
+    def test_selection_is_deterministic_under_a_seed(self) -> None:
+        assert [s for s, _ in load_large_fixtures(n=4)] == [s for s, _ in load_large_fixtures(n=4)]
+
+    def test_the_floor_tracks_the_source_count_rather_than_a_literal(self) -> None:
+        """A floor written as ``12`` would silently starve sources again the next
+        time SOURCES grows; it is derived from len(SOURCES) instead."""
+        for _sid, tids in load_large_fixtures(min_techniques=1, n=3):
+            assert len(tids) >= 3 * len(SOURCES)
+
+
+class TestExcludedSources:
+    def test_the_measured_exclusions_are_not_also_arms(self) -> None:
+        """They were dropped because they never fire on this corpus; an arm for
+        one of them would report a null caused by the input, not the cascade."""
+        names = {n for n, _ in SOURCES}
+        for name, _domain, _why in EXCLUDED_SOURCES:
+            assert name not in names
+            assert f"no_{name}" not in ARMS
+
+    def test_each_exclusion_carries_its_evidence(self) -> None:
+        """A source may only be dropped with a measured rate attached — "it
+        didn't seem to matter" is how the six-source design went wrong."""
+        for _name, _domain, why in EXCLUDED_SOURCES:
+            assert "no claim" in why
+            assert "43" in why
 
 
 class TestArms:
