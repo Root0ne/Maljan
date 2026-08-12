@@ -34,6 +34,8 @@ from maljan.core.config import Settings
 from maljan.memory.attck_validator import ATTCKValidator
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
+_OUTPUT_DIR = Path(__file__).resolve().parent
+
 TRAM2_URL = (
     "https://raw.githubusercontent.com/center-for-threat-informed-defense"
     "/tram/main/data/tram2-data/single_label.json"
@@ -174,7 +176,7 @@ def main() -> None:
             )
     report = "\n".join(lines)
     print("\n" + report, flush=True)
-    out = Path("D:/tmp/autocorrect_ablation.md")
+    out = _OUTPUT_DIR / "autocorrect_ablation.md"
     try:
         out.write_text(report + "\n", encoding="utf-8")
         print(f"\nWrote {out}", flush=True)

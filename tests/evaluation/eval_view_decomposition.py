@@ -46,8 +46,18 @@ from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
 
 _FIXTURE_DIR = _REPO_ROOT / "tests" / "evaluation" / "fixtures"
-_OUT_FILE = Path("D:/tmp/view_decomposition.md")
-_DEFAULT_CHECKPOINT = Path("D:/tmp/view_decomposition_checkpoint.jsonl")
+# Outputs land in this directory, beside the harness that produced them.
+#
+# These paths were `D:/tmp/...` — valid on the Windows box this was first
+# written on, and on Linux a *relative* directory literally named `D:` in
+# whatever the working directory happened to be. Nothing errors; the file is
+# written and then is wherever the run was launched from, under a name no one
+# thinks to look for. That is a silent retention failure in the harnesses whose
+# retained output §4.5 depends on, and one of these four is the withdrawn
+# n=210 drift study.
+_OUTPUT_DIR = Path(__file__).resolve().parent
+_OUT_FILE = _OUTPUT_DIR / "view_decomposition.md"
+_DEFAULT_CHECKPOINT = _OUTPUT_DIR / "view_decomposition_checkpoint.jsonl"
 _DEFAULT_BUDGET = 2000
 
 _TID_RE = re.compile(r"T\d{4}(?:\.\d{3})?")

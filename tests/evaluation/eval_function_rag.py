@@ -34,7 +34,17 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.memory.function_index import BEHAVIOR_QUERIES, select_relevant_chunks
 
-_OUT_FILE = Path("D:/tmp/function_rag.md")
+# Outputs land in this directory, beside the harness that produced them.
+#
+# These paths were `D:/tmp/...` — valid on the Windows box this was first
+# written on, and on Linux a *relative* directory literally named `D:` in
+# whatever the working directory happened to be. Nothing errors; the file is
+# written and then is wherever the run was launched from, under a name no one
+# thinks to look for. That is a silent retention failure in the harnesses whose
+# retained output §4.5 depends on, and one of these four is the withdrawn
+# n=210 drift study.
+_OUTPUT_DIR = Path(__file__).resolve().parent
+_OUT_FILE = _OUTPUT_DIR / "function_rag.md"
 
 # One malicious function per behavior cluster (the seeded "core").
 _MALICIOUS: list[tuple[str, str]] = [

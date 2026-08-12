@@ -42,6 +42,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+_OUTPUT_DIR = Path(__file__).resolve().parent
+
 # Make the repo root importable so `tests.evaluation.*` resolves whether run via
 # `uv run python tests/evaluation/eval_category_inference.py` (script dir on
 # path) or as a module.
@@ -321,7 +323,7 @@ def main() -> None:
 
     report = "\n".join(header + full_lines + beh_lines + confusion_lines + disagree_lines)
     print("\n" + report, flush=True)
-    out = Path("D:/tmp/category_inference_eval.md")
+    out = _OUTPUT_DIR / "category_inference_eval.md"
     try:
         out.write_text(report + "\n", encoding="utf-8")
         print(f"\nWrote {out}", flush=True)

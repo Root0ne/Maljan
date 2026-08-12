@@ -41,6 +41,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_OUTPUT_DIR = Path(__file__).resolve().parent
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -514,7 +516,7 @@ def _report(
 
     report = "\n".join(lines)
     print("\n" + report, flush=True)
-    out = Path("D:/tmp/hint_ablation.md")
+    out = _OUTPUT_DIR / "hint_ablation.md"
     try:
         out.write_text(report + "\n", encoding="utf-8")
         print(f"\nWrote {out}", flush=True)
@@ -529,7 +531,7 @@ def main() -> None:
     ap.add_argument(
         "--checkpoint",
         type=str,
-        default="D:/tmp/hint_ablation_checkpoint.jsonl",
+        default=str(_OUTPUT_DIR / "hint_ablation_checkpoint.jsonl"),
         help="JSONL checkpoint; completed samples are skipped on resume",
     )
     args = ap.parse_args()

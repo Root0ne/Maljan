@@ -51,7 +51,9 @@ from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-_OUT_FILE = Path("D:/tmp/temporal_manifest.json")
+_OUTPUT_DIR = Path(__file__).resolve().parent
+
+_OUT_FILE = _OUTPUT_DIR / "temporal_manifest.json"
 _MB_API = "https://mb-api.abuse.ch/api/v1/"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SAMPLES_DIR = _REPO_ROOT / "data" / "samples"

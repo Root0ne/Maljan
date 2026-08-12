@@ -24,7 +24,8 @@ family resolves to a ground-truth fixture; otherwise it is counted as
                      Requires a live llama-server + the binaries on disk.
 
 Run:  uv run python tests/evaluation/eval_temporal_drift.py --dry-run
-      uv run python tests/evaluation/eval_temporal_drift.py --manifest D:/tmp/manifest.json
+      uv run python tests/evaluation/eval_temporal_drift.py \
+          --manifest tests/evaluation/temporal_manifest.json
       uv run python tests/evaluation/eval_temporal_drift.py --max-per-cohort 10   # cheap first pass
 """
 
@@ -49,12 +50,22 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 
 from tests.evaluation.metrics import TTPAccuracyMetrics
 
-_OUT_FILE = Path("D:/tmp/temporal_drift.md")
-_DEFAULT_CHECKPOINT = Path("D:/tmp/temporal_drift_checkpoint.jsonl")
+# Outputs land in this directory, beside the harness that produced them.
+#
+# These paths were `D:/tmp/...` — valid on the Windows box this was first
+# written on, and on Linux a *relative* directory literally named `D:` in
+# whatever the working directory happened to be. Nothing errors; the file is
+# written and then is wherever the run was launched from, under a name no one
+# thinks to look for. That is a silent retention failure in the harnesses whose
+# retained output §4.5 depends on, and one of these four is the withdrawn
+# n=210 drift study.
+_OUTPUT_DIR = Path(__file__).resolve().parent
+_OUT_FILE = _OUTPUT_DIR / "temporal_drift.md"
+_DEFAULT_CHECKPOINT = _OUTPUT_DIR / "temporal_drift_checkpoint.jsonl"
 # Default to the vendored, reproducible manifest (metadata only — no binaries);
 # a fresh local collection can be pointed at with --manifest.
 _VENDORED_MANIFEST = _REPO_ROOT / "tests" / "evaluation" / "temporal_manifest.json"
-_LOCAL_MANIFEST = Path("D:/tmp/temporal_manifest_live.json")
+_LOCAL_MANIFEST = _OUTPUT_DIR / "temporal_manifest_live.json"
 _DEFAULT_MANIFEST = _VENDORED_MANIFEST if _VENDORED_MANIFEST.exists() else _LOCAL_MANIFEST
 _GROUND_TRUTH_DIR = _REPO_ROOT / "tests" / "evaluation" / "ground_truth" / "attck_malware"
 _SAMPLES_DIR = _REPO_ROOT / "data" / "samples"
