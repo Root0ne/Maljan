@@ -13,14 +13,21 @@ technique IDs deterministically, with no language model anywhere:**
 
 | | mean | 95% CI |
 |---|---|---|
-| precision | 0.3008 | [0.2337, 0.3673] |
-| recall | 0.1610 | [0.1254, 0.1962] |
-| **F1** | **0.1871** | **[0.1508, 0.2234]** |
+| precision | 0.2902 | [0.2447, 0.3398] |
+| recall | 0.1343 | [0.1104, 0.1596] |
+| **F1** | **0.1666** | **[0.1411, 0.1938]** |
 
-n = 24 of the 100-sample cohort, bootstrap CI, seed recorded. CAPE asserted at least one technique on
-every sample (4 minimum, 12 median, 33 maximum), so this is a real predictor rather than an artefact
+n = 43 of the 100-sample cohort, bootstrap CI, seed recorded. CAPE asserted at least one technique on
+every sample (3 minimum, 11 median, 33 maximum), so this is a real predictor rather than an artefact
 of an empty one. Ground truth resolution uses the same alias map as the drift harness, so the two
 studies score identically.
+
+**Why 43 and not 100, and why the number is not a choice we made.** The cohort was submitted as one
+batch and every task completed, but the sandbox retains report files for a limited window: 56 of the
+100 now answer a report request with `Reports directory does not exist`, and one task failed
+outright. The analyses ran; their reports are gone. An earlier pass over 24 of these reports gave
+F1 0.1871 [0.1508, 0.2234] — the present estimate sits inside that interval and is tighter, so this
+is a firmer version of the same number rather than a different one.
 
 We report this first because without it a pipeline F1 is uninterpretable, and because it sets a bar
 the pipeline must clear to have contributed anything. Earlier drafts of this work reported F1 values

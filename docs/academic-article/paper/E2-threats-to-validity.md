@@ -87,12 +87,20 @@ prompt sensitivity surfacing as measurement error.
 
 **P8 Surrogate fallacy — `PARTIAL`, on evidence.** Every local result comes from **one model on one
 machine**: Qwen3.6-35B-A3B at IQ3_K_R4, ik_llama.cpp, single host. Four claims were rescoped to that
-exact identifier. A second endpoint has now run — a 120B reasoning model on the same fixtures, prompt
-and token budget — and **did not separate from the local model**: 0.5025 [0.4101, 0.6178] at n=9
-against 0.4136 at n=25, an interval containing the local mean (§3.16). This neither demonstrates a
-difference nor refutes one; the honest limit is now **sample size** rather than the absence of a
-comparison. The cap is quantified: the free tier of the endpoint allows 50 requests/day, so the
-cohort-scale arm is a two-day run or a paid one.
+exact identifier. A second endpoint has now run to completion — a 120B reasoning model on the same
+fixtures, repeats, prompt and token budget — and **did not separate from the local model**: paired
+**ΔF1 +0.003, 95% CI [−0.077, +0.081]**, n=25, better on 12 and worse on 13 (§3.16). A 3.4× parameter
+advantage produces no measurable difference here, which is evidence *against* the pitfall's usual
+worry rather than merely an absence of evidence for it.
+
+An interim version of this arm reported 0.5025 at n=9 and read as a lead; completing the sample moved
+the estimate through the local mean and out the other side. We record that because the arm had been
+truncated by a daily request quota, not by anything about the samples — the failure mode is reading a
+difference off an underpowered arm, and this audit carried the wrong number for a day.
+
+What remains is **coverage, not power**: the second model has been measured on five synthetic
+fixtures, not on the malware cohort, where evidence bundles are longer and messier. That is the arm
+the free tier's 50 requests/day makes a two-day run or a paid one.
 
 **P9 Model ambiguity — `PARTIAL`.** Model and engine are both pinned: GGUF digest, HuggingFace
 revision, retrieval date, quantiser, **and the imatrix calibration dataset** — which most papers
@@ -143,8 +151,8 @@ we accept rather than argue with:
 
 1. Absolute F1 values in this paper are **not comparable to work using per-sample expert labels**.
 2. The bias is approximately constant across arms, so within-study contrasts are the defensible
-   reading — which is exactly why a baseline matters. **CAPE alone, with no LLM anywhere, scores
-   F1 0.187 [0.151, 0.223]** on our cohort (§C5). Every pipeline figure is read against that rather
+   reading — which is exactly why a baseline matters. **the sandbox alone, with no LLM anywhere, scores
+   F1 0.167 [0.141, 0.194]** on our cohort (§C5). Every pipeline figure is read against that rather
    than against zero.
 
 ## The host as an uncontrolled variable

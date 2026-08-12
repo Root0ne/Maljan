@@ -82,7 +82,7 @@ the instrument.
 ## 8.5 What we claim, and what we do not
 
 We claim: the measured negatives above; four failure mechanisms with the boundary each occurred at;
-a detector that found all four and costs one line; and a no-LLM baseline of **F1 0.187**, without
+a detector that found all four and costs one line; and a no-LLM baseline of **F1 0.167** [0.141, 0.194], n=43, without
 which none of our F1 numbers refer to anything.
 
 We do not claim that multi-agent decomposition cannot work, that these retrieval designs are
