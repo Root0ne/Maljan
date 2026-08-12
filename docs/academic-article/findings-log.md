@@ -1930,52 +1930,63 @@ the tier as shipped contributes nothing.
 
 ---
 
-### 3.18 The paired sink-hint ablation is halted, and its failures are not attributable — `INCOMPLETE` (B6, second half)
+### 3.18 The sink-reachability hint does not change what the analyst finds — `NEGATIVE` (B6, second half, complete)
 
-**Status: 10 of 24 arms complete, run stopped 2026-08-11 23:5x, not resumed.** Recorded here rather
-than left in a scratch file because the reason it stopped is itself a measurement-validity result.
+Twelve samples drawn from the 55 with a non-empty hint (§3.15), two arms each, differing only in
+`use_sink_reachability`. Restricted to the firing subset on purpose: where the hint is empty the two
+arms are identical by construction, and averaging over those is how §3.11's cap produced an
+uninterpretable null.
 
-**What was collected.** Twelve samples drawn from the 55 with a non-empty hint (§3.15), two arms
-each, differing only in `use_sink_reachability`:
+**Result — paired, n=6 usable pairs:**
 
-| sample | hint off | hint on | disposition |
+| outcome | mean Δ (on − off) | 95% CI | |
 |---|---|---|---|
-| `000ac83f` | 2 tid / 5 claims | 6 tid / 8 claims | usable, hint **+4** |
-| `000b535a` | 0 tid / 1 claim (625s) | 0 tid / 1 claim (1545s) | both arms dead |
-| `0014daea` | 6 tid / 10 claims | 0 tid / 5 claims | usable, hint **−6** |
-| `00162899` | 14 tid / **117 claims** | 1 tid / 1 claim | degenerate (§3.3), 8.4 claims/tid |
-| `00c66a68` | 0 tid / 1 claim (612s) | 0 tid / 1 claim (622s) | both arms dead |
+| **distinct technique IDs** | **+0.50** | **[−3.33, +4.50]** | includes 0 |
+| claims | −0.83 | [−4.33, +3.67] | includes 0 |
+| seconds | +52.55 | [−161.93, +268.45] | includes 0 |
 
-Two of five complete pairs are scoreable and they point in **opposite directions**. No result is
-claimed from this, and none should be: n=2 with deltas of +4 and −6 is not an underpowered estimate,
-it is an absence of one.
+Direction is **2 better, 2 worse, 2 tied** — as symmetric as six pairs can be. Per-pair deltas are
++4, −6, 0, 0, −4, +9: large in both directions and cancelling. **C1's mechanism fires on 56.7% of
+samples and, where it fires, does not measurably change the output.** That closes C1 from `PARTIAL`
+to a measured null, and it is the fourth architectural claim to end this way.
 
-**Why it cannot simply be resumed and finished.** The host was swapping when the last pair ran.
-`llama-server` had **2,289 MB of its own address space paged out** with the swap file at **8,191 /
-8,191 MB — fully exhausted**. A model generating from disk-backed pages is a different instrument
-from one generating from RAM, and the arm that failed did so by exceeding a 594-second synthesis
-budget on a prompt trimmed to 16,000 characters, which is otherwise inexplicable. The failure may
-belong to the pipeline; it may belong to the machine. **On the evidence retained, the question
-cannot be decided** — which is §4.5's lesson arriving a second time, in a new place: per-sample
-*outputs* were kept, but per-sample *host state* was not, and that is what the question needed.
+**The more useful number is that half the experiment was unusable.** Twelve pairs attempted, six
+scored, and the six exclusions fall into three distinct classes:
 
-**The correction is to the harness, not to the analysis.** Any resumed run must record
-`MemAvailable`, `SwapFree`, and the model server's `VmSwap` **at the start and end of every arm**, so
-that a failed arm can afterwards be attributed to the pipeline or excluded as an artefact of the
-host. Screening after the fact is not possible; the state is gone the moment the arm ends.
+| excluded | n | why |
+|---|---|---|
+| degenerate decode | **3** | an arm emitting 49–117 claims across 2–14 technique IDs (ratios 8.4–34.3) |
+| unattributable | **2** | both arms dead, and the host state that would decide whether the pipeline or the machine failed was not recorded |
+| incomplete | **1** | one arm exceeded the 630 s hard cap; a genuine outcome, but it costs the pair |
 
-**A second, harder constraint.** The pipeline's working set — model server ~16 GB, analysis worker
-~8 GB, Ghidra JVM up to 6 GB — does not coexist with a desktop session on a 30 GB machine. This is
-not a threshold to tune. The 2026-08-11 event ended with the kernel's OOM killer terminating the
-user's editor *and* the ablation, because the memory guard had been given a grace window (for
-declared model loads) that checked marker age and nothing else. The guard now refuses to grant grace
-below a free-swap floor (`3a96171`), but that only changes which process dies. **The experiment
-requires an otherwise-idle machine**, and saying so is cheaper than a fourth threshold.
+A 50% pair-loss rate is not a footnote to the null — it bounds what any ablation on this pipeline can
+detect. An effect smaller than the noise introduced by losing half the samples is not measurable
+here, and reporting `+0.50 [−3.33, +4.50]` without that context would imply a precision the
+instrument does not have.
 
-**What §3.15 still supports.** The firing rate — 55/97 = 56.7% — stands; it was measured by the
-pre-pass alone and never depended on this run. C1's claim remains what it was before the ablation
-started: *measured to fire, effect unmeasured*. That is a weaker position than a null result and it
-is reported as such.
+**The degenerate arms do not falsify §3.3's fix; they identify a second mode.** §3.3's loop repeated
+*wrong* technique IDs the model could not recall, and the fix routed ID assignment through a
+deterministic index. These arms emit **valid, plausible IDs** — T1055, T1057, T1027, T1059 — merely
+dozens of times each. The identifier-level failure is fixed; a claim-level repetition survives it,
+and it is a different defect wearing a similar shape. The screening rule is deliberately
+**conjunctive** (≥20 claims *and* ≥4 claims per technique) because one healthy arm sits at a ratio of
+5.0 on 5 claims and a ratio test alone would have discarded it.
+
+**Two arms were re-run, and one was deliberately not.** Three arms failed outright: two with
+`Connection error` from a model-server restart race, one with a 630 s timeout. The first two were
+re-run because **the measurement never happened**; the timeout was left standing because it is an
+outcome, and deleting an outcome one dislikes is selection rather than repair. The recovered pair
+(`1940ba18ed66`) contributed a **−4**, against the hint.
+
+**What this run cost before it produced anything, and the host lesson that came out of it.** The
+first attempt halted at 10 of 24 arms when the host exhausted its swap file; a second stopped at 13.
+Both were traced — eventually — to the model server running inside the *editor's* cgroup, so its
+16 GB was charged to a scope whose death took the session with it (`E5 §3`). Four arms died in those
+windows and two of them are the `unattributable` rows above: per-sample outputs had been retained,
+as §4.5 requires, but per-sample **host state** had not, and that is what the question needed. The
+harness now records `MemAvailable`, `SwapFree` and the server's resident-versus-swapped split at both
+ends of every arm, and the scorer screens on it — forward only. For the two arms already collected,
+the honest label is that we cannot say.
 
 ---
 

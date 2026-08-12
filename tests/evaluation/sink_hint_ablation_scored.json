@@ -6,7 +6,9 @@
   "claims_per_tid": 4.0
  },
  "excluded": {
-  "incomplete": [],
+  "incomplete": [
+   "1ab39bc014f6b6124fbd72d6f6390af9dbb0b67b50112e911c508b81318a3c8d"
+  ],
   "host_degraded": [],
   "failed_both": [],
   "unattributable": [
@@ -14,39 +16,41 @@
    "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7"
   ],
   "degenerate": [
-   "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e"
+   "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e",
+   "21c3b30041dc16f6fb0fe758c4cd1767e272133ff45dd21aee22506e6d9199aa",
+   "2371d8edbb2a1245b01cc06a870ddca49acb3be47b25e0fddc5d1b0032780bdf"
   ]
  },
  "summary": {
-  "n_pairs": 2,
+  "n_pairs": 6,
   "technique IDs": {
-   "mean": -1.0,
+   "mean": 0.5,
    "ci95": [
-    -6.0,
-    4.0
+    -3.333,
+    4.5
    ],
    "includes_zero": true
   },
   "claims": {
-   "mean": -1.0,
+   "mean": -0.833,
    "ci95": [
-    -5.0,
-    3.0
+    -4.333,
+    3.667
    ],
    "includes_zero": true
   },
   "seconds": {
-   "mean": 26.75,
+   "mean": 52.55,
    "ci95": [
-    3.1,
-    50.4
+    -161.933,
+    268.45
    ],
-   "includes_zero": false
+   "includes_zero": true
   },
   "direction": {
-   "hint_better": 1,
-   "hint_worse": 1,
-   "tied": 0
+   "hint_better": 2,
+   "hint_worse": 2,
+   "tied": 2
   }
  },
  "per_pair": [
@@ -74,6 +78,58 @@
     "tids": 6,
     "claims": 10,
     "seconds": 113.0
+   }
+  },
+  {
+   "sha256": "08e362bf1810b2e4a97771b2890295d3c7dca17a112e0c82020e501d8fc6711d",
+   "on": {
+    "tids": 1,
+    "claims": 1,
+    "seconds": 70.8
+   },
+   "off": {
+    "tids": 1,
+    "claims": 5,
+    "seconds": 146.2
+   }
+  },
+  {
+   "sha256": "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00",
+   "on": {
+    "tids": 0,
+    "claims": 1,
+    "seconds": 621.2
+   },
+   "off": {
+    "tids": 0,
+    "claims": 5,
+    "seconds": 77.0
+   }
+  },
+  {
+   "sha256": "1940ba18ed66dd2f1c3d4dbd2fbf6cf3438bcdee1e108982fb557461106a8073",
+   "on": {
+    "tids": 3,
+    "claims": 6,
+    "seconds": 297.0
+   },
+   "off": {
+    "tids": 7,
+    "claims": 10,
+    "seconds": 118.6
+   }
+  },
+  {
+   "sha256": "1aab32f769ba3b4e2c651fb2f34acc5d5f251ff0b2972a5ea1fd8367b8274c06",
+   "on": {
+    "tids": 9,
+    "claims": 10,
+    "seconds": 271.4
+   },
+   "off": {
+    "tids": 0,
+    "claims": 1,
+    "seconds": 656.8
    }
   }
  ]

@@ -22,7 +22,7 @@ a deterministic layer adjudicates between them.
 | **case-prior RAG** | retrieves similar past cases to prime mapping | **measured: loses to a label-frequency prior in production** |
 | **family-feature RAG** | retrieves family fingerprints | **measured: +0.003 F1 end to end** |
 | **opcode-hash attribution** | normalised function hashes matched against a corpus | **measured: fires on 0 of 18 samples** |
-| **sink-reachability hint** | ranks functions reachable to sensitive APIs, injected as prompt steering | **fires on 56.7%**; effect measurement incomplete |
+| **sink-reachability hint** | ranks functions reachable to sensitive APIs, injected as prompt steering | **fires on 56.7%**; measured: **ΔtechniqueIDs +0.5, CI [−3.3, +4.5]** |
 
 Two design choices are worth stating because they are *not* what failed, and a reader should not
 infer that everything did.

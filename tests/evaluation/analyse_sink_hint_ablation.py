@@ -3,14 +3,24 @@
 Two arms per sample, differing only in `use_sink_reachability`. The comparison
 is paired and reported with a bootstrap interval, following §3.7.
 
-**Why arms are screened before they are scored.** §3.3 documents a degenerate
-repetition mode in this model: it emits the same technique claim over and over.
-One arm of this run produced **117 claims carrying 14 distinct technique IDs** —
-a claims-per-technique ratio of 8.4 where every healthy arm sits between 1.0 and
-2.5. Scored naively that arm looks like a large win for its side; it is a decode
-failure. So an arm is flagged degenerate when it is both **voluminous** (>= 20
-claims) and **repetitive** (>= 4 claims per distinct technique), and any pair
-containing one is reported separately rather than silently averaged in.
+**Why arms are screened before they are scored.** This model has a degenerate
+repetition mode (§3.3). Four arms of the completed run produced 49 to 117 claims
+carrying 2 to 14 distinct technique IDs — ratios of 8.4 to 34.3 — against a
+healthy band that runs 1.1 to 2.5 on low-volume arms. Scored naively such an arm
+looks like a large win for its side; it is a decode failure.
+
+The rule is therefore **conjunctive**: an arm is degenerate when it is both
+**voluminous** (>= 20 claims) and **repetitive** (>= 4 claims per distinct
+technique). Both halves earn their place — one healthy arm sits at a ratio of
+5.0 on 5 claims, and a ratio test alone would have discarded it. Any pair
+containing a degenerate arm is reported separately rather than averaged in.
+
+Note what these arms are *not*: their technique IDs are valid and plausible
+(T1055, T1057, T1027, T1059), unlike §3.3's original loop, which repeated
+*wrong* IDs the model could not recall. That fix — routing ID assignment through
+a deterministic index — holds. What survives it is repetition at the claim level
+rather than at the identifier level, which is a different mode wearing a similar
+shape.
 
 Symmetric failures — both arms hitting the wall-clock bound on the same sample —
 are also excluded as pairs, and counted. They cost the pair but do not bias it,

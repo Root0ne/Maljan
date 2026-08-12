@@ -431,7 +431,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | # | Claim | Evidence | Verdict | Closed by |
 |---|---|---|---|---|
 | C0 | LLM-as-analyst vs LLM-for-a-trained-detector taxonomy | positioning | — | E3 |
-| C1 | Sink-reachability transferred JS→binary as prompt steering | **fires on 56.7%** (55/97, §3.15); effect not yet measured | `PARTIAL` | B6 second half |
+| C1 | Sink-reachability transferred JS→binary as prompt steering | **fires on 56.7%** (55/97, §3.15); paired ablation on the firing subset: **Δtechnique IDs +0.50, CI [−3.33, +4.50]**, n=6, direction 2/2/2 (§3.18) | **NEGATIVE — measured** | closed |
 | C2 | Two-tier attribution (opcode-hash + semantic RAG) | semantic +0.003 F1 (§3.12); opcode-hash **fires 0/18** (§3.17) | **NEGATIVE — both tiers measured** | closed |
 | C3 | Falsification-before-confidence protocol | **measured**: the cap fires on **0.82%** of techniques (§3.11) | `REFINEMENT` of FAX — and now a measured near-null | closed |
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |

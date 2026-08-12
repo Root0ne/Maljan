@@ -117,7 +117,7 @@ interpreted at all.
 | mechanism | fires on | consequence |
 |---|---|---|
 | confidence cap (falsification-before-confidence) | **0.82%** of techniques | an ablation would measure nothing; the null is uninterpretable |
-| sink-reachability priority hint | **56.7%** of samples (55/97) | an ablation would be interpretable; it was attempted and did not complete (§7) |
+| sink-reachability priority hint | **56.7%** of samples (55/97) | an ablation is interpretable, was run, and returned a null (§7) |
 | STIX integrity pass | measured over 60 fresh judge bundles | reported by removal reason |
 
 For the cap, the mechanism's own preconditions explain the rate: it applies to three technique
@@ -131,7 +131,7 @@ an ablation over a mechanism that fires on 0.82% of cases produces a null that m
 mechanisms the architecture was built around engage on almost nothing, and an ablation of any of them
 would return a null describing the cases where the mechanism never ran. Only the sink-reachability
 hint clears a rate at which an ablation would carry information — which is why it is the one we
-attempted, and §7 reports what happened when we did.
+ablated, and §7 reports the null it returned.
 
 ## 5. The corroboration cascade does not reach the verdict
 
@@ -158,34 +158,46 @@ data is handled.
 
 ## 7. What the ablations cost, and what that revealed
 
-The sink-hint effect ablation is **incomplete and is not reported as a null**: it reached 10 of 24
-arms before the host ran out of memory, and stopped there.
+The one mechanism whose firing rate justified an ablation (§4, 56.7%) was ablated, paired, on the
+subset where it fires. It does nothing measurable:
 
-| sample | hint off | hint on | disposition |
-|---|---|---|---|
-| `000ac83f` | 2 techniques / 150 s | 6 techniques / 200 s | scoreable, hint **+4** |
-| `0014daea` | 6 techniques / 113 s | 0 techniques / 116 s | scoreable, hint **−6** |
-| `00162899` | 14 techniques / **117 claims** | 1 / 1 | degenerate decode (§3.3), excluded |
-| `000b535a` | 0 / 1 (625 s) | 0 / 1 (1,545 s) | both arms dead |
-| `00c66a68` | 0 / 1 (612 s) | 0 / 1 (622 s) | both arms dead |
+| outcome | mean Δ (hint on − off) | 95% CI |
+|---|---|---|
+| **distinct technique IDs** | **+0.50** | **[−3.33, +4.50]** |
+| claims | −0.83 | [−4.33, +3.67] |
+| seconds | +52.55 | [−161.93, +268.45] |
 
-Two scoreable pairs pointing in opposite directions is not an underpowered estimate; it is the
-absence of one, and the paired mean of −1.0 with a bootstrap interval of [−6, +4] should be read as
-nothing at all.
+n=6 pairs; the hint is better on 2, worse on 2, and tied on 2, with per-pair deltas of +4, −6, 0, 0,
+−4 and +9 — large in both directions and cancelling. This is the fourth architectural claim to end in
+a null, and the last one we were in a position to test.
 
-**The four dead arms are the more useful part of this result, and they are reported as
-unattributable rather than as pipeline failures.** The last pair ran while the host's swap file was
-fully exhausted and the model server had **2.3 GB of its own address space paged out**; one arm then
-exceeded a 594-second budget on a prompt trimmed to 16,000 characters, which is inexplicable for a
-model generating from RAM and unsurprising for one generating from disk. Whether those arms failed
-because of the pipeline or because of the machine **cannot be determined from what was retained** —
-per-sample outputs were kept, per-sample *host state* was not.
+**The result that constrains the result: half the experiment was not scoreable.** Twelve pairs were
+attempted and six survived screening.
 
-That is this paper's own §4.5 recurring against it, in a place we had not thought to look: the rule
-was written about the pipeline's outputs, and the thing that went unrecorded was the environment the
-measurement was taken in. The harness now captures `MemAvailable`, `SwapFree` and the model server's
-resident-versus-swapped split at both ends of every arm, and the scorer excludes arms whose host was
-degraded — a screen that can only ever be applied forward, never to data already collected.
+| excluded | n | why |
+|---|---|---|
+| degenerate decode | 3 | an arm emitting 49–117 claims across 2–14 technique IDs (ratios 8.4–34.3) |
+| unattributable | 2 | both arms dead, and the host state needed to decide whether the pipeline or the machine failed was never recorded |
+| incomplete | 1 | an arm exceeded the 630 s bound — a genuine outcome, but it costs the pair |
+
+A 50% pair-loss rate bounds what any ablation on this pipeline can detect. An effect smaller than the
+noise from losing half the samples is not measurable here, and quoting `+0.50 [−3.33, +4.50]` without
+that context would claim a precision the instrument does not have. **Reporting the loss rate beside
+the estimate is the whole of what we have to say about how to read it.**
+
+**The two `unattributable` pairs are this paper's own §4.5 recurring against it.** They died while
+the host's swap file was exhausted and the model server had 2.3 GB of its own address space paged
+out; one arm then exceeded a 594-second budget on a prompt trimmed to 16,000 characters, which is
+inexplicable for a model generating from RAM and unsurprising for one generating from disk. We had
+retained per-sample outputs, as our own rule requires. What went unrecorded was the environment the
+measurement ran in. The harness now captures `MemAvailable`, `SwapFree` and the server's
+resident-versus-swapped split at both ends of every arm and the scorer screens on it — forward only,
+never for data already collected.
+
+**Three arms failed outright; two were re-run and one deliberately was not.** Two carried a
+`Connection error` from a restart race, meaning the measurement never happened, and were re-run. The
+third was the 630-second timeout, which is an outcome — deleting an outcome one dislikes is selection
+rather than repair. The recovered pair contributed a −4, against the hint.
 
 Running it, however, surfaced a production defect that the 1,995-test suite did not: on any binary
 rich enough to exhaust the 40-step ReAct budget, the analyst returned **zero techniques**, because
