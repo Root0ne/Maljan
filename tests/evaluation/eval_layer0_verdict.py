@@ -80,14 +80,27 @@ _OUT_FILE = _REPO_ROOT / "tests" / "evaluation" / "layer0_verdict.md"
 _JSON_FILE = _REPO_ROOT / "tests" / "evaluation" / "layer0_verdict.json"
 _DEFAULT_CHECKPOINT = Path("/tmp/layer0_verdict_checkpoint.jsonl")
 
-# The three static Layer-0 sources, with the cascade domain each actually emits
-# on. tool_artifact sharing yara's domain is not an accident of this harness --
-# it is what the production layer does (src/maljan/analysis/tool_artifact_layer.py),
-# and it is why §1.10 found that source unable to add corroboration.
+# All six Layer-0 sources, with the cascade domain each actually emits on, taken
+# from the production layers rather than assumed. tool_artifact sharing yara's
+# domain is not an accident of this harness -- it is what the production layer
+# does (src/maljan/analysis/tool_artifact_layer.py), and it is why §1.10 found
+# that source unable to add corroboration.
+#
+# **The first three used to be the whole list, and that was the defect.** This
+# study's null -- layer removal never changes the verdict -- was obtained while
+# the other three were absent because they need a sandbox report. §3.21 measured
+# them over the archived cohort: `sigma_layer` fires on 43/43 and contributes a
+# technique no other dynamic source found on 43/43, at weight 0.55, above every
+# static layer this study did vary. A null taken without the second-heaviest
+# contributor is a statement about an incomplete cascade, so the arm list now
+# covers all six.
 SOURCES: tuple[tuple[str, str], ...] = (
     ("yara_layer", "yara"),
     ("import_capability_layer", "static"),
     ("tool_artifact_layer", "yara"),
+    ("sigma_layer", "sigma"),
+    ("lolbin", "dynamic"),
+    ("network_dga", "network"),
 )
 
 ARMS: tuple[str, ...] = ("all", *(f"no_{name}" for name, _ in SOURCES))

@@ -41,11 +41,26 @@ class TestAssignment:
     def test_no_source_gets_a_systematically_easier_slice(self) -> None:
         """Round-robin rather than a contiguous split: a fixed split would give
         one source the first techniques of every fixture, confounding layer
-        identity with whatever those techniques have in common."""
+        identity with whatever those techniques have in common.
+
+        The expected assignment tracks SOURCES, which grew from three to six
+        when the sandbox-fed layers were added — so five techniques now land one
+        per source rather than wrapping around.
+        """
         assignment = assign_to_sources(["T1055", "T1071", "T1486", "T1490", "T1140"])
-        assert assignment["yara_layer"] == ["T1055", "T1490"]
-        assert assignment["import_capability_layer"] == ["T1071", "T1140"]
+        assert assignment["yara_layer"] == ["T1055"]
+        assert assignment["import_capability_layer"] == ["T1071"]
         assert assignment["tool_artifact_layer"] == ["T1486"]
+        assert assignment["sigma_layer"] == ["T1490"]
+        assert assignment["lolbin"] == ["T1140"]
+        assert assignment["network_dga"] == []
+
+    def test_round_robin_wraps_across_all_six_sources(self) -> None:
+        """Seven techniques over six sources: the wrap must land on the first."""
+        tids = [f"T10{i}0" for i in range(1, 8)]
+        assignment = assign_to_sources(tids)
+        assert assignment["yara_layer"] == ["T1010", "T1070"]
+        assert [len(v) for v in assignment.values()] == [2, 1, 1, 1, 1, 1]
 
     def test_ids_are_normalised(self) -> None:
         assert assign_to_sources(["t1055"])["yara_layer"] == ["T1055"]

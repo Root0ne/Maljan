@@ -2139,6 +2139,46 @@ evidence — ours was not, and the check costs one `Counter`.
 
 ---
 
+### 3.22 The six-source verdict re-run is void, and the two runs disagree — `INVALID` (C3, attempt 1)
+
+§3.21 showed §1.10's null rested on three of six Layer-0 sources, so the verdict study was re-run
+with all six. **The result cannot be used, and the reason is a precondition I broke rather than a
+finding.**
+
+The harness distributes each fixture's ground truth round-robin across the sources and states the
+assumption it depends on: *each source carries an equal share*. The fixtures carry **five**
+techniques. Over three sources that is 2/2/1 — uneven but every source carries something. Over six
+it is **1/1/1/1/1/0**:
+
+| arm removed | verdict changed | Jaccard | what that actually measures |
+|---|---|---|---|
+| five sources carrying one technique each | **15/15** | 0.800 | removing the sole carrier of a technique loses that technique — arithmetic |
+| `network_dga`, carrying none | **0/15** | 1.000 | removing a source with no claims changes nothing — also arithmetic |
+
+Every number in that table is fixed by the assignment before the cascade or the judge does anything.
+Extending `SOURCES` from three to six without checking the fixtures' technique count invalidated the
+design, and it is my error, caught by reading the assignment rather than by any check that exists.
+
+**Worse, the two runs disagree in a direction neither explanation covers.** With three sources,
+removing `yara_layer` — which carried **two** of five techniques — changed nothing: Jaccard **1.000**,
+0/15. With six, removing `yara_layer` carrying **one** technique lost it: Jaccard 0.800, 15/15.
+Removing *more* techniques produced full recovery; removing *fewer* produced loss. That is not
+explained by the assignment change alone, and we do not have an account of it.
+
+Candidates we can name but not currently separate: the model server was at **17.8 GB of its 20 GB
+cgroup cap** and thrashing during most of the new run (the run died at 102/105 arms on judge
+connection errors and was resumed after a restart, so its arms did not all see the same server
+state); and the two runs are three days apart with production changes in between. Either would be
+enough. **We record the disagreement rather than picking the reading we prefer.**
+
+**Consequences taken now.** §5 of the results stays `provisional` — the caveat added earlier stands
+and is now better understood: not merely "measured with three of six layers" but "and the six-layer
+re-run was void". C3 is **not** closed. A valid re-run needs fixtures carrying at least twelve
+techniques so six sources each hold two or more, and it needs the model server restarted between
+samples the way §3.18's harness does — this one does not restart, which is why it reached 17.8 GB.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
