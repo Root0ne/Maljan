@@ -437,7 +437,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
 | C5 | Describe-then-map | §1.5.1/§1.5.2 measured | **PRIOR ART** `2401.12178` | cite only |
 | C5a | Rank and gate are separate axes | N=4,913 TRAM2 **+ AnnoCTR** | **REFINEMENT** — `2604.03676` owns the framing | keeps the *inversion* |
-| C6 | Multi-layer corroboration cascade | §1.10 partial | `UNMEASURED` | **C3**, C2 |
+| C6 | Multi-layer corroboration cascade | §1.10's 0/15 null was measured with **three of six** Layer-0 sources; the missing `sigma_layer` fires on **43/43** and contributes uniquely on **43/43** (§3.21) | `UNMEASURED` — and the prior null is now known to be **based on an incomplete cascade** | C3 re-run, six layers |
 | C7 | Deterministic STIX integrity + honest degradation | **measured** on 60 fresh judge bundles (§3.10) | `PARTIAL` — firing rate known, truncation distribution awaits C7 runs | C7 |
 | C8 | Schema-pruning hint → completion, not accuracy | n=17 paired | **OURS** — held at A4 | second search before submission |
 | N1 | Claim-count is an invalid instrument | measured | `REFINEMENT` | E1 |

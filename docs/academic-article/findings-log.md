@@ -2089,6 +2089,56 @@ acknowledged limitation in the paper: no human analyst scored a report.
 
 ---
 
+### 3.21 The other half of Layer-0, and a contaminated evidence channel — `NEGATIVE` (C2 closed)
+
+§3.1 measured three of six Layer-0 sources and said so: `sigma_layer`, `lolbin` and `network_dga`
+consume a sandbox report and could not run. With the cohort's reports archived they can, offline —
+the production assembly in `pipeline/nodes.py` takes a **report dict**, not a live connection. Run
+over all 43 archived samples with that assembly copied rather than reimplemented:
+
+| dynamic source | fires on | contributes a technique no other dynamic source found |
+|---|---|---|
+| `sigma_layer` | **43 / 43 = 100%** | **43 / 43** |
+| `lolbin` | **0 / 43** | 0 |
+| `network_dga` | **0 / 43** | 0 |
+
+**This invalidates the basis of §1.10's null rather than confirming it.** That study found the
+corroborated set never changes the verdict (0 of 15) — measured with three static sources, while the
+source that fires on *every* sample and contributes uniquely on *every* sample was absent. `sigma`
+carries weight **0.55**, above `static` (0.35) and below only `yara` (0.90). A null obtained without
+the second-heaviest layer is not a result about the cascade; it is a result about a cascade missing a
+layer, and the re-run is queued as C3 rather than treated as done.
+
+**Two more mechanisms join the near-inert list, and the reason is not the mechanism.** `lolbin` and
+`network_dga` fire on nothing, and the harness records no errors, so this is genuine absence rather
+than silent failure. But the inputs are present and rich: every report carries 51–59 domains and
+1–6 processes, and `build_network_iocs` returns them intact. The layers are being fed and are
+declining to claim.
+
+**Why they decline is the finding.** Of 130 distinct domains across the cohort, **40 appear in all
+43 samples**, and they are the analysis VM's own background traffic — WPS Office and Kingsoft
+endpoints (`global.wps.com`, `params.wps.com`, `entry.wpscdn.com`, `365.kdocs.cn`, `api.wps.cn`)
+phoning home during every detonation.
+
+| | |
+|---|---|
+| share of each sample's domains that are cohort-ubiquitous | 63.5% min / **71.4% median** / 81.6% max |
+| domains left after removing the ubiquitous set | 9 min / 16 median / 23 max |
+| samples with no sample-specific domains at all | 0 / 43 |
+
+**About seven of every ten domains in this cohort's network evidence describe the sandbox, not the
+sample.** The DGA heuristic is correct to find nothing in them. This is §6.3's output-cardinality
+check arriving one level lower than usual — not in the outputs, but in the *evidence*: 40 constants
+where variation was expected, visible the moment anyone counted.
+
+Two consequences we take rather than argue with. Any measurement over "network evidence" on this
+cohort is measuring the host as much as the malware, and **C4's dynamic-vs-static comparison must
+report this**, because a dynamic channel that is 71% constant is a weaker treatment than its name
+suggests. And a sandbox VM should be checked for its own telephony before its captures are used as
+evidence — ours was not, and the check costs one `Counter`.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as

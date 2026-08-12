@@ -1,0 +1,361 @@
+{
+ "schema": "layer0-six/v1",
+ "scope": "The three sandbox-fed Layer-0 sources over the archived cohort. Static sources are measured separately in layer0_contribution.json; this file exists to close the half that needed a sandbox report.",
+ "n": 43,
+ "fired": {
+  "sigma_layer": 43,
+  "lolbin": 0,
+  "network_dga": 0
+ },
+ "unique_technique_credit": {
+  "sigma_layer": 43,
+  "lolbin": 0,
+  "network_dga": 0
+ },
+ "per_sample": [
+  {
+   "sha256": "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "2a07b1741dbf216a188938d0fec870f8395374f760c6bf452f0a0479e975b018",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "37289955e43235c56374e1cee02a98bd78d1448f02377caa92255c87a9df014e",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "3a311fa2632d70ba58f402a83270f3111ebd0074fe45ecfad273ebb8aecdd328",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "40bcf1b92cac08e72eb025659bb892a41926ebd655f448ff5544ece312986987",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "4565983c56ad07456e1fedc689887813df0f0fbff3bb716e687347d53526d88b",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "4e0f7777fd3ba58bb20f7ceaebaff50b6dcc3191cf27519d83b5ad3db30b8f5e",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "52b6f57b2e7a9fc832227cc0ae02794e506358a295dadcf75387755a1b84b1ea",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "5925ecddcc4b4ea9017aad9abe70dfc47bb6aa63bd01a84536a8cd3cc039d781",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "69947cfea7518aab0920c81530b9e643d0fd0a14b0686a5d13dc1500366f071d",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "6f2ec2f8dd5ec28adb7f652496ad75db346fa32372247ece6a69e15d30314b1b",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "7e2bc1dc1e6350f7e622d47697f088b4ae00799a9f61246312932851a0d9bece",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "8b2c21c13d38bbf20fd65e3a6b840315e14d60c0dc7e131104a5ea8b73699953",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "95b999ce29d2e82dfe33e33261634d449466671debf78c2ebb4747e3434a1d9e",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "964e7b311e933799477fd793aa4e7721af35fe5c494fd9d995a6a620b162e516",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "9c9a646099da045731162e08f6d04b1c386d81005580f27406fd2ae78ce237c1",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 2,
+   "corroborated": 0
+  },
+  {
+   "sha256": "a3ae935dad0de2657b032a70d1908f622b3cf54fc53f01a69d5f086e21ad4d9a",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "a7c4aae68e13b16ed7d916ba7cde189381e597934b05a26d113a97c8ae8afdbf",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "bf158ab1720e6a0da531b99de882c8c4c32eb5be8a0b1be6483156c561070641",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "c3e21f7b2bfc3da5e77b37f6556fb985e4402551bac45636a7488664e67d477f",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "cb4e4d28e4ae4e4acaffb8087e80d9163089be1d1f08837e23d665e65d8f30fa",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "d06be7bd36b4cdd6ac12e3c7fb675515cd33ae9ea75a26e7dc7fc3a7db14caff",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "d634843da16ff74a676a748989cd01916cd86278dc96c0d45fa9872dd78ba251",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "da0a4e16ef4baf46f27e666e9b4547cdf17eafad3caa235df6c29a52d3da8d0a",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "e8d4ad02e8811033f3ce05547774f6e9650ee66cf3f9221df656b326b8bd039d",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "f7333c98b0d4fac43070b0b17fb185a1934925d1be959cead7d44445abf84df7",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "f75668dcd2d8c554bde126315253439858d2155588b1889473a7df5914537f10",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  }
+ ]
+}
