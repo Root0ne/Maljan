@@ -82,6 +82,32 @@ static no-tools fallback exceeded the 1530s hard cap
 Neither bound was wrong alone. Exceeding the first *guarantees* an attempt at the second, and the
 composition was never considered.
 
+### The same mechanism at a fifth boundary — caught before it produced data
+
+M1–M4 were all found after the fact, in data already collected. The fifth was not, and the
+difference is the whole argument of this paper.
+
+Fetching the sandbox cohort's reports, we found that a request for a report the sandbox has since
+deleted is answered with **HTTP 200** and a 63-byte body:
+
+```
+{"error":true,"error_value":"Reports directory does not exist"}
+```
+
+Fifty-six of one hundred tasks answer this way — the analyses ran, and their reports have aged out of
+retention. A fetcher that trusted the status code would have written fifty-six of those bodies into
+the archive under the filename of the sample they were supposed to describe, and the three studies
+that read that archive would each have scored them.
+
+They did not, because the fetcher was written to verify the report's own `target.file.sha256` against
+the identifier it asked for before writing anything. That check exists only because M3 taught us the
+shape: an HTTP status is a statement about the transport, not about the answer. **This is the first
+time the discipline paid forward rather than backward**, and it cost four lines.
+
+The consequence is still a real one: the baseline study is n=43 rather than n=100, and that is a
+limit of the sandbox's retention window rather than a sampling decision. We would rather report a
+smaller honest n than a full one built on error bodies.
+
 ## 6.2 Why the test suite did not help
 
 **1,995 tests passed throughout.** This is not a gap in test quality but in test *shape*:
