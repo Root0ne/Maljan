@@ -348,7 +348,12 @@ def _prose(rep: MalwareReport) -> dict[str, Any]:
     return {
         "executive_summary": rep.executive_summary,
         "capabilities_narrative": rep.capabilities_narrative,
-        "defensive_recommendations": list(rep.defensive_recommendations or []),
+        # Recommendations are model objects, not strings; dump them so the
+        # checkpoint stays plain JSON that any later reader can open.
+        "defensive_recommendations": [
+            r.model_dump() if hasattr(r, "model_dump") else str(r)
+            for r in (rep.defensive_recommendations or [])
+        ],
     }
 
 

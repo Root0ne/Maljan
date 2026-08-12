@@ -444,7 +444,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | N2 | Equal-budget view decomposition trades grounding for volume | n≈8–9/arm | `REFINEMENT` | E1 |
 | N3 | Zero-shot semantic category inference loses to keywords | N=101 | `REFINEMENT` | E1 |
 | N4 | Auto-correction damages 38% to recover 21% | measured | **REFINEMENT** — GEC over-correction | keeps non-separability |
-| N5 | Deterministic template beats LLM narrative on faithfulness | n=15 | `REFINEMENT` | D1 informs |
+| N5 | Deterministic template beats LLM narrative on faithfulness | n=15 (2026-06-04). **Re-measured 2026-08-12: the LLM arm is schema-valid on 0/15** — structured output was disabled for local endpoints on 2026-08-07 to cure a 1800 s hang, and the surviving manual-parse path never validates (§3.19) | `REFINEMENT` — the 06-04 measurement stands; it no longer describes the shipped system | closed, with the regression recorded |
 | N6 | Working retriever, unreachable query; frequency prior wins | measured | `REFINEMENT` | E1 |
 | N7 | Degenerate ID loop; sampler penalties insufficient | reproducible | **REFINEMENT** — text degeneration | keeps *delivery* failure |
 | N8 | No speculative-decoding gain on A3B MoE | measured | `PRIOR ART`-adjacent | appendix |

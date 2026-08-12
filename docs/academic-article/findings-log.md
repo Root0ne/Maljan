@@ -1990,6 +1990,50 @@ the honest label is that we cannot say.
 
 ---
 
+### 3.19 A fix for one silent failure created another: the LLM narrative is dead in production — `NEGATIVE` (D1 prep)
+
+**Measured 2026-08-12, 5 fixtures x 3 repeats = 15 generations: the LLM narrative arm produced a
+schema-valid `NarrativeOutput` on 0 of 15.** Every failure carries **exactly 21 validation errors** —
+1 for `capabilities_narrative` (the model returns a string where the schema declares `list[str]`) and
+20 for `defensive_recommendations` (5 recommendations x 4 required fields, returned as dicts whose
+keys do not match). Twelve independent generations, twelve identical error counts: the §6.3
+output-cardinality signature, arriving as a constant where variation was expected.
+
+**This is a regression, and its cause is a fix.**
+
+| date | state | measured |
+|---|---|---|
+| 2026-06-04 | structured output attempted against the local server | structural pass **0.733**, F1 0.889, n=15 (§3.5) |
+| 2026-08-07 | a structured call hung for the full 1800 s `request_timeout`; structured output disabled whenever a custom `base_url` is set | the hang is gone |
+| 2026-08-12 | manual JSON parse is the only path | schema-valid output **0 of 15** |
+
+Both decisions were right on their own. `with_structured_output` against llama-server really did hang
+for thirty minutes with no log line — that is `registry.py`'s documented reason for refusing it — and
+the manual-parse path really does answer in seconds. What nobody measured is whether the surviving
+path *works*: it depends on the model spontaneously emitting JSON that matches a nested schema, and
+this model does so **never**. The composition is M4's shape a second time: two individually correct
+bounds meeting in a hole.
+
+**Why it was invisible for five days.** `NarrativeAgent.generate` returns `None` on failure, and the
+report node falls back to the deterministic template — which is *better on faithfulness anyway*
+(§3.5: F1 1.000 vs 0.889). So the report ships, reads well, scores well, and the run reports success.
+The only observable is a log line at `ERROR`, in a pipeline that emits thousands.
+
+**The ledger consequence.** §3.5's finding — *"the LLM's only edge is structural/readability
+compliance, 0.73 vs 0.00"* — describes a capability that **no longer exists in production**. The one
+justification the LLM narrator had is exactly the one that regressed. N5 is not withdrawn: its
+2026-06-04 measurement stands as a measurement. What changes is that it no longer describes the
+shipped system, and a row that says so is worth more than one that quietly keeps the old number.
+
+**What the retention rule cost us again, one level deeper.** The harness now keeps the prose beside
+each score (fixed today), but on a *failed* generation there is no prose to keep — and we kept
+nothing about what the model actually emitted. So the coercion that would repair this (string ->
+paragraphs, recommendation-key mapping) cannot be designed from the run that found the defect; it
+needs one more generation captured raw. That is the third time in this project that the artefact
+needed to answer the next question was the one not retained.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
