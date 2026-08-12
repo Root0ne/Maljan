@@ -171,6 +171,21 @@ rather than from our fix:
    cannot be re-screened, which is the same structural problem that withdrew our drift study, in a
    new variable.
 
+**A postscript, because it took three attempts to see.** Two of the interruptions above we
+attributed to memory pressure and treated with progressively better limits: a floor, then a strike
+counter, then an allowance for declared allocations, then marking the model server as the kernel's
+preferred OOM victim. All four were correct and none was the cause. The harness had started the
+server as a **child process**, so it ran inside the cgroup of the terminal that launched it and its
+memory was accounted to that scope; the kernel's log named the scope plainly and we did not read it
+until the third failure. Every fix we made chose *which process* the kernel would kill, and the
+defect was *whose accounting it was killed inside*.
+
+We report this because it is the same error as M1–M4 in a different register: a mechanism that looked
+like it was working, an intervention that addressed a real thing at the wrong layer, and a log line
+that had contained the answer for two days. A measurement environment is not a backdrop to the
+measurement, and the discipline that catches this is not cleverness — it is reading the error
+message that was already there.
+
 ## Scope
 
 Unless a statement says otherwise it was produced on one model, one machine, one quantisation and

@@ -84,6 +84,21 @@ Two consequences for anyone reproducing this work:
   script excludes arms whose host was degraded. This screen can only be applied forward: for arms
   already collected without it, the state is gone and the honest label is `unattributable`. That is
   the label our own halted ablation carries.
+* **Start the model server in its own cgroup, not the harness's.** This one cost us three
+  interrupted runs before we read the kernel log carefully enough:
+
+  ```
+  task_memcg=/user.slice/.../snap.code.code-*.scope, task=llama-server
+  Out of memory: Killed process (llama-server) oom_score_adj:1000
+  snap.code.code-*.scope: Failed with result 'oom-kill'
+  ```
+
+  The harness had launched the server as a child process, so it inherited the cgroup of whatever
+  started the harness — an editor's integrated terminal — and its ~16 GB was accounted to the
+  editor's scope. We had already made the server the kernel's preferred victim, and that was the
+  wrong level: choosing *which process* dies cannot change *whose accounting it dies inside*.
+  Launching it as a transient unit with an explicit `MemoryMax` puts the measurement's memory where
+  it belongs and lets the server hit a limit of its own before the host has to arbitrate.
 
 ## 4. Data
 
