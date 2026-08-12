@@ -335,30 +335,55 @@ def _bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]
 # ---------------------------------------------------------------------------
 
 
-def _fallback_score(report: MalwareReport) -> NarrativeScore:
+def _prose(rep: MalwareReport) -> dict[str, Any]:
+    """The narrative text itself, kept alongside its score.
+
+    §4.5 says retain enough to re-ask a question nobody has thought of yet.
+    This harness scored prose for faithfulness and then discarded it, so a
+    later question about the *same* generations — readability, redundancy,
+    actionability — could not be put to them at all. That is the rule failing
+    inside the harness that measures narrative quality, which is a good enough
+    reason to keep the text and cheap enough to be no argument.
+    """
+    return {
+        "executive_summary": rep.executive_summary,
+        "capabilities_narrative": rep.capabilities_narrative,
+        "defensive_recommendations": list(rep.defensive_recommendations or []),
+    }
+
+
+def _fallback_score(report: MalwareReport) -> tuple[NarrativeScore, dict[str, Any]]:
     """Deterministic baseline arm — apply the template narrative and score it."""
     rep = report.model_copy(deep=True)
     rep = MalwareReportBuilder.apply_fallback_narrative(rep)
-    return score_narrative(
-        report=rep,
-        exec_summary=rep.executive_summary,
-        capabilities=rep.capabilities_narrative,
-        n_recommendations=len(rep.defensive_recommendations),
+    return (
+        score_narrative(
+            report=rep,
+            exec_summary=rep.executive_summary,
+            capabilities=rep.capabilities_narrative,
+            n_recommendations=len(rep.defensive_recommendations),
+        ),
+        _prose(rep),
     )
 
 
-async def _llm_score(narrative_agent: Any, report: MalwareReport) -> NarrativeScore | None:
+async def _llm_score(
+    narrative_agent: Any, report: MalwareReport
+) -> tuple[NarrativeScore, dict[str, Any]] | None:
     """LLM arm — generate a narrative, apply it, and score. ``None`` on failure."""
     narrative = await narrative_agent.generate(report)
     if narrative is None:
         return None
     rep = report.model_copy(deep=True)
     rep = MalwareReportBuilder.apply_narrative(rep, narrative.model_dump())
-    return score_narrative(
-        report=rep,
-        exec_summary=rep.executive_summary,
-        capabilities=rep.capabilities_narrative,
-        n_recommendations=len(rep.defensive_recommendations),
+    return (
+        score_narrative(
+            report=rep,
+            exec_summary=rep.executive_summary,
+            capabilities=rep.capabilities_narrative,
+            n_recommendations=len(rep.defensive_recommendations),
+        ),
+        _prose(rep),
     )
 
 
@@ -493,14 +518,17 @@ async def main_async(limit: int, repeats: int, smoke: bool, checkpoint: Path) ->
         sid = str(fixture.get("sample_id", "synthetic"))
         report = _build_report_from_fixture(fixture, name_map)
         # Fallback is deterministic — score once per sample, reuse across repeats.
-        fb = _fallback_score(report)
+        fb, fb_prose = _fallback_score(report)
         for r in range(repeats):
             key = f"{sid}:{r}"
             if key in done_keys:
                 continue
             llm: NarrativeScore | None = None
+            llm_prose: dict[str, Any] | None = None
             if narrative_agent is not None:
-                llm = await _llm_score(narrative_agent, report)
+                got = await _llm_score(narrative_agent, report)
+                if got is not None:
+                    llm, llm_prose = got
             fb_scores.append(fb)
             if llm is not None:
                 llm_scores.append(llm)
@@ -513,6 +541,8 @@ async def main_async(limit: int, repeats: int, smoke: bool, checkpoint: Path) ->
                             "sample_id": sid,
                             "llm": llm.to_dict() if llm else None,
                             "fallback": fb.to_dict(),
+                            "llm_prose": llm_prose,
+                            "fallback_prose": fb_prose,
                         }
                     )
                     + "\n"
