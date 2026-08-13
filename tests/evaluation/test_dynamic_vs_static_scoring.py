@@ -344,3 +344,68 @@ class TestAttemptCeiling:
         import tests.evaluation.eval_dynamic_vs_static as mod
 
         assert mod.abandoned("never:dynamic", {}, ceiling=3) is False
+
+
+class TestAbandonmentAttribution:
+    """Whose failure is it — the sample's or the machine's?
+
+    The first ceiling counted attempts alone and wrote off three samples of
+    59.5, 2.7 and **0.7 MB** within an hour. Sizes with nothing in common,
+    because size was never the cause: the memory guard had stopped the job four
+    times in that window and every stop consumed an attempt. The mechanism was
+    charging the sample for the machine's failures — the same attribution error
+    this project keeps finding in other people's instruments.
+    """
+
+    def test_attempts_the_guard_ended_do_not_count_against_the_sample(self) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        counts = {"a:dynamic": 3}
+        assert mod.abandoned("a:dynamic", counts, ceiling=3, first_attempt=100, kills=3) is False
+        assert mod.abandoned("a:dynamic", counts, ceiling=3, first_attempt=100, kills=1) is False
+
+    def test_a_sample_that_fails_on_its_own_is_still_written_off(self) -> None:
+        """Otherwise the livelock returns the moment the guard goes quiet."""
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        counts = {"a:dynamic": 3}
+        assert mod.abandoned("a:dynamic", counts, ceiling=3, first_attempt=100, kills=0) is True
+
+    def test_below_the_ceiling_nothing_is_abandoned(self) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        assert mod.abandoned("a:dynamic", {"a:dynamic": 2}, ceiling=3, first_attempt=1) is False
+
+    def test_guard_kills_are_counted_from_the_arm_s_first_attempt(self, tmp_path) -> None:
+        import time as _t
+
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        log = tmp_path / "night-guard.log"
+        early = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(1000))
+        late = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(5000))
+        log.write_text(
+            f"{early} CRITICAL 100MB available (<4096) for 3 checks — "
+            "stopping the registered job\n"
+            f"{late} CRITICAL 100MB available (<4096) for 3 checks — "
+            "stopping the registered job\n"
+        )
+        assert mod.guard_kills_since(0, log) == 2
+        assert mod.guard_kills_since(3000, log) == 1
+        assert mod.guard_kills_since(9000, log) == 0
+
+    def test_a_missing_guard_log_blames_nobody(self, tmp_path) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        assert mod.guard_kills_since(0, tmp_path / "absent.log") == 0
+
+    def test_first_attempt_epoch_keeps_the_earliest(self, tmp_path) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        path = tmp_path / "attempts.jsonl"
+        path.write_text(
+            '{"key": "a:dynamic", "at": 500}\n'
+            '{"key": "a:dynamic", "at": 900}\n'
+            '{"key": "b:dynamic", "at": 700}\n'
+        )
+        assert mod.first_attempt_epoch(path) == {"a:dynamic": 500, "b:dynamic": 700}

@@ -420,13 +420,79 @@ def attempts_by_key(path: Path = ATTEMPTS) -> dict[str, int]:
     return counts
 
 
-def abandoned(key: str, counts: dict[str, int], ceiling: int = ATTEMPT_CEILING) -> bool:
-    """True when this arm has been started ``ceiling`` times and never finished.
+def first_attempt_epoch(path: Path = ATTEMPTS) -> dict[str, int]:
+    """When each arm was first started, so guard kills can be counted from there."""
+    firsts: dict[str, int] = {}
+    if not path.exists():
+        return firsts
+    for line in path.read_text().splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        key, at = row.get("key"), row.get("at")
+        if key and isinstance(at, int) and key not in firsts:
+            firsts[key] = at
+    return firsts
+
+
+GUARD_LOG = _REPO_ROOT / "logs" / "night-guard.log"
+
+
+def guard_kills_since(epoch: int, path: Path = GUARD_LOG) -> int:
+    """How many times the memory guard stopped the job since ``epoch``.
+
+    Parsed from the guard's own log rather than inferred, because the difference
+    it establishes is the difference between blaming a sample and blaming the
+    machine.
+    """
+    if not path.exists():
+        return 0
+    kills = 0
+    for line in path.read_text(errors="replace").splitlines():
+        if "stopping the registered job" not in line:
+            continue
+        stamp = line[:19]
+        try:
+            when = int(time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M:%S")))
+        except ValueError:
+            continue
+        if when >= epoch:
+            kills += 1
+    return kills
+
+
+def abandoned(
+    key: str,
+    counts: dict[str, int],
+    ceiling: int = ATTEMPT_CEILING,
+    first_attempt: int | None = None,
+    kills: int = 0,
+) -> bool:
+    """True when this arm has been started ``ceiling`` times and never finished
+    **for reasons the machine cannot be blamed for**.
+
+    The first version of this counted attempts alone, and within an hour it had
+    written off three samples of 59.5, 2.7 and **0.7 MB** — sizes with nothing in
+    common, because size was never the cause. The guard had stopped the job four
+    times in that window and every stop consumed an attempt. The ceiling was
+    charging the sample for the machine's failures, which is exactly the
+    attribution error this project keeps finding in other instruments.
+
+    So an attempt only counts against the sample when the guard did not end it.
+    If the machine is killing the job as fast as it starts, nothing is written
+    off — the run simply makes no progress, which is a true statement about the
+    machine and one the watch reports rather than hides in a smaller n.
 
     Called only for keys absent from the checkpoint, so a completed arm is never
     abandoned no matter how many times it was started.
     """
-    return counts.get(key, 0) >= ceiling
+    tries = counts.get(key, 0)
+    if tries < ceiling:
+        return False
+    if first_attempt is None:
+        return True
+    return (tries - kills) >= ceiling
 
 
 def predicted_from_result(result: Any) -> set[str]:
@@ -599,6 +665,7 @@ async def main_async(limit: int) -> int:
                 done.add(row["key"])
 
     attempts = attempts_by_key()
+    firsts = first_attempt_epoch()
     stuck = sorted(k for k, n in attempts.items() if n >= ATTEMPT_CEILING and k not in done)
     print(
         f"attempts recorded for {len(attempts)} arms"
@@ -611,7 +678,8 @@ async def main_async(limit: int) -> int:
             key = f"{sha}:{arm}"
             if key in done:
                 continue
-            if abandoned(key, attempts):
+            kills = guard_kills_since(firsts.get(key, 0)) if key in firsts else 0
+            if abandoned(key, attempts, first_attempt=firsts.get(key), kills=kills):
                 print(
                     f"  [{i}/{len(shas)}] {sha[:12]} {arm:11s} ABANDONED after "
                     f"{attempts[key]} silent deaths — recording and moving on",
@@ -626,9 +694,10 @@ async def main_async(limit: int) -> int:
                                 "arm": arm,
                                 "error": (
                                     f"abandoned after {attempts[key]} attempts that died "
-                                    "without returning — the process is the kernel's OOM "
-                                    "victim by design, so a sample too heavy for this "
-                                    "machine leaves no other trace"
+                                    f"without returning ({kills} of them ended by the memory "
+                                    "guard) — the process is the kernel's OOM victim by "
+                                    "design, so a sample this machine cannot finish leaves "
+                                    "no other trace"
                                 ),
                             }
                         )
