@@ -38,6 +38,28 @@ RESUME_MB="${RESUME_MB:-9216}"
 POLL="${POLL:-60}"
 TOTAL_ARMS="${TOTAL_ARMS:-86}"
 
+# Do not start a sixteen-thread model server into a machine that is already hot.
+# The guard clears its thermal hold at 82 °C, which is the top of this chassis's
+# idle band (measured 76-81 °C on the CPU die at rest); starting work the instant
+# the hold lifts would put full load on silicon that has not actually cooled.
+# 84 °C leaves a little room above idle without waiting for a temperature this
+# laptop does not reach on its own.
+RESUME_MAX_C="${RESUME_MAX_C:-84}"
+
+cpu_temp_c() {
+  local h name raw
+  for h in /sys/class/hwmon/hwmon*; do
+    [ -r "$h/name" ] || continue
+    read -r name < "$h/name" 2>/dev/null || continue
+    if [ "$name" = "k10temp" ] && [ -r "$h/temp1_input" ]; then
+      read -r raw < "$h/temp1_input" 2>/dev/null || return 1
+      echo $((raw / 1000))
+      return 0
+    fi
+  done
+  return 1
+}
+
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
 
 available_mb() { awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo; }
@@ -117,6 +139,12 @@ while :; do
   fi
   if [ "$avail" -lt "$RESUME_MB" ]; then
     log "holding: ${avail}MB available < ${RESUME_MB}MB (${done_arms}/${TOTAL_ARMS} arms)"
+    sleep "$POLL"
+    continue
+  fi
+  temp="$(cpu_temp_c || echo -1)"
+  if [ "$temp" -ge 0 ] && [ "$temp" -ge "$RESUME_MAX_C" ]; then
+    log "holding: CPU die at ${temp}C >= ${RESUME_MAX_C}C (${done_arms}/${TOTAL_ARMS} arms)"
     sleep "$POLL"
     continue
   fi

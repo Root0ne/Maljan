@@ -122,7 +122,10 @@ def restart_llama() -> bool:
     belongs; the grace marker tells the guard this drop is declared.
     """
     GRACE.parent.mkdir(parents=True, exist_ok=True)
-    GRACE.touch()
+    # The epoch goes *inside* the marker, not just on its mtime: the guard
+    # reads its age with a builtin rather than stat(1), because the pass that
+    # needs this answer is the one where forking has stopped working.
+    GRACE.write_text(f"{int(time.time())}\n")
     subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
     subprocess.run(
         ["systemctl", "--user", "reset-failed", f"{LLAMA_UNIT}.service"], capture_output=True
