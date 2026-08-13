@@ -685,6 +685,29 @@ def summarise() -> int:
         and "error" not in a["dynamic"]
         and "error" not in a["static_only"]
     ]
+    # Arms the machine could not finish, named rather than merely subtracted from
+    # n. Abandonment is triggered by memory state at the moment of the attempt,
+    # not by any property of the sample — one of the first two dropped was a 2 MB
+    # report — so the sample this study ends up with is shaped partly by what
+    # else the machine was doing. That is a selection effect, and a selection
+    # effect a reader cannot see is a bias.
+    lost = sorted(
+        (r["sha256"], r.get("arm", "?"))
+        for r in rows
+        if str(r.get("error", "")).startswith("abandoned")
+    )
+    if lost:
+        summary_lost = [{"sha256": s, "arm": a} for s, a in lost]
+        print(f"\nabandoned: {len(lost)} arms the machine could not complete")
+        for sha, arm in lost:
+            print(f"  {sha[:12]} {arm}")
+        print(
+            "  these were dropped on memory pressure at the time of the attempt, not on any "
+            "property of the sample — the achieved cohort is shaped by machine state"
+        )
+    else:
+        summary_lost = []
+
     print(f"\npairs: {len(by_sha)} seen, {len(pairs)} scoreable")
     if not pairs:
         print("no scoreable pairs")
@@ -697,7 +720,11 @@ def summarise() -> int:
     INFERENCE_FLOOR = 5
 
     deltas = {k: [d[k] - s[k] for _, d, s in pairs] for k in ("f1", "recall", "precision")}
-    summary: dict[str, Any] = {"n_pairs": len(pairs), "inference_floor": INFERENCE_FLOOR}
+    summary: dict[str, Any] = {
+        "n_pairs": len(pairs),
+        "inference_floor": INFERENCE_FLOOR,
+        "abandoned_arms": summary_lost,
+    }
     interim = len(pairs) < INFERENCE_FLOOR
     print(f"\npaired deltas (dynamic − static-only), n={len(pairs)}")
     if interim:
