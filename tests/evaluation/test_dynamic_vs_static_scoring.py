@@ -243,3 +243,56 @@ class TestSourceAttribution:
 
     def test_a_result_without_isrs_attributes_nothing(self) -> None:
         assert techniques_by_source({}) == {}
+
+
+class TestThermalGuard:
+    """The machine froze on 2026-08-13 under fourteen hours of sustained model
+    load. These pin the reader and the cooldown, because a thermal pause that
+    silently never triggers is worse than none — it reads as protection."""
+
+    def test_millidegrees_become_degrees(self, tmp_path, monkeypatch) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        probe = tmp_path / "temp1_input"
+        probe.write_text("82375\n")
+        monkeypatch.setattr(mod, "_TEMP_PATH", probe)
+        assert mod.cpu_temp_c() == 82
+
+    def test_an_unreadable_sensor_is_none_rather_than_a_crash(self, tmp_path, monkeypatch) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        monkeypatch.setattr(mod, "_TEMP_PATH", tmp_path / "absent")
+        assert mod.cpu_temp_c() is None
+        monkeypatch.setattr(mod, "_TEMP_PATH", None)
+        assert mod.cpu_temp_c() is None
+
+    def test_a_cool_machine_does_not_wait(self, tmp_path, monkeypatch) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        probe = tmp_path / "temp1_input"
+        probe.write_text("70000\n")
+        monkeypatch.setattr(mod, "_TEMP_PATH", probe)
+        out = mod.wait_until_cool(ceiling=82, max_wait=30)
+        assert out["waited_s"] == 0
+        assert out["temp_start"] == 70
+
+    def test_a_missing_sensor_never_stalls_the_study(self, monkeypatch) -> None:
+        """No sensor is a reason to lose the protection, not a reason to hang."""
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        monkeypatch.setattr(mod, "_TEMP_PATH", None)
+        out = mod.wait_until_cool(ceiling=82, max_wait=30)
+        assert out == {"temp_start": -1, "temp_end": -1, "waited_s": 0}
+
+    def test_a_hot_machine_gives_up_rather_than_waiting_forever(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A stuck fan or a warm room must not stall the queue indefinitely."""
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        probe = tmp_path / "temp1_input"
+        probe.write_text("95000\n")
+        monkeypatch.setattr(mod, "_TEMP_PATH", probe)
+        monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+        out = mod.wait_until_cool(ceiling=82, max_wait=0)
+        assert out["temp_start"] == 95

@@ -80,6 +80,14 @@ OUT = _HERE / "dynamic_vs_static.json"
 CHECKPOINT = _HERE / "dynamic_vs_static_checkpoint.jsonl"
 SEED = 20260812
 
+# Between arms the machine is allowed to shed heat before the next twenty-minute
+# block of full load. 82 °C is the top of this chassis's measured idle band
+# (76-81 °C on the CPU die), so this waits for "back to rest" rather than for a
+# temperature the laptop never reaches on its own. The cap keeps a stuck fan or
+# a warm room from stalling the study indefinitely — it proceeds and says so.
+COOL_CEILING_C = 82
+COOL_MAX_WAIT_S = 600
+
 LLAMA_UNIT = "c4-llama"
 LLAMA_BIN = "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server"
 LLAMA_MODEL = str(_REPO_ROOT / "models" / "Qwen3.6-35B-A3B-IQ3_K_R4.gguf")
@@ -112,6 +120,82 @@ def host_memory() -> dict[str, int]:
     except (OSError, ValueError, subprocess.SubprocessError):
         pass
     return out
+
+
+def temp_sensor_path() -> Path | None:
+    """The CPU die temperature file, discovered rather than hard-coded.
+
+    hwmon numbering is not stable across boots, so the k10temp node is located by
+    name. Falls back to the first ACPI thermal zone, which on this chassis reads
+    a few degrees above the die and is better than nothing.
+    """
+    for hwmon in sorted(Path("/sys/class/hwmon").glob("hwmon*")):
+        try:
+            if (hwmon / "name").read_text().strip() == "k10temp":
+                probe = hwmon / "temp1_input"
+                if probe.exists():
+                    return probe
+        except OSError:
+            continue
+    for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
+        probe = zone / "temp"
+        if probe.exists():
+            return probe
+    return None
+
+
+_TEMP_PATH = temp_sensor_path()
+
+
+def cpu_temp_c() -> int | None:
+    """CPU die temperature in whole degrees, or None when unreadable."""
+    if _TEMP_PATH is None:
+        return None
+    try:
+        return int(_TEMP_PATH.read_text().strip()) // 1000
+    except (OSError, ValueError):
+        return None
+
+
+def wait_until_cool(
+    ceiling: int = COOL_CEILING_C, max_wait: int = COOL_MAX_WAIT_S
+) -> dict[str, int]:
+    """Pause between arms until the machine has shed its heat.
+
+    On 2026-08-13 this laptop overheated and froze under fourteen hours of
+    sustained model-server load, and had to be power-cycled. It idles at 76-81 °C
+    on the CPU die, so a twenty-minute arm leaves very little thermal headroom
+    and the next arm used to start immediately on top of it.
+
+    **This is a scheduling change, not a workload change.** Lowering llama's
+    thread count would cool the machine too, but thread count alters the
+    reduction order in llama.cpp's matrix multiplies; changing it midway would
+    make the arms completed before it incomparable with the ones after. Waiting
+    between arms changes nothing the model sees.
+
+    Returns what it observed, so the wait is data rather than an invisible sleep.
+    """
+    start = time.time()
+    first = cpu_temp_c()
+    if first is None:
+        return {"temp_start": -1, "temp_end": -1, "waited_s": 0}
+    while True:
+        current = cpu_temp_c()
+        if current is None or current <= ceiling:
+            break
+        waited = int(time.time() - start)
+        if waited >= max_wait:
+            print(f"    cooldown: still {current}C after {waited}s — proceeding", flush=True)
+            break
+        if waited % 60 == 0:
+            print(f"    cooldown: {current}C > {ceiling}C, waited {waited}s", flush=True)
+        time.sleep(15)
+    end = cpu_temp_c()
+    return {
+        "temp_start": first,
+        "temp_end": end if end is not None else -1,
+        "waited_s": int(time.time() - start),
+    }
 
 
 def restart_llama() -> bool:
@@ -383,10 +467,12 @@ async def run_arm(sha: str, report: dict[str, Any] | None, truth: set[str]) -> d
     }
 
     mem_before = host_memory()
+    temp_before = cpu_temp_c()
     t0 = time.time()
     result = await graph.ainvoke(state)
     seconds = round(time.time() - t0, 1)
     mem_after = host_memory()
+    temp_after = cpu_temp_c()
 
     predicted = {t for t in predicted_from_result(result) if t and t != "NONE"}
     m = TTPAccuracyMetrics(predicted_ttps=predicted, ground_truth_ttps=truth)
@@ -407,6 +493,12 @@ async def run_arm(sha: str, report: dict[str, Any] | None, truth: set[str]) -> d
         "degradation_reasons": [str(x) for x in (result.get("degradation_reasons") or [])],
         "host_mem_before": mem_before,
         "host_mem_after": mem_after,
+        # Recorded for the same reason §3.18 records memory at both ends: when an
+        # arm comes back wrong, the retained data has to be able to say whether
+        # the pipeline or the machine was the thing that failed. The machine
+        # froze on 2026-08-13 and nothing on disk carried a temperature.
+        "cpu_temp_before": temp_before if temp_before is not None else -1,
+        "cpu_temp_after": temp_after if temp_after is not None else -1,
     }
 
 
@@ -469,6 +561,7 @@ async def main_async(limit: int) -> int:
             key = f"{sha}:{arm}"
             if key in done:
                 continue
+            cooldown = wait_until_cool()
             if not restart_llama():
                 print("  model server did not come back healthy — stopping", flush=True)
                 return 1
@@ -485,6 +578,7 @@ async def main_async(limit: int) -> int:
                 "arm": arm,
                 "n_domains": len(doms),
                 "ubiquitous_share": round(len(doms & ubiquitous) / len(doms), 4) if doms else None,
+                "cooldown": cooldown,
             }
             with CHECKPOINT.open("a") as fh:
                 fh.write(json.dumps(row) + "\n")
