@@ -32,6 +32,7 @@ from tests.evaluation.eval_dynamic_vs_static import (
     load_report,
     predicted_from_result,
     sample_domains,
+    techniques_by_source,
     ubiquitous_domains,
 )
 
@@ -200,3 +201,45 @@ class TestBootstrap:
 
     def test_no_observations_is_zero_width_at_zero(self) -> None:
         assert bootstrap_ci([]) == (0.0, 0.0)
+
+
+class TestSourceAttribution:
+    """Which source claimed what — the question the eighth pair raised.
+
+    The dynamic arm predicted more techniques than the static-only arm while
+    reporting that the dynamic and network analysts produced no claims. Either
+    the reason string is wrong or the gain comes from somewhere else; without
+    per-source attribution the study cannot say which.
+    """
+
+    def test_reads_claims_per_source(self) -> None:
+        result = {
+            "isr_reports": {
+                "sigma_layer": {"claims": [{"technique_id": "T1055"}, {"technique_id": "T1071"}]},
+                "yara_layer": {"claims": [{"technique_id": "T1486"}]},
+            }
+        }
+        assert techniques_by_source(result) == {
+            "sigma_layer": ["T1055", "T1071"],
+            "yara_layer": ["T1486"],
+        }
+
+    def test_a_source_present_but_silent_is_an_empty_list_not_absent(self) -> None:
+        """The distinction the whole question turns on: an analyst that ran and
+        claimed nothing is not the same as one that never ran."""
+        result = {"isr_reports": {"dynamic": {"claims": []}}}
+        assert techniques_by_source(result) == {"dynamic": []}
+
+    def test_duplicate_claims_collapse(self) -> None:
+        result = {
+            "isr_reports": {"s": {"claims": [{"technique_id": "T1055"}, {"technique_id": "t1055"}]}}
+        }
+        assert techniques_by_source(result) == {"s": ["T1055"]}
+
+    def test_object_shaped_reports_are_read_too(self) -> None:
+        claim = type("C", (), {"technique_id": "T1071"})()
+        isr = type("I", (), {"claims": [claim]})()
+        assert techniques_by_source({"isr_reports": {"net": isr}}) == {"net": ["T1071"]}
+
+    def test_a_result_without_isrs_attributes_nothing(self) -> None:
+        assert techniques_by_source({}) == {}

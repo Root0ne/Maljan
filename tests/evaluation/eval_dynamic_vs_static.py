@@ -268,6 +268,42 @@ def incidental_reasons(reasons: list[str], arm: str) -> set[str]:
     return out
 
 
+def techniques_by_source(result: Any) -> dict[str, list[str]]:
+    """Which ISR source claimed which techniques, so the delta can be attributed.
+
+    Added after the eighth pair, because the interim data raised a question the
+    harness could not answer. In **7 of 7** dynamic arms with recorded reasons,
+    the pipeline reported "analysts produced no claims: dynamic, network" — the
+    two LLM analysts that consume the sandbox report produced nothing *while
+    holding it* — and yet the dynamic arm predicted more techniques than the
+    static-only arm (median 12 against 8).
+
+    §3.21 measured `sigma_layer` firing on 43/43 of this cohort with unique
+    technique credit on 43/43, which makes the deterministic rule engine the
+    obvious candidate. Obvious is not measured. This records the attribution so
+    the claim "the dynamic channel reaches the output through Layer-0 rules
+    rather than through the analysts assigned to it" can be checked rather than
+    inferred.
+    """
+
+    def _get(obj: Any, key: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    out: dict[str, list[str]] = {}
+    isr_reports = _get(result, "isr_reports", {}) or {}
+    items = isr_reports.items() if isinstance(isr_reports, dict) else []
+    for name, isr in items:
+        tids = set()
+        for claim in _get(isr, "claims", []) or []:
+            tid = _get(claim, "technique_id", None)
+            if tid:
+                tids.add(str(tid).upper())
+        out[str(name)] = sorted(tids)
+    return out
+
+
 def predicted_from_result(result: Any) -> set[str]:
     """The techniques this run predicted: ISR claims ∪ cascade-corroborated.
 
@@ -358,6 +394,7 @@ async def run_arm(sha: str, report: dict[str, Any] | None, truth: set[str]) -> d
         "precision": round(m.precision, 4),
         "recall": round(m.recall, 4),
         "f1": round(m.f1, 4),
+        "techniques_by_source": techniques_by_source(result),
         "degraded": bool(result.get("degraded_mode")),
         # *Why* it degraded, not just that it did. The first arm came back
         # degraded, and a pair whose two arms degrade for different reasons is
@@ -565,6 +602,40 @@ def summarise() -> int:
         print("  incidental reasons (the treatment does not account for these):")
         for why, count in sorted(reasons.items(), key=lambda kv: -kv[1])[:6]:
             print(f"    {count:3d}  {why[:96]}")
+
+    # Where the dynamic arm's extra techniques actually come from. If the two
+    # analysts that consume the sandbox report contribute nothing while the
+    # deterministic sigma layer contributes the difference, then this study's
+    # treatment is a rule engine, not an LLM reading behaviour — and the paper
+    # must say so rather than let "the dynamic path" imply the analysts.
+    attributed = [(d, s) for _, d, s in pairs if d.get("techniques_by_source") is not None]
+    if attributed:
+        gained: dict[str, int] = {}
+        credited: dict[str, int] = {}
+        for d, s in attributed:
+            extra = set(d["predicted"]) - set(s["predicted"])
+            for name, tids in (d.get("techniques_by_source") or {}).items():
+                if tids:
+                    credited[name] = credited.get(name, 0) + 1
+                if extra & set(tids):
+                    gained[name] = gained.get(name, 0) + 1
+        summary["attribution"] = {
+            "pairs_attributed": len(attributed),
+            "sources_that_claimed_anything": credited,
+            "sources_carrying_the_dynamic_gain": gained,
+        }
+        print(
+            f"\nattribution over {len(attributed)} pairs — "
+            "which source claimed the extra techniques"
+        )
+        for name, count in sorted(gained.items(), key=lambda kv: -kv[1]):
+            print(f"  {count:3d}  {name}")
+        silent = sorted(n for n in ("dynamic", "network") if credited.get(n, 0) == 0)
+        if silent:
+            print(
+                f"  sources that claimed nothing in any dynamic arm: {', '.join(silent)}"
+                " — they hold the sandbox report and produce no claim"
+            )
 
     distinct = len({tuple(d["predicted"]) for _, d, _ in pairs})
     summary["distinct_dynamic_outputs"] = distinct
