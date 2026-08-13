@@ -78,6 +78,20 @@ GT_DIR = _HERE / "ground_truth" / "attck_malware"
 COHORT = _HERE / "dynamic_cohort_n100.json"
 OUT = _HERE / "dynamic_vs_static.json"
 CHECKPOINT = _HERE / "dynamic_vs_static_checkpoint.jsonl"
+# Arms that were *started*, whether or not they came back. The checkpoint only
+# records completions, so it cannot distinguish "not attempted yet" from
+# "attempted and the process died before it could write anything" — and on
+# 2026-08-13 that difference cost four hours (see ATTEMPT_CEILING).
+ATTEMPTS = _HERE / "dynamic_vs_static_attempts.jsonl"
+# After this many silent deaths on the same arm, record it as unfinishable and
+# move on. The memory guard marks the job as the kernel's preferred OOM victim
+# so the desktop survives, which means a heavy sample is killed without a
+# traceback, without a guard log line, and without anything on disk saying it
+# was tried. The supervisor then restarts, the harness re-runs the same arm from
+# the beginning, and the study makes no progress while looking busy. Three
+# attempts is enough to distinguish a transient from a sample this machine
+# cannot complete.
+ATTEMPT_CEILING = 3
 SEED = 20260812
 
 # Between arms the machine is allowed to shed heat before the next twenty-minute
@@ -391,6 +405,30 @@ def techniques_by_source(result: Any) -> dict[str, list[str]]:
     return out
 
 
+def attempts_by_key(path: Path = ATTEMPTS) -> dict[str, int]:
+    """How many times each arm has been started. Missing file → nothing tried."""
+    counts: dict[str, int] = {}
+    if not path.exists():
+        return counts
+    for line in path.read_text().splitlines():
+        try:
+            key = json.loads(line).get("key")
+        except Exception:  # noqa: BLE001 — a torn line is one lost count, not a stop
+            continue
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def abandoned(key: str, counts: dict[str, int], ceiling: int = ATTEMPT_CEILING) -> bool:
+    """True when this arm has been started ``ceiling`` times and never finished.
+
+    Called only for keys absent from the checkpoint, so a completed arm is never
+    abandoned no matter how many times it was started.
+    """
+    return counts.get(key, 0) >= ceiling
+
+
 def predicted_from_result(result: Any) -> set[str]:
     """The techniques this run predicted: ISR claims ∪ cascade-corroborated.
 
@@ -555,12 +593,54 @@ async def main_async(limit: int) -> int:
                 continue
             if "error" not in row and row.get("key"):
                 done.add(row["key"])
+            elif row.get("key") and str(row.get("error", "")).startswith("abandoned"):
+                # An abandoned arm is a decision, not a transient: it must not be
+                # retried on the next resume or the livelock simply resumes too.
+                done.add(row["key"])
+
+    attempts = attempts_by_key()
+    stuck = sorted(k for k, n in attempts.items() if n >= ATTEMPT_CEILING and k not in done)
+    print(
+        f"attempts recorded for {len(attempts)} arms"
+        + (f"; {len(stuck)} at the ceiling and will be abandoned" if stuck else ""),
+        flush=True,
+    )
 
     for i, sha in enumerate(shas, 1):
         for arm in ("dynamic", "static_only"):
             key = f"{sha}:{arm}"
             if key in done:
                 continue
+            if abandoned(key, attempts):
+                print(
+                    f"  [{i}/{len(shas)}] {sha[:12]} {arm:11s} ABANDONED after "
+                    f"{attempts[key]} silent deaths — recording and moving on",
+                    flush=True,
+                )
+                with CHECKPOINT.open("a") as fh:
+                    fh.write(
+                        json.dumps(
+                            {
+                                "key": key,
+                                "sha256": sha,
+                                "arm": arm,
+                                "error": (
+                                    f"abandoned after {attempts[key]} attempts that died "
+                                    "without returning — the process is the kernel's OOM "
+                                    "victim by design, so a sample too heavy for this "
+                                    "machine leaves no other trace"
+                                ),
+                            }
+                        )
+                        + "\n"
+                    )
+                done.add(key)
+                continue
+            # Written *before* the arm runs. If the process is killed mid-arm this
+            # is the only evidence the attempt happened at all.
+            with ATTEMPTS.open("a") as fh:
+                fh.write(json.dumps({"key": key, "at": int(time.time())}) + "\n")
+            attempts[key] = attempts.get(key, 0) + 1
             cooldown = wait_until_cool()
             if not restart_llama():
                 print("  model server did not come back healthy — stopping", flush=True)

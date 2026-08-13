@@ -296,3 +296,51 @@ class TestThermalGuard:
         monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
         out = mod.wait_until_cool(ceiling=82, max_wait=0)
         assert out["temp_start"] == 95
+
+
+class TestAttemptCeiling:
+    """The livelock that cost four hours on 2026-08-13.
+
+    The memory guard marks this job as the kernel's preferred OOM victim so the
+    desktop survives a squeeze. A sample heavy enough to trigger that is killed
+    with no traceback, no guard log line and nothing on disk saying it was tried;
+    the supervisor restarts, the harness re-runs the same arm from the top, and
+    the study makes no progress while looking busy. Five attempts, zero arms.
+    """
+
+    def test_attempts_are_counted_per_arm(self, tmp_path) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        path = tmp_path / "attempts.jsonl"
+        path.write_text(
+            '{"key": "a:dynamic", "at": 1}\n'
+            '{"key": "a:dynamic", "at": 2}\n'
+            '{"key": "b:dynamic", "at": 3}\n'
+        )
+        assert mod.attempts_by_key(path) == {"a:dynamic": 2, "b:dynamic": 1}
+
+    def test_a_missing_ledger_means_nothing_was_tried(self, tmp_path) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        assert mod.attempts_by_key(tmp_path / "absent.jsonl") == {}
+
+    def test_a_torn_line_costs_one_count_not_the_run(self, tmp_path) -> None:
+        """The process is killed mid-write by design, so a half-line is expected."""
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        path = tmp_path / "attempts.jsonl"
+        path.write_text('{"key": "a:dynamic", "at": 1}\n{"key": "a:dyn')
+        assert mod.attempts_by_key(path) == {"a:dynamic": 1}
+
+    def test_abandonment_needs_the_ceiling(self) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        counts = {"a:dynamic": 2}
+        assert mod.abandoned("a:dynamic", counts, ceiling=3) is False
+        counts["a:dynamic"] = 3
+        assert mod.abandoned("a:dynamic", counts, ceiling=3) is True
+
+    def test_an_untried_arm_is_never_abandoned(self) -> None:
+        import tests.evaluation.eval_dynamic_vs_static as mod
+
+        assert mod.abandoned("never:dynamic", {}, ceiling=3) is False
