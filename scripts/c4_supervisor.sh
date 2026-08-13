@@ -36,7 +36,16 @@ HARNESS="tests/evaluation/eval_dynamic_vs_static.py"
 # post-load footprint plus the pipeline's peak plus room for the desktop.
 RESUME_MB="${RESUME_MB:-9216}"
 POLL="${POLL:-60}"
-TOTAL_ARMS="${TOTAL_ARMS:-86}"
+# Two arms per archived report, derived rather than fixed. It was hard-coded to
+# 86 (43 reports x 2) and then the §3.24 recovery started adding reports to the
+# archive while the study ran; a fixed target would have declared the study
+# finished with a third of the recovered cohort untouched. Re-read each pass, so
+# it tracks the archive as the recovery lands.
+target_arms() {
+  local n
+  n="$(ls "$ROOT"/data/cape_reports/*.json 2>/dev/null | wc -l)"
+  echo $((n * 2))
+}
 
 # Do not start a sixteen-thread model server into a machine that is already hot.
 # The guard clears its thermal hold at 82 °C, which is the top of this chassis's
@@ -108,7 +117,7 @@ reap_idle_llama() {
   esac
 }
 
-log "supervisor up: resume>${RESUME_MB}MB, poll ${POLL}s, target ${TOTAL_ARMS} arms"
+log "supervisor up: resume>${RESUME_MB}MB, poll ${POLL}s, target $(target_arms) arms (2 per archived report)"
 
 attempts=0
 while :; do
@@ -118,8 +127,9 @@ while :; do
   fi
 
   done_arms="$(completed_arms)"
-  if [ "$done_arms" -ge "$TOTAL_ARMS" ]; then
-    log "all $TOTAL_ARMS arms complete — supervisor exiting"
+  total_arms="$(target_arms)"
+  if [ "$done_arms" -ge "$total_arms" ]; then
+    log "all $total_arms arms complete — supervisor exiting"
     exit 0
   fi
 
@@ -133,24 +143,24 @@ while :; do
 
   avail="$(available_mb)"
   if [ -f "$GUARD_STOP" ]; then
-    log "holding: guard STOP sentinel is down (${avail}MB available, ${done_arms}/${TOTAL_ARMS} arms)"
+    log "holding: guard STOP sentinel is down (${avail}MB available, ${done_arms}/${total_arms} arms)"
     sleep "$POLL"
     continue
   fi
   if [ "$avail" -lt "$RESUME_MB" ]; then
-    log "holding: ${avail}MB available < ${RESUME_MB}MB (${done_arms}/${TOTAL_ARMS} arms)"
+    log "holding: ${avail}MB available < ${RESUME_MB}MB (${done_arms}/${total_arms} arms)"
     sleep "$POLL"
     continue
   fi
   temp="$(cpu_temp_c || echo -1)"
   if [ "$temp" -ge 0 ] && [ "$temp" -ge "$RESUME_MAX_C" ]; then
-    log "holding: CPU die at ${temp}C >= ${RESUME_MAX_C}C (${done_arms}/${TOTAL_ARMS} arms)"
+    log "holding: CPU die at ${temp}C >= ${RESUME_MAX_C}C (${done_arms}/${total_arms} arms)"
     sleep "$POLL"
     continue
   fi
 
   attempts=$((attempts + 1))
-  log "attempt ${attempts}: ${avail}MB available, ${done_arms}/${TOTAL_ARMS} arms done — starting"
+  log "attempt ${attempts}: ${avail}MB available, ${done_arms}/${total_arms} arms done — starting"
   nohup setsid "$PY" "$HARNESS" >>"$LOG_DIR/c4_run.log" 2>&1 &
   sleep 5
   pid="$(pgrep -f "eval_dynamic_vs_static\.py" | head -1)"

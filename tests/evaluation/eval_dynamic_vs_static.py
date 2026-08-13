@@ -636,7 +636,32 @@ def summarise() -> int:
         )
         print(f"  {k:10s} {mean:+.4f}   95% CI [{lo:+.4f}, {hi:+.4f}]   {verdict}")
 
-    shares = [d["ubiquitous_share"] for _, d, _ in pairs if d.get("ubiquitous_share") is not None]
+    # **Recomputed here, not read from the arms.** The §3.24 recovery added
+    # reports to the archive while this study was running, so the cohort each arm
+    # saw grew underneath it: the first arms measured their ubiquitous share
+    # against a 43-report intersection and later ones against a 73-report
+    # intersection, which are not the same quantity. The share is a pure function
+    # of the reports on disk, so it is derived once here against a single stated
+    # reference set and the arms' own values are ignored. Nothing needs re-running
+    # — the covariate was the only cohort-dependent thing an arm recorded.
+    reference: dict[str, dict[str, Any]] = {}
+    for sha, _d, _s in pairs:
+        report = load_report(sha)
+        if report is not None:
+            reference[sha] = report
+    ubiquitous_now = ubiquitous_domains(reference)
+    recomputed: dict[str, float] = {}
+    for sha, report in reference.items():
+        doms = sample_domains(report)
+        if doms:
+            recomputed[sha] = round(len(doms & ubiquitous_now) / len(doms), 4)
+    summary["ubiquitous_reference"] = {
+        "n_reports": len(reference),
+        "n_ubiquitous_domains": len(ubiquitous_now),
+        "note": "intersection over the scored pairs only, so the covariate is one quantity",
+    }
+
+    shares = [recomputed[sha] for sha, _d, _s in pairs if sha in recomputed]
     if shares:
         shares.sort()
         summary["ubiquitous_share"] = {
