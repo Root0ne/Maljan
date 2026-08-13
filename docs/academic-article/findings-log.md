@@ -2341,6 +2341,46 @@ difference from everything measured after this point even though the arithmetic 
 
 ---
 
+### 3.26 The pipeline scores what the sandbox already scored — `NEGATIVE` (C5 at n=95, C4 interim at n=13)
+
+C5 exists because every F1 this project has reported was unanchored. The natural anchor is the
+sandbox the pipeline is built on: CAPE maps its own signature hits to ATT&CK technique IDs in each
+report's `ttps` block, deterministically, with no model anywhere. Scored against the same family
+ground truth, through the same alias resolution the drift harness uses:
+
+| | n | precision | recall | F1 |
+|---|---|---|---|---|
+| CAPE alone, whole recovered cohort | **95** | 0.2405 [0.2114, 0.2702] | 0.1308 [0.1111, 0.1513] | **0.1509 [0.1328, 0.1693]** |
+| CAPE alone, earlier cohort | 43 | 0.2902 | 0.1343 | 0.1666 [0.1411, 0.1938] |
+
+CAPE asserts at least one technique on **95 of 95** samples, median 11 per sample (min 1, max 33).
+There is no sample where the baseline simply declines to answer.
+
+**The comparison that matters, on the 13 samples C4 has scored so far** — same binaries, same
+ground truth, per-sample rather than cohort-mean:
+
+| | mean F1 |
+|---|---|
+| CAPE alone, no LLM | **0.1130** |
+| pipeline, static-only arm | **0.1130** |
+| pipeline, dynamic arm | **0.1160** |
+
+Three LLM analysts, a negotiation loop, a revision pass, a judge and a weighted corroboration
+cascade land within **0.003 F1** of the signature engine they are built on top of. The per-sample
+figures are not the same numbers — the two means agreeing to four decimals is a coincidence, and
+was checked rather than reported: all 13 samples differ individually, by as much as 0.13 in either
+direction. The system is not reproducing CAPE's answers; it is arriving at different answers of
+the same quality.
+
+**Read this as interim and bounded.** n=13 of a possible 95, and C4's remaining arms are blocked
+on a machine that cannot finish one before its memory guard intervenes (§3.25 and the abandonment
+work). The direction has been stable across every interim reading, but the number will move.
+
+The ceiling both sides share is stated in C5's own scope note: family-level `uses` sets are a
+coarse per-sample truth, so absolute recall carries a structural cap. That bias is identical for
+the baseline and the pipeline, which is exactly why the comparison is worth more than either
+number alone.
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
