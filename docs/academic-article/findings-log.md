@@ -2192,14 +2192,24 @@ more. Building it surfaced a prior question that the prescription assumed away �
 sources produce anything on this corpus at all?* They do not, and the distinction matters
 because the two ways of producing nothing call for opposite designs.
 
-Over the 43 archived reports, measured by running the production builders directly
+Over the archived reports, measured by running the production builders directly
 (`build_lolbin_isr`, `build_dga_isr(build_network_iocs(...))`, deterministic, no LLM):
 
 | source | claims produced | what it was given |
 |---|---|---|
-| `sigma_layer` | fires on **43/43**, unique technique credit 43/43 | — |
-| `lolbin` | **0/43** | median **3356** recorded API calls, median 2 processes (min 1, max 18) |
-| `network_dga` | **0/43** | **49–63** domains per sample, median 56 |
+| `sigma_layer` | fires on **92/95**, unique technique credit 92 | — |
+| `lolbin` | **0/95** | median **8667** recorded API calls, median 2 processes (max 56) |
+| `network_dga` | **0/95** | **48–68** domains per sample, median 56 |
+
+**Re-measured on 2026-08-13, after the §3.24 recovery more than doubled the cohort.** A rate of
+zero over 43 samples is a weaker claim than the same rate over 95, and the recovered reports are
+visibly richer: the median API-call count rose from 3356 to 8667 and the busiest sample now
+records 56 processes against the old cohort's 18. The rate did not move off zero. The source that
+*is* kept moved slightly the other way — `sigma_layer` fires on 92 of 95 rather than all of them,
+so three samples carry no dynamic Layer-0 evidence at all.
+
+Original n=43 figures, kept for the record: sigma 43/43, lolbin 0/43 against a median 3356 API
+calls, network_dga 0/43 against 49–63 domains.
 
 Both return `None` **cleanly — no exception, no degraded path**. They are handed substantial
 evidence and decline it: no invocation in the process data matches a LOLBin, and none of the

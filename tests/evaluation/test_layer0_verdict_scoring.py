@@ -145,7 +145,7 @@ class TestExcludedSources:
         didn't seem to matter" is how the six-source design went wrong."""
         for _name, _domain, why in EXCLUDED_SOURCES:
             assert "no claim" in why
-            assert "43" in why
+            assert "95" in why
 
 
 class TestArms:
