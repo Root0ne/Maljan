@@ -2282,6 +2282,55 @@ them (task 19144, 2026-08-13 11:38) ran for minutes rather than seconds on the s
 
 ---
 
+### 3.25 The evaluation machine was thermally saturated, and the fix costs nothing — `MEASURED` (E.5)
+
+C4's second night ended with the laptop overheating and freezing hard enough to need a power cut.
+Three things came out of investigating it, and the third one changes how every remaining LLM run
+on this hardware should be executed.
+
+**The guard could not run in the condition it exists for.** It saw the danger — 13:06:01, "LOW
+5571MB available — STOP sentinel laid" — and then wrote nothing for six minutes while the model
+server kept working, until its log ends mid-line on the power cut. A loop polling every ten
+seconds does not go quiet for six minutes because it is idle. Its polling path forked six to
+eight times a pass (`awk` ×3, `pgrep`, `date`, `stat`, `cat`), and fork+exec is precisely what
+stops completing on a thrashing machine; the policy required three consecutive readings before
+acting and the implementation could not take the second one. The hot path is now fork-free, and a
+pass that arrives more than four intervals late is treated as the finding rather than as a
+prelude to counting — verified by SIGSTOPping the guard, which now reports
+`STARVED: this pass is 16s late`.
+
+**Nothing had ever measured heat.** Memory was instrumented in detail across four sections of this
+ledger; the quantity the operator actually reported was not sampled anywhere. The guard now reads
+k10temp `Tctl`.
+
+**The load was saturating the CPU for no throughput at all.** With the machine idling at 76-81 °C
+on the die, a fixed 1500-token generation was run twice under identical conditions, changing only
+the CPU's power ceiling:
+
+| CPU ceiling | peak die temp | throughput | output |
+|---|---|---|---|
+| boost on, 5386 MHz (as run for §3.16-§3.24) | **95 °C** | 55.6 tok/s | sha `ea54fa3b47d71ae3` |
+| boost off, capped to **2401 MHz** | **71 °C** | **55.6 tok/s** | sha `ea54fa3b47d71ae3` |
+
+**Twenty-four degrees cooler, identical throughput, bit-identical output.** Under the real
+pipeline the effect holds: four minutes into a live arm the die sits at 76 °C, where the same
+workload previously reached 92 °C in under a minute and 98 °C ten seconds later.
+
+The explanation is that this configuration is **memory-bandwidth bound, not clock bound**. The
+`-ot` regex places thirty blocks of MoE expert tensors in host RAM (10.1 GB of pinned CUDA_Host
+buffer, §3.24 investigation), and the cores spend their time waiting on memory. At 5.4 GHz they
+wait faster and hotter.
+
+Consequences: frequency and boost do not affect floating-point results, so this is the one
+mitigation that leaves the measurement untouched — unlike lowering llama's thread count, which
+alters the reduction order in ggml's matmul and would make arms run before and after the change
+incomparable. The reproducibility appendix must state the CPU ceiling alongside the model digest
+and engine commit, because "55 tok/s on a laptop" is only reproducible with the power terms
+attached. And §3.16-§3.24 were all produced at the uncapped setting, which is a hardware
+difference from everything measured after this point even though the arithmetic is identical.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
