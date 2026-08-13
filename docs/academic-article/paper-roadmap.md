@@ -66,7 +66,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
 
 | Decision | Consequence |
 |---|---|
-| Cascade ablation scale | **n=100 with the CAPE dynamic path ON**, not the n=210 static corpus (C3) |
+| Cascade ablation scale | **the recovered CAPE cohort with the dynamic path ON**, not the n=210 static corpus (C3). Intended as n=100; the sandbox produced reports for **95** (§3.24 — 56 of the original 100 tasks were marked `reported` after zero seconds, and 3 of the re-submissions failed processing) |
 | Frontier arm | **Yes**, small budget — closes P8 + E.4 + E.8 in one experiment (A6, B8, C6) |
 | Human evaluation | Replaced by an **internal, explicitly LLM-based** readability assessment (D1) that **does not enter the paper**; E.7 stays an open limitation |
 | Target | No venue fixed, **quality first** — nothing is pruned from this queue |
@@ -279,7 +279,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       terms moves the pipeline by +0.003 F1 while lowering precision. Two independent retrieval
       components, both functional in isolation, both near-inert wired in.
       **But n=19 with no CI** — the honest statement is *no effect detectable at n=19*, not *no
-      effect*. **Fold this arm into C3's n=100 cohort**; it costs nothing extra there.
+      effect*. **Fold this arm into C3's recovered cohort**; it costs nothing extra there.
       **Remaining work:** the opcode-hash tier, which drives Ghidra MCP `get_bulk_function_hashes`
       and writes to Qdrant. Schedule with the service-heavy items.
 
@@ -287,7 +287,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       Cheap sanity check before the big run: plumbing works, the cost ceiling holds, output parses.
 - [ ] **B9 — Commit the B layer**, update `findings-log.md`, stop llama-server
 
-## C — The CAPE network (dynamic path) — n=100
+## C — The CAPE network (dynamic path) — n=95 recovered of an intended 100 (§3.24)
 
 > **The tightest memory profile in the queue:** llama-server 16.2 GB + an arq analysis ~8.5 GB
 > ≈ 24.7 GB of 30 GB. Never start with the desktop stack loaded. Watcher up for the whole run.
@@ -304,7 +304,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       The other half of the Layer-0 study. Then **re-run the weight-sensitivity analysis with all
       six layers** — §1.10's "the corroborated set moves on 0.0%" was measured with three static
       layers and has to hold with six. → **E.5** complete
-- [ ] **C3 — n=100 cascade ablation, dynamic path on** `[CAPE]` `[LLM]`
+- [ ] **C3 — cascade ablation on the recovered cohort (n=95), dynamic path on** `[LLM]`
       Flat union vs the weighted cascade, on a sample stratified by family and year so it stays
       comparable to the n=210 drift cohort. **Per-sample results are stored this time** — the
       drift study kept only cohort means, which is exactly why no TOST was possible for the E1
@@ -313,9 +313,9 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       The paper currently *argues* the dynamic path lifts recall. This measures it: same ground
       truth, paired statistics, bootstrap CIs. → **E.3**
 - [ ] **C5 — Baseline with no LLM at all** `[CAPE]`
-      CAPE's own signature-derived TTPs on the same n=100. **Without this, "F1 0.08" has no
+      CAPE's own signature-derived TTPs on the same recovered cohort. **Without this, "F1 0.08" has no
       referent** — arguably the single highest-value item in the queue. → **E.4**
-- [ ] **C6 — Frontier arm on the n=100 cohort** `[CAPE]` `[LLM]` `[$]`
+- [ ] **C6 — Frontier arm on the recovered cohort (n=95)** `[LLM]` `[$]`
       Same pipeline, one endpoint changed. `arXiv:2606.18166` found parameter size is the **only**
       significant predictor of ATT&CK-classification F1 (ρ=0.85, p=0.014), so without this arm the
       architecture/model confound stands. → **E.4 + E.8 + P8**
@@ -456,7 +456,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | M3 | A refused load answers HTTP 200; the pre-pass carried on | hints and function hashes built from another binary | **OURS** (instrument defect) | §3.14, fixed `3eabf88` |
 | M4 | Two local safety bounds composed into an empty result | the 40-step ReAct salvage received a **fresh copy** of the time budget it was already inside; any binary rich enough to exhaust the step budget returned **zero techniques** at 28 min | **OURS** (composition defect) | §3.18, fixed `786dfe5` — verified 1,677s/0 tids → 323s/5 tids |
 | M-DET | Repeated-constant detection catches stale-state bugs a green suite misses | 4 defects, 1,995 passing tests, 0 caught | **REFINEMENT** — demoted 2026-08-11 by counter-search; the detector is a **metamorphic relation** (TOSEM `10.1145/3708521`), and `2603.05399` tests the inverse (identical inputs → consistent output). Ours keeps the *application*: an output-cardinality **reporting norm** for evaluation batches crossing third-party tool servers, with three measured defect classes and a withdrawn study as the cost | E1 |
-| B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.187** [0.151, 0.223], n=24 | measured | C5 at n=100 |
+| B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.187** [0.151, 0.223], n=24; **F1 0.1666** [0.1411, 0.1938] at n=43 | measured | C5 re-run at n=95 |
 | E2 | KV scaling on hybrid-offload MoE | measured | — | appendix |
 | E3 | ~201-tool catalogue infeasible at 3B | measured | open gap | E1 |
 | — | binary→ATT&CK input modality | — | **PRIOR ART** `2602.06325` | cite only |
