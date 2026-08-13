@@ -593,18 +593,23 @@ def main_async(repeats: int, smoke: bool, overlap: bool, checkpoint: Path) -> No
 
     for sid, truth in samples:
         assignment = assign_to_sources(truth, overlap=overlap)
-        # One fresh server per fixture — see ``restart_llama``. Skipped when the
-        # fixture is already fully checkpointed, so a resume does not pay for a
-        # model load it will not use.
-        pending = any(f"{arm}:{sid}:{rep}" not in done for rep in range(repeats) for arm in ARMS)
-        if pending and not restart_llama():
-            print("  model server did not come back healthy — stopping", flush=True)
-            break
         for rep in range(repeats):
             for arm in ARMS:
                 key = f"{arm}:{sid}:{rep}"
                 if key in done:
                     continue
+                # **A fresh server per arm, not per fixture.** The per-fixture
+                # cadence was copied from a design whose fixtures carried five
+                # techniques. These carry twelve to fifty-one, and on 2026-08-14
+                # llama-server went from 12 GB to 19.9 GB — its whole 20 GB cap —
+                # inside the first fixture's five arms, with the host down to
+                # 4.0 GB and the memory guard about to intervene. That is §3.22's
+                # failure repeating at a finer grain: the growth is per judge
+                # call, so the restart has to be too. Forty model loads cost
+                # about half an hour on a four-hour run.
+                if not restart_llama():
+                    print("  model server did not come back healthy — stopping", flush=True)
+                    return
                 isr_reports = build_isr_reports(assignment, arm)
                 try:
                     bundle, snap = asyncio.run(_run_one(container, judge, isr_reports))
