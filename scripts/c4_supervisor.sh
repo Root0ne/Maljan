@@ -60,6 +60,32 @@ EOF
 
 running() { pgrep -f "eval_dynamic_vs_static\.py" >/dev/null 2>&1; }
 
+# An idle model server is the deadlock this supervisor walked into on its first
+# night. After the guard killed the harness at 05:11, llama-server stayed up —
+# it is a separate systemd unit — holding 19.4 GB of its 20 GB cap and doing
+# nothing. The supervisor then waited three hours for memory that could only be
+# released by the harness it was refusing to start.
+#
+# The harness kills and reloads the server at the start of every sample anyway,
+# so stopping an idle one costs a model load and nothing else. Only ever when no
+# harness is running, and only on a clear "no work in flight" answer.
+reap_idle_llama() {
+  running && return 0
+  systemctl --user is-active c4-llama.service >/dev/null 2>&1 || return 0
+  local health
+  health="$(curl -s -m 5 http://localhost:8080/health 2>/dev/null || true)"
+  case "$health" in
+    *'"slots_processing":0'*)
+      local held
+      held="$(systemctl --user show c4-llama.service -p MemoryCurrent --value 2>/dev/null)"
+      held="$(( ${held:-0} / 1048576 ))"
+      log "reaping idle model server holding ${held}MB — the harness reloads it per sample"
+      systemctl --user stop c4-llama.service >/dev/null 2>&1
+      sleep 5
+      ;;
+  esac
+}
+
 log "supervisor up: resume>${RESUME_MB}MB, poll ${POLL}s, target ${TOTAL_ARMS} arms"
 
 attempts=0
@@ -79,6 +105,9 @@ while :; do
     sleep "$POLL"
     continue
   fi
+
+  # Before judging the machine short of memory, stop holding it hostage.
+  reap_idle_llama
 
   avail="$(available_mb)"
   if [ -f "$GUARD_STOP" ]; then
