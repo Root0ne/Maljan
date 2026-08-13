@@ -2239,6 +2239,49 @@ open.
 
 ---
 
+### 3.24 The cohort was never n=100: the sandbox reported success for 56 analyses that took zero seconds — `INSTRUMENT FAILURE`
+
+The n=100 cohort was submitted on 2026-08-10 and 43 reports were archived. The other 57 were
+assumed to be pending or lost in transit. On 2026-08-13, with the sandbox reachable again, the
+fetch was retried and refused every one of them: 56 with `Reports directory does not exist`, one
+with `Task failed`. Asking the sandbox *why* produced the finding.
+
+Every task in the cohort was queried through `/apiv2/tasks/view/`. The split is bimodal with
+nothing in between:
+
+| group | n | task status | analysis wall-clock |
+|---|---|---|---|
+| report archived | 43 | `reported` ×43 | min **186 s**, median **350 s**, max 366 s |
+| no report | 57 | `reported` ×56, `failed_analysis` ×1 | min **0 s**, median **0 s**, max **1 s** — 56/56 at ≤2 s |
+
+**56 analyses are marked `reported` after zero to one second of execution.** A Windows PE does not
+detonate in one second; nothing was observed, and no report directory was written. The status field
+records the queue transition, not whether an analysis happened, so on this instance `reported` is
+not evidence of anything. Per-task timings are retained in `cape_task_status_audit.json`.
+
+Ordering points at the cause rather than at the samples. The 43 real analyses complete through the
+afternoon of 2026-08-10; from roughly 17:30 onward every task returns instantly. A single-VM
+instance appears to have stopped detonating mid-batch while the scheduler kept marking work
+complete. It is not the samples: their binaries are intact locally, and a re-submission of one of
+them (task 19144, 2026-08-13 11:38) ran for minutes rather than seconds on the same instance.
+
+**Consequences, and they reach several planned studies.**
+
+* **The cohort has always been n=43.** C3, C5 and C6 are written against "n=100" in the roadmap and
+  in the decision table; that number was never realised and every one of them must either re-run
+  the missing 57 or report n=43. C4 is unaffected in kind — it draws from the archived reports and
+  its cohort was already the 43 — but "n=100 cohort" must not appear next to it either.
+* **A completion status is not a completion.** The retrieval path already verifies
+  `target.file.sha256` against the ledger before writing (§6), which is why nothing false entered
+  the archive. What no check covered was an *absent* report whose task claimed success. Checking
+  the analysis duration is now part of accepting a task as done.
+* This is the sixth instrument failure in the ledger, and the second where the instrument reported
+  success it had not achieved — the first being the sandbox answering a request for a deleted
+  report with HTTP 200 and a 63-byte error body (§6). Both were found by disbelieving a success
+  signal, not by a test.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
