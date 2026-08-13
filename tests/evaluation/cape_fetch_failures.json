@@ -1,5 +1,5 @@
 {
  "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6": "api error: Task failed",
- "7faba2fe65c014143a60ef7ef4ec1c24933bec883f3d959cea44e039e01036cc": "api error: Reports directory does not exist",
- "aba7133b1ccdb78338fe271d73689bac4f40251b8fc194a9b86253a71e4017cc": "api error: Reports directory does not exist"
+ "7faba2fe65c014143a60ef7ef4ec1c24933bec883f3d959cea44e039e01036cc": "analysis lasted 1s (< 60s) \u2014 it did not run",
+ "aba7133b1ccdb78338fe271d73689bac4f40251b8fc194a9b86253a71e4017cc": "analysis lasted 0s (< 60s) \u2014 it did not run"
 }
