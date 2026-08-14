@@ -240,7 +240,7 @@ while parameter size was (ρ=0.85, p=0.014).
 one model (see P8). The pitfall's recommendation to "optimize prompts per model-task pair" only
 bites once a second model exists.
 
-## P8 — Surrogate Fallacy `EXPOSED`
+## P8 — Surrogate Fallacy `EXPOSED` → `PARTIAL`
 
 > *"Findings from specific LLMs are often inappropriately generalized to other, often large and
 > more capable models or even to entire classes of language models."*
@@ -298,6 +298,23 @@ cohort; C6 asks the same question against real samples, where evidence bundles a
 and the two models may diverge in ways five fixtures cannot show. The free tier caps at **50
 requests/day**, so C6 is a two-day run or a $10 purchase — a scheduling fact for the reproducibility
 appendix, since a reader reproducing it hits the same wall.
+
+**Rescoped 2026-08-14, and the ceiling is now the design's rather than the budget's.** Two further
+endpoints became reachable at no cost, turning the single comparison into a four-model series
+spanning **35B → 744B** total parameters (21×). That is a materially better answer to this pitfall:
+`arXiv:2606.18166`'s claim is about a *trend* in parameter count, and one comparison model can only
+agree or disagree with it at a point. But the series carries a limit that must be stated with it —
+**with four arms the smallest reachable two-tailed p is 0.083**, so even a perfect ordering is
+suggestive rather than significant, and two confounds (quantisation entangled with size; four labs
+rather than four draws from one population) are irreducible. The series therefore cannot move this
+row to `CLEAR` on its own; it can only make the `PARTIAL` much better evidenced.
+
+**Blocked as of 2026-08-14.** Both new endpoints began refusing every request with HTTP 429, and
+the refusal carries no `x-ratelimit-*` header of any kind to say how long to wait. An earlier
+throughput figure taken from these endpoints — 36 completed calls an hour — did not survive: later
+in the same session the same client completed zero, so that number described a quota draining
+rather than a rate. Whether the endpoints recover is under measurement and not yet answered, so no
+completion date is claimed for the two new arms.
 
 **Verdict: `PARTIAL`, and closer to `CLEAR` than at any earlier pass.** The write-up half is done —
 all four claims carry their scope at the point of claim, `related-work.md` carries a section-level
