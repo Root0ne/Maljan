@@ -103,9 +103,21 @@ Both arms see the same five fixtures at the same five repeats, so the comparison
 > **frontier − local = +0.0026**, 95% CI **[−0.0770, +0.0814]**, n=25.
 > The frontier model is better on 12 of the 25 and worse on 13.
 
-A 3.4× larger reasoning model, given the same evidence and the same output budget, lands within
-three thousandths of F1 of a 35B model quantised to run on one desktop GPU, and its direction across
-samples is a coin flip. We report it because the literature's prior predicts otherwise:
+A 3.4× larger reasoning model, given the same evidence and the same nominal output budget, lands
+within three thousandths of F1 of a 35B model quantised to run on one desktop GPU, and its
+direction across samples is a coin flip.
+
+**We have since found that the two arms were not configured alike, and we report the null with that
+caveat attached.** The local arm runs with its reasoning stream disabled — necessarily, because the
+local server otherwise returns an empty answer — while the frontier arm ran with reasoning on and
+spent 56.5% of its budget there. The nominal budget was equal; the budget available for an *answer*
+was not. How much this matters we can bound from a third endpoint measured later on the same
+fixtures: with reasoning enabled it spent 99.9% of every call's budget thinking and scored **0.000**
+across all 25 calls, and with reasoning disabled the same model scored **0.4501**. One flag was
+worth 0.45 F1 — more than every architectural effect in this paper combined. The frontier arm above
+was not crippled that way (it parsed 25 of 25), so the null is not an artefact of a collapsed arm;
+but it is not the single-variable comparison it appears to be, and the matched-configuration arm is
+outstanding. We report it because the literature's prior predicts otherwise:
 `arXiv:2606.18166` found parameter size the *only* statistically significant predictor of
 ATT&CK-classification F1 (ρ=0.85, p=0.014) on the nearest task. On this task, at this budget, we do
 not reproduce that.

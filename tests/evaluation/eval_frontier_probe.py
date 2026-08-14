@@ -75,18 +75,22 @@ from tests.evaluation.eval_consensus_ablation import (  # noqa: E402
 BUDGET = 2400  # the same total output budget the `single` arm gets in §3.7
 
 
-def out_path(arm: str) -> Path:
+def out_path(arm: str, no_thinking: bool = False) -> Path:
     """Where an arm's record goes.
 
     ``default`` keeps the original filename. B8's result is already cited by the
     figure script and by §3.16, and renaming a stored measurement to tidy up a
     naming scheme is how a record and the text that cites it come apart.
     """
-    return _HERE / ("frontier_probe.json" if arm == "default" else f"frontier_probe_{arm}.json")
+    suffix = "_nothink" if no_thinking else ""
+    if arm == "default" and not no_thinking:
+        return _HERE / "frontier_probe.json"
+    return _HERE / f"frontier_probe_{arm}{suffix}.json"
 
 
-def checkpoint_path(arm: str) -> Path:
-    return Path(f"/tmp/frontier_probe_{arm}_checkpoint.jsonl")
+def checkpoint_path(arm: str, no_thinking: bool = False) -> Path:
+    suffix = "_nothink" if no_thinking else ""
+    return Path(f"/tmp/frontier_probe_{arm}{suffix}_checkpoint.jsonl")
 
 
 def main() -> int:
@@ -103,6 +107,20 @@ def main() -> int:
     ap.add_argument("--arm", default="default", help="Configured arm name (see --list).")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--list", action="store_true", help="Show configured arms and exit.")
+    # The local `single` arm this series is compared against runs with thinking
+    # DISABLED (`bind_eval_llm`, §3.6: the local server otherwise strips <think>
+    # into reasoning_content and returns an empty answer). The frontier arms have
+    # been running with it ENABLED. That asymmetry is not cosmetic — measured on
+    # qwen3.6-plus 2026-08-14, one prompt, one budget, one flag: thinking on
+    # spends 2,400 of 2,402 output tokens reasoning and returns nothing (F1
+    # 0.000, finish=length); thinking off returns the right answer in 5 tokens.
+    # So the configuration is now an explicit axis rather than an accident, and
+    # the results file records which side it ran on.
+    ap.add_argument(
+        "--no-thinking",
+        action="store_true",
+        help="Disable the model's reasoning stream, matching the local arm's configuration.",
+    )
     args = ap.parse_args()
 
     arms = resolve_arms(get_settings().llm.frontier)
@@ -124,6 +142,16 @@ def main() -> int:
     cfg = arms[args.arm]
     provenance = arm_provenance(args.arm, cfg)
     llm = build_frontier_llm(cfg, max_tokens=BUDGET)
+    if args.no_thinking:
+        # Both spellings: DashScope accepts the top-level flag, llama.cpp-style
+        # servers want it under chat_template_kwargs. Sending both is harmless
+        # and avoids the arm silently running in the wrong configuration.
+        llm = llm.bind(
+            extra_body={
+                "enable_thinking": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+        )
     meter = build_meter(cfg)
     caller = PacedCaller.for_arm(cfg)
     samples = load_samples()
@@ -148,7 +176,7 @@ def main() -> int:
     # same defect the C4 harness had on 2026-08-12, reintroduced here and caught
     # before it ran; "error rows counted as done" is evidently a mistake worth
     # testing for rather than remembering.)
-    ckpt = checkpoint_path(args.arm)
+    ckpt = checkpoint_path(args.arm, args.no_thinking)
     latest: dict[str, dict[str, Any]] = {}
     if ckpt.exists():
         for line in ckpt.read_text().splitlines():
@@ -256,13 +284,14 @@ def main() -> int:
     print(f"  mean reasoning fraction of output {summary['mean_reasoning_fraction']}")
     print(f"  meter {summary['meter']}")
 
-    out = out_path(args.arm)
+    out = out_path(args.arm, args.no_thinking)
     out.write_text(
         json.dumps(
             {
                 "schema": "maljan-frontier-probe/v2",
                 "model": cfg.model,
                 "arm": provenance,
+                "thinking_disabled": bool(args.no_thinking),
                 "budget_output_tokens": BUDGET,
                 "summary": summary,
                 "per_sample": rows,

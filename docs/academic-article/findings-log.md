@@ -2657,6 +2657,61 @@ subtract from it and, across 80 arms, added nothing to it.
 
 ---
 
+### 3.31 One flag is worth 0.45 F1, and our arms were not on the same side of it — `INSTRUMENT FAILURE` (C6a)
+
+A third comparison endpoint became available on 2026-08-14 (`qwen3.6-plus`, Alibaba Model Studio,
+International). Running it on the §3.7 fixtures at the §3.7 budget produced the worst arm this
+project has recorded:
+
+| | n | parsed | hit the cap | mean F1 | reasoning share of output |
+|---|---|---|---|---|---|
+| `qwen3.6-plus`, reasoning **enabled** | 25 | **0/25** | **25/25** | **0.0000** | **99.9%** |
+
+Every call spent 2,400 of 2,402 output tokens thinking and returned no answer at all. Paired
+against the local arm: **−0.4136, 95% CI [−0.4742, −0.3525]**.
+
+**That is not a measurement of the model. It is a measurement of a configuration difference we did
+not know we had.** The local `single` arm — the baseline every frontier arm in this project is
+compared against — runs with **`enable_thinking=false`** (`bind_eval_llm`, and for a documented
+reason: §3.6, the local server otherwise strips `<think>` into `reasoning_content` and returns an
+empty answer). The frontier arms have been running with reasoning **enabled**. Same fixtures, same
+prompt, same 2,400-token budget, opposite sides of one flag.
+
+Re-running the same arm with the flag matched to the local one:
+
+| arm | reasoning | n | mean F1 | 95% CI | paired vs local |
+|---|---|---|---|---|---|
+| local Qwen3.6-35B-A3B (IQ3_K_R4) | off | 25 | 0.4136 | — | — |
+| `qwen3.6-plus` | **off** | 25 | **0.4501** | [0.3927, 0.5077] | **+0.0365** [−0.0425, +0.1195] |
+| `qwen3.6-plus` | **on** | 25 | **0.0000** | [0.0, 0.0] | **−0.4136** [−0.4742, −0.3525] |
+| Nemotron-3-Super-120B (§3.16) | **on** | 25 | 0.4162 | [0.3596, 0.4711] | +0.0026 [−0.0758, +0.0836] |
+
+**The flag is worth 0.45 F1 on one model — larger than every architectural effect this project has
+measured, combined.** It is not a capability difference: with reasoning off the same model answers
+in 510–954 tokens, parses 25/25, and beats the local arm by a margin whose interval still contains
+zero.
+
+**What this costs §3.16.** The frontier arm reported there ran with reasoning **on**, spending
+56.5% of its budget on it, against a local arm that spent none. The paper describes that comparison
+as *"the same prompt, the same 2,400-token output budget"*, which is true of the nominal budget and
+false of the budget available for an answer. The +0.0026 null is therefore measured across a
+configuration difference the text does not mention. It is not thereby wrong — Nemotron parsed 25/25
+and was not crippled the way `qwen3.6-plus` is — but it is not the clean single-variable comparison
+it is presented as, and the honest reading is that **§3.16's null is confounded and needs the
+matched arm before it can be relied on.** That arm costs nothing (free endpoint) and is queued.
+
+**How it was found, which is the reason it is filed here.** Not by review — by the arm collapsing
+so completely that the number could not be believed. An arm that had come back at 0.38 instead of
+0.00 would have been recorded as a weak frontier result and the flag would never have been
+examined. This is the fifth instrument failure in E6's shape, and the second inside our own
+evaluation rather than someone else's server: **the harness answered successfully, and answered
+about the wrong thing** — and it took a degenerate result, not diligence, to expose it.
+
+`--no-thinking` is now an explicit axis on the harness, recorded in every result file, rather than
+a default nobody chose. Cost of the whole episode: **$0.24**.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
