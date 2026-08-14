@@ -26,7 +26,7 @@
 | P3 | Data Leakage | `PARTIAL` | One instance found, disclosed and mitigated by us — but never systematically audited |
 | P4 | Model Collapse | `CLEAR` | Explicitly rejected augmenting long-term memory with LLM-fabricated cases, with a cited rationale |
 | P5 | Spurious Correlations | `PARTIAL` | Two found and published; no systematic perturbation testing |
-| P6 | Context Truncation | `EXPOSED` | Truncation mechanisms everywhere, **frequency never reported** |
+| P6 | Context Truncation | `EXPOSED` → `PARTIAL` | Frequency measured 2026-08-14: the static ReAct loop hits its step budget on **82.1%** of arms, always at exactly 19 tool calls / 41 messages; a tool output is cut on 83.9%; evidence is chunked on 48.2%. Truncation is the normal regime, not an edge case. Performance impact still unmeasured — too few unaffected arms to compare |
 | P7 | Prompt Sensitivity | `PARTIAL` | A structured prompt-variation study exists; production prompts are fixed and unvaried |
 | P8 | Surrogate Fallacy | `EXPOSED` → `PARTIAL` | One model, one machine. Four claims **scoped 2026-08-09**. Frontier arm completed 2026-08-12 at n=25: paired ΔF1 **+0.003 [−0.077, +0.081]** — a 3.4× model does not separate. Remaining gap is **coverage** (fixtures, not the cohort) → C6 |
 | P9 | Model Ambiguity | `PARTIAL` | Model **and engine both pinned 2026-08-09** (GGUF digest + HF revision + imatrix dataset; engine commit `eb570eb9`). Off `CLEAR` because the running binary reports `unknown` — the commit was recovered from a second copy of the sources, not from the artifact |
@@ -156,7 +156,7 @@ renamed functions) is unrun and would be a real experiment. **The B1 follow-up �
 evidence channels to locate `arXiv:2604.02460`'s crossover — is exactly such a perturbation and is
 now queued**, so this row has a concrete path off `PARTIAL` for the first time.
 
-## P6 — Context Truncation `EXPOSED`
+## P6 — Context Truncation `EXPOSED` → `PARTIAL`
 
 > *"The LLM's context size is not spacious enough for its intended task and the input needs to
 > be truncated."*
@@ -182,8 +182,36 @@ chunks were dropped, or what fraction of runs hit `max_steps`. The data exists i
 runs exist — no new experiment, just instrumentation of runs we already do.
 
 *Progress, 2026-08-11.* The counters exist (`core/truncation_ledger.py`, A3) and record every
-guardrail decision including the pass-through, because a frequency needs its denominator. The
-distribution still awaits the cohort runs (C7), so this row stays `EXPOSED`.
+guardrail decision including the pass-through, because a frequency needs its denominator.
+
+*Measured, 2026-08-14 — the frequency this row was opened for.* Counted over the dynamic-vs-static
+study's arms, which drive the full pipeline on real binaries. The denominator is **arms started**
+(56) rather than arms completed (30), because an arm killed by the memory guard still exercised the
+static analyst before it died, and using completions would flatter every rate:
+
+| truncation site | arms affected | rate |
+|---|---|---|
+| static ReAct loop hit its step budget | 46/56 | **82.1%** |
+| a tool's output exceeded the guardrail and was cut | 47/56 | **83.9%** |
+| static evidence split into chunks | 27/56 | **48.2%** |
+| forced-synthesis fallback then exceeded its hard cap | 10/56 | 17.9% |
+
+**The step-budget row is not a distribution.** All 46 arms stopped at *exactly* 19 tool calls and
+*exactly* 41 messages — the same boundary every time, which is `static max_steps = 40` binding on
+message count. This is not a model failing to converge and occasionally running long; it is a
+deterministic cap being reached on four arms in five, after which the analyst abandons its loop and
+falls back to synthesising from whatever it had gathered.
+
+Chunking is common but modest where it happens: 2 chunks on 10 arms, 3 on 9, 6 on 3, 11 on 5.
+
+**What this changes about the paper.** Truncation is not an edge case in this system, it is the
+normal operating regime, and every accuracy number in this work was produced under it. That belongs
+next to the numbers rather than in an appendix.
+
+**Verdict: `EXPOSED` → `PARTIAL`.** The pitfall asks for two things and we now have one. Frequency
+is reported with its denominator. The *performance impact* is not: with 46 of 56 arms hitting the
+same cap there is almost no unaffected control group to compare against, so we can say how often
+the system runs truncated but not yet what it costs. Saying so is the point of the row.
 
 One truncation site was found that no part of this audit had listed: the sink-reachability
 pre-pass fetches the call graph with **`limit=20000` edges**, and a binary whose graph exceeds that

@@ -2423,6 +2423,47 @@ in 60, all `empty_pattern`): the integrity pass ran on 51 of 80 bundles and remo
 21 `empty_pattern`, 8 `dangling_relationship`, 3 `duplicate_relationship`.
 
 
+---
+
+### 3.28 Truncation is the normal operating regime, not an edge case — `MEASURED` (P6)
+
+P6 has been this audit's weakest row since 2026-08-08: truncation mechanisms are everywhere in the
+design and deliberate, and the pitfall asks for their *frequency*, which nobody had counted. The
+counters were built in A3; the count is now taken, from the dynamic-vs-static arms, which drive the
+full pipeline on real binaries.
+
+The denominator is **arms started (56)**, not arms completed (30). An arm killed by the memory guard
+still exercised the static analyst before it died, and scoring against completions alone would
+flatter every rate here.
+
+| truncation site | arms affected | rate |
+|---|---|---|
+| static ReAct loop hit its step budget | 46/56 | **82.1%** |
+| a tool's output exceeded the guardrail and was cut | 47/56 | **83.9%** |
+| static evidence split into chunks | 27/56 | **48.2%** |
+| forced-synthesis fallback then exceeded its hard cap | 10/56 | 17.9% |
+
+**The first row is a constant, not a distribution, and that is the finding.** All 46 arms stopped at
+*exactly* 19 tool calls and *exactly* 41 messages. The same boundary every time is `static
+max_steps = 40` binding on message count — the config's own comment calls it "the BINDING constraint
+on depth" and it is. So this is not a model that occasionally runs long: it is a deterministic cap
+reached on four arms in five, after which the analyst abandons its loop and synthesises from
+whatever it had gathered by then.
+
+Chunking is frequent but shallow where it occurs: 2 chunks on 10 arms, 3 on 9, 6 on 3, 11 on 5.
+
+**Every accuracy number in this project was produced under this regime.** That is not a caveat to
+file in an appendix; it is a property of the measured system, and it belongs beside the numbers.
+It also reframes §3.16 and §3.18's nulls: an ablation that changes what evidence is *offered* to an
+analyst which is already discarding four-fifths of its own loop has less room to move the result
+than its design implies.
+
+P6 moves `EXPOSED` → `PARTIAL`. The pitfall asks for frequency **and** performance impact; frequency
+is now reported with its denominator, and impact is not, because with 46 of 56 arms hitting the same
+cap there is barely an unaffected control group to compare against. We can say how often the system
+runs truncated. We cannot yet say what it costs.
+
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
