@@ -337,8 +337,7 @@ than quietly inheriting.
       or a null result will be indistinguishable from a feature that never fired — the same trap
       B5 was reframed around.
 
-- [~] **B7 — C2 tier contribution** — **semantic tier already measured** → **§3.12**; opcode-hash
-      tier needs **Ghidra + Qdrant**, not llama
+- [x] **B7 — C2 tier contribution** `[done, both tiers]` — semantic **§3.12**, opcode-hash **§3.17**
       **Half of this was done and the queue did not know.** Two leakage-free artifacts already in
       `tests/evaluation/` measure the family-feature RAG tier: retrieval in isolation
       (**recall@5 0.199 vs 0.032 random — 6.3× chance**, 158 families / 629 samples) and an
@@ -347,9 +346,13 @@ than quietly inheriting.
       terms moves the pipeline by +0.003 F1 while lowering precision. Two independent retrieval
       components, both functional in isolation, both near-inert wired in.
       **But n=19 with no CI** — the honest statement is *no effect detectable at n=19*, not *no
-      effect*. **Fold this arm into C3's recovered cohort**; it costs nothing extra there.
-      **Remaining work:** the opcode-hash tier, which drives Ghidra MCP `get_bulk_function_hashes`
-      and writes to Qdrant. Schedule with the service-heavy items.
+      effect*.
+      **The opcode-hash tier was measured on 2026-08-14 (§3.17) and this entry did not know it:**
+      0/18 samples fire, 7,716 functions hashed, **0 matches**, on an empty-in-practice corpus with
+      a structural instruction-count floor that excludes half the samples regardless. Both tiers are
+      therefore measured and the two-tier claim cannot be made. Third independently-built retrieval
+      component to be reasonable in isolation and inert once wired to real inputs (§1.5.3, §3.12,
+      §3.17) — which makes it the project's most-replicated result rather than three anecdotes.
 
 - [x] **B8 — Frontier arm on the fixture suite** `[done]` **2026-08-12** — §3.16, `frontier_probe.json`.
       n=25 paired, ΔF1 **+0.0026** [−0.0770, +0.0814]; reasoning is **56.5%** of output tokens.
@@ -373,7 +376,7 @@ than quietly inheriting.
       honest statement — that individual MCP tool reachability was never enumerated — goes in the
       reproducibility appendix instead of being carried as queue work that would never earn its
       wall-clock. → **E5**, one sentence
-- [~] **C2 — Sigma / LOLBin / network-DGA layer contribution** — **first half done, second half open**
+- [x] **C2 — Sigma / LOLBin / network-DGA layer contribution** `[done, both halves]` **2026-08-14**
   - [x] layer contribution `[done]` **2026-08-14** — `layer0_six.json`: sigma fires on **94/97**,
         lolbin **0/97**, network_dga **0/97** (§3.23). The two silent layers are why B3 runs four
         sources rather than six.
@@ -388,11 +391,22 @@ than quietly inheriting.
         sandbox in play, against 87.9% without it, and **none reach three**. `tool_artifact`
         produces a claim on **1/97**. C2 is now closed in both halves.
 
-- [ ] **C3 — cascade ablation on the recovered cohort (n=97), dynamic path on** `[LLM]`
-      Flat union vs the weighted cascade, on a sample stratified by family and year so it stays
-      comparable to the n=210 drift cohort. **Per-sample results are stored this time** — the
-      drift study kept only cohort means, which is exactly why no TOST was possible for the E1
-      bound. → moves **C6** out of `UNMEASURED`; closes **E.1**
+- [~] **C3 — redesigned; the original experiment was vacuous and is not being run** `[LLM]`
+      *Original scope: flat union vs the weighted cascade on the recovered cohort.* **Cancelled
+      2026-08-14 and replaced, on evidence.** §3.27.1 established that both arms share one
+      `cascade_summary.results`, so `_reconcile_with_cascade` forces both bundles to contain the
+      same techniques whatever the judge produces: the comparison could only ever return "no
+      difference", correctly and vacuously. It was stopped four minutes into its first run.
+  - [~] **C3′ — what the judge contributes to the bundle** — the measurement the vacuous design
+        could not reach. Intercepts `_reconcile_with_cascade` to record the judge's own output
+        *before* the deterministic set is merged in. **Interim at 4 scored calls:** judge share of
+        the final bundle **0.0%**, and **76%** of its attack-patterns dropped for naming no
+        technique. Re-opened 2026-08-14 after the remaining calls turned out to be measurements
+        rather than failures — `give_verdict` has four early returns that never reach
+        reconciliation at all (§3.35), and two harness defects were fixed before the retry: a
+        per-request timeout tighter than production's, which would have manufactured the very
+        timeouts being counted, and a spy that read zero attack-patterns from every fallback
+        bundle by construction. **Running.**
 - [~] **C4 — Dynamic cohort vs static-only, paired delta** — **closed incomplete at 13 of 97 pairs**
       **2026-08-14**, §3.26. Stopped after five supervised attempts produced **zero** completed arms
       in 70 minutes: each began with ~22 GB free, drove the box into swap, and was killed by the
@@ -411,7 +425,8 @@ than quietly inheriting.
       CAPE alone: **F1 0.1526** [0.1344, 0.1709] at n=97. Every F1 in this paper now has a referent.
       CAPE's own signature-derived TTPs on the same recovered cohort. **Without this, "F1 0.08" has no
       referent** — arguably the single highest-value item in the queue. → **E.4**
-- [ ] **C6 — Parameter-size series on the recovered cohort (n=97)** `[LLM]` `[network]`
+- [x] **C6 — Parameter-size series** `[done, NEGATIVE]` **2026-08-14** — §3.32, §3.33, §3.34.
+      *The cohort stage was never reached and would not have helped; see C6b.* `[network]`
       *Rescoped 2026-08-14 from "one frontier arm" — see the decision table above.* Four models,
       35B → 744B total parameters, each answering on the same evidence with the same output budget.
       `arXiv:2606.18166` found parameter size the **only** significant predictor of

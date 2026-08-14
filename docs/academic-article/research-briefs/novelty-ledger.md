@@ -19,12 +19,43 @@
 **Revised 2026-08-09 twice: first after the adversarial counter-search (A4), then again after the
 B-layer measurements (B1, B2).**
 
+> **This table is the 2026-08-09 state and is kept for the record, not as the current ledger.**
+> The live counts are in [`paper-roadmap.md`](../paper-roadmap.md) under *Where this stands*
+> (revised 2026-08-11): **5 `OURS` · 10 `REFINEMENT` · 2 `PRIOR ART` (+1 adjacent) ·
+> 0 `UNMEASURED` · 1 `WITHDRAWN`**. Annotated rather than rewritten, on the same principle the
+> brief states: the change should stay visible.
+
 | verdict | count | claims |
 |---|---|---|
 | `OURS` | **2** | C8, E1 |
 | `REFINEMENT` | **11** | N1, N5, N6, C6(partly), C3, "false corroboration", C5a, N4, N7, **+ N9, N10** |
 | `PRIOR ART` | **4** | C5, binary→ATT&CK modality, local/confidentiality framing, honest degradation |
-| `UNMEASURED` — cannot claim | **3** | C1, C2, C7 *(C6 partly answered by B3, pending)* |
+| `UNMEASURED` — cannot claim | **3** → **0** | **all three have since been measured, and all three came back negative** — see below |
+
+### The three `UNMEASURED` rows, resolved (2026-08-11 … 2026-08-14)
+
+The row this ledger was most worried about — *"four architectural claims cannot be defended because
+they were never measured"* — is closed. Not by defending them:
+
+| claim | measurement | result |
+|---|---|---|
+| **C1** sink-reachability prompt steering | §3.18 | **negative** — the hint fires on 56.7% of samples and changes nothing the analyst receives |
+| **C2** two-tier attribution | §3.12 (semantic), §3.17 (opcode-hash) | **negative on both tiers** — the retriever works at 6.3× chance and moves the pipeline +0.003 F1; the opcode tier fires on **0 of 18** samples after hashing 7,716 functions |
+| **C7** deterministic STIX integrity + reconciliation | §3.10, then §3.27 | **premise measured** — 15 of 51 fresh bundles had objects removed across all four defect classes. The *repair-versus-reject* comparison is still not measured and is not claimed |
+| **C6** the cascade *(listed as pending above)* | §3.27.1, §3.30 | **closed `NEGATIVE`** — the agreement flag cannot be moved by the cascade's own constants, and the technique set reaching the analyst is the cascade's, not the model's |
+
+**The pattern is the finding.** Four independently-designed components, each defensible on paper,
+each measured, each inert or near-inert once wired to real inputs. That is now the project's
+most-replicated result and it is what the paper is about.
+
+### Pending counter-search — not yet a row
+
+**M6** (2026-08-14): a parameter-size correlation that ranked a reasoning-configuration flag and
+recovered the published scaling ρ almost exactly. It is recorded in the findings log (§3.34) and in
+the paper (E6 §M6), but it is **not entered here as `OURS`**, because this ledger's own rule is that
+every `OURS` is a *searched* negative and no counter-search has been run for it. Prior work on
+confounded evaluation comparisons is likely to exist; it must be looked for before the row is
+written.
 
 ### New rows from the B layer, 2026-08-09 — **both counter-searched the same day, both demoted**
 
@@ -56,6 +87,11 @@ one where either answer is publishable.
 **Read plainly:** the strongest surviving story is *negative results and measurement*, not
 architecture. Four architectural claims cannot be defended because they were never measured, and
 the two candidates we were building a framing on both fell to prior art in a single night.
+
+> **Corrected 2026-08-14.** The second clause no longer holds and the first is stronger for it. All
+> four architectural claims *were* measured, between 2026-08-11 and 2026-08-14, and every one came
+> back negative or near-inert (see the resolution table above). They are not undefended for want of
+> evidence; they are refuted by it. The reading stands, with its reason replaced.
 
 **And now a third thing.** Part F recommended the F2 remnant — **C5a + N4 + N7** — as the paper's
 "sharpest chapter". A4 searched each of those three in the vocabulary of an adjacent field, and
