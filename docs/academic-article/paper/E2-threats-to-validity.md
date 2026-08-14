@@ -156,6 +156,30 @@ we accept rather than argue with:
    rather than against zero, and on the samples where both have run the full pipeline is 0.003 F1
    above it.
 
+## The dynamic channel is two-thirds constant
+
+Any claim about what the sandbox contributes has to survive one measurement of what the sandbox
+actually reports. Across the 95 archived analyses there are **142 distinct network domains**, and
+**38 of them appear in every single sample** — the analysis VM's own vendor telemetry, present in
+each capture whatever was detonated. Per sample, between **55.9% and 79.2%** of observed domains are
+cohort-ubiquitous, median **67.9%**.
+
+So two-thirds of the network evidence in a "dynamic" arm is the instrument describing itself. A
+treatment that constant is weaker than its name suggests, and an effect attributed to malware
+behaviour may be partly an effect of the VM's idle traffic. We report the ubiquitous share alongside
+every dynamic-versus-static contrast rather than in a footnote, because the contrast cannot be read
+without it.
+
+The same measurement bounds two Layer-0 sources from the other direction. The LOLBin layer and the
+DGA layer produce a claim on **0 of 95** samples while being fed a median of 8667 recorded API calls
+and 48–68 domains respectively — they are offered the evidence and decline it. That is why neither
+appears as an arm in the cascade ablation: giving a mechanism an equal share of ground truth when it
+never engages in the deployment would measure a system that does not exist.
+
+An earlier version of this measurement, on the 43 analyses that survived before the cohort was
+recovered, gave 130 domains with 40 ubiquitous and a median share of 71.4%. More than doubling the
+cohort moved the figure by three points and left the conclusion where it was.
+
 ## The host as an uncontrolled variable
 
 A threat we did not anticipate and met late: **the machine a measurement runs on is part of the
