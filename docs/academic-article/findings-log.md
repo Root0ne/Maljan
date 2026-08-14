@@ -2712,6 +2712,140 @@ a default nobody chose. Cost of the whole episode: **$0.24**.
 
 ---
 
+### 3.32 The matched arm §3.31 promised does not exist on that endpoint — `NEGATIVE` (C6a)
+
+§3.31 ended with a commitment: the Nemotron arm would be re-run with reasoning disabled, the
+comparison would become single-variable, and *"that arm costs nothing (free endpoint) and is
+queued."* It was run on 2026-08-14. The flag was accepted, recorded in the result file, and
+**ignored by the provider**:
+
+| arm | `--no-thinking` requested | n | parsed | hit the cap | mean F1 | 95% CI | reasoning share |
+|---|---|---|---|---|---|---|---|
+| Nemotron-3-Super-120B (§3.16) | no | 25 | 25/25 | 1 | 0.4162 | [0.3596, 0.4711] | 56.5% |
+| Nemotron-3-Super-120B (re-run) | **yes** | 25 | 25/25 | 3 | **0.4149** | [0.3276, 0.4998] | **56.2%** |
+
+56.2% against 56.5% is not a suppressed reasoning budget. It is the same budget. `config.py`
+already carried this as a comment for OpenRouter's `reasoning.exclude` — *"does NOT suppress
+generation — it stops returning the stream separately"*, measured 2026-06-10 — and the same is now
+measured for `enable_thinking`: on this provider the parameter travels, is not rejected, and
+changes nothing.
+
+**So §3.16's confound is not a scheduling problem, it is structural.** The plan recorded in §3.31
+— re-run the arm matched and the null becomes clean — cannot be executed on the endpoint that arm
+lives on, at any price or delay. A confound that can be removed by spending a day is a debt; one
+that cannot is a **limitation**, and it belongs in the paper as a limitation rather than as a
+queued item. The +0.0026 null in §3.16 stands as measured across a reasoning-budget difference,
+and no re-run of that arm will change that.
+
+**The arm replicates, which is worth recording separately.** Two independent runs a day apart
+returned 0.4162 and 0.4149 — Δ = 0.0013 on a scale where this project's largest architectural
+effect is 0.0365. That is stability of *the endpoint under re-execution*, not stability across
+fixtures: both runs used the same five fixtures at five repeats, so it says the arm's number is
+reproducible, and says nothing about how it would move on a different sample. It does mean the
+frontier comparisons in §3.16 are not resting on a single lucky draw.
+
+**What replaces the promised arm.** The question §3.31 wanted answered — does the flag explain the
+gap, or does the model — needs a provider that honours the flag. Alibaba's DashScope does
+(`enable_thinking=false` there produces a 0.0% reasoning share, §3.31), and it hosts
+`qwen3.6-35b-a3b`: **the same model this project runs locally**. That route is §3.33, and it turns
+out to answer a bigger question than the one it was opened for.
+
+---
+
+### 3.33 The same weights, hosted: the quantisation confound is bounded and the flag replicates — `MEASURED` (C6a)
+
+DashScope hosts `qwen3.6-35b-a3b`, which is the model this project runs locally as a 3-bit
+`IQ3_K_R4` quantisation, and it honours `enable_thinking=false`. Running it in both configurations
+on the §3.7 fixtures at the §3.7 budget puts two questions on the same weights at once:
+
+| arm | precision | reasoning | n | parsed | hit the cap | mean F1 | 95% CI |
+|---|---|---|---|---|---|---|---|
+| local `single` | IQ3_K_R4 (3-bit) | off | 25 | 25/25 | — | 0.4136 | — |
+| DashScope | vendor-hosted | **off** | 25 | 25/25 | 0 | **0.3507** | [0.2750, 0.4302] |
+| DashScope | vendor-hosted | **on** | 25 | **1/25** | **24/25** | **0.0080** | [0.0000, 0.0240] |
+
+Paired by fixture and repeat, all n=25:
+
+| comparison | paired delta | 95% CI |
+|---|---|---|
+| hosted (reasoning off) − local | **−0.0629** | [−0.1484, +0.0256] |
+| hosted (reasoning on) − hosted (off) | **−0.3427** | [−0.4264, −0.2654] |
+| hosted (reasoning on) − local | −0.4056 | [−0.4667, −0.3418] |
+
+**The quantisation confound is bounded, and it does not run the way the roadmap assumed.** C6 was
+written with quantisation listed as a confound arithmetic could not remove: the local arm is 3-bit
+and the hosted arms are not, so any gap between them could be precision rather than model. Here the
+same weights are compared to themselves across that axis, and the 3-bit local arm is **0.0629
+higher** than the vendor's own hosting, with an interval that comfortably contains zero. Whatever
+else limits this pipeline, running the model at three bits on one desktop is not it.
+
+What the comparison does *not* isolate is precision alone. Two serving stacks differ here —
+`ik_llama.cpp` locally against DashScope's — and §2.1 already established that samplers this
+project cannot see change outputs on this model. So the honest statement is about the **deployment**
+rather than the quantisation: *this deployment of these weights is not measurably worse than the
+vendor's.* That is the claim the paper can make, and it is the one that matters for a reader
+deciding whether a 3-bit local model invalidates the results.
+
+**The reasoning flag replicates on a second model, and on the one we host.** §3.31 measured the
+flag at 0.45 F1 on `qwen3.6-plus` and could reasonably have been read as a quirk of one endpoint's
+largest model. It is not: on `qwen3.6-35b-a3b` the same flag is worth **0.3427** paired, 24 of 25
+calls hit the output cap with 99.5% of their tokens spent reasoning, and exactly one call in
+twenty-five produced an answer at all. Two models, two sizes, one endpoint, same collapse.
+
+**Where this leaves the frontier comparison.** The largest effect this project has measured on any
+arm remains a configuration flag, not an architecture and not a parameter count. §3.16's +0.0026
+frontier null was measured across that flag (§3.32), and it cannot be re-measured without it on
+that provider. The paper reports the null with the confound named, and the size of the confound —
+0.34 to 0.45 F1 — is now measured on two models rather than estimated from one.
+
+Cost of both arms: **$0.18**.
+
+---
+
+### 3.34 The parameter-size series cannot be built on these endpoints — `NEGATIVE` (C6b)
+
+C6b asked whether F1 tracks parameter count, against `arXiv:2606.18166`'s ρ=0.85. The answer is
+that the question cannot be put to these arms, and the reason is §3.33's finding rather than a
+shortage of endpoints.
+
+A rank correlation over model size needs the arms to differ **in size and not in anything that
+matters more**. The reasoning flag matters more — 0.34 F1 on one model, 0.45 on another — and it
+cannot be held constant across the providers available: DashScope honours it, OpenRouter accepts
+and ignores it (§3.32). What survives the requirement is:
+
+| model | size | reasoning share | usable as a series point |
+|---|---|---|---|
+| Qwen3.6-35B-A3B, local | 35B / 3B active | 0.0% | yes |
+| `qwen3.6-35b-a3b`, hosted | 35B / 3B active | 0.0% | yes |
+| `nemotron-3-super-120b-a12b` | 120B / 12B active | 56.2% | **no** |
+| `qwen3.6-plus` | undisclosed | — | no (size not published) |
+
+**Two configuration-matched arms, at one parameter count.** A correlation needs three points at
+three sizes; this has two points at one. `eval_parameter_size_series.py` now refuses and prints the
+excluded arm with its measured reasoning share, so the refusal is reviewable rather than a silent
+`status: incomplete`.
+
+**P8 therefore closes as a stated limitation with a measured reason.** Not "we could not afford a
+larger model" — the 120B arm ran twice, free, to completion — but *the axis that dominates this
+task cannot be held constant across the providers that publish parameter counts*. That is a
+sharper limitation than the one the roadmap anticipated, and it is a claim about the measurement
+environment rather than an admission about the budget.
+
+**This section exists because the harness reported the opposite first.** Run before the
+configuration gate was added, the series returned **ρ=+0.866** over five rows and printed *"the
+parameter-size prior survives"*. The five rows were three models: `qwen3.6-35b-a3b` appeared twice
+at two reasoning settings and Nemotron twice from two runs. The reasoning-enabled qwen arm — 0.0080
+because of a flag, not because of its size — sat at the small end of the axis and set the sign.
+**A configuration difference was one report away from being published as a scaling law**, on the
+side that agrees with the literature, which is the direction a result is least likely to be
+questioned. The gate that now prevents it keys on the *measured* reasoning share rather than the
+requested flag, because §3.32 is precisely the case where those two disagree. Nine unit tests pin
+it (`TestConfigurationMatching`).
+
+Sixth instrument failure in E6's shape, and the third inside our own evaluation.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
