@@ -22,10 +22,13 @@
 
 What moved, and it is most of the table:
 
-* **The four architectural claims are no longer unmeasured.** C1 fires on **56.7%** of samples
-  (effect still open); C2 is a **measured negative** on both tiers; C3's cap fires on **0.82%** of
-  techniques; C7's integrity pass was read on 60 fresh bundles. Only **C6** (the cascade) still
-  waits on CAPE.
+* **The four architectural claims are no longer unmeasured.** C1's effect is now measured too and
+  is **negative** (§3.18: the hint fires on 56.7% of samples and changes nothing the analyst
+  finds); C2 is a **measured negative** on both tiers; C3's cap fires on **0.82%** of techniques;
+  C7's integrity pass was read on 60 fresh bundles. Ledger row **C6, the cascade, closed
+  `NEGATIVE`** on 2026-08-14 (§3.27) — nothing in the ledger waits on CAPE any more.
+  *(Queue item C6 is a different thing entirely — the frontier series — and is blocked on an
+  endpoint, not on evidence. The name collision has now caused two misreadings of this file.)*
 * **The four new `OURS` rows are all instrument defects; none is architectural.** M1–M3 were found
   on 2026-08-10 — a `null` argument, a program that never became current, an HTTP 200 on a refused
   load — and M4 on 2026-08-11, two local safety bounds composing into an empty result. They join C8.
@@ -94,14 +97,31 @@ own task:
 | MiniMax-M3 | 428B | 22B | new |
 | GLM-5.2 | 744B | 40B | new |
 
-**Measured the same day, because the limits decide the design.** GLM-5.2 answers tool calls
-correctly, accepted a 13,228-token prompt in 4.0 s, and reports usage. Under a client that retries
-without pacing it sustains **36 completed calls per hour** (6 calls and 16 retries in 599 s), which
-is the number that separates C6's two candidate designs:
+**Both new arms are blocked, and the throughput figure first written here has been withdrawn
+(§3.29).** GLM-5.2 does work: it answers tool calls correctly, accepted a 13,228-token prompt in
+4.0 s, and reports usage. But the "36 completed calls per hour" this entry originally carried was
+measured while the endpoint's allowance was draining, and later the same session the same client
+completed **zero** calls; a 24-minute idle watch then returned **0 of 9** successes on both arms.
+The 2.7 h and 55 h per-arm projections built on that number are withdrawn with it.
 
-* **one call per sample over the cohort (n=97) — ~2.7 h per arm.** Reachable today, on any arm.
-* **the full ReAct pipeline (~2,000 requests) — ~55 h per arm.** Not reachable at this rate, and
-  it also cannot share the machine with C4.
+Two candidate designs remain, now costed against a provider that will actually answer:
+
+* **one call per sample over the cohort (n=97)** — the judge-level comparison, on the same evidence
+  §3.27 showed the verdict is decided by. Needs no local resources.
+* **the full ReAct pipeline (~2,000 requests per arm)** — the literal "one endpoint changed"
+  reading. Declined: it cannot share this machine with C4, and the cost is out of proportion to
+  what it adds over the judge-level arm. Stated as a limitation in E2 rather than worked around.
+
+**OpenCode Zen is the live alternative** (`https://opencode.ai/zen/v1`, OpenAI-compatible, so the
+harness needs a config entry and no code). It serves **both** blocked models, which means the
+series design does not change — only the endpoint. Priced from models.dev: `glm-5.2` at
+$1.40/$4.40 per Mtok, `minimax-m3` at $0.30/$1.20. Against B8's measured usage that is **~$0.22 for
+the fixture series and ~$6 for the cohort series**, well inside the configured $25 ceiling. It also
+carries genuinely free models (`nemotron-3-ultra-free`, `deepseek-v4-flash-free`), and a **fifth
+arm would drop the smallest reachable p from 0.083 to 0.017** — the first configuration in which
+this series could reach significance at all. A free arm may only join the correlation if its
+parameter count is published; the code-named models (`big-pickle`, `hy3`, `laguna-s`) cannot.
+Blocked on an API key, which needs the author's account.
 
 **Two confounds this series introduces and must state.** Parameter count is entangled with
 *quantisation* (the local arm is 3-bit; the hosted arms are served at precisions we do not control
@@ -296,7 +316,9 @@ than quietly inheriting.
       relative to production — 25 eligible is a **lower bound** and the real rate will be higher.
       The LLM half (`[LLM]`) measures that and remains queued.
 
-- [ ] **B6 — C1 ablation** `[LLM]` **+ needs the Ghidra container** — *mis-tagged until 2026-08-09*
+- [x] **B6 — C1 ablation** `[done]` **2026-08-11** — frequency §3.15 (fires on 58%, later 56.7%),
+      effect §3.18 `NEGATIVE` (the hint does not change what the analyst finds).
+      `sink_hint_ablation_scored.json`. *Original note, kept: mis-tagged until 2026-08-09.*
       Sink-reachability steering has a clean config gate (`use_sink_reachability`, default True),
       so the ablation itself is simple. What is not simple is the input: the module is pure and
       deterministic, but it consumes a **call graph from Ghidra MCP `get_full_call_graph`**. There
@@ -323,8 +345,9 @@ than quietly inheriting.
       **Remaining work:** the opcode-hash tier, which drives Ghidra MCP `get_bulk_function_hashes`
       and writes to Qdrant. Schedule with the service-heavy items.
 
-- [ ] **B8 — Frontier arm on the fixture suite** `[LLM]` `[$]`
-      Cheap sanity check before the big run: plumbing works, the cost ceiling holds, output parses.
+- [x] **B8 — Frontier arm on the fixture suite** `[done]` **2026-08-12** — §3.16, `frontier_probe.json`.
+      n=25 paired, ΔF1 **+0.0026** [−0.0770, +0.0814]; reasoning is **56.5%** of output tokens.
+      The n=9 first attempt was quota-truncated and pointed the wrong way — see §3.29.
 - [ ] **B9 — Commit the B layer**, update `findings-log.md`, stop llama-server
 
 ## C — The CAPE network (dynamic path) — n=97 recovered of an intended 100 (§3.24)
@@ -332,7 +355,7 @@ than quietly inheriting.
 > **The tightest memory profile in the queue:** llama-server 16.2 GB + an arq analysis ~8.5 GB
 > ≈ 24.7 GB of 30 GB. Never start with the desktop stack loaded. Watcher up for the whole run.
 
-- [ ] **C0 — Connect** `[CAPE]`
+- [x] **C0 — Connect** `[done]` — cohort submitted and fetched; **97 reports** in `data/cape_reports/`
       Three lines into `.env` — there are currently **zero** `MCP__CAPE__*` keys:
       `MCP__CAPE__ENABLED=true`, `MCP__CAPE__TRANSPORT=streamable-http`,
       `MCP__CAPE__URL=http://10.65.0.40:9004/mcp`. Then `make docker-up` and **one clean
@@ -340,7 +363,9 @@ than quietly inheriting.
       touched.
 - [ ] **C1 — 36-tool CAPE MCP verification** `[CAPE]` — the worker is wired directly; every tool
       checked reachable and schema-conformant
-- [ ] **C2 — Sigma / LOLBin / network-DGA layer contribution** `[CAPE]`
+- [x] **C2 — Sigma / LOLBin / network-DGA layer contribution** `[done]` **2026-08-14** — `layer0_six.json`:
+      sigma fires on **94/97**, lolbin **0/97**, network_dga **0/97** (§3.23). The two silent layers are
+      why B3 runs four sources rather than six.
       The other half of the Layer-0 study. Then **re-run the weight-sensitivity analysis with all
       six layers** — §1.10's "the corroborated set moves on 0.0%" was measured with three static
       layers and has to hold with six. → **E.5** complete
@@ -352,7 +377,8 @@ than quietly inheriting.
 - [ ] **C4 — Dynamic cohort vs static-only, paired delta** `[CAPE]` `[LLM]`
       The paper currently *argues* the dynamic path lifts recall. This measures it: same ground
       truth, paired statistics, bootstrap CIs. → **E.3**
-- [ ] **C5 — Baseline with no LLM at all** `[CAPE]`
+- [x] **C5 — Baseline with no LLM at all** `[done]` **2026-08-14** — §3.26, `cape_baseline.json`.
+      CAPE alone: **F1 0.1526** [0.1344, 0.1709] at n=97. Every F1 in this paper now has a referent.
       CAPE's own signature-derived TTPs on the same recovered cohort. **Without this, "F1 0.08" has no
       referent** — arguably the single highest-value item in the queue. → **E.4**
 - [ ] **C6 — Parameter-size series on the recovered cohort (n=97)** `[LLM]` `[network]`
@@ -370,7 +396,10 @@ than quietly inheriting.
         actually decided. The full-ReAct variant (~2,000 requests, ~55 h/arm, and it cannot share
         the machine with C4) is **not** attempted at this rate; that limitation is stated in E2
         rather than worked around.
-- [ ] **C7 — Close P6** `[cheap]` once C runs exist
+- [x] **C7 — Close P6** `[done]` **2026-08-14** — §3.28. Step budget hit on **82.1%** of arms (always at
+      exactly 19 tool calls / 41 messages), a tool output cut on **83.9%**, evidence chunked on **48.2%**.
+      P6 `EXPOSED` → `PARTIAL`, not `CLEAR`: frequency is reported, **impact is not**, because with 46 of
+      56 arms at the same cap there is no unaffected control group to compare against.
       Truncation frequency distribution from A3's counters: how many runs truncated, how many
       chunks dropped, how often `max_steps` was hit — **and the performance impact**. Exactly what
       the pitfall asks for. → **P6 `EXPOSED` → `CLEAR`**
@@ -378,7 +407,8 @@ than quietly inheriting.
 
 ## D — Closing measurements and decisions
 
-- [ ] **D1 — Readability assessment (internal, LLM-based)** `[LLM]`
+- [x] **D1 — Readability assessment (internal, LLM-based)** `[done]` — §3.20, `narrative_quality.md`.
+      Stays out of the paper as decided; E.7 remains an open limitation.
       15 reports scored on a rubric (structure, traceability, redundancy, actionability),
       deterministic template vs LLM narrative, blinded. Recorded in `findings-log.md` **explicitly
       labelled an LLM-based internal instrument**, used to steer development.
