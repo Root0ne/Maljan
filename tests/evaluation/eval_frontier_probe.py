@@ -137,18 +137,35 @@ def main() -> int:
 
     # Resume: a throttle storm can stretch 25 calls across a long wall-clock, and
     # losing completed calls to an interruption is how a series loses a point.
+    #
+    # **Only a scored call counts as done.** An errored row is kept in the
+    # checkpoint as a record but is retried on the next run, because the errors
+    # this arm actually produces are transient: a 429 that outlasts PacedCaller's
+    # six backoffs is the endpoint being busy, not the call being impossible.
+    # Treating it as permanent would turn one bad hour into 25 holes that no
+    # later run could ever fill — and a partially scored arm still enters the
+    # series, so those holes would silently become the measurement. (This is the
+    # same defect the C4 harness had on 2026-08-12, reintroduced here and caught
+    # before it ran; "error rows counted as done" is evidently a mistake worth
+    # testing for rather than remembering.)
     ckpt = checkpoint_path(args.arm)
-    rows: list[dict[str, Any]] = []
-    done: set[str] = set()
+    latest: dict[str, dict[str, Any]] = {}
     if ckpt.exists():
         for line in ckpt.read_text().splitlines():
             try:
                 prior = json.loads(line)
             except Exception:  # noqa: BLE001
                 continue
-            rows.append(prior)
-            done.add(f"{prior.get('sample_id')}:{prior.get('repeat')}")
-        print(f"resume: {len(done)} calls already recorded")
+            key = f"{prior.get('sample_id')}:{prior.get('repeat')}"
+            # A later scored row supersedes an earlier error; an error never
+            # supersedes a score.
+            if key in latest and "error" in prior and "error" not in latest[key]:
+                continue
+            latest[key] = prior
+    rows: list[dict[str, Any]] = list(latest.values())
+    done = {k for k, r in latest.items() if "error" not in r}
+    if latest:
+        print(f"resume: {len(done)} scored, {len(latest) - len(done)} errored (will retry)")
 
     for rep in range(repeats):
         for sample_id, truth in samples:

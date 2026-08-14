@@ -61,6 +61,12 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 OUT_JSON = _HERE / "parameter_size_series.json"
 OUT_MD = _HERE / "parameter_size_series.md"
 
+# Below this many shared cells the arms are not being compared on the same
+# evidence in any useful sense, whatever the arithmetic says. Deliberately a
+# floor *and* a proportion of the largest arm (see build_report): a fixed 10
+# would pass a series in which one arm scored 10 of 25 and the rest scored 25.
+MIN_COMMON_CELLS = 10
+
 # The local arm is the `single` arm of the consensus ablation: same fixtures,
 # same prompt, same budget as every frontier probe. Reusing it rather than
 # re-running it keeps the series anchored to a measurement the paper already
@@ -146,6 +152,32 @@ def best_achievable_p(n: int) -> float:
         return 1.0
     xs = [float(i) for i in range(n)]
     return exact_two_tailed_p(xs, xs)
+
+
+def common_cells(arms: list[dict[str, Any]]) -> set[str]:
+    """The fixture×repeat cells every arm scored.
+
+    The arms do **not** complete the same cells: an endpoint that throttles for
+    an hour leaves holes, and those holes are not random with respect to
+    anything we can check. Comparing each arm's mean over *its own* completed
+    cells would let "which calls got through" enter the correlation alongside
+    "how large the model is", and the two are indistinguishable afterwards.
+
+    So the series is computed on the intersection. This costs n and buys the
+    only thing that makes the comparison mean what it says.
+    """
+    sets = [set(a.get("by_key") or {}) for a in arms]
+    if not sets or any(not s for s in sets):
+        return set()
+    out = sets[0]
+    for s in sets[1:]:
+        out = out & s
+    return out
+
+
+def mean_over(by_key: dict[str, float], cells: set[str]) -> float | None:
+    shared = [by_key[c] for c in sorted(cells) if c in by_key]
+    return sum(shared) / len(shared) if shared else None
 
 
 def paired_delta(a: dict[str, float], b: dict[str, float]) -> tuple[list[float], int]:
@@ -252,9 +284,37 @@ def build_report(arms: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         result["status"] = "incomplete"
         return "\n".join(lines), result
 
+    # The correlation runs on the cells every arm scored, not on each arm's own
+    # completed subset — otherwise "which calls got through" is confounded with
+    # "how large the model is". An arm that limped to three scored calls would
+    # otherwise carry the same weight as one that completed all 25.
+    cells = common_cells(usable)
+    biggest = max(a["n"] for a in usable)
+    result["common_cells"] = len(cells)
+    result["largest_arm_n"] = biggest
+    if len(cells) < max(MIN_COMMON_CELLS, int(0.6 * biggest)):
+        lines += [
+            "",
+            f"**Not comparable: only {len(cells)} fixture-repeat cells were scored by every",
+            f"arm** (largest single arm: {biggest}). The correlation is not computed. Comparing",
+            "arms over cells they did not share would let endpoint availability enter the",
+            "result alongside model size, and the two cannot be separated afterwards.",
+            "",
+            "| arm | scored | of which shared |",
+            "|---|---|---|",
+        ]
+        for a in usable:
+            lines.append(f"| {a.get('arm', '?')} | {a['n']} | {len(set(a['by_key']) & cells)} |")
+        result["status"] = "not-comparable"
+        return "\n".join(lines), result
+
+    for a in usable:
+        a["mean_f1_common"] = round(mean_over(a["by_key"], cells) or 0.0, 4)
+    result["arms"] = [{k: v for k, v in a.items() if k != "by_key"} for a in usable]
+
     totals = [a["total_params_b"] for a in usable]
     actives = [a.get("active_params_b", 0.0) for a in usable]
-    f1s = [a["mean_f1"] for a in usable]
+    f1s = [a["mean_f1_common"] for a in usable]
     rho_total = spearman(totals, f1s)
     rho_active = spearman(actives, f1s)
     p_total = exact_two_tailed_p(totals, f1s)

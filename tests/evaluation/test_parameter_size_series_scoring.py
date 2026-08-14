@@ -27,7 +27,9 @@ import pytest
 from tests.evaluation.eval_parameter_size_series import (
     best_achievable_p,
     build_report,
+    common_cells,
     exact_two_tailed_p,
+    mean_over,
     paired_delta,
     ranks,
     spearman,
@@ -139,14 +141,21 @@ class TestSummariseArm:
 
 
 def _arm(name: str, total: float, active: float, f1: float) -> dict[str, object]:
+    """A fully-scored arm: all 25 fixture-repeat cells, every one at ``f1``.
+
+    ``by_key`` is populated rather than left empty because the report now
+    correlates over the cells every arm shares — an arm with no cells is, quite
+    correctly, refused as not comparable.
+    """
+    cells = {f"s{i}:{r}": f1 for i in range(5) for r in range(5)}
     return {
         "arm": name,
         "model": f"model-{name}",
         "total_params_b": total,
         "active_params_b": active,
         "mean_f1": f1,
-        "n": 25,
-        "by_key": {},
+        "n": len(cells),
+        "by_key": cells,
     }
 
 
@@ -208,3 +217,113 @@ class TestReport:
             ]
         )
         assert blob["param_span"] == pytest.approx(744 / 35, abs=0.1)
+
+
+class TestCommonCells:
+    """The arms do not complete the same cells, and the holes are not random.
+
+    Found by review on 2026-08-14, before either new arm had run: the first
+    version of ``build_report`` compared each arm's mean over *its own* scored
+    calls, so an endpoint that throttled through half its run would have entered
+    the correlation with a mean taken from whichever calls happened to get
+    through. Endpoint availability and model size would then be inseparable.
+    """
+
+    def test_the_intersection_is_what_gets_compared(self) -> None:
+        arms = [
+            {"by_key": {"a:0": 0.1, "b:0": 0.2, "c:0": 0.3}},
+            {"by_key": {"a:0": 0.4, "b:0": 0.5}},
+        ]
+        assert common_cells(arms) == {"a:0", "b:0"}
+
+    def test_one_empty_arm_empties_the_intersection(self) -> None:
+        """An arm that scored nothing must not silently drop out of the
+        intersection and leave the others looking comparable."""
+        assert common_cells([{"by_key": {"a:0": 0.1}}, {"by_key": {}}]) == set()
+
+    def test_no_arms_is_empty_rather_than_an_error(self) -> None:
+        assert common_cells([]) == set()
+
+    def test_mean_over_uses_only_the_named_cells(self) -> None:
+        got = mean_over({"a:0": 0.0, "b:0": 1.0, "c:0": 9.9}, {"a:0", "b:0"})
+        assert got == pytest.approx(0.5)
+
+    def test_mean_over_an_empty_selection_is_none_not_zero(self) -> None:
+        """Zero is a legitimate F1; None is 'nothing was measured'."""
+        assert mean_over({"a:0": 0.5}, set()) is None
+
+
+def _arm_with_cells(name: str, total: float, active: float, cells: dict[str, float]) -> dict:
+    return {
+        "arm": name,
+        "model": f"model-{name}",
+        "total_params_b": total,
+        "active_params_b": active,
+        "mean_f1": round(sum(cells.values()) / len(cells), 4) if cells else None,
+        "n": len(cells),
+        "by_key": cells,
+    }
+
+
+class TestPartialArmsAreRefused:
+    def test_a_barely_scored_arm_stops_the_correlation(self) -> None:
+        """The failure this guards: one arm limps to 3 of 25 calls and carries
+        the same weight in rho as an arm that completed all 25."""
+        full = {f"s{i}:0": 0.4 for i in range(25)}
+        _md, blob = build_report(
+            [
+                _arm_with_cells("local", 35, 3, dict(full)),
+                _arm_with_cells("nemotron", 120, 12, dict(full)),
+                _arm_with_cells("minimax", 428, 22, {"s0:0": 0.9, "s1:0": 0.9, "s2:0": 0.9}),
+                _arm_with_cells("glm", 744, 40, dict(full)),
+            ]
+        )
+        assert blob["status"] == "not-comparable"
+        assert "rho_total_params" not in blob
+        assert blob["common_cells"] == 3
+
+    def test_the_refusal_shows_each_arm_s_shared_count(self) -> None:
+        """So the reader can see which endpoint caused it rather than guessing."""
+        full = {f"s{i}:0": 0.4 for i in range(25)}
+        md, _ = build_report(
+            [
+                _arm_with_cells("local", 35, 3, dict(full)),
+                _arm_with_cells("nemotron", 120, 12, dict(full)),
+                _arm_with_cells("minimax", 428, 22, {"s0:0": 0.9}),
+                _arm_with_cells("glm", 744, 40, dict(full)),
+            ]
+        )
+        assert "of which shared" in md
+        assert "minimax" in md
+
+    def test_fully_scored_arms_correlate_on_the_shared_cells(self) -> None:
+        full = {f"s{i}:0": 0.4 for i in range(25)}
+        rising = [0.30, 0.40, 0.50, 0.60]
+        arms = [
+            _arm_with_cells("local", 35, 3, {k: rising[0] for k in full}),
+            _arm_with_cells("nemotron", 120, 12, {k: rising[1] for k in full}),
+            _arm_with_cells("minimax", 428, 22, {k: rising[2] for k in full}),
+            _arm_with_cells("glm", 744, 40, {k: rising[3] for k in full}),
+        ]
+        _md, blob = build_report(arms)
+        assert blob["status"] == "complete"
+        assert blob["common_cells"] == 25
+        assert blob["rho_total_params"] == pytest.approx(1.0)
+
+    def test_the_shared_mean_is_what_rho_uses_not_the_arms_own_mean(self) -> None:
+        """An arm whose extra, unshared calls were unusually good must not carry
+        that advantage into the correlation."""
+        shared = {f"s{i}:0": 0.30 for i in range(25)}
+        inflated = dict(shared) | {f"x{i}:0": 1.0 for i in range(10)}
+        arms = [
+            _arm_with_cells("local", 35, 3, dict(shared)),
+            _arm_with_cells("nemotron", 120, 12, dict(shared)),
+            _arm_with_cells("minimax", 428, 22, dict(shared)),
+            _arm_with_cells("glm", 744, 40, inflated),
+        ]
+        _md, blob = build_report(arms)
+        glm = next(a for a in blob["arms"] if a["arm"] == "glm")
+        # 25 shared cells at 0.30 plus 10 unshared at 1.0 → its own mean is 0.50
+        assert glm["mean_f1"] == pytest.approx(0.50, abs=0.01)  # inflated by the extras
+        assert glm["mean_f1_common"] == pytest.approx(0.30)  # what rho actually uses
+        assert blob["rho_total_params"] == 0.0
