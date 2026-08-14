@@ -72,7 +72,43 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
 | Frontier arm | **Yes**, small budget — closes P8 + E.4 + E.8 in one experiment (A6, B8, C6) |
 | Human evaluation | Replaced by an **internal, explicitly LLM-based** readability assessment (D1) that **does not enter the paper**; E.7 stays an open limitation |
 | Target | No venue fixed, **quality first** — nothing is pruned from this queue |
-| Second open-weight model | **Dropped.** C6 answers the same question more sharply; revisit only if C6 is inconclusive |
+| Second open-weight model | ~~Dropped~~ — **reinstated and then some, 2026-08-14** (see below) |
+
+### Revised 2026-08-14 — the frontier arm is a series, not a model
+
+Two further endpoints became reachable on the author's own NVIDIA account, at no cost. That
+retires the "second open-weight model" decision above on its own terms: it was dropped because a
+second local model cost hours of download for a weak second data point, and this costs neither.
+
+The reason it matters is not that there are more models but that **a trend can now be tested where
+only a point could be before.** `arXiv:2606.18166` reports parameter count as the *only*
+significant predictor of ATT&CK-classification F1 (ρ=0.85, p=0.014). Against a single comparison
+model, B8's null says "these two did not separate". Against four models spanning **21× in total
+parameters and 13× in active parameters**, the same question becomes a dose-response test on our
+own task:
+
+| arm | total | active | status |
+|---|---|---|---|
+| Qwen3.6-35B-A3B (IQ3_K_R4), local | 35B | 3B | the system's own model |
+| Nemotron-3-Super-120B-A12B | 120B | 12B | **done** — B8, n=25, §3.16 |
+| MiniMax-M3 | 428B | 22B | new |
+| GLM-5.2 | 744B | 40B | new |
+
+**Measured the same day, because the limits decide the design.** GLM-5.2 answers tool calls
+correctly, accepted a 13,228-token prompt in 4.0 s, and reports usage. Under a client that retries
+without pacing it sustains **36 completed calls per hour** (6 calls and 16 retries in 599 s), which
+is the number that separates C6's two candidate designs:
+
+* **one call per sample over the cohort (n=97) — ~2.7 h per arm.** Reachable today, on any arm.
+* **the full ReAct pipeline (~2,000 requests) — ~55 h per arm.** Not reachable at this rate, and
+  it also cannot share the machine with C4.
+
+**Two confounds this series introduces and must state.** Parameter count is entangled with
+*quantisation* (the local arm is 3-bit; the hosted arms are served at precisions we do not control
+or fully know) and with *training corpus and lab* — four models from four organisations are not
+four draws from one population. A ρ over four such points is descriptive, not inferential, and the
+paper must say so. `arXiv:2606.18166` has the same weakness, which is worth noting in E3 rather
+than quietly inheriting.
 
 ---
 
@@ -319,10 +355,21 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
 - [ ] **C5 — Baseline with no LLM at all** `[CAPE]`
       CAPE's own signature-derived TTPs on the same recovered cohort. **Without this, "F1 0.08" has no
       referent** — arguably the single highest-value item in the queue. → **E.4**
-- [ ] **C6 — Frontier arm on the recovered cohort (n=97)** `[LLM]` `[$]`
-      Same pipeline, one endpoint changed. `arXiv:2606.18166` found parameter size is the **only**
-      significant predictor of ATT&CK-classification F1 (ρ=0.85, p=0.014), so without this arm the
-      architecture/model confound stands. → **E.4 + E.8 + P8**
+- [ ] **C6 — Parameter-size series on the recovered cohort (n=97)** `[LLM]` `[network]`
+      *Rescoped 2026-08-14 from "one frontier arm" — see the decision table above.* Four models,
+      35B → 744B total parameters, each answering on the same evidence with the same output budget.
+      `arXiv:2606.18166` found parameter size the **only** significant predictor of
+      ATT&CK-classification F1 (ρ=0.85, p=0.014); this tests that trend rather than sampling one
+      point on it. → **E.4 + E.8 + P8**
+      Runs in two stages, because the endpoints' rate limits make them different experiments:
+  - [ ] **C6a — the series on the §3.7 fixtures** (5 fixtures × 5 repeats × 2 new arms = 50 calls,
+        ~1.4 h each at the measured 36 calls/h). Directly comparable to B8's stored n=25, so the
+        four-point curve exists before the cohort is touched. **No local resources — runs beside C4.**
+  - [ ] **C6b — the series on the cohort** (97 calls per arm, ~2.7 h each). One call per sample on
+        the same evidence the local judge received, which is where §3.27 showed the verdict is
+        actually decided. The full-ReAct variant (~2,000 requests, ~55 h/arm, and it cannot share
+        the machine with C4) is **not** attempted at this rate; that limitation is stated in E2
+        rather than worked around.
 - [ ] **C7 — Close P6** `[cheap]` once C runs exist
       Truncation frequency distribution from A3's counters: how many runs truncated, how many
       chunks dropped, how often `max_steps` was hit — **and the performance impact**. Exactly what
