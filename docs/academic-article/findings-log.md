@@ -2560,6 +2560,15 @@ is now reported with its denominator, and impact is not, because with 46 of 56 a
 cap there is barely an unaffected control group to compare against. We can say how often the system
 runs truncated. We cannot yet say what it costs.
 
+> **Added 2026-08-15 — a fifth truncation site that is missing for a reason.** The ledger carries a
+> `judge_token_cap_hits` counter and this table has no row for it. That is not an oversight in the
+> census: §3.35 shows the judge's 8,192-token ceiling **never reached the model server** — the
+> parameter is renamed by the client library to a key the server does not read — so the judge has
+> been decoding without a cap, no call ever returned `finish_reason: length`, and the counter could
+> not fire. The correct reading of its absence is therefore the opposite of the natural one: the
+> judge's truncation site was **unbounded, not untriggered.** Measured on one call at 30,155
+> generated tokens against that 8,192 cap, still generating when the caller gave up.
+
 ### 3.29 A throughput figure that described a quota draining, not a rate — `INSTRUMENT FAILURE` (C6)
 
 Two additional comparison endpoints (NVIDIA NIM: `z-ai/glm-5.2`, `minimaxai/minimax-m3`) were
@@ -2843,6 +2852,72 @@ requested flag, because §3.32 is precisely the case where those two disagree. N
 it (`TestConfigurationMatching`).
 
 Sixth instrument failure in E6's shape, and the third inside our own evaluation.
+
+---
+
+### 3.35 The judge's output ceiling never reached the server — `DEFECT` (found while running C3)
+
+`ServiceContainer.get_judge_llm` builds the verdict model with
+`max_tokens=judge_max_tokens` (8,192) and says why in its own comment: *"Bound the verdict
+generation so a degenerate decode can't consume the full wall-clock timeout."* The intent was
+right. The request was not.
+
+**What is actually on the wire.** `langchain-openai` renames `max_tokens` to OpenAI's newer
+`max_completion_tokens` when it serialises the payload. ik_llama.cpp's OpenAI-compatible endpoint
+does not know that key, so it accepts the field, ignores it, and decodes without a ceiling:
+
+```
+wire keys: ['extra_body', 'max_completion_tokens', 'messages', 'model', 'stream', 'temperature']
+max_completion_tokens = 8192          ← set, and read by nobody
+```
+
+**Measured, not inferred.** One judge call on the `jhuhugit` fixture, 2026-08-15:
+
+| | |
+|---|---|
+| prompt | **1,403** tokens (server checkpoint 1 of 32) |
+| position when the client gave up | **31,558** |
+| tokens generated | **30,155** — against a cap of 8,192 |
+| still generating at that point | yes, ~46 tok/s at 1,520% CPU |
+| what stopped it | the caller's 600 s `asyncio.wait_for`, nothing else |
+
+**Where it was invisible.** Every level anyone would inspect was correct. `judge_max_tokens` is
+8192 in the config; the container passes it; `ChatOpenAI.max_tokens` holds it; it survives
+`bind_eval_llm`'s `.bind()` intact. Only the serialised request was wrong, and nothing reads that.
+
+**This is the paper's own thesis, in our own production configuration.** Every mechanism in E6 has
+the shape *a parameter is accepted and ignored*; M1–M4 are other people's servers and M5–M6 are our
+analysis code. This one is neither: it is the pipeline that produces the artefact, and it has been
+running this way for as long as the cap has existed. It is also the **second** parameter measured
+tonight to be accepted and ignored — the first being `enable_thinking` on OpenRouter (§3.32). Two
+different providers, two different parameters, same failure, one evening.
+
+**Consequences, in order of how much they cost.**
+
+1. **The judge can decode until the context ends.** At 65,536 context and ~46 tok/s that is roughly
+   twenty minutes of generation per call, bounded only by whatever wall-clock ceiling the caller
+   happens to set. §3.3's degenerate-ID loop is the mechanism; the missing cap is why it is not
+   contained.
+2. **C3's timeouts are this defect, not the fixtures.** Four of eight fixtures never returned a
+   verdict. On those the pipeline builds its bundle through `_fallback_bundle_from_text`, which
+   never calls the reconciliation step — so the cascade contributes nothing and the analyst
+   receives techniques copied straight from the Layer-0 ISR claims (§3.36).
+3. **The truncation ledger has a judge-ceiling counter that could never have fired, and P6's census
+   does not include it.** `truncation_ledger.judge_token_cap_hits` detects the cap by
+   `finish_reason == "length"`; a cap the server never applies produces no such finish reason, so
+   the counter reads zero for a reason that has nothing to do with how often the judge runs long.
+   §3.28's table reports four truncation sites and this is not one of them — the census is
+   therefore complete as printed, and the omission is now explained rather than being a gap. The
+   step-budget and tool-output figures there are unaffected. What P6 should say after this is that
+   the judge's truncation site was **unbounded rather than untriggered**, which is the opposite of
+   what an absent row implies.
+
+**Fixed** (`OUTPUT-CAP-01`) the way the repetition-penalty guard immediately above it already
+works: re-send the cap through `extra_body`, which reaches the server verbatim, under both
+spellings the llama.cpp forks disagree about (`max_tokens`, `n_predict`). Local servers only —
+vanilla OpenAI rejects unknown body fields. Nine tests pin the wire format, including that the two
+`extra_body` guards do not clobber each other and that a cap of 0 is never forwarded, since that
+would return nothing at all.
 
 ---
 
