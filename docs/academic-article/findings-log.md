@@ -2463,6 +2463,43 @@ is now reported with its denominator, and impact is not, because with 46 of 56 a
 cap there is barely an unaffected control group to compare against. We can say how often the system
 runs truncated. We cannot yet say what it costs.
 
+### 3.29 A throughput figure that described a quota draining, not a rate — `INSTRUMENT FAILURE` (C6)
+
+Two additional comparison endpoints (NVIDIA NIM: `z-ai/glm-5.2`, `minimaxai/minimax-m3`) were
+brought up on 2026-08-14 to turn the single frontier arm into a four-model parameter series. Both
+answered correctly at first — GLM-5.2 emitted a well-formed tool call, accepted a 13,228-token
+prompt in 4.0 s and returned usage metadata — and then stopped answering entirely.
+
+**The failure is in what we measured in between.** A pacing probe reported **36 completed calls per
+hour** for GLM-5.2 (6 calls, 16 retries, 599 s), and that number was carried into planning: the
+cohort arm was costed at ~2.7 h and the full-pipeline arm at ~55 h. Later in the *same session* the
+same client completed **zero** calls in 428 s, and a subsequent 24-minute watch — nine probes, three
+minutes apart, the client otherwise idle — returned **0 of 9** HTTP 200s on both endpoints.
+
+Those observations cannot both describe a steady state. The first was not a throughput measurement;
+it was the tail of a quota being consumed, sampled while it still had something left. **A rate
+measured on a resource that is being exhausted is not a rate**, and the mistake is a close relative
+of §3.16's: an estimate taken before the run finished, believed because it was a number.
+
+Three things worth keeping:
+
+* **Idle time does not restore it.** Three-minute gaps with no traffic rule out short-window rate
+  limiting; whatever the limit is, it is not per-minute.
+* **The refusal carries no metadata.** No `x-ratelimit-*`, `retry-after`, quota or credit header of
+  any kind — a client cannot tell how long to wait, or whether waiting helps. `{"status":429,
+  "title":"Too Many Requests"}` is the entire body. This repeats the CAPE instance's pattern (§5 of
+  E5, where the throttle and the auth refusal are byte-identical): **the two providers this project
+  depends on both signal exhaustion in a form no automated client can act on.**
+* **The catalogue oversells.** 102 models are listed; every one probed outside the two provisioned
+  for this account returns HTTP 404 with an unresolved function id. So "a third endpoint" is not an
+  available fallback, and the block could not be isolated to one model versus the account.
+
+**Consequence.** C6's two new arms are unscheduled rather than delayed — no completion date is
+claimed, because whether the allowance resets is itself unmeasured. The infrastructure is finished
+and tested (`PacedCaller`, per-arm provenance, the series analysis and its p=0.083 floor at four
+arms), so the arms run whenever the endpoints do. The B8 arm is unaffected: it is a different
+provider and its n=25 record is complete.
+
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 

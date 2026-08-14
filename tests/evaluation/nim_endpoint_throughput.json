@@ -1,0 +1,46 @@
+{
+ "z-ai/glm-5.2": {
+  "window_s": 598.9,
+  "completed": 6,
+  "failed": 1,
+  "retries": 16,
+  "calls_per_min": 0.6,
+  "calls_per_hour": 36.1,
+  "mean_seconds_per_completed_call": 84.6,
+  "projection_97_calls_hours": 2.69,
+  "projection_2000_calls_hours": 55.5,
+  "tools": {
+   "reached_endpoint": false,
+   "seconds": 428.3,
+   "retries": 8,
+   "emitted_tool_call": false,
+   "calls": [],
+   "content_instead": null,
+   "detail": {
+    "status": 429
+   }
+  }
+ },
+ "minimaxai/minimax-m3": {
+  "window_s": 428.7,
+  "completed": 0,
+  "failed": 1,
+  "retries": 8,
+  "calls_per_min": 0.0,
+  "calls_per_hour": 0.0,
+  "mean_seconds_per_completed_call": 427.7,
+  "projection_97_calls_hours": null,
+  "projection_2000_calls_hours": null,
+  "tools": {
+   "reached_endpoint": false,
+   "seconds": 427.9,
+   "retries": 8,
+   "emitted_tool_call": false,
+   "calls": [],
+   "content_instead": null,
+   "detail": {
+    "status": 429
+   }
+  }
+ }
+}

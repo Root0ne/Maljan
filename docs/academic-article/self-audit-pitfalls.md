@@ -309,12 +309,13 @@ suggestive rather than significant, and two confounds (quantisation entangled wi
 rather than four draws from one population) are irreducible. The series therefore cannot move this
 row to `CLEAR` on its own; it can only make the `PARTIAL` much better evidenced.
 
-**Blocked as of 2026-08-14.** Both new endpoints began refusing every request with HTTP 429, and
-the refusal carries no `x-ratelimit-*` header of any kind to say how long to wait. An earlier
-throughput figure taken from these endpoints — 36 completed calls an hour — did not survive: later
-in the same session the same client completed zero, so that number described a quota draining
-rather than a rate. Whether the endpoints recover is under measurement and not yet answered, so no
-completion date is claimed for the two new arms.
+**Blocked as of 2026-08-14, and unscheduled rather than delayed (§3.29).** Both new endpoints
+refuse every request with HTTP 429 carrying no `x-ratelimit-*`, `retry-after` or quota header of
+any kind. A 24-minute watch with the client idle between probes returned **0 of 9** successes on
+both. An earlier throughput figure from these endpoints — 36 completed calls an hour — did not
+survive the session and has been withdrawn: it sampled a quota being consumed rather than a rate.
+No completion date is claimed for the two new arms, because whether the allowance resets is itself
+unmeasured. The infrastructure is finished and tested, so they run whenever the endpoints do.
 
 **Verdict: `PARTIAL`, and closer to `CLEAR` than at any earlier pass.** The write-up half is done —
 all four claims carry their scope at the point of claim, `related-work.md` carries a section-level
