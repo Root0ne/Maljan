@@ -2381,6 +2381,48 @@ coarse per-sample truth, so absolute recall carries a structural cap. That bias 
 the baseline and the pipeline, which is exactly why the comparison is worth more than either
 number alone.
 
+---
+
+### 3.27 The verdict follows the claims and ignores the corroboration — `NEGATIVE` (B3 re-run, attempt 2, complete)
+
+Both conditions are in: 80 judge calls over 8 fixtures carrying 12 to 51 techniques, four Layer-0
+sources, one arm per source plus the baseline. The two halves point in opposite directions, and
+together they answer the question §1.10 left open.
+
+| condition | what removing a layer does to the evidence | verdict changed | Jaccard vs `all` |
+|---|---|---|---|
+| `disjoint` | its techniques disappear — no other source claims them | **32/32** | 0.738–0.765 |
+| `overlap` | its techniques survive — a partner still claims them — but their **corroboration** changes | **0/32** | **1.000 [1.000, 1.000]** |
+
+**The judge is reading the claim list and nothing else.** Take a technique away and the bundle
+loses it; leave the technique but destroy the cross-domain agreement behind it and the bundle is
+byte-identical. The cascade computes corroboration, weights it by layer trust and surfaces it in
+the run summary — and none of that reaches the artefact the analyst receives.
+
+This is §1.10's null established rather than inherited. That version measured three static sources
+on five-technique fixtures, where the sixth source received nothing and its arm was identical to
+the baseline by arithmetic (§3.22). This one includes `sigma_layer` at weight 0.55 — the heaviest
+source, and the one previously absent — gives every source at least three claims, and adds a
+yara-free corroborated pair so that no arm is a foregone conclusion (§3.23). The null survives all
+of it, at 32 arms rather than 15.
+
+**A pre-registered prediction, resolved in both directions.** `no_tool_artifact_layer` was
+predicted to change nothing, because that source shares yara's cascade domain and so cannot
+contribute corroboration. In `overlap` that is exactly right: 0/8. In `disjoint` it is wrong, 8/8,
+because there the source solely owns its techniques and removing it removes them. The prediction
+was about corroboration, and it holds precisely where corroboration is the only thing that varies.
+
+**What this costs the architecture.** C6 — the multi-layer corroboration cascade — cannot be
+claimed as a contribution to the output. It is a real mechanism with a measurable internal state,
+and that state is downstream-inert on this evidence. Whether corroboration *should* reach the
+verdict is a design question; whether it *does* is now settled.
+
+B4 rides along on both runs, and fresh bundles behave quite unlike the archived ones (3 removals
+in 60, all `empty_pattern`): the integrity pass ran on 51 of 80 bundles and removed something on
+15, 51 objects in total, across all four defect classes — 19 `duplicate_attack_pattern`,
+21 `empty_pattern`, 8 `dangling_relationship`, 3 `duplicate_relationship`.
+
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
