@@ -90,6 +90,59 @@ def _pattern_ids(objects: list[Any]) -> tuple[int, list[str]]:
     return total, ids
 
 
+def as_dicts(objects: list[Any]) -> list[dict[str, Any]]:
+    """STIX objects as plain dicts, whichever side of validation they came from.
+
+    ``_reconcile_with_cascade`` sees dicts, because it runs inside
+    ``postprocess_judge_bundle`` before the bundle is validated. The fallback
+    path does not: ``_fallback_bundle_from_text`` ends in
+    ``Bundle.model_validate(...)`` and ``Bundle.objects`` is typed as a union of
+    pydantic models, so every object arrives as a model instance.
+
+    ``_pattern_ids`` skips anything that is not a dict, so reading the fallback
+    bundle without this returned **zero attack-patterns for every fallback,
+    structurally** — a number that looks like a finding about the bundle and is
+    really a fact about the type check. Caught on 2026-08-14 by reading the
+    production fallback builder, which visibly copies technique ids out of the
+    ISR claims: a bundle that provably contains patterns cannot report none.
+    """
+    out: list[dict[str, Any]] = []
+    for obj in objects or []:
+        if isinstance(obj, dict):
+            out.append(obj)
+        elif hasattr(obj, "model_dump"):
+            try:
+                out.append(obj.model_dump(mode="json", exclude_none=True))
+            except Exception:  # noqa: BLE001 — an unserialisable object is not a pattern
+                continue
+    return out
+
+
+def _fallback_reason(raw: str) -> str:
+    """Name the branch of ``give_verdict`` that routed this call to the fallback.
+
+    The four early returns are distinguishable from the text they were handed,
+    which is why this reads ``raw`` rather than a stack: ``"[TIMEOUT]"`` is a
+    literal the timeout branch passes in, and the two JSON branches are decided
+    by re-running the same parser on the same string. Anything that parses to a
+    dict and still arrived here got past both JSON gates, so the only remaining
+    path is the one where post-processing or Bundle validation raised.
+    """
+    if raw == "[TIMEOUT]":
+        return "verdict_timed_out"
+    try:
+        from maljan.utils.json_cleaner import safe_parse_json
+
+        data = safe_parse_json(raw)
+    except Exception:  # noqa: BLE001 — the parser's own failure is still data
+        return "json_parser_raised"
+    if data is None:
+        return "no_json_in_response"
+    if not isinstance(data, dict):
+        return "json_not_an_object"
+    return "postprocess_or_validation_raised"
+
+
 def install_spy(captured: list[dict[str, Any]]) -> Any:
     """Record what crosses the judge/cascade seam, then delegate untouched.
 
@@ -97,6 +150,22 @@ def install_spy(captured: list[dict[str, Any]]) -> Any:
     resolves the name from module globals at call time. The real function still
     runs, so the pipeline behaves exactly as in production — this observes, it
     does not substitute.
+
+    **Two seams, not one.** The first run of this harness recorded five of nine
+    calls as the error ``"reconcile never ran"`` and they were read as machine
+    trouble. They are not. ``give_verdict`` has four early returns —
+    ``judge_agent.py`` at the timeout branch, the two JSON gates, and the
+    post-processing ``except`` — and every one of them returns
+    ``_fallback_bundle_from_text`` **without calling ``postprocess_judge_bundle``
+    at all**. On those calls ``_reconcile_with_cascade`` genuinely never runs, so
+    the cascade's technique set is never injected and the bundle is built by a
+    different construction path entirely.
+
+    That matters beyond this harness. §3.27.1's finding — the bundle's technique
+    set equals the cascade's exactly — was measured on calls that reached
+    reconciliation. It says nothing about calls that never got there. So the
+    fallback is instrumented as a *second outcome* rather than an absence: which
+    branch fired, and how much text the model had produced when it did.
     """
     import maljan.agents.judge_postprocess as jp
 
@@ -110,6 +179,7 @@ def install_spy(captured: list[dict[str, Any]]) -> Any:
         resolvable_set = set(resolvable)
         captured.append(
             {
+                "path": "reconciled",
                 "judge_patterns_emitted": emitted,
                 "judge_patterns_resolvable": len(resolvable_set),
                 "judge_patterns_unresolvable_dropped": emitted - len(resolvable),
@@ -123,6 +193,33 @@ def install_spy(captured: list[dict[str, Any]]) -> Any:
         return out
 
     jp._reconcile_with_cascade = spy
+
+    from maljan.agents.judge_agent import JudgeAgent
+
+    original_fallback = JudgeAgent._fallback_bundle_from_text
+
+    def fallback_spy(self: Any, raw: str, *args: Any, **kwargs: Any) -> Any:
+        bundle = original_fallback(self, raw, *args, **kwargs)
+        objects = as_dicts(list(getattr(bundle, "objects", []) or []))
+        total, resolvable = _pattern_ids(objects)
+        captured.append(
+            {
+                "path": "fallback",
+                "fallback_reason": _fallback_reason(raw),
+                "response_chars": 0 if raw == "[TIMEOUT]" else len(raw),
+                "fallback_patterns_emitted": total,
+                "fallback_patterns_resolvable": len(set(resolvable)),
+                "final_bundle_size": len(set(resolvable)),
+                # Where those techniques came from matters more than how many
+                # there are. The fallback builder copies ids out of the ISR
+                # claims, so a non-empty bundle here is Layer-0 evidence reaching
+                # the analyst *without* the cascade's ranking ever being applied.
+                "fallback_technique_ids": sorted(set(resolvable)),
+            }
+        )
+        return bundle
+
+    JudgeAgent._fallback_bundle_from_text = fallback_spy
     return original
 
 
@@ -139,10 +236,87 @@ async def run_one(judge: Any, isr_reports: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def fallback_breakdown(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Count the fallback rows by the branch that produced them."""
+    out: dict[str, int] = {}
+    for r in rows:
+        if r.get("path") == "fallback":
+            reason = str(r.get("fallback_reason") or "unknown")
+            out[reason] = out.get(reason, 0) + 1
+    return out
+
+
+def reachability_lines(
+    n_reconciled: int, fell_back: list[dict[str, Any]], errored: int
+) -> list[str]:
+    """Report how often the judge's output reached reconciliation at all.
+
+    Written as its own section because it answers a different question from the
+    rest of the harness. Everything else here measures what the judge contributed
+    *given* that its output reached the seam; this measures how often it did.
+    """
+    total = n_reconciled + len(fell_back) + errored
+    if not total:
+        return []
+    lines = [
+        "",
+        "## Did the judge's output reach the cascade seam at all?",
+        "",
+        "`give_verdict` returns `_fallback_bundle_from_text` from four places — the verdict",
+        "timeout, both JSON gates, and the post-processing `except`. None of them call",
+        "`postprocess_judge_bundle`, so on those calls `_reconcile_with_cascade` never runs and",
+        "the cascade's technique set is **never injected**. This is not the same failure as a bad",
+        "verdict: it is a different bundle-construction path, and §3.27.1's equality was measured",
+        "only on the calls that avoided it.",
+        "",
+        f"| reached reconciliation | {n_reconciled}/{total} |",
+        "|---|---|",
+        f"| fell back before reconciliation | **{len(fell_back)}/{total}** |",
+    ]
+    if errored:
+        lines.append(f"| raised before returning a bundle | {errored}/{total} |")
+    breakdown = fallback_breakdown(fell_back)
+    if breakdown:
+        lines += ["", "| fallback branch | calls |", "|---|---|"]
+        for reason, count in sorted(breakdown.items(), key=lambda kv: -kv[1]):
+            lines.append(f"| `{reason}` | {count} |")
+    if fell_back:
+        share = len(fell_back) / total
+        lines += [
+            "",
+            f"**{share:.0%} of judge calls never reached the reconciliation step.** On those the",
+            "cascade contributed nothing to the bundle, because the code that injects it was not",
+            "the path taken. Any claim about what the bundle contains has to say which path it is",
+            "about.",
+        ]
+    return lines
+
+
 def summarise(rows: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-    scored = [r for r in rows if "error" not in r and r.get("cascade_size") is not None]
+    # A row that reached the seam carries ``cascade_size``; the legacy rows from
+    # the first run predate the ``path`` key and are recognised the same way.
+    scored = [
+        r
+        for r in rows
+        if "error" not in r and r.get("path") != "fallback" and r.get("cascade_size") is not None
+    ]
+    fell_back = [r for r in rows if r.get("path") == "fallback"]
+    errored = sum(1 for r in rows if "error" in r)
     if not scored:
-        return "no scoreable calls — nothing to report", {"status": "empty", "n": 0}
+        # Every call taking the fallback path is not an empty result — it is the
+        # strongest possible version of this study's finding, so it is reported.
+        lines = ["# C3 — what the judge contributes to the bundle", ""]
+        lines += ["No call reached the reconciliation seam.", ""]
+        lines += reachability_lines(0, fell_back, errored)
+        return "\n".join(lines), {
+            "schema": "judge-contribution/v1",
+            "status": "no-call-reached-reconciliation",
+            "n_calls": 0,
+            "calls_fell_back": len(fell_back),
+            "fallback_reasons": fallback_breakdown(fell_back),
+            "failed_calls": errored,
+            "per_call": rows,
+        }
 
     n = len(scored)
     tot = {
@@ -230,11 +404,17 @@ def summarise(rows: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
             "inferred from its log line.",
         ]
 
+    lines += reachability_lines(n, fell_back, errored)
+
     blob = {
-        "schema": "judge-contribution/v1",
+        "schema": "judge-contribution/v2",
         "status": "complete",
         "n_calls": n,
-        "failed_calls": len(rows) - n,
+        # A fallback is an outcome, not a failure, and counting it as one was how
+        # the first run came to describe five recorded measurements as errors.
+        "calls_fell_back": len(fell_back),
+        "fallback_reasons": fallback_breakdown(fell_back),
+        "failed_calls": errored,
         "totals": tot,
         "judge_ids_outside_cascade_total": own,
         "calls_with_a_judge_contribution": calls_with_own,
@@ -242,6 +422,7 @@ def summarise(rows: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         "judge_share_of_final_bundle": round(own_share, 4),
         "unresolvable_share_of_judge_patterns": round(unresolvable_share, 4),
         "per_call": scored,
+        "per_call_fallback": fell_back,
     }
     return "\n".join(lines), blob
 
@@ -275,7 +456,24 @@ def main() -> int:
 
     container = ServiceContainer(get_settings(), mock=False)
     judge = container.get_judge_agent()
-    bind_eval_llm(judge, timeout_s=300)
+    # 900 s, not the 300 s the ablation harnesses use, and the difference is the
+    # measurement rather than a convenience.
+    #
+    # ``give_verdict`` wraps its call in ``asyncio.wait_for`` at the judge's own
+    # configured ceiling — ``react_agent_timeout_overrides["judge"] = 600`` — while
+    # the provider builds its HTTP client at 1800 s, so in production the judge
+    # gets **one contiguous 600 s attempt**. Binding 300 s here made the request
+    # die at 300 s, hand a connection error to ``retry_on_connection_error``, and
+    # start a second attempt that the outer 600 s then killed at 23:42:50 on
+    # 2026-08-14. The model never received a contiguous 600 s window.
+    #
+    # That matters because this study reports how often the judge leaves the
+    # reconciliation path. A per-request cap tighter than production's would
+    # *manufacture* the timeouts being counted. Binding above the outer ceiling
+    # makes ``wait_for`` the operative limit, exactly as it is in production; the
+    # bound value still exists so a stalled socket cannot run unbounded (§ the
+    # 14-minute call that ignored a "180 s cap" — ``bind_eval_llm``).
+    bind_eval_llm(judge, timeout_s=900)
     print(f"{len(samples)} fixtures, one judge call each, condition=overlap", flush=True)
 
     rows: list[dict[str, Any]] = list(done.values())
@@ -296,7 +494,14 @@ def main() -> int:
         else:
             new = captured[before:]
             if not new:
-                row = {"key": key, "sample_id": sid, "error": "reconcile never ran"}
+                # With both seams instrumented there is no longer a silent third
+                # path: a call that returns a bundle has crossed one of them. If
+                # this fires, the pipeline changed and the harness is blind again.
+                row = {
+                    "key": key,
+                    "sample_id": sid,
+                    "error": "neither reconcile nor fallback was reached — spy is blind",
+                }
             else:
                 row = {"key": key, "sample_id": sid, **new[-1]}
         with CHECKPOINT.open("a") as fh:
@@ -304,6 +509,13 @@ def main() -> int:
         rows.append(row)
         if "error" in row:
             print(f"  {sid}: {row['error']}", flush=True)
+        elif row.get("path") == "fallback":
+            print(
+                f"  {sid}: FELL BACK ({row['fallback_reason']}) after "
+                f"{row['response_chars']} chars — reconciliation never ran, "
+                f"{row['fallback_patterns_resolvable']} nameable technique(s) in the bundle",
+                flush=True,
+            )
         else:
             print(
                 f"  {sid}: judge emitted {row['judge_patterns_emitted']} pattern(s), "
