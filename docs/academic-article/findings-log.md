@@ -2500,9 +2500,16 @@ null instead of as a constant.
 **What changes and what does not.** The architectural conclusion is unchanged and in fact
 strengthened: corroboration does not reach the analyst's artefact, and the cascade cannot be
 claimed as a contribution to the output. What is withdrawn is the *mechanism* — the judge was
-never shown to read anything. The stronger true statement is that **the judge's technique output
-is discarded and replaced by the cascade's**, which is a different and more serious property of
-this pipeline than inattention.
+never shown to read anything.
+
+**And the replacement claim needs its own bound, or it repeats the error it corrects.** What the
+80 arms establish is that the judge **cannot subtract** from the bundle's technique set and **added
+nothing** to it. They do not establish that its output was discarded: a judge that reproduced the
+cascade's set exactly leaves an identical trace to one whose output was unusable. The C3 log is
+suggestive of the latter — four attack-patterns dropped for unresolvable IDs, then 51 injected —
+but that is one sample from a stopped run. **The measurement that separates them is the judge's
+pre-reconciliation output, and it is outstanding.** Until it lands the defensible statement is the
+narrow one: on this evidence the model has no influence over which techniques reach the analyst.
 
 **Two consequences beyond this section.** First, **C3 is vacuous as designed**: its two arms share
 one `cascade_summary.results`, so `valid_technique_ids` is identical and the bundles are forced to

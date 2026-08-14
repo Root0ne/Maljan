@@ -53,11 +53,17 @@ was refuted; each is a domain instance of a neighbouring field's settled result,
 real mechanism. But the chapter can no longer be introduced as novel findings, and **D3 re-decides
 on that basis.**
 
-**The self-audit's three exposed rows.** P6 is instrumented (A3), has gained a truncation site
-nobody had listed (the 20,000-edge call-graph fetch, hit by 1 of 97 samples), and stays `EXPOSED`
-until the distribution is reported at C7. **P8 is now `PARTIAL` on evidence rather than on
-promises** — a second model has run (§3.16) and did not separate from the local one, so the limit
-is sample size, not the absence of a comparison. P9's model and engine are both pinned (A2).
+**The self-audit's three exposed rows — none is `EXPOSED` any more, and none is `CLEAR`.** P6 moved
+to `PARTIAL` on 2026-08-14 (§3.28): the step budget is hit on **82.1%** of arms, a tool output cut
+on **83.9%**, evidence chunked on **48.2%** — truncation is the operating regime, not an edge case.
+It does not reach `CLEAR` because the pitfall asks for frequency **and** impact, and with 46 of 56
+arms at the same cap there is no unaffected control group left to measure impact against. **P8 is
+`PARTIAL` on evidence rather than on promises** — a second model has run (§3.16) and did not
+separate from the local one, so the limit is coverage, not the absence of a comparison; the
+parameter series that would improve it is blocked on an endpoint (§3.29). P9's model and engine are
+both pinned (A2) and it stays `PARTIAL` for one stated reason: the running binary reports its
+version as `unknown`, so the commit was recovered from a second copy of the sources rather than
+from the artifact.
 
 **B1 has run, and it decided the paper's shape.** The result was null: `negotiated − single` =
 **−0.016**, 95% CI **[−0.084, +0.050]**, at **3.2× the tokens**. The literature's prior held — two
@@ -361,22 +367,45 @@ than quietly inheriting.
       `MCP__CAPE__URL=http://10.65.0.40:9004/mcp`. Then `make docker-up` and **one clean
       end-to-end run** on `4565983c…`. Maljan-side config only; the CAPE tunnels and VM are not
       touched.
-- [ ] **C1 — 36-tool CAPE MCP verification** `[CAPE]` — the worker is wired directly; every tool
-      checked reachable and schema-conformant
-- [x] **C2 — Sigma / LOLBin / network-DGA layer contribution** `[done]` **2026-08-14** — `layer0_six.json`:
-      sigma fires on **94/97**, lolbin **0/97**, network_dga **0/97** (§3.23). The two silent layers are
-      why B3 runs four sources rather than six.
-      The other half of the Layer-0 study. Then **re-run the weight-sensitivity analysis with all
-      six layers** — §1.10's "the corroborated set moves on 0.0%" was measured with three static
-      layers and has to hold with six. → **E.5** complete
+- [~] **C1 — 36-tool CAPE MCP verification** — **dropped 2026-08-14, recorded as a limitation**
+      A plumbing check rather than a measurement: it needs the sandbox network, contributes no
+      finding, and the tools it would verify are exercised by every run in the C layer already. The
+      honest statement — that individual MCP tool reachability was never enumerated — goes in the
+      reproducibility appendix instead of being carried as queue work that would never earn its
+      wall-clock. → **E5**, one sentence
+- [~] **C2 — Sigma / LOLBin / network-DGA layer contribution** — **first half done, second half open**
+  - [x] layer contribution `[done]` **2026-08-14** — `layer0_six.json`: sigma fires on **94/97**,
+        lolbin **0/97**, network_dga **0/97** (§3.23). The two silent layers are why B3 runs four
+        sources rather than six.
+  - [ ] **C2b — weight sensitivity with the dynamic layer in play** `[cheap]` — §1.10 measured the
+        eleven cascade constants over **three static sources** and found the corroborated set moving
+        on **0.0%**. Part of that is structural and cannot change (`is_corroborated` is
+        `len(contributing_layers) >= 2` and never reads `LAYER_WEIGHTS`), so it needs no re-run. What
+        does need one is §1.10's own caveat — *"87.9% of techniques are single-source **before the
+        sandbox is in play**"*. `sigma_layer` fires on 94/97 and carries a **different domain**, so it
+        is the first source that could create cross-domain corroboration where the static three could
+        not. `eval_layer0_contribution.py` is service-free and the 97 reports are archived, so this
+        runs offline. *Ticked prematurely on 2026-08-14 and corrected the same day: the item's second
+        half had never been run.* → **E.5**
 - [ ] **C3 — cascade ablation on the recovered cohort (n=97), dynamic path on** `[LLM]`
       Flat union vs the weighted cascade, on a sample stratified by family and year so it stays
       comparable to the n=210 drift cohort. **Per-sample results are stored this time** — the
       drift study kept only cohort means, which is exactly why no TOST was possible for the E1
       bound. → moves **C6** out of `UNMEASURED`; closes **E.1**
-- [ ] **C4 — Dynamic cohort vs static-only, paired delta** `[CAPE]` `[LLM]`
-      The paper currently *argues* the dynamic path lifts recall. This measures it: same ground
-      truth, paired statistics, bootstrap CIs. → **E.3**
+- [~] **C4 — Dynamic cohort vs static-only, paired delta** — **closed incomplete at 13 of 97 pairs**
+      **2026-08-14**, §3.26. Stopped after five supervised attempts produced **zero** completed arms
+      in 70 minutes: each began with ~22 GB free, drove the box into swap, and was killed by the
+      memory guard at its 4 GB floor before finishing one ~40-minute arm. 26 of 194 arms are on disk;
+      the remaining 168 **cannot be completed on this machine**, which is now measured rather than
+      predicted.
+      **The effect estimate is recorded and deliberately not interpreted** — F1 +0.0030
+      [−0.0177, +0.0230], recall +0.0024 [−0.0151, +0.0188], precision −0.0701 [−0.1392, −0.0072].
+      §3.16 is why: a difference read off an underpowered arm is unreliable, not weak, and the
+      frontier arm's n=9 estimate moved 0.086 when completed. The precision interval is not exempt —
+      12 of 12 pairs carry a degradation reason the treatment does not explain.
+      **What survives the sample size is a mechanism observation**, because it is not a difference in
+      means: across all 13 dynamic arms the two sources that consume the sandbox report — `dynamic`
+      and `network` — **claimed nothing at all**. → **E.3**, as a stated limitation
 - [x] **C5 — Baseline with no LLM at all** `[done]` **2026-08-14** — §3.26, `cape_baseline.json`.
       CAPE alone: **F1 0.1526** [0.1344, 0.1709] at n=97. Every F1 in this paper now has a referent.
       CAPE's own signature-derived TTPs on the same recovered cohort. **Without this, "F1 0.08" has no

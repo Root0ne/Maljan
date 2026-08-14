@@ -147,8 +147,12 @@ two numbers we reported are necessities of an `if` statement, and the experiment
 returned anything else.
 
 **The architectural conclusion survives the correction — corroboration does not reach the analyst's
-artefact — but its mechanism is worse than we described.** The model's technique output is not
-overlooked; it is discarded and replaced. And a second study, already written and about to run,
+artefact — but the mechanism is not the one we described.** The model cannot subtract from the
+bundle's technique set and, across 80 arms, added nothing to it. Whether its output was unusable
+and wholly replaced, or happened to reproduce the cascade's set, this evidence cannot say; both
+leave the same trace, and separating them needs the pre-reconciliation output measured directly.
+What is certain is narrower and sufficient: the model has no influence over which techniques reach
+the analyst. And a second study, already written and about to run,
 was designed to compare a weighted cascade against a flat union of the same claims. Both of its
 arms would have shared one reconciliation set, so it would have reported "no difference" after an
 hour of computation, correctly and vacuously. It was stopped four minutes in, by the same log line

@@ -201,9 +201,17 @@ techniques from that set, so the bundle shrinks — 32 of 32, equally necessary.
 32 times, does not usually agree with itself perfectly. We read a constant as a strong null.
 
 The architectural conclusion is unchanged and, if anything, sharper. Corroboration does not reach
-the analyst's artefact. But the reason is not that a model overlooked it — **the model's technique
-output is discarded and replaced by the deterministic set**, which is a more consequential property
-of this pipeline than inattention, and one no ablation of ours was designed to detect.
+the analyst's artefact. But the reason is not that a model overlooked it: **the judge cannot
+subtract from the bundle's technique set, and across 80 arms it added nothing to it.** Omissions
+are restored by reconciliation; additions would have survived, and there were none.
+
+We state that bound rather than the stronger claim it invites. The evidence does not distinguish a
+judge whose output was unusable and wholly replaced from one that reproduced the cascade's set
+exactly, because both leave the same trace. A single run's log is suggestive — four attack-patterns
+dropped for unresolvable IDs, then fifty-one techniques injected — but it is one sample from a run
+we stopped, and the distinction needs the judge's pre-reconciliation output measured directly. That
+measurement is outstanding, and until it lands the defensible statement is the narrow one: on this
+evidence the model has no influence over which techniques reach the analyst.
 
 **This replaces an earlier version of the same result, and the replacement is why we trust it.** The
 first pass varied three of six Layer-0 sources — the three needing no sandbox — over fixtures

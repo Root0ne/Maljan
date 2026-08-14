@@ -15,7 +15,7 @@ did not hold.
 | claim | measured |
 |---|---|
 | negotiated multi-agent consensus beats a single judge | ΔF1 **−0.016**, 95% CI [−0.084, +0.050], at **3.2×** the tokens |
-| a multi-layer corroboration cascade improves the verdict | corroboration never reaches the artefact — and the model is not even the reason: a reconciliation step replaces the judge's technique set with the cascade's in **80 of 80** arms, so the ablation's 0-of-32 and 32-of-32 are arithmetic |
+| a multi-layer corroboration cascade improves the verdict | corroboration never reaches the artefact — and the model is not the reason: reconciliation restores every cascade technique the judge omits, and across **80 of 80** arms the judge added nothing of its own, so the ablation's 0-of-32 and 32-of-32 are arithmetic |
 | two-tier attribution identifies families | opcode-hash tier fires on **0 of 18** samples; family-feature retrieval contributes **+0.003 F1** |
 | falsification-before-confidence disciplines claims | the cap fires on **0.82%** of techniques |
 
