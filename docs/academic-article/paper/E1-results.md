@@ -248,13 +248,39 @@ the analyst's artefact. But the reason is not that a model overlooked it: **the 
 subtract from the bundle's technique set, and across 80 arms it added nothing to it.** Omissions
 are restored by reconciliation; additions would have survived, and there were none.
 
-We state that bound rather than the stronger claim it invites. The evidence does not distinguish a
-judge whose output was unusable and wholly replaced from one that reproduced the cascade's set
-exactly, because both leave the same trace. A single run's log is suggestive — four attack-patterns
-dropped for unresolvable IDs, then fifty-one techniques injected — but it is one sample from a run
-we stopped, and the distinction needs the judge's pre-reconciliation output measured directly. That
-measurement is outstanding, and until it lands the defensible statement is the narrow one: on this
-evidence the model has no influence over which techniques reach the analyst.
+We stated that bound rather than the stronger claim it invites, because the evidence could not
+distinguish a judge whose output was unusable and wholly replaced from one that reproduced the
+cascade's set exactly. **That measurement has since been taken**, by intercepting the
+reconciliation step and recording what the model produced before the deterministic set was merged
+in. On the four calls that reached it:
+
+| | total | per call |
+|---|---|---|
+| attack-patterns the judge emitted | 50 | 12.5 |
+| carrying a resolvable ATT&CK ID | 12 | 3.0 |
+| **dropped — the model named no technique** | **38 (76.0%)** | 9.5 |
+| **IDs the cascade did not already hold** | **0** | 0.0 |
+| injected because the judge omitted them | 87 | 21.8 |
+
+Three of the four calls produced nothing nameable at all; the fourth named twelve techniques, every
+one already in the cascade. Three quarters of the model's own attack-patterns asserted a behaviour
+it could not map to a technique and were discarded. Of the two pipelines the bound allowed, the
+evidence points at the second: the bundle is the cascade's set wearing the judge's name.
+
+**And half the calls never reached that step.** Four of the eight timed out at the verdict ceiling,
+and on a timeout `give_verdict` returns a text-fallback bundle that never calls the reconciliation
+routine — so the cascade is not consulted on that path at all. The timeouts are not a property of
+the fixtures: the judge's 8,192-token output cap was renamed by our client library to a parameter
+the local inference server does not read, so the model decoded unbounded until the caller gave up
+(§6, M7). One such call was measured at **30,155 generated tokens** and was still going.
+
+The fallback bundle's technique set is identical to the cascade set on all four calls, but we do
+not report that as agreement: cascade membership is unconditional — the weights score techniques,
+they do not gate them — and the fallback scrapes IDs from the same claims, so the two are the same
+set by construction under this configuration. What the comparison does establish is that the
+cascade's three filters (platform gating, empty-domain gating, a placeholder denylist) were all
+inactive here. On an ordinary sample, where the sandbox is frequently empty, the two paths would
+diverge, and nothing in the emitted bundle records which one produced it.
 
 **This replaces an earlier version of the same result, and the replacement is why we trust it.** The
 first pass varied three of six Layer-0 sources — the three needing no sandbox — over fixtures
