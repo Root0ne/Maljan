@@ -62,6 +62,34 @@ class OpenAIProvider:
             extra.setdefault("repetition_penalty", rp)
             build_kwargs["extra_body"] = extra
 
+        # OUTPUT-CAP-01 (2026-08-15): re-send the output cap under the key a
+        # llama.cpp-derived server actually reads.
+        #
+        # ``ChatOpenAI(max_tokens=N)`` does not put ``max_tokens`` on the wire.
+        # ``langchain-openai`` renames it to OpenAI's newer
+        # ``max_completion_tokens``, and ik_llama.cpp's OpenAI-compatible
+        # endpoint does not know that key — so it ignores the field and decodes
+        # without a ceiling. Measured, not inferred: on 2026-08-15 a judge call
+        # built with ``judge_max_tokens=8192`` generated **30,155 tokens** past a
+        # 1,403-token prompt before the client's 600 s wrapper gave up, and it
+        # was still going. Four of eight fixtures in the C3 study never returned
+        # a verdict for this reason.
+        #
+        # The comment in ``ServiceContainer.get_judge_llm`` says the cap exists
+        # "so a degenerate decode can't consume the full wall-clock timeout".
+        # That was true of the intent and false of the request. This restores it.
+        #
+        # Sent through ``extra_body`` for the same reason the repetition penalty
+        # is: it is the only channel that reaches the server verbatim, forks
+        # disagree on the spelling, and unknown sampler keys are ignored rather
+        # than rejected. Local servers only — vanilla OpenAI would reject both.
+        cap = build_kwargs.get("max_tokens")
+        if base_url and isinstance(cap, int) and cap > 0:
+            extra = dict(build_kwargs.get("extra_body") or {})
+            extra.setdefault("max_tokens", cap)
+            extra.setdefault("n_predict", cap)
+            build_kwargs["extra_body"] = extra
+
         # Disable the local reasoning model's chain-of-thought when configured
         # (Qwen3 ``enable_thinking``). On a constrained host the model otherwise
         # spends its whole decode budget inside ``<think>`` — empty answers +
