@@ -135,7 +135,7 @@ def main() -> int:
     n = len(per_call)
     identical = sum(1 for c in per_call if c["identical"])
     lines = [
-        "# Does a timed-out verdict change what the analyst receives?",
+        "# Does a failed verdict change what the analyst receives?",
         "",
         f"{n} calls that fell back before reconciliation, compared against the cascade set each",
         "would have been given had it completed. Deterministic: no model was called.",
@@ -184,12 +184,16 @@ def main() -> int:
         ]
     else:
         lines += [
-            f"**The sets differ on {n - identical} of {n} calls.** A timed-out verdict does",
-            "not merely cost the narrative — it changes which techniques reach the analyst,",
-            "and neither the report nor the bundle says which construction path produced it.",
-            "The cascade's weighting and corroboration are skipped entirely on that path, so",
-            "what arrives is the raw union of Layer-0 claims, including any the cascade would",
-            "have dropped for platform incompatibility or for coming from an empty domain.",
+            f"**The sets differ on {n - identical} of {n} calls.** A failed verdict does not",
+            "merely cost the narrative — it changes which techniques reach the analyst, and",
+            "neither the report nor the bundle records which construction path produced it.",
+            "",
+            "`_fallback_bundle_from_text` scrapes ATT&CK ids from **two** places: the ISR",
+            "claims, and the model's own raw response. When the response is unparseable that",
+            "second source is a degenerate decode, and every id in it enters the bundle",
+            "without passing the cascade, the reconciliation step, the invalid-id filter or",
+            "the integrity pass. Nothing downstream can tell those ids from corroborated",
+            "ones.",
         ]
 
     only_fb = sum(len(c["only_in_fallback"]) for c in per_call)

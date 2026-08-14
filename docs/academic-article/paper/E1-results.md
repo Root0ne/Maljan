@@ -274,13 +274,37 @@ the fixtures: the judge's 8,192-token output cap was renamed by our client libra
 the local inference server does not read, so the model decoded unbounded until the caller gave up
 (§6, M7). One such call was measured at **30,155 generated tokens** and was still going.
 
-The fallback bundle's technique set is identical to the cascade set on all four calls, but we do
-not report that as agreement: cascade membership is unconditional — the weights score techniques,
-they do not gate them — and the fallback scrapes IDs from the same claims, so the two are the same
-set by construction under this configuration. What the comparison does establish is that the
-cascade's three filters (platform gating, empty-domain gating, a placeholder denylist) were all
-inactive here. On an ordinary sample, where the sandbox is frequently empty, the two paths would
-diverge, and nothing in the emitted bundle records which one produced it.
+**Repeating the study with the cap fixed turns the pair into a controlled experiment, and the
+result inverts the section's own conclusion.** With the ceiling binding, the same four fixtures
+fail and the same four succeed; the judge's share of the bundle is 0.0% in both conditions; every
+number on the reconciled path is identical. What changes is only how the failure arrives — 8,192
+tokens of unparseable output in three and a half minutes, instead of a ten-minute timeout.
+
+But the artefact is not the same. The fallback builder scrapes ATT&CK IDs from two places: the
+evidence claims, and the model's own raw response. In the uncapped condition that response is the
+literal string `[TIMEOUT]` and contains no IDs, so the fallback bundle was exactly the
+evidence-derived set — identical to the cascade set on all four calls. In the capped condition it
+is 18,748 to 24,710 characters of degenerate decode, and:
+
+| fixture | fallback | cascade | **only in fallback** |
+|---|---|---|---|
+| `jhuhugit` | 32 | 20 | **12** |
+| `sardonic` | 27 | 25 | **2** |
+| `sliver` | **46** | 23 | **23** |
+| `wannacry` | 26 | 16 | **10** |
+
+**Forty-seven techniques reach the analyst that the corroboration cascade never held**, and none
+goes the other way. On one sample the bundle doubles. Because the uncapped run is a control whose
+raw text provably contains no IDs, every one of the 47 is attributable to the model's own output.
+They passed through no filter at all — not the cascade, not the reconciliation step, not the
+invalid-ID filter, not the integrity pass — and once in the bundle they are indistinguishable from
+techniques three independent sources corroborated.
+
+So the finding that opened this section needs its scope stated exactly. The verdict model has no
+influence over which techniques reach the analyst **on the path where it works**. On the path where
+it fails it has more influence than on the path where it succeeds: 0 of 99 techniques when
+reconciliation runs, 47 of 131 when it does not. The architecture suppresses the model's
+contribution precisely when the model is functioning, and admits it precisely when it is not.
 
 **This replaces an earlier version of the same result, and the replacement is why we trust it.** The
 first pass varied three of six Layer-0 sources — the three needing no sandbox — over fixtures

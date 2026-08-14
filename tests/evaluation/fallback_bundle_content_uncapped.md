@@ -1,4 +1,4 @@
-# Does a timed-out verdict change what the analyst receives?
+# Does a failed verdict change what the analyst receives?
 
 4 calls that fell back before reconciliation, compared against the cascade set each
 would have been given had it completed. Deterministic: no model was called.

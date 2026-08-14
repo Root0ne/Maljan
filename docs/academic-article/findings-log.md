@@ -3008,7 +3008,70 @@ rather than bounded. C3′ closes `NEGATIVE`.
 **What it opens.** These numbers describe a judge running without its output cap. §3.35's fix was
 committed after this run, and whether a capped judge returns a usable verdict — or simply fails
 faster with truncated JSON — is a separate question with a separate answer. It is queued as the
-capped condition and both will be reported.
+capped condition and both will be reported. §3.37 is that answer, and it is worse than either
+option in the question.
+
+---
+
+### 3.37 When the verdict fails, the model's garbage reaches the analyst — `NEGATIVE` (C3′, capped condition)
+
+§3.36 measured the judge with its output ceiling not reaching the server (§3.35). This repeats it
+with the ceiling binding — the *only* change — and the pair turns out to be a controlled experiment
+neither run was designed as.
+
+**The cap changes the failure mode and nothing else.**
+
+| | uncapped | capped |
+|---|---|---|
+| reached reconciliation | 4/8 | 4/8 — **the same four fixtures** |
+| fell back | 4/8, all `verdict_timed_out` | 4/8, all `no_json_in_response` — **the same four** |
+| judge share of the final bundle | **0.0%** (0 of 99) | **0.0%** (0 of 99) |
+| attack-patterns emitted / nameable | 50 / 12 | 50 / 12 |
+
+Every number on the reconciled path is identical. The four fixtures that fail, fail in both
+conditions; the four that succeed, succeed in both. What the cap buys is **speed of failure**: the
+model stops at 8,192 tokens (~3.5 minutes) instead of running until the caller gives up at ten. It
+does not buy a verdict.
+
+**But the bundle the analyst receives is not the same, and the difference is the model's
+unparseable output.** `_fallback_bundle_from_text` scrapes ATT&CK ids from two places — the ISR
+claims, and the raw model response. In the uncapped condition that response is the literal string
+`[TIMEOUT]`, which contains no ids, so the fallback bundle was exactly the ISR-derived set. In the
+capped condition it is 18,748–24,710 characters of degenerate decode:
+
+| fixture | fallback | cascade | **only in fallback** | Jaccard |
+|---|---|---|---|---|
+| `jhuhugit` | 32 | 20 | **12** | 0.625 |
+| `sardonic` | 27 | 25 | **2** | 0.926 |
+| `sliver` | **46** | 23 | **23** | 0.500 |
+| `wannacry` | 26 | 16 | **10** | 0.615 |
+
+**47 techniques reach the analyst that the cascade never held. None goes the other way.** On
+`sliver` the bundle doubles.
+
+**And the attribution is clean, which is why this is reportable rather than suggestive.** The
+uncapped run is a control: same fixtures, same judge, same everything, with a raw response that
+provably contains no technique ids. There the fallback set equalled the cascade set **exactly** on
+4 of 4 (§3.36). So the ISR-derived component is precisely the cascade set, and every one of the 47
+additions in the capped condition came from the model's own text. Nothing else changed between the
+runs.
+
+**What those 47 ids passed through: nothing.** Not the cascade, not `_reconcile_with_cascade`, not
+`_filter_invalid_technique_ids`, not the STIX integrity pass. They are `T\d{4}`-shaped strings
+lifted out of a decode that was degenerate enough to be unparseable as JSON, and once in the bundle
+they are indistinguishable from techniques three independent sources corroborated.
+
+**This inverts the reading of §3.27.1 and §3.36.** Those sections establish that the verdict model
+has **no influence** over which techniques reach the analyst. That is true — of the path where the
+model works. On the path where it fails, it has *more* influence than on the path where it
+succeeds: 0 of 99 when reconciliation runs, 47 of 131 when it does not. The system is arranged so
+that the model's contribution is suppressed exactly when the model is functioning and admitted
+exactly when it is not.
+
+**Cost of the pair:** two runs of eight judge calls, about ninety minutes of local inference, and
+one code change between them. The controlled comparison was available only because the first run
+had already recorded *which branch* each failed call took, and because the harness stored the
+fallback bundle's technique ids rather than only their count.
 
 ---
 
