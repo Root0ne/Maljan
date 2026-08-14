@@ -1,0 +1,28 @@
+{
+ "schema": "parameter-size-series/v1",
+ "arms": [
+  {
+   "arm": "local",
+   "model": "Qwen3.6-35B-A3B (IQ3_K_R4)",
+   "total_params_b": 35.0,
+   "active_params_b": 3.0,
+   "quantisation": "IQ3_K_R4",
+   "source": "consensus_ablation.json (arm=single)",
+   "n": 25,
+   "mean_f1": 0.4136,
+   "failed": 0
+  },
+  {
+   "arm": "default",
+   "model": "nvidia/nemotron-3-super-120b-a12b:free",
+   "total_params_b": 120.0,
+   "active_params_b": 12.0,
+   "quantisation": "",
+   "source": "frontier_probe.json",
+   "n": 25,
+   "mean_f1": 0.4162,
+   "failed": 0
+  }
+ ],
+ "status": "incomplete"
+}
