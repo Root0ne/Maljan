@@ -151,9 +151,10 @@ we accept rather than argue with:
 
 1. Absolute F1 values in this paper are **not comparable to work using per-sample expert labels**.
 2. The bias is approximately constant across arms, so within-study contrasts are the defensible
-   reading — which is exactly why a baseline matters. **the sandbox alone, with no LLM anywhere, scores
-   F1 0.167 [0.141, 0.194]** on our cohort (§C5). Every pipeline figure is read against that rather
-   than against zero.
+   reading — which is exactly why a baseline matters. **The sandbox alone, with no LLM anywhere,
+   scores F1 0.151 [0.133, 0.169]** on our cohort of 95. Every pipeline figure is read against that
+   rather than against zero, and on the samples where both have run the full pipeline is 0.003 F1
+   above it.
 
 ## The host as an uncontrolled variable
 

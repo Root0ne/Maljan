@@ -104,9 +104,23 @@ the identifier it asked for before writing anything. That check exists only beca
 shape: an HTTP status is a statement about the transport, not about the answer. **This is the first
 time the discipline paid forward rather than backward**, and it cost four lines.
 
-The consequence is still a real one: the baseline study is n=43 rather than n=100, and that is a
-limit of the sandbox's retention window rather than a sampling decision. We would rather report a
-smaller honest n than a full one built on error bodies.
+We first recorded the consequence as a retention limit: the reports had existed and expired. That
+explanation was wrong, and finding out how wrong is the fifth failure in this list. Asking the
+sandbox how long each analysis had taken produced a split with nothing between the modes — the 43
+tasks whose reports survived ran 186–366 s, and the other 57 ran **zero to one second**, 56 of them
+still marked `reported`. A Windows PE does not detonate in one second. Nothing had expired; nothing
+had happened, and the instrument said otherwise.
+
+Re-submitting the same binaries from the same local files two days later produced full-length
+analyses on the same instance, which recovers 54 of the 57 and puts the cohort at 95. Three failed
+in processing or reporting and are gone for good.
+
+The lesson generalises past this instrument. A completion status is a statement about a queue, not
+about an analysis, and it is exactly as trustworthy as an HTTP 200. The retrieval path now reads
+each task's wall-clock duration and refuses anything under 60 s — an order of magnitude below the
+shortest real analysis on this instance — before it will accept a report. We would rather report a
+smaller honest n than a full one built on error bodies, and we would rather state the reason we
+verified than the one that first sounded plausible.
 
 ## 6.2 Why the test suite did not help
 

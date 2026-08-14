@@ -15,7 +15,7 @@ did not hold.
 | claim | measured |
 |---|---|
 | negotiated multi-agent consensus beats a single judge | ΔF1 **−0.016**, 95% CI [−0.084, +0.050], at **3.2×** the tokens |
-| a multi-layer corroboration cascade improves the verdict | verdict identical in **0 of 15** cases where the corroborated set was varied |
+| a multi-layer corroboration cascade improves the verdict | verdict identical in **0 of 32** cases where corroboration was destroyed but the techniques left standing; **32 of 32** changed when the techniques themselves were removed |
 | two-tier attribution identifies families | opcode-hash tier fires on **0 of 18** samples; family-feature retrieval contributes **+0.003 F1** |
 | falsification-before-confidence disciplines claims | the cap fires on **0.82%** of techniques |
 
@@ -82,8 +82,9 @@ the instrument.
 ## 8.5 What we claim, and what we do not
 
 We claim: the measured negatives above; four failure mechanisms with the boundary each occurred at;
-a detector that found all four and costs one line; and a no-LLM baseline of **F1 0.167** [0.141, 0.194], n=43, without
-which none of our F1 numbers refer to anything.
+a detector that found all four and costs one line; and a no-LLM baseline of **F1 0.151**
+[0.133, 0.169], n=95, without which none of our F1 numbers refer to anything — and against which
+the full pipeline gains **0.003 F1**.
 
 We do not claim that multi-agent decomposition cannot work, that these retrieval designs are
 worthless, or that our practices generalise beyond one system. This is one pipeline, one 35B model

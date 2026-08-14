@@ -13,25 +13,51 @@ technique IDs deterministically, with no language model anywhere:**
 
 | | mean | 95% CI |
 |---|---|---|
-| precision | 0.2902 | [0.2447, 0.3398] |
-| recall | 0.1343 | [0.1104, 0.1596] |
-| **F1** | **0.1666** | **[0.1411, 0.1938]** |
+| precision | 0.2405 | [0.2114, 0.2702] |
+| recall | 0.1308 | [0.1111, 0.1513] |
+| **F1** | **0.1509** | **[0.1328, 0.1693]** |
 
-n = 43 of the 100-sample cohort, bootstrap CI, seed recorded. CAPE asserted at least one technique on
-every sample (3 minimum, 11 median, 33 maximum), so this is a real predictor rather than an artefact
-of an empty one. Ground truth resolution uses the same alias map as the drift harness, so the two
-studies score identically.
+n = 95, bootstrap CI, seed recorded. CAPE asserted at least one technique on **every** sample
+(1 minimum, 11 median, 33 maximum), so this is a real predictor rather than an artefact of an empty
+one. Ground truth resolution uses the same alias map as the drift harness, so the two studies score
+identically.
 
-**Why 43 and not 100, and why the number is not a choice we made.** The cohort was submitted as one
-batch and every task completed, but the sandbox retains report files for a limited window: 56 of the
-100 now answer a report request with `Reports directory does not exist`, and one task failed
-outright. The analyses ran; their reports are gone. An earlier pass over 24 of these reports gave
-F1 0.1871 [0.1508, 0.2234] — the present estimate sits inside that interval and is tighter, so this
-is a firmer version of the same number rather than a different one.
+**And here is what the pipeline adds to it.** On the samples where both have been run, scored
+per-sample against the same ground truth:
 
-We report this first because without it a pipeline F1 is uninterpretable, and because it sets a bar
-the pipeline must clear to have contributed anything. Earlier drafts of this work reported F1 values
-against nothing at all.
+| | mean F1 |
+|---|---|
+| CAPE alone, no language model | **0.1130** |
+| pipeline, static evidence only | **0.1130** |
+| pipeline, with the sandbox report | **0.1160** |
+
+Three analyst agents, a negotiation loop, a revision pass, an LLM judge and a weighted corroboration
+cascade land within **0.003 F1** of the signature engine they are built on top of. The two means
+agreeing to four decimal places is a coincidence and was checked rather than reported: every one of
+the samples differs individually, by as much as 0.13 in either direction. The system is not
+reproducing the sandbox's answers — it reaches different answers of the same quality. This
+comparison is interim at the n reached so far and is the number most likely to move; its direction
+has been stable across every reading taken while it accumulated.
+
+**Why 95 and not 100, and why the reason is not the one we first wrote down.** The cohort was
+submitted as one batch and the sandbox reported every task as complete. It had not been. Querying
+each task's timing shows a split with nothing between the modes: the 43 tasks whose reports survived
+ran for 186–366 s, and the other 57 ran for **zero to one second**, 56 of them still marked
+`reported`, none with a report directory. A Windows PE does not detonate in one second. The ordering
+implicates the instrument rather than the samples — real analyses run through one afternoon and
+every task after roughly 17:30 returns instantly — and re-submitting the same binaries from the same
+local files two days later produced full-length analyses on the same instance. 54 of the 57 were
+recovered that way; three failed in processing or reporting and are permanently gone.
+
+We had originally written that the analyses ran and their reports had expired. That was the
+comfortable reading of `Reports directory does not exist`, and it was wrong. The correction matters
+beyond the sample count: a completion status from this instrument is not evidence that anything
+happened, which is why the retrieval path now checks each analysis's wall-clock duration before
+accepting its report (§E6).
+
+We report the baseline first because without it a pipeline F1 is uninterpretable, and because it
+sets a bar the pipeline must clear to have contributed anything. Earlier drafts of this work
+reported F1 values against nothing at all.
 
 ![Every arm on one F1 axis, against the baseline that gives the axis meaning.](figures/fig3-arms-against-baseline.pdf)
 
@@ -142,19 +168,46 @@ ablated, and §7 reports the null it returned.
 
 ## 5. The corroboration cascade does not reach the verdict
 
-The multi-layer corroboration set — the design's central claim about evidence quality — was varied
-from 3 corroborated techniques to 0. **The final verdict was identical in 0 of 15 cases changed.**
-The cascade's arithmetic runs; its output does not reach the decision.
+The multi-layer corroboration set is the design's central claim about evidence quality. We remove
+one Layer-0 source at a time and compare the bundle the analyst receives against the bundle produced
+with all of them, under two conditions that differ in exactly one respect — whether the removed
+source was the sole owner of its techniques.
 
-**We report a limit on this result that we found after obtaining it, and it is the kind that would
-normally go unstated.** The study varied **three of the cascade's six Layer-0 sources** — the three
-that need no sandbox. Measuring the other three over an archived cohort afterwards showed that one of
-them, the Sigma layer, **fires on 43 of 43 samples and contributes a technique no other dynamic
-source found on all 43**, at weight 0.55 — second only to YARA and above the static layers this study
-did vary. A null obtained while the second-heaviest contributor was absent is not yet a statement
-about the cascade. We therefore treat the finding as **provisional pending a six-source re-run**
-rather than as the settled result it appeared to be, and we would rather print that sentence than a
-cleaner one we could not defend.
+| condition | what removing a source does to the evidence | verdict changed | Jaccard vs all-sources |
+|---|---|---|---|
+| disjoint | its techniques disappear; nothing else claims them | **32/32** | 0.738–0.765 |
+| overlap | its techniques survive under a partner source, but their **corroboration** changes | **0/32** | **1.000 [1.000, 1.000]** |
+
+**The judge is reading the claim list and nothing else.** Take a technique away and the bundle loses
+it. Leave the technique in place and destroy the cross-domain agreement behind it — the thing the
+cascade exists to compute — and the bundle is byte-identical. The cascade runs, weights each source
+by a trust coefficient, and reports a corroborated set in the run summary; none of that reaches the
+artefact the analyst is given.
+
+**This replaces an earlier version of the same result, and the replacement is why we trust it.** The
+first pass varied three of six Layer-0 sources — the three needing no sandbox — over fixtures
+carrying five techniques, and reported the verdict unchanged in 0 of 15 cases. Two defects were
+found in it afterwards. The absent sources included the Sigma layer, which fires on 92 of 95 samples
+at weight 0.55, above every static layer that study did vary; and at five techniques over six
+sources, round-robin assignment left one source with nothing, so its arm was identical to the
+baseline by arithmetic rather than by measurement. The re-run uses fixtures of 12 to 51 techniques so
+every source carries at least three claims, includes the Sigma layer, and adds a corroborated source
+pair that does not involve YARA so that no arm's result is a foregone conclusion. The null survives
+all of it, at 32 arms rather than 15.
+
+**One pre-registered prediction, resolved in both directions.** We predicted that removing the
+tool-artifact layer would change nothing, because it emits on YARA's cascade domain and therefore
+cannot contribute corroboration. In the overlap condition that is exactly right: 0 of 8. In the
+disjoint condition it is wrong: 8 of 8, because there that source solely owns its techniques and
+removing it removes them. The prediction was about corroboration and it holds precisely where
+corroboration is the only thing varying — which is the sharpest evidence we have that the two
+conditions measure what we claim they measure.
+
+Two Layer-0 sources are absent from these arms by measurement rather than by choice. Over the 95
+archived reports the LOLBin layer and the DGA layer each produce a claim on **0 of 95**, while being
+fed a median of 8667 recorded API calls and 48–68 domains per sample respectively. They are offered
+the evidence and decline it; giving either an equal share of the ground truth would have ablated a
+mechanism that never engages in this deployment.
 
 ## 6. Confidence is very nearly a constant
 
