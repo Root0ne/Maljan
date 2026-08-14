@@ -397,16 +397,21 @@ than quietly inheriting.
       `cascade_summary.results`, so `_reconcile_with_cascade` forces both bundles to contain the
       same techniques whatever the judge produces: the comparison could only ever return "no
       difference", correctly and vacuously. It was stopped four minutes into its first run.
-  - [~] **C3′ — what the judge contributes to the bundle** — the measurement the vacuous design
-        could not reach. Intercepts `_reconcile_with_cascade` to record the judge's own output
-        *before* the deterministic set is merged in. **Interim at 4 scored calls:** judge share of
-        the final bundle **0.0%**, and **76%** of its attack-patterns dropped for naming no
-        technique. Re-opened 2026-08-14 after the remaining calls turned out to be measurements
-        rather than failures — `give_verdict` has four early returns that never reach
-        reconciliation at all (§3.35), and two harness defects were fixed before the retry: a
-        per-request timeout tighter than production's, which would have manufactured the very
-        timeouts being counted, and a spy that read zero attack-patterns from every fallback
-        bundle by construction. **Running.**
+  - [x] **C3′ — what the judge contributes to the bundle** `[done, NEGATIVE]` **2026-08-15** —
+        §3.36, §3.37. The measurement the vacuous design could not reach, run in **two
+        conditions** because a defect found mid-run made the pair a controlled experiment.
+        **Judge share of the final bundle: 0.0%** (0 of 99) in both, with **76%** of its
+        attack-patterns dropped for naming no technique and 3 of 4 completed calls producing
+        nothing nameable at all. **Half the calls never reached the seam** — 4 of 8 fall back,
+        where reconciliation never runs and the cascade is never consulted.
+        **And the inversion (§3.37):** with the output cap fixed the same four fixtures still
+        fail, but the fallback now scrapes ATT&CK ids out of the model's unparseable decode —
+        **47 techniques reach the analyst that the cascade never held**, none the other way, one
+        bundle doubling. The model has no influence when it works and the most influence when it
+        fails. Four harness defects were fixed to get here, each of which would have produced a
+        number that looked like a finding: a per-request timeout tighter than production's, a spy
+        that read zero patterns from every fallback by construction, an output cap that never
+        reached the server (§3.35), and `bind_eval_llm` discarding the provider's `extra_body`.
 - [~] **C4 — Dynamic cohort vs static-only, paired delta** — **closed incomplete at 13 of 97 pairs**
       **2026-08-14**, §3.26. Stopped after five supervised attempts produced **zero** completed arms
       in 70 minutes: each began with ~22 GB free, drove the box into swap, and was killed by the
