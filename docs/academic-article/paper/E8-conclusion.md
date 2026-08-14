@@ -28,9 +28,14 @@ not from one unable to see anything.
 Two further negatives constrain how the rest should be read. Verbal confidence — the number the
 cascade and every deterministic gate consume — discriminates correct from incorrect claims at **AUC
 0.550**, so those gates are keyed to noise. And a 120B reasoning frontier model did not separate from
-our local 35B on identical fixtures at equal budget — paired **ΔF1 +0.003**, 95% CI [−0.077, +0.081],
-n=25, better on 12 of 25 and worse on 13 — which means the ceiling we kept attributing to model
-capacity is not obviously that.
+our local 35B on identical fixtures at equal *nominal* budget — paired **ΔF1 +0.003**, 95% CI
+[−0.077, +0.081], n=25, better on 12 of 25 and worse on 13 — which means the ceiling we kept
+attributing to model capacity is not obviously that. That null carries a confound we could not
+remove: the frontier arm reasoned and the local one did not, and the endpoint accepts the parameter
+that would have matched them without acting on it. We report the confound's size rather than its
+absence — on two other models the same flag is worth **0.34 and 0.45 F1** — and note that the local
+model is not the weaker deployment either: run against its vendor's own full-precision hosting, our
+3-bit local copy scores **0.063 higher**, 95% CI [−0.148, +0.026].
 
 ## 8.2 The nulls are interpretable only because firing rates came first
 

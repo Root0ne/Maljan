@@ -116,11 +116,42 @@ fixtures: with reasoning enabled it spent 99.9% of every call's budget thinking 
 across all 25 calls, and with reasoning disabled the same model scored **0.4501**. One flag was
 worth 0.45 F1 — more than every architectural effect in this paper combined. The frontier arm above
 was not crippled that way (it parsed 25 of 25), so the null is not an artefact of a collapsed arm;
-but it is not the single-variable comparison it appears to be, and the matched-configuration arm is
-outstanding. We report it because the literature's prior predicts otherwise:
+but it is not the single-variable comparison it appears to be.
+
+**The matched arm cannot be built on that endpoint, and we established this by measurement rather
+than by assumption.** We re-ran the 120B arm with the reasoning parameter set. The provider accepted
+it and ignored it: 56.2% of the output was still reasoning, against 56.5% without it, and the arm
+returned 0.4149 where the first run returned 0.4162 (paired Δ = −0.0014, 95% CI [−0.0929, +0.0874],
+n=25). The re-run is therefore a replication of the original configuration, not a correction of it.
+The confound in this comparison is a property of the endpoint, and we report the null with the
+confound stated rather than promising a cleaner version of it.
+
+**A matched comparison is available on different weights, and it bounds two things at once.** The
+model we run locally, `qwen3.6-35b-a3b`, is also hosted by its vendor at full precision on an
+endpoint that does honour the flag. Against our local 3-bit deployment, on the same fixtures and
+repeats:
+
+| arm | precision | reasoning | mean F1 | paired vs local | n |
+|---|---|---|---|---|---|
+| local | IQ3_K_R4 (3-bit) | off | 0.4136 | — | 25 |
+| vendor-hosted | full | off | 0.3507 | **−0.0629** [−0.1484, +0.0256] | 25 |
+| vendor-hosted | full | on | 0.0080 | −0.4056 [−0.4667, −0.3418] | 25 |
+
+Two results follow. First, **quantisation is not this pipeline's handicap**: the 3-bit local
+deployment is not measurably worse than the vendor's own hosting of the same weights, and the
+direction is if anything in its favour. Second, **the reasoning flag replicates at 0.3427 paired**
+(95% CI [−0.4264, −0.2654]) on a second model — this time the one we host — with 24 of 25 calls
+exhausting the output budget on reasoning. The largest effect we have measured on any arm in this
+paper is a configuration flag, not an architecture and not a parameter count.
+
+We report the frontier null because the literature's prior predicts otherwise:
 `arXiv:2606.18166` found parameter size the *only* statistically significant predictor of
 ATT&CK-classification F1 (ρ=0.85, p=0.014) on the nearest task. On this task, at this budget, we do
-not reproduce that.
+not reproduce that — and we cannot test it as a series either: a rank correlation over model size
+needs the arms matched on the flag that is worth more than the size effect, and the only endpoint
+we have above 35B does not permit that match. Two of our arms are configuration-matched and both
+are 35B, so the series is two points at one size. We state this as a limitation with a measured
+cause rather than as an untested claim in either direction.
 
 **An earlier version of this arm reported 0.5025 and was wrong to suggest a lead.** That figure came
 from n=9, the run having been cut short by a daily request quota; the apparent advantage did not

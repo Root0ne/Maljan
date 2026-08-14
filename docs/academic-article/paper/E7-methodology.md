@@ -20,6 +20,19 @@ tokens separately from content, and **56.5%** of its output was reasoning across
 (84% on a one-token answer). Capping content alone would have granted it roughly twice the generation for the
 same nominal budget.
 
+**And the arms must be on the same side of the reasoning switch, which is a stronger requirement
+than it sounds.** We measured this flag on two models at 25 calls each: enabling it moved F1 by
+**0.45** on one and **0.34** on the other, in both cases because the model spent its entire output
+budget thinking and returned no answer — 24 of 25 calls hit the cap on the second model, and one
+answered. That is larger than every architectural effect in this paper combined, so an unmatched
+pair does not produce a noisy comparison; it produces a comparison of the flag. Two further
+cautions follow from what it took to hold this constant. The flag cannot be read from the request:
+one of our providers accepts the parameter and ignores it, returning the same 56% reasoning share
+with and without it, so **matching must be verified against the measured reasoning share of the
+completed arm**. And it cannot be assumed uniform across a series: when we ranked arms by parameter
+count without checking, the ranking recovered the published scaling correlation (ρ=+0.866) from an
+axis on which one point was a disabled model rather than a small one.
+
 ## 4.2 Paired designs, bootstrap intervals, and never a single run
 
 Every arm sees the same samples in the same order; differences are computed **per sample and then

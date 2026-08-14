@@ -98,7 +98,32 @@ the estimate through the local mean and out the other side. We record that becau
 truncated by a daily request quota, not by anything about the samples — the failure mode is reading a
 difference off an underpowered arm, and this audit carried the wrong number for a day.
 
-What remains is **coverage, not power**: the second model has been measured on five synthetic
+**That null is confounded, and the confound cannot be removed on that endpoint.** The local arm runs
+with its reasoning stream disabled; the 120B arm ran with reasoning on, spending 56.5% of its output
+budget there. We re-ran it with the flag set: the provider accepted the parameter and ignored it —
+56.2% reasoning, F1 0.4149 against the original 0.4162 (paired Δ −0.0014, CI [−0.0929, +0.0874]).
+The re-run replicates the arm rather than correcting it, and no further re-run will do better,
+because the control is not exposed. We therefore report the null with its confound named. The size
+of what is being confounded is not small: on two separate models the same flag is worth **0.34 and
+0.45 F1**, larger than every architectural effect in this paper combined.
+
+**One quantisation is no longer an unmeasured threat.** The model we run locally is also hosted by
+its vendor at full precision, on an endpoint that does honour the reasoning flag. Paired on the same
+fixtures and repeats, our 3-bit `IQ3_K_R4` deployment scores **0.0629 higher** than the vendor's
+hosting of the same weights (95% CI [−0.1484, +0.0256], n=25) — an interval containing zero, and
+pointing away from the direction the threat assumes. Two serving stacks differ alongside the
+precision, so this bounds *the deployment* rather than quantisation alone; but the specific worry
+that a 3-bit local model understates what these architectures can do is not supported.
+
+**What P8 cannot close is the size series, and the reason is measured rather than budgetary.**
+Testing `arXiv:2606.18166`'s parameter-size trend needs three arms at three sizes, matched on the
+flag that outweighs size. Of the endpoints available, the one that honours the flag hosts the same
+35B model we already run, and the one above 35B does not honour it. Two matched arms exist and both
+are 35B. We state this as a limitation rather than reporting a correlation over unmatched arms —
+which, run once before this constraint was enforced, returned ρ=+0.866 and would have agreed with
+the literature for the wrong reason.
+
+What also remains is **coverage, not power**: the second model has been measured on five synthetic
 fixtures, not on the malware cohort, where evidence bundles are longer and messier. That is the arm
 the free tier's 50 requests/day makes a two-day run or a paid one.
 

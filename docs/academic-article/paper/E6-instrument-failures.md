@@ -8,11 +8,12 @@ for disassembly, a sandbox for detonation, a vector store for retrieval, and a m
 inference, over three protocols. Each boundary is a place where a request can succeed and still not
 mean what the caller assumed.
 
-This section reports five such failures. We report them together because they share a shape that a
+This section reports six such failures. We report them together because they share a shape that a
 test suite is poorly positioned to catch and a results table cannot show: **the instrument answered
-successfully, and answered about something else.**
+successfully, and answered about something else.** The last two are our own analysis code rather
+than someone else's server, which is the point: the shape does not stop at the network boundary.
 
-## 6.1 Five mechanisms
+## 6.1 Six mechanisms
 
 ### M1 — An unset argument arrives as an assertion
 
@@ -163,6 +164,40 @@ with a zero-width bootstrap interval, from a language model asked the same quest
 temperature 0. Models do not agree with themselves that well. We read a constant as an unusually
 clean null, because a clean null was the result we were prepared to find.
 
+### M6 — A configuration difference wearing a parameter count
+
+The most recent (2026-08-14), and the only one whose wrong answer **agreed with the literature**.
+
+We assembled a parameter-size series to test a published finding that parameter count is the only
+significant predictor of ATT&CK-classification F1 (ρ=0.85). The harness read every completed arm
+file, ranked mean F1 against total parameters, and reported **ρ=+0.866** — reproducing the prior
+almost exactly, across a 3× span, with the confounds it could not remove printed honestly beneath.
+
+The five rows were three models. One model appeared twice because it had been run in two
+configurations, and another twice because it had been run twice. The duplicate configurations were
+not a labelling detail: the same weights score **0.3507** with the reasoning stream disabled and
+**0.0080** with it enabled, because 24 of 25 calls then spend their entire output budget reasoning
+and never answer. The 0.0080 row sat at the small end of the parameter axis, where it set the sign
+of the correlation. What the series measured was a flag, ordered by coincidence against size.
+
+**The failure is not the duplicate rows; it is that the arm-selection rule did not exist.** The
+harness had careful arithmetic — averaged ranks so file order cannot break ties, an exact
+permutation p because four points cannot reach significance, a common-cell restriction so endpoint
+availability cannot masquerade as model size — and every one of those guards was about a way the
+*numbers* could mislead. None was about whether the rows were comparable in the first place.
+
+The rule now keys on the **measured** reasoning share of each arm rather than the flag the harness
+requested, because those two disagree: one provider accepts the parameter and ignores it, so an arm
+selected on intent would enter the series labelled matched while running the opposite
+configuration. With the rule applied, two arms qualify and both are 35B, so the series refuses and
+says which arm was excluded and at what measured reasoning share. Nine unit tests pin the rule.
+
+**What made this one hard to see.** It agreed with the published result. M5 was caught by a number
+too clean to believe; this one produced a number in exactly the range a reader would expect, in the
+direction the literature predicts, with its limitations already stated. There was nothing anomalous
+to notice. It was caught by reading the arms table under the correlation and asking why one model
+was on it twice — which is a question no result, however wrong, would have prompted.
+
 ## 6.2 Why the test suite did not help
 
 **1,995 tests passed throughout.** This is not a gap in test quality but in test *shape*:
@@ -178,10 +213,19 @@ clean null, because a clean null was the result we were prepared to find.
   function was never wrong. What was wrong was an experiment that varied the cascade's input and
   attributed the output to a model downstream of it — and no test of a component can catch a
   misattribution made three modules away.
+* M6 was **tested more carefully than anything else in the harness, and the tests were about the
+  wrong question.** The series arithmetic had a test file of its own: averaged ranks so file order
+  cannot break ties, an exact permutation p because four points cannot reach significance, a
+  common-cell restriction so endpoint availability cannot pass for model size. Every test asserted
+  something true. None asked whether the rows entering the correlation were comparable, because the
+  answer had been assumed at the point where the arms were assembled rather than decided anywhere a
+  test could see it.
 
 Four preconditions — a second call, a second server, a large input — are exactly what a fast unit
-suite is designed to avoid. The fifth is worse: **M5 is invisible to unit testing in principle**,
-because every unit involved behaved as specified.
+suite is designed to avoid. The last two are worse: **M5 and M6 are invisible to unit testing in
+principle**, because every unit involved behaved as specified. Their common shape is that the defect
+lived in the *composition* — which measurement was attributed to which cause — and a test that
+pins a function's behaviour cannot reach an assumption made when its inputs were chosen.
 
 ## 6.3 What did find them: output cardinality
 
@@ -228,7 +272,10 @@ exists precisely for programs whose correct output is unknown. The inverse — d
 items to verify identical inputs score consistently — is already an eval-harness practice [23]. And
 the genus is described: a longitudinal study of a production LLM agent runtime defines the
 meta-pattern as *"a failure whose error signal never reaches a human in actionable form"* and gives
-a five-class taxonomy [20] into which all four of our mechanisms fall.
+a five-class taxonomy [20] into which all four of our **boundary** mechanisms fall. M5 and M6 share
+the meta-pattern but not the setting: no server misled us, and no protocol was involved. They arose
+inside our own analysis code, where the taxonomy's classes — all of which describe a call to
+something else — do not reach.
 
 ## 6.4 What it cost
 
@@ -259,6 +306,11 @@ Not that silent failures exist at tool boundaries — that is documented. Ours i
   therefore propagates into a published claim rather than into a support ticket;
 * a detector reported **alongside results** rather than run as a test, because the failure appears in
   the batch and not in any single call;
+* two further failures (M5, M6) with **no server involved at all** — an ablation that varied a
+  deterministic code path and reported a language model, and a correlation that ranked a
+  configuration flag and reported a parameter count. Both had passing unit tests over the exact
+  functions concerned. They extend the claim from "other people's servers can mislead you" to *the
+  same shape occurs wherever a measurement's cause is assigned rather than measured*;
 * and a demonstrated price rather than a hypothesised one.
 
 In a pipeline assembled from other people's servers, the correctness of the model is not the binding
