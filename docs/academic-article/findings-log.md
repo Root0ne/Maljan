@@ -2919,6 +2919,97 @@ vanilla OpenAI rejects unknown body fields. Nine tests pin the wire format, incl
 `extra_body` guards do not clobber each other and that a cap of 0 is never forwarded, since that
 would return nothing at all.
 
+**Verified against the live server**, same prompt, cap of 64, one variable:
+
+| request | tokens generated | `finish_reason` | |
+|---|---|---|---|
+| `max_completion_tokens` only — what the library sends by itself | **292** | `stop` | cap ignored |
+| plus `max_tokens` / `n_predict` — the fix | **64** | `stop` | **cap binds** |
+
+**And a second defect the probe exposed, which the fix does not address.** Both rows report
+`finish_reason: "stop"`. The server truncates at exactly the requested count and says nothing about
+having done so — no `length`, no `stopped_limit`, no field anywhere in the response body. The
+truncation ledger's `hit_length_cap` keys on precisely that field, so the judge-ceiling counter was
+blind *before* the cap fix because the cap never bound, and would have stayed blind *after* it
+because the server does not report binding. `record_judge_response` now takes the cap it was built
+with and compares it against the generated-token count, which is the only evidence the server
+leaves. Six tests, one of them the probe's own observation: 8,192 produced against an 8,192 cap with
+`finish_reason: "stop"` must count as a hit.
+
+That makes three parameters measured in one evening to be accepted and not acted on —
+`enable_thinking` on OpenRouter, `max_completion_tokens` on ik_llama, and now a truncation event
+the server performs without reporting. The first two are requests that did nothing; the third is a
+*result* that went unstated. Same shape from the other direction.
+
+---
+
+### 3.36 The judge contributes nothing, and half the time it does not answer at all — `NEGATIVE` (C3′)
+
+§3.27.1 established a **bound**: across 80 arms the bundle's technique set equals the cascade's
+exactly, so the judge cannot subtract from it and added nothing to it. That bound was consistent
+with two very different pipelines — a judge whose verdict happened to match the cascade, or a judge
+whose output was unusable and silently replaced. E1 §5 states the distinction and names the
+measurement as outstanding. This is that measurement, taken at the seam where the model's own
+output ends (`_reconcile_with_cascade`), on the eight fixtures B3 used.
+
+**Of the four calls that reached the seam:**
+
+| | total | per call |
+|---|---|---|
+| attack-patterns the judge emitted | 50 | 12.5 |
+| of those, carrying a resolvable ATT&CK id | 12 | 3.0 |
+| **dropped — the model named no technique** | **38 (76.0%)** | 9.5 |
+| techniques the cascade held | 99 | 24.8 |
+| judge ids the cascade already held | 12 | 3.0 |
+| **judge ids the cascade did not hold** | **0** | 0.0 |
+| injected because the judge omitted them | 87 | 21.8 |
+| final bundle | 99 | 24.8 |
+
+**The bound becomes a description.** Not one technique in any bundle is there because the judge
+named it — 0 of 99, on 0 of 4 calls. Three of the four calls produced **nothing nameable at all**;
+the fourth named twelve, every one of which the cascade already held. Three quarters of the
+model's own attack-patterns were discarded for asserting a behaviour it could not map to a
+technique. So of the two pipelines §3.27.1 could not separate, the evidence now points at the
+second: the judge's output is largely unusable, and the bundle is the cascade's set wearing the
+judge's name.
+
+**And half the calls never reached the seam.** Four of eight timed out, every one of them at the
+600 s ceiling, and on those `give_verdict` returns `_fallback_bundle_from_text` — which does not
+call `postprocess_judge_bundle`, so reconciliation never runs and the cascade is never consulted:
+
+| reached reconciliation | 4/8 |
+|---|---|
+| **fell back before reconciliation** | **4/8**, all `verdict_timed_out` |
+
+The timeouts are not a property of the fixtures. They are §3.35: the judge's 8,192-token ceiling
+never reached the model server, so a degenerate decode runs until the caller gives up. One of these
+calls was measured at **30,155 generated tokens** and was still going.
+
+**Does the analyst then receive a different artefact? Not here — and the reason is arithmetic, not
+agreement.** The fallback bundle's technique set is identical to the cascade set on 4 of 4 calls,
+Jaccard 1.000. That number is not a finding and this log is not going to report it as one twice in
+one week: `TTPCascadeEngine.compute` appends a result for **every** claimed technique id — the
+weights score them, they do not gate membership — and `_fallback_bundle_from_text` scrapes ids from
+the same ISR claims with a `T\d{4}` regex. Two routes to the set of claimed ids. Equality was the
+only available outcome.
+
+What the comparison is good for is the inverse. The cascade has three filters the fallback does not
+have — platform gating, empty-domain gating, and the `T0000`/`T9999` placeholder denylist — and
+**none of them was active on these fixtures**. On an ordinary real sample, where the sandbox is
+often empty and rules are platform-gated, the two paths would diverge, and the bundle records
+nothing about which one built it. The defensible statement is not *the paths agree*; it is
+**nothing makes them agree**, and here the filters that would have separated them were all
+inactive.
+
+**What this closes.** The pre-reconciliation measurement E1 §5 lists as outstanding is done: the
+judge has no influence over which techniques reach the analyst, and now the reason is measured
+rather than bounded. C3′ closes `NEGATIVE`.
+
+**What it opens.** These numbers describe a judge running without its output cap. §3.35's fix was
+committed after this run, and whether a capped judge returns a usable verdict — or simply fails
+faster with truncated JSON — is a separate question with a separate answer. It is queued as the
+capped condition and both will be reported.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations

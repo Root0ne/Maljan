@@ -116,12 +116,47 @@ def hit_length_cap(response: object) -> bool:
     return False
 
 
-def record_judge_response(ledger: object | None, response: object) -> None:
-    """Count one judge call and whether it hit the token ceiling. Never raises."""
+def completion_tokens_of(response: object) -> int | None:
+    """Generated-token count from whichever place the provider put it."""
+    meta = getattr(response, "response_metadata", None)
+    usage = getattr(response, "usage_metadata", None)
+    for blob, key in (
+        (usage, "output_tokens"),
+        (meta, "token_usage"),
+    ):
+        if isinstance(blob, dict):
+            value = blob.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, dict) and isinstance(value.get("completion_tokens"), int):
+                return int(value["completion_tokens"])
+    return None
+
+
+def record_judge_response(ledger: object | None, response: object, cap: int | None = None) -> None:
+    """Count one judge call and whether it hit the token ceiling. Never raises.
+
+    ``cap`` exists because ``finish_reason`` is not a reliable truncation signal
+    on the server this project runs. Probed directly on 2026-08-15: asked for 64
+    tokens with ``n_predict`` set, ik_llama.cpp returned **exactly 64** and still
+    reported ``finish_reason: "stop"``. Nothing in the response says it was cut —
+    no ``stopped_limit``, no ``length`` — so a counter keyed on the finish reason
+    alone reads zero however often the cap binds.
+
+    That mattered twice over. Before OUTPUT-CAP-01 the cap never reached the
+    server at all (§3.35), so the counter was measuring an event that could not
+    occur; after the fix it can occur and the counter still could not see it.
+    Comparing the generated-token count against the cap that was requested is the
+    signal the server actually leaves behind.
+    """
     if ledger is None:
         return
     try:
-        ledger.record_judge_call(hit_token_cap=hit_length_cap(response))  # type: ignore[attr-defined]
+        hit = hit_length_cap(response)
+        if not hit and isinstance(cap, int) and cap > 0:
+            produced = completion_tokens_of(response)
+            hit = produced is not None and produced >= cap
+        ledger.record_judge_call(hit_token_cap=hit)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001 — telemetry must never break a verdict
         return
 

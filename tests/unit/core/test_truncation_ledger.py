@@ -262,3 +262,72 @@ class TestConcurrency:
         assert snap["tool_output_calls"] == 1600
         assert snap["tool_output_over_limit"] == 1600
         assert snap["tool_output_chars_dropped"] == 1600 * 6
+
+
+class TestTheCapIsDetectedWhenTheServerWillNotSaySo:
+    """``finish_reason`` is not a truncation signal on the server we run.
+
+    Probed directly on 2026-08-15: asked for 64 tokens with ``n_predict`` set,
+    ik_llama.cpp returned **exactly 64** and reported ``finish_reason: "stop"``.
+    The response carries no ``stopped_limit``, no ``length``, nothing at all to
+    say it was cut — only ``usage.completion_tokens`` equal to the cap.
+
+    So the judge-ceiling counter was blind twice over. Before OUTPUT-CAP-01 the
+    cap never reached the server (§3.35) and the counter measured an event that
+    could not occur; after the fix the event occurs and ``finish_reason`` still
+    does not report it. Comparing the produced count against the requested cap is
+    the only evidence the server leaves.
+    """
+
+    def _response(self, *, tokens: int, reason: str = "stop") -> object:
+        return type(
+            "R",
+            (),
+            {
+                "response_metadata": {
+                    "finish_reason": reason,
+                    "token_usage": {"completion_tokens": tokens},
+                }
+            },
+        )()
+
+    def test_a_silent_truncation_is_counted(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+
+        ledger = TruncationLedger()
+        record_judge_response(ledger, self._response(tokens=8192), cap=8192)
+        assert ledger.judge_token_cap_hits == 1
+
+    def test_a_short_answer_is_not_counted(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+
+        ledger = TruncationLedger()
+        record_judge_response(ledger, self._response(tokens=412), cap=8192)
+        assert ledger.judge_token_cap_hits == 0
+        assert ledger.judge_invocations == 1
+
+    def test_without_a_cap_it_falls_back_to_the_finish_reason(self) -> None:
+        """The old behaviour must survive for providers that do report it."""
+        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+
+        ledger = TruncationLedger()
+        record_judge_response(ledger, self._response(tokens=8192, reason="length"))
+        assert ledger.judge_token_cap_hits == 1
+
+        quiet = TruncationLedger()
+        record_judge_response(quiet, self._response(tokens=8192), cap=None)
+        assert quiet.judge_token_cap_hits == 0
+
+    def test_the_usage_metadata_shape_is_also_read(self) -> None:
+        """LangChain exposes the count in two places depending on the provider."""
+        from maljan.core.truncation_ledger import completion_tokens_of
+
+        r = type("R", (), {"usage_metadata": {"output_tokens": 77}, "response_metadata": {}})()
+        assert completion_tokens_of(r) == 77
+
+    def test_a_response_with_no_counts_is_not_a_hit(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+
+        ledger = TruncationLedger()
+        record_judge_response(ledger, object(), cap=8192)
+        assert ledger.judge_token_cap_hits == 0

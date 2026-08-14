@@ -222,7 +222,14 @@ class JudgeAgent:
                 timeout=float(no_tools_timeout),
             )
             record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
-            record_judge_response(getattr(self, "truncation_ledger", None), response)
+            record_judge_response(
+                getattr(self, "truncation_ledger", None),
+                response,
+                # The cap this call was actually built with. Passed because the
+                # local server truncates silently — same token count, same
+                # ``finish_reason: "stop"`` — so the count is the only evidence.
+                cap=getattr(get_settings().llm, "judge_max_tokens", None),
+            )
             return str(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
