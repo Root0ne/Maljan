@@ -1,6 +1,21 @@
 {
- "schema": "parameter-size-series/v1",
+ "schema": "parameter-size-series/v2",
  "arms": [
+  {
+   "arm": "qwen35ba3b",
+   "model": "qwen3.6-35b-a3b",
+   "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+   "total_params_b": 35.0,
+   "active_params_b": 3.0,
+   "quantisation": "hosted-full-precision",
+   "free_tier": false,
+   "source": "frontier_probe_qwen35ba3b_nothink.json",
+   "thinking_disabled_requested": true,
+   "mean_reasoning_fraction": 0.0,
+   "n": 25,
+   "mean_f1": 0.3507,
+   "failed": 0
+  },
   {
    "arm": "local",
    "model": "Qwen3.6-35B-A3B (IQ3_K_R4)",
@@ -8,6 +23,7 @@
    "active_params_b": 3.0,
    "quantisation": "IQ3_K_R4",
    "source": "consensus_ablation.json (arm=single)",
+   "mean_reasoning_fraction": 0.0,
    "n": 25,
    "mean_f1": 0.4136,
    "failed": 0
@@ -15,14 +31,51 @@
   {
    "arm": "default",
    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+   "base_url": "https://openrouter.ai/api/v1",
+   "total_params_b": 120.0,
+   "active_params_b": 12.0,
+   "quantisation": "",
+   "free_tier": true,
+   "source": "frontier_probe_default_nothink.json",
+   "thinking_disabled_requested": true,
+   "mean_reasoning_fraction": 0.562,
+   "n": 25,
+   "mean_f1": 0.4149,
+   "failed": 0
+  }
+ ],
+ "secondary_runs": [
+  {
+   "arm": "default",
+   "model": "nvidia/nemotron-3-super-120b-a12b:free",
    "total_params_b": 120.0,
    "active_params_b": 12.0,
    "quantisation": "",
    "source": "frontier_probe.json",
+   "thinking_disabled_requested": null,
+   "mean_reasoning_fraction": 0.565,
    "n": 25,
    "mean_f1": 0.4162,
    "failed": 0
+  },
+  {
+   "arm": "qwen35ba3b",
+   "model": "qwen3.6-35b-a3b",
+   "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+   "total_params_b": 35.0,
+   "active_params_b": 3.0,
+   "quantisation": "hosted-full-precision",
+   "free_tier": false,
+   "source": "frontier_probe_qwen35ba3b.json",
+   "thinking_disabled_requested": false,
+   "mean_reasoning_fraction": 0.995,
+   "n": 25,
+   "mean_f1": 0.008,
+   "failed": 0
   }
  ],
- "status": "incomplete"
+ "configuration_matched": 2,
+ "configuration_unmatched": 1,
+ "distinct_sizes_matched": 1,
+ "status": "not-configuration-comparable"
 }

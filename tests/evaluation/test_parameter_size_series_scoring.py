@@ -6,7 +6,7 @@ architecture" or "our findings are about one model". That is too much weight for
 untested arithmetic, so the parts that could quietly produce a wrong rho are
 pinned here.
 
-Three failures this guards against, each of which would be invisible in the
+Four failures this guards against, each of which would be invisible in the
 output:
 
 * **ties broken by file order.** Two arms landing on the same mean F1 is
@@ -18,6 +18,13 @@ output:
 * **an incomplete series correlating anyway.** If one endpoint throttles and its
   arm never finishes, a rho over the survivors describes which endpoints
   answered, not which models are larger.
+* **a configuration difference reported as a size effect.** The fourth was found
+  by running it: on 2026-08-14 the series returned rho=+0.866 from five rows that
+  were three models, one of them appearing twice at two reasoning settings. The
+  reasoning-enabled row scored 0.0080 — crippled by a flag, not by its parameter
+  count — and sat at the small end of the axis, where it set the sign. The gate
+  in ``TestConfigurationMatching`` exists because that rho was reported before
+  anyone asked what the rows were.
 """
 
 from __future__ import annotations
@@ -28,10 +35,13 @@ from tests.evaluation.eval_parameter_size_series import (
     best_achievable_p,
     build_report,
     common_cells,
+    configuration_matched,
+    distinct_sizes,
     exact_two_tailed_p,
     mean_over,
     paired_delta,
     ranks,
+    select_representative_arms,
     spearman,
     summarise_arm,
 )
@@ -140,12 +150,23 @@ class TestSummariseArm:
         assert summarise_arm([{"sample_id": "a", "error": "boom"}])["mean_f1"] is None
 
 
-def _arm(name: str, total: float, active: float, f1: float) -> dict[str, object]:
+def _arm(
+    name: str,
+    total: float,
+    active: float,
+    f1: float,
+    *,
+    reasoning: float | None = 0.0,
+    requested_no_thinking: bool | None = None,
+) -> dict[str, object]:
     """A fully-scored arm: all 25 fixture-repeat cells, every one at ``f1``.
 
     ``by_key`` is populated rather than left empty because the report now
     correlates over the cells every arm shares — an arm with no cells is, quite
     correctly, refused as not comparable.
+
+    ``reasoning`` defaults to the local baseline's 0.0: these arms are meant to
+    be configuration-matched, and the gate that enforces that has its own tests.
     """
     cells = {f"s{i}:{r}": f1 for i in range(5) for r in range(5)}
     return {
@@ -156,6 +177,9 @@ def _arm(name: str, total: float, active: float, f1: float) -> dict[str, object]
         "mean_f1": f1,
         "n": len(cells),
         "by_key": cells,
+        "mean_reasoning_fraction": reasoning,
+        "thinking_disabled_requested": requested_no_thinking,
+        "source": f"frontier_probe_{name}.json",
     }
 
 
@@ -253,7 +277,22 @@ class TestCommonCells:
         assert mean_over({"a:0": 0.5}, set()) is None
 
 
-def _arm_with_cells(name: str, total: float, active: float, cells: dict[str, float]) -> dict:
+def _arm_with_cells(
+    name: str,
+    total: float,
+    active: float,
+    cells: dict[str, float],
+    *,
+    reasoning: float | None = 0.0,
+    requested_no_thinking: bool | None = None,
+) -> dict:
+    """A series arm. Configuration-matched by default.
+
+    ``reasoning`` defaults to 0.0 — the local baseline's share — because these
+    tests are about cell sharing and rank arithmetic, and an arm that silently
+    failed the configuration gate would make every one of them pass for the
+    wrong reason. The gate itself is exercised by ``TestConfigurationMatching``.
+    """
     return {
         "arm": name,
         "model": f"model-{name}",
@@ -262,6 +301,9 @@ def _arm_with_cells(name: str, total: float, active: float, cells: dict[str, flo
         "mean_f1": round(sum(cells.values()) / len(cells), 4) if cells else None,
         "n": len(cells),
         "by_key": cells,
+        "mean_reasoning_fraction": reasoning,
+        "thinking_disabled_requested": requested_no_thinking,
+        "source": f"frontier_probe_{name}.json",
     }
 
 
@@ -327,3 +369,89 @@ class TestPartialArmsAreRefused:
         assert glm["mean_f1"] == pytest.approx(0.50, abs=0.01)  # inflated by the extras
         assert glm["mean_f1_common"] == pytest.approx(0.30)  # what rho actually uses
         assert blob["rho_total_params"] == 0.0
+
+
+class TestConfigurationMatching:
+    """The gate that decides whether an arm belongs on the size axis at all.
+
+    Added 2026-08-14, after the series produced rho=+0.866 from five rows that
+    were really three models. Two of the rows were the same model at two
+    reasoning settings, and the reasoning-enabled one — 0.0080, crippled by the
+    flag rather than by its size — sat at the small end and set the sign. The
+    flag is worth 0.34-0.45 F1 (§3.31, §3.33); parameter count in this series
+    would have to move F1 further than that to be visible past it.
+    """
+
+    def test_matching_is_judged_on_what_the_provider_did(self) -> None:
+        """Not on what the harness asked for. §3.32: the flag was requested,
+        accepted, and ignored — 56.2% of the output was still reasoning."""
+        ignored = _arm("nemotron", 120, 12, 0.41, reasoning=0.562, requested_no_thinking=True)
+        assert configuration_matched(ignored) is False
+
+    def test_an_honoured_flag_matches(self) -> None:
+        honoured = _arm("qwen", 35, 3, 0.35, reasoning=0.0, requested_no_thinking=True)
+        assert configuration_matched(honoured) is True
+
+    def test_an_unknown_reasoning_share_is_not_matched(self) -> None:
+        """Unknown is unknown. Treating it as matched would let a v1 result file
+        with no reasoning accounting silently become a series point."""
+        assert configuration_matched(_arm("old", 120, 12, 0.42, reasoning=None)) is False
+
+    def test_repeated_runs_of_one_model_collapse_to_one_point(self) -> None:
+        """Two runs of the same model are one point on the size axis, not two."""
+        a = _arm("nemotron", 120, 12, 0.4162, reasoning=0.565)
+        b = _arm("nemotron", 120, 12, 0.4149, reasoning=0.562)
+        reps, others = select_representative_arms([a, b])
+        assert len(reps) == 1
+        assert len(others) == 1
+
+    def test_the_matched_run_represents_its_model(self) -> None:
+        """Both configurations of one model exist; the matched one is the point."""
+        thinking = _arm("qwen", 35, 3, 0.0080, reasoning=0.995)
+        matched = _arm("qwen", 35, 3, 0.3507, reasoning=0.0)
+        reps, others = select_representative_arms([thinking, matched])
+        assert [r["mean_f1"] for r in reps] == [0.3507]
+        assert [o["mean_f1"] for o in others] == [0.0080]
+
+    def test_distinct_sizes_counts_sizes_not_rows(self) -> None:
+        """Local and hosted copies of one model are two rows at one size."""
+        arms = [_arm("local", 35, 3, 0.41), _arm("hosted", 35, 3, 0.35)]
+        assert distinct_sizes(arms) == 1
+
+    def test_an_unmatched_arm_cannot_complete_the_span(self) -> None:
+        """The 2026-08-14 situation exactly: two matched arms at one size, and
+        the only larger model running the opposite configuration."""
+        arms = [
+            _arm("local", 35, 3, 0.4136, reasoning=0.0),
+            _arm("hosted", 35, 3, 0.3507, reasoning=0.0),
+            _arm("nemotron", 120, 12, 0.4149, reasoning=0.562, requested_no_thinking=True),
+        ]
+        md, blob = build_report(arms)
+        assert blob["status"] == "not-configuration-comparable"
+        assert "rho_total_params" not in blob
+        assert blob["configuration_matched"] == 2
+        assert blob["distinct_sizes_matched"] == 1
+        assert "the provider ignored it" in md or "provider ignored it" in md
+
+    def test_the_excluded_arm_is_named_with_its_measured_share(self) -> None:
+        """A refusal that does not say which arm and why is not reviewable."""
+        arms = [
+            _arm("local", 35, 3, 0.4136, reasoning=0.0),
+            _arm("hosted", 35, 3, 0.3507, reasoning=0.0),
+            _arm("nemotron", 120, 12, 0.4149, reasoning=0.562, requested_no_thinking=True),
+        ]
+        md, _blob = build_report(arms)
+        assert "56.2%" in md
+        assert "model-nemotron" in md
+
+    def test_a_matched_series_still_correlates(self) -> None:
+        """The gate must not block a series that genuinely is comparable."""
+        arms = [
+            _arm("local", 35, 3, 0.41),
+            _arm("nemotron", 120, 12, 0.42),
+            _arm("minimax", 428, 22, 0.43),
+            _arm("glm", 744, 40, 0.44),
+        ]
+        _md, blob = build_report(arms)
+        assert blob["status"] == "complete"
+        assert blob["rho_total_params"] == pytest.approx(1.0)

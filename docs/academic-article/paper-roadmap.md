@@ -418,14 +418,22 @@ than quietly inheriting.
       ATT&CK-classification F1 (ρ=0.85, p=0.014); this tests that trend rather than sampling one
       point on it. → **E.4 + E.8 + P8**
       Runs in two stages, because the endpoints' rate limits make them different experiments:
-  - [ ] **C6a — the series on the §3.7 fixtures** (5 fixtures × 5 repeats × 2 new arms = 50 calls,
-        ~1.4 h each at the measured 36 calls/h). Directly comparable to B8's stored n=25, so the
-        four-point curve exists before the cohort is touched. **No local resources — runs beside C4.**
-  - [ ] **C6b — the series on the cohort** (97 calls per arm, ~2.7 h each). One call per sample on
-        the same evidence the local judge received, which is where §3.27 showed the verdict is
-        actually decided. The full-ReAct variant (~2,000 requests, ~55 h/arm, and it cannot share
-        the machine with C4) is **not** attempted at this rate; that limitation is stated in E2
-        rather than worked around.
+  - [x] **C6a — the series on the §3.7 fixtures** `[done]` **2026-08-14** — §3.32, §3.33.
+        Four arms ran to completion at n=25 each: Nemotron-120B re-run with the reasoning flag
+        (**ignored by the provider** — 56.2% reasoning, F1 0.4149, a replication of §3.16 at
+        Δ=−0.0014), and `qwen3.6-35b-a3b` hosted in **both** configurations (off: **0.3507**;
+        on: **0.0080**, 24/25 calls exhausted on reasoning). Two results the series was not
+        opened for: **quantisation is bounded** — our 3-bit local deployment is 0.0629 *above*
+        the vendor's own hosting of the same weights, CI [−0.1484, +0.0256] — and the reasoning
+        flag **replicates at 0.3427 paired** on the model we host. Cost $0.18.
+  - [x] **C6b — the series** `[done, NEGATIVE]` **2026-08-14** — §3.34. **Not run on the cohort,
+        and the cohort would not have helped.** A size correlation needs the arms matched on the
+        flag that outweighs the size effect, and no provider above 35B honours it: DashScope does,
+        OpenRouter accepts and ignores it (§3.32). Two configuration-matched arms survive and both
+        are 35B — two points at one size. `eval_parameter_size_series.py` now refuses and names the
+        excluded arm with its measured reasoning share. **The harness reported ρ=+0.866 before the
+        gate existed**, from five rows that were three models; that near-miss is recorded in §3.34.
+        → **P8 closes as a limitation with a measured cause, not a budget excuse.**
 - [x] **C7 — Close P6** `[done]` **2026-08-14** — §3.28. Step budget hit on **82.1%** of arms (always at
       exactly 19 tool calls / 41 messages), a tool output cut on **83.9%**, evidence chunked on **48.2%**.
       P6 `EXPOSED` → `PARTIAL`, not `CLEAR`: frequency is reported, **impact is not**, because with 46 of
