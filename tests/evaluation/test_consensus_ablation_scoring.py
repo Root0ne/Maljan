@@ -147,6 +147,11 @@ class _FakeLLM:
     def bind(self, **kwargs: object) -> _FakeLLM:
         out = _FakeLLM()
         out.bound = {**self.bound, **kwargs}
+        # LangChain's ``bind`` returns a RunnableBinding, which exposes the bound
+        # kwargs as ``.kwargs``. The fake exposed only ``.bound``, so a second
+        # ``bind_eval_llm`` on the result could not see what the first had set —
+        # and the idempotence test failed against a faithful implementation.
+        out.kwargs = out.bound
         return out
 
 
@@ -186,6 +191,59 @@ class TestTheEvalTimeoutActuallyBinds:
         extra = agent.llm.bound.get("extra_body")
         assert isinstance(extra, dict)
         assert extra["chat_template_kwargs"]["enable_thinking"] is False
+
+    def test_the_providers_extra_body_survives_the_bind(self) -> None:
+        """The 2026-08-15 regression: ``bind(extra_body=...)`` *replaces*.
+
+        The provider puts the local server's output cap in ``extra_body``
+        (OUTPUT-CAP-01) and its repetition penalty beside it. Passing a fresh
+        dict here dropped both, so every harness calling this function ran a
+        differently-configured model than production — with the judge's
+        8,192-token ceiling removed, which is how one C3 call reached 30,155
+        generated tokens on a run whose purpose was to measure the capped
+        condition.
+        """
+        agent = _FakeAgent()
+        agent.llm.extra_body = {  # type: ignore[attr-defined]
+            "max_tokens": 8192,
+            "n_predict": 8192,
+            "repeat_penalty": 1.05,
+        }
+        bind_eval_llm(agent, timeout_s=120)
+        extra = agent.llm.bound.get("extra_body")
+        assert isinstance(extra, dict)
+        assert extra["max_tokens"] == 8192
+        assert extra["n_predict"] == 8192
+        assert extra["repeat_penalty"] == 1.05
+        assert extra["chat_template_kwargs"]["enable_thinking"] is False
+
+    def test_an_existing_chat_template_kwargs_is_extended_not_dropped(self) -> None:
+        """The provider sets ``enable_thinking`` too; merging must not lose a
+        sibling key it happens to carry."""
+        agent = _FakeAgent()
+        agent.llm.extra_body = {  # type: ignore[attr-defined]
+            "chat_template_kwargs": {"enable_thinking": True, "some_other_flag": 1}
+        }
+        bind_eval_llm(agent)
+        ctk = agent.llm.bound["extra_body"]["chat_template_kwargs"]  # type: ignore[index]
+        assert ctk["enable_thinking"] is False  # the harness wins on this one
+        assert ctk["some_other_flag"] == 1
+
+    def test_binding_twice_is_idempotent(self) -> None:
+        """Harnesses that wrap an already-bound model must not lose the cap."""
+        agent = _FakeAgent()
+        agent.llm.extra_body = {"max_tokens": 8192}  # type: ignore[attr-defined]
+        bind_eval_llm(agent, timeout_s=300)
+        bind_eval_llm(agent, timeout_s=120)
+        extra = agent.llm.bound["extra_body"]  # type: ignore[index]
+        assert extra["max_tokens"] == 8192
+        assert agent.llm.bound["timeout"] == 120
+
+    def test_a_provider_that_set_nothing_still_gets_the_thinking_flag(self) -> None:
+        agent = _FakeAgent()
+        bind_eval_llm(agent)
+        extra = agent.llm.bound["extra_body"]  # type: ignore[index]
+        assert extra == {"chat_template_kwargs": {"enable_thinking": False}}
 
     def test_a_provider_that_rejects_the_kwargs_does_not_kill_the_run(self) -> None:
         class Hostile:

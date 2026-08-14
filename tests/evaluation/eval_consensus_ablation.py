@@ -429,12 +429,41 @@ def bind_eval_llm(agent: Any, *, timeout_s: int = _CALL_TIMEOUT_S) -> None:
     Second, ``enable_thinking=false``: otherwise this reasoning model spends the
     whole cap inside ``<think>``, which the server strips into
     ``reasoning_content``, leaving an empty answer (§3.6).
+
+    **And ``extra_body`` is merged, not replaced — the third thing, learned on
+    2026-08-15.** ``bind(extra_body=...)`` overrides the value the provider set at
+    construction rather than adding to it. The provider puts everything a local
+    llama.cpp server needs in there: the output cap under the key that server
+    actually reads (``OUTPUT-CAP-01``), and the repetition penalty when one is
+    configured. Passing a fresh dict here silently dropped all of it, so **every
+    harness that calls this function was measuring a differently-configured
+    system than production runs** — with the judge's 8,192-token ceiling removed,
+    which is how a C3 call reached 30,155 generated tokens (§3.35) on a run whose
+    whole purpose was to measure the capped condition.
+
+    The failure was invisible because the two settings this function *does* apply
+    were applied correctly. Nothing looked wrong; something else had gone missing.
     """
     try:
-        agent.llm = agent.llm.bind(
-            timeout=timeout_s,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
+        # Resolve what the provider already put there. After a previous bind the
+        # model is a RunnableBinding, so check its kwargs and its inner model
+        # before falling back to nothing.
+        existing: dict[str, Any] = {}
+        for source in (
+            getattr(agent.llm, "kwargs", {}) or {},
+            {"extra_body": getattr(getattr(agent.llm, "bound", None), "extra_body", None)},
+            {"extra_body": getattr(agent.llm, "extra_body", None)},
+        ):
+            candidate = source.get("extra_body")
+            if isinstance(candidate, dict) and candidate:
+                existing = dict(candidate)
+                break
+
+        chat_template_kwargs = dict(existing.get("chat_template_kwargs") or {})
+        chat_template_kwargs["enable_thinking"] = False
+        existing["chat_template_kwargs"] = chat_template_kwargs
+
+        agent.llm = agent.llm.bind(timeout=timeout_s, extra_body=existing)
     except Exception as exc:  # noqa: BLE001 — a provider may reject either kwarg
         print(f"  WARNING: could not bind eval LLM settings ({exc}); running unbounded.")
 
