@@ -17,7 +17,8 @@
 ## Where this stands
 
 **The ledger, which governs everything below** *(revised 2026-08-11 after B5–B8, D3, E3)*:
-**5 `OURS` · 10 `REFINEMENT` · 2 `PRIOR ART` (+1 adjacent) · 2 `UNMEASURED` · 1 `WITHDRAWN`**.
+**5 `OURS` · 10 `REFINEMENT` · 2 `PRIOR ART` (+1 adjacent) · 0 `UNMEASURED` · 1 `WITHDRAWN`**
+(C6 closed `NEGATIVE` and C7's premise measured on 2026-08-14, §3.27).
 
 What moved, and it is most of the table:
 
@@ -237,7 +238,9 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       duplicates, no dangling relationships.
       "Repairing beats rejecting" cannot rest on that. Not a refutation either: the evidence here is
       constructed and consistent, so there is little to repair. **C7 needs a population where the
-      defects occur — the CAPE runs.** Stays `UNMEASURED`, now with a measured lower bound.
+      defects occur.** **Superseded 2026-08-14 (§3.27):** the B3 re-run's 80 fresh bundles are that
+      population — 15 of the 51 that ran the pass had objects removed, across all four defect
+      classes. C7's premise is measured; the head-to-head repair-vs-reject comparison is not.
       Worth keeping: the one defect class observed is §3.3/§1.7.1's budget exhaustion showing up in
       the *artifact* rather than the token stream.
 
@@ -408,7 +411,9 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       makes live submission impossible" reading (§3.13c — the backlog is never scheduled at all),
       and the n=210 temporal-drift result (§3.14 — it meets the stale-program precondition and its
       per-sample outputs were not retained, so it cannot be checked and must be re-run).
-- [ ] **D4 — Finalise the ledger and the self-audit** — update the four `UNMEASURED` rows with
+- [~] **D4 — Finalise the ledger and the self-audit** — C6 closed `NEGATIVE` and C7's premise
+      measured on 2026-08-14 (§3.27); **0 `UNMEASURED` rows remain**. Still to do: re-issue the
+      P6/P8/P9 verdicts. Original scope was to update the four `UNMEASURED` rows with
       their results; re-issue the P6/P8/P9 verdicts
 
 ## E — The paper — last
@@ -439,8 +444,8 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | C4 | "Use a tool ≠ expose it" — 20-tool allowlist | §2.2 measured | open gap | E1 |
 | C5 | Describe-then-map | §1.5.1/§1.5.2 measured | **PRIOR ART** `2401.12178` | cite only |
 | C5a | Rank and gate are separate axes | N=4,913 TRAM2 **+ AnnoCTR** | **REFINEMENT** — `2604.03676` owns the framing | keeps the *inversion* |
-| C6 | Multi-layer corroboration cascade | §1.10's 0/15 null was measured with **three of six** Layer-0 sources; the missing `sigma_layer` fires on **43/43** and contributes uniquely on **43/43** (§3.21) | `UNMEASURED` — and the prior null is now known to be **based on an incomplete cascade** | B3 re-run, four firing layers (§3.23) |
-| C7 | Deterministic STIX integrity + honest degradation | **measured** on 60 fresh judge bundles (§3.10) | `PARTIAL` — firing rate known, truncation distribution awaits C7 runs | C7 |
+| C6 | Multi-layer corroboration cascade | **measured** (§3.27): 80 judge calls, four firing layers including `sigma_layer` at weight 0.55. Removing a layer while its techniques survive under a partner source changes the verdict on **0/32**, Jaccard **1.000 [1.000, 1.000]**; removing one whose techniques vanish changes it on **32/32** | `NEGATIVE` — the judge reads the claim list. Corroboration is computed, weighted and surfaced in the run summary, and reaches the analyst's artefact **not at all** | closed |
+| C7 | Deterministic STIX integrity + honest degradation | **measured** on 80 fresh bundles from the B3 re-run (§3.27): the pass ran on **51**, removed something on **15**, 51 objects, and **all four** defect classes appear — 19 duplicate_attack_pattern, 21 empty_pattern, 8 dangling_relationship, 3 duplicate_relationship. The archived-bundle measurement saw 3 removals in 60, all one class (§3.10) | `PARTIAL → MEASURED PREMISE` — the defect population C7 needed now exists, and rejecting instead of repairing would discard **15 of 51** bundles. Still not a head-to-head repair-vs-reject comparison | truncation distribution (P6) |
 | C8 | Schema-pruning hint → completion, not accuracy | n=17 paired | **OURS** — held at A4 | second search before submission |
 | N1 | Claim-count is an invalid instrument | measured | `REFINEMENT` | E1 |
 | N2 | Equal-budget view decomposition trades grounding for volume | n≈8–9/arm | `REFINEMENT` | E1 |
