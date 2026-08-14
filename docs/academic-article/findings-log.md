@@ -2341,7 +2341,7 @@ difference from everything measured after this point even though the arithmetic 
 
 ---
 
-### 3.26 The pipeline scores what the sandbox already scored — `NEGATIVE` (C5 at n=97, C4 interim at n=13)
+### 3.26 The pipeline scores what the sandbox already scored — `NEGATIVE` (C5 at n=97; C4 closed incomplete at 13 pairs)
 
 C5 exists because every F1 this project has reported was unanchored. The natural anchor is the
 sandbox the pipeline is built on: CAPE maps its own signature hits to ATT&CK technique IDs in each
@@ -2372,9 +2372,42 @@ was checked rather than reported: all 13 samples differ individually, by as much
 direction. The system is not reproducing CAPE's answers; it is arriving at different answers of
 the same quality.
 
-**Read this as interim and bounded.** n=13 of a possible 97, and C4's remaining arms are blocked
-on a machine that cannot finish one before its memory guard intervenes (§3.25 and the abandonment
-work). The direction has been stable across every interim reading, but the number will move.
+**C4 is closed at 13 pairs, and its effect estimate is not offered as a finding.** On 2026-08-14
+the study was stopped after five consecutive supervised attempts produced **zero** completed arms
+in 70 minutes: each attempt started with ~22 GB free, drove the machine into swap (284,519 pages
+out in 10 s at the worst point), and was terminated by the memory guard at the 4 GB floor before
+finishing a single ~40-minute arm. 26 arms of a planned 194 are on disk. The remaining 168 cannot
+be completed on this machine, and that is now measured rather than predicted.
+
+The paired deltas at n=13 are therefore recorded and **not interpreted**:
+
+| | delta (dynamic − static-only) | 95% CI | |
+|---|---|---|---|
+| F1 | +0.0030 | [−0.0177, +0.0230] | includes 0 |
+| recall | +0.0024 | [−0.0151, +0.0188] | includes 0 |
+| precision | −0.0701 | [−0.1392, −0.0072] | excludes 0 |
+
+§3.16 is the reason for that refusal, and it is our own: *a difference read off an underpowered arm
+is not a weak result, it is an unreliable one.* The frontier arm's n=9 estimate moved by 0.086 when
+the run was completed — through the local mean and out the other side — and nothing was learned in
+between except the remaining calls. Reporting +0.003 at n=13 as "the dynamic path does not help"
+would repeat exactly the error this log already documents. The precision interval excluding zero is
+not exempt: **12 of 12 pairs differ in a degradation reason the treatment does not explain**, so an
+unknown share of that gap is not attributable to the sandbox at all.
+
+**What does survive the sample size is a mechanism observation, because it is not a difference in
+means.** Across all 13 dynamic arms, the two sources that actually consume the sandbox report —
+the `dynamic` and `network` analysts — **claimed nothing at all**. Where the dynamic arm named
+techniques the static arm did not, attribution puts them at `sigma_layer` (5 of 7) and `static`
+(2 of 7). The dynamic channel was live, fed, and silent; whatever separates the arms did not come
+through it.
+
+That does not depend on n in the way an effect size does, and it is the third independent
+appearance of the same shape: §3.23 (two Layer-0 sources claim nothing on 97/97 archived reports),
+§3.27 (the judge reads the claim list and ignores the corroboration), and now the dynamic analysts
+themselves. **The recurring finding of this project is not that its mechanisms are weak but that
+they frequently do not engage at all** — and that a pipeline reports a confident verdict either
+way.
 
 The ceiling both sides share is stated in C5's own scope note: family-level `uses` sets are a
 coarse per-sample truth, so absolute recall carries a structural cap. That bias is identical for
@@ -2383,7 +2416,13 @@ number alone.
 
 ---
 
-### 3.27 The verdict follows the claims and ignores the corroboration — `NEGATIVE` (B3 re-run, attempt 2, complete)
+### 3.27 The verdict does not follow the claims — it is overwritten by them — `NEGATIVE` (B3, corrected 2026-08-14)
+
+> **Corrected the same week it was written.** This section originally concluded *"the judge is
+> reading the claim list and nothing else"* and presented B3 as a measurement of LLM behaviour. It
+> was not. The observed numbers are produced in full by a deterministic post-processing step,
+> `_reconcile_with_cascade`, and the judge plays no part in them. The correction is at the end of
+> this section (**§3.27.1**); the original measurement stands, only its explanation was wrong.
 
 Both conditions are in: 80 judge calls over 8 fixtures carrying 12 to 51 techniques, four Layer-0
 sources, one arm per source plus the baseline. The two halves point in opposite directions, and
@@ -2394,10 +2433,12 @@ together they answer the question §1.10 left open.
 | `disjoint` | its techniques disappear — no other source claims them | **32/32** | 0.738–0.765 |
 | `overlap` | its techniques survive — a partner still claims them — but their **corroboration** changes | **0/32** | **1.000 [1.000, 1.000]** |
 
-**The judge is reading the claim list and nothing else.** Take a technique away and the bundle
+**~~The judge is reading the claim list and nothing else.~~** *(This was the original reading. See
+§3.27.1 — it is wrong, and the mechanism is not the judge.)* Take a technique away and the bundle
 loses it; leave the technique but destroy the cross-domain agreement behind it and the bundle is
 byte-identical. The cascade computes corroboration, weights it by layer trust and surfaces it in
-the run summary — and none of that reaches the artefact the analyst receives.
+the run summary — and none of that reaches the artefact the analyst receives. **That last sentence
+survives the correction; only the attribution to the judge does not.**
 
 This is §1.10's null established rather than inherited. That version measured three static sources
 on five-technique fixtures, where the sixth source received nothing and its arm was identical to
@@ -2421,6 +2462,55 @@ B4 rides along on both runs, and fresh bundles behave quite unlike the archived 
 in 60, all `empty_pattern`): the integrity pass ran on 51 of 80 bundles and removed something on
 15, 51 objects in total, across all four defect classes — 19 `duplicate_attack_pattern`,
 21 `empty_pattern`, 8 `dangling_relationship`, 3 `duplicate_relationship`.
+
+#### 3.27.1 The correction: this measured an `if` statement, not a language model
+
+Found on 2026-08-14 while starting C3, from a single line in an unrelated log:
+
+    judge_postprocess: added 51 cascade technique(s) the verdict LLM omitted from the bundle
+
+`judge_agent` builds `valid_technique_ids` from `cascade_summary.results` and hands it to
+`postprocess_judge_bundle`, which calls **`_reconcile_with_cascade`**. That function does two
+things to the judge's output: it **drops** every `attack-pattern` whose technique ID cannot be
+resolved, and it **appends** every cascade technique missing from the bundle. The cascade's
+technique set is therefore a guaranteed subset of every bundle the system emits, *whatever the
+judge produced* — confirmed directly against the function with a synthetic bundle in which the
+judge and the cascade disagreed in both directions.
+
+**Checked against all 80 stored B3 arms** by rebuilding each arm's cascade set from the same seeded
+fixtures and the same assignment (`verify_b3_mechanism.py`, `b3_mechanism_check.json`):
+
+| | |
+|---|---|
+| arms where the cascade set is a subset of the bundle | **80/80** |
+| arms where the bundle is **exactly** the cascade set | **80/80** |
+| techniques contributed by the judge, across all arms | **0** |
+
+Both halves of the table above then follow from set arithmetic, with no model involved:
+
+* **overlap** — removing a source whose every claim a partner also makes leaves `results`
+  unchanged, so the injected set is unchanged, so the bundle is unchanged. **0/32, necessarily.**
+* **disjoint** — removing a source removes its techniques from `results`, so the injected set
+  shrinks and the bundle shrinks with it. **32/32, necessarily.**
+
+Jaccard 1.000 with a zero-width bootstrap interval should have been the tell: an LLM at
+temperature 0 asked 32 times does not usually agree with itself perfectly. It was read as a strong
+null instead of as a constant.
+
+**What changes and what does not.** The architectural conclusion is unchanged and in fact
+strengthened: corroboration does not reach the analyst's artefact, and the cascade cannot be
+claimed as a contribution to the output. What is withdrawn is the *mechanism* — the judge was
+never shown to read anything. The stronger true statement is that **the judge's technique output
+is discarded and replaced by the cascade's**, which is a different and more serious property of
+this pipeline than inattention.
+
+**Two consequences beyond this section.** First, **C3 is vacuous as designed**: its two arms share
+one `cascade_summary.results`, so `valid_technique_ids` is identical and the bundles are forced to
+match. The run was stopped four minutes in. Its question has to be asked of what the judge emits
+*before* reconciliation. Second, this is the fifth instance of the pattern in E6 and the first
+found **inside our own results**: a study built to measure a model measured a deterministic code
+path, produced a plausible number, and was written up without an error anywhere. The instrument
+that failed this time was the evaluation.
 
 
 ---

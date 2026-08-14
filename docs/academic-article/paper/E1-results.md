@@ -178,11 +178,32 @@ source was the sole owner of its techniques.
 | disjoint | its techniques disappear; nothing else claims them | **32/32** | 0.738–0.765 |
 | overlap | its techniques survive under a partner source, but their **corroboration** changes | **0/32** | **1.000 [1.000, 1.000]** |
 
-**The judge is reading the claim list and nothing else.** Take a technique away and the bundle loses
-it. Leave the technique in place and destroy the cross-domain agreement behind it — the thing the
-cascade exists to compute — and the bundle is byte-identical. The cascade runs, weights each source
-by a trust coefficient, and reports a corroborated set in the run summary; none of that reaches the
-artefact the analyst is given.
+Take a technique away and the bundle loses it. Leave the technique in place and destroy the
+cross-domain agreement behind it — the thing the cascade exists to compute — and the bundle is
+byte-identical. The cascade runs, weights each source by a trust coefficient, and reports a
+corroborated set in the run summary; none of that reaches the artefact the analyst is given.
+
+**Why the bundle behaves that way is not what we first wrote, and the difference matters.** Our
+initial reading was that the judge attends to the claim list and ignores everything else. It does
+not read either. A post-processing step reconciles the bundle against the cascade: every
+`attack-pattern` whose technique ID cannot be resolved is dropped, and every cascade technique
+missing from the bundle is appended. The cascade's technique set is therefore a guaranteed subset
+of every bundle the system emits, independent of what the judge produced. Checked against all 80
+stored arms by recomputing each arm's cascade set from the same seeded fixtures: **the bundle is
+exactly the cascade's technique set in 80 of 80, and the judge contributes zero techniques to any
+of them.**
+
+Both rows of the table then follow from set arithmetic. Under overlap, removing a source whose
+claims a partner also makes leaves the cascade's set unchanged, so the bundle cannot change — 0 of
+32 is a necessity, not a measurement of restraint. Under disjoint, removing a source deletes its
+techniques from that set, so the bundle shrinks — 32 of 32, equally necessary. The Jaccard of
+1.000 with a zero-width interval was the tell we missed: a language model at temperature 0, asked
+32 times, does not usually agree with itself perfectly. We read a constant as a strong null.
+
+The architectural conclusion is unchanged and, if anything, sharper. Corroboration does not reach
+the analyst's artefact. But the reason is not that a model overlooked it — **the model's technique
+output is discarded and replaced by the deterministic set**, which is a more consequential property
+of this pipeline than inattention, and one no ablation of ours was designed to detect.
 
 **This replaces an earlier version of the same result, and the replacement is why we trust it.** The
 first pass varied three of six Layer-0 sources — the three needing no sandbox — over fixtures

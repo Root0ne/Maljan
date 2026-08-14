@@ -17,7 +17,7 @@ a deterministic layer adjudicates between them.
 | **dynamic analyst** | ReAct loop over a CAPEv2 sandbox via MCP | operational; only Windows PE is analysable on our instance |
 | **network analyst** | local PCAP analysis over the sandbox's capture | operational; depends on the sandbox indirectly |
 | **judge** | synthesises a verdict and emits STIX | operational |
-| **corroboration cascade** | weights layers, marks a technique corroborated when ≥2 layers contribute | **measured: never changes a verdict** (0/15) |
+| **corroboration cascade** | weights layers, marks a technique corroborated when ≥2 layers contribute | **measured: never reaches the artefact** (0/32), and its technique set *replaces* the judge's (80/80) |
 | **confidence gating** | caps confidence for unsupported obfuscation/injection claims | **measured: fires on 0.82% of techniques** |
 | **case-prior RAG** | retrieves similar past cases to prime mapping | **measured: loses to a label-frequency prior in production** |
 | **family-feature RAG** | retrieves family fingerprints | **measured: +0.003 F1 end to end** |

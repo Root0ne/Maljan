@@ -8,11 +8,11 @@ for disassembly, a sandbox for detonation, a vector store for retrieval, and a m
 inference, over three protocols. Each boundary is a place where a request can succeed and still not
 mean what the caller assumed.
 
-This section reports four such failures. We report them together because they share a shape that a
+This section reports five such failures. We report them together because they share a shape that a
 test suite is poorly positioned to catch and a results table cannot show: **the instrument answered
 successfully, and answered about something else.**
 
-## 6.1 Four mechanisms
+## 6.1 Five mechanisms
 
 ### M1 — An unset argument arrives as an assertion
 
@@ -122,6 +122,43 @@ shortest real analysis on this instance — before it will accept a report. We w
 smaller honest n than a full one built on error bodies, and we would rather state the reason we
 verified than the one that first sounded plausible.
 
+### M5 — An ablation that measured a code path and reported a language model
+
+The four above are failures of other people's servers. This one is ours, it is the most recent
+(2026-08-14), and it is the only one that reached a results table.
+
+We ablated the corroboration cascade by removing one evidence source at a time and comparing the
+STIX bundle the analyst receives. Under the condition where a removed source's techniques survive
+under a partner — so that only their *corroboration* changes — the bundle was identical in **32 of
+32** arms, at Jaccard 1.000. Under the condition where the removed source solely owned its
+techniques, **32 of 32** changed. We wrote this up as a finding about the judge model: that it
+attends to the list of claimed techniques and ignores the evidence-quality apparatus above it.
+
+The judge was not involved. A post-processing step reconciles the bundle against the cascade before
+it is returned: unresolvable attack-patterns are dropped, and **every cascade technique missing
+from the bundle is appended to it**. The cascade's technique set is therefore a guaranteed subset
+of every bundle the pipeline emits, whatever the model produced. Recomputing each arm's cascade set
+from the same seeded fixtures shows the bundle is *exactly* that set in **80 of 80** arms, with the
+model contributing **zero** techniques to any of them.
+
+Both results then follow from set arithmetic. Removing a source with a duplicate partner does not
+change the cascade's set, so the bundle cannot change; removing a sole owner does, so it must. The
+two numbers we reported are necessities of an `if` statement, and the experiment could not have
+returned anything else.
+
+**The architectural conclusion survives the correction — corroboration does not reach the analyst's
+artefact — but its mechanism is worse than we described.** The model's technique output is not
+overlooked; it is discarded and replaced. And a second study, already written and about to run,
+was designed to compare a weighted cascade against a flat union of the same claims. Both of its
+arms would have shared one reconciliation set, so it would have reported "no difference" after an
+hour of computation, correctly and vacuously. It was stopped four minutes in, by the same log line
+that exposed M5.
+
+**What made this one hard to see.** The tell was in the results the whole time: a Jaccard of 1.000
+with a zero-width bootstrap interval, from a language model asked the same question 32 times at
+temperature 0. Models do not agree with themselves that well. We read a constant as an unusually
+clean null, because a clean null was the result we were prepared to find.
+
 ## 6.2 Why the test suite did not help
 
 **1,995 tests passed throughout.** This is not a gap in test quality but in test *shape*:
@@ -132,9 +169,15 @@ verified than the one that first sounded plausible.
 * M1 required a second *server*. The behaviour was correct against the only server exercised.
 * M4 required a rich enough **input** — the composition only appears when the step budget is
   actually exhausted, which small fixtures never do.
+* M5 was **tested and passing**. `_reconcile_with_cascade` has unit tests, and they assert exactly
+  what it does: unresolvable patterns are dropped, missing cascade techniques are added. The
+  function was never wrong. What was wrong was an experiment that varied the cascade's input and
+  attributed the output to a model downstream of it — and no test of a component can catch a
+  misattribution made three modules away.
 
-All three preconditions — a second call, a second server, a large input — are exactly what a fast
-unit suite is designed to avoid.
+Four preconditions — a second call, a second server, a large input — are exactly what a fast unit
+suite is designed to avoid. The fifth is worse: **M5 is invisible to unit testing in principle**,
+because every unit involved behaved as specified.
 
 ## 6.3 What did find them: output cardinality
 
@@ -147,6 +190,12 @@ Each was found by the same observation: **a number that repeated where variation
 | 66 consecutive samples at exactly 75,426 characters | M3 |
 | every tool call returning the same validation error | M1 |
 | a 25-minute call that always produced one claim and zero techniques | M4 |
+| a Jaccard of **1.000 with a zero-width interval**, from a model asked the same question 32 times at temperature 0 | M5 |
+
+M5 extends the detector in a direction worth stating, because it is where the idea is least
+comfortable: the repeated number was **our own result**, not a server's response, and the variation
+that failed to appear was the model's. A perfect agreement is the same signal as an identical
+digest, and it deserves the same suspicion.
 
 The generalisation is one line of arithmetic: **before trusting a batch measurement, ask how many
 distinct outputs the N inputs produced.** If far fewer than N differ on a dimension that should
