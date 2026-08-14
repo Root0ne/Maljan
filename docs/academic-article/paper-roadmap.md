@@ -377,16 +377,17 @@ than quietly inheriting.
   - [x] layer contribution `[done]` **2026-08-14** — `layer0_six.json`: sigma fires on **94/97**,
         lolbin **0/97**, network_dga **0/97** (§3.23). The two silent layers are why B3 runs four
         sources rather than six.
-  - [ ] **C2b — weight sensitivity with the dynamic layer in play** `[cheap]` — §1.10 measured the
-        eleven cascade constants over **three static sources** and found the corroborated set moving
-        on **0.0%**. Part of that is structural and cannot change (`is_corroborated` is
-        `len(contributing_layers) >= 2` and never reads `LAYER_WEIGHTS`), so it needs no re-run. What
-        does need one is §1.10's own caveat — *"87.9% of techniques are single-source **before the
-        sandbox is in play**"*. `sigma_layer` fires on 94/97 and carries a **different domain**, so it
-        is the first source that could create cross-domain corroboration where the static three could
-        not. `eval_layer0_contribution.py` is service-free and the 97 reports are archived, so this
-        runs offline. *Ticked prematurely on 2026-08-14 and corrected the same day: the item's second
-        half had never been run.* → **E.5**
+  - [x] **C2b — weight sensitivity with the dynamic layer in play** `[done]` **2026-08-14** —
+        §3.30, `weight_sensitivity_six.json`. §1.10's five perturbations repeated over the full
+        six-source assembly on the 97 archived reports. **The pre-registered prediction failed, and
+        that is the result.** `sigma_layer` fires on 94/97 and supplies the third domain §1.10 said
+        was missing — and the corroborated set still moves on **0/97** under every perturbation
+        (top-10 ranking moves on 12.4–28.9%, so the constants do order things; they are simply
+        disconnected from the one field the cascade exists to compute). The domain distribution
+        moved the *wrong* way: **89.9% of techniques are seen by exactly one domain** with the
+        sandbox in play, against 87.9% without it, and **none reach three**. `tool_artifact`
+        produces a claim on **1/97**. C2 is now closed in both halves.
+
 - [ ] **C3 — cascade ablation on the recovered cohort (n=97), dynamic path on** `[LLM]`
       Flat union vs the weighted cascade, on a sample stratified by family and year so it stays
       comparable to the n=210 drift cohort. **Per-sample results are stored this time** — the

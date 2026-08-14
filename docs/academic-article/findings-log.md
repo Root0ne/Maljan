@@ -2598,6 +2598,65 @@ arms), so the arms run whenever the endpoints do. The B8 arm is unaffected: it i
 provider and its n=25 record is complete.
 
 
+### 3.30 The cascade's agreement signal is unreachable by its own constants — `NEGATIVE` (C2b)
+
+§1.10 perturbed the eleven cascade constants over three static Layer-0 sources and found the
+corroborated set moving on **0.0%** every time. It left one explanation open, in its own words:
+*"87.9% of techniques are single-source **before the sandbox is in play**."* Two of those three
+sources share a cascade domain (`tool_artifact` emits on yara's), so the study had only two
+effective domains and corroboration needs two — the null could have been a property of a thin
+corpus rather than of the cascade.
+
+`sigma_layer` is the source that settles it: it fires on **94 of 97** archived reports, carries a
+different domain, and is weighted 0.55 — above every static source except yara. This repeats
+§1.10's five perturbations over the full **six-source** assembly, built from the 97 archived
+sandbox reports, which makes it a *dynamic* Layer-0 study and retires the scope limitation
+`eval_layer0_contribution.py` states in its own docstring.
+
+**Written before the run:** the corroborated set should move for the first time, because a genuine
+third domain is what makes corroboration possible at all.
+
+**It does not.**
+
+| source | produced a claim on |
+|---|---|
+| `sigma_layer` | **94/97** |
+| `yara_layer` | 88/97 |
+| `import_capability` | 54/97 |
+| `tool_artifact` | **1/97** |
+
+| perturbation | top-10 changed | corroborated set changed |
+|---|---|---|
+| `flat_0.5_all_layers` | 27/97 (27.8%) | **0/97** |
+| `inverted_yara_network` | 28/97 (28.9%) | **0/97** |
+| `compressed_toward_0.5_x0.25` | 24/97 (24.7%) | **0/97** |
+| `stretched_from_0.5_x1.75` | 12/97 (12.4%) | **0/97** |
+| `yara_demoted_0.90_to_0.45` | 24/97 (24.7%) | **0/97** |
+
+**The prediction failed, and its failure is the result.** The explanation §1.10 left open is now
+spent: the sandbox *is* in play, on 94 of 97 samples, and nothing moves. `is_corroborated` is
+`len(contributing_layers) >= 2` and never consults `LAYER_WEIGHTS`, so no weight can reach it —
+that was always the mechanism, and the thin corpus was never what was hiding it. The constants are
+not decorative in general (the top-10 ranking moves on 12.4–28.9% of samples, so they do order
+things), they are simply disconnected from the one field the cascade exists to compute.
+
+**The domain distribution moved the wrong way, which is the sharper number.** With the sandbox in
+play, **796 techniques (89.9%) are seen by exactly one domain**, 89 by two, and **none by three or
+more** — against §1.10's 87.9% single-domain without it. Adding a third source did not increase
+agreement; it *decreased* the corroborated share, because `sigma_layer` mostly contributes
+techniques no other source claims. The cascade's central quantity has no more evidence to work
+with after the sandbox than before it.
+
+**And `tool_artifact` is worse than §1.10 found.** That study measured 5 techniques across 209
+samples and called the source effectively inert. Here it produces a claim on **1 of 97**.
+
+Taken with §3.27.1 the cascade is inert twice over. Its agreement flag cannot be moved by its own
+weights. And its technique set — the one thing that *is* read downstream — reaches the artefact
+through a reconciliation step that restores whatever the judge omitted, so the judge cannot
+subtract from it and, across 80 arms, added nothing to it.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as
