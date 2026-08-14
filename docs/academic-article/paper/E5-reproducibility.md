@@ -145,11 +145,19 @@ An n=100 cohort is roughly 9 hours of sandbox time.
 OpenRouter, `nvidia/nemotron-3-super-120b-a12b:free`, temperature 0, 2,400-token output cap.
 
 **The free tier allows 50 requests per day** (`X-RateLimit-Limit: 50`,
-`limit_source: openrouter_free_tier_daily`), resetting daily. This is why the frontier arm is n=9
-rather than n=25: the run exhausted the quota mid-flight, 9 calls landing and 16 returning HTTP 429.
-A cohort-scale frontier arm is a **two-day run or a paid one**. The spend meter is enforced as a
-precondition on every call rather than reconciled afterwards, and projections price output at the
-full cap because a degenerate decode produces exactly that.
+`limit_source: openrouter_free_tier_daily`), resetting daily, with a 20-requests-per-minute cap
+that applies whether or not credit has been purchased. The **first** attempt at this arm exhausted
+the daily quota mid-flight — 9 calls landing and 16 returning HTTP 429 — and the n=9 estimate it
+produced was not merely imprecise but pointed the wrong way (§2). The arm reported above is the
+completed **n=25** run, taken from a fresh quota: 25 of 25 parsed, 0 refusals, $0 charged against
+the $25 ceiling.
+
+The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
+rather than in dollars: one call per sample over a 97-sample cohort is two days at 50 requests per
+day, and a full-pipeline arm — roughly 20 model requests per analysis — is not reachable on the
+free tier at all. The spend meter is enforced as a precondition on every call rather than reconciled
+afterwards, and projections price output at the full cap because a degenerate decode produces
+exactly that.
 
 ## 7. Reproducing each result
 
