@@ -13,11 +13,11 @@ technique IDs deterministically, with no language model anywhere:**
 
 | | mean | 95% CI |
 |---|---|---|
-| precision | 0.2405 | [0.2114, 0.2702] |
-| recall | 0.1308 | [0.1111, 0.1513] |
-| **F1** | **0.1509** | **[0.1328, 0.1693]** |
+| precision | 0.2413 | [0.2123, 0.2711] |
+| recall | 0.1328 | [0.1131, 0.1529] |
+| **F1** | **0.1526** | **[0.1344, 0.1709]** |
 
-n = 95, bootstrap CI, seed recorded. CAPE asserted at least one technique on **every** sample
+n = 97, bootstrap CI, seed recorded. CAPE asserted at least one technique on **every** sample
 (1 minimum, 11 median, 33 maximum), so this is a real predictor rather than an artefact of an empty
 one. Ground truth resolution uses the same alias map as the drift harness, so the two studies score
 identically.
@@ -46,7 +46,7 @@ ran for 186–366 s, and the other 57 ran for **zero to one second**, 56 of them
 `reported`, none with a report directory. A Windows PE does not detonate in one second. The ordering
 implicates the instrument rather than the samples — real analyses run through one afternoon and
 every task after roughly 17:30 returns instantly — and re-submitting the same binaries from the same
-local files two days later produced full-length analyses on the same instance. 54 of the 57 were
+local files two days later produced full-length analyses on the same instance. 56 of the 57 were
 recovered that way; three failed in processing or reporting and are permanently gone.
 
 We had originally written that the analyses ran and their reports had expired. That was the
@@ -187,7 +187,7 @@ artefact the analyst is given.
 **This replaces an earlier version of the same result, and the replacement is why we trust it.** The
 first pass varied three of six Layer-0 sources — the three needing no sandbox — over fixtures
 carrying five techniques, and reported the verdict unchanged in 0 of 15 cases. Two defects were
-found in it afterwards. The absent sources included the Sigma layer, which fires on 92 of 95 samples
+found in it afterwards. The absent sources included the Sigma layer, which fires on 94 of 97 samples
 at weight 0.55, above every static layer that study did vary; and at five techniques over six
 sources, round-robin assignment left one source with nothing, so its arm was identical to the
 baseline by arithmetic rather than by measurement. The re-run uses fixtures of 12 to 51 techniques so
@@ -204,8 +204,8 @@ corroboration is the only thing varying — which is the sharpest evidence we ha
 conditions measure what we claim they measure.
 
 Two Layer-0 sources are absent from these arms by measurement rather than by choice. Over the 95
-archived reports the LOLBin layer and the DGA layer each produce a claim on **0 of 95**, while being
-fed a median of 8667 recorded API calls and 48–68 domains per sample respectively. They are offered
+archived reports the LOLBin layer and the DGA layer each produce a claim on **0 of 97**, while being
+fed a median of 8888 recorded API calls and 48–68 domains per sample respectively. They are offered
 the evidence and decline it; giving either an equal share of the ground truth would have ablated a
 mechanism that never engages in this deployment.
 

@@ -112,7 +112,7 @@ still marked `reported`. A Windows PE does not detonate in one second. Nothing h
 had happened, and the instrument said otherwise.
 
 Re-submitting the same binaries from the same local files two days later produced full-length
-analyses on the same instance, which recovers 54 of the 57 and puts the cohort at 95. Three failed
+analyses on the same instance, which recovers 54 of the 57 and puts the cohort at 97. Three failed
 in processing or reporting and are gone for good.
 
 The lesson generalises past this instrument. A completion status is a statement about a queue, not

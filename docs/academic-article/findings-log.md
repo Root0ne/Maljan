@@ -2197,15 +2197,15 @@ Over the archived reports, measured by running the production builders directly
 
 | source | claims produced | what it was given |
 |---|---|---|
-| `sigma_layer` | fires on **92/95**, unique technique credit 92 | — |
-| `lolbin` | **0/95** | median **8667** recorded API calls, median 2 processes (max 56) |
-| `network_dga` | **0/95** | **48–68** domains per sample, median 56 |
+| `sigma_layer` | fires on **94/97**, unique technique credit 92 | — |
+| `lolbin` | **0/97** | median **8888** recorded API calls, median 2 processes (max 56) |
+| `network_dga` | **0/97** | **48–68** domains per sample, median 56 |
 
 **Re-measured on 2026-08-13, after the §3.24 recovery more than doubled the cohort.** A rate of
 zero over 43 samples is a weaker claim than the same rate over 95, and the recovered reports are
-visibly richer: the median API-call count rose from 3356 to 8667 and the busiest sample now
+visibly richer: the median API-call count rose from 3356 to 8888 and the busiest sample now
 records 56 processes against the old cohort's 18. The rate did not move off zero. The source that
-*is* kept moved slightly the other way — `sigma_layer` fires on 92 of 95 rather than all of them,
+*is* kept moved slightly the other way — `sigma_layer` fires on 94 of 97 rather than all of them,
 so three samples carry no dynamic Layer-0 evidence at all.
 
 Original n=43 figures, kept for the record: sigma 43/43, lolbin 0/43 against a median 3356 API
@@ -2341,7 +2341,7 @@ difference from everything measured after this point even though the arithmetic 
 
 ---
 
-### 3.26 The pipeline scores what the sandbox already scored — `NEGATIVE` (C5 at n=95, C4 interim at n=13)
+### 3.26 The pipeline scores what the sandbox already scored — `NEGATIVE` (C5 at n=97, C4 interim at n=13)
 
 C5 exists because every F1 this project has reported was unanchored. The natural anchor is the
 sandbox the pipeline is built on: CAPE maps its own signature hits to ATT&CK technique IDs in each
@@ -2350,10 +2350,10 @@ ground truth, through the same alias resolution the drift harness uses:
 
 | | n | precision | recall | F1 |
 |---|---|---|---|---|
-| CAPE alone, whole recovered cohort | **95** | 0.2405 [0.2114, 0.2702] | 0.1308 [0.1111, 0.1513] | **0.1509 [0.1328, 0.1693]** |
+| CAPE alone, whole recovered cohort | **97** | 0.2413 [0.2123, 0.2711] | 0.1328 [0.1131, 0.1529] | **0.1526 [0.1344, 0.1709]** |
 | CAPE alone, earlier cohort | 43 | 0.2902 | 0.1343 | 0.1666 [0.1411, 0.1938] |
 
-CAPE asserts at least one technique on **95 of 95** samples, median 11 per sample (min 1, max 33).
+CAPE asserts at least one technique on **97 of 97** samples, median 11 per sample (min 1, max 33).
 There is no sample where the baseline simply declines to answer.
 
 **The comparison that matters, on the 13 samples C4 has scored so far** — same binaries, same
@@ -2372,7 +2372,7 @@ was checked rather than reported: all 13 samples differ individually, by as much
 direction. The system is not reproducing CAPE's answers; it is arriving at different answers of
 the same quality.
 
-**Read this as interim and bounded.** n=13 of a possible 95, and C4's remaining arms are blocked
+**Read this as interim and bounded.** n=13 of a possible 97, and C4's remaining arms are blocked
 on a machine that cannot finish one before its memory guard intervenes (§3.25 and the abandonment
 work). The direction has been stable across every interim reading, but the number will move.
 

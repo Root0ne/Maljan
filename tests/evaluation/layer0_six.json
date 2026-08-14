@@ -1,14 +1,14 @@
 {
  "schema": "layer0-six/v1",
  "scope": "The three sandbox-fed Layer-0 sources over the archived cohort. Static sources are measured separately in layer0_contribution.json; this file exists to close the half that needed a sandbox report.",
- "n": 95,
+ "n": 97,
  "fired": {
-  "sigma_layer": 92,
+  "sigma_layer": 94,
   "lolbin": 0,
   "network_dga": 0
  },
  "unique_technique_credit": {
-  "sigma_layer": 92,
+  "sigma_layer": 94,
   "lolbin": 0,
   "network_dga": 0
  },
@@ -117,6 +117,14 @@
   },
   {
    "sha256": "1ab39bc014f6b6124fbd72d6f6390af9dbb0b67b50112e911c508b81318a3c8d",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc",
    "sources_fired": [
     "sigma_layer"
    ],
@@ -579,6 +587,14 @@
   },
   {
    "sha256": "b9b052dfb2f19bf15aaba81f07861234f91a72a5c38d83c176a7a4dcdbb2e8c1",
+   "sources_fired": [
+    "sigma_layer"
+   ],
+   "n_dynamic_techniques": 1,
+   "corroborated": 0
+  },
+  {
+   "sha256": "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876",
    "sources_fired": [
     "sigma_layer"
    ],

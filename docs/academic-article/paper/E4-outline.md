@@ -42,7 +42,7 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > one failure is scoped to that failure.
 >
 > We contribute the measured negatives, the failure mechanisms with the boundary each occurred at,
-> the cheap detector that found them, and a no-LLM baseline (F1 0.151, n=95) against which all of it is
+> the cheap detector that found them, and a no-LLM baseline (F1 0.153, n=97) against which all of it is
 > read. We argue that in a pipeline assembled from other people's servers, a server that answers is
 > not the same as a server that answered your question — and that evaluation harnesses should report
 > output cardinality the way they report sample size.

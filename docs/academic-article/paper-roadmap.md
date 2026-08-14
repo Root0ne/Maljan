@@ -34,8 +34,9 @@ What moved, and it is most of the table:
   accident of bookkeeping.
 * **E1 is withdrawn**, not demoted. The n=210 drift study meets M2's precondition and its per-sample
   outputs were not retained, so it cannot be checked and is not restated anywhere.
-* **A baseline exists for the first time.** CAPE alone scores **F1 0.187** [0.151, 0.223] on the
-  cohort (B0), so pipeline figures now have a reference instead of floating.
+* **A baseline exists for the first time.** CAPE alone scores **F1 0.1526** [0.1344, 0.1709] on
+  the full recovered cohort of 97 (C5), so pipeline figures now have a reference instead of
+  floating. On the samples where both have run, the whole pipeline is 0.003 F1 above it.
 
 Three rows had drifted from the evidence log and were corrected in this pass — C1 still carried an
 interim 58.2%/n=79, C3 and C7 still read "unmeasured" after B5 and B4 had measured them. That is the
@@ -290,7 +291,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       Cheap sanity check before the big run: plumbing works, the cost ceiling holds, output parses.
 - [ ] **B9 — Commit the B layer**, update `findings-log.md`, stop llama-server
 
-## C — The CAPE network (dynamic path) — n=95 recovered of an intended 100 (§3.24)
+## C — The CAPE network (dynamic path) — n=97 recovered of an intended 100 (§3.24)
 
 > **The tightest memory profile in the queue:** llama-server 16.2 GB + an arq analysis ~8.5 GB
 > ≈ 24.7 GB of 30 GB. Never start with the desktop stack loaded. Watcher up for the whole run.
@@ -307,7 +308,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
       The other half of the Layer-0 study. Then **re-run the weight-sensitivity analysis with all
       six layers** — §1.10's "the corroborated set moves on 0.0%" was measured with three static
       layers and has to hold with six. → **E.5** complete
-- [ ] **C3 — cascade ablation on the recovered cohort (n=95), dynamic path on** `[LLM]`
+- [ ] **C3 — cascade ablation on the recovered cohort (n=97), dynamic path on** `[LLM]`
       Flat union vs the weighted cascade, on a sample stratified by family and year so it stays
       comparable to the n=210 drift cohort. **Per-sample results are stored this time** — the
       drift study kept only cohort means, which is exactly why no TOST was possible for the E1
@@ -318,7 +319,7 @@ the crossover experimentally — is a refinement of a settled answer, not a rout
 - [ ] **C5 — Baseline with no LLM at all** `[CAPE]`
       CAPE's own signature-derived TTPs on the same recovered cohort. **Without this, "F1 0.08" has no
       referent** — arguably the single highest-value item in the queue. → **E.4**
-- [ ] **C6 — Frontier arm on the recovered cohort (n=95)** `[LLM]` `[$]`
+- [ ] **C6 — Frontier arm on the recovered cohort (n=97)** `[LLM]` `[$]`
       Same pipeline, one endpoint changed. `arXiv:2606.18166` found parameter size is the **only**
       significant predictor of ATT&CK-classification F1 (ρ=0.85, p=0.014), so without this arm the
       architecture/model confound stands. → **E.4 + E.8 + P8**
@@ -461,7 +462,7 @@ Definitions in [literature-review-brief.md](literature-review-brief.md) Part B; 
 | M3 | A refused load answers HTTP 200; the pre-pass carried on | hints and function hashes built from another binary | **OURS** (instrument defect) | §3.14, fixed `3eabf88` |
 | M4 | Two local safety bounds composed into an empty result | the 40-step ReAct salvage received a **fresh copy** of the time budget it was already inside; any binary rich enough to exhaust the step budget returned **zero techniques** at 28 min | **OURS** (composition defect) | §3.18, fixed `786dfe5` — verified 1,677s/0 tids → 323s/5 tids |
 | M-DET | Repeated-constant detection catches stale-state bugs a green suite misses | 4 defects, 1,995 passing tests, 0 caught | **REFINEMENT** — demoted 2026-08-11 by counter-search; the detector is a **metamorphic relation** (TOSEM `10.1145/3708521`), and `2603.05399` tests the inverse (identical inputs → consistent output). Ours keeps the *application*: an output-cardinality **reporting norm** for evaluation batches crossing third-party tool servers, with three measured defect classes and a withdrawn study as the cost | E1 |
-| B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.187** [0.151, 0.223], n=24; **F1 0.1666** [0.1411, 0.1938] at n=43 | measured | C5 re-run at n=95 |
+| B0 | CAPE alone, no LLM: the baseline every F1 needed | **F1 0.1526** [0.1344, 0.1709] at **n=97**, the full recovered cohort. Earlier passes: 0.187 [0.151, 0.223] at n=24, 0.1666 [0.1411, 0.1938] at n=43 — each estimate sits inside the previous interval | **measured, closed** | — |
 | E2 | KV scaling on hybrid-offload MoE | measured | — | appendix |
 | E3 | ~201-tool catalogue infeasible at 3B | measured | open gap | E1 |
 | — | binary→ATT&CK input modality | — | **PRIOR ART** `2602.06325` | cite only |

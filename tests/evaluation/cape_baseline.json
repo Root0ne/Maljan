@@ -4,32 +4,32 @@
  "cohort_digest": "33ff934fa1e344f3e7dae28bda591a67711bc87ab523a41ab8d9a2ac849e5bb8",
  "seed": 20260810,
  "summary": {
-  "n": 95,
+  "n": 97,
   "precision": {
-   "mean": 0.2405,
+   "mean": 0.2413,
    "ci95": [
-    0.2114,
-    0.2702
+    0.2123,
+    0.2711
    ]
   },
   "recall": {
-   "mean": 0.1308,
+   "mean": 0.1328,
    "ci95": [
-    0.1111,
-    0.1513
+    0.1131,
+    0.1529
    ]
   },
   "f1": {
-   "mean": 0.1509,
+   "mean": 0.1526,
    "ci95": [
-    0.1328,
-    0.1693
+    0.1344,
+    0.1709
    ]
   }
  },
  "empty_prediction_samples": 0,
  "skipped": {
-  "no_report": 5,
+  "no_report": 3,
   "no_ground_truth": 0
  },
  "per_sample": [
@@ -2651,6 +2651,65 @@
    "f1": 0.08333333333333333,
    "malscore": 7.0,
    "n_signatures": 29
+  },
+  {
+   "sha256": "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876",
+   "year": "2023",
+   "family": "NanoCore",
+   "slug": "nanocore",
+   "n_predicted": 19,
+   "n_ground_truth": 13,
+   "predicted": [
+    "T1012",
+    "T1027",
+    "T1027.002",
+    "T1033",
+    "T1055",
+    "T1059",
+    "T1070",
+    "T1071",
+    "T1082",
+    "T1106",
+    "T1112",
+    "T1129",
+    "T1497",
+    "T1518",
+    "T1547",
+    "T1547.001",
+    "T1562",
+    "T1568",
+    "T1574"
+   ],
+   "precision": 0.15789473684210525,
+   "recall": 0.23076923076923078,
+   "f1": 0.18749999999999997,
+   "malscore": 10.0,
+   "n_signatures": 44
+  },
+  {
+   "sha256": "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc",
+   "year": "2020",
+   "family": "DarkComet",
+   "slug": "darkcomet",
+   "n_predicted": 10,
+   "n_ground_truth": 18,
+   "predicted": [
+    "T1012",
+    "T1033",
+    "T1055",
+    "T1057",
+    "T1059",
+    "T1071",
+    "T1082",
+    "T1129",
+    "T1497",
+    "T1542.003"
+   ],
+   "precision": 0.4,
+   "recall": 0.2222222222222222,
+   "f1": 0.2857142857142857,
+   "malscore": 9.0,
+   "n_signatures": 23
   }
  ]
 }

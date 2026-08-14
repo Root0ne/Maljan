@@ -152,14 +152,14 @@ we accept rather than argue with:
 1. Absolute F1 values in this paper are **not comparable to work using per-sample expert labels**.
 2. The bias is approximately constant across arms, so within-study contrasts are the defensible
    reading — which is exactly why a baseline matters. **The sandbox alone, with no LLM anywhere,
-   scores F1 0.151 [0.133, 0.169]** on our cohort of 95. Every pipeline figure is read against that
+   scores F1 0.153 [0.134, 0.171]** on our cohort of 97. Every pipeline figure is read against that
    rather than against zero, and on the samples where both have run the full pipeline is 0.003 F1
    above it.
 
 ## The dynamic channel is two-thirds constant
 
 Any claim about what the sandbox contributes has to survive one measurement of what the sandbox
-actually reports. Across the 95 archived analyses there are **142 distinct network domains**, and
+actually reports. Across the 97 archived analyses there are **143 distinct network domains**, and
 **38 of them appear in every single sample** — the analysis VM's own vendor telemetry, present in
 each capture whatever was detonated. Per sample, between **55.9% and 79.2%** of observed domains are
 cohort-ubiquitous, median **67.9%**.
@@ -171,7 +171,7 @@ every dynamic-versus-static contrast rather than in a footnote, because the cont
 without it.
 
 The same measurement bounds two Layer-0 sources from the other direction. The LOLBin layer and the
-DGA layer produce a claim on **0 of 95** samples while being fed a median of 8667 recorded API calls
+DGA layer produce a claim on **0 of 97** samples while being fed a median of 8888 recorded API calls
 and 48–68 domains respectively — they are offered the evidence and decline it. That is why neither
 appears as an arm in the cascade ablation: giving a mechanism an equal share of ground truth when it
 never engages in the deployment would measure a system that does not exist.

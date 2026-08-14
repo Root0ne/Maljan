@@ -47,8 +47,8 @@ measured rates, and the two must be read together.
 
 **Which is exactly why two sources are absent from the arm list.** The equal-share
 construction is a legitimate way to probe a mechanism, but only for a mechanism
-that engages at all. `lolbin` and `network_dga` produce a claim on **0 of 95**
-archived reports while being fed a median of 8667 API calls and 48-68 domains
+that engages at all. `lolbin` and `network_dga` produce a claim on **0 of 97**
+archived reports while being fed a median of 8888 API calls and 48-68 domains
 respectively (§3.23) — they are offered the evidence and decline it. Ablating
 them under an equal share would describe a system that does not exist. They are
 excluded by measurement, the measurement travels in the run's JSON, and the
@@ -119,13 +119,13 @@ _DEFAULT_CHECKPOINT = Path("/tmp/layer0_verdict_v2_checkpoint.jsonl")
 #
 # *Too large.* The repair added all three sandbox-fed sources, which was worse.
 # Two of them produce nothing on this corpus, and §3.23 establishes that they
-# are **fed and decline** rather than failing: over the 95 archived reports
-# `lolbin` returns no claim on 95/95 against a median of 8667 recorded API calls
-# and 2 processes, and `network_dga` returns no claim on 95/95 while the network
+# are **fed and decline** rather than failing: over the 97 archived reports
+# `lolbin` returns no claim on 97/97 against a median of 8888 recorded API calls
+# and 2 processes, and `network_dga` returns no claim on 97/97 while the network
 # extractor hands it 48-68 domains per sample, none of which score as generated.
 # Re-measured after the §3.24 recovery more than doubled the cohort: the rate did
 # not move off zero, and `sigma_layer` — the source that *is* kept — went from
-# 43/43 to 92/95.
+# 43/43 to 94/97.
 # Giving either an equal share of the ground truth would ablate a mechanism that
 # never engages -- measuring a system that does not exist and reporting the
 # result as if it described this one. They are therefore excluded from the arms
@@ -149,12 +149,12 @@ EXCLUDED_SOURCES: tuple[tuple[str, str, str], ...] = (
     (
         "lolbin",
         "dynamic",
-        "no claim on 95/95 archived reports (median 8667 API calls, 2 processes present)",
+        "no claim on 97/97 archived reports (median 8888 API calls, 2 processes present)",
     ),
     (
         "network_dga",
         "network",
-        "no claim on 95/95 archived reports (48-68 domains supplied per sample)",
+        "no claim on 97/97 archived reports (48-68 domains supplied per sample)",
     ),
 )
 
