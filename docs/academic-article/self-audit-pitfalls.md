@@ -299,6 +299,42 @@ and the two models may diverge in ways five fixtures cannot show. The free tier 
 requests/day**, so C6 is a two-day run or a $10 purchase — a scheduling fact for the reproducibility
 appendix, since a reader reproducing it hits the same wall.
 
+### Re-issued 2026-08-14 — `PARTIAL`, and now for a different reason
+
+The verdict does not move, but almost everything under it does. Three things happened after the
+paragraph above was written, and they change what P8 is a caveat *about*.
+
+**1. The cross-model null is confounded, and the confound cannot be lifted on that endpoint.** The
+local arm runs with its reasoning stream disabled; the 120B arm ran with reasoning on, spending
+56.5% of its output budget there. The obvious fix — re-run it matched — was attempted. The provider
+accepted the parameter and ignored it: 56.2% reasoning, F1 0.4149 against the original 0.4162
+(paired Δ −0.0014, CI [−0.0929, +0.0874]). So the re-run **replicates the arm rather than
+correcting it**, and the audit must stop treating the matched comparison as outstanding work. The
+size of what is being confounded is measured, not assumed: on two other models the same flag is
+worth **0.34 and 0.45 F1**, larger than every architectural effect in this project combined.
+
+**2. One quantisation stops being an unmeasured threat — and it does not point the way the pitfall
+assumes.** The model we run locally is hosted by its vendor at full precision on an endpoint that
+*does* honour the flag. Paired on the same fixtures and repeats, our 3-bit `IQ3_K_R4` deployment
+scores **0.0629 higher** than the vendor's hosting of the same weights, 95% CI [−0.1484, +0.0256].
+Two serving stacks differ alongside the precision, so this bounds *the deployment* rather than
+quantisation alone. But the specific worry — that a 3-bit local model understates what these
+architectures can do — is not supported by the one measurement that can address it.
+
+**3. The parameter-size series cannot be built, and this is measured rather than budgetary.**
+`arXiv:2606.18166`'s trend needs three arms at three sizes matched on the flag that outweighs size.
+Of the endpoints available, the one that honours the flag hosts the same 35B model we already run,
+and the one above 35B does not honour it. Two matched arms exist; both are 35B. Run once before this
+constraint was enforced, the correlation returned **ρ=+0.866** — agreeing with the published result,
+from an axis on which one point was a disabled model rather than a small one.
+
+**What P8 now says.** Not *"we have one model and should get more"*. It says: we have a second model
+and a second deployment of our own, both measured; the second model's comparison carries a confound
+its provider will not let us remove; and the trend this pitfall's own citation rests on **cannot be
+tested here at all**, because the dominant variable is not controllable across the providers that
+publish parameter counts. `PARTIAL` with a measured boundary is a better position than `PARTIAL`
+with an open queue item, and it is the honest one.
+
 **Rescoped 2026-08-14, and the ceiling is now the design's rather than the budget's.** Two further
 endpoints became reachable at no cost, turning the single comparison into a four-model series
 spanning **35B → 744B** total parameters (21×). That is a materially better answer to this pitfall:
