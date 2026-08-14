@@ -217,6 +217,14 @@ volunteer_as_oom_victim() {
 stop_job() {
     local why="$1" pid
     : >"$STOP"
+    # Every caller of stop_job lays the sentinel, but only the memory branch used
+    # to track that it had done so. On 2026-08-14 a resume-from-suspend fired the
+    # starvation branch at 23:15:03; it laid STOP with `warned` still 0, so the
+    # recovery arm below (`elif [ "$warned" -eq 1 ]`) never ran and **the sentinel
+    # stayed on a machine with 21 GB free**. Every heavy step is gated on that
+    # file, so the guard had quietly closed the night. Setting the flag here
+    # rather than in each branch means a future caller cannot reintroduce this.
+    warned=1
     if [ -r "$JOB_PID_FILE" ]; then
         read -r pid < "$JOB_PID_FILE" 2>/dev/null || pid=""
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
