@@ -159,7 +159,12 @@ def frontier_ready(cfg: Any) -> tuple[bool, str]:
     with zero rates can never refuse anything, which would turn the ceiling into
     decoration.
     """
-    if not getattr(cfg, "enabled", False):
+    # A named arm has no ``enabled`` field of its own — ``FrontierConfig.enabled``
+    # gates the whole set, and an arm that had to be enabled twice would be a
+    # second place for a run to silently not happen. Absent means "the parent
+    # already decided"; present and false still refuses.
+    enabled = getattr(cfg, "enabled", None)
+    if enabled is not None and not enabled:
         return False, "frontier.enabled is false"
     if not getattr(cfg, "model", ""):
         return False, "frontier.model is unset"
@@ -218,3 +223,154 @@ def build_frontier_llm(cfg: Any, *, max_tokens: int | None = None) -> Any:
     if max_tokens and max_tokens > 0:
         kwargs["max_tokens"] = max_tokens
     return ChatOpenAI(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Several arms, and a client that survives their rate limits
+# ---------------------------------------------------------------------------
+
+
+def resolve_arms(cfg: Any) -> dict[str, Any]:
+    """The comparison arms this configuration defines, by name.
+
+    The inherited single-endpoint fields are arm ``default`` — that is the arm
+    B8 ran, and keeping its name stable means the stored B8 record does not have
+    to be rewritten to accommodate the ones added after it. Named arms follow.
+
+    Only arms that pass :func:`frontier_ready` are returned. An arm that is
+    half-configured is dropped here rather than failing in the middle of a run,
+    because a series that quietly loses a point produces a correlation over
+    whatever survived and reports it as though it were the design.
+    """
+    if not getattr(cfg, "enabled", False):
+        return {}
+
+    out: dict[str, Any] = {}
+    ready, _why = frontier_ready(cfg)
+    if ready:
+        out["default"] = cfg
+    for name, arm in (getattr(cfg, "arms", None) or {}).items():
+        ok, _reason = frontier_ready(arm)
+        if ok:
+            out[str(name)] = arm
+    return out
+
+
+def arm_provenance(name: str, arm: Any) -> dict[str, Any]:
+    """What an arm must declare about itself for the parameter-size analysis.
+
+    Emitted into every result file. The correlation this project reports against
+    `arXiv:2606.18166` is computed from these numbers, so they belong next to the
+    scores rather than in the prose describing them.
+    """
+    return {
+        "arm": name,
+        "model": getattr(arm, "model", ""),
+        "base_url": getattr(arm, "base_url", None),
+        "total_params_b": float(getattr(arm, "total_params_b", 0.0) or 0.0),
+        "active_params_b": float(getattr(arm, "active_params_b", 0.0) or 0.0),
+        "quantisation": getattr(arm, "quantisation", "") or "",
+        "free_tier": bool(getattr(arm, "free_tier", False)),
+    }
+
+
+def is_rate_limited(exc: BaseException) -> bool:
+    """Whether an exception is the endpoint saying "too fast" rather than "no".
+
+    The distinction is the whole point. B8's first attempt counted HTTP 429s as
+    failed calls, finished with 9 of 25 arms, and reported a point estimate that
+    the completed run later moved by 0.086 — through the local mean and out the
+    other side. A throttle is not a result; it is a request to wait.
+
+    Checked structurally where the client exposes a status code and by substring
+    otherwise, because the OpenAI SDK, httpx and requests each wrap it
+    differently and this must not depend on which one a harness happens to use.
+    """
+    for attr in ("status_code", "http_status", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int) and value == 429:
+            return True
+    response = getattr(exc, "response", None)
+    if response is not None and getattr(response, "status_code", None) == 429:
+        return True
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "429" in text or "too many requests" in text or "rate limit" in text
+
+
+@dataclass
+class PacedCaller:
+    """Calls an endpoint no faster than it will answer.
+
+    Two mechanisms, and they address different failures:
+
+    * ``min_interval_s`` spaces calls out so the limit is approached rather than
+      hit. Measured on NVIDIA NIM 2026-08-14: two calls four seconds apart
+      succeed, the next six return 429.
+    * exponential backoff recovers when it is hit anyway. Shared quotas mean no
+      fixed interval is safe, so the retry path is not optional.
+
+    ``throttled_calls`` and ``retries`` are recorded rather than swallowed: a run
+    that needed 300 retries to finish is a different measurement from one that
+    needed none, and the paper reports wall-clock.
+    """
+
+    min_interval_s: float = 0.0
+    max_retries: int = 6
+    base_delay_s: float = 5.0
+    max_delay_s: float = 90.0
+    calls: int = 0
+    retries: int = 0
+    throttled_calls: int = 0
+    _last_call_at: float = 0.0
+
+    @classmethod
+    def for_arm(cls, arm: Any) -> PacedCaller:
+        return cls(
+            min_interval_s=float(getattr(arm, "min_interval_s", 0.0) or 0.0),
+            max_retries=int(getattr(arm, "max_retries", 6) or 6),
+        )
+
+    def delay_for(self, attempt: int) -> float:
+        """Backoff for retry ``attempt`` (0-based), capped."""
+        return float(min(self.base_delay_s * (2.0**attempt), self.max_delay_s))
+
+    def invoke(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        """Run ``fn``, waiting out throttles. Non-throttle errors propagate.
+
+        A failed call is data; a throttled call is not. Anything that is not a
+        rate limit is raised immediately so a broken prompt or a bad key surfaces
+        at once instead of being retried into the backoff ceiling.
+        """
+        import time
+
+        if self.min_interval_s > 0 and self._last_call_at:
+            wait = self.min_interval_s - (time.monotonic() - self._last_call_at)
+            if wait > 0:
+                time.sleep(wait)
+
+        was_throttled = False
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = fn(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 — re-raised unless it is a throttle
+                if not is_rate_limited(exc) or attempt >= self.max_retries:
+                    self._last_call_at = time.monotonic()
+                    raise
+                was_throttled = True
+                self.retries += 1
+                time.sleep(self.delay_for(attempt))
+                continue
+            self.calls += 1
+            self._last_call_at = time.monotonic()
+            if was_throttled:
+                self.throttled_calls += 1
+            return result
+        raise FrontierBudgetExceeded("unreachable: retry loop exhausted without raising")
+
+    def snapshot(self) -> dict[str, int | float]:
+        return {
+            "calls": self.calls,
+            "retries": self.retries,
+            "throttled_calls": self.throttled_calls,
+            "min_interval_s": self.min_interval_s,
+        }

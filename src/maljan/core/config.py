@@ -100,15 +100,15 @@ class AgentLLMConfig(BaseModel):
     temperature: float | None = None
 
 
-class FrontierConfig(BaseModel):
-    """The frontier comparison arm (findings-log E.8, queue items B8 / C6).
+class FrontierArm(BaseModel):
+    """One comparison endpoint.
 
-    **Evaluation only.** Nothing in the analysis pipeline reads this; only the
-    eval harnesses do, through ``maljan.core.frontier``. The arm exists to close
-    pitfall **P8** — every LLM result in this work is one model on one machine,
-    and `arXiv:2606.18166` found parameter size to be the only significant
-    predictor of F1 on the nearest task, which makes the architecture/model
-    confound a live threat to validity rather than a formality.
+    Was a single endpoint until 2026-08-14, when a second provider made a
+    **parameter-size series** reachable instead of a single bigger model. That
+    is a different and much stronger answer to P8: `arXiv:2606.18166` claims
+    parameter count is the only significant predictor of ATT&CK-classification
+    F1 (rho=0.85), and one comparison model can only agree or disagree with that
+    on a single point, whereas a series can test the trend on our own task.
 
     ``max_spend_usd`` is a **hard** ceiling checked before every call, and the
     per-million-token rates are what make it enforceable. Leaving the rates at
@@ -116,7 +116,6 @@ class FrontierConfig(BaseModel):
     a call cannot refuse one. Set them from the provider's published pricing.
     """
 
-    enabled: bool = False
     base_url: str | None = None
     api_key: SecretStr | None = None
     model: str = ""
@@ -150,6 +149,41 @@ class FrontierConfig(BaseModel):
     # stops returning the stream separately, and the text then leaks into
     # ``content`` and exhausts the cap. Measured 2026-08-10. Leave it unset.)
     count_reasoning_tokens: bool = True
+
+    # Throttling is a property of the endpoint, so it is configured per arm
+    # rather than assumed by the harness. Measured 2026-08-14 on NVIDIA NIM:
+    # two calls four seconds apart succeed and the next six return HTTP 429.
+    # The first attempt at B8 recorded throttles as failures and reported n=9
+    # with a wrong point estimate, so a paced client with backoff is now part of
+    # the arm's definition and not something each harness reinvents.
+    min_interval_s: float = 0.0
+    max_retries: int = 6
+
+    # Provenance for the parameter-size analysis, which is the whole reason
+    # more than one arm exists. Recorded here so the correlation in the paper is
+    # computed from configuration rather than from a number remembered while
+    # writing, and so an arm cannot enter the series without declaring its size.
+    total_params_b: float = 0.0
+    active_params_b: float = 0.0
+    quantisation: str = ""
+
+
+class FrontierConfig(FrontierArm):
+    """The frontier comparison arms (findings-log E.8, queue items B8 / C6).
+
+    **Evaluation only.** Nothing in the analysis pipeline reads this; only the
+    eval harnesses do, through ``maljan.core.frontier``. The arms exist to close
+    pitfall **P8** — every LLM result in this work is one model on one machine,
+    and a single-model finding cannot be read as a property of the architecture.
+
+    Inherits the endpoint fields so the original single-endpoint configuration
+    keeps working unchanged (``LLM__FRONTIER__MODEL`` and friends still describe
+    one arm, the one B8 ran). Additional arms go in ``arms`` and are addressed by
+    name: ``LLM__FRONTIER__ARMS__GLM__MODEL=...``.
+    """
+
+    enabled: bool = False
+    arms: dict[str, FrontierArm] = Field(default_factory=dict)
 
 
 class LLMConfig(BaseModel):
