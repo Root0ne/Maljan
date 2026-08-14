@@ -8,12 +8,14 @@ for disassembly, a sandbox for detonation, a vector store for retrieval, and a m
 inference, over three protocols. Each boundary is a place where a request can succeed and still not
 mean what the caller assumed.
 
-This section reports six such failures. We report them together because they share a shape that a
+This section reports seven such failures. We report them together because they share a shape that a
 test suite is poorly positioned to catch and a results table cannot show: **the instrument answered
-successfully, and answered about something else.** The last two are our own analysis code rather
-than someone else's server, which is the point: the shape does not stop at the network boundary.
+successfully, and answered about something else.** The last three are ours rather than someone
+else's server — two in the analysis code that produces our results, one in the pipeline that
+produces the artefact — which is the point: the shape does not stop at the network boundary, and it
+does not stop at the evaluation harness either.
 
-## 6.1 Six mechanisms
+## 6.1 Seven mechanisms
 
 ### M1 — An unset argument arrives as an assertion
 
@@ -198,6 +200,40 @@ direction the literature predicts, with its limitations already stated. There wa
 to notice. It was caught by reading the arms table under the correlation and asking why one model
 was on it twice — which is a question no result, however wrong, would have prompted.
 
+### M7 — A safety property that was configured, documented, and never sent
+
+The last one is in the production pipeline rather than in an evaluation harness, and it removed a
+guarantee the code states in its own comment.
+
+The verdict model is built with an 8,192-token output ceiling, and the line that builds it says
+why: *"Bound the verdict generation so a degenerate decode can't consume the full wall-clock
+timeout."* The client library renames that parameter to the API vendor's newer spelling when it
+serialises the request, and our local inference server does not read the newer spelling. It
+accepted the field, ignored it, and decoded without a ceiling.
+
+Measured on one call: a 1,403-token prompt, **30,155 tokens generated**, still generating at 46
+tokens per second when the caller's ten-minute wrapper gave up. The only thing that ever stopped a
+verdict was wall-clock.
+
+The consequence is not a slow call. Four of eight fixtures in a separate study never returned a
+verdict at all, and for each of them the pipeline emitted a bundle through its text-fallback path —
+which does not run the reconciliation step, so the corroboration cascade contributed nothing and
+the analyst received techniques copied straight from the raw evidence claims. A component we
+describe as bounded was unbounded, and its failure mode was to hand the analyst a differently-built
+artefact without saying so.
+
+**Where it was invisible.** The configured value was correct. The container passed it. The model
+object held it. It survived every later rebinding intact. Only the serialised request was wrong,
+and nothing in the system reads the serialised request. Every check anyone would think to perform
+would have confirmed the property that did not hold.
+
+**What found it.** Not a test and not a review. A study measuring something else — what the verdict
+model contributes to the bundle — recorded *which branch* each failed call took rather than only
+that it failed. Four calls named the timeout branch, which prompted the question of why a
+temperature-zero model would need ten minutes, which led to the server's own log and a token
+counter that had passed thirty thousand. The instrumentation that caught it was written for a
+different question three hours earlier.
+
 ## 6.2 Why the test suite did not help
 
 **1,995 tests passed throughout.** This is not a gap in test quality but in test *shape*:
@@ -221,11 +257,18 @@ was on it twice — which is a question no result, however wrong, would have pro
   answer had been assumed at the point where the arms were assembled rather than decided anywhere a
   test could see it.
 
+* M7 had **nothing left to assert on**. A unit test would build the model and check that its output
+  ceiling is 8,192 — and it is, at every level the object model exposes. The defect existed only in
+  the serialised request, which no test in this suite inspects and which no application code reads.
+  Testing the property as the system represents it confirms exactly the thing that is not true.
+
 Four preconditions — a second call, a second server, a large input — are exactly what a fast unit
-suite is designed to avoid. The last two are worse: **M5 and M6 are invisible to unit testing in
-principle**, because every unit involved behaved as specified. Their common shape is that the defect
-lived in the *composition* — which measurement was attributed to which cause — and a test that
-pins a function's behaviour cannot reach an assumption made when its inputs were chosen.
+suite is designed to avoid. The last three are worse: **M5, M6 and M7 are invisible to unit testing
+in principle**, because every unit involved behaved as specified. Their common shape is that the
+defect lived in the *composition* — which measurement was attributed to which cause, or which
+representation of a value actually crosses the boundary — and a test that pins a function's
+behaviour cannot reach an assumption made when its inputs were chosen or when its output was
+serialised.
 
 ## 6.3 What did find them: output cardinality
 
@@ -311,6 +354,10 @@ Not that silent failures exist at tool boundaries — that is documented. Ours i
   configuration flag and reported a parameter count. Both had passing unit tests over the exact
   functions concerned. They extend the claim from "other people's servers can mislead you" to *the
   same shape occurs wherever a measurement's cause is assigned rather than measured*;
+* and one (M7) in the **production pipeline**, where a documented safety property — a bounded
+  verdict generation — was configured correctly at every level the code can inspect and removed
+  entirely by a parameter rename during serialisation. It is the case that shows the shape is not
+  peculiar to evaluation: the artefact the analyst receives was affected, not a number in a table;
 * and a demonstrated price rather than a hypothesised one.
 
 In a pipeline assembled from other people's servers, the correctness of the model is not the binding
