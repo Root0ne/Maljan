@@ -57,12 +57,30 @@ ITERS = 20_000
 # nothing here may pool them.
 FIXTURE_CORPUS = "fixtures-n5"
 CAPE_CORPUS = "cape-n97"
+# The consensus arms re-run on real binaries: one sample per malware family, so
+# every cluster holds exactly one observation and k is the sample count. That is
+# the whole reason the run exists. On the fixture corpus k=5, where the exact
+# two-sided cluster sign-flip test cannot return below 2/2^5 = 0.0625 and no
+# comparison can reach alpha whatever its effect. Here k is 24 and the floor is
+# 2/2^24, so a result is possible in principle rather than excluded by design.
+CAPE_CONSENSUS_CORPUS = "cape-n24"
 
-# The two declared families for multiplicity correction. Family C — per-arm
+# The declared families for multiplicity correction. A fourth group — per-arm
 # descriptive intervals, firing rates, counts — carries no null and is not
 # corrected; correcting an estimate is a category error.
 FAMILY_A = ("P1", "P2", "P3", "P4")  # pre-registered primary comparisons
 FAMILY_B = ("E1", "E2", "E3", "E4", "E5")  # post-hoc configuration sweep
+# Declared separately rather than folded into Family A, and the reason is not
+# convenience: these are the same two contrasts on a different corpus, run after
+# Family A was analysed. Adding them to A would silently re-correct four
+# published q-values against evidence that did not exist when they were
+# pre-registered. A replication is its own confirmatory set.
+FAMILY_C = ("C1", "C2")  # the same contrasts, on real binaries
+# Below this many families the real-corpus comparisons are not reported at all.
+# A partially complete run has fewer clusters than it will have, and an interval
+# from twelve families printed in the same table as one from twenty-four invites
+# exactly the reading the cluster correction was written to stop.
+MIN_CAPE_FAMILIES = 20
 
 
 class ReanalysisError(RuntimeError):
@@ -104,6 +122,45 @@ def _consensus_arms() -> dict[str, dict[tuple[str, int], float]]:
     return arms
 
 
+def _cape_families() -> dict[str, str]:
+    """sha256 -> malware family, from the cohort that selected the samples."""
+    cohort = load("dynamic_cohort_n100.json")["samples"]
+    return {s["sha256"]: s["signature"] for s in cohort}
+
+
+def _consensus_arms_cape() -> tuple[dict[str, dict[tuple[str, int], float]], dict[str, str]]:
+    """The consensus arms on real binaries, read per generation.
+
+    The checkpoint is the record, not the summary beside it: the harness appends
+    one line before starting the next generation, so it is what survives an
+    interruption, and this run was interrupted by the memory guard and resumed
+    three times. Reading the rolled-up JSON instead would quietly analyse
+    whichever prefix happened to be written last.
+    """
+    path = _HERE / "consensus_cape_checkpoint.jsonl"
+    if not path.exists():
+        raise ReanalysisError("missing artifact: consensus_cape_checkpoint.jsonl")
+    arms: dict[str, dict[tuple[str, int], float]] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if not isinstance(r.get("f1"), int | float):
+            continue
+        arms.setdefault(r["arm"], {})[(r["sample_id"], int(r["repeat"]))] = float(r["f1"])
+    if not arms:
+        raise ReanalysisError("consensus_cape_checkpoint.jsonl yielded no scored arms")
+
+    families = _cape_families()
+    unmapped = sorted({sid for cells in arms.values() for sid, _ in cells if sid not in families})
+    if unmapped:
+        raise ReanalysisError(
+            f"{len(unmapped)} scored samples are not in the cohort that selected them: "
+            f"{', '.join(s[:12] for s in unmapped[:5])}"
+        )
+    return arms, families
+
+
 def _frontier_arm(stem: str) -> dict[tuple[str, int], float]:
     d = load(f"{stem}.json")
     rows = d.get("per_sample")
@@ -113,19 +170,34 @@ def _frontier_arm(stem: str) -> dict[tuple[str, int], float]:
 
 
 def _paired(
-    left: dict[tuple[str, int], float], right: dict[tuple[str, int], float]
+    left: dict[tuple[str, int], float],
+    right: dict[tuple[str, int], float],
+    cluster_of: dict[str, str] | None = None,
 ) -> tuple[list[float], list[str]]:
-    """Deltas over the keys both arms hold, clustered by sample."""
+    """Deltas over the keys both arms hold, clustered by sample or by family.
+
+    On the fixture corpus the sample *is* the cluster — repeats of one fixture
+    are the correlated unit. On real binaries the family is: two samples of the
+    same family share ground truth, so treating them as independent is the
+    error this whole re-analysis exists to correct.
+    """
     keys = sorted(set(left) & set(right))
     if len(keys) < 2:
         raise ReanalysisError("fewer than two paired observations")
-    return [left[k] - right[k] for k in keys], [k[0] for k in keys]
+    clusters = [k[0] if cluster_of is None else cluster_of[k[0]] for k in keys]
+    return [left[k] - right[k] for k in keys], clusters
 
 
 def _paired_entry(
-    label: str, title: str, left: dict, right: dict, corpus: str, iters: int = ITERS
+    label: str,
+    title: str,
+    left: dict,
+    right: dict,
+    corpus: str,
+    iters: int = ITERS,
+    cluster_of: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    deltas, clusters = _paired(left, right)
+    deltas, clusters = _paired(left, right, cluster_of)
     res = stats.paired_cluster_result(deltas, clusters, iters=iters, seed=SEED)
     return {
         "id": label,
@@ -223,6 +295,37 @@ def comparisons(iters: int = ITERS) -> dict[str, dict[str, Any]]:
             iters,
         ),
     }
+
+    # The same two contrasts on real binaries, when that run has produced enough
+    # to pair. It is skipped rather than faked while the run is still going: a
+    # comparison over four families would be reported with the same confidence
+    # as one over twenty-four, and the family count is the entire point.
+    cape_arms, cape_families = _consensus_arms_cape()
+    if {"single", "negotiated"} <= set(cape_arms):
+        shared = set(cape_arms["single"]) & set(cape_arms["negotiated"])
+        if len({cape_families[sid] for sid, _ in shared}) >= MIN_CAPE_FAMILIES:
+            out["C1"] = _paired_entry(
+                "C1",
+                "negotiated multi-agent consensus minus a single judge, on real binaries",
+                cape_arms["negotiated"],
+                cape_arms["single"],
+                CAPE_CONSENSUS_CORPUS,
+                iters,
+                cluster_of=cape_families,
+            )
+    if {"single", "noise"} <= set(cape_arms):
+        shared = set(cape_arms["single"]) & set(cape_arms["noise"])
+        if len({cape_families[sid] for sid, _ in shared}) >= MIN_CAPE_FAMILIES:
+            out["C2"] = _paired_entry(
+                "C2",
+                "the noise control minus a single judge, on real binaries",
+                cape_arms["noise"],
+                cape_arms["single"],
+                CAPE_CONSENSUS_CORPUS,
+                iters,
+                cluster_of=cape_families,
+            )
+
     out["P4"] = confidence_auc(iters)
     return out
 
@@ -494,19 +597,43 @@ def judge_contribution_bound() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _cape_cluster_count(comps: dict[str, Any]) -> int | None:
+    """The family count the replication achieved, or None if it has not run.
+
+    Reported in the design block rather than left to be read off an interval,
+    because it is the number that decides whether the exact test has any room:
+    at k the floor is 2/2**k, and the fixture corpus's k=5 put every comparison
+    below alpha by construction.
+    """
+    ks = {c["structure"]["k"] for c in comps.values() if c["corpus"] == CAPE_CONSENSUS_CORPUS}
+    if not ks:
+        return None
+    if len(ks) != 1:
+        raise ReanalysisError(f"the replication corpus reports several cluster counts: {ks}")
+    return ks.pop()
+
+
 def analyse(iters: int = ITERS) -> dict[str, Any]:
     comps = comparisons(iters)
 
-    declared = set(FAMILY_A) | set(FAMILY_B)
+    declared = set(FAMILY_A) | set(FAMILY_B) | set(FAMILY_C)
     undeclared = sorted(set(comps) - declared)
     if undeclared:
         raise ReanalysisError("comparisons with no multiplicity family: " + ", ".join(undeclared))
-    missing = sorted(declared - set(comps))
+    # Family C is conditional: its run may not have finished. A and B are not.
+    missing = sorted((set(FAMILY_A) | set(FAMILY_B)) - set(comps))
     if missing:
         raise ReanalysisError("declared family members never computed: " + ", ".join(missing))
 
     families: dict[str, Any] = {}
-    for name, members in (("A_primary", FAMILY_A), ("B_posthoc", FAMILY_B)):
+    groups: list[tuple[str, tuple[str, ...]]] = [
+        ("A_primary", FAMILY_A),
+        ("B_posthoc", FAMILY_B),
+    ]
+    present_c = tuple(m for m in FAMILY_C if m in comps)
+    if present_c:
+        groups.append(("C_replication", present_c))
+    for name, members in groups:
         p_boot = [comps[m]["p_bootstrap"] for m in members]
         p_exact = [comps[m]["p_exact_signflip"] for m in members]
         q_boot = stats.benjamini_hochberg(p_boot)
@@ -548,8 +675,12 @@ def analyse(iters: int = ITERS) -> dict[str, Any]:
                     "from their own technique lists",
                     CAPE_CORPUS: "97 real Windows PE samples over 24 families, "
                     "family-level MITRE ground truth",
+                    CAPE_CONSENSUS_CORPUS: "one real sample per family, so each "
+                    "cluster holds one observation and the family count is the "
+                    "cluster count",
                 },
                 "corpora_comparable": False,
+                "replication_clusters": _cape_cluster_count(comps),
             },
             "families": families,
             "comparisons": comps,
@@ -574,8 +705,10 @@ def main(out: Path | None = None) -> int:
     )
     print(header)
     print("-" * len(header))
-    for cid in list(FAMILY_A) + list(FAMILY_B):
-        c = result["comparisons"][cid]
+    for cid in list(FAMILY_A) + list(FAMILY_B) + list(FAMILY_C):
+        c = result["comparisons"].get(cid)
+        if c is None:
+            continue
         iv = c["interval"]
         ci = f"[{iv['lo']:+.4f}, {iv['hi']:+.4f}]"
         print(

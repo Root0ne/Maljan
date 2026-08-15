@@ -760,12 +760,14 @@
  },
  "design": {
   "corpora": {
+   "cape-n24": "one real sample per family, so each cluster holds one observation and the family count is the cluster count",
    "cape-n97": "97 real Windows PE samples over 24 families, family-level MITRE ground truth",
    "fixtures-n5": "five synthesised fixtures, evidence generated from their own technique lists"
   },
   "corpora_comparable": false,
   "fixture_clusters": 5,
   "floor_note": "at 5 clusters the exact two-sided cluster permutation test cannot return a p below 0.0625; no comparison on this corpus can reach alpha=0.05 whatever its effect size",
+  "replication_clusters": null,
   "signflip_floor": 0.0625
  },
  "families": {
