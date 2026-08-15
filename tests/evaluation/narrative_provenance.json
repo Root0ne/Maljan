@@ -192,6 +192,215 @@
    "record_ref": "src/maljan/core/config.py expert temperature",
    "artifact": null,
    "provenance": "configuration-constant"
+  },
+  "engine_commit_pr": {
+   "value": "1778",
+   "claim": "the upstream pull request the pinned engine commit carries",
+   "observed": "2026-05-11",
+   "record_ref": "E5 §The engine; ik_llama.cpp commit message",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "engine_source_files": {
+   "value": "837",
+   "claim": "the identical source files that proved the vendored tree describes the running build",
+   "observed": "2026-08-11",
+   "record_ref": "E5 §The engine",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "context_served": {
+   "value": "131,072",
+   "claim": "the context length the model server was started with, half the model's maximum",
+   "observed": "2026-08-11",
+   "record_ref": "E5 §The engine; llama-server -c",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "cpu_offload_blocks": {
+   "value": "30",
+   "claim": "the expert blocks the service actually placed on CPU",
+   "observed": "2026-08-11",
+   "record_ref": "E5 §The engine",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "host_threads": {
+   "value": "16",
+   "claim": "the host's thread count",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "host_gpu": {
+   "value": "5060",
+   "claim": "the host's GPU model number",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "ghidra_mem_limit_gb": {
+   "value": "6",
+   "claim": "the Ghidra container's memory cap",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host; docker mem_limit",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "ghidra_jvm_heap_gb": {
+   "value": "4",
+   "claim": "its nominal JVM heap, against which measured RSS ran higher",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "llama_rss_fresh_gb": {
+   "value": "10.4",
+   "claim": "the model server's resident size on a fresh start",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "llama_rss_64k_gb": {
+   "value": "14.6",
+   "claim": "its peak when served at half the context, which does not lower it",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "ghidra_rss_gb": {
+   "value": "5.15",
+   "claim": "Ghidra's measured resident size against a nominal 4 GB heap",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "generation_rate_high": {
+   "value": "162",
+   "claim": "the fastest generation rate observed across requests, tokens per second",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "generation_rate_low": {
+   "value": "20",
+   "claim": "the slowest, on the same host and model",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "recurrent_checkpoint_mib": {
+   "value": "63",
+   "claim": "the recurrent-state checkpoint written and erased per request by this hybrid architecture",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "cape_backlog": {
+   "value": "10,348",
+   "claim": "the pending tasks on the shared instance that are never scheduled",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §The sandbox; cape_task_ledger_n100.json context",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "cape_report_retention_sampled": {
+   "value": "18",
+   "claim": "the older tasks sampled across the full task range, all of which had lost their reports",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §The sandbox",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "cape_minutes_per_sample": {
+   "value": "5.5",
+   "claim": "the mean sandbox time per sample once a task is scheduled",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §The sandbox",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "cohort_sandbox_hours": {
+   "value": "9",
+   "claim": "roughly how long the cohort takes end to end in sandbox time",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §The sandbox",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "openrouter_daily_limit": {
+   "value": "50",
+   "claim": "the free tier's daily request allowance",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §Endpoints; X-RateLimit-Limit header",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "openrouter_burst_limit": {
+   "value": "20",
+   "claim": "its per-minute allowance",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §Endpoints",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "quota_calls_landed": {
+   "value": "9",
+   "claim": "the calls that landed before the daily quota was exhausted mid-flight",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §Endpoints",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "quota_calls_refused": {
+   "value": "16",
+   "claim": "the calls that returned HTTP 429 in the same run",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §Endpoints",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "cost_ceiling_usd": {
+   "value": "25",
+   "claim": "the hard cost ceiling set for the hosted arms",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §Endpoints",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "requests_per_analysis": {
+   "value": "20",
+   "claim": "roughly the model requests one full-pipeline analysis makes",
+   "observed": "2026-08-13",
+   "record_ref": "E5 §Endpoints",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "oom_score_adj": {
+   "value": "1000",
+   "claim": "the kernel's oom_score_adj on the killed model server, quoted from the log",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §The host; dmesg",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "confidence_auc_naive_legacy": {
+   "value": "0.458",
+   "claim": "the AUC a naive descending sort returned before tie handling was corrected",
+   "observed": "2026-08-14",
+   "record_ref": "E5 §Confidence; superseded by the derived 0.460",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "Retained because the paper's point is that the two differ; the derived value is confidence_auc_naive."
   }
  }
 }

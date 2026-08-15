@@ -27,11 +27,11 @@ calibration produced it, and two IQ3 quants of the same model are not the same a
 \subsection{The engine, and an honest note about how we know}\label{the-engine-and-an-honest-note-about-how-we-know}
 
 Engine: \texttt{ik\_llama.cpp}, commit \textbf{\texttt{eb570eb96689c235933b813693ca28ab9d3d26de}}
-(\emph{``MTP: Avoid per step SSM copy (\#1778)''}).
+(\emph{``MTP: Avoid per step SSM copy (\#\fact{engine-commit-pr})''}).
 
 \textbf{The binary could not identify itself.} \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)},
 because the build tree was never a git checkout. The commit was recovered from a depth-1 clone
-vendored elsewhere in the project and then \emph{proved} to describe the build: identical 837-file source
+vendored elsewhere in the project and then \emph{proved} to describe the build: identical \fact{engine-source-files}-file source
 lists, and with line endings normalised \textbf{exactly one file differs --- the generated
 \texttt{common/build-info.cpp}}.
 
@@ -49,38 +49,38 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
   --context-shift on --jinja --host 0.0.0.0 --port 8080
 \end{verbatim}
 
-Two caveats a reader needs. The context is served at \textbf{131,072 --- half the model's native 262,144}.
+Two caveats a reader needs. The context is served at \textbf{\fact{context-served} --- half the model's native 262,144}.
 And the launch command documented in the repository at one point specified \texttt{-\/-n-cpu-moe\ 36} while
-the service actually ran 30 blocks on CPU; the command above is what ran.
+the service actually ran \fact{cpu-offload-blocks} blocks on CPU; the command above is what ran.
 
 \subsection{Hardware, and the ceiling it imposes}\label{hardware-and-the-ceiling-it-imposes}
 
-Single host: RTX 5060, 31 GiB RAM, 16 threads. Three measured properties that shape what can be
+Single host: RTX \fact{host-gpu}, 31 GiB RAM, 16 threads. Three measured properties that shape what can be
 reproduced here:
 
 \begin{itemize}
 \tightlist
 \item
-  \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- 10.4 GB fresh, \fact{llama-rss-growth-gb} GB
+  \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB
   after a single full analyst pass. A long paired run must restart it between arms; at temperature 0
   this is measurement-neutral.
 \item
-  \textbf{Serving at 64k instead of 131k does not lower the peak} (14.6 vs \fact{llama-rss-growth-gb} GB) --- the baseline is
+  \textbf{Serving at 64k instead of 131k does not lower the peak} (\fact{llama-rss-64k-gb} vs \fact{llama-rss-growth-gb} GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
 \item
-  \textbf{Generation rate varies from 162 to 20 tokens/s across requests.} On this hybrid recurrent
-  architecture, llama.cpp writes and erases a \textbf{63 MiB recurrent-state checkpoint every few hundred
+  \textbf{Generation rate varies from \fact{generation-rate-high} to 20 tokens/s across requests.} On this hybrid recurrent
+  architecture, llama.cpp writes and erases a \textbf{\fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred
   tokens} at \textasciitilde39k tokens of context. Long-context calls are therefore not slow in proportion ---
   they fall off a cliff.
 \end{itemize}
 
-The Ghidra container is capped at \textbf{6 GB} (\texttt{mem\_limit}). Its JVM \texttt{-Xmx4g} bounds the heap only;
-the database is memory-mapped and measured RSS reached 5.15 GB against that nominal 4 GB cap. Two
+The Ghidra container is capped at \textbf{\fact{ghidra-mem-limit-gb} GB} (\texttt{mem\_limit}). Its JVM \texttt{-Xmx4g} bounds the heap only;
+the database is memory-mapped and measured RSS reached \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap. Two
 host lock-ups preceded this limit being added.
 
 \textbf{The working set does not fit alongside an interactive session, and that is a reproducibility fact
 rather than an operational one.} Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
-up to 6 GB: on a 31 GiB host this leaves nothing for a desktop. When we ran a paired study without
+up to \fact{ghidra-mem-limit-gb} GB: on a 31 GiB host this leaves nothing for a desktop. When we ran a paired study without
 that headroom, the swap file was exhausted, the model server had \textbf{2.3 GB of its own address space
 paged out}, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
 generating from disk-backed pages is a different instrument from one generating from RAM, and the
@@ -105,7 +105,7 @@ Two consequences for anyone reproducing this work:
 
 \begin{verbatim}
 task_memcg=/user.slice/.../snap.code.code-*.scope, task=llama-server
-Out of memory: Killed process (llama-server) oom_score_adj:1000
+Out of memory: Killed process (llama-server) oom_score_adj:\fact{oom-score-adj}
 snap.code.code-*.scope: Failed with result 'oom-kill'
 \end{verbatim}
 
@@ -177,10 +177,10 @@ CAPE 2.5 at a private address, reachable only from one network.
 \item
   \textbf{One analysis machine} (\texttt{win10}, x64), no Linux VM. Only Windows PE can be analysed dynamically
   whatever the code's stated scope, which is why the cohort is Windows-only. An ELF submitted there
-  joins the 10,348 tasks that are never scheduled.
+  joins the \fact{cape-backlog} tasks that are never scheduled.
 \item
-  \textbf{Reports are retained for days, not indefinitely.} Sampled across the full task-id range, \textbf{18
-  of 18} older tasks return \texttt{"Reports\ directory\ does\ not\ exist"}; a report from four days earlier
+  \textbf{Reports are retained for days, not indefinitely.} Sampled across the full task-id range, \textbf{\fact{cape-report-retention-sampled}
+  of \fact{cape-report-retention-sampled}} older tasks return \texttt{"Reports\ directory\ does\ not\ exist"}; a report from four days earlier
   survived. The local archive of fetched reports is therefore \textbf{the only copy}, and ``submit the
   same samples'' is not a reproduction recipe on its own.
 \item
@@ -191,7 +191,7 @@ CAPE 2.5 at a private address, reachable only from one network.
 \end{enumerate}
 
 Timing, for planning: a new Windows submission is scheduled in \textbf{\textasciitilde1 second} and completes in
-\textbf{\textasciitilde5.5 minutes}; the 10,348-task backlog is never scheduled and does not queue ahead of new work.
+\textbf{\textasciitilde5.5 minutes}; the \fact{cape-backlog}-task backlog is never scheduled and does not queue ahead of new work.
 An n=100 cohort is roughly 9 hours of sandbox time.
 
 \subsection{The comparison endpoints, and one parameter that decides everything}\label{the-comparison-endpoints-and-one-parameter-that-decides-everything}
@@ -236,11 +236,11 @@ n
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & 25 \\
-frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & 25 $\times$2 \\
-same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & 25 \\
-same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & 25 \\
-larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & 25 each \\
+local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{cost-ceiling-usd} \\
+frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & \fact{cost-ceiling-usd} $\times$2 \\
+same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & \fact{cost-ceiling-usd} \\
+same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & \fact{cost-ceiling-usd} \\
+larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \fact{cost-ceiling-usd} each \\
 \end{longtable}
 
 \textbf{\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter.} Not rejected --- accepted,
@@ -271,16 +271,16 @@ cap that was requested instead.
 
 OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature 0, \fact{consensus-budget}-token output cap.
 
-\textbf{The free tier allows 50 requests per day} (\texttt{X-RateLimit-Limit:\ 50},
+\textbf{The free tier allows \fact{openrouter-daily-limit} requests per day} (\texttt{X-RateLimit-Limit:\ 50},
 \texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a 20-requests-per-minute cap
 that applies whether or not credit has been purchased. The \textbf{first} attempt at this arm exhausted
 the daily quota mid-flight --- 9 calls landing and 16 returning HTTP 429 --- and the n=9 estimate it
 produced was not merely imprecise but pointed the wrong way (§2). The arm reported above is the
-completed \textbf{n=25} run, taken from a fresh quota: 25 of 25 parsed, 0 refusals, \$0 charged against
-the \$25 ceiling.
+completed \textbf{n=\fact{cost-ceiling-usd}} run, taken from a fresh quota: \fact{cost-ceiling-usd} of \fact{cost-ceiling-usd} parsed, 0 refusals, \$0 charged against
+the \$\fact{cost-ceiling-usd} ceiling.
 
 The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
-rather than in dollars: one call per sample over a \fact{baseline-n}-sample cohort is two days at 50 requests per
+rather than in dollars: one call per sample over a \fact{baseline-n}-sample cohort is two days at \fact{openrouter-daily-limit} requests per
 day, and a full-pipeline arm --- roughly 20 model requests per analysis --- is not reachable on the
 free tier at all. The spend meter is enforced as a precondition on every call rather than reconciled
 afterwards, and projections price output at the full cap because a degenerate decode produces
@@ -349,7 +349,7 @@ run alone shows it. Preserved as \texttt{judge\_contribution\_uncapped.*} and \t
 \textbf{Figures are generated from the same retained records as the text.} The script recomputes intervals
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
 cannot drift apart without the script failing to reproduce one of them. This caught a live error: an
-ROC computed by naive descending sort returned AUC 0.458 against the \fact{confidence-auc} in our text, because 186
+ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because 186
 of 210 claims are tied at confidence 1.0 and tie handling decides the entire estimate. The text was
 right and the first draft of the figure was wrong --- which is the ordinary direction for this check to
 fire, and the reason for wiring it this way.
