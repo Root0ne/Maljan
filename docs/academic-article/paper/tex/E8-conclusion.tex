@@ -57,6 +57,17 @@ return. No comparison on that corpus can reach $\alpha$ = 0.05 whatever its effe
 nulls; the sensitivity argument does not stand, and the honest reading of every one of them is a
 bound rather than an equivalence.
 
+\textbf{One of those bounds has since been replaced by a measurement, and it changed the answer.}
+Re-run on \fact{cape-consensus-families} real samples, one per family, the negotiated arm beats the
+single judge by \fact{cape-negotiated-delta} (\fact{cape-negotiated-ci}) --- and the noise control
+beats it by \fact{cape-noise-delta} (\fact{cape-noise-ci}). Negotiated against noise is
+\fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so the design could have
+seen the mechanism and did not. What helps is the
+\fact{cape-consensus-negotiated-calls} calls both arms make rather than the
+\fact{cape-consensus-single-calls} the single judge makes; the negotiation itself is the part that
+does nothing. The architectural claim fails in a more specific way than the fixture null could
+express, and it took a corpus that could produce a significant result to say so.
+
 Two further negatives constrain how the rest should be read. Verbal confidence --- the number the
 cascade and every deterministic gate consume --- ranks correct above incorrect claims at \textbf{AUC
 \fact{confidence-auc}}, but the interval that resamples samples rather than claims is

@@ -75,7 +75,16 @@ FAMILY_B = ("E1", "E2", "E3", "E4", "E5")  # post-hoc configuration sweep
 # Family A was analysed. Adding them to A would silently re-correct four
 # published q-values against evidence that did not exist when they were
 # pre-registered. A replication is its own confirmatory set.
-FAMILY_C = ("C1", "C2")  # the same contrasts, on real binaries
+FAMILY_C = ("C1", "C2", "C3")  # the same contrasts, on real binaries, plus their difference
+# C3 was added after C1 and C2 were computed, and that has to be said rather
+# than hidden. The two came back at +0.0537 and +0.0532 — the noise control
+# gaining as much as the negotiation — so the contrast that decides whether the
+# mechanism does anything is negotiated against noise directly, and it was not
+# in the declared set because the fixture corpus never needed it.
+#
+# The correction is applied over three members rather than two, which makes C1
+# and C2 harder to survive, not easier. An addition that moves against the
+# result it accompanies is the only kind that can be made after seeing data.
 # Below this many families the real-corpus comparisons are not reported at all.
 # A partially complete run has fewer clusters than it will have, and an interval
 # from twelve families printed in the same table as one from twenty-four invites
@@ -369,6 +378,19 @@ def comparisons(iters: int = ITERS) -> dict[str, dict[str, Any]]:
                 "the noise control minus a single judge, on real binaries",
                 cape_arms["noise"],
                 cape_arms["single"],
+                CAPE_CONSENSUS_CORPUS,
+                iters,
+                cluster_of=cape_families,
+            )
+    if {"negotiated", "noise"} <= set(cape_arms):
+        shared = set(cape_arms["negotiated"]) & set(cape_arms["noise"])
+        if len({cape_families[sid] for sid, _ in shared}) >= MIN_CAPE_FAMILIES:
+            out["C3"] = _paired_entry(
+                "C3",
+                "negotiated consensus minus the noise control, on real binaries — "
+                "the contrast that isolates the mechanism from the call count",
+                cape_arms["negotiated"],
+                cape_arms["noise"],
                 CAPE_CONSENSUS_CORPUS,
                 iters,
                 cluster_of=cape_families,

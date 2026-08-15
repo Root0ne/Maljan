@@ -1,9 +1,11 @@
 \subsection{Five objections}\label{objections}
 
 We wrote down the five strongest objections we could raise against this paper and
-then answered them, or failed to and said so. Three are answered by measurements
-already reported. Two are not answerable with what we have, and each is stated
-below with the experiment that would settle it.
+then answered them, or failed to and said so. Four are answered by measurements
+reported here. The fourth was answered late, by running the experiment the
+objection asked for rather than by arguing with it, and the answer cost the
+result the objection was aimed at. The fifth is not answerable with what we
+have, and is stated below with the experiment that would settle it.
 
 \subsubsection{The central experiment's corpus is generated from its own answer
 key}\label{obj-fixtures}
@@ -33,12 +35,19 @@ comparison measured there can reach $\alpha$ = 0.05 whatever its effect size. Ad
 decoding repeats does not help --- repeats add rows inside clusters, and the test
 counts clusters.
 
-\textbf{What would settle it.} Running the same three arms on the
-\fact{baseline-n}-sample cohort, which has real binaries, sandbox reports,
-family-level ground truth and \fact{baseline-families} clusters. The evidence
-builder for that exists and is released with this paper; the arms are not run
-because the model server does not fit on this host alongside anything else, which
-is Section~\ref{sec:threats}'s own finding rather than an excuse.
+\textbf{What settled it, and what it cost the fixture results.} We ran the same
+three arms on \fact{cape-consensus-families} real samples, one per family
+(§\ref{consensus-replication}). The corpus objection is now answered for the
+consensus arms and answered against the fixture version of them: on real
+binaries the noise control runs \fact{cape-noise-delta} against the single
+judge, and on fixtures it ran \fact{consensus-noise-delta} --- the same control,
+the same arms, opposite signs. A corpus generated from its own answer key did
+not merely have less power here. It ordered the arms the other way round, and no
+amount of data collection inside it would have revealed that.
+
+Two of the three arms are therefore no longer a pilot. The frontier comparison
+and the confidence calibration still are: they were not re-run, for the reason
+below rather than for a better one.
 
 \subsubsection{The system does not beat its baseline, so the component analysis
 is uninteresting}\label{obj-baseline}
@@ -143,11 +152,20 @@ batch for a year and count how many defects it catches before anything else does
 
 \subsubsection{What the five have in common}\label{obj-common}
 
-Three of the five are answered by measurements, and the two that are not
-(\ref{obj-fixtures} and \ref{obj-small-n}) are blocked by the same thing: a host
-on which the model server does not fit alongside anything else. That is not a
-coincidence and it is not a resource complaint. Section~\ref{sec:threats} reports
-the environment as an uncontrolled variable that cost four arms of a completed
-ablation; here it is the reason two of this paper's weakest results are weak. An
-evaluation's ceiling is set by its machine at least as often as by its method,
-and we would rather state which of our limits are which.
+The objections that remained open were blocked by the same thing: a host on
+which the model server does not fit alongside anything else.
+Section~\ref{sec:threats} reports the environment as an uncontrolled variable
+that cost four arms of a completed ablation, and it is the reason this paper's
+weakest results are weak. An evaluation's ceiling is set by its machine at least
+as often as by its method, and we would rather state which of our limits are
+which.
+
+\ref{obj-fixtures} shows what it takes to lift one. The blocker was never the
+method; it was that the server's resident set climbs with cumulative requests
+and does not come back down --- \fact{llama-rss-fresh-gb} GB loaded,
+\fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes}
+minutes, and unreclaimable, so a long run walks the host into its own memory
+guard. Cycling the server from the checkpoint between stretches of work turned a
+run that could not finish into one that did, which is a change to the method and
+not to the machine. \ref{obj-small-n} is still open and needs the same treatment
+applied to a more expensive intercept.

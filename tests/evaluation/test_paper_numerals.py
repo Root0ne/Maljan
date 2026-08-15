@@ -99,6 +99,11 @@ _NOT_A_MEASUREMENT = (
     # Protocol and status constants.
     re.compile(r"\bHTTP\s+\d{3}\b"),
     re.compile(r"\bport\s+\d+\b", re.I),
+    # Inline maths carrying a symbolic exponent is a formula, not a
+    # measurement: $2/2^k$ is the sign-flip floor as an expression, and the 2s
+    # in it are the arithmetic rather than a result. Narrow on purpose — the
+    # exponent must be a letter, so $2^{10}$ and $0.85$ still count.
+    re.compile(r"\$[^$]*\^\{?[a-zA-Z][^$]*\$"),
     # A digit bound into the tail of a hyphenated name is part of the name:
     # Layer-0, Track-2. The lookbehind in _NUMERAL only refuses a digit after a
     # word character, and a hyphen is not one, so "Layer-0" was being read as

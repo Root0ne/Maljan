@@ -775,6 +775,15 @@
    "record_ref": "logs/consensus-supervised.log",
    "artifact": null,
    "provenance": "unretained-session"
+  },
+  "graph_edge_cap": {
+   "value": "20,000",
+   "claim": "the edge cap on the call-graph fetch, found while instrumenting a different measurement",
+   "observed": "2026-08-11",
+   "record_ref": "src/maljan/agents/static_analyst.py; E2 §P6",
+   "artifact": null,
+   "provenance": "configuration-constant",
+   "note": "Registered rather than written as a \\setting because it collides in value with stats_iters, the bootstrap draw count, which the analysis derives. The two are unrelated and the collision is arithmetic accident; the laundering guard cannot tell them apart by value, and it should not have to."
   }
  }
 }

@@ -1,23 +1,24 @@
-Multi-agent LLM pipelines are being built to map malware evidence to MITRE ATT\&CK techniques, and
-their components are rarely measured against the deterministic tooling they sit on top of. We
-evaluate one such pipeline, and report why several of our own measurements of it were wrong.
+Multi-agent LLM pipelines map malware evidence to MITRE ATT\&CK techniques, and their components are
+rarely measured against the deterministic tooling they sit on. We evaluate one, and report why
+several of our own measurements of it were wrong.
 
-Scored per sample on the same binaries and the same ground truth, the full pipeline reaches F1
-\fact{h2h-dynamic-f1} where the sandbox it is built on reaches \fact{h2h-cape-f1} --- paired
-\fact{h2h-delta}, 95\% cluster CI \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. Negotiated multi-agent
-consensus does not beat a single judge at equal token budget
-(\fact{consensus-negotiated-delta}, \fact{consensus-negotiated-ci}, at \fact{consensus-token-ratio}$\times$ the
-tokens). Verbal confidence, the number every deterministic gate consumes, ranks correct claims
-above incorrect ones at AUC \fact{confidence-auc} {[}\fact{confidence-auc-lo}, \fact{confidence-auc-hi}{]} ---
-indistinguishable from chance.
+Scored per sample on the same binaries and ground truth, the full pipeline reaches F1
+\fact{h2h-dynamic-f1} against \fact{h2h-cape-f1} for the sandbox it is built on --- paired
+\fact{h2h-delta} \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. On
+\fact{cape-consensus-families} real samples, one per family, negotiated multi-agent consensus beats
+a single judge by \fact{cape-negotiated-delta} F1 \fact{cape-negotiated-ci} --- and so does a noise
+control, by \fact{cape-noise-delta}. The two differ by \fact{cape-mechanism-delta} at a resolution
+of \fact{mde-cape-mechanism}: what helps is the calls the arms share, not the negotiation. Verbal
+confidence, which every deterministic gate consumes, ranks correct claims above incorrect ones at
+AUC \fact{confidence-auc}, on an interval containing chance.
 
-Seven defects in our own instrument produced plausible results rather than errors, and a suite of
-\fact{test-count} passing tests caught none of them. Four crossed a boundary with another server; three
-did not, and those three share a different shape --- a measurement's cause assigned rather than
-measured. The largest instance is this paper's own statistics: every interval we published
-resampled rows when the observations were clustered, and correcting it widened our anchor interval
+Seven defects in our own instrument produced plausible results rather than errors, and
+\fact{test-count} passing tests caught none. Four crossed a boundary with another server; the other
+three share a shape --- a measurement's cause assigned rather than measured. The
+largest is this paper's own statistics: every interval we published resampled rows when the
+observations were clustered, and correcting it widened our anchor interval
 \fact{baseline-f1-widening}-fold and turned two equivalence claims into bounds.
 
 We contribute the measured negatives with the minimum detectable effect beside each, seven failure
-mechanisms with what found them, and a no-LLM baseline (F1 \fact{baseline-f1}, n=\fact{baseline-n} over
-\fact{baseline-families} families) without which none of these numbers refers to anything.
+mechanisms with what found them, and a no-LLM baseline (F1 \fact{baseline-f1}, n=\fact{baseline-n})
+without which none of these numbers means anything.

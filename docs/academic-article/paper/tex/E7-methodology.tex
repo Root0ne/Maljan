@@ -59,6 +59,23 @@ axis on which one point was a disabled model rather than a small one.
 Every arm sees the same samples in the same order; differences are computed \textbf{per sample and then
 aggregated}, with 95\% bootstrap confidence intervals over the paired deltas.
 
+\textbf{Resampled at the cluster, and tested at the cluster.} The observations are nested --- many
+claims from one sample, many samples from one family --- so the bootstrap resamples whole clusters
+and the p-value comes from flipping the sign of whole cluster means rather than of rows. Two
+properties of that test have to be reported with it. The first is its floor: with $k$ clusters the
+two-sided version cannot return a p below $2/2^k$, which at $k$=\setting{5} is
+\fact{fixture-signflip-floor} and puts $\alpha$=0.05 out of reach whatever the effect. The second is
+that above \setting{20} clusters the $2^k$ assignments are sampled rather than enumerated, at
+\fact{stats-iters} draws with the observed assignment counted in its own reference set, so the
+smallest p that route can return is one over the draws rather than zero. Each reported p names which
+route produced it.
+
+We record this because the two properties pull opposite ways and the design has to answer both.
+Raising the cluster count is what lifts the floor --- it is the whole reason the consensus arms were
+re-run one sample per family (§\ref{consensus-replication}) --- and it is also what makes
+enumeration stop being possible. A design improved on one axis broke the estimator on the other, and
+the first version of that estimator responded by returning no test at all.
+
 The motivating failure is specific. An early study ranked prompt structures using a \textbf{single-run
 parsed-claim count}, and the ranking \textbf{inverted} when the decoding budget changed --- the instrument
 was measuring the interaction of structure and budget while being read as measuring structure. A

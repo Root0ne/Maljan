@@ -666,8 +666,13 @@ def paired_block(scores: list[ArmScore], left: str, right: str) -> list[str]:
         "",
         f"- mean F1 delta **{res.delta:+.3f}**, 95% cluster CI "
         f"[{iv.lo:+.3f}, {iv.hi:+.3f}] — {verdict}",
-        f"- {res.p_signflip_method} cluster sign-flip p = {res.p_signflip:.4f} "
-        f"(the smallest this design can reach is {res.p_floor:.4f})",
+        # Enough digits that a p sitting exactly on its floor is visible as
+        # that rather than as a small number. At 20k draws the floor is
+        # 0.00005, and both printed as 0.0000 — which reads as "significant"
+        # when what it says is "this test cannot resolve any further".
+        f"- {res.p_signflip_method} cluster sign-flip p = {res.p_signflip:.5f} "
+        f"(the smallest this design can reach is {res.p_floor:.5f}"
+        f"{', and the p is at it' if res.p_signflip <= res.p_floor * 1.001 else ''})",
         f"- minimum detectable effect at 80% power: {res.mde_t:.3f} F1 — {detectable}",
         f"- ICC {res.structure.icc:.3f}, design effect {res.structure.design_effect:.2f}, "
         f"effective n {res.structure.effective_n:.1f}",

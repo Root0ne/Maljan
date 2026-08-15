@@ -141,6 +141,47 @@ def consensus_facts() -> dict[str, Any]:
     return out
 
 
+def cape_consensus_facts() -> dict[str, Any]:
+    """The consensus arms on real binaries: what each scored and what it cost.
+
+    Read from the rolled-up artifact, which the harness writes only when a full
+    pass over every sample and arm returns — so its presence is the run's own
+    statement that it finished, and a partial run yields nothing here rather
+    than a number that will move.
+
+    The cost is derived beside the score because the two are the finding. Both
+    multi-agent arms beat the single judge by the same amount at the same call
+    count, so what separates them from it is the count and not the
+    negotiation — and a delta quoted without its token ratio invites exactly
+    the reading the noise control was built to refuse.
+    """
+    path = _HERE / "consensus_ablation_cape.json"
+    if not path.exists():
+        return {}
+    rows = json.loads(path.read_text())
+    by_arm: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        if isinstance(r.get("f1"), int | float):
+            by_arm.setdefault(r["arm"], []).append(r)
+    if not {"single", "negotiated", "noise"} <= set(by_arm):
+        return {}
+    single_tokens = sum(int(r.get("output_tokens") or 0) for r in by_arm["single"])
+    if not single_tokens:
+        raise FactError("consensus_ablation_cape.json records no tokens for the single arm")
+
+    out: dict[str, Any] = {}
+    for arm, arm_rows in sorted(by_arm.items()):
+        tokens = sum(int(r.get("output_tokens") or 0) for r in arm_rows)
+        calls = [int(r.get("calls") or 0) for r in arm_rows]
+        out[f"cape_consensus_{arm}_f1"] = f"{sum(r['f1'] for r in arm_rows) / len(arm_rows):.4f}"
+        out[f"cape_consensus_{arm}_n"] = str(len(arm_rows))
+        out[f"cape_consensus_{arm}_tokens"] = f"{tokens:,}"
+        out[f"cape_consensus_{arm}_ratio"] = f"{tokens / single_tokens:.2f}"
+        out[f"cape_consensus_{arm}_calls"] = f"{sum(calls) / len(calls):.0f}"
+    out["cape_consensus_families"] = str(len({r["sample_id"] for r in rows}))
+    return out
+
+
 def frontier_facts() -> dict[str, Any]:
     """One entry per arm file, keyed by arm and configuration."""
     out: dict[str, Any] = {}
@@ -938,13 +979,31 @@ def cluster_stat_facts() -> dict[str, Any]:
         "E3": "reasoning_flag_third",
         "E4": "frontier_replication",
         "E5": "vendor_think",
+        # The real-corpus replication. Conditional: the run may not have
+        # finished, and reanalyse withholds these until it has.
+        "C1": "cape_negotiated",
+        "C2": "cape_noise",
+        "C3": "cape_mechanism",
     }
     for cid, name in labels.items():
+        if cid.startswith("C") and cid not in d["comparisons"]:
+            continue
         c = _comparison(cid)
         iv = c["interval"]
         out[f"{name}_delta"] = signed(c["delta"])
         out[f"{name}_ci"] = interval(iv["lo"], iv["hi"])
-        out[f"{name}_p_exact"] = f"{c['p_exact_signflip']:.4f}"
+        # The sign-flip p, whichever route produced it, and the route named
+        # beside it. `_p_exact` keeps its name for the comparisons that were
+        # enumerated; at twenty-four clusters the assignments are sampled, and
+        # a fact called "exact" must not quietly hold a sampled number. This is
+        # the third consumer that assumed enumeration always ran — the harness
+        # crashed on it, the re-analysis corrected on it, and this one turned a
+        # None into a formatting error mid-derivation.
+        out[f"{name}_p"] = f"{c['p_signflip']:.4f}"
+        out[f"{name}_p_method"] = c["p_signflip_method"]
+        out[f"{name}_p_floor"] = f"{c['p_floor']:.5f}"
+        if c["p_exact_signflip"] is not None:
+            out[f"{name}_p_exact"] = f"{c['p_exact_signflip']:.4f}"
         out[f"{name}_q_exact"] = f"{c['q_exact']:.4f}"
         out[f"{name}_k"] = str(c["structure"]["k"])
         out[f"{name}_pairs"] = str(c.get("n_pairs") or c["interval"]["n_rows"])
@@ -1017,6 +1076,11 @@ def power_facts() -> dict[str, Any]:
     out: dict[str, Any] = {
         "fixture_clusters": str(d["design"]["fixture_clusters"]),
         "fixture_signflip_floor": f"{d['design']['signflip_floor']:.4f}",
+        # The draw count, taken from the analysis that used it rather than from
+        # the methodology sentence describing it. Above twenty clusters this is
+        # what sets the smallest p the test can return, so a sentence quoting a
+        # different number would misstate the resolution of every replication p.
+        "stats_iters": f"{d['bootstrap_iters']:,}",
     }
     labels = {
         "P1": "consensus_negotiated",
@@ -1027,8 +1091,17 @@ def power_facts() -> dict[str, Any]:
         "E2": "reasoning_flag_vendor35b",
         "E3": "reasoning_flag_third",
         "E5": "vendor_think",
+        # The replication, whose MDE is the number that makes its null readable:
+        # at k=24 the mechanism contrast resolves 0.046, and the effect the
+        # mechanism would have to carry is the 0.054 its neighbours show. A null
+        # below its own resolution says nothing; this one is not that.
+        "C1": "cape_negotiated",
+        "C2": "cape_noise",
+        "C3": "cape_mechanism",
     }
     for cid, name in labels.items():
+        if cid.startswith("C") and cid not in _cluster()["comparisons"]:
+            continue
         c = _comparison(cid)
         # The prose rounds to two places where the interval is a tenth wide,
         # which is the honest precision; both are emitted so a sentence and a
@@ -1105,6 +1178,7 @@ def provenance_facts() -> dict[str, Any]:
 BUILDERS = (
     baseline_facts,
     consensus_facts,
+    cape_consensus_facts,
     frontier_facts,
     judge_facts,
     cascade_facts,

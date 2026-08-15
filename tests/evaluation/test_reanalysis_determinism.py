@@ -54,8 +54,9 @@ def test_a_different_seed_would_move_the_intervals():
 
 def test_every_comparison_declares_its_multiplicity_family():
     result = reanalyse.analyse(iters=200)
+    declared = {"A_primary", "B_posthoc", "C_replication"}
     for cid, comp in result["comparisons"].items():
-        assert comp["family"] in {"A_primary", "B_posthoc"}, cid
+        assert comp["family"] in declared, cid
         assert "q_exact" in comp and "q_bootstrap" in comp, cid
 
 
@@ -88,14 +89,37 @@ def test_the_fixture_corpus_floor_is_reported_and_binding():
     assert all(c["p_exact_signflip"] >= 0.0625 for c in on_fixtures)
 
 
-def test_the_two_corpora_are_never_pooled():
-    """The CAPE baseline and the fixture arms must not share an estimate."""
+def test_no_estimate_pools_two_corpora():
+    """Each comparison belongs to exactly one corpus, at that corpus's own k.
+
+    This asserted that every comparison was on the fixture corpus, which was
+    true when it was written and stopped being true when the consensus arms
+    were re-run on real binaries. The invariant it was protecting is not "one
+    corpus" but "never two in one estimate", and the cluster count is what
+    gives it away: five means the synthesised fixtures, twenty-four means one
+    real sample per family. A comparison reporting anything else has mixed
+    them.
+    """
     result = reanalyse.analyse(iters=200)
-    assert result["cape_baseline"]["corpus"] == "cape-n97"
+    assert result["cape_baseline"]["corpus"] == reanalyse.CAPE_CORPUS
     assert result["cape_baseline"]["f1"]["structure"]["k"] == 24
-    for comp in result["comparisons"].values():
-        assert comp["corpus"] == "fixtures-n5"
-        assert comp["structure"]["k"] == 5
+
+    expected_k = {
+        reanalyse.FIXTURE_CORPUS: 5,
+        reanalyse.CAPE_CONSENSUS_CORPUS: 24,
+    }
+    for cid, comp in result["comparisons"].items():
+        corpus = comp["corpus"]
+        assert corpus in expected_k, f"{cid} names an undeclared corpus {corpus!r}"
+        assert comp["structure"]["k"] == expected_k[corpus], (
+            f"{cid} is on {corpus} but reports k={comp['structure']['k']}, "
+            f"not {expected_k[corpus]} — an estimate over one corpus cannot have "
+            "the other's cluster count unless the two were pooled"
+        )
+
+    # And the two must not be summarised together: the corpora are declared
+    # incomparable, so nothing may average across them.
+    assert result["design"]["corpora_comparable"] is False
 
 
 @pytest.mark.slow

@@ -209,10 +209,66 @@ p = \fact{consensus-noise-p-exact}. That is the smallest p the design can produc
 that all \fact{fixture-clusters} samples moved the same way, which is worth reporting and is not a
 demonstration of sensitivity.
 
-This was pre-registered as the experiment that would decide the paper's framing, and its null result
-is why this is not a systems paper. The literature's prior ran the same way: two 2026 equal-budget
-studies find single agents match or beat debate, and \texttt{arXiv:2604.02460} §5.3 reports a crossover at
-$\alpha$=0.7 on our own model class.
+This was pre-registered as the experiment that would decide the paper's framing. The literature's
+prior ran the same way: two 2026 equal-budget studies find single agents match or beat debate, and
+\texttt{arXiv:2604.02460} §5.3 reports a crossover at $\alpha$=0.7 on our own model class.
+
+\subsubsection{The same three arms on real binaries, where the design can
+see}\label{consensus-replication}
+
+The null above is a statement about a corpus that cannot produce a significant result. We re-ran the
+three arms on \fact{cape-consensus-families} real samples, one per malware family, so that every
+cluster holds a single observation and the family count is the cluster count. At
+\fact{cape-negotiated-k} clusters the sign-flip floor is \fact{cape-negotiated-p-floor} rather than
+\fact{fixture-signflip-floor}; above twenty clusters the assignments are sampled rather than
+enumerated, and the method is reported with each p.
+
+\begin{longtable}[]{@{}lrrrr@{}}
+\caption{The consensus arms on real binaries. Scored against the same family-level MITRE ground truth as the no-LLM baseline, so the F1 values are comparable to Table~\ref{tab:results-2} and not to the fixture table above.}\label{tab:consensus-cape}\\
+\toprule\noalign{}
+arm & F1 & output tokens & $\times$ single & calls \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+arm & F1 & output tokens & $\times$ single & calls \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+single judge & \fact{cape-consensus-single-f1} & \fact{cape-consensus-single-tokens} & \fact{cape-consensus-single-ratio} & \fact{cape-consensus-single-calls} \\
+negotiated consensus & \textbf{\fact{cape-consensus-negotiated-f1}} & \fact{cape-consensus-negotiated-tokens} & \fact{cape-consensus-negotiated-ratio} & \fact{cape-consensus-negotiated-calls} \\
+noise control & \textbf{\fact{cape-consensus-noise-f1}} & \fact{cape-consensus-noise-tokens} & \fact{cape-consensus-noise-ratio} & \fact{cape-consensus-noise-calls} \\
+\end{longtable}
+
+\textbf{Both multi-agent arms beat the single judge, and neither beats the other.} Negotiated minus
+single is \textbf{\fact{cape-negotiated-delta}}, 95\% cluster CI \fact{cape-negotiated-ci}, q =
+\fact{cape-negotiated-q-exact}, better on \fact{cape-negotiated-better} of
+\fact{cape-negotiated-pairs} families. The noise control minus single is
+\textbf{\fact{cape-noise-delta}}, \fact{cape-noise-ci}, q = \fact{cape-noise-q-exact}. The two
+differences are the same difference.
+
+\textbf{The contrast that isolates the mechanism returns nothing, and this time that means
+something.} Negotiated minus noise is \fact{cape-mechanism-delta},
+\fact{cape-mechanism-ci}, q = \fact{cape-mechanism-q-exact}. This design resolves
+\fact{mde-cape-mechanism} F1 at 80\% power, and the effect the negotiation would have to carry ---
+the \fact{cape-negotiated-delta} its neighbours show --- is above that resolution. A null below its
+own minimum detectable effect says nothing; this one is not that. If the negotiation were doing the
+work, this design would have seen it.
+
+What separates the multi-agent arms from the single judge is therefore the thing they share:
+\fact{cape-consensus-negotiated-calls} model calls instead of
+\fact{cape-consensus-single-calls}, at \fact{cape-consensus-negotiated-ratio}$\times$ and
+\fact{cape-consensus-noise-ratio}$\times$ the output tokens. \textbf{Spending more calls on a sample
+helps; making them argue does not.} That is a claim about this pipeline at this budget on this
+corpus, and it is the claim the noise control was added to make possible --- a control that
+separates from the treatment is a control that has done nothing, and this one does not separate.
+
+\textbf{The fixture corpus gave the opposite sign, which is the sharpest evidence we have about that
+corpus.} There the noise control ran \fact{consensus-noise-delta} against the single judge --- worse,
+every sample in the same direction --- and here it runs \fact{cape-noise-delta}, better, at the same
+q as the negotiation. Nothing about the arms changed between the two runs; the evidence did. A
+corpus whose inputs are generated from its own answer key does not merely have less power than one
+of real binaries. It can rank the arms the other way round.
 
 \subsection{A model \fact{param-ratio} times larger does not separate from the local one}\label{frontier-does-not-separate}
 

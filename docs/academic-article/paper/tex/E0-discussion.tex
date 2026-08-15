@@ -85,9 +85,14 @@ study that can no longer be asked its question.
 
 \subsection{What we are not in a position to say}\label{what-we-are-not-in-a-position-to-say}
 
-We cannot say that multi-agent decomposition does not help. We can say that on five samples, at
-equal token budget, we could not detect a difference larger than \fact{mde-consensus-negotiated} F1,
-and did not.
+We can now say something narrower than ``multi-agent decomposition does not help'' and sharper than
+the fixture null. On \fact{cape-consensus-families} real samples it does help ---
+\fact{cape-negotiated-delta} F1 over a single judge --- and a noise control helps by the same
+\fact{cape-noise-delta}, with the two separated by \fact{cape-mechanism-delta} at a resolution of
+\fact{mde-cape-mechanism}. So the decomposition into several calls is worth something here and the
+negotiation between them is not, at this budget, on this corpus, with this model. What we cannot say
+is that negotiation is worthless in general: one pipeline, one model class, and a control that
+matches the treatment tells us where our gain came from, not where anyone else's must.
 
 We cannot say that model capacity is not the ceiling. We can say that a \fact{param-ratio}$\times$ larger model did not
 separate from ours at a resolution of \fact{mde-frontier-local} F1, that the two arms differed in a
