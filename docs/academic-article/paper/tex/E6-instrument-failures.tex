@@ -17,7 +17,7 @@ does not stop at the evaluation harness either.
 
 \subsubsection{M1 --- An unset argument arrives as an assertion}\label{m1-an-unset-argument-arrives-as-an-assertion}
 
-The sandbox's MCP interface declares 36 tools. Every one takes an optional \texttt{token} parameter with a
+The sandbox's MCP interface declares \fact{cape-tool-count} tools. Every one takes an optional \texttt{token} parameter with a
 declared default of \texttt{""}. Our client built its argument model with ``required, else \texttt{None}'', and the
 agent framework fills every declared field before invoking. So an argument the agent never mentioned
 reached the server as an \textbf{explicit null}, and a field typed \texttt{str} rejected it:
@@ -28,7 +28,7 @@ token
   Input should be a valid string [type=string_type, input_value=None, ...]
 \end{verbatim}
 
-All 36 tools failed. \emph{Unset} and \emph{null} are different statements, and the client was making the
+All \fact{cape-tool-count} tools failed. \emph{Unset} and \emph{null} are different statements, and the client was making the
 second while intending the first.
 
 \textbf{Why it survived to first contact.} The reverse-engineering server --- the only one this client had
@@ -64,12 +64,12 @@ The same server answers a load it cannot perform with \textbf{HTTP 200} and an e
 
 \texttt{raise\_for\_status()} sees nothing wrong. Downstream code then analysed and described whichever
 program remained current. When the server began refusing loads after roughly thirty in one
-lifetime, \textbf{66 consecutive samples produced a call graph of exactly \fact{stuck-graph-chars} characters} before
+lifetime, \textbf{\fact{stuck-graph-run} consecutive samples produced a call graph of exactly \fact{stuck-graph-chars} characters} before
 anyone noticed.
 
 \subsubsection{M4 --- Two bounds composing into an empty result}\label{m4-two-bounds-composing-into-an-empty-result}
 
-The analyst's ReAct loop has a 40-step budget; exceeding it triggers a salvage that re-invokes the
+The analyst's ReAct loop has a \fact{react-step-budget}-step budget; exceeding it triggers a salvage that re-invokes the
 model to synthesise from what was gathered. That salvage received a \textbf{fresh copy of the full time
 budget} --- so loop-plus-salvage exceeded the hard cap by construction. On any binary rich enough to
 exhaust the step budget the analysis returned \textbf{zero techniques}, at a cost of 28 minutes:
@@ -107,13 +107,14 @@ time the discipline paid forward rather than backward}, and it cost four lines.
 
 We first recorded the consequence as a retention limit: the reports had existed and expired. That
 explanation was wrong, and finding out how wrong is the fifth failure in this list. Asking the
-sandbox how long each analysis had taken produced a split with nothing between the modes --- the 43
-tasks whose reports survived ran 186--366 s, and the other 57 ran \textbf{zero to one second}, 56 of them
+sandbox how long each analysis had taken produced a split with nothing between the modes --- the \fact{audit-real}
+tasks whose reports survived ran \fact{audit-real-min}--\fact{audit-real-max} s, and the other
+\fact{audit-instant} ran \textbf{under a second}, all \fact{audit-reported-but-instant} of them
 still marked \texttt{reported}. A Windows PE does not detonate in one second. Nothing had expired; nothing
 had happened, and the instrument said otherwise.
 
 Re-submitting the same binaries from the same local files two days later produced full-length
-analyses on the same instance, which recovers 54 of the 57 and puts the cohort at 97. Three failed
+analyses on the same instance, which recovers 54 of the 57 and puts the cohort at \fact{baseline-n}. Three failed
 in processing or reporting and are gone for good.
 
 The lesson generalises past this instrument. A completion status is a statement about a queue, not
@@ -131,7 +132,7 @@ The four above are failures of other people's servers. This one is ours, it is t
 We ablated the corroboration cascade by removing one evidence source at a time and comparing the
 STIX bundle the analyst receives. Under the condition where a removed source's techniques survive
 under a partner --- so that only their \emph{corroboration} changes --- the bundle was identical in \textbf{32 of
-32} arms, at Jaccard \fact{fixture-extractor-f1}. Under the condition where the removed source solely owned its
+32} arms, at Jaccard \fact{cascade-overlap-jaccard}. Under the condition where the removed source solely owned its
 techniques, \textbf{32 of 32} changed. We wrote this up as a finding about the judge model: that it
 attends to the list of claimed techniques and ignores the evidence-quality apparatus above it.
 
@@ -139,7 +140,7 @@ The judge was not involved. A post-processing step reconciles the bundle against
 it is returned: unresolvable attack-patterns are dropped, and \textbf{every cascade technique missing
 from the bundle is appended to it}. The cascade's technique set is therefore a guaranteed subset
 of every bundle the pipeline emits, whatever the model produced. Recomputing each arm's cascade set
-from the same seeded fixtures shows the bundle is \emph{exactly} that set in \textbf{80 of 80} arms, with the
+from the same seeded fixtures shows the bundle is \emph{exactly} that set in \textbf{\fact{judge-mechanism-arms} of \fact{judge-mechanism-arms}} arms, with the
 model contributing \textbf{zero} techniques to any of them.
 
 Both results then follow from set arithmetic. Removing a source with a duplicate partner does not
@@ -149,7 +150,7 @@ returned anything else.
 
 \textbf{The architectural conclusion survives the correction --- corroboration does not reach the analyst's
 artefact --- but the mechanism is not the one we described.} The model cannot subtract from the
-bundle's technique set and, across 80 arms, added nothing to it. Whether its output was unusable
+bundle's technique set and, across \fact{judge-mechanism-arms} arms, added nothing to it. Whether its output was unusable
 and wholly replaced, or happened to reproduce the cascade's set, this evidence cannot say; both
 leave the same trace, and separating them needs the pre-reconciliation output measured directly.
 What is certain is narrower and sufficient: the model has no influence over which techniques reach
@@ -160,7 +161,7 @@ hour of computation, correctly and vacuously. It was stopped four minutes in, by
 that exposed M5.
 
 \textbf{What made this one hard to see.} The tell was in the results the whole time: a Jaccard of \fact{fixture-extractor-f1}
-with a zero-width bootstrap interval, from a language model asked the same question 32 times at
+with a zero-width bootstrap interval, from a language model asked the same question \fact{cascade-overlap-pairs} times at
 temperature 0. Models do not agree with themselves that well. We read a constant as an unusually
 clean null, because a clean null was the result we were prepared to find.
 
@@ -176,7 +177,7 @@ almost exactly, across a 3$\times$ span, with the confounds it could not remove 
 The five rows were three models. One model appeared twice because it had been run in two
 configurations, and another twice because it had been run twice. The duplicate configurations were
 not a labelling detail: the same weights score \textbf{\fact{arm-qwen35ba3b-nothink-f1}} with the reasoning stream disabled and
-\textbf{\fact{arm-qwen35ba3b-f1}} with it enabled, because 24 of 25 calls then spend their entire output budget reasoning
+\textbf{\fact{arm-qwen35ba3b-f1}} with it enabled, because \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls then spend their entire output budget reasoning
 and never answer. The \fact{arm-qwen35ba3b-f1} row sat at the small end of the parameter axis, where it set the sign
 of the correlation. What the series measured was a flag, ordered by coincidence against size.
 
@@ -327,10 +328,10 @@ defect
 \endlastfoot
 a priority hint of exactly \fact{hint-chars-repeated} characters for two unrelated binaries, and a third in an earlier session & M2 \\
 call graphs identical to the character (\fact{call-graph-chars} chars, \fact{call-graph-lines} lines) for samples of 241 KB and 139 KB & M2 \\
-66 consecutive samples at exactly \fact{stuck-graph-chars} characters & M3 \\
+\fact{stuck-graph-run} consecutive samples at exactly \fact{stuck-graph-chars} characters & M3 \\
 every tool call returning the same validation error & M1 \\
 a 25-minute call that always produced one claim and zero techniques & M4 \\
-a Jaccard of \textbf{\fact{fixture-extractor-f1} with a zero-width interval}, from a model asked the same question 32 times at temperature 0 & M5 \\
+a Jaccard of \textbf{\fact{cascade-overlap-jaccard} with a zero-width interval}, from a model asked the same question \fact{cascade-overlap-pairs} times at temperature 0 & M5 \\
 \end{longtable}
 
 M5 extends the detector in a direction worth stating, because it is where the idea is least
@@ -347,16 +348,16 @@ makes it usable exactly where correctness is hard to check.
 \begin{figure}
 \centering
 \pandocbounded{\includegraphics[keepaspectratio,alt={Figure 4: The whole detector, drawn. Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while a stuck one goes flat --- no ground truth required, because the diagnosis is in the shape. Left is measured: 63 distinct call-graph sizes across 97 samples, the staircase's flat treads being genuinely identical binaries rather than a fault.}]{figures/fig1-output-cardinality.pdf}}
-\caption{\textbf{Figure 4: The whole detector, drawn.} Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while a stuck one goes flat --- no ground truth required, because the diagnosis is in the shape. Left is measured: 63 distinct call-graph sizes across 97 samples, the staircase's flat treads being genuinely identical binaries rather than a fault.}
+\caption{\textbf{The whole detector, drawn.} Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while a stuck one goes flat --- no ground truth required, because the diagnosis is in the shape. Left is measured: 63 distinct call-graph sizes across 97 samples, the staircase's flat treads being genuinely identical binaries rather than a fault.}
 \end{figure}
 
 \textbf{The right panel is a schematic, and the reason is the argument of §6.4.} It depicts M3 --- the run
-in which 66 consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph --- and we cannot
+in which \fact{stuck-graph-run} consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph --- and we cannot
 plot it, because that run predates the per-sample retention policy those very failures caused us to
 adopt. The most important curve in this paper is the one we are unable to draw.
 
-We now report it beside every batch result: 50 distinct call-graph sizes across 79 samples, then 63
-across 97.
+We now report it beside every batch result: 50 distinct call-graph sizes across 79 samples, then
+\fact{cardinality-distinct-graphs} across \fact{cardinality-samples}.
 
 \textbf{This is a refinement, not a discovery, and we checked before saying otherwise.} ``Distinct inputs
 should produce distinct outputs'' is an ordinary metamorphic relation {[}22{]}; metamorphic testing
@@ -389,7 +390,7 @@ Two policies follow, and both are cheap:
   caused by the defect \emph{plus} the inability to re-ask the question afterwards. Aggregates cannot be
   re-interrogated.
 \item
-  \textbf{Restart the shared server between samples.} In our sweeps this recovered 12 of 14 samples
+  \textbf{Restart the shared server between samples.} In our sweeps this recovered \fact{switch-recovered} of \fact{switch-attempted} samples
   previously recorded as unmeasurable --- the failures belonged to the \emph{state they inherited}, not to
   the samples. Fresh state per sample removes a whole class of the failures above.
 \end{enumerate}

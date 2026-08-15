@@ -182,17 +182,28 @@ def _offenders(path: Path) -> list[tuple[int, str]]:
     return out
 
 
+_VERBATIM_OPEN = re.compile(r"\\begin\{(verbatim|Shaded|Highlighting|lstlisting)\}")
+_VERBATIM_CLOSE = re.compile(r"\\end\{(verbatim|Shaded|Highlighting|lstlisting)\}")
+
+
 def _fenced_line_numbers(path: Path) -> set[int]:
-    """Line numbers inside fenced blocks, which ``_strip`` cannot see line by line."""
+    """Line numbers inside a verbatim environment, which ``_strip`` cannot see line by line.
+
+    This looked for Markdown fences until the sources became LaTeX, so a command
+    line in the reproducibility appendix — the one place a bare number is
+    unambiguously not a measurement — was being reported as a hand-typed result.
+    """
     inside: set[int] = set()
-    open_block = False
+    depth = 0
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if raw.lstrip().startswith("```"):
-            open_block = not open_block
+        opened = bool(_VERBATIM_OPEN.search(raw))
+        closed = bool(_VERBATIM_CLOSE.search(raw))
+        if opened:
+            depth += 1
+        if depth:
             inside.add(lineno)
-            continue
-        if open_block:
-            inside.add(lineno)
+        if closed:
+            depth = max(0, depth - 1)
     return inside
 
 
