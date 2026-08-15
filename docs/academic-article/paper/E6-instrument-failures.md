@@ -200,6 +200,19 @@ direction the literature predicts, with its limitations already stated. There wa
 to notice. It was caught by reading the arms table under the correlation and asking why one model
 was on it twice — which is a question no result, however wrong, would have prompted.
 
+**And the phenomenon is not ours.** `arXiv:2604.00025` shows that an inference-time output-length
+constraint *reverses* performance hierarchies between large and small models — a 28.4-point gap
+inverted — and frames it as a methodological confound requiring evaluation protocols that adapt to
+the model rather than a universal one. Our reasoning flag consumes the answer budget, which makes
+the disabled arm a brevity-constrained arm under a different name, and a reversal is a stronger
+result than a spurious correlation. We report M6 as a domain instance of that finding.
+
+What we would add is narrower and sits in the remedy rather than the phenomenon: their protocol is
+adapted per model, ours has to be **verified per arm**, because matching on the requested
+configuration is not sufficient when a provider accepts the parameter and does not act on it
+(§3.32). An arm can be labelled matched and be running the opposite setting. The rule that follows —
+select on the *measured* reasoning share, never on the flag — is what the gate implements.
+
 ### M7 — A safety property that was configured, documented, and never sent
 
 The last one is in the production pipeline rather than in an evaluation harness, and it removed a
@@ -233,6 +246,14 @@ that it failed. Four calls named the timeout branch, which prompted the question
 temperature-zero model would need ten minutes, which led to the server's own log and a token
 counter that had passed thirty thousand. The instrumentation that caught it was written for a
 different question three hours earlier.
+
+**The incompatibility itself is known; the consequence is what we contribute.** That
+OpenAI-compatible servers disagree about token-limit parameters is documented in their own issue
+trackers — `llama.cpp` #8634 reports generation continuing to the context limit when the cap is not
+honoured on one of its endpoints. We are not reporting a new integration wart. We are reporting
+what one costs inside a measurement: a documented safety property silently absent for as long as it
+has existed, and half of a study's calls diverted onto a bundle-construction path that skips the
+corroboration cascade entirely.
 
 ## 6.2 Why the test suite did not help
 

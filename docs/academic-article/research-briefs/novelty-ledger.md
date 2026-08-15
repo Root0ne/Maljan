@@ -48,14 +48,29 @@ they were never measured"* — is closed. Not by defending them:
 each measured, each inert or near-inert once wired to real inputs. That is now the project's
 most-replicated result and it is what the paper is about.
 
-### Pending counter-search — not yet a row
+### M6 and M7, counter-searched 2026-08-15 — **both demoted before they were ever claimed**
 
-**M6** (2026-08-14): a parameter-size correlation that ranked a reasoning-configuration flag and
-recovered the published scaling ρ almost exactly. It is recorded in the findings log (§3.34) and in
-the paper (E6 §M6), but it is **not entered here as `OURS`**, because this ledger's own rule is that
-every `OURS` is a *searched* negative and no counter-search has been run for it. Prior work on
-confounded evaluation comparisons is likely to exist; it must be looked for before the row is
-written.
+Entered as pending on 2026-08-14 with the note *"prior work on confounded evaluation comparisons is
+likely to exist; it must be looked for before the row is written."* It exists. Neither becomes an
+`OURS` row.
+
+| # | Claim | What owns it | What is left to us |
+|---|---|---|---|
+| **M6** | A parameter-size correlation that ranked a reasoning-configuration flag and recovered the published scaling ρ almost exactly (§3.34) | **`arXiv:2604.00025`** (*Brevity Constraints Reverse Performance Hierarchies in Language Models*) — **abstract fetched and verified**. An inference-time output-length constraint *reverses* model rankings by 28.4 points, and the authors frame it exactly as a methodological confound: universal evaluation protocols "mask" latent capability, so protocols must be scale-aware. Our reasoning flag consumes the answer budget, which makes our arm a brevity-constrained arm by another name — and their result is the stronger one, since a reversal beats a spurious correlation | **The selection rule, not the phenomenon.** Their remedy is to adapt the protocol per model. Ours is narrower and, we think, not stated there: match arms on the **measured** configuration rather than the requested one, because a provider can accept the parameter and ignore it (§3.32), which makes intent-based matching silently unsafe. That is a refinement of their methodological point, and it is how it must be written |
+| **M7** | A documented output cap that never reached the server, because the client library renamed it to a key the server does not read (§3.35) | **Known in the implementations' own issue trackers.** `ggml-org/llama.cpp` issue **#8634** reports `max_tokens` not being respected on the non-chat endpoint, with generation continuing to the context limit — our failure with a different key on the chat endpoint. vLLM carries a parallel request (**#11976**) for a server-side cap. *Search-result level; the issues have not been read in full, so this is a demotion pending confirmation — the conservative direction* | **The consequence, not the incompatibility.** That OpenAI-compatible servers disagree about token-limit parameters is a known integration wart. What we add is what it costs downstream in a measurement setting: a documented safety property silently absent, a degenerate decode reaching 30,155 tokens, and half a study's calls diverted onto a bundle-construction path that skips the cascade entirely (§3.37) |
+
+**Neither demotion weakens E6's actual claim, and both narrow it.** The chapter does not argue that
+each mechanism is individually unknown; §6.5 claims the *setting* — an evaluation pipeline for
+security research, where the artefact is a measurement that is wrong and looks right — and the
+composition. But the M6 write-up as first drafted reads as though the phenomenon were ours, and it
+is not. That has to be fixed in the text before submission, not left for a reviewer.
+
+**Third time in two days that reading the source changed the answer.** The search summary for a
+second paper (`arXiv:2607.28211`) reported it as framing scaling correlations as evaluation
+artifacts. Fetching it shows the authors argue the opposite emphasis — that *data* properties
+predict better than scale. It reports ρ falling 0.68 → 0.48 → 0.05 across benchmarks, which is
+adjacent evidence that ρ(scale, performance) is protocol-dependent, and it is **not** a confound
+claim. Cited at that strength or not at all.
 
 ### New rows from the B layer, 2026-08-09 — **both counter-searched the same day, both demoted**
 
