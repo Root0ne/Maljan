@@ -134,7 +134,7 @@ rebuild-ghidra: ghidra-build
 # The paper. Facts first, always: build_paper.py refuses to run against a
 # paper_facts.json older than any result it summarises, so this ordering is not
 # a convenience — the reverse order fails loudly, which is the point.
-.PHONY: paper facts reanalyse paper-check
+.PHONY: paper facts reanalyse paper-check cohort-complete
 # Every interval in the paper, recomputed at the cluster its observations are
 # independent at. Reads committed per-sample artifacts only: no LLM, no network.
 reanalyse:
@@ -142,6 +142,11 @@ reanalyse:
 
 facts: reanalyse
 	.venv/bin/python tests/evaluation/paper_facts.py
+
+# Recover the three samples the sandbox lost and take the cohort to 100.
+# Needs the sandbox's network; refuses clearly without it.
+cohort-complete:
+	./scripts/complete_cohort.sh
 
 # Every rubric item a machine can check, checked by one. Run after `make paper`.
 paper-check:
