@@ -3087,6 +3087,57 @@ fallback bundle's technique ids rather than only their count.
 
 ---
 
+### 3.38 The outbound parameter set, swept rather than waited for — `CLEAR`, with a methodological note
+
+Two parameters were found accepted-and-ignored on 2026-08-15, both **by accident**: a result made
+no sense and was traced back (§3.32, §3.35). The set of parameters this pipeline sends is small and
+enumerable, so continuing to find them that way is a choice. `probe_outbound_parameters.py` reads
+what the provider actually puts on the wire and tests each one **by behaviour**, because a server
+that ignores a parameter does not say so.
+
+| parameter | how it was checked | verdict |
+|---|---|---|
+| `temperature` | 3 repeats at 0.0 against 3 at 2.0, plus a 3-seed sweep | 1 distinct at 0.0, **3 distinct at 2.0, 3 across seeds** → **honoured** |
+| `max_completion_tokens` alone | 48-token cap on a counting prompt | 2,805 tokens → **ignored** (§3.35, kept as a regression witness) |
+| `extra_body.max_tokens` / `n_predict` | same cap, both spellings sent | exactly 48 → **honoured** |
+| `chat_template_kwargs.enable_thinking=False` | is the answer non-empty | 47 chars → **honoured** |
+| `request_timeout`, `max_retries` | verified 2026-08-09 (`bind_eval_llm`) | not re-probed |
+| `repeat_penalty` family | §2.1 live probe; also **not sent** at `rp=1.0` | n/a |
+| `top_p`, `top_k`, `seed` | **not sent at all** — server defaults apply | n/a |
+
+**No new defect.** The one known bad parameter is the one already fixed. What changes is the
+epistemic status of the rest: they were assumed to work and are now measured to work.
+
+**`temperature` mattered more than the others and the answer is the reassuring one.** E6's M5
+argument turns on it — *"a language model at temperature 0, asked 32 times, does not usually agree
+with itself perfectly. We read a constant as an unusually clean null."* Had the server been greedy
+regardless of what we send, that sentence would have been wrong: perfect agreement would be the
+expected result rather than a missed tell. It is not wrong. Temperature is read, 0.0 is genuinely
+greedy, and the M5 tell stands as stated.
+
+**The methodological note, which is the part worth keeping.** This probe produced **two confident
+wrong verdicts before it produced a right one**, inside twenty minutes, and both were the shape it
+was written to detect:
+
+1. *"Three colours, comma separated"* at 32 tokens — a prompt so constrained that a peaked
+   distribution returns the same answer at any temperature. That would have made "ignored"
+   unfalsifiable. Caught before running, by asking what a negative result would prove.
+2. Then, with an open-ended prompt: **`greedy-regardless`, from three empty strings compared
+   against three empty strings.** The temperature arms omitted `enable_thinking=False`, so the
+   whole 64-token budget went into `reasoning_content` (§3.6) and every arm returned nothing. The
+   summary line said *"1 distinct of 3 at 0.0, 1 of 3 at 2.0"* — perfectly true, and about nothing.
+   Caught only by printing the raw samples rather than the counts.
+
+Had that second verdict been written up, this log would now contain a §3.38 stating that the
+project's determinism guarantee is an accident of the deployment — a claim that is false, that
+undermines M5, and that carries the same authority as everything else here. **The instrument built
+to catch parameters-that-do-nothing was itself measuring nothing, twice.** The probe now refuses to
+compare empty outputs and returns `inconclusive-empty-output` instead, which is the fix, but the
+transferable rule is the one that actually worked: *look at the artefact, not the summary of it.*
+Both catches came from printing what the model said.
+
+---
+
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
 
 Items are status-tagged inline (`IMPLEMENTED` / `SUPERSEDED` / `SURVEY`); most began as

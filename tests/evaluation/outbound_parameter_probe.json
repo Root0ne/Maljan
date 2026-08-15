@@ -1,0 +1,38 @@
+{
+ "schema": "outbound-parameter-probe/v1",
+ "temperature": {
+  "parameter": "temperature",
+  "prompt_style": "open-ended continuation, 64-token budget, thinking disabled",
+  "all_arms_produced_text": true,
+  "deterministic_at_0": true,
+  "varies_at_2": true,
+  "varies_across_seeds_at_2": true,
+  "distinct_at_0": 1,
+  "distinct_at_2": 3,
+  "distinct_across_seeds": 3,
+  "cold_sample": "This technique, often referred to as self-replication or cloning, allows the malicious code to persist on the system even if the original executable is deleted. By executing the copied instance, the p",
+  "hot_sample": "This self-replicating behavior effectively creates a redundant instance that persists even if the original source file is deleted or modified. Consequently, the software maintains its operational pres",
+  "honoured": true,
+  "verdict": "honoured"
+ },
+ "output_cap": [
+  {
+   "parameter": "max_completion_tokens only",
+   "requested": 48,
+   "produced": 2805,
+   "honoured": false
+  },
+  {
+   "parameter": "+ max_tokens/n_predict",
+   "requested": 48,
+   "produced": 48,
+   "honoured": true
+  }
+ ],
+ "thinking": {
+  "parameter": "chat_template_kwargs.enable_thinking=False",
+  "answer_chars": 47,
+  "answer_is_empty": false,
+  "honoured": true
+ }
+}
