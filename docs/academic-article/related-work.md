@@ -243,6 +243,28 @@ ordinary metamorphic relation, and metamorphic testing exists precisely for prog
 output is unknown [22]; the inverse — duplicating dataset items to check that identical inputs
 score consistently — is already an eval-harness practice [23].
 
+**And the newest of our mechanisms is a domain instance, not a discovery.** In the course of
+building a parameter-size series we produced a rank correlation of +0.866 between model size and
+F1 — reproducing the ρ=0.85 the nearest prior work reports — from five rows that were three models,
+one of them present twice at two reasoning settings. The low-scoring row was a model disabled by a
+flag rather than limited by its size, and it sat at the small end of the axis where it set the sign.
+That phenomenon is established: *Brevity Constraints Reverse Performance Hierarchies in Language
+Models* [24] shows an inference-time output-length constraint **inverting** a 28.4-point gap between
+large and small models, and frames it exactly as a methodological problem — universal evaluation
+protocols mask latent capability, so protocols must adapt to the model. A reasoning flag consumes
+the answer budget, which makes our disabled arm a brevity-constrained arm under another name, and a
+reversal is a stronger result than a spurious correlation. We report ours as an instance of theirs.
+
+What does not appear in [24], and is what we would add, sits in the remedy rather than the
+phenomenon. Their protocol is adapted per model; ours has to be **verified per arm**, because one of
+our providers accepts the parameter that would match two arms and does not act on it — so an arm can
+be labelled matched while running the opposite configuration. Selection has to key on the *measured*
+reasoning share of a completed arm, never on the flag that was requested. The same is true one layer
+down: that OpenAI-compatible servers disagree about which token-limit parameter they honour is
+documented in their own issue trackers [25], so what we contribute there is not the incompatibility
+but what one costs inside a measurement — a documented output ceiling absent for as long as it had
+existed, and half of a study's calls diverted onto a different artefact-construction path.
+
 **What we add is therefore narrow and stated narrowly.** Three instances of the described genus,
 drawn not from a user-facing assistant but from an **evaluation pipeline for security research**,
 where the consequence is neither a bad answer to a user nor a degraded session but **a measurement
@@ -253,6 +275,19 @@ test; and a demonstrated cost — one study withdrawn, because its per-sample ou
 retained and the question can no longer be asked of it. The last of these is the part we have not
 seen elsewhere: the taxonomies report incidents, and we report what an incident of this class does
 to a result that has already been written down.
+
+**One further claim, and it is about where the genus ends rather than what is in it.** [20]'s five
+classes each describe a call to something else — an environment quirk, a swallowed error, a
+mismatched design assumption at an interface. Three of our seven mechanisms have no interface in
+them at all: an ablation that varied a deterministic post-processing step and attributed the result
+to a language model; the correlation described above; and an output ceiling correct at every level
+of our own object model and wrong only in the serialised request. No server misled us in any of the
+three. They share the meta-pattern [20] names — the error signal never reaches a human in actionable
+form — while sitting outside every class it offers, because the taxonomy is organised by the
+boundary crossed and these crossed none. We suggest the organising principle that covers both is not
+the boundary but the attribution: **the same shape appears wherever a measurement's cause is assigned
+rather than measured.** We state that as a proposal, on seven cases from one project, not as a
+taxonomy.
 
 ## Scope of every empirical statement above
 
@@ -297,6 +332,14 @@ verification status differs — deliberately recorded rather than smoothed over:
 | [21] | *From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents*, `arXiv:2507.16044`; MCP tool-description quality and runtime-server studies (`arXiv:2607.11086`, `arXiv:2607.11098`) | **Search results only.** The "silent downstream reasoning failures rather than explicit, testable errors" phrasing comes from a search summary and must be located in the source |
 | [22] | Metamorphic testing; *Metamorphic Relation Generation: State of the Art and Research Directions*, ACM TOSEM `10.1145/3708521` | **Search results only.** The framework is textbook and the demotion it forces is safe, but the specific survey must be read before it is cited |
 | [23] | *Judge Reliability Harness: Stress Testing the Reliability of LLM Judges*, `arXiv:2603.05399` | **Search results only.** Cited for the duplicate-item consistency check; verify that this is what it does |
+
+**[24]–[25] were added on 2026-08-15 by the counter-search for M6 and M7. Both demoted a claim of
+ours before it was made, which is the point of running the search first:**
+
+| # | Source | Verified how |
+|---|---|---|
+| [24] | *Brevity Constraints Reverse Performance Hierarchies in Language Models*, `arXiv:2604.00025` | **Abstract fetched and read.** The 28.4-point underperformance of larger models under spontaneous verbosity, the 7.7–15.9-point inversion under brevity constraints, and the framing of universal evaluation protocols as masking latent capability are all quoted from it. The full text has **not** been read; our claim that our reasoning-flag arm is a brevity-constrained arm under another name is **our reading and must be checked against the body before submission** |
+| [25] | Token-limit incompatibility across OpenAI-compatible servers: `ggml-org/llama.cpp` issue **#8634** (`max_tokens` not respected on the non-chat endpoint, generation continuing to the context limit); `vllm-project/vllm` issue **#11976** (request for a server-side cap) | **Search results only.** The issues have not been read in full. They are cited to *demote* our M7 from a new mechanism to a known integration wart, which is the safe direction; a submitted paper needs them read |
 
 Acting on [17]–[23] now is conservative because each one *demotes* a claim of ours — the safe
 direction. Citing them in a submitted paper on this basis would not be, and the standing rule from

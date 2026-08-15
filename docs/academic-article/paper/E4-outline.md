@@ -25,27 +25,39 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > family-feature index, and an opcode-hash attribution tier — each work in isolation and contribute
 > +0.003 F1, lose to a frequency prior, and fire on 0 of 18 samples respectively. A deterministic
 > confidence cap fires on 0.82% of techniques. A 120B reasoning model did not separate from our local
-> 35B on identical fixtures at equal budget (paired ΔF1 **+0.003**, 95% CI [−0.077, +0.081], n=25).
+> 35B on identical fixtures at equal nominal budget (paired ΔF1 **+0.003**, 95% CI [−0.077, +0.081],
+> n=25) — a null we report with a confound its provider will not let us remove, since the parameter
+> that would have matched the two arms' reasoning budgets is accepted and ignored there.
 >
-> More consequentially, four defects at tool-integration boundaries produced *silent wrong answers*:
-> unset optional arguments sent as `null`, a loaded program that never became the server's current
-> program, a refused load returning HTTP 200, and two protective bounds that composed into an empty
-> result. A suite of 1,995 passing tests caught none of them; all four were found by a single check —
-> asking how many **distinct** outputs N inputs produced. One of our own studies is withdrawn as a
-> direct consequence, because its per-sample outputs were not retained and the question can no longer
-> be asked of it.
+> The verdict model's influence over its own output is not small but **conditional on it working**.
+> Where the model returns a parsable verdict it supplies **0 of 99** techniques in the bundle the
+> analyst receives; a post-processing step restores the deterministic set regardless. Where it fails
+> — half of calls, in a degenerate decode our own output cap had never bounded — a text fallback
+> scrapes identifiers out of the unparsable response, and **47 techniques reach the analyst that no
+> evidence source corroborated**, in the same object type as those three sources agreed on. All 45
+> unique identifiers are real ATT&CK techniques, which is what makes them indistinguishable.
 >
-> The same gap then recurred while this paper was being written, which we report rather than repair
-> quietly. A paired ablation halted when the host exhausted its memory, and four of its arms cannot
-> be attributed to the pipeline or to the machine — we had retained the pipeline's outputs, as our own
-> rule requires, but not the state of the host the measurement ran on. A retention rule written after
-> one failure is scoped to that failure.
+> Seven defects produced *plausible wrong answers with no error anywhere*. Four are at boundaries
+> with other people's servers: unset optional arguments sent as `null`, a loaded program that never
+> became the server's current program, a refused load returning HTTP 200, and two protective bounds
+> composing into an empty result. **Three are ours** — an ablation that varied a deterministic code
+> path and reported a language model, a correlation that ranked a configuration flag and reported a
+> parameter count, and a documented output ceiling renamed during serialisation to a key the
+> inference server does not read. A suite of 2,666 passing tests caught none of them, and the last
+> three had passing tests over the exact functions concerned. The four boundary defects were all
+> found by one check — how many **distinct** outputs N inputs produced; the other three were not,
+> and we say what did find them.
 >
-> We contribute the measured negatives, the failure mechanisms with the boundary each occurred at,
-> the cheap detector that found them, and a no-LLM baseline (F1 0.153, n=97) against which all of it is
-> read. We argue that in a pipeline assembled from other people's servers, a server that answers is
-> not the same as a server that answered your question — and that evaluation harnesses should report
-> output cardinality the way they report sample size.
+> One of our studies is withdrawn as a direct consequence, its per-sample outputs not retained and
+> its question no longer askable. The same gap then recurred while this paper was written: a paired
+> ablation halted on host memory and four arms cannot be attributed to the pipeline or the machine,
+> because the retention rule we adopted after the first failure was scoped to that failure.
+>
+> We contribute the measured negatives, the failure mechanisms with the layer each occurred at, the
+> cheap detector that found four of them, and a no-LLM baseline (F1 0.153, n=97) against which all of
+> it is read. We argue that in a pipeline assembled from other people's servers a server that answers
+> is not the same as a server that answered your question — and that the same shape does not stop at
+> the network boundary: it appears wherever a measurement's cause is assigned rather than measured.
 
 ## Structure
 
@@ -85,25 +97,49 @@ the servers it depends on. In each case a server answered successfully and answe
 else: an argument the agent never supplied arrived as an explicit `null`; a program reported as
 loaded — by name — never became the one being analysed; a refused load returned HTTP 200 with an
 error in the body; and two bounds designed to protect the analyst composed into a path that
-returned nothing at all. None was caught by 1,995 passing tests, because each needs a *second* case
+returned nothing at all. None was caught by 2,666 passing tests, because each needs a *second* case
 in one server lifetime, and a unit test writes one.
 
-Every one was caught the same way: **a number repeated where variation was expected.** A hint of
-exactly 2,575 characters for two unrelated binaries; call graphs identical to the character for
-samples of 241 KB and 139 KB; 66 consecutive samples at 75,426 characters. The check costs one line,
-needs no ground truth, and we now report it beside every batch result.
+Every one of those four was caught the same way: **a number repeated where variation was expected.**
+A hint of exactly 2,575 characters for two unrelated binaries; call graphs identical to the
+character for samples of 241 KB and 139 KB; 66 consecutive samples at 75,426 characters. The check
+costs one line, needs no ground truth, and we now report it beside every batch result.
+
+**Then three more, and none of them was at a boundary.** An ablation varied a deterministic
+post-processing step and we attributed its output to a language model. A rank correlation over model
+size ranked a reasoning-configuration flag instead and recovered the published scaling coefficient
+almost exactly — agreeing with the literature, which is the direction a result is least likely to be
+questioned. And a documented output ceiling on the verdict model was renamed by our client library
+during serialisation to a key the inference server does not read, so a component we describe as
+bounded had never once been bounded. The detector above does not find these: their outputs *do*
+vary. Two were caught by a number too clean to believe, one by a study that recorded which failure
+branch each call took. Each had passing unit tests over the exact function concerned, because the
+defect was never in a function — it was in which measurement was attributed to which cause, or in
+which representation of a value crossed a boundary.
+
+We report them because the correction is part of the result. Two published findings of ours were
+withdrawn or rewritten on their account, and a third was one report away from being published as a
+scaling law.
 
 The cost of not having had it is concrete: **a completed 210-sample study is withdrawn from this
 paper.** It met the precondition for one of the defects, and its per-sample outputs were not
 retained, so whether it was affected cannot be established. We report the withdrawal rather than the
 result.
 
-We do not claim the category. Silent failures in production LLM agent runtimes are already described
-and taxonomised [20], "distinct inputs should produce distinct outputs" is an ordinary metamorphic
-relation [22], and the failure modes we hit sit inside published classes. What we add is the setting
-and the price: an **evaluation pipeline for security research**, where the artefact is not a degraded
-user session but a measurement that is wrong and looks right — with three mechanisms at three
-distinct integration boundaries, a detector reported alongside results, and one withdrawn study as
+We do not claim the category, and we counter-searched the newest mechanisms before claiming them
+either. Silent failures in production LLM agent runtimes are already described and taxonomised [20];
+"distinct inputs should produce distinct outputs" is an ordinary metamorphic relation [22]; that an
+inference-time constraint can invert model rankings and confound a comparison is established, with a
+28.4-point reversal, in [24]; and the token-limit incompatibility between OpenAI-compatible servers
+is documented in their own issue trackers. Every mechanism we report sits inside a published class,
+and one of them — the configuration difference masquerading as a scaling result — is a domain
+instance of [24] rather than a new phenomenon.
+
+What we add is the setting and the price: an **evaluation pipeline for security research**, where
+the artefact is not a degraded user session but a measurement that is wrong and looks right. Three
+mechanisms at three distinct integration boundaries; a detector reported alongside results; a
+selection rule that follows from a provider accepting a parameter and not acting on it, so arms must
+be matched on their *measured* configuration and not their requested one; and one withdrawn study as
 the demonstrated consequence.
 
 ## Methodology (to write — the material exists)
