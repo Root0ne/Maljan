@@ -401,6 +401,38 @@
    "artifact": null,
    "provenance": "unretained-session",
    "note": "Retained because the paper's point is that the two differ; the derived value is confidence_auc_naive."
+  },
+  "static_curated_functions": {
+   "value": "20",
+   "claim": "the functions the static analyst is given, curated rather than exhaustive because recall degrades before the context does",
+   "observed": "2026-08-11",
+   "record_ref": "src/maljan/analysis config; E3 §The system",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "reasoning_share_one_token": {
+   "value": "84%",
+   "claim": "the share of output spent reasoning on a call whose answer was one token",
+   "observed": "2026-08-13",
+   "record_ref": "frontier_probe.json per-call record, quoted in E1 §2",
+   "artifact": "tests/evaluation/frontier_probe.json",
+   "provenance": "derived-elsewhere"
+  },
+  "switch_recovered": {
+   "value": "12",
+   "claim": "samples previously lost to the stuck-program defect that a per-sample program switch recovered",
+   "observed": "2026-08-11",
+   "record_ref": "findings-log.md §3.15",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "switch_attempted": {
+   "value": "14",
+   "claim": "samples the recovery was attempted on",
+   "observed": "2026-08-11",
+   "record_ref": "findings-log.md §3.15",
+   "artifact": null,
+   "provenance": "unretained-session"
   }
  }
 }

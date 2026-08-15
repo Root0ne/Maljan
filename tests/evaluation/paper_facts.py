@@ -517,6 +517,20 @@ def corpus_shape_facts() -> dict[str, Any]:
     return out
 
 
+def model_size_facts() -> dict[str, Any]:
+    """How much larger the frontier model is, computed rather than recalled.
+
+    Both parameter counts are in the arms' own names; the ratio the paper quotes
+    three times is arithmetic on them.
+    """
+    local_b, frontier_b = 35.0, 120.0
+    return {
+        "param_ratio": f"{frontier_b / local_b:.1f}",
+        "local_params_b": f"{local_b:.0f}",
+        "frontier_params_b": f"{frontier_b:.0f}",
+    }
+
+
 def cascade_jaccard_facts() -> dict[str, Any]:
     """The overlap condition's Jaccard against the all-sources arm.
 
@@ -749,6 +763,10 @@ def power_facts() -> dict[str, Any]:
     }
     for cid, name in labels.items():
         c = _comparison(cid)
+        # The prose rounds to two places where the interval is a tenth wide,
+        # which is the honest precision; both are emitted so a sentence and a
+        # table can each use the one that fits without either being typed.
+        out[f"{name}_delta_2dp"] = f"{abs(c['delta']):.2f}"
         out[f"mde_{name}"] = f"{c['mde_t']:.3f}"
         out[f"mde_{name}_z"] = f"{c['mde_z']:.3f}"
         # Whether the observed effect is even inside the design's resolution.
@@ -833,6 +851,7 @@ BUILDERS = (
     fixture_ceiling_facts,
     fallback_table_facts,
     corpus_shape_facts,
+    model_size_facts,
     cascade_jaccard_facts,
     drift_facts,
     cluster_stat_facts,

@@ -94,6 +94,8 @@ _NOT_A_MEASUREMENT = (
     re.compile(r"\b\d+(?:\.\d+)?\s?B(?:-A\d+B)?\b"),
     re.compile(r"\b\d+-bit\b"),
     re.compile(r"\bIQ\d\w*"),
+    # Algorithm and hardware names that carry a digit.
+    re.compile(r"\bSHA-?\d+\b|\bRTX\s*\d+\b|\bIQ\d\w*\b|\bq\d_\d\b"),
     # Protocol and status constants.
     re.compile(r"\bHTTP\s+\d{3}\b"),
     re.compile(r"\bport\s+\d+\b", re.I),

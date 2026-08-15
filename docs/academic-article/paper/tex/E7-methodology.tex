@@ -13,18 +13,18 @@ consensus study the noise arm separated clearly (\fact{consensus-noise-f1} again
 treatment did not, which distinguishes ``no effect'' from ``no sensitivity''.
 
 \textbf{For reasoning models the budget must cover reasoning.} Our frontier endpoint reports reasoning
-tokens separately from content, and \textbf{56.5\%} of its output was reasoning across 25 real prompts
-(84\% on a one-token answer). Capping content alone would have granted it roughly twice the generation for the
+tokens separately from content, and \textbf{\fact{arm-default-reasoning}} of its output was reasoning across \fact{arm-default-n} real prompts
+(\fact{reasoning-share-one-token} on a one-token answer). Capping content alone would have granted it roughly twice the generation for the
 same nominal budget.
 
 \textbf{And the arms must be on the same side of the reasoning switch, which is a stronger requirement
-than it sounds.} We measured this flag on two models at 25 calls each: enabling it moved F1 by
-\textbf{0.45} on one and \textbf{0.34} on the other, in both cases because the model spent its entire output
-budget thinking and returned no answer --- 24 of 25 calls hit the cap on the second model, and one
+than it sounds.} We measured this flag on two models at \fact{arm-default-n} calls each: enabling it moved F1 by
+\textbf{\fact{reasoning-flag-third-delta-2dp}} on one and \textbf{\fact{reasoning-flag-vendor35b-delta-2dp}} on the other, in both cases because the model spent its entire output
+budget thinking and returned no answer --- \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls hit the cap on the second model, and one
 answered. That is larger than every architectural effect in this paper combined, so an unmatched
 pair does not produce a noisy comparison; it produces a comparison of the flag. Two further
 cautions follow from what it took to hold this constant. The flag cannot be read from the request:
-one of our providers accepts the parameter and ignores it, returning the same 56\% reasoning share
+one of our providers accepts the parameter and ignores it, returning the same reasoning share
 with and without it, so \textbf{matching must be verified against the measured reasoning share of the
 completed arm}. And it cannot be assumed uniform across a series: when we ranked arms by parameter
 count without checking, the ranking recovered the published scaling correlation ($\rho$=\fact{superseded-rho}) from an
@@ -109,13 +109,13 @@ of every external task the run depended on.
 \subsection{Fresh server state per sample}\label{fresh-server-state-per-sample}
 
 Shared, long-lived servers accumulate state that crosses sample boundaries. In our sweeps, restarting
-the reverse-engineering server between samples \textbf{recovered 12 of 14 samples previously recorded as
+the reverse-engineering server between samples \textbf{recovered \fact{switch-recovered} of \fact{switch-attempted} samples previously recorded as
 unmeasurable} --- the failures belonged to the state each sample inherited from its predecessor, not
 to the samples themselves. A read timeout leaves the JVM mid-analysis and every subsequent load is
 refused; without restarts, one slow sample silently invalidates the window that follows it.
 
 The same applies to the model server: it grows with cumulative requests and does not plateau
-(10.4 GB fresh, 14.8 GB after one pass), so long paired runs restart it between arms. At temperature
+(\fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after one pass), so long paired runs restart it between arms. At temperature
 0 this is measurement-neutral.
 
 \subsection{Two audits that cost minutes and caught real errors}\label{two-audits-that-cost-minutes-and-caught-real-errors}
