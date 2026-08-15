@@ -66,7 +66,7 @@ _FENCED = re.compile(
     re.S,
 )
 _INLINE_CODE = re.compile(r"\\texttt\{(?:[^{}]|\{[^{}]*\})*\}")
-_PLACEHOLDER = re.compile(r"\\fact\{[a-z0-9-]+\}")
+_PLACEHOLDER = re.compile(r"\\fact\{[a-z0-9-]+\}|\\setting\{[^}]*\}")
 _CITATION = re.compile(r"\{\[\}\d+(?:\s*,\s*\d+)*\{\]\}|\[\d+(?:\s*,\s*\d+)*\]")
 _SECTION_REF = re.compile(r"§+\s?[\dA-Za-z.]+|\\ref\{[^}]*\}|\\label\{[^}]*\}")
 _HEADING_NUMBER = re.compile(r"^\\(?:sub)*section\*?\{[\d.]+\s", re.M)
@@ -222,6 +222,32 @@ def test_no_measurement_is_a_hand_typed_numeral(filename: str) -> None:
             f"paper_facts.py and reference it as a placeholder, or register it in "
             f"narrative_provenance.json with the record it comes from:\n{listing}{more}"
         )
+
+
+def test_setting_is_not_a_way_to_launder_a_measurement() -> None:
+    """``\\setting{x}`` may not hold a value the analysis derives.
+
+    The marker exists so a number that cannot drift — a port, a thread count, a
+    GPU model — does not need a derivation it would never benefit from. It would
+    also be a perfectly good way to silence the checker on a real measurement,
+    which is why this test exists: if the value inside a ``\\setting`` is one a
+    fact already produces, the number belongs to that fact.
+    """
+    if not _FACTS.exists():
+        pytest.skip("paper_facts.json not derived yet")
+    derived = {str(v).strip() for v in json.loads(_FACTS.read_text()).values()}
+    # Small integers coincide with something derived by chance; the marker is
+    # only suspicious when the value is distinctive enough for the match to mean
+    # something, which is the same threshold the substitution sweeps used.
+    laundered: list[str] = []
+    for path in sorted(_PAPER.glob("*.tex")):
+        for m in re.finditer(r"\\setting\{([^}]*)\}", path.read_text(encoding="utf-8")):
+            value = m.group(1).strip()
+            core = value.strip("%+").replace(",", "")
+            distinctive = len(core.split(".")[1]) >= 2 if "." in core else len(core) >= 4
+            if distinctive and value in derived:
+                laundered.append(f"{path.name}: \\setting{{{value}}} is a derived quantity")
+    assert not laundered, "; ".join(laundered)
 
 
 def test_related_work_is_exempt_and_says_so() -> None:

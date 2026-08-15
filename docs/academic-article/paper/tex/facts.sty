@@ -44,5 +44,23 @@
 % fail, e.g. a sentence that only appears when a study has been run.
 \newcommand{\factdefined}[3]{\@ifundefined{maljan@fact@#1}{#3}{#2}}
 
+% \setting{value} — a number that is deliberately literal.
+%
+% The rule this document follows is that a number computed over data must be
+% derived, so that re-running the analysis updates the paper. The reason is
+% drift, and a number that cannot drift does not need the machinery: a port, a
+% thread count, a GPU model, a command-line flag. Those are settings. The
+% distinction is not visible in the digits — "31 GiB of host memory" is a
+% setting and "2.3 GB paged out" is a measurement, and both are a number and a
+% unit — so it is declared here, at the point of use, by whoever wrote the
+% sentence.
+%
+% This prints its argument and nothing else. Its whole job is to be greppable,
+% to say to the next reader of the source that the literal is deliberate, and to
+% let the checker tell a declared setting from an undeclared measurement. A test
+% refuses \setting on any value the analysis already derives, so it cannot
+% become a way of laundering a measurement into a constant.
+\newcommand{\setting}[1]{#1}
+
 \makeatother
 \endinput

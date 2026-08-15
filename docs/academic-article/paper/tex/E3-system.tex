@@ -38,7 +38,7 @@ verdict
 \textbf{dynamic analyst} & ReAct loop over a CAPEv2 sandbox via MCP & operational; only Windows PE is analysable on our instance \\
 \textbf{network analyst} & local PCAP analysis over the sandbox's capture & operational; depends on the sandbox indirectly \\
 \textbf{judge} & synthesises a verdict and emits STIX & operational \\
-\textbf{corroboration cascade} & weights layers, marks a technique corroborated when $\ge$2 layers contribute & \textbf{measured: never reaches the artefact} (0/32); a reconciliation step restores every cascade technique the judge omits, and across 80 arms the judge added none of its own \\
+\textbf{corroboration cascade} & weights layers, marks a technique corroborated when $\ge$\setting{2} layers contribute & \textbf{measured: never reaches the artefact} (0/32); a reconciliation step restores every cascade technique the judge omits, and across 80 arms the judge added none of its own \\
 \textbf{confidence gating} & caps confidence for unsupported obfuscation/injection claims & \textbf{measured: fires on \fact{cap-rate} of techniques} \\
 \textbf{case-prior RAG} & retrieves similar past cases to prime mapping & \textbf{measured: loses to a label-frequency prior in production} \\
 \textbf{family-feature RAG} & retrieves family fingerprints & \textbf{measured: \fact{family-delta-f1} F1 end to end} \\

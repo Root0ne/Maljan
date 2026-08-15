@@ -1,6 +1,50 @@
 \section{Reproducibility}
 \label{app:repro}
 
+\subsection{How the numbers in this paper get onto the page}\label{numeral-policy}
+
+Every number this paper states about its own results is generated from the
+committed per-sample records into a macro and referenced, never typed. A key the
+document asks for and the derivation cannot produce stops the build rather than
+leaving a hole in the page. The reason is drift and not tidiness: over this
+project's history the same measurement was typed into five places and went stale
+in all of them, a superseded interval survived a correction because it had been
+typed rather than referenced, and a figure caption disagreed with the paragraph
+beside it for a month.
+
+The rule is scoped to its reason, and the scope is stated here rather than left
+implicit, so that a reader can tell a deliberate exemption from an oversight.
+Three kinds of number are deliberately literal.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Settings.} A port, a thread count, a context length, a step budget, a
+  GPU model. No analysis produces them and they cannot go stale. They are marked
+  \texttt{\textbackslash setting\{\}} in the source at the point of use, because
+  the distinction is not visible in the digits --- \setting{31}\,GiB of host
+  memory is a setting and \fact{paged-out-working-set} paged out is a
+  measurement, and both are a number and a unit.
+\item
+  \textbf{Values quoted from cited work.} No derivation of ours produces someone
+  else's result. These are registered with the citation each belongs to and are
+  permitted only on a line that carries that citation, so a quoted figure cannot
+  drift away from its source and become indistinguishable from one of ours.
+\item
+  \textbf{Observations whose raw output was not retained.} A handful of the
+  incidents in Section~\ref{sec:failures} were seen in diagnostic sessions
+  against live containers rather than in a study, and those sessions were never
+  in scope for the retention rule --- which is Section~\ref{sec:threats}'s point
+  arriving one more time. Each is registered with the dated record that carries
+  it and is presented as an observation, not as a measurement from the archive.
+\end{itemize}
+
+A check enforces all of this, and refuses the third and second categories
+without their record or their citation. It also refuses a
+\texttt{\textbackslash setting\{\}} whose value is one the analysis already
+derives, because that would be a way of laundering a measurement into a
+constant.
+
 \subsection{The model, exactly}\label{the-model-exactly}
 
 \begin{longtable}[]{@{}
@@ -30,7 +74,7 @@ Engine: \texttt{ik\_llama.cpp}, commit \textbf{\texttt{eb570eb96689c235933b81369
 (\emph{``MTP: Avoid per step SSM copy (\#\fact{engine-commit-pr})''}).
 
 \textbf{The binary could not identify itself.} \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)},
-because the build tree was never a git checkout. The commit was recovered from a depth-1 clone
+because the build tree was never a git checkout. The commit was recovered from a depth-\setting{1} clone
 vendored elsewhere in the project and then \emph{proved} to describe the build: identical \fact{engine-source-files}-file source
 lists, and with line endings normalised \textbf{exactly one file differs --- the generated
 \texttt{common/build-info.cpp}}.
@@ -55,7 +99,7 @@ the service actually ran \fact{cpu-offload-blocks} blocks on CPU; the command ab
 
 \subsection{Hardware, and the ceiling it imposes}\label{hardware-and-the-ceiling-it-imposes}
 
-Single host: RTX \fact{host-gpu}, 31 GiB RAM, 16 threads. Three measured properties that shape what can be
+Single host: RTX \fact{host-gpu}, \setting{31} GiB RAM, \setting{16} threads. Three measured properties that shape what can be
 reproduced here:
 
 \begin{itemize}
@@ -65,10 +109,10 @@ reproduced here:
   after a single full analyst pass. A long paired run must restart it between arms; at temperature 0
   this is measurement-neutral.
 \item
-  \textbf{Serving at 64k instead of 131k does not lower the peak} (\fact{llama-rss-64k-gb} vs \fact{llama-rss-growth-gb} GB) --- the baseline is
+  \textbf{Serving at \setting{64}k instead of \setting{131}k does not lower the peak} (\fact{llama-rss-64k-gb} vs \fact{llama-rss-growth-gb} GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
 \item
-  \textbf{Generation rate varies from \fact{generation-rate-high} to 20 tokens/s across requests.} On this hybrid recurrent
+  \textbf{Generation rate varies from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s across requests.} On this hybrid recurrent
   architecture, llama.cpp writes and erases a \textbf{\fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred
   tokens} at \textasciitilde39k tokens of context. Long-context calls are therefore not slow in proportion ---
   they fall off a cliff.
@@ -80,7 +124,7 @@ host lock-ups preceded this limit being added.
 
 \textbf{The working set does not fit alongside an interactive session, and that is a reproducibility fact
 rather than an operational one.} Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
-up to \fact{ghidra-mem-limit-gb} GB: on a 31 GiB host this leaves nothing for a desktop. When we ran a paired study without
+up to \fact{ghidra-mem-limit-gb} GB: on a \setting{31} GiB host this leaves nothing for a desktop. When we ran a paired study without
 that headroom, the swap file was exhausted, the model server had \textbf{2.3 GB of its own address space
 paged out}, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
 generating from disk-backed pages is a different instrument from one generating from RAM, and the
@@ -146,10 +190,10 @@ committed
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\texttt{temporal\_manifest.json} & 210 dated samples, 7 cohorts, 27 families, \textbf{metadata only --- no binaries} & yes \\
-\texttt{dynamic\_cohort\_n100.json} & the n=100 dynamic cohort: Windows PE only, stratified by year, \textbf{seed 20260810}, digest recorded & yes \\
-\texttt{cape\_task\_ledger\_n100.json} & sha256 $\rightarrow$ CAPE task id for all 100 submissions & yes \\
-\texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=100 attempted & yes \\
+\texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, \textbf{metadata only --- no binaries} & yes \\
+\texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, \textbf{seed 20260810}, digest recorded & yes \\
+\texttt{cape\_task\_ledger\_n100.json} & sha256 $\rightarrow$ CAPE task id for all \fact{cohort-n} submissions & yes \\
+\texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=\fact{cohort-n} attempted & yes \\
 \texttt{cape\_baseline.json} & per-sample CAPE-only scores & yes \\
 \texttt{consensus\_ablation.json}, \texttt{frontier\_probe*.json}, \ldots{} & per-sample arms for every ablation, one file per arm and configuration & yes \\
 \texttt{parameter\_size\_series.json} & the size series with each arm's \textbf{measured} reasoning share and why it was included or excluded & yes \\
@@ -192,7 +236,7 @@ CAPE 2.5 at a private address, reachable only from one network.
 
 Timing, for planning: a new Windows submission is scheduled in \textbf{\textasciitilde1 second} and completes in
 \textbf{\textasciitilde5.5 minutes}; the \fact{cape-backlog}-task backlog is never scheduled and does not queue ahead of new work.
-An n=100 cohort is roughly 9 hours of sandbox time.
+An n=\fact{cohort-n} cohort is roughly \fact{cohort-sandbox-hours} hours of sandbox time.
 
 \subsection{The comparison endpoints, and one parameter that decides everything}\label{the-comparison-endpoints-and-one-parameter-that-decides-everything}
 
@@ -236,11 +280,11 @@ n
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{cost-ceiling-usd} \\
-frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & \fact{cost-ceiling-usd} $\times$2 \\
-same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & \fact{cost-ceiling-usd} \\
-same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & \fact{cost-ceiling-usd} \\
-larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \fact{cost-ceiling-usd} each \\
+local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{arm-default-n} \\
+frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & \fact{arm-default-n} $\times$2 \\
+same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & \fact{arm-qwen35ba3b-nothink-n} \\
+same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & \fact{arm-qwen35ba3b-n} \\
+larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenplus-n} each \\
 \end{longtable}
 
 \textbf{\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter.} Not rejected --- accepted,
@@ -269,19 +313,19 @@ cap that was requested instead.
 
 \subsubsection{The original frontier arm}\label{the-original-frontier-arm}
 
-OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature 0, \fact{consensus-budget}-token output cap.
+OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature \setting{0}, \fact{consensus-budget}-token output cap.
 
 \textbf{The free tier allows \fact{openrouter-daily-limit} requests per day} (\texttt{X-RateLimit-Limit:\ 50},
-\texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a 20-requests-per-minute cap
+\texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a \fact{openrouter-burst-limit}-requests-per-minute cap
 that applies whether or not credit has been purchased. The \textbf{first} attempt at this arm exhausted
-the daily quota mid-flight --- 9 calls landing and 16 returning HTTP 429 --- and the n=9 estimate it
+the daily quota mid-flight --- \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning HTTP 429 --- and the n=\fact{superseded-frontier-n} estimate it
 produced was not merely imprecise but pointed the wrong way (§2). The arm reported above is the
-completed \textbf{n=\fact{cost-ceiling-usd}} run, taken from a fresh quota: \fact{cost-ceiling-usd} of \fact{cost-ceiling-usd} parsed, 0 refusals, \$0 charged against
-the \$\fact{cost-ceiling-usd} ceiling.
+completed \textbf{n=\fact{arm-default-n}} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, 0 refusals, \$0 charged against
+the \$\setting{25} ceiling.
 
 The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
 rather than in dollars: one call per sample over a \fact{baseline-n}-sample cohort is two days at \fact{openrouter-daily-limit} requests per
-day, and a full-pipeline arm --- roughly 20 model requests per analysis --- is not reachable on the
+day, and a full-pipeline arm --- roughly \fact{requests-per-analysis} model requests per analysis --- is not reachable on the
 free tier at all. The spend meter is enforced as a precondition on every call rather than reconciled
 afterwards, and projections price output at the full cap because a degenerate decode produces
 exactly that.
@@ -350,7 +394,7 @@ run alone shows it. Preserved as \texttt{judge\_contribution\_uncapped.*} and \t
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
 cannot drift apart without the script failing to reproduce one of them. This caught a live error: an
 ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because 186
-of 210 claims are tied at confidence 1.0 and tie handling decides the entire estimate. The text was
+of \fact{confidence-n} claims are tied at confidence \setting{1.0} and tie handling decides the entire estimate. The text was
 right and the first draft of the figure was wrong --- which is the ordinary direction for this check to
 fire, and the reason for wiring it this way.
 
