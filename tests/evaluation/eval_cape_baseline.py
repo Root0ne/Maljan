@@ -176,7 +176,14 @@ def main() -> int:
                 **stats.provenance(seed=SEED, iters=2000),
                 "summary": summary,
                 "empty_prediction_samples": empty,
-                "skipped": {k: len(v) for k, v in skipped.items()},
+                # The identities, not just the count. An earlier version stored
+                # `{k: len(v)}`, and when the paper later needed to say what
+                # happened to the samples that produced no report, the study
+                # could not answer: the question was askable of the data and not
+                # of the record. That is the retention failure this project
+                # withdrew a study over, in a smaller form.
+                "skipped": {k: sorted(v) for k, v in skipped.items()},
+                "skipped_counts": {k: len(v) for k, v in skipped.items()},
                 "per_sample": rows,
             },
             indent=1,

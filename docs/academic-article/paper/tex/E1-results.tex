@@ -114,8 +114,11 @@ the other \fact{audit-instant} ran for \textbf{under a second}, all \fact{audit-
 still marked \texttt{reported}, none with a report directory. A Windows PE does not detonate in one second.
 The ordering implicates the instrument rather than the samples --- real analyses run through one
 afternoon and every task after that returns instantly --- and re-submitting the same binaries from the
-same local files two days later produced full-length analyses on the same instance. Nearly all were
-recovered that way; three failed in processing or reporting and are permanently gone.
+same
+local files two days later produced full-length analyses on the same instance. \fact{audit-recovered} of the
+\fact{audit-instant} were recovered that way. The remaining \fact{audit-lost} are permanently gone --- and all
+\fact{audit-lost-still-reporting-success} of them are \emph{still} marked \texttt{reported}, at zero seconds, with no
+report directory. The one task in the cohort that admitted a failure is one that was recovered.
 
 We had originally written that the analyses ran and their reports had expired. That was the
 comfortable reading of \texttt{Reports\ directory\ does\ not\ exist}, and it was wrong. The correction matters

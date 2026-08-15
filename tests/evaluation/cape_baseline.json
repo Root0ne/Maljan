@@ -3,32 +3,71 @@
  "note": "CAPE's own signature-derived ATT&CK ids, no LLM in the loop",
  "cohort_digest": "33ff934fa1e344f3e7dae28bda591a67711bc87ab523a41ab8d9a2ac849e5bb8",
  "seed": 20260810,
+ "stats_schema": "maljan-stats/v1",
+ "bootstrap_iters": 2000,
+ "stats_module_sha256": "8bdb1cfd4f12f69d5a224b8116f82dcdc664f2f6cf2d00837441438a0ebca874",
  "summary": {
   "n": 97,
+  "n_families": 24,
   "precision": {
    "mean": 0.2413,
    "ci95": [
-    0.2123,
-    0.2711
-   ]
+    0.1842,
+    0.3
+   ],
+   "cluster": {
+    "icc": 0.583513692689089,
+    "icc_raw": 0.583513692689089,
+    "k": 24,
+    "n_rows": 97,
+    "mean_cluster_size": 4.041666666666667,
+    "design_effect": 2.7748541485959795,
+    "effective_n": 34.956792251254015
+   }
   },
   "recall": {
    "mean": 0.1328,
    "ci95": [
-    0.1131,
-    0.1529
-   ]
+    0.0897,
+    0.1785
+   ],
+   "cluster": {
+    "icc": 0.637616064164587,
+    "icc_raw": 0.637616064164587,
+    "k": 24,
+    "n_rows": 97,
+    "mean_cluster_size": 4.041666666666667,
+    "design_effect": 2.939415528500619,
+    "effective_n": 32.99975762510828
+   }
   },
   "f1": {
    "mean": 0.1526,
    "ci95": [
-    0.1344,
-    0.1709
-   ]
+    0.1113,
+    0.1969
+   ],
+   "cluster": {
+    "icc": 0.6919156749529692,
+    "icc_raw": 0.6919156749529692,
+    "k": 24,
+    "n_rows": 97,
+    "mean_cluster_size": 4.041666666666667,
+    "design_effect": 3.104576844648615,
+    "effective_n": 31.244193606352415
+   }
   }
  },
  "empty_prediction_samples": 0,
  "skipped": {
+  "no_report": [
+   "5c1e7e7b83bc21cebd4ce833cac790ddc3c1f5d1c872fd009aed09b541764b91",
+   "b073bd6963c36cd4ea37acf1ccd75d418ac3e293a51e8accebc96a97215ddf81",
+   "c12a1b39a379333a188cae48cabda5eaecfed024220bf6495aca025498d6c0fd"
+  ],
+  "no_ground_truth": []
+ },
+ "skipped_counts": {
   "no_report": 3,
   "no_ground_truth": 0
  },

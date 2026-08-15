@@ -620,7 +620,36 @@ def cape_audit_facts() -> dict[str, Any]:
             f"the audit's two modes are {gap_hi - gap_lo:.0f}s apart — the split "
             "is no longer bimodal and the threshold has to be re-argued"
         )
+    # How many of the instant tasks a re-submission recovered. Derived from the
+    # baseline's own skip counts rather than from the report directory, which is
+    # not committed — the reports embed strings and memory contents from live
+    # malware. The two must agree, and the derivation says so if they do not.
+    baseline = load("cape_baseline.json")
+    scored = len(baseline["per_sample"])
+    lost_shas = baseline["skipped"]["no_report"]
+    lost = len(lost_shas)
+    cohort = len(load("dynamic_cohort_n100.json")["samples"])
+    if scored + lost != cohort:
+        raise FactError(
+            f"{scored} scored plus {lost} without a report is not the {cohort}-sample cohort"
+        )
+    recovered = scored - len(slow)
+    if recovered < 0:
+        raise FactError("more samples scored than were ever submitted")
+
+    # Every permanently lost task still reports success. That is the point of the
+    # sentence these numbers appear in, so it is checked against the identities
+    # rather than described: if one of them ever admits failure the claim has to
+    # be rewritten, and the derivation will say so.
+    by_sha = {str(r.get("sha256")): r for r in rows}
+    still_claiming = sum(
+        1 for sha in lost_shas if str(by_sha.get(sha, {}).get("status")) == "reported"
+    )
+
     return {
+        "audit_recovered": str(recovered),
+        "audit_lost": str(lost),
+        "audit_lost_still_reporting_success": str(still_claiming),
         "audit_tasks": str(len(rows)),
         "audit_timed": str(len(timed)),
         "audit_instant": str(len(fast)),
