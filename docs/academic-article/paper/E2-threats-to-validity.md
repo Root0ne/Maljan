@@ -40,6 +40,16 @@ step budget**, because two protective bounds composed: exceeding the step cap tr
 call that received a *fresh* copy of the full time budget, so loop-plus-synthesis overran the hard
 cap by construction (§3.15).
 
+**Three further defects were found later, and none of them involved a server.** An ablation varied a
+deterministic post-processing step and we attributed its output to a language model; a rank
+correlation over model size ranked a reasoning-configuration flag instead and recovered the
+published scaling coefficient almost exactly; and the verdict model's documented 8,192-token output
+ceiling was renamed by our client library during serialisation to a key the inference server does
+not read, so a component described as bounded had never once been bounded. These three had passing
+unit tests over the exact functions concerned, which the four above did not — the defect was never
+in a function, but in which measurement was attributed to which cause, or in which representation
+of a value crossed a boundary. §6 reports all seven with the layer each occurred at.
+
 We report these because we believe the interesting threat to an LLM-plus-tooling pipeline is not
 that the model is wrong. It is that **the instrument answers a different question than the one asked,
 convincingly.**
@@ -166,6 +176,12 @@ actionable form"* — is described with a five-class taxonomy our defects fall i
 is the setting: an evaluation pipeline for security research, where the output is not a degraded
 user session but **a measurement that is wrong and looks right**, together with three mechanisms at
 three integration boundaries and one withdrawn study as the demonstrated cost.
+
+The taxonomy's five classes each describe a call to something else, and three of our seven crossed
+no boundary at all. They share its meta-pattern and sit outside every class it offers, which is why
+we suggest — as a proposal, on seven cases from one project — that the organising principle covering
+both is **attribution rather than boundary**: the shape appears wherever a measurement's cause is
+assigned rather than measured.
 
 ## Construct validity: what the ground truth can and cannot support
 

@@ -83,6 +83,21 @@ PREAMBLE = r"""
 % calc's arithmetic, not a stub's.
 \usepackage{calc}
 
+% Long code literals in narrow table columns overrun their neighbour: the
+% appendix rendered "judge_contribution_{uncapped,cappe}.json the judge stu..."
+% and an endpoint name printed on top of the column beside it. Verbatim text has
+% no discretionary break points, so a cell wider than its column simply keeps
+% going. Allowing breaks inside \texttt fixes the class rather than the instances.
+\usepackage[htt]{hyphenat}
+% Figures are drawn at 7.2in and the text block is 7.0in, so every one overran by
+% a couple of hundredths of an inch — invisible on screen, an overfull box in the
+% log, and a figure hanging into the margin on paper. Bound them to the measure
+% rather than trusting each figure's own size.
+\setkeys{Gin}{width=\linewidth,keepaspectratio}
+% And let TeX loosen a line rather than push a word past the margin. Ugly spacing
+% is a worse-looking page; an overfull line is an unreadable one.
+\sloppy
+
 \captionsetup{font=small,labelfont=bf,skip=6pt}
 \setlength{\parskip}{2pt}
 \graphicspath{{../}{./}}
