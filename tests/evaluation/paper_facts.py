@@ -517,6 +517,43 @@ def corpus_shape_facts() -> dict[str, Any]:
     return out
 
 
+def cascade_jaccard_facts() -> dict[str, Any]:
+    """The overlap condition's Jaccard against the all-sources arm.
+
+    A constant 1.000 with a zero-width interval, which is what the paper reports
+    and what it says it should have read as a tell rather than as a strong null.
+    Derived because an automatic substitution mistook this 1.000 for another
+    quantity that also happens to be 1.000 — the two are unrelated and a shared
+    literal is exactly how they came to be confused.
+    """
+    d = load("layer0_verdict_v2_overlap.json")
+    arms = d.get("arms")
+    if not arms:
+        raise FactError("layer0_verdict_v2_overlap.json has no arms")
+    base = {
+        (a["sample_id"], a["repeat"]): set(a["technique_ids"]) for a in arms if a["arm"] == "all"
+    }
+    js = []
+    for a in arms:
+        if a["arm"] == "all":
+            continue
+        other = base.get((a["sample_id"], a["repeat"]))
+        if other is None:
+            continue
+        mine = set(a["technique_ids"])
+        union = mine | other
+        js.append(len(mine & other) / len(union) if union else 1.0)
+    if not js:
+        raise FactError("no paired arms to compare against the all-sources baseline")
+    mean = sum(js) / len(js)
+    return {
+        "cascade_overlap_jaccard": f"{mean:.3f}",
+        "cascade_overlap_jaccard_min": f"{min(js):.3f}",
+        "cascade_overlap_jaccard_max": f"{max(js):.3f}",
+        "cascade_overlap_pairs": str(len(js)),
+    }
+
+
 def drift_facts() -> dict[str, Any]:
     """The withdrawn study's shape, from the one thing that survived it.
 
@@ -796,6 +833,7 @@ BUILDERS = (
     fixture_ceiling_facts,
     fallback_table_facts,
     corpus_shape_facts,
+    cascade_jaccard_facts,
     drift_facts,
     cluster_stat_facts,
     power_facts,

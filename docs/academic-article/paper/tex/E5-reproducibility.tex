@@ -65,7 +65,7 @@ reproduced here:
   after a single full analyst pass. A long paired run must restart it between arms; at temperature 0
   this is measurement-neutral.
 \item
-  \textbf{Serving at 64k instead of \fact{fallback-bundle-total}k does not lower the peak} (14.6 vs \fact{llama-rss-growth-gb} GB) --- the baseline is
+  \textbf{Serving at 64k instead of 131k does not lower the peak} (14.6 vs \fact{llama-rss-growth-gb} GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
 \item
   \textbf{Generation rate varies from 162 to 20 tokens/s across requests.} On this hybrid recurrent
