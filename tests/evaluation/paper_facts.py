@@ -335,8 +335,19 @@ def firing_rate_facts() -> dict[str, Any]:
 
     return {
         "cap_rate": pct(fired / total, 2),
+        # The share the cap never touched. The paper quotes it when it explains
+        # that a null over this mechanism describes the cases where it did not
+        # run, so it is the rate's complement by construction and must move with
+        # it rather than beside it.
+        "cap_rate_complement": pct(1 - fired / total, 1),
         "cap_fired": str(fired),
         "cap_total": f"{total:,}",
+        # The cap's preconditions, which are what actually explain its rate:
+        # gating is common, the sole-static requirement is the bottleneck.
+        "cap_gated": str(cap["gated_techniques"]),
+        "cap_gated_share": pct(cap["gated_share_of_all"]),
+        "cap_eligible": str(cap["gated_and_sole_static"]),
+        "cap_fire_rate_eligible": pct(cap["cap_fire_rate_among_eligible"]),
         "hint_rate": pct(hint_fired / len(ok)),
         "hint_fired": str(hint_fired),
         "hint_total": str(len(ok)),
@@ -532,40 +543,45 @@ def model_size_facts() -> dict[str, Any]:
 
 
 def cascade_jaccard_facts() -> dict[str, Any]:
-    """The overlap condition's Jaccard against the all-sources arm.
+    """Each Layer-0 condition's Jaccard against its all-sources arm.
 
-    A constant 1.000 with a zero-width interval, which is what the paper reports
-    and what it says it should have read as a tell rather than as a strong null.
-    Derived because an automatic substitution mistook this 1.000 for another
-    quantity that also happens to be 1.000 — the two are unrelated and a shared
-    literal is exactly how they came to be confused.
+    Overlap is a constant 1.000 with a zero-width interval, which is what the
+    paper reports and what it says it should have read as a tell rather than as
+    a strong null. Derived because an automatic substitution mistook that 1.000
+    for another quantity that also happens to be 1.000 — the two are unrelated
+    and a shared literal is exactly how they came to be confused.
+
+    Disjoint is derived for the opposite reason: it is the row of the same table
+    that varies, so it is the one that can drift without anybody noticing.
     """
-    d = load("layer0_verdict_v2_overlap.json")
-    arms = d.get("arms")
-    if not arms:
-        raise FactError("layer0_verdict_v2_overlap.json has no arms")
-    base = {
-        (a["sample_id"], a["repeat"]): set(a["technique_ids"]) for a in arms if a["arm"] == "all"
-    }
-    js = []
-    for a in arms:
-        if a["arm"] == "all":
-            continue
-        other = base.get((a["sample_id"], a["repeat"]))
-        if other is None:
-            continue
-        mine = set(a["technique_ids"])
-        union = mine | other
-        js.append(len(mine & other) / len(union) if union else 1.0)
-    if not js:
-        raise FactError("no paired arms to compare against the all-sources baseline")
-    mean = sum(js) / len(js)
-    return {
-        "cascade_overlap_jaccard": f"{mean:.3f}",
-        "cascade_overlap_jaccard_min": f"{min(js):.3f}",
-        "cascade_overlap_jaccard_max": f"{max(js):.3f}",
-        "cascade_overlap_pairs": str(len(js)),
-    }
+    out: dict[str, Any] = {}
+    for cond in ("overlap", "disjoint"):
+        d = load(f"layer0_verdict_v2_{cond}.json")
+        arms = d.get("arms")
+        if not arms:
+            raise FactError(f"layer0_verdict_v2_{cond}.json has no arms")
+        base = {
+            (a["sample_id"], a["repeat"]): set(a["technique_ids"])
+            for a in arms
+            if a["arm"] == "all"
+        }
+        js = []
+        for a in arms:
+            if a["arm"] == "all":
+                continue
+            other = base.get((a["sample_id"], a["repeat"]))
+            if other is None:
+                continue
+            mine = set(a["technique_ids"])
+            union = mine | other
+            js.append(len(mine & other) / len(union) if union else 1.0)
+        if not js:
+            raise FactError(f"no paired {cond} arms to compare against the all-sources baseline")
+        out[f"cascade_{cond}_jaccard"] = f"{sum(js) / len(js):.3f}"
+        out[f"cascade_{cond}_jaccard_min"] = f"{min(js):.3f}"
+        out[f"cascade_{cond}_jaccard_max"] = f"{max(js):.3f}"
+        out[f"cascade_{cond}_pairs"] = str(len(js))
+    return out
 
 
 def drift_facts() -> dict[str, Any]:

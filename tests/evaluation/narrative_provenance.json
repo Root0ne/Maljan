@@ -433,6 +433,24 @@
    "record_ref": "findings-log.md §3.15",
    "artifact": null,
    "provenance": "unretained-session"
+  },
+  "cap_gated_yara_only": {
+   "value": "257",
+   "claim": "of the 306 gated techniques, those whose only claimant is the yara layer",
+   "observed": "2026-08-10",
+   "record_ref": "docs/academic-article/findings-log.md:1372 (source breakdown table)",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "confidence_cap.json keeps the counts but not the per-technique source, so the breakdown cannot be recomputed from the artefact. It is the measurement that corrected the paper's first reading — the cap is not exempted by corroboration, the population it targets barely exists on this evidence."
+  },
+  "cap_gated_yara_only_share": {
+   "value": "84%",
+   "claim": "the share of gated techniques with no static-layer claim for the cap to discipline",
+   "observed": "2026-08-10",
+   "record_ref": "docs/academic-article/findings-log.md:1376",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "257 of 306. Not to be confused with reasoning_share_one_token, which is also 84% and unrelated; the two sat in different sections and an automatic substitution would have swapped them."
   }
  }
 }

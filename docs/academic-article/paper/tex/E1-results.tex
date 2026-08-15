@@ -488,7 +488,7 @@ STIX integrity pass & measured over 60 fresh judge bundles & reported by removal
 \end{longtable}
 
 For the cap, the mechanism's own preconditions explain the rate: it applies to three technique
-families, only when the sole contributing layer is \texttt{static}, and 84\% of those claims are YARA-only ---
+families, only when the sole contributing layer is \texttt{static}, and \fact{cap-gated-yara-only-share} of those claims are YARA-only ---
 so no static claim exists for it to discipline. We report the rate rather than an ablation, because
 an ablation over a mechanism that fires on \fact{cap-rate} of cases produces a null that means nothing.
 
@@ -537,7 +537,7 @@ Jaccard vs all-sources
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-disjoint & its techniques disappear; nothing else claims them & \textbf{32/32} & 0.738--0.765 \\
+disjoint & its techniques disappear; nothing else claims them & \textbf{\fact{cascade-disjoint-changed}/\fact{cascade-disjoint-arms}} & \textbf{\fact{cascade-disjoint-jaccard} {[}\fact{cascade-disjoint-jaccard-min}, \fact{cascade-disjoint-jaccard-max}{]}} \\
 overlap & its techniques survive under a partner source, but their \textbf{corroboration} changes & \textbf{\fact{cascade-overlap-changed}/\fact{cascade-overlap-arms}} & \textbf{\fact{cascade-overlap-jaccard} {[}\fact{cascade-overlap-jaccard-min}, \fact{cascade-overlap-jaccard-max}{]}} \\
 \end{longtable}
 
@@ -551,15 +551,16 @@ initial reading was that the judge attends to the claim list and ignores everyth
 not read either. The reconciliation step reconciles the bundle against the cascade: every
 \texttt{attack-pattern} whose technique ID cannot be resolved is dropped, and every cascade technique
 missing from the bundle is appended. The cascade's technique set is therefore a guaranteed subset
-of every bundle the system emits, independent of what the judge produced. Checked against all 80
-stored arms by recomputing each arm's cascade set from the same seeded fixtures: \textbf{the bundle is
-exactly the cascade's technique set in 80 of 80, and the judge contributes zero techniques to any
-of them.}
+of every bundle the system emits, independent of what the judge produced. Checked against all
+\fact{judge-mechanism-arms} stored arms by recomputing each arm's cascade set from the same seeded
+fixtures: \textbf{the bundle is exactly the cascade's technique set in \fact{judge-mechanism-arms} of
+\fact{judge-mechanism-arms}, and the judge contributes zero techniques to any of them.}
 
 Both rows of the table then follow from set arithmetic. Under overlap, removing a source whose
-claims a partner also makes leaves the cascade's set unchanged, so the bundle cannot change --- 0 of
-32 is a necessity, not a measurement of restraint. Under disjoint, removing a source deletes its
-techniques from that set, so the bundle shrinks --- 32 of 32, equally necessary. The Jaccard of
+claims a partner also makes leaves the cascade's set unchanged, so the bundle cannot change ---
+\fact{cascade-overlap-changed} of \fact{cascade-overlap-arms} is a necessity, not a measurement of
+restraint. Under disjoint, removing a source deletes its techniques from that set, so the bundle
+shrinks --- \fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms}, equally necessary. The Jaccard of
 \fact{cascade-overlap-jaccard} with a zero-width interval was the tell we missed: a language model at temperature 0, asked
 32 times, does not usually agree with itself perfectly. We read a constant as a strong null.
 

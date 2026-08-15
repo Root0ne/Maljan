@@ -96,13 +96,13 @@ what an ablation would mean
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-confidence cap & \textbf{\fact{cap-rate}} of techniques & nothing --- a null describes the 99.2\% where it never ran \\
+confidence cap & \textbf{\fact{cap-rate}} of techniques & nothing --- a null describes the \fact{cap-rate-complement} where it never ran \\
 sink-reachability hint & \textbf{\fact{hint-rate}} of samples & a real statement about the hint \\
 \end{longtable}
 
 The cap's own preconditions explain its rate --- three technique families, only when the sole
-contributing layer is static, and 84\% of those claims are YARA-only, so no static claim exists for
-it to discipline. Reporting the rate is more informative than an ablation of it, and cheaper.
+contributing layer is static, and \fact{cap-gated-yara-only-share} of those claims are YARA-only, so
+no static claim exists for it to discipline. Reporting the rate is more informative than an ablation of it, and cheaper.
 
 A corollary: an ablation must be \textbf{restricted to the samples where the mechanism fires}, and must
 report the remainder separately. Averaging a feature over inputs it never touched dilutes a real
