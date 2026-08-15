@@ -243,8 +243,10 @@ than quietly inheriting.
 > ceiling here is ~18–20 GB. `scripts/overnight_watch.sh` stands guard at a 3 GB floor and writes
 > a STOP sentinel rather than killing anything.
 
-- [ ] **B0 — Pre-flight** — restart the watcher → confirm ≥ 20 GB free →
-      `systemctl --user start maljan-llama` → wait for `slots_idle=1`
+- [x] **B0 — Pre-flight** `[done, and superseded]` — the checklist ran before every B and C item.
+      It has since been replaced by machinery rather than discipline: `night_guard.sh` watches
+      memory, heat and its own scheduling latency, and `night_track_b.sh` refuses to start a heavy
+      step while the STOP sentinel is down. Kept for the record; do not re-run by hand.
 - [x] **B1 — E.2 consensus ablation** `[done]` **2026-08-09** → **§3.7**, `consensus_ablation.md`
       **The defence did not hold.** n=25 per arm, all arms complete, equal budget B=2400.
       | comparison | mean F1 delta | 95% CI | verdict |
@@ -357,7 +359,10 @@ than quietly inheriting.
 - [x] **B8 — Frontier arm on the fixture suite** `[done]` **2026-08-12** — §3.16, `frontier_probe.json`.
       n=25 paired, ΔF1 **+0.0026** [−0.0770, +0.0814]; reasoning is **56.5%** of output tokens.
       The n=9 first attempt was quota-truncated and pointed the wrong way — see §3.29.
-- [ ] **B9 — Commit the B layer**, update `findings-log.md`, stop llama-server
+- [x] **B9 — Commit the B layer** `[done, continuously]` — every B item landed in its own commit
+      with its findings-log section as it completed, rather than in one batch at the end; the model
+      server is stopped after each. The batching this entry assumed never happened, which is why it
+      sat unticked while the work it describes was finished.
 
 ## C — The CAPE network (dynamic path) — n=97 recovered of an intended 100 (§3.24)
 
@@ -472,7 +477,9 @@ than quietly inheriting.
       Truncation frequency distribution from A3's counters: how many runs truncated, how many
       chunks dropped, how often `max_steps` was hit — **and the performance impact**. Exactly what
       the pitfall asks for. → **P6 `EXPOSED` → `CLEAR`**
-- [ ] **C8 — Commit the C layer**, update `findings-log.md`, stop all services
+- [x] **C8 — Commit the C layer** `[done, continuously]` — as B9: per-item commits, services
+      stopped after each run. Verified 2026-08-15: working tree clean, no llama-server or arq
+      process alive, 22 GB free.
 
 ## D — Closing measurements and decisions
 
@@ -565,10 +572,15 @@ than quietly inheriting.
 
 ## E — The paper — last
 
-- [ ] **E1 — Results / Evaluation** — from the measured record; everything above lands here
-- [ ] **E2 — Threats to Validity** — from `self-audit-pitfalls.md`, with P6/P8/P9 now closed and
-      P3's residual (the LLM's training data is unknown to us and memorisation was never probed)
-      **explicitly acknowledged**, which is the pitfall's own recommendation
+- [~] **E1 — Results / Evaluation** — **written and current**; `E1-results.md` builds as §Results
+      and was last revised 2026-08-15 (C3′ both conditions, the quantisation bound, the frontier
+      confound). Left open only for the final read-through once E3 and E5 catch up.
+- [~] **E2 — Threats to Validity** — **written and current**; `E2-threats-to-validity.md` builds
+      as §Threats and carries the re-issued P8 (2026-08-15: the matched arm cannot be built, the
+      quantisation threat is measured and points the other way, the size series cannot be tested
+      here). P3's residual — the LLM's training data is unknown to us and memorisation was never
+      probed — is acknowledged there as the pitfall itself recommends. Left open for the final
+      read-through.
 - [ ] **E3 — Related Work, final** — `related-work.md` exists as a draft; fold in the new results
       and whatever A4's counter-searches turn up
 - [ ] **E4 — LaTeX skeleton, then the paper** — after D3 locks the framing
