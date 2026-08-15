@@ -758,6 +758,23 @@
    "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
    "artifact": null,
    "provenance": "unretained-session"
+  },
+  "llama_rss_sustained_gb": {
+   "value": "18.1",
+   "claim": "the model server's resident size after an hour of sustained multi-arm load, still climbing",
+   "observed": "2026-08-15",
+   "record_ref": "logs/night-guard.log; logs/consensus-supervised.log; /proc/<pid>/smaps_rollup",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "Measured three ways on the same process: VmRSS 18.07 GB, smaps_rollup Private_Dirty 18.03 GB — anonymous and unreclaimable, so it can only go to swap — against 10.46 GB on a fresh load of the identical command line. A second workload reaching a higher peak than the 14.8 GB previously recorded is why the claim is that it does not plateau rather than that it settles at a number."
+  },
+  "llama_rss_sustained_minutes": {
+   "value": "60",
+   "claim": "minutes of sustained load to reach that size from a fresh start",
+   "observed": "2026-08-15",
+   "record_ref": "logs/consensus-supervised.log",
+   "artifact": null,
+   "provenance": "unretained-session"
   }
  }
 }

@@ -106,8 +106,14 @@ reproduced here:
 \tightlist
 \item
   \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB
-  after a single full analyst pass. A long paired run must restart it between arms; the restart
+  after a single full analyst pass, and \fact{llama-rss-sustained-gb} GB after
+  \fact{llama-rss-sustained-minutes} minutes of multi-arm load. The growth is anonymous and
+  unreclaimable: it can go to swap and nowhere else, so on this host it is the ceiling on how long
+  any run can be. A long paired run must therefore restart the server between arms; the restart
   changes no decoding parameter, so it is measurement-neutral.
+  \texttt{scripts/run\_with\_restarts.sh} does this from the checkpoint, and is released with the
+  rest --- an evaluation that outlasts its own instrument needs the cycling to be part of the
+  method rather than something the operator remembers.
 \item
   \textbf{Serving at \setting{64}k instead of \setting{131}k does not lower the peak} (\fact{llama-rss-64k-gb} vs \fact{llama-rss-growth-gb} GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
