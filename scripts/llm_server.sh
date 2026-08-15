@@ -28,7 +28,24 @@ OFFLOAD='blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU'
 
 mkdir -p logs
 
-pid_of() { pgrep -f "llama-server .*--port $PORT" | head -1; }
+# Match on the process *name*, then confirm the port from its own argv.
+#
+# This was `pgrep -f "llama-server .*--port $PORT"`, which matches any process
+# whose command line merely contains that text — including a monitoring shell
+# that greps for exactly this pattern. On 2026-08-15 one did: `start` found the
+# watcher, reported "already running", skipped the launch, and a run proceeded
+# against a server that was not there. `pgrep -x` matches comm, which a bash
+# script cannot fake, so the whole class of self-match goes with it.
+pid_of() {
+    local pid
+    for pid in $(pgrep -x llama-server 2>/dev/null); do
+        if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -- "--port $PORT"; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    done
+    return 1
+}
 
 healthy() { curl -s -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q 200; }
 
