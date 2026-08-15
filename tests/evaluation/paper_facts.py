@@ -391,6 +391,51 @@ def _comparison(cid: str) -> dict[str, Any]:
     return comps[cid]
 
 
+def fixture_ceiling_facts() -> dict[str, Any]:
+    """What a regular expression scores on the fixture corpus, measured not asserted.
+
+    The paper says no baseline is definable for the five synthesised fixtures
+    because a deterministic extractor over the dictionary that generated their
+    evidence scores perfectly by construction. That is a claim about a
+    measurement, so it is measured: the artifact dictionary is inverted into a
+    prose-to-technique lookup, run over each fixture's assembled channels, and
+    scored against the same ground truth every arm is scored against.
+
+    If it ever came back below 1.0 the sentence would be wrong and the build
+    would carry a number that contradicts it.
+    """
+    import sys
+
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from tests.evaluation.eval_consensus_ablation import (
+        _ARTIFACTS,
+        build_channels,
+        load_samples,
+        prf,
+    )
+
+    samples = load_samples()
+    if not samples:
+        raise FactError("no fixtures found")
+    by_text = {text: tid for tid, (_chan, text) in _ARTIFACTS.items()}
+    f1s = []
+    for _sid, truth in samples:
+        blob = "\n".join(build_channels(truth).values())
+        predicted = [tid for text, tid in by_text.items() if text in blob]
+        f1s.append(prf(predicted, truth)[2])
+    mean = sum(f1s) / len(f1s)
+    if mean < 0.999:
+        raise FactError(
+            f"the trivial extractor scores {mean:.4f} on the fixtures, not 1.0 — "
+            "the claim that no baseline is definable there needs rewriting"
+        )
+    return {
+        "fixture_extractor_f1": f"{mean:.3f}",
+        "fixture_extractor_n": str(len(f1s)),
+    }
+
+
 def cape_audit_facts() -> dict[str, Any]:
     """The sandbox reported every task complete; the timings say otherwise.
 
@@ -638,6 +683,7 @@ BUILDERS = (
     retrieval_facts,
     suite_facts,
     cape_audit_facts,
+    fixture_ceiling_facts,
     cluster_stat_facts,
     power_facts,
     multiplicity_facts,

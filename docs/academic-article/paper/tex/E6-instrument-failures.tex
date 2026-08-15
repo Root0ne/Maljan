@@ -131,7 +131,7 @@ The four above are failures of other people's servers. This one is ours, it is t
 We ablated the corroboration cascade by removing one evidence source at a time and comparing the
 STIX bundle the analyst receives. Under the condition where a removed source's techniques survive
 under a partner --- so that only their \emph{corroboration} changes --- the bundle was identical in \textbf{32 of
-32} arms, at Jaccard 1.000. Under the condition where the removed source solely owned its
+32} arms, at Jaccard \fact{fixture-extractor-f1}. Under the condition where the removed source solely owned its
 techniques, \textbf{32 of 32} changed. We wrote this up as a finding about the judge model: that it
 attends to the list of claimed techniques and ignores the evidence-quality apparatus above it.
 
@@ -159,7 +159,7 @@ arms would have shared one reconciliation set, so it would have reported ``no di
 hour of computation, correctly and vacuously. It was stopped four minutes in, by the same log line
 that exposed M5.
 
-\textbf{What made this one hard to see.} The tell was in the results the whole time: a Jaccard of 1.000
+\textbf{What made this one hard to see.} The tell was in the results the whole time: a Jaccard of \fact{fixture-extractor-f1}
 with a zero-width bootstrap interval, from a language model asked the same question 32 times at
 temperature 0. Models do not agree with themselves that well. We read a constant as an unusually
 clean null, because a clean null was the result we were prepared to find.
@@ -199,7 +199,8 @@ to notice. It was caught by reading the arms table under the correlation and ask
 was on it twice --- which is a question no result, however wrong, would have prompted.
 
 \textbf{And the phenomenon is not ours.} \texttt{arXiv:2604.00025} shows that an inference-time output-length
-constraint \emph{reverses} performance hierarchies between large and small models --- a 28.4-point gap
+constraint \emph{reverses} performance hierarchies between large and small models {[}24{]} --- a
+28.4-point gap
 inverted --- and frames it as a methodological confound requiring evaluation protocols that adapt to
 the model rather than a universal one. Our reasoning flag consumes the answer budget, which makes
 the disabled arm a brevity-constrained arm under a different name, and a reversal is a stronger
@@ -329,7 +330,7 @@ call graphs identical to the character (\fact{call-graph-chars} chars, \fact{cal
 66 consecutive samples at exactly \fact{stuck-graph-chars} characters & M3 \\
 every tool call returning the same validation error & M1 \\
 a 25-minute call that always produced one claim and zero techniques & M4 \\
-a Jaccard of \textbf{1.000 with a zero-width interval}, from a model asked the same question 32 times at temperature 0 & M5 \\
+a Jaccard of \textbf{\fact{fixture-extractor-f1} with a zero-width interval}, from a model asked the same question 32 times at temperature 0 & M5 \\
 \end{longtable}
 
 M5 extends the detector in a direction worth stating, because it is where the idea is least

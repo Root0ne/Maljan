@@ -40,6 +40,7 @@ _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent.parent
 _PAPER = _REPO_ROOT / "docs" / "academic-article" / "paper" / "tex"
 _FACTS = _HERE / "paper_facts.json"
+_QUOTED = _PAPER.parent / "quoted-numbers.json"
 
 # Sections whose numbers are the paper's own measurements. `related-work.tex` is
 # not here: its numbers are quoted from cited literature, which no derivation can
@@ -86,9 +87,9 @@ _NOT_A_MEASUREMENT = (
     # The confidence level and the power an interval was computed at. These are
     # settings, and pinning them to a fact would let a re-run silently move the
     # meaning of every interval in the paper.
-    re.compile(r"\b\d{2}%\s+(?:bootstrap\s+)?(?:CI|confidence|cluster\s+CI)", re.I),
-    re.compile(r"\b\d{2}%\s+power\b", re.I),
-    re.compile(r"\balpha\s*=\s*0?\.\d+|α\s*=\s*0?\.\d+"),
+    re.compile(r"\b\d{2}\\?%\s+(?:bootstrap\s+)?(?:cluster\s+)?(?:CI|confidence|interval)", re.I),
+    re.compile(r"\b\d{2}\\?%\s+power\b", re.I),
+    re.compile(r"(?:\\alpha|alpha|α)\s*\$?\s*=\s*\$?\s*0?\.\d+"),
     # Model and hardware names: 120B, 35B-A3B, 3-bit, IQ3_K_R4, RTX 5060.
     re.compile(r"\b\d+(?:\.\d+)?\s?B(?:-A\d+B)?\b"),
     re.compile(r"\b\d+-bit\b"),
@@ -144,13 +145,36 @@ def _strip(text: str) -> str:
     return text
 
 
+def _quoted_index() -> dict[str, set[str]]:
+    """value -> the citation keys it may be quoted under.
+
+    A number from someone else's paper cannot be derived, so it is exempt — but
+    only where the citation is on the same line. A quoted figure separated from
+    its source is indistinguishable from one of ours, which is the exact
+    confusion three of this paper's own citations turned out to contain.
+    """
+    if not _QUOTED.exists():
+        return {}
+    blob = json.loads(_QUOTED.read_text())
+    out: dict[str, set[str]] = {}
+    for rec in blob.get("quoted", []):
+        out.setdefault(str(rec["value"]), set()).add(str(rec["cite"]))
+    return out
+
+
 def _offenders(path: Path) -> list[tuple[int, str]]:
+    quoted = _quoted_index()
     out: list[tuple[int, str]] = []
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         cleaned = _strip(raw)
+        # pandoc writes a citation bracket as {[}24{]}; both forms are accepted.
+        cites = set(re.findall(r"\{\[\}(\d+)\{\]\}|\[(\d+)\]", raw))
+        on_line = {a or b for a, b in cites}
         for match in _NUMERAL.finditer(cleaned):
             token = match.group(0)
             if token.lower() in _STRUCTURAL:
+                continue
+            if quoted.get(token.strip("%+")) and quoted[token.strip("%+")] & on_line:
                 continue
             out.append((lineno, token))
     return out
