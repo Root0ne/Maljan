@@ -420,6 +420,17 @@ than quietly inheriting.
       predicted.
       **The effect estimate is recorded and deliberately not interpreted** — F1 +0.0030
       [−0.0177, +0.0230], recall +0.0024 [−0.0151, +0.0188], precision −0.0701 [−0.1392, −0.0072].
+      **And there is a second reason not to interpret it, added 2026-08-15: the 13 pairs that
+      completed are not a random 13.** Arms were killed by the memory guard, and what a pair costs
+      in memory scales with how much evidence its sample produces — so the survivors are
+      systematically the *cheap* samples, on the exact axis the study is about. The estimate is
+      therefore biased as well as underpowered, and no amount of additional wall-clock on this
+      machine fixes the first problem. Closing incomplete is the right call rather than a
+      concession.
+      **Nothing in the paper depends on it** (checked 2026-08-15): E1 makes no claim about the
+      dynamic path's contribution, and the only mentions anywhere are E3's description of the
+      static-only fallback and an E5 data-manifest row. C4 would have added a result; its absence
+      does not leave a claim unsupported.
       §3.16 is why: a difference read off an underpowered arm is unreliable, not weak, and the
       frontier arm's n=9 estimate moved 0.086 when completed. The precision interval is not exempt —
       12 of 12 pairs carry a degradation reason the treatment does not explain.

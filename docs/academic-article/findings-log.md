@@ -3136,6 +3136,34 @@ compare empty outputs and returns `inconclusive-empty-output` instead, which is 
 transferable rule is the one that actually worked: *look at the artefact, not the summary of it.*
 Both catches came from printing what the model said.
 
+#### 3.38.1 The second sweep: comparisons that could not have returned otherwise
+
+M5 and M6 share a shape distinct from the parameter failures — not *a request that did nothing*,
+but *a comparison whose result was forced*. Three instances are on record (§3.27.1, §3.34, and the
+fallback-versus-cascade equality in §3.36, which was caught while being written). The remaining
+published comparisons were swept for the same shape.
+
+**The diagnostic is cheap and numerical: are the per-item deltas ever non-zero?** A forced
+comparison returns the identical value every time, because nothing on the path can differ. A live
+one varies, whatever its mean.
+
+| comparison | per-item evidence | live path |
+|---|---|---|
+| B1 consensus ablation (§3.7) | paired deltas non-zero on **21 of 25** for both arms, range −0.364 to +0.200 | yes |
+| CAPE signature baseline (§3.26) | **67 distinct F1 values** across 97 samples | yes |
+| C1 sink-reachability hint (§3.18) | per-pair deltas +4, −6, 0, 0, −4, +9 distinct technique ids | yes |
+| C2 semantic tier A/B (§3.12) | F1 +0.0029 with precision **−0.0088** — moves in opposite directions | yes |
+| weight sensitivity (§1.10, §3.30) | top-10 ranking moves on 10.6–28.9% of samples | yes, and the one invariant is explained structurally in place |
+| frontier vs local (§3.16) | better on 12, worse on 13 | yes |
+
+**No fourth instance.** Every comparison this project reports, apart from the three already
+retracted or bounded, demonstrably could have returned something else. That is a weaker statement
+than "they are correct" and a much stronger one than "they look fine": it rules out the specific
+failure that cost this project two results in one week.
+
+The rule is worth stating for reuse, because it is what M5 and M6 both failed and it costs nothing:
+**before reporting that an ablation found no difference, check that some pair in it found one.**
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
