@@ -666,7 +666,7 @@ def paired_block(scores: list[ArmScore], left: str, right: str) -> list[str]:
         "",
         f"- mean F1 delta **{res.delta:+.3f}**, 95% cluster CI "
         f"[{iv.lo:+.3f}, {iv.hi:+.3f}] — {verdict}",
-        f"- exact cluster sign-flip p = {res.p_exact:.4f} "
+        f"- {res.p_signflip_method} cluster sign-flip p = {res.p_signflip:.4f} "
         f"(the smallest this design can reach is {res.p_floor:.4f})",
         f"- minimum detectable effect at 80% power: {res.mde_t:.3f} F1 — {detectable}",
         f"- ICC {res.structure.icc:.3f}, design effect {res.structure.design_effect:.2f}, "

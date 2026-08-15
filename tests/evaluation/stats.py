@@ -139,8 +139,14 @@ class PairedResult:
     delta: float
     interval: Interval
     p_bootstrap: float
+    # The sign-flip p, always present, and how it was obtained. `p_exact` is the
+    # same number when the enumeration ran and None when it did not, kept so a
+    # reader can tell an enumerated p from a sampled one without consulting a
+    # second field. Every consumer should branch on `p_signflip`.
+    p_signflip: float
+    p_signflip_method: str
     p_exact: float | None
-    p_floor: float | None
+    p_floor: float
     structure: ClusterStructure
     cluster_sd: float
     mde_z: float
@@ -153,6 +159,8 @@ class PairedResult:
             "delta": self.delta,
             "interval": self.interval.as_json(),
             "p_bootstrap": self.p_bootstrap,
+            "p_signflip": self.p_signflip,
+            "p_signflip_method": self.p_signflip_method,
             "p_exact_signflip": self.p_exact,
             "p_floor": self.p_floor,
             "structure": self.structure.as_json(),
@@ -453,6 +461,63 @@ def exact_signflip_p(cluster_means: Sequence[float]) -> float:
     return hits / (2**k)
 
 
+def sampled_signflip_p(cluster_means: Sequence[float], *, iters: int, seed: int) -> float:
+    """The same test at cluster counts too large to enumerate.
+
+    Above about twenty clusters, 2**k assignments stop being a loop and start
+    being a wait, so the assignments are sampled instead. The estimator is
+    (1 + hits) / (iters + 1) rather than hits / iters: adding the observed
+    assignment to its own reference set keeps the test valid — it cannot return
+    zero, which a sampled test has no right to claim.
+
+    This exists because the fix to one problem created another. Moving from five
+    fixtures to twenty-four families was done precisely so a p-value could
+    reach alpha, and the exact routine then declined to run at all, leaving the
+    better-powered design with no test where the weaker one had one.
+    """
+    k = len(cluster_means)
+    if k == 0:
+        raise ValueError("no clusters")
+    if iters < 1:
+        raise ValueError("a sampled test needs at least one draw")
+    observed = abs(sum(cluster_means) / k)
+    tol = 1e-12 * max(1.0, observed)
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(iters):
+        total = 0.0
+        for m in cluster_means:
+            total += m if rng.getrandbits(1) else -m
+        if abs(total / k) >= observed - tol:
+            hits += 1
+    return (1 + hits) / (iters + 1)
+
+
+# The largest cluster count worth enumerating. 2**20 is a million assignments,
+# which is a second; 2**24 is sixteen million, which is not.
+EXACT_SIGNFLIP_MAX_K = 20
+
+
+def signflip_p(
+    cluster_means: Sequence[float], *, iters: int, seed: int
+) -> tuple[float, str, float]:
+    """The cluster sign-flip p, how it was obtained, and the floor it can reach.
+
+    One entry point so a caller cannot get a test at one cluster count and
+    silence at another. The floor matters as much as the p: at k=5 the exact
+    test cannot return below 0.0625 whatever the effect, and a sampled test
+    cannot return below 1/(iters+1).
+    """
+    k = len(cluster_means)
+    if k <= EXACT_SIGNFLIP_MAX_K:
+        return exact_signflip_p(cluster_means), "exact", signflip_p_floor(k)
+    return (
+        sampled_signflip_p(cluster_means, iters=iters, seed=seed),
+        "sampled",
+        1.0 / (iters + 1),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Power
 # ---------------------------------------------------------------------------
@@ -600,12 +665,15 @@ def paired_cluster_result(
         raise ValueError("a paired result needs at least two clusters")
 
     sd = math.sqrt(sum((x - sum(cluster_means) / k) ** 2 for x in cluster_means) / (k - 1))
+    p_flip, flip_method, p_flip_floor = signflip_p(cluster_means, iters=iters, seed=seed)
     return PairedResult(
         delta=sum(deltas) / len(deltas),
         interval=interval,
         p_bootstrap=bootstrap_p(draws),
-        p_exact=exact_signflip_p(cluster_means) if k <= 20 else None,
-        p_floor=signflip_p_floor(k) if k <= 20 else None,
+        p_signflip=p_flip,
+        p_signflip_method=flip_method,
+        p_exact=p_flip if flip_method == "exact" else None,
+        p_floor=p_flip_floor,
         structure=structure,
         cluster_sd=sd,
         mde_z=mde_paired(cluster_means, alpha=alpha, power=power, use_t=False),

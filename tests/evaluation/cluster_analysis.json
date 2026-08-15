@@ -344,6 +344,8 @@
    "p_bootstrap": 0.4392,
    "p_exact_signflip": 0.5,
    "p_floor": 0.0625,
+   "p_signflip": 0.5,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.549,
    "q_exact": 0.625,
    "structure": {
@@ -391,6 +393,8 @@
    "p_bootstrap": 0.0,
    "p_exact_signflip": 0.0625,
    "p_floor": 0.0625,
+   "p_signflip": 0.0625,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.0,
    "q_exact": 0.104167,
    "structure": {
@@ -438,6 +442,8 @@
    "p_bootstrap": 0.0,
    "p_exact_signflip": 0.0625,
    "p_floor": 0.0625,
+   "p_signflip": 0.0625,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.0,
    "q_exact": 0.104167,
    "structure": {
@@ -485,6 +491,8 @@
    "p_bootstrap": 0.922,
    "p_exact_signflip": 0.9375,
    "p_floor": 0.0625,
+   "p_signflip": 0.9375,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.922,
    "q_exact": 0.9375,
    "structure": {
@@ -532,6 +540,8 @@
    "p_bootstrap": 0.0,
    "p_exact_signflip": 0.0625,
    "p_floor": 0.0625,
+   "p_signflip": 0.0625,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.0,
    "q_exact": 0.104167,
    "structure": {
@@ -579,6 +589,8 @@
    "p_bootstrap": 0.8194,
    "p_exact_signflip": 0.8125,
    "p_floor": 0.0625,
+   "p_signflip": 0.8125,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.9252,
    "q_exact": 1.0,
    "structure": {
@@ -626,6 +638,8 @@
    "p_bootstrap": 0.0,
    "p_exact_signflip": 0.0625,
    "p_floor": 0.0625,
+   "p_signflip": 0.0625,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.0,
    "q_exact": 0.25,
    "structure": {
@@ -673,6 +687,8 @@
    "p_bootstrap": 0.9252,
    "p_exact_signflip": 1.0,
    "p_floor": 0.0625,
+   "p_signflip": 1.0,
+   "p_signflip_method": "exact",
    "q_bootstrap": 0.9252,
    "q_exact": 1.0,
    "structure": {
@@ -721,6 +737,8 @@
    "p_bootstrap": 0.4264,
    "p_exact_signflip": 0.75,
    "p_floor": 0.0625,
+   "p_signflip": 0.75,
+   "p_signflip_method": "exact",
    "per_cluster": {
     "dropper_sample_1": {
      "auc": 0.466667,
@@ -955,6 +973,8 @@
    "p_bootstrap": 0.8515,
    "p_exact_signflip": 0.960938,
    "p_floor": 0.007812,
+   "p_signflip": 0.960938,
+   "p_signflip_method": "exact",
    "structure": {
     "design_effect": 1.0,
     "effective_n": 13.0,
@@ -992,6 +1012,6 @@
  "note": "every interval recomputed at the cluster the observations are independent at; no LLM, no re-run, committed artifacts only",
  "schema": "maljan-cluster-analysis/v1",
  "seed": 20260815,
- "stats_module_sha256": "8bdb1cfd4f12f69d5a224b8116f82dcdc664f2f6cf2d00837441438a0ebca874",
+ "stats_module_sha256": "62038396d1a302bd10ecf8d3c1a162f90bd08556f2f9ce53c425afb860d1e5c1",
  "stats_schema": "maljan-stats/v1"
 }

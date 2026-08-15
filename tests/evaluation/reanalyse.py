@@ -412,6 +412,7 @@ def confidence_auc(iters: int = ITERS) -> dict[str, Any]:
         iters=iters,
         seed=SEED,
     )
+    _flip_p, _flip_method, _flip_floor = stats.signflip_p(centred, iters=iters, seed=SEED)
     return {
         "id": "P4",
         "title": "verbal confidence ranks correctness (AUC against chance)",
@@ -420,8 +421,12 @@ def confidence_auc(iters: int = ITERS) -> dict[str, Any]:
         "point": point,
         "interval": interval.as_json(),
         "p_bootstrap": stats.bootstrap_p(draws, null=0.5),
-        "p_exact_signflip": stats.exact_signflip_p(centred),
-        "p_floor": stats.signflip_p_floor(len(centred)),
+        # One entry point, so P4 cannot be the comparison that has no test if
+        # its cluster count ever rises above the enumeration limit.
+        "p_signflip": _flip_p,
+        "p_signflip_method": _flip_method,
+        "p_exact_signflip": _flip_p if _flip_method == "exact" else None,
+        "p_floor": _flip_floor,
         "structure": stats.icc_oneway(scores, clusters).as_json(),
         "correct_structure": stats.icc_oneway([float(v) for v in labels], clusters).as_json(),
         "mde_t": stats.mde_paired(centred),
@@ -683,7 +688,7 @@ def analyse(iters: int = ITERS) -> dict[str, Any]:
         groups.append(("C_replication", present_c))
     for name, members in groups:
         p_boot = [comps[m]["p_bootstrap"] for m in members]
-        p_exact = [comps[m]["p_exact_signflip"] for m in members]
+        p_exact = [comps[m]["p_signflip"] for m in members]
         q_boot = stats.benjamini_hochberg(p_boot)
         q_exact = stats.benjamini_hochberg(p_exact)
         for m, qb, qe in zip(members, q_boot, q_exact, strict=True):
@@ -761,7 +766,7 @@ def main(out: Path | None = None) -> int:
         ci = f"[{iv['lo']:+.4f}, {iv['hi']:+.4f}]"
         print(
             f"{cid:4s} {c['delta']:+9.4f}  {ci:<22s} "
-            f"{c['p_exact_signflip']:8.4f} {c['q_exact']:8.4f} {c['mde_t']:7.3f}"
+            f"{c['p_signflip']:8.4f} {c['q_exact']:8.4f} {c['mde_t']:7.3f}"
         )
     cb = result["cape_baseline"]["f1"]
     print(

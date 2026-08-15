@@ -206,6 +206,75 @@ def test_auc_cluster_ci_carries_its_method_and_cluster_count():
 # ---------------------------------------------------------------------------
 
 
+def test_the_sampled_signflip_agrees_with_enumeration_where_both_can_run():
+    """The sampled test is only trustworthy above the cap if it matches below it.
+
+    Same means, both routes, enough draws that sampling error is smaller than
+    the difference that would matter.
+    """
+    means = [0.12, -0.04, 0.31, 0.02, -0.18, 0.07, 0.22, -0.09]
+    exact = S.exact_signflip_p(means)
+    sampled = S.sampled_signflip_p(means, iters=200_000, seed=1)
+    assert sampled == pytest.approx(exact, abs=0.005), (
+        f"sampled {sampled:.5f} against enumerated {exact:.5f} — one of the two is wrong"
+    )
+
+
+def test_a_sampled_p_is_never_zero():
+    """(1 + hits) / (iters + 1), not hits / iters.
+
+    A sampled test that returns 0 is claiming an exactness it does not have.
+    The observed assignment belongs in its own reference set.
+    """
+    unanimous = [0.5] * 24  # every cluster the same sign: nothing is more extreme
+    p = S.sampled_signflip_p(unanimous, iters=2_000, seed=7)
+    assert p > 0.0
+    assert p == pytest.approx(1 / 2001, rel=1e-9)
+
+
+def test_signflip_picks_a_route_and_says_which():
+    """The entry point that stopped k>20 from having no test at all.
+
+    Twenty-four clusters is the design this project moved to *because* it
+    raises the resolution; the exact routine refused to run there, and the
+    caller formatted None.
+    """
+    small = [0.1, -0.2, 0.3, 0.05, -0.15]
+    p, method, floor = S.signflip_p(small, iters=1000, seed=3)
+    assert method == "exact"
+    assert floor == pytest.approx(2 / 2**5)
+    assert p == pytest.approx(S.exact_signflip_p(small))
+
+    big = [0.05 * (-1) ** i + 0.02 for i in range(24)]
+    p, method, floor = S.signflip_p(big, iters=5000, seed=3)
+    assert method == "sampled"
+    assert floor == pytest.approx(1 / 5001)
+    assert 0.0 < p <= 1.0
+
+
+def test_a_paired_result_always_carries_a_signflip_p():
+    """The defect this whole change came from.
+
+    `paired_cluster_result` returned p_exact=None above twenty clusters, and
+    the harness that formats it did not check. Reporting crashed on the first
+    real-corpus run — after the generations were already paid for.
+    """
+    rng = random.Random(11)
+    deltas, clusters = [], []
+    for family in range(24):  # one observation per cluster, as the real design has
+        deltas.append(rng.gauss(0.03, 0.1))
+        clusters.append(f"family-{family}")
+    res = S.paired_cluster_result(deltas, clusters, iters=2000, seed=5)
+    assert res.structure.k == 24
+    assert res.p_signflip is not None
+    assert res.p_signflip_method == "sampled"
+    assert res.p_exact is None, "nothing was enumerated, so p_exact must not claim otherwise"
+    assert res.p_floor == pytest.approx(1 / 2001)
+    # And it must survive being formatted, which is what actually broke.
+    assert f"{res.p_signflip:.4f}" and f"{res.p_floor:.4f}"
+    assert res.as_json()["p_signflip_method"] == "sampled"
+
+
 def test_signflip_floor_is_two_over_two_to_the_k():
     assert S.signflip_p_floor(5) == pytest.approx(0.0625)
     assert S.signflip_p_floor(4) == pytest.approx(0.125)
