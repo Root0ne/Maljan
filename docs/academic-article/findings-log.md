@@ -3164,6 +3164,39 @@ failure that cost this project two results in one week.
 The rule is worth stating for reuse, because it is what M5 and M6 both failed and it costs nothing:
 **before reporting that an ablation found no difference, check that some pair in it found one.**
 
+#### 3.38.2 A third instance, in the monitoring layer, hours after writing the rule down
+
+The hourly watch on this machine greps `night-guard.log` for `THERMAL|STARVED|SIGKILL`. Three
+consecutive checks returned nothing and were reported as *"no critical records"*. The command was
+not working at all.
+
+`grep` in that shell is a wrapper that routes to `ugrep` with `-I` (skip binary input), and
+`file(1)` classifies the log as **`data`** rather than text — so the filter skipped the entire file
+and exited 1. The empty output was read as an empty result. The log's second line is literally
+`CRITICAL 3005MB available (<4096) — stopping the registered job`.
+
+**Why the file is binary: the power cut of 2026-08-13**, the one `night_guard.sh`'s own header
+describes as *"the log ends mid-line on the power cut"*. 78 NUL bytes at offset 21,356, immediately
+after `13:06:01 LOW 5571MB available — STOP sentinel laid`. ext4 journalled the file's new size and
+never flushed the block, so the gap reads back as zeros. A two-day-old artefact of an event already
+written up, quietly disabling every text tool that defaults to skipping binary input.
+
+**The reported conclusion was right and its evidence was worthless.** Checked with a working
+command afterwards: 10 records today, **0 critical**. That is the uncomfortable part — three
+accurate reports resting on a filter that never read the file, and nothing in the output
+distinguishes that from a filter that read it and found nothing. Had the machine actually thermal-
+throttled overnight, the same three reports would have said the same thing.
+
+Fixed by stripping the NUL run (all 682 lines preserved byte-for-byte, the strip recorded in the
+log itself) rather than only by fixing the command, because leaving the file binary leaves the trap
+for whoever reads it next.
+
+**Same shape, third variant, one day.** A parameter accepted and not acted on (§3.32, §3.35); a
+comparison that could not have differed (§3.27.1, §3.34); and now **a filter that declined to read
+its input and said so only by staying silent**. The common form is that *absence of output was
+taken as output*, and the general rule this section keeps arriving at applies unchanged: an empty
+result is a claim about the instrument until something shows the instrument ran.
+
 ---
 
 ## 4. Literature-driven roadmap (MARD / TraceRAG / LAMD) + dataset integrations
