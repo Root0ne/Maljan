@@ -59,7 +59,7 @@ import json
 import re
 import sys
 from collections.abc import Hashable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +71,7 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
 from tests.evaluation import stats
+from tests.evaluation.cape_channels import leaked_truth as cape_leaked_truth
 
 _FIXTURE_DIR = _REPO_ROOT / "tests" / "evaluation" / "fixtures"
 _OUT_FILE = _REPO_ROOT / "tests" / "evaluation" / "consensus_ablation.md"
@@ -296,6 +297,27 @@ def extract_tids(text: str) -> list[str]:
     return seen
 
 
+def parent(tid: str) -> str:
+    """``T1055.002`` -> ``T1055``. The coarser question, reported beside the exact one."""
+    return tid.split(".", 1)[0].upper()
+
+
+def prf_parent(predicted: list[str], truth: list[str]) -> tuple[float, float, float]:
+    """Precision, recall, F1 after collapsing sub-techniques to their parents.
+
+    Not a softer version of the metric — a different question. Family-level MITRE
+    ground truth is largely sub-techniques (``T1027.003``, ``T1547.001``), while
+    a model reading sandbox evidence names the parent about as often as the
+    child. Exact match therefore scores a correct-but-coarse answer as a miss.
+
+    **Exact match stays the primary metric**, because it is what the no-LLM CAPE
+    baseline is scored with and the comparison to that baseline is the only thing
+    that makes any F1 here mean something. This is recorded alongside so the gap
+    between the two can be read rather than guessed at.
+    """
+    return prf([parent(t) for t in predicted], [parent(t) for t in truth])
+
+
 def prf(predicted: list[str], truth: list[str]) -> tuple[float, float, float]:
     """Precision, recall, F1 over technique-id sets.
 
@@ -372,6 +394,14 @@ class ArmScore:
     n_predicted: int
     output_tokens: int
     calls: int
+    # The identifiers themselves, not just how many. A study that retains only a
+    # count cannot answer a question asked of it later — which is exactly how the
+    # n=210 drift study came to be withdrawn. `truth` rides along because the
+    # ground truth for a real sample is resolved per family at run time and is
+    # not recoverable from the sample id alone.
+    predicted: list[str] = field(default_factory=list)
+    truth: list[str] = field(default_factory=list)
+    f1_parent: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -389,6 +419,9 @@ def score_from_dict(d: dict[str, Any]) -> ArmScore:
         n_predicted=int(d["n_predicted"]),
         output_tokens=int(d["output_tokens"]),
         calls=int(d["calls"]),
+        predicted=[str(x) for x in (d.get("predicted") or [])],
+        truth=[str(x) for x in (d.get("truth") or [])],
+        f1_parent=float(d.get("f1_parent") or 0.0),
     )
 
 
@@ -534,6 +567,7 @@ def arm_block(arm: str, scores: list[ArmScore]) -> list[str]:
         _row("precision", [s.precision for s in scores]),
         _row("recall", [s.recall for s in scores]),
         _row("F1", [s.f1 for s in scores]),
+        _row("F1 (sub-techniques collapsed to parents)", [s.f1_parent for s in scores]),
         _row("invalid technique-id rate", [s.invalid_id_rate for s in scores]),
         _row("techniques predicted", [float(s.n_predicted) for s in scores], ".2f"),
         _row("output tokens (est.)", [float(s.output_tokens) for s in scores], ".0f"),
@@ -647,25 +681,111 @@ def paired_block(scores: list[ArmScore], left: str, right: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def main_async(repeats: int, budget: int, smoke: bool, checkpoint: Path) -> None:
+def load_cape_corpus(limit: int = 0) -> list[tuple[str, list[str], dict[str, str]]]:
+    """The real cohort: 97 archived sandbox reports over 24 families.
+
+    The fixture corpus this replaces generates each sample's evidence *from its
+    own ground-truth technique list*, so evidence and answer key are in
+    bijection and a regular expression scores 1.000 on it. It also has five
+    clusters, at which the exact cluster permutation test floors at p = 0.0625.
+
+    Here the evidence is what the sandbox observed and the truth is the sample
+    family's MITRE ``uses`` set — the same truth, resolved the same way, that
+    the no-LLM CAPE baseline is scored against. That is what lets the two
+    finally share an axis.
+    """
+    from tests.evaluation import cape_channels
+    from tests.evaluation.eval_dynamic_vs_static import (
+        REPORTS_DIR,
+        load_report,
+        ubiquitous_domains,
+    )
+    from tests.evaluation.eval_temporal_drift import (
+        available_fixture_slugs,
+        load_ground_truth,
+        resolve_fixture_slug,
+    )
+
+    gt_dir = _REPO_ROOT / "tests" / "evaluation" / "ground_truth" / "attck_malware"
+    cohort = json.loads(
+        (_REPO_ROOT / "tests" / "evaluation" / "dynamic_cohort_n100.json").read_text()
+    )
+    by_sha = {s["sha256"]: s for s in cohort["samples"]}
+    slugs = available_fixture_slugs(gt_dir)
+
+    reports: dict[str, dict[str, Any]] = {}
+    for path in sorted(REPORTS_DIR.glob("*.json")):
+        report = load_report(path.stem)
+        if report is not None:
+            reports[path.stem] = report
+    # Computed across the whole cohort before any truncation: a domain every
+    # sample resolved is the guest image describing itself, and feeding those to
+    # a network analyst is how it comes to claim C2 on every sample in a corpus.
+    ubiquitous = ubiquitous_domains(reports)
+
+    out: list[tuple[str, list[str], dict[str, str]]] = []
+    for sha in sorted(reports):
+        meta = by_sha.get(sha)
+        if meta is None:
+            continue
+        slug = resolve_fixture_slug(meta.get("signature") or "", slugs)
+        if slug is None:
+            continue
+        truth, _valid = load_ground_truth(slug, gt_dir)
+        if not truth:
+            continue
+        build = cape_channels.build_channels(reports[sha], ubiquitous=ubiquitous)
+        if len(build.populated) < len(CHANNELS):
+            continue
+        out.append((sha, sorted(str(t).upper() for t in truth), build.channels))
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def main_async(
+    repeats: int,
+    budget: int,
+    smoke: bool,
+    checkpoint: Path,
+    corpus: str = "fixtures",
+    limit: int = 0,
+) -> None:
     from maljan.memory.attck_validator import ATTCKValidator
 
-    samples = load_samples()
-    if not samples:
-        print("No fixtures found — aborting.", flush=True)
-        return
+    if corpus == "cape":
+        built = load_cape_corpus(limit)
+        if not built:
+            print("No archived reports resolved to ground truth — aborting.", flush=True)
+            return
+        # The same leak check the fixture corpus gets. It has never fired there
+        # by construction; here it is the only thing standing between a real
+        # measurement and the copying exercise the fixtures were.
+        for sid, tids, channels in built:
+            leaks = cape_leaked_truth(channels, tids)
+            if leaks:
+                print(f"ABORT: sample {sid} leaks ground truth into evidence: {leaks}", flush=True)
+                return
+    else:
+        samples = load_samples()
+        if not samples:
+            print("No fixtures found — aborting.", flush=True)
+            return
 
-    # Build every sample's channels up front, and refuse to run on a leak.
-    built = [(sid, tids, build_channels(tids)) for sid, tids in samples]
-    for sid, tids, channels in built:
-        leaks = leaked_ids(channels)
-        if leaks:
-            print(f"ABORT: sample {sid} leaks ground-truth ids into evidence: {leaks}", flush=True)
-            return
-        missing = [t for t in tids if t.upper() not in _ARTIFACTS]
-        if missing:
-            print(f"ABORT: sample {sid} has techniques with no artifact: {missing}", flush=True)
-            return
+        # Build every sample's channels up front, and refuse to run on a leak.
+        built = [(sid, tids, build_channels(tids)) for sid, tids in samples]
+        for sid, tids, channels in built:
+            leaks = leaked_ids(channels)
+            if leaks:
+                print(
+                    f"ABORT: sample {sid} leaks ground-truth ids into evidence: {leaks}",
+                    flush=True,
+                )
+                return
+            missing = [t for t in tids if t.upper() not in _ARTIFACTS]
+            if missing:
+                print(f"ABORT: sample {sid} has techniques with no artifact: {missing}", flush=True)
+                return
 
     if smoke:
         built = built[:1]
@@ -716,6 +836,9 @@ def main_async(repeats: int, budget: int, smoke: bool, checkpoint: Path) -> None
             n_predicted=len(tids),
             output_tokens=tokens,
             calls=calls,
+            predicted=sorted(tids),
+            truth=sorted(truth),
+            f1_parent=prf_parent(tids, truth)[2],
         )
         scores.append(sc)
         with checkpoint.open("a", encoding="utf-8") as fh:
@@ -764,11 +887,14 @@ def main_async(repeats: int, budget: int, smoke: bool, checkpoint: Path) -> None
     report = "\n".join(lines)
     print("\n" + report, flush=True)
     try:
-        _OUT_FILE.write_text(report + "\n", encoding="utf-8")
-        _JSON_FILE.write_text(
+        suffix = "" if corpus == "fixtures" else f"_{corpus}"
+        out_file = _OUT_FILE.with_name(f"consensus_ablation{suffix}.md")
+        json_file = _JSON_FILE.with_name(f"consensus_ablation{suffix}.json")
+        out_file.write_text(report + "\n", encoding="utf-8")
+        json_file.write_text(
             json.dumps([s.to_dict() for s in scores], indent=2) + "\n", encoding="utf-8"
         )
-        print(f"\nWrote {_OUT_FILE} and {_JSON_FILE}", flush=True)
+        print(f"\nWrote {out_file} and {json_file}", flush=True)
     except OSError as exc:
         print(f"Could not write report: {exc}", flush=True)
 
@@ -779,8 +905,27 @@ def main() -> None:
     ap.add_argument("--budget", type=int, default=_DEFAULT_BUDGET, help="Total output budget B.")
     ap.add_argument("--smoke", action="store_true", help="One sample, one repeat.")
     ap.add_argument("--checkpoint", type=Path, default=_DEFAULT_CHECKPOINT)
+    ap.add_argument(
+        "--corpus",
+        choices=("fixtures", "cape"),
+        default="fixtures",
+        help=(
+            "fixtures: five synthesised inputs whose evidence is generated from "
+            "their own technique lists (5 clusters, exact-p floor 0.0625). "
+            "cape: the archived 97-sample cohort over 24 families, scored against "
+            "the same family-level ground truth as the no-LLM baseline."
+        ),
+    )
+    ap.add_argument("--limit", type=int, default=0, help="Cap the corpus size (0 = all).")
     args = ap.parse_args()
-    main_async(args.repeats, args.budget, args.smoke, args.checkpoint)
+    main_async(
+        args.repeats,
+        args.budget,
+        args.smoke,
+        args.checkpoint,
+        corpus=args.corpus,
+        limit=args.limit,
+    )
 
 
 if __name__ == "__main__":
