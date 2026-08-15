@@ -79,12 +79,22 @@ PREAMBLE = r"""
 % tables are readable is worth more than one that looks like a proceedings.
 \documentclass[11pt]{article}
 
-% XeLaTeX, not pdfLaTeX: the text carries Δ, ×, ≥, — and Turkish-set quotation
-% marks throughout, and escaping each one would put a rendering concern into
-% every sentence that reports a paired difference.
+% XeLaTeX, not pdfLaTeX. The sources are UTF-8 throughout and the em dashes,
+% quotation marks and accented author names in the bibliography all resolve
+% without an encoding package. Mathematical symbols do NOT reach here as
+% literals: build_paper translates them to maths after pandoc and fails the
+% build on any that survive, because a Unicode minus is a dash-shaped glyph at
+% text metrics and this paper reports several hundred signed numbers.
 \usepackage{fontspec}
 \setmainfont{TeX Gyre Termes}
 \setmonofont[Scale=0.85]{DejaVu Sans Mono}
+% Maths in the body's own family. Without this, fontspec leaves maths to
+% Computer Modern, so the moment the symbol translator emits its first $-$ the
+% document embeds CMMI10, CMR10 and CMSY10 alongside Termes — three extra
+% families, and a minus sign that does not match the digits either side of it.
+% Caught by the conformance check counting font families, not by reading the page.
+\usepackage{unicode-math}
+\setmathfont{TeX Gyre Termes Math}
 \usepackage[margin=0.75in]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -94,6 +104,16 @@ PREAMBLE = r"""
 \usepackage{microtype}
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
+% A section title containing maths becomes a PDF bookmark, and unicode-math's
+% symbols are not expandable in that string — the build died on "Improper
+% alphabetic constant" the moment a heading carried a translated multiplication
+% sign. This tells hyperref what to write instead.
+\pdfstringdefDisableCommands{%
+  \def\times{x}\def\Delta{Delta}\def\rho{rho}\def\alpha{alpha}%
+  \def\beta{beta}\def\sigma{sigma}\def\mu{mu}%
+  \def\ge{>=}\def\le{<=}\def\gg{>>}\def\ll{<<}%
+  \def\approx{~}\def\neq{!=}\def\pm{+/-}\def\rightarrow{->}%
+}
 \usepackage{fancyvrb}
 \usepackage{amsmath}
 % pandoc computes table column widths as `\columnwidth * \real{0.23}`, which is
@@ -114,6 +134,12 @@ PREAMBLE = r"""
 % And let TeX loosen a line rather than push a word past the margin. Ugly spacing
 % is a worse-looking page; an overfull line is an unreadable one.
 \sloppy
+% \sloppy sets \hfuzz=0.5pt, which stops sub-half-point overruns being reported
+% at all. A zero-overfull log bought that way is not the same as a zero-overfull
+% document, so the tolerance goes back to nothing and the zero has to be earned.
+\hfuzz=0pt
+\vfuzz=0pt
+
 
 \captionsetup{font=small,labelfont=bf,skip=6pt}
 \setlength{\parskip}{2pt}
@@ -297,6 +323,97 @@ def strip_own_title(md: str) -> str:
     return re.sub(r"\A\s*#(?!#)[^\n]*\n", "", md, count=1)
 
 
+# Mathematical symbols that reach the source as literal UTF-8. XeLaTeX renders
+# them, which is why they were left alone — but rendering is not the whole
+# question. A Unicode minus pasted into text is a dash-shaped glyph at
+# text-metrics, not a true minus at maths metrics, so "−0.016" and "$-0.016$"
+# print differently and inconsistently across a paper that reports several
+# hundred signed numbers. The same argument applies to the multiplication sign
+# and to Greek letters used as variables. Translated once, here, rather than
+# left to whoever types the next paired difference.
+_SYMBOLS = {
+    "−": "$-$",  # MINUS SIGN
+    "×": "$\\times$",
+    "≥": "$\\ge$",
+    "≤": "$\\le$",
+    "≫": "$\\gg$",
+    "≪": "$\\ll$",
+    "≈": "$\\approx$",
+    "≠": "$\\neq$",
+    "±": "$\\pm$",
+    "→": "$\\rightarrow$",
+    "Δ": "$\\Delta$",
+    "ρ": "$\\rho$",
+    "α": "$\\alpha$",
+    "β": "$\\beta$",
+    "σ": "$\\sigma$",
+    "μ": "$\\mu$",
+    "…": "\\ldots{}",
+}
+
+# Characters that must never reach the .tex at all: they either break
+# compilation or survive a copy-paste invisibly.
+_FORBIDDEN_CHARS = {
+    " ": "non-breaking space",
+    "­": "soft hyphen",
+    "​": "zero-width space",
+    "﻿": "byte-order mark",
+    "‘": "left single quote",
+    "’": "right single quote",
+    "“": "left double quote",
+    "”": "right double quote",
+}
+
+# Verbatim regions of pandoc's LaTeX output, where a symbol is a literal that
+# must survive: an elided hash reads `d0de70ef…c4ea` and turning that ellipsis
+# into maths would put a dollar sign inside a monospace token.
+_TEX_VERBATIM = re.compile(
+    r"\\texttt\{(?:[^{}]|\{[^{}]*\})*\}"
+    r"|\\begin\{verbatim\}.*?\\end\{verbatim\}"
+    r"|\\begin\{Shaded\}.*?\\end\{Shaded\}"
+    r"|\\begin\{Highlighting\}.*?\\end\{Highlighting\}",
+    re.S,
+)
+
+
+def translate_symbols(tex: str) -> str:
+    """Rewrite mathematical Unicode as maths in pandoc's output.
+
+    Applied **after** pandoc rather than before it. Doing it in the markdown
+    looked simpler and produced a broken document: pandoc only reads ``$...$`` as
+    maths when the closing dollar is not followed by a digit, so ``$\approx$22k``
+    came through as two literal dollar signs and LaTeX then failed with
+    "Missing $ inserted". Operating on the LaTeX has no such rule.
+    """
+
+    def convert(text: str) -> str:
+        for char, latex in _SYMBOLS.items():
+            text = text.replace(char, latex)
+        return text
+
+    out: list[str] = []
+    last = 0
+    for m in _TEX_VERBATIM.finditer(tex):
+        out.append(convert(tex[last : m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(convert(tex[last:]))
+    return "".join(out)
+
+
+def check_symbols(name: str, tex: str) -> list[str]:
+    """Report any hazard character that survived translation."""
+    found: list[str] = []
+    for char, why in _FORBIDDEN_CHARS.items():
+        if char in tex:
+            found.append(f"{name}: {why} (U+{ord(char):04X})")
+    stripped = _TEX_VERBATIM.sub(" ", tex)
+    for char in _SYMBOLS:
+        if char in stripped:
+            found.append(f"{name}: untranslated U+{ord(char):04X} outside verbatim")
+    return found
+
+
 _MANUAL_NUMBER = re.compile(r"^(#{2,6})\s+\d+(?:\.\d+)*\.?\s+", re.M)
 
 
@@ -309,6 +426,24 @@ def strip_manual_numbers(md: str) -> str:
     deleted.
     """
     return _MANUAL_NUMBER.sub(r"\1 ", md)
+
+
+_TABLE_WIDTH = re.compile(r"\(\\linewidth - (\d+)\\tabcolsep\)")
+
+
+def fit_table_widths(tex: str) -> str:
+    r"""Shave two points off every pandoc longtable's measure.
+
+    pandoc writes each column as a fraction of the line, and six equal columns
+    come out as ``\real{0.1667}`` six times — which sums to 1.0002. The excess is
+    a hundredth of a point, invisible on the page and three overfull boxes in the
+    log, and it only became visible once ``\hfuzz`` was set back to zero. Reducing
+    the intercolumn padding does not help, because pandoc has already subtracted
+    it. Taking two points off the measure absorbs any rounding of this kind for
+    any column count, and two points across a seven-inch line is not a layout a
+    reader can see.
+    """
+    return _TABLE_WIDTH.sub(r"(\\linewidth - \1\\tabcolsep - 2pt)", tex)
 
 
 def demote_headings(tex: str) -> str:
@@ -356,7 +491,9 @@ def main() -> int:
     intro_md, miss = substitute_facts(intro_md, facts, "introduction")
     unresolved += miss
     intro_clean = strip_manual_numbers(strip_draft_notes(intro_md))
-    body.append(demote_headings(pandoc(intro_clean, "introduction")))
+    intro_tex = translate_symbols(pandoc(intro_clean, "introduction"))
+    violations += check_symbols("introduction", intro_tex)
+    body.append(fit_table_widths(demote_headings(intro_tex)))
 
     for filename, title in SECTIONS[1:]:
         src = (HERE / filename).resolve()
@@ -369,8 +506,10 @@ def main() -> int:
         unresolved += miss
         violations += check_anonymity(filename, md)
         star = "*" if title in UNNUMBERED else ""
+        section_tex = translate_symbols(pandoc(md, filename))
+        violations += check_symbols(filename, section_tex)
         body.append(f"\n\\section{star}{{{title}}}\n")
-        body.append(demote_headings(pandoc(md, filename)))
+        body.append(fit_table_widths(demote_headings(section_tex)))
         print(f"  converted {filename}")
 
     app_src = HERE / APPENDIX[0]
@@ -380,9 +519,11 @@ def main() -> int:
         md, miss = substitute_facts(md, facts, APPENDIX[0])
         unresolved += miss
         violations += check_anonymity(APPENDIX[0], md)
+        appendix_tex = translate_symbols(pandoc(md, APPENDIX[0]))
+        violations += check_symbols(APPENDIX[0], appendix_tex)
         body.append("\n\\appendix\n")
         body.append(f"\n\\section{{{APPENDIX[1]}}}\n")
-        body.append(demote_headings(pandoc(md, APPENDIX[0])))
+        body.append(fit_table_widths(demote_headings(appendix_tex)))
         print(f"  converted {APPENDIX[0]} (appendix)")
 
     if unresolved:
@@ -392,12 +533,18 @@ def main() -> int:
         return 1
 
     if violations:
-        print("\nBUILD FAILED — the system name reached the paper:", file=sys.stderr)
+        print("\nBUILD FAILED — characters that must not reach the .tex:", file=sys.stderr)
         for v in violations[:20]:
             print(f"  {v}", file=sys.stderr)
         return 2
 
-    abstract_tex = pandoc(abstract_md, "abstract")
+    abstract_tex = translate_symbols(pandoc(abstract_md, "abstract"))
+    violations += check_symbols("abstract", abstract_tex)
+    if violations:
+        print("\nBUILD FAILED — characters that must not reach the .tex:", file=sys.stderr)
+        for v in violations[:20]:
+            print(f"  {v}", file=sys.stderr)
+        return 2
     doc = (
         PREAMBLE.replace("TITLEPLACEHOLDER", TITLE).replace("ABSTRACTPLACEHOLDER", abstract_tex)
         + "\n".join(body)

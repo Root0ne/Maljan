@@ -135,7 +135,7 @@ is why this is not a systems paper. The literature's prior ran the same way: two
 studies find single agents match or beat debate, and `arXiv:2604.02460` §5.3 reports a crossover at
 α=0.7 on our own model class.
 
-## 2. A 3.4× larger model does not separate from the local one
+## 2. A model 3.4 times larger does not separate from the local one
 
 Same five fixtures, same prompt, same 2,400-token output budget:
 
