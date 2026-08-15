@@ -193,8 +193,9 @@ vary --- length, digest, element count --- the instrument is repeating itself, a
 stale-state bug looks like from outside. All three boundary defects above were caught this way: a \fact{hint-chars-repeated}-char
 hint repeated across unrelated samples; call graphs identical to the character for binaries of
 \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at exactly \fact{stuck-graph-chars} characters. It costs one line of code and
-needs no ground truth. We now report it alongside results (50 distinct call-graph sizes across 79
-samples; \fact{cardinality-distinct-graphs} across \fact{cardinality-samples}).
+needs no ground truth. We now report it alongside results
+(\fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples}
+samples).
 
 This check is a \textbf{refinement, not a discovery}, and we counter-searched it before claiming
 otherwise: ``distinct inputs should produce distinct outputs'' is an ordinary metamorphic relation
@@ -273,9 +274,9 @@ we accept rather than argue with:
 \item
   The bias is approximately constant across arms, so within-study contrasts are the defensible
   reading --- which is exactly why a baseline matters. \textbf{The sandbox alone, with no LLM anywhere,
-  scores F1 0.153 {[}0.134, 0.171{]}} on our cohort of 97. Every pipeline figure is read against that
-  rather than against zero, and on the samples where both have run the full pipeline is 0.003 F1
-  above it.
+  scores F1 \fact{baseline-f1}} \fact{baseline-f1-cluster-ci} on our cohort of \fact{baseline-n}. Every
+  pipeline figure is read against that rather than against zero, and on the samples where both have
+  run the full pipeline is \fact{h2h-delta} F1 above it.
 \end{enumerate}
 
 \subsection{The dynamic channel is two-thirds constant}\label{the-dynamic-channel-is-two-thirds-constant}
