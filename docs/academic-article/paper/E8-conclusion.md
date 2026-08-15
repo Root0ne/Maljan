@@ -77,8 +77,8 @@ none of them**, and not because the tests were bad — each defect requires a se
 server, or a large input, which is precisely what a fast unit suite is built to avoid.
 
 All four were found by one arithmetic check: **how many distinct outputs did N inputs produce?** A
-priority hint of exactly 2,575 characters for unrelated binaries; 66 consecutive samples at exactly
-75,426. It needs no ground truth and no oracle, which is what makes it usable where correctness is
+priority hint of exactly {{hint_chars_repeated}} characters for unrelated binaries; 66 consecutive samples at exactly
+{{stuck_graph_chars}}. It needs no ground truth and no oracle, which is what makes it usable where correctness is
 hard to check, and it belongs beside sample size in an evaluation report rather than inside a test.
 
 **Three more followed, and none of them was at a boundary.** An ablation varied a deterministic
@@ -87,8 +87,8 @@ size ranked a reasoning-configuration flag instead, and recovered the published 
 almost exactly — agreeing with the literature, which is the direction a wrong result is least likely
 to be questioned. And the verdict model's documented output ceiling was renamed by our client
 library during serialisation to a key the inference server does not read, so a component described
-as bounded had never once been bounded; one call was measured at 30,155 generated tokens against an
-8,192 cap. The cardinality check does not find these — their outputs vary. Each had passing unit
+as bounded had never once been bounded; one call was measured at {{unbounded_decode_tokens}} generated tokens against an
+{{judge_output_cap}} cap. The cardinality check does not find these — their outputs vary. Each had passing unit
 tests over the exact function concerned, because the defect was never in a function.
 
 We are careful about what is new here, and we counter-searched before claiming. Silent failure at

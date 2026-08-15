@@ -43,7 +43,7 @@ cap by construction (§3.15).
 **Three further defects were found later, and none of them involved a server.** An ablation varied a
 deterministic post-processing step and we attributed its output to a language model; a rank
 correlation over model size ranked a reasoning-configuration flag instead and recovered the
-published scaling coefficient almost exactly; and the verdict model's documented 8,192-token output
+published scaling coefficient almost exactly; and the verdict model's documented {{judge_output_cap}}-token output
 ceiling was renamed by our client library during serialisation to a key the inference server does
 not read, so a component described as bounded had never once been bounded. These three had passing
 unit tests over the exact functions concerned, which the four above did not — the defect was never
@@ -76,7 +76,7 @@ considered and refused, with a cited rationale.
 testing was performed.
 
 **P6 Context truncation — `EXPOSED`.** Truncation is designed-in throughout — chunking at function
-boundaries, a per-call evidence cap, a 40-step ReAct budget, an 8,192-token verdict cap, a 400-char
+boundaries, a per-call evidence cap, a 40-step ReAct budget, an {{judge_output_cap}}-token verdict cap, a 400-char
 hint cap — and the counters now exist to report frequency, with pass-throughs counted so the rate has
 a correct denominator. What we cannot yet report is the distribution over a full cohort. Two specific
 findings belong here:
@@ -111,7 +111,7 @@ difference off an underpowered arm, and this audit carried the wrong number for 
 **That null is confounded, and the confound cannot be removed on that endpoint.** The local arm runs
 with its reasoning stream disabled; the 120B arm ran with reasoning on, spending 56.5% of its output
 budget there. We re-ran it with the flag set: the provider accepted the parameter and ignored it —
-56.2% reasoning, F1 0.4149 against the original 0.4162 (paired Δ −0.0014, CI [−0.0929, +0.0874]).
+56.2% reasoning, F1 {{arm_default_nothink_f1}} against the original {{arm_default_f1}} (paired Δ −0.0014, CI [−0.0929, +0.0874]).
 The re-run replicates the arm rather than correcting it, and no further re-run will do better,
 because the control is not exposed. We therefore report the null with its confound named. The size
 of what is being confounded is not small: on two separate models the same flag is worth **0.34 and
@@ -130,7 +130,7 @@ Testing `arXiv:2606.18166`'s parameter-size trend needs three arms at three size
 flag that outweighs size. Of the endpoints available, the one that honours the flag hosts the same
 35B model we already run, and the one above 35B does not honour it. Two matched arms exist and both
 are 35B. We state this as a limitation rather than reporting a correlation over unmatched arms —
-which, run once before this constraint was enforced, returned ρ=+0.866 and would have agreed with
+which, run once before this constraint was enforced, returned ρ={{superseded_rho}} and would have agreed with
 the literature for the wrong reason.
 
 What also remains is **coverage, not power**: the second model has been measured on five synthetic
@@ -162,9 +162,9 @@ conditions for the two to diverge.
 **The eleventh check — count the distinct outputs.** Before trusting a batch measurement, ask how
 many distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should
 vary — length, digest, element count — the instrument is repeating itself, and repetition is what a
-stale-state bug looks like from outside. All three boundary defects above were caught this way: a 2,575-char
+stale-state bug looks like from outside. All three boundary defects above were caught this way: a {{hint_chars_repeated}}-char
 hint repeated across unrelated samples; call graphs identical to the character for binaries of
-241 KB and 139 KB; 66 consecutive samples at exactly 75,426 characters. It costs one line of code and
+241 KB and 139 KB; 66 consecutive samples at exactly {{stuck_graph_chars}} characters. It costs one line of code and
 needs no ground truth. We now report it alongside results (50 distinct call-graph sizes across 79
 samples; 63 across 97).
 

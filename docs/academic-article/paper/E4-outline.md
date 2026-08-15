@@ -81,8 +81,8 @@ returned nothing at all. None was caught by {{test_count}} passing tests, becaus
 in one server lifetime, and a unit test writes one.
 
 Every one of those four was caught the same way: **a number repeated where variation was expected.**
-A hint of exactly 2,575 characters for two unrelated binaries; call graphs identical to the
-character for samples of 241 KB and 139 KB; 66 consecutive samples at 75,426 characters. The check
+A hint of exactly {{hint_chars_repeated}} characters for two unrelated binaries; call graphs identical to the
+character for samples of 241 KB and 139 KB; 66 consecutive samples at {{stuck_graph_chars}} characters. The check
 costs one line, needs no ground truth, and we now report it beside every batch result.
 
 **Then three more, and none of them was at a boundary.** An ablation varied a deterministic

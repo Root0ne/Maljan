@@ -66,7 +66,7 @@ The same server answers a load it cannot perform with **HTTP 200** and an error 
 
 `raise_for_status()` sees nothing wrong. Downstream code then analysed and described whichever
 program remained current. When the server began refusing loads after roughly thirty in one
-lifetime, **66 consecutive samples produced a call graph of exactly 75,426 characters** before
+lifetime, **66 consecutive samples produced a call graph of exactly {{stuck_graph_chars}} characters** before
 anyone noticed.
 
 ### M4 — Two bounds composing into an empty result
@@ -172,14 +172,14 @@ The most recent (2026-08-14), and the only one whose wrong answer **agreed with 
 
 We assembled a parameter-size series to test a published finding that parameter count is the only
 significant predictor of ATT&CK-classification F1 (ρ=0.85). The harness read every completed arm
-file, ranked mean F1 against total parameters, and reported **ρ=+0.866** — reproducing the prior
+file, ranked mean F1 against total parameters, and reported **ρ={{superseded_rho}}** — reproducing the prior
 almost exactly, across a 3× span, with the confounds it could not remove printed honestly beneath.
 
 The five rows were three models. One model appeared twice because it had been run in two
 configurations, and another twice because it had been run twice. The duplicate configurations were
-not a labelling detail: the same weights score **0.3507** with the reasoning stream disabled and
-**0.0080** with it enabled, because 24 of 25 calls then spend their entire output budget reasoning
-and never answer. The 0.0080 row sat at the small end of the parameter axis, where it set the sign
+not a labelling detail: the same weights score **{{arm_qwen35ba3b_nothink_f1}}** with the reasoning stream disabled and
+**{{arm_qwen35ba3b_f1}}** with it enabled, because 24 of 25 calls then spend their entire output budget reasoning
+and never answer. The {{arm_qwen35ba3b_f1}} row sat at the small end of the parameter axis, where it set the sign
 of the correlation. What the series measured was a flag, ordered by coincidence against size.
 
 **The failure is not the duplicate rows; it is that the arm-selection rule did not exist.** The
@@ -218,13 +218,13 @@ select on the *measured* reasoning share, never on the flag — is what the gate
 The last one is in the production pipeline rather than in an evaluation harness, and it removed a
 guarantee the code states in its own comment.
 
-The verdict model is built with an 8,192-token output ceiling, and the line that builds it says
+The verdict model is built with an {{judge_output_cap}}-token output ceiling, and the line that builds it says
 why: *"Bound the verdict generation so a degenerate decode can't consume the full wall-clock
 timeout."* The client library renames that parameter to the API vendor's newer spelling when it
 serialises the request, and our local inference server does not read the newer spelling. It
 accepted the field, ignored it, and decoded without a ceiling.
 
-Measured on one call: a 1,403-token prompt, **30,155 tokens generated**, still generating at 46
+Measured on one call: a {{unbounded_decode_prompt_tokens}}-token prompt, **{{unbounded_decode_tokens}} tokens generated**, still generating at 46
 tokens per second when the caller's ten-minute wrapper gave up. The only thing that ever stopped a
 verdict was wall-clock.
 
@@ -279,7 +279,7 @@ corroboration cascade entirely.
   test could see it.
 
 * M7 had **nothing left to assert on**. A unit test would build the model and check that its output
-  ceiling is 8,192 — and it is, at every level the object model exposes. The defect existed only in
+  ceiling is {{judge_output_cap}} — and it is, at every level the object model exposes. The defect existed only in
   the serialised request, which no test in this suite inspects and which no application code reads.
   Testing the property as the system represents it confirms exactly the thing that is not true.
 
@@ -299,9 +299,9 @@ no repetition to notice.
 
 | observation | defect |
 |---|---|
-| a priority hint of exactly 2,575 characters for two unrelated binaries, and a third in an earlier session | M2 |
-| call graphs identical to the character (404,337 chars, 11,798 lines) for samples of 241 KB and 139 KB | M2 |
-| 66 consecutive samples at exactly 75,426 characters | M3 |
+| a priority hint of exactly {{hint_chars_repeated}} characters for two unrelated binaries, and a third in an earlier session | M2 |
+| call graphs identical to the character ({{call_graph_chars}} chars, {{call_graph_lines}} lines) for samples of 241 KB and 139 KB | M2 |
+| 66 consecutive samples at exactly {{stuck_graph_chars}} characters | M3 |
 | every tool call returning the same validation error | M1 |
 | a 25-minute call that always produced one claim and zero techniques | M4 |
 | a Jaccard of **1.000 with a zero-width interval**, from a model asked the same question 32 times at temperature 0 | M5 |
@@ -325,7 +325,7 @@ diagnosis is in the shape. Left is measured: 63 distinct call-graph sizes across
 staircase's flat treads being genuinely identical binaries rather than a fault.
 
 **The right panel is a schematic, and the reason is the argument of §6.4.** It depicts M3 — the run
-in which 66 consecutive samples returned a byte-identical 75,426-character call graph — and we cannot
+in which 66 consecutive samples returned a byte-identical {{stuck_graph_chars}}-character call graph — and we cannot
 plot it, because that run predates the per-sample retention policy those very failures caused us to
 adopt. The most important curve in this paper is the one we are unable to draw.
 

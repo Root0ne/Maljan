@@ -390,6 +390,42 @@ def _comparison(cid: str) -> dict[str, Any]:
     return comps[cid]
 
 
+def cape_audit_facts() -> dict[str, Any]:
+    """The sandbox reported every task complete; the timings say otherwise.
+
+    The split is bimodal with nothing between the modes, which is why the
+    boundary is stated as a threshold rather than fitted: a Windows PE does not
+    detonate in a second, and every task on the fast side is one that produced no
+    report directory while still being marked reported.
+    """
+    rows = load("cape_task_status_audit.json")
+    timed = [r for r in rows if isinstance(r.get("seconds"), int | float)]
+    if not timed:
+        raise FactError("cape_task_status_audit.json has no timed tasks")
+    fast = [r for r in timed if r["seconds"] <= 1]
+    slow = [r for r in timed if r["seconds"] > 1]
+    if not slow:
+        raise FactError("no task in the audit ran for more than a second")
+    gap_lo = max(r["seconds"] for r in fast) if fast else 0
+    gap_hi = min(r["seconds"] for r in slow)
+    if gap_hi - gap_lo < 60:
+        raise FactError(
+            f"the audit's two modes are {gap_hi - gap_lo:.0f}s apart — the split "
+            "is no longer bimodal and the threshold has to be re-argued"
+        )
+    return {
+        "audit_tasks": str(len(rows)),
+        "audit_timed": str(len(timed)),
+        "audit_instant": str(len(fast)),
+        "audit_real": str(len(slow)),
+        "audit_real_min": f"{min(r['seconds'] for r in slow):.0f}",
+        "audit_real_max": f"{max(r['seconds'] for r in slow):.0f}",
+        "audit_reported_but_instant": str(
+            sum(1 for r in fast if str(r.get("status")) == "reported")
+        ),
+    }
+
+
 def cluster_stat_facts() -> dict[str, Any]:
     """Every interval the paper states, at the cluster level, plus its structure.
 
@@ -600,6 +636,7 @@ BUILDERS = (
     firing_rate_facts,
     retrieval_facts,
     suite_facts,
+    cape_audit_facts,
     cluster_stat_facts,
     power_facts,
     multiplicity_facts,

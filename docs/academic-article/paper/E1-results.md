@@ -59,14 +59,15 @@ The interval on that difference is what should be read, not the point: at {{h2h_
 this design could detect a difference of **{{h2h_mde}} F1** at 80% power, and it did not detect one.
 That is a bound on the pipeline's contribution, not a demonstration that the contribution is zero.
 
-**Why 95 and not 100, and why the reason is not the one we first wrote down.** The cohort was
-submitted as one batch and the sandbox reported every task as complete. It had not been. Querying
-each task's timing shows a split with nothing between the modes: the 43 tasks whose reports survived
-ran for 186–366 s, and the other 57 ran for **zero to one second**, 56 of them still marked
-`reported`, none with a report directory. A Windows PE does not detonate in one second. The ordering
-implicates the instrument rather than the samples — real analyses run through one afternoon and
-every task after roughly 17:30 returns instantly — and re-submitting the same binaries from the same
-local files two days later produced full-length analyses on the same instance. 56 of the 57 were
+**Why the cohort is {{baseline_n}} and not {{audit_tasks}}, and why the reason is not the one we
+first wrote down.** The cohort was submitted as one batch and the sandbox reported every task as
+complete. It had not been. Querying each task's timing shows a split with nothing between the modes:
+the {{audit_real}} tasks whose reports survived ran for {{audit_real_min}}–{{audit_real_max}} s, and
+the other {{audit_instant}} ran for **under a second**, all {{audit_reported_but_instant}} of them
+still marked `reported`, none with a report directory. A Windows PE does not detonate in one second.
+The ordering implicates the instrument rather than the samples — real analyses run through one
+afternoon and every task after that returns instantly — and re-submitting the same binaries from the
+same local files two days later produced full-length analyses on the same instance. Nearly all were
 recovered that way; three failed in processing or reporting and are permanently gone.
 
 We had originally written that the analyses ran and their reports had expired. That was the
@@ -348,14 +349,14 @@ evidence points at the second: the bundle is the cascade's set wearing the judge
 **And half the calls never reached that step.** Four of the eight timed out at the verdict ceiling,
 and on a timeout `give_verdict` returns a text-fallback bundle that never calls the reconciliation
 routine — so the cascade is not consulted on that path at all. The timeouts are not a property of
-the fixtures: the judge's 8,192-token output cap was renamed by our client library to a parameter
+the fixtures: the judge's {{judge_output_cap}}-token output cap was renamed by our client library to a parameter
 the local inference server does not read, so the model decoded unbounded until the caller gave up
-(§6, M7). One such call was measured at **30,155 generated tokens** and was still going.
+(§6, M7). One such call was measured at **{{unbounded_decode_tokens}} generated tokens** and was still going.
 
 **Repeating the study with the cap fixed turns the pair into a controlled experiment, and the
 result inverts the section's own conclusion.** With the ceiling binding, the same four fixtures
 fail and the same four succeed; the judge's share of the bundle is 0.0% in both conditions; every
-number on the reconciled path is identical. What changes is only how the failure arrives — 8,192
+number on the reconciled path is identical. What changes is only how the failure arrives — {{judge_output_cap}}
 tokens of unparseable output in three and a half minutes, instead of a ten-minute timeout.
 
 But the artefact is not the same. The fallback builder scrapes ATT&CK IDs from two places: the

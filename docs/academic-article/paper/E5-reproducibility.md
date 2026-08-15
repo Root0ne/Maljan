@@ -237,7 +237,7 @@ run alone shows it. Preserved as `judge_contribution_uncapped.*` and `judge_cont
 **Figures are generated from the same retained records as the text.** The script recomputes intervals
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
 cannot drift apart without the script failing to reproduce one of them. This caught a live error: an
-ROC computed by naive descending sort returned AUC 0.458 against the 0.550 in our text, because 186
+ROC computed by naive descending sort returned AUC 0.458 against the {{confidence_auc}} in our text, because 186
 of 210 claims are tied at confidence 1.0 and tie handling decides the entire estimate. The text was
 right and the first draft of the figure was wrong — which is the ordinary direction for this check to
 fire, and the reason for wiring it this way.

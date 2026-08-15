@@ -30,7 +30,7 @@ cautions follow from what it took to hold this constant. The flag cannot be read
 one of our providers accepts the parameter and ignores it, returning the same 56% reasoning share
 with and without it, so **matching must be verified against the measured reasoning share of the
 completed arm**. And it cannot be assumed uniform across a series: when we ranked arms by parameter
-count without checking, the ranking recovered the published scaling correlation (ρ=+0.866) from an
+count without checking, the ranking recovered the published scaling correlation (ρ={{superseded_rho}}) from an
 axis on which one point was a disabled model rather than a small one.
 
 ## 4.2 Paired designs, bootstrap intervals, and never a single run
