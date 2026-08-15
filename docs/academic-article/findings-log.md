@@ -3013,7 +3013,7 @@ option in the question.
 
 ---
 
-### 3.37 When the verdict fails, the model's garbage reaches the analyst — `NEGATIVE` (C3′, capped condition)
+### 3.37 When the verdict fails, uncorroborated techniques reach the analyst — `NEGATIVE` (C3′, capped condition)
 
 §3.36 measured the judge with its output ceiling not reaching the server (§3.35). This repeats it
 with the ceiling binding — the *only* change — and the pair turns out to be a controlled experiment
@@ -3057,9 +3057,21 @@ additions in the capped condition came from the model's own text. Nothing else c
 runs.
 
 **What those 47 ids passed through: nothing.** Not the cascade, not `_reconcile_with_cascade`, not
-`_filter_invalid_technique_ids`, not the STIX integrity pass. They are `T\d{4}`-shaped strings
-lifted out of a decode that was degenerate enough to be unparseable as JSON, and once in the bundle
-they are indistinguishable from techniques three independent sources corroborated.
+`_filter_invalid_technique_ids`, not the STIX integrity pass.
+
+**But they are not nonsense, and checking bounded this finding rather than sharpening it.** The
+first write-up called them *"`T\d{4}`-shaped strings lifted out of a degenerate decode"*, which
+invited the reading that the model was inventing identifiers. Checked against the 691-technique
+ATT&CK catalogue (`data/attck_valid_ids.json`, offline): **45 of 45 unique ids are real
+techniques. Zero hallucinations.** The model, mid-degenerate-decode and unable to close a JSON
+object, was still naming techniques that exist.
+
+That makes the failure narrower and harder to dismiss at the same time. Narrower, because "the
+pipeline emits invented technique ids" would have been false. Harder to dismiss, because what
+actually reaches the analyst is **45 real ATT&CK techniques that no evidence source claimed and no
+corroboration supports**, sitting in the same bundle, in the same object type, as techniques three
+independent sources agreed on. Nothing downstream — not the report renderer, not the confidence
+annotation, not the bundle schema — distinguishes them.
 
 **This inverts the reading of §3.27.1 and §3.36.** Those sections establish that the verdict model
 has **no influence** over which techniques reach the analyst. That is true — of the path where the

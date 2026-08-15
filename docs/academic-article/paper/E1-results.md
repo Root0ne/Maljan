@@ -297,8 +297,14 @@ is 18,748 to 24,710 characters of degenerate decode, and:
 goes the other way. On one sample the bundle doubles. Because the uncapped run is a control whose
 raw text provably contains no IDs, every one of the 47 is attributable to the model's own output.
 They passed through no filter at all — not the cascade, not the reconciliation step, not the
-invalid-ID filter, not the integrity pass — and once in the bundle they are indistinguishable from
-techniques three independent sources corroborated.
+invalid-ID filter, not the integrity pass.
+
+They are also, checked against the 691-technique ATT&CK catalogue, **real: 45 of 45 unique IDs
+exist, none is invented.** That is worth stating because it removes the easy reading. The pipeline
+is not emitting hallucinated identifiers a schema check would catch. It is emitting genuine ATT&CK
+techniques that no evidence source claimed and no corroboration supports, in the same object type
+and the same bundle as techniques three independent sources agreed on, with nothing downstream to
+tell them apart.
 
 So the finding that opened this section needs its scope stated exactly. The verdict model has no
 influence over which techniques reach the analyst **on the path where it works**. On the path where
