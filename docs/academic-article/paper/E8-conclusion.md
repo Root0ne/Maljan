@@ -12,30 +12,51 @@ methodological problem we kept running into while taking them.
 Four claims motivated the design. Measured against simpler alternatives at equal token budget, they
 did not hold.
 
-| claim | measured |
-|---|---|
-| negotiated multi-agent consensus beats a single judge | ΔF1 **{{consensus_negotiated_delta}}**, 95% CI [−0.084, +0.050], at **3.2×** the tokens |
-| a multi-layer corroboration cascade improves the verdict | corroboration never reaches the artefact — and the model is not the reason: reconciliation restores every cascade technique the judge omits, and across **80 of 80** arms the judge added nothing of its own, so the ablation's 0-of-32 and 32-of-32 are arithmetic |
-| two-tier attribution identifies families | opcode-hash tier fires on **{{hash_fired}} of {{hash_total}}** samples; family-feature retrieval contributes **{{family_delta_f1}} F1** |
-| falsification-before-confidence disciplines claims | the cap fires on **{{cap_rate}}** of techniques |
+**Table 12: Four architectural claims against what the measurements support.** Every interval
+resamples the unit the observations are independent at; the minimum detectable effect says what the
+design could have seen.
 
-None of these components is broken. Several work in isolation, and each was built for a reason we
-would give again. They simply do not move the end-to-end result. We report that as a result rather
-than as a tuning opportunity, and note that the noise control separated cleanly ({{consensus_noise_f1}} against
-{{consensus_negotiated_f1}} and {{consensus_single_f1}}) — so these are nulls from an instrument demonstrated able to detect a difference,
-not from one unable to see anything.
+| claim | measured | this design could detect |
+|---|---|---|
+| negotiated multi-agent consensus beats a single judge | ΔF1 **{{consensus_negotiated_delta}}**, 95% cluster CI {{consensus_negotiated_ci}}, at **{{consensus_token_ratio}}×** the tokens | {{mde_consensus_negotiated}} F1 |
+| a multi-layer corroboration cascade improves the verdict | corroboration never reaches the artefact — and the model is not the reason: reconciliation restores every cascade technique the judge omits, and on **{{judge_mechanism_added}} of {{judge_mechanism_samples}}** samples the judge added nothing of its own | a per-sample rate of {{judge_mechanism_upper_bound}} |
+| two-tier attribution identifies families | opcode-hash tier fires on **{{hash_fired}} of {{hash_total}}** samples; family-feature retrieval contributes **{{family_delta_f1}} F1** | — |
+| falsification-before-confidence disciplines claims | the cap fires on **{{cap_rate}}** of techniques | — |
+
+None of these components is broken. Some work in isolation, and each was built for a reason we would
+give again. They do not move the end-to-end result. We report that as a result rather than as a
+tuning opportunity.
+
+**What we may not say about those nulls, and said in an earlier draft.** We wrote that the noise
+control separated cleanly and that the nulls therefore came from an instrument shown able to detect a
+difference. The control does move — {{consensus_noise_delta}}, {{consensus_noise_ci}}, all
+{{fixture_clusters}} samples in the same direction — but the effect is smaller than the design's own
+minimum detectable effect of {{mde_consensus_noise}}, and the exact cluster permutation test returns
+{{consensus_noise_p_exact}}, which at {{fixture_clusters}} clusters is the smallest value the test can
+return. No comparison on that corpus can reach α = 0.05 whatever its effect size. The nulls stand as
+nulls; the sensitivity argument does not stand, and the honest reading of every one of them is a
+bound rather than an equivalence.
 
 Two further negatives constrain how the rest should be read. Verbal confidence — the number the
-cascade and every deterministic gate consume — discriminates correct from incorrect claims at **AUC
-{{confidence_auc}}**, so those gates are keyed to noise. And a 120B reasoning frontier model did not separate from
-our local 35B on identical fixtures at equal *nominal* budget — paired **ΔF1 +0.003**, 95% CI
-[−0.077, +0.081], n=25, better on 12 of 25 and worse on 13 — which means the ceiling we kept
-attributing to model capacity is not obviously that. That null carries a confound we could not
-remove: the frontier arm reasoned and the local one did not, and the endpoint accepts the parameter
-that would have matched them without acting on it. We report the confound's size rather than its
-absence — on two other models the same flag is worth **0.34 and 0.45 F1** — and note that the local
-model is not the weaker deployment either: run against its vendor's own full-precision hosting, our
-3-bit local copy scores **0.063 higher**, 95% CI [−0.148, +0.026].
+cascade and every deterministic gate consume — ranks correct above incorrect claims at **AUC
+{{confidence_auc}}**, but the interval that resamples samples rather than claims is
+[{{confidence_auc_lo}}, {{confidence_auc_hi}}] and contains chance;
+{{confidence_at_or_below_chance}} of the {{confidence_clusters}} samples are at or below it, and the
+pooled figure is carried by the one that reaches {{confidence_best_cluster_auc}}. Verbal confidence
+is **indistinguishable from chance here**, which is a stronger statement than the one we set out to
+make and a worse one for the gates that consume it. And a 120B reasoning frontier model did not
+separate from our local 35B on identical fixtures at equal *nominal* budget — paired **ΔF1
+{{frontier_local_delta}}**, 95% cluster CI {{frontier_local_ci}}, better on
+{{frontier_local_better}} and worse on {{frontier_local_worse}} — at a design resolution of
+{{mde_frontier_local}} F1, which is coarser than every architectural effect in this paper. That null
+means the design could not see a difference, not that there is none. It also carries a confound we
+could not remove: the frontier arm reasoned and the local one did not, and the endpoint accepts the
+parameter that would have matched them without acting on it. We report the confound's size rather
+than its absence — on two other models the same flag is worth
+**{{reasoning_flag_vendor35b_delta}} and {{reasoning_flag_third_delta}} F1** — and note that we
+cannot show the local model to be the weaker deployment either: against its vendor's own
+full-precision hosting the paired difference is {{quantisation_delta}}, {{quantisation_ci}}, an
+interval wide enough to admit a substantial penalty in either direction.
 
 ## 8.2 The nulls are interpretable only because firing rates came first
 

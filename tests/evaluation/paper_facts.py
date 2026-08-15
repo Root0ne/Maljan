@@ -85,11 +85,17 @@ def baseline_facts() -> dict[str, Any]:
     stored = s.get("mean_f1")
     if stored is not None and abs(stored - mean) > 5e-4:
         raise FactError(f"baseline summary {stored} disagrees with per-sample mean {mean:.4f}")
-    return {
+    out = {
         "baseline_f1": f"{mean:.4f}",
         "baseline_n": str(len(f1s)),
         "baseline_distinct_f1": str(len({round(v, 6) for v in f1s})),
     }
+    for metric in ("precision", "recall"):
+        vals = [r[metric] for r in rows if isinstance(r.get(metric), int | float)]
+        if len(vals) != len(f1s):
+            raise FactError(f"cape_baseline.json has {len(vals)} {metric} rows, {len(f1s)} f1 rows")
+        out[f"baseline_{metric}"] = f"{sum(vals) / len(vals):.4f}"
+    return out
 
 
 def consensus_facts() -> dict[str, Any]:
@@ -109,11 +115,26 @@ def consensus_facts() -> dict[str, Any]:
         out[f"consensus_{arm}_f1"] = f"{sum(cells.values()) / len(cells):.4f}"
         out[f"consensus_{arm}_n"] = str(len(cells))
 
+    # "wins at 3x the tokens is not a win" is the design's own sentence, so the
+    # ratio it turns on is derived rather than typed.
+    tokens: dict[str, int] = {}
+    for r in rows:
+        if isinstance(r.get("output_tokens"), int | float):
+            tokens[r["arm"]] = tokens.get(r["arm"], 0) + int(r["output_tokens"])
+    if not tokens.get("single"):
+        raise FactError("consensus_ablation.json records no output tokens for the single arm")
+    out["consensus_token_ratio"] = f"{tokens['negotiated'] / tokens['single']:.1f}"
+    out["consensus_negotiated_tokens"] = str(tokens["negotiated"])
+    out["consensus_single_tokens"] = str(tokens["single"])
+
     base = by_arm["single"]
     for arm in ("negotiated", "noise"):
         shared = sorted(set(base) & set(by_arm[arm]))
         deltas = [by_arm[arm][k] - base[k] for k in shared]
-        out[f"consensus_{arm}_delta"] = signed(sum(deltas) / len(deltas), 3)
+        # The delta itself is emitted by ``cluster_stat_facts``, which owns every
+        # paired difference in the paper so that a point estimate and its interval
+        # cannot come from two places. What stays here is the count of pairs that
+        # moved at all, which the cluster analysis does not carry.
         out[f"consensus_{arm}_nonzero"] = str(sum(1 for d in deltas if abs(d) > 1e-9))
         out[f"consensus_{arm}_paired_n"] = str(len(deltas))
     return out
@@ -343,6 +364,230 @@ def retrieval_facts() -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# The corrected statistics
+# ---------------------------------------------------------------------------
+
+
+def _cluster() -> Any:
+    """The re-analysis artifact, refusing a stale one.
+
+    ``cluster_analysis.json`` is written by ``reanalyse.py`` from the committed
+    per-sample records. It is the only source for anything cluster-level: reading
+    a per-study summary instead would reintroduce exactly the row-level numbers
+    the re-analysis exists to replace.
+    """
+    d = load("cluster_analysis.json")
+    if d.get("schema") != "maljan-cluster-analysis/v1":
+        raise FactError(f"cluster_analysis.json has schema {d.get('schema')!r}")
+    return d
+
+
+def _comparison(cid: str) -> dict[str, Any]:
+    comps = _cluster()["comparisons"]
+    if cid not in comps:
+        raise FactError(f"comparison {cid} is not in cluster_analysis.json")
+    return comps[cid]
+
+
+def cluster_stat_facts() -> dict[str, Any]:
+    """Every interval the paper states, at the cluster level, plus its structure.
+
+    Nine comparisons and one baseline, each with the design effect that says how
+    much of its row count is real. The names are the paper's own labels for the
+    comparisons rather than the file stems, so a sentence and its number are
+    findable from each other.
+    """
+    d = _cluster()
+    out: dict[str, Any] = {}
+
+    # Rule 1 of this module is derive-from-records-not-summaries, and
+    # cluster_analysis.json is a summary from this file's point of view. So the
+    # two deltas it is possible to check are recomputed here from the per-arm
+    # rows and compared. A disagreement means the re-analysis ran against a
+    # different corpus than the one on disk, which is the failure that would
+    # otherwise be invisible.
+    rows = load("consensus_ablation.json")
+    by_arm: dict[str, dict[Any, float]] = {}
+    for r in rows:
+        if isinstance(r.get("f1"), int | float):
+            by_arm.setdefault(r["arm"], {})[(r["sample_id"], r.get("repeat", 0))] = float(r["f1"])
+    for arm, cid in (("negotiated", "P1"), ("noise", "P2")):
+        base, other = by_arm["single"], by_arm[arm]
+        keys = sorted(set(base) & set(other))
+        direct = sum(other[k] - base[k] for k in keys) / len(keys)
+        stored = _comparison(cid)["delta"]
+        if abs(direct - stored) > 5e-4:
+            raise FactError(
+                f"{cid}: cluster_analysis says {stored:+.4f}, the per-arm rows say {direct:+.4f}"
+            )
+
+    labels = {
+        "P1": "consensus_negotiated",
+        "P2": "consensus_noise",
+        "P3": "frontier_local",
+        "P4": "confidence_auc_cluster",
+        "E1": "quantisation",
+        "E2": "reasoning_flag_vendor35b",
+        "E3": "reasoning_flag_third",
+        "E4": "frontier_replication",
+        "E5": "vendor_think",
+    }
+    for cid, name in labels.items():
+        c = _comparison(cid)
+        iv = c["interval"]
+        out[f"{name}_delta"] = signed(c["delta"])
+        out[f"{name}_ci"] = interval(iv["lo"], iv["hi"])
+        out[f"{name}_p_exact"] = f"{c['p_exact_signflip']:.4f}"
+        out[f"{name}_q_exact"] = f"{c['q_exact']:.4f}"
+        out[f"{name}_k"] = str(c["structure"]["k"])
+        out[f"{name}_pairs"] = str(c.get("n_pairs") or c["interval"]["n_rows"])
+        if "better" in c:
+            out[f"{name}_better"] = str(c["better"])
+            out[f"{name}_worse"] = str(c["worse"])
+
+    cb = d["cape_baseline"]
+    for metric in ("precision", "recall", "f1"):
+        m = cb[metric]
+        out[f"baseline_{metric}_cluster_ci"] = interval(m["interval"]["lo"], m["interval"]["hi"])
+        out[f"baseline_{metric}_widening"] = f"{m['widening']:.2f}"
+        out[f"baseline_{metric}_icc"] = f"{m['structure']['icc']:.3f}"
+        out[f"baseline_{metric}_effective_n"] = f"{m['structure']['effective_n']:.1f}"
+    out["baseline_families"] = str(cb["k"])
+    out["baseline_mean_cluster"] = f"{cb['n'] / cb['k']:.2f}"
+
+    p4 = _comparison("P4")
+    out["confidence_auc_lo"] = f"{p4['interval']['lo']:.3f}"
+    out["confidence_auc_hi"] = f"{p4['interval']['hi']:.3f}"
+    out["confidence_clusters"] = str(p4["structure"]["k"])
+    out["confidence_at_or_below_chance"] = str(p4["clusters_at_or_below_chance"])
+    out["confidence_best_cluster_auc"] = f"{max(v['auc'] for v in p4['per_cluster'].values()):.3f}"
+    out["confidence_icc"] = f"{p4['structure']['icc']:.3f}"
+    out["confidence_design_effect"] = f"{p4['structure']['design_effect']:.1f}"
+    out["confidence_effective_n"] = f"{p4['structure']['effective_n']:.1f}"
+    out["confidence_auc_naive"] = f"{p4['naive_descending_sort_auc']:.3f}"
+
+    # The only like-for-like comparison in the paper: pipeline against the
+    # signature engine it is built on, same samples, same truth, same scoring.
+    h = d["head_to_head"]
+    out["h2h_n"] = str(h["n"])
+    out["h2h_families"] = str(h["k"])
+    for arm, name in (
+        ("cape_f1", "h2h_cape"),
+        ("static_only_f1", "h2h_static"),
+        ("dynamic_f1", "h2h_dynamic"),
+    ):
+        out[f"{name}_f1"] = f"{h[arm]['mean']:.4f}"
+        out[f"{name}_ci"] = interval(h[arm]["interval"]["lo"], h[arm]["interval"]["hi"])
+    hm = h["pipeline_minus_cape"]
+    out["h2h_delta"] = signed(hm["delta"])
+    out["h2h_ci"] = interval(hm["interval"]["lo"], hm["interval"]["hi"])
+    out["h2h_p_exact"] = f"{hm['p_exact_signflip']:.4f}"
+    out["h2h_mde"] = f"{hm['mde_t']:.3f}"
+    out["h2h_better"] = str(hm["better"])
+    out["h2h_worse"] = str(hm["worse"])
+
+    jc = d["judge_contribution"]
+    out["judge_mechanism_arms"] = str(jc["arms"])
+    out["judge_mechanism_samples"] = str(jc["samples"])
+    out["judge_mechanism_added"] = str(jc["samples_where_the_judge_added_a_technique"])
+    out["judge_mechanism_upper_bound"] = f"{jc['rule_of_three_upper_bound']:.3f}"
+    return out
+
+
+def power_facts() -> dict[str, Any]:
+    """What each null could have detected, and the floor the design cannot cross.
+
+    A null without a minimum detectable effect is unreadable, and every null in
+    this paper was reported without one. ``fixture_signflip_floor`` is the number
+    that governs the rest: at five clusters no comparison on that corpus can
+    reach alpha=0.05, whatever its effect size.
+    """
+    d = _cluster()
+    out: dict[str, Any] = {
+        "fixture_clusters": str(d["design"]["fixture_clusters"]),
+        "fixture_signflip_floor": f"{d['design']['signflip_floor']:.4f}",
+    }
+    labels = {
+        "P1": "consensus_negotiated",
+        "P2": "consensus_noise",
+        "P3": "frontier_local",
+        "P4": "confidence_auc_cluster",
+        "E1": "quantisation",
+        "E2": "reasoning_flag_vendor35b",
+        "E3": "reasoning_flag_third",
+        "E5": "vendor_think",
+    }
+    for cid, name in labels.items():
+        c = _comparison(cid)
+        out[f"mde_{name}"] = f"{c['mde_t']:.3f}"
+        out[f"mde_{name}_z"] = f"{c['mde_z']:.3f}"
+        # Whether the observed effect is even inside the design's resolution.
+        out[f"{name}_above_mde"] = "yes" if abs(c["delta"]) >= c["mde_t"] else "no"
+    return out
+
+
+def multiplicity_facts() -> dict[str, Any]:
+    """Family membership and Benjamini-Hochberg q-values.
+
+    Two declared families: the pre-registered primary comparisons, and the
+    configuration sweep run after the reasoning-flag confound was found. Per-arm
+    descriptive intervals carry no null and are not corrected — correcting an
+    estimate is a category error, and saying so is part of reporting the
+    correction honestly.
+    """
+    d = _cluster()
+    fams = d["families"]
+    out: dict[str, Any] = {}
+    for key, short in (("A_primary", "primary"), ("B_posthoc", "posthoc")):
+        f = fams[key]
+        out[f"family_{short}_m"] = str(f["m"])
+        out[f"family_{short}_members"] = ", ".join(f["members"])
+        out[f"family_{short}_survivors_exact"] = str(f["survivors_at_q05_exact"])
+        out[f"family_{short}_survivors_bootstrap"] = str(f["survivors_at_q05_bootstrap"])
+    total = sum(fams[k]["survivors_at_q05_exact"] for k in fams)
+    out["multiplicity_survivors_total"] = str(total)
+    return out
+
+
+def provenance_facts() -> dict[str, Any]:
+    """Numbers the paper states that no committed artifact can produce.
+
+    Six quantities in the introduction and conclusion come from live sessions
+    whose raw output was not retained: the identical call graphs, the run of
+    identically-sized hints, the token count of an unbounded decode, the paged-out
+    working set, the halted arm count, and the superseded rank correlation. They
+    are not fabricated — each is recorded in a dated entry of the findings log or
+    a harness docstring — but they are *observations*, not measurements from the
+    record, and the paper must not present them as the latter.
+
+    The registry makes that distinction machine-checkable. A record with neither
+    an artifact nor an explicit ``unretained-session`` provenance raises, so a
+    number cannot quietly acquire the authority of a derivation by being added
+    here.
+    """
+    reg = load("narrative_provenance.json")
+    if reg.get("schema") != "maljan-narrative-provenance/v1":
+        raise FactError(f"narrative_provenance.json has schema {reg.get('schema')!r}")
+    # The only provenances a number may claim when no artifact backs it. Anything
+    # else is a number with no account of where it came from, which is what this
+    # registry exists to make impossible rather than merely discouraged.
+    declared = {"unretained-session", "configuration-constant"}
+    out: dict[str, Any] = {}
+    for name, rec in sorted((reg.get("records") or {}).items()):
+        if not rec.get("artifact") and rec.get("provenance") not in declared:
+            raise FactError(
+                f"{name} has no artifact and claims provenance {rec.get('provenance')!r}, "
+                f"which is not one of {sorted(declared)}"
+            )
+        if not rec.get("record_ref"):
+            raise FactError(f"{name} cites no record")
+        if "value" not in rec:
+            raise FactError(f"{name} has no value")
+        out[name] = str(rec["value"])
+    return out
+
+
 BUILDERS = (
     baseline_facts,
     consensus_facts,
@@ -355,6 +600,10 @@ BUILDERS = (
     firing_rate_facts,
     retrieval_facts,
     suite_facts,
+    cluster_stat_facts,
+    power_facts,
+    multiplicity_facts,
+    provenance_facts,
 )
 
 

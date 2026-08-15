@@ -329,6 +329,94 @@ def cape_baseline(iters: int = ITERS) -> dict[str, Any]:
     return out
 
 
+def head_to_head(iters: int = ITERS) -> dict[str, Any]:
+    """Pipeline against the no-LLM baseline **on the same samples**.
+
+    The paper states three F1 values side by side — CAPE alone, the pipeline on
+    static evidence, the pipeline with the sandbox report — with no sample size
+    and no artifact behind the first of them. It is the only place the pipeline
+    is compared to its baseline like for like, and it was the one number that
+    could not be traced.
+
+    Derived here: the 13 samples that completed both arms of the dynamic-vs-static
+    study, scored for CAPE with the same signature-to-technique map and the same
+    family-level ground truth the baseline study uses. Every arm on one axis, one
+    population, one truth — which is what Figure 1 needed and did not have.
+    """
+    from tests.evaluation.eval_cape_baseline import cape_technique_ids
+    from tests.evaluation.eval_temporal_drift import (
+        available_fixture_slugs,
+        load_ground_truth,
+        resolve_fixture_slug,
+    )
+    from tests.evaluation.metrics import TTPAccuracyMetrics
+
+    gt_dir = _HERE / "ground_truth" / "attck_malware"
+    reports_dir = _REPO_ROOT / "data" / "cape_reports"
+    slugs = available_fixture_slugs(gt_dir)
+    cohort = load("dynamic_cohort_n100.json")
+    by_sha = {s["sha256"]: s for s in cohort["samples"]}
+
+    pairs = load("dynamic_vs_static.json").get("per_pair") or []
+    if not pairs:
+        raise ReanalysisError("dynamic_vs_static.json has no per_pair rows")
+
+    rows: list[dict[str, Any]] = []
+    for pair in pairs:
+        sha = pair["sha256"]
+        meta = by_sha.get(sha)
+        report_path = reports_dir / f"{sha}.json"
+        if meta is None or not report_path.exists():
+            raise ReanalysisError(f"head-to-head sample {sha[:12]} has no report or cohort entry")
+        slug = resolve_fixture_slug(meta.get("signature") or "", slugs)
+        if slug is None:
+            raise ReanalysisError(f"head-to-head sample {sha[:12]} resolves to no family")
+        truth, valid = load_ground_truth(slug, gt_dir)
+        report = json.loads(report_path.read_text())
+        cape = TTPAccuracyMetrics(
+            predicted_ttps=cape_technique_ids(report),
+            ground_truth_ttps=truth,
+            attck_valid_ttps=valid,
+        )
+        rows.append(
+            {
+                "sha256": sha,
+                "family": slug,
+                "cape_f1": cape.f1,
+                "static_only_f1": float(pair["static_only"]["f1"]),
+                "dynamic_f1": float(pair["dynamic"]["f1"]),
+            }
+        )
+
+    families = [r["family"] for r in rows]
+    out: dict[str, Any] = {
+        "n": len(rows),
+        "k": len(set(families)),
+        "corpus": CAPE_CORPUS,
+        "note": "the 13 samples that completed both arms, all three scored on one truth",
+        "per_sample": rows,
+    }
+    for arm in ("cape_f1", "static_only_f1", "dynamic_f1"):
+        vals = [r[arm] for r in rows]
+        out[arm] = {
+            "mean": sum(vals) / len(vals),
+            "interval": stats.cluster_bootstrap_ci(
+                vals, families, iters=iters, seed=SEED
+            ).as_json(),
+        }
+    # The claim the paper makes with these numbers: does the whole pipeline beat
+    # the signature engine it is built on? Paired, because every sample was run
+    # through both.
+    deltas = [r["dynamic_f1"] - r["cape_f1"] for r in rows]
+    res = stats.paired_cluster_result(deltas, families, iters=iters, seed=SEED)
+    out["pipeline_minus_cape"] = {
+        "better": sum(1 for d in deltas if d > 0),
+        "worse": sum(1 for d in deltas if d < 0),
+        **res.as_json(),
+    }
+    return out
+
+
 def arm_intervals(iters: int = ITERS) -> dict[str, Any]:
     """Per-arm F1 with a cluster interval. Estimates, so no p and no q."""
     out: dict[str, Any] = {}
@@ -466,6 +554,7 @@ def analyse(iters: int = ITERS) -> dict[str, Any]:
             "families": families,
             "comparisons": comps,
             "cape_baseline": cape_baseline(iters),
+            "head_to_head": head_to_head(iters),
             "arms": arm_intervals(iters),
             "judge_contribution": judge_contribution_bound(),
         }

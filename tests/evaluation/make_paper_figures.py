@@ -53,8 +53,20 @@ LIGHT = "#d9d9d9"
 
 plt.rcParams.update(
     {
+        # Matplotlib's default `pdf.fonttype` is 3, and Type 3 is a bitmap format:
+        # text in the figure cannot be extracted, plagiarism and accessibility
+        # tools see nothing where the axis labels are, and several publishers
+        # reject a PDF containing one outright. Seven of the eleven fonts embedded
+        # in the assembled paper were Type 3 subsets, all of them from here — the
+        # LaTeX text layer was clean throughout. 42 is TrueType.
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        # One serif family across body, figures and maths. The body is set in
+        # TeX Gyre Termes (a Times clone) and the figures were in DejaVu Serif,
+        # which is visible on the page as two different papers stapled together.
         "font.family": "serif",
-        "font.serif": ["DejaVu Serif"],
+        "font.serif": ["TeX Gyre Termes", "Nimbus Roman", "Times New Roman", "DejaVu Serif"],
+        "mathtext.fontset": "stix",
         "font.size": 9,
         "axes.edgecolor": INK,
         "axes.labelcolor": INK,

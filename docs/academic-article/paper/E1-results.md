@@ -11,33 +11,53 @@ Every accuracy number in this work is read against one reference, and we state i
 own. **CAPE alone — the sandbox the pipeline is built on, mapping its signature hits to ATT&CK
 technique IDs deterministically, with no language model anywhere:**
 
-| | mean | 95% CI |
+**Table 1: The no-LLM baseline.** CAPE's own signature-derived technique identifiers, scored against
+family-level MITRE ground truth. Intervals resample **families**, not samples: ground truth is
+resolved per family, so two binaries of one family are scored against a byte-identical label vector
+and are not two observations.
+
+| | mean | 95% cluster CI | ICC | effective n |
+|---|---|---|---|---|
+| precision | {{baseline_precision}} | {{baseline_precision_cluster_ci}} | {{baseline_precision_icc}} | {{baseline_precision_effective_n}} |
+| recall | {{baseline_recall}} | {{baseline_recall_cluster_ci}} | {{baseline_recall_icc}} | {{baseline_recall_effective_n}} |
+| **F1** | **{{baseline_f1}}** | **{{baseline_f1_cluster_ci}}** | {{baseline_f1_icc}} | {{baseline_f1_effective_n}} |
+
+n = {{baseline_n}} samples over {{baseline_families}} families, mean {{baseline_mean_cluster}} samples
+per family; bootstrap seed recorded with the interval. CAPE asserted at least one technique on
+**every** sample, so this is a predictor rather than an artefact of an empty one. Ground truth
+resolution uses the same alias map as the drift harness, so the two studies score identically.
+
+We report these intervals at the family level because our first version of this table did not, and
+the difference is not decorative: resampling samples rather than families gave an F1 interval
+{{baseline_f1_widening}} times narrower than the one above, on data whose intra-cluster correlation
+is {{baseline_f1_icc}}. The row count is {{baseline_n}}; the count that supports an inference is
+{{baseline_f1_effective_n}}.
+
+**And here is what the pipeline adds to it.** On the {{h2h_n}} samples that completed both arms of
+the paired study of §5 — the only samples where pipeline and baseline have been run on the same
+inputs — all three scored per sample against the same ground truth by the same code:
+
+**Table 2: Pipeline against the engine it is built on, like for like.**
+
+| | mean F1 | 95% cluster CI |
 |---|---|---|
-| precision | 0.2413 | [0.2123, 0.2711] |
-| recall | 0.1328 | [0.1131, 0.1529] |
-| **F1** | **{{baseline_f1}}** | **[0.1344, 0.1709]** |
+| CAPE alone, no language model | **{{h2h_cape_f1}}** | {{h2h_cape_ci}} |
+| pipeline, static evidence only | **{{h2h_static_f1}}** | {{h2h_static_ci}} |
+| pipeline, with the sandbox report | **{{h2h_dynamic_f1}}** | {{h2h_dynamic_ci}} |
 
-n = {{baseline_n}}, bootstrap CI, seed recorded. CAPE asserted at least one technique on **every** sample
-(1 minimum, 11 median, 33 maximum), so this is a real predictor rather than an artefact of an empty
-one. Ground truth resolution uses the same alias map as the drift harness, so the two studies score
-identically.
-
-**And here is what the pipeline adds to it.** On the samples where both have been run, scored
-per-sample against the same ground truth:
-
-| | mean F1 |
-|---|---|
-| CAPE alone, no language model | **0.1130** |
-| pipeline, static evidence only | **0.1130** |
-| pipeline, with the sandbox report | **0.1160** |
+n = {{h2h_n}} samples over {{h2h_families}} families. Paired, because every sample went through both:
+**{{h2h_delta}} F1**, 95% cluster CI {{h2h_ci}}, exact cluster sign-flip p = {{h2h_p_exact}}, better on
+{{h2h_better}} of {{h2h_n}}.
 
 Three analyst agents, a negotiation loop, a revision pass, an LLM judge and a weighted corroboration
-cascade land within **0.003 F1** of the signature engine they are built on top of. The two means
-agreeing to four decimal places is a coincidence and was checked rather than reported: every one of
-the samples differs individually, by as much as 0.13 in either direction. The system is not
-reproducing the sandbox's answers — it reaches different answers of the same quality. This
-comparison is interim at the n reached so far and is the number most likely to move; its direction
-has been stable across every reading taken while it accumulated.
+cascade land within {{h2h_delta}} F1 of the signature engine they are built on top of. Two of the
+means agreeing to four decimal places is a coincidence, and was checked rather than reported: the
+samples differ individually in both directions. The system is not reproducing the sandbox's answers
+— it reaches different answers of the same quality.
+
+The interval on that difference is what should be read, not the point: at {{h2h_families}} families
+this design could detect a difference of **{{h2h_mde}} F1** at 80% power, and it did not detect one.
+That is a bound on the pipeline's contribution, not a demonstration that the contribution is zero.
 
 **Why 95 and not 100, and why the reason is not the one we first wrote down.** The cohort was
 submitted as one batch and the sandbox reported every task as complete. It had not been. Querying
@@ -74,15 +94,31 @@ difference between them is +0.003 with an interval eight times wider than the ef
 Design after Bertalanič & Fortuna: three arms at an **equal total token budget**, including a
 stochastic-noise control in which one analyst receives irrelevant evidence.
 
-| arm | mean F1 | n |
-|---|---|---|
-| single judge, all evidence at once | **{{consensus_single_f1}}** | {{consensus_single_n}} |
-| negotiated multi-agent consensus | {{consensus_negotiated_f1}} | {{consensus_negotiated_n}} |
-| noise control | {{consensus_noise_f1}} | {{consensus_noise_n}} |
+**Table 3: The equal-budget consensus arms.** n is rows; the unit that supports an inference is the
+sample, of which there are {{fixture_clusters}}.
 
-**Paired delta, negotiated − single: −0.016, 95% CI [−0.084, +0.050]** — an interval containing
-zero, at **3.2× the tokens**. The noise control separates from both, so the harness can detect a
-difference when one exists; it does not detect one here.
+| arm | mean F1 | rows | samples |
+|---|---|---|---|
+| single judge, all evidence at once | **{{consensus_single_f1}}** | {{consensus_single_n}} | {{fixture_clusters}} |
+| negotiated multi-agent consensus | {{consensus_negotiated_f1}} | {{consensus_negotiated_n}} | {{fixture_clusters}} |
+| noise control | {{consensus_noise_f1}} | {{consensus_noise_n}} | {{fixture_clusters}} |
+
+**Paired delta, negotiated − single: {{consensus_negotiated_delta}}, 95% cluster CI
+{{consensus_negotiated_ci}}** — an interval containing zero, at **{{consensus_token_ratio}}× the
+tokens**. At 80% power this design could have detected a difference of **{{mde_consensus_negotiated}}
+F1**; the observed difference is two orders of magnitude smaller than that. The null is a bound on
+what the design could see, not a demonstration that the two arms are equivalent.
+
+**What the noise control does and does not license.** Earlier drafts read the control's separation as
+proof that the harness can detect a difference when one exists. It does not carry that weight. The
+control moves by {{consensus_noise_delta}}, {{consensus_noise_ci}} — every one of the
+{{fixture_clusters}} samples in the same direction — but the effect is *below this design's own
+minimum detectable effect* of {{mde_consensus_noise}}, and the exact cluster permutation test returns
+p = {{consensus_noise_p_exact}}. That is the smallest p the design can produce: with
+{{fixture_clusters}} clusters the two-sided sign-flip test floors at {{fixture_signflip_floor}}, so
+**no comparison on this corpus can reach α = 0.05 whatever its effect size**. The honest statement is
+that all {{fixture_clusters}} samples moved the same way, which is worth reporting and is not a
+demonstration of sensitivity.
 
 This was pre-registered as the experiment that would decide the paper's framing, and its null result
 is why this is not a systems paper. The literature's prior ran the same way: two 2026 equal-budget
@@ -93,56 +129,88 @@ studies find single agents match or beat debate, and `arXiv:2604.02460` §5.3 re
 
 Same five fixtures, same prompt, same 2,400-token output budget:
 
-| arm | model | mean F1 | 95% CI | n |
+**Table 4: Local against frontier, same fixtures, same nominal budget.**
+
+| arm | model | mean F1 | rows | samples |
 |---|---|---|---|---|
-| local | Qwen3.6-35B-A3B (IQ3_K_R4) | {{consensus_single_f1}} | — | {{consensus_single_n}} |
-| frontier | Nemotron-3-Super-120B-A12B | {{arm_default_f1}} | {{arm_default_ci}} | {{arm_default_n}} |
+| local | Qwen3.6-35B-A3B (IQ3_K_R4) | {{consensus_single_f1}} | {{consensus_single_n}} | {{fixture_clusters}} |
+| frontier | Nemotron-3-Super-120B-A12B | {{arm_default_f1}} | {{arm_default_n}} | {{fixture_clusters}} |
 
-Both arms see the same five fixtures at the same five repeats, so the comparison is **paired**:
+Both arms see the same fixtures at the same repeats, so the comparison is **paired**:
 
-> **frontier − local = +0.0026**, 95% CI **[−0.0770, +0.0814]**, n=25.
-> The frontier model is better on 12 of the 25 and worse on 13.
+> **frontier − local = {{frontier_local_delta}}**, 95% cluster CI **{{frontier_local_ci}}**,
+> {{frontier_local_pairs}} rows over {{fixture_clusters}} samples.
+> The frontier model is better on {{frontier_local_better}} and worse on {{frontier_local_worse}}.
 
 A 3.4× larger reasoning model, given the same evidence and the same nominal output budget, lands
-within three thousandths of F1 of a 35B model quantised to run on one desktop GPU, and its
-direction across samples is a coin flip.
+within three thousandths of F1 of a 35B model quantised to run on one desktop GPU, and its direction
+across samples is a coin flip.
+
+**That null is not a claim of equivalence, and the interval is the reason.** At 80% power this design
+could have detected a difference of **{{mde_frontier_local}} F1** — coarser than every architectural
+effect reported in this paper, and coarser than the largest configuration effect we found. A design
+that could only ever have seen effects above {{mde_frontier_local}} says nothing about the
+{{frontier_local_delta}} it returned. We report the null because it is what we measured and because
+it is the direction the literature's prior already pointed; we do not report it as evidence that the
+two models are alike.
 
 **We have since found that the two arms were not configured alike, and we report the null with that
 caveat attached.** The local arm runs with its reasoning stream disabled — necessarily, because the
 local server otherwise returns an empty answer — while the frontier arm ran with reasoning on and
-spent 56.5% of its budget there. The nominal budget was equal; the budget available for an *answer*
-was not. How much this matters we can bound from a third endpoint measured later on the same
-fixtures: with reasoning enabled it spent 99.9% of every call's budget thinking and scored **0.000**
-across all 25 calls, and with reasoning disabled the same model scored **0.4501**. One flag was
-worth 0.45 F1 — more than every architectural effect in this paper combined. The frontier arm above
-was not crippled that way (it parsed 25 of 25), so the null is not an artefact of a collapsed arm;
-but it is not the single-variable comparison it appears to be.
+spent {{arm_default_reasoning}} of its budget there. The nominal budget was equal; the budget
+available for an *answer* was not. How much this matters we can bound from a third endpoint measured
+later on the same fixtures: with reasoning enabled it spent {{arm_qwenplus_reasoning}} of every
+call's budget thinking and scored **{{arm_qwenplus_f1}}** across all {{arm_qwenplus_n}} calls, and
+with reasoning disabled the same model scored **{{arm_qwenplus_nothink_f1}}**. That flag is worth
+**{{reasoning_flag_third_delta}} F1**, {{reasoning_flag_third_ci}} — the largest effect measured on
+any arm in this paper. The frontier arm above was not crippled that way (it parsed
+{{arm_default_n}} of {{arm_default_n}}), so the null is not an artefact of a collapsed arm; but it is
+not the single-variable comparison it appears to be.
 
 **The matched arm cannot be built on that endpoint, and we established this by measurement rather
 than by assumption.** We re-ran the 120B arm with the reasoning parameter set. The provider accepted
-it and ignored it: 56.2% of the output was still reasoning, against 56.5% without it, and the arm
-returned 0.4149 where the first run returned 0.4162 (paired Δ = −0.0014, 95% CI [−0.0929, +0.0874],
-n=25). The re-run is therefore a replication of the original configuration, not a correction of it.
-The confound in this comparison is a property of the endpoint, and we report the null with the
-confound stated rather than promising a cleaner version of it.
+it and ignored it: {{arm_default_nothink_reasoning}} of the output was still reasoning, against
+{{arm_default_reasoning}} without it, and the arm returned {{arm_default_nothink_f1}} where the first
+run returned {{arm_default_f1}} (paired Δ = {{frontier_replication_delta}}, 95% cluster CI
+{{frontier_replication_ci}}). The re-run is therefore a replication of the original configuration,
+not a correction of it. The confound in this comparison is a property of the endpoint, and we report
+the null with the confound stated rather than promising a cleaner version of it.
 
 **A matched comparison is available on different weights, and it bounds two things at once.** The
 model we run locally, `qwen3.6-35b-a3b`, is also hosted by its vendor at full precision on an
 endpoint that does honour the flag. Against our local 3-bit deployment, on the same fixtures and
 repeats:
 
-| arm | precision | reasoning | mean F1 | paired vs local | n |
-|---|---|---|---|---|---|
-| local | IQ3_K_R4 (3-bit) | off | {{consensus_single_f1}} | — | {{consensus_single_n}} |
-| vendor-hosted | full | off | {{arm_qwen35ba3b_nothink_f1}} | **−0.0629** [−0.1484, +0.0256] | 25 |
-| vendor-hosted | full | on | {{arm_qwen35ba3b_f1}} | −0.4056 [−0.4667, −0.3418] | 25 |
+**Table 5: The same weights at two precisions, with and without the reasoning flag.** Paired against
+the local arm; intervals resample samples.
 
-Two results follow. First, **quantisation is not this pipeline's handicap**: the 3-bit local
-deployment is not measurably worse than the vendor's own hosting of the same weights, and the
-direction is if anything in its favour. Second, **the reasoning flag replicates at 0.3427 paired**
-(95% CI [−0.4264, −0.2654]) on a second model — this time the one we host — with 24 of 25 calls
-exhausting the output budget on reasoning. The largest effect we have measured on any arm in this
-paper is a configuration flag, not an architecture and not a parameter count.
+| arm | precision | reasoning | mean F1 | paired vs local | 95% cluster CI |
+|---|---|---|---|---|---|
+| local | IQ3_K_R4 (3-bit) | off | {{consensus_single_f1}} | — | — |
+| vendor-hosted | full | off | {{arm_qwen35ba3b_nothink_f1}} | **{{quantisation_delta}}** | {{quantisation_ci}} |
+| vendor-hosted | full | on | {{arm_qwen35ba3b_f1}} | {{vendor_think_delta}} | {{vendor_think_ci}} |
+
+Two results follow, and the first is weaker than we first wrote it. **We cannot detect a quantisation
+penalty, and we cannot rule out a large one**: the paired difference is {{quantisation_delta}} with
+an interval of {{quantisation_ci}}, which admits a penalty of over 0.2 F1 against our local
+deployment, and this design's minimum detectable effect is {{mde_quantisation}}. What the data
+support is that 3-bit quantisation is not *demonstrably* this pipeline's handicap, not that it is
+not one. Second, **the reasoning flag replicates at {{reasoning_flag_vendor35b_delta}} paired**
+({{reasoning_flag_vendor35b_ci}}) on a second model — this time the one we host — with
+{{arm_qwen35ba3b_hit_cap}} of {{arm_qwen35ba3b_n}} calls exhausting the output budget on reasoning.
+The flag is the only effect in this paper that exceeds its own design's minimum detectable effect
+({{mde_reasoning_flag_vendor35b}} here, {{mde_reasoning_flag_third}} on the third endpoint). The
+largest effect we have measured on any arm is a configuration flag, not an architecture and not a
+parameter count.
+
+Two qualifications belong with that, because it is the paper's one positive result. The flag
+comparisons are **post-hoc** — they were run after the confound was discovered, not planned — and are
+corrected as a family of {{family_posthoc_m}}, at which their q-values are
+{{reasoning_flag_vendor35b_q_exact}} and {{reasoning_flag_third_q_exact}}. And like every comparison
+on this corpus they sit at the exact test's floor of {{fixture_signflip_floor}}. They are reported as
+sign-consistent across all {{fixture_clusters}} samples with an effect several times their detection
+threshold, which is the strongest statement this design can support and is not a claim of
+significance.
 
 We report the frontier null because the literature's prior predicts otherwise:
 `arXiv:2606.18166` found parameter size the *only* statistically significant predictor of

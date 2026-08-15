@@ -793,6 +793,193 @@
    "survivors_at_q05_exact": 0
   }
  },
+ "head_to_head": {
+  "cape_f1": {
+   "interval": {
+    "alpha": 0.05,
+    "dropped_draws": 0,
+    "hi": 0.162449,
+    "iters": 20000,
+    "lo": 0.065444,
+    "method": "cluster_bootstrap",
+    "n_clusters": 8,
+    "n_rows": 13,
+    "point": 0.113,
+    "seed": 20260815
+   },
+   "mean": 0.113
+  },
+  "corpus": "cape-n97",
+  "dynamic_f1": {
+   "interval": {
+    "alpha": 0.05,
+    "dropped_draws": 0,
+    "hi": 0.148508,
+    "iters": 20000,
+    "lo": 0.08233,
+    "method": "cluster_bootstrap",
+    "n_clusters": 8,
+    "n_rows": 13,
+    "point": 0.115985,
+    "seed": 20260815
+   },
+   "mean": 0.115985
+  },
+  "k": 8,
+  "n": 13,
+  "note": "the 13 samples that completed both arms, all three scored on one truth",
+  "per_sample": [
+   {
+    "cape_f1": 0.176471,
+    "dynamic_f1": 0.169,
+    "family": "trickbot",
+    "sha256": "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941",
+    "static_only_f1": 0.1231
+   },
+   {
+    "cape_f1": 0.166667,
+    "dynamic_f1": 0.0714,
+    "family": "azorult",
+    "sha256": "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7",
+    "static_only_f1": 0.1
+   },
+   {
+    "cape_f1": 0.294118,
+    "dynamic_f1": 0.1875,
+    "family": "darkcomet",
+    "sha256": "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d",
+    "static_only_f1": 0.2581
+   },
+   {
+    "cape_f1": 0.111111,
+    "dynamic_f1": 0.2143,
+    "family": "pony",
+    "sha256": "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab",
+    "static_only_f1": 0.1429
+   },
+   {
+    "cape_f1": 0.144928,
+    "dynamic_f1": 0.1714,
+    "family": "trickbot",
+    "sha256": "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578",
+    "static_only_f1": 0.169
+   },
+   {
+    "cape_f1": 0.057143,
+    "dynamic_f1": 0.1622,
+    "family": "icedid",
+    "sha256": "2a07b1741dbf216a188938d0fec870f8395374f760c6bf452f0a0479e975b018",
+    "static_only_f1": 0.1176
+   },
+   {
+    "cape_f1": 0.054054,
+    "dynamic_f1": 0.0556,
+    "family": "icedid",
+    "sha256": "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47",
+    "static_only_f1": 0.0606
+   },
+   {
+    "cape_f1": 0.034483,
+    "dynamic_f1": 0.1481,
+    "family": "emotet",
+    "sha256": "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535",
+    "static_only_f1": 0.1132
+   },
+   {
+    "cape_f1": 0.047619,
+    "dynamic_f1": 0.0455,
+    "family": "bumblebee",
+    "sha256": "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969",
+    "static_only_f1": 0.0488
+   },
+   {
+    "cape_f1": 0.133333,
+    "dynamic_f1": 0.0,
+    "family": "pony",
+    "sha256": "37289955e43235c56374e1cee02a98bd78d1448f02377caa92255c87a9df014e",
+    "static_only_f1": 0.0
+   },
+   {
+    "cape_f1": 0.151515,
+    "dynamic_f1": 0.1714,
+    "family": "trickbot",
+    "sha256": "3a311fa2632d70ba58f402a83270f3111ebd0074fe45ecfad273ebb8aecdd328",
+    "static_only_f1": 0.1944
+   },
+   {
+    "cape_f1": 0.097561,
+    "dynamic_f1": 0.0526,
+    "family": "icedid",
+    "sha256": "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9",
+    "static_only_f1": 0.0541
+   },
+   {
+    "cape_f1": 0.0,
+    "dynamic_f1": 0.0588,
+    "family": "pikabot",
+    "sha256": "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c",
+    "static_only_f1": 0.087
+   }
+  ],
+  "pipeline_minus_cape": {
+   "better": 7,
+   "cluster_means": [
+    0.012962,
+    -0.095267,
+    -0.106618,
+    -0.015072,
+    0.020547,
+    0.113617,
+    -0.002119,
+    0.0588
+   ],
+   "cluster_sd": 0.073299,
+   "delta": 0.002984,
+   "interval": {
+    "alpha": 0.05,
+    "dropped_draws": 0,
+    "hi": 0.034381,
+    "iters": 20000,
+    "lo": -0.03526,
+    "method": "cluster_bootstrap",
+    "n_clusters": 8,
+    "n_rows": 13,
+    "point": 0.002984,
+    "seed": 20260815
+   },
+   "mde_t": 0.084501,
+   "mde_z": 0.072604,
+   "n_pairs": 13,
+   "p_bootstrap": 0.8515,
+   "p_exact_signflip": 0.960938,
+   "p_floor": 0.007812,
+   "structure": {
+    "design_effect": 1.0,
+    "effective_n": 13.0,
+    "icc": 0.0,
+    "icc_raw": -0.249971,
+    "k": 8,
+    "mean_cluster_size": 1.625,
+    "n_rows": 13
+   },
+   "worse": 6
+  },
+  "static_only_f1": {
+   "interval": {
+    "alpha": 0.05,
+    "dropped_draws": 0,
+    "hi": 0.154283,
+    "iters": 20000,
+    "lo": 0.077017,
+    "method": "cluster_bootstrap",
+    "n_clusters": 8,
+    "n_rows": 13,
+    "point": 0.112985,
+    "seed": 20260815
+   },
+   "mean": 0.112985
+  }
+ },
  "judge_contribution": {
   "arms": 80,
   "note": "the row count is arms, not independent trials; the denominator that supports an inference is the sample count",
