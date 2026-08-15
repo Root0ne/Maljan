@@ -65,7 +65,7 @@ effect toward zero and manufactures a null.
 
 **How many distinct outputs did the N inputs produce?** If far fewer than N differ on a dimension
 that should vary, the instrument is repeating itself. The four *boundary* defects in §6 were found
-this way and none by a 2,666-test suite. The three that are ours rather than a server's were not:
+this way and none by a {{test_count}}-test suite. The three that are ours rather than a server's were not:
 their outputs do vary, and what found them was a number too clean to believe, an arms table read
 under a correlation, and a study that recorded which failure branch each call took.
 

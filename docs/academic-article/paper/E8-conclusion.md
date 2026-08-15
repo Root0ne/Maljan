@@ -14,7 +14,7 @@ did not hold.
 
 | claim | measured |
 |---|---|
-| negotiated multi-agent consensus beats a single judge | ΔF1 **−0.016**, 95% CI [−0.084, +0.050], at **3.2×** the tokens |
+| negotiated multi-agent consensus beats a single judge | ΔF1 **{{consensus_negotiated_delta}}**, 95% CI [−0.084, +0.050], at **3.2×** the tokens |
 | a multi-layer corroboration cascade improves the verdict | corroboration never reaches the artefact — and the model is not the reason: reconciliation restores every cascade technique the judge omits, and across **80 of 80** arms the judge added nothing of its own, so the ablation's 0-of-32 and 32-of-32 are arithmetic |
 | two-tier attribution identifies families | opcode-hash tier fires on **0 of 18** samples; family-feature retrieval contributes **+0.003 F1** |
 | falsification-before-confidence disciplines claims | the cap fires on **0.82%** of techniques |
@@ -51,7 +51,7 @@ This is the finding we did not expect to be the paper. Four defects at the bound
 pipeline and the servers it depends on each produced *plausible results rather than errors*: an
 unset optional argument arriving as an explicit `null`; a program reported as loaded, by name, that
 never became the one being analysed; a refused load returning HTTP 200 with the error in the body;
-and two protective bounds composing into an empty result. **A suite of 2,666 passing tests caught
+and two protective bounds composing into an empty result. **A suite of {{test_count}} passing tests caught
 none of them**, and not because the tests were bad — each defect requires a second call, a second
 server, or a large input, which is precisely what a fast unit suite is built to avoid.
 
@@ -108,14 +108,14 @@ the instrument.
 We claim: the measured negatives above; seven failure mechanisms with the layer each occurred at,
 four of them at a boundary with another server and three inside our own code; a detector that found
 the four boundary cases and costs one line, together with what found the other three; and a no-LLM
-baseline of **F1 0.153** [0.134, 0.171], n=97, without which none of our F1 numbers refer to
+baseline of **F1 {{baseline_f1}}** [0.134, 0.171], n={{baseline_n}}, without which none of our F1 numbers refer to
 anything — and against which the full pipeline gains **0.003 F1**.
 
 We claim one result about the architecture that we did not go looking for: the verdict model's
 influence on the artefact is **conditional on the model working**. Where it returns a parsable
-verdict it supplies 0 of 99 techniques, because a post-processing step restores the deterministic
+verdict it supplies {{judge_capped_own_ids}} of {{judge_capped_bundle}} techniques, because a post-processing step restores the deterministic
 set regardless; where it fails, a text fallback lifts identifiers out of the unparsable response and
-47 techniques reach the analyst that no evidence source corroborated. The design suppresses the
+{{fallback_only_capped}} techniques reach the analyst that no evidence source corroborated. The design suppresses the
 model's contribution exactly when the model is functioning and admits it exactly when it is not.
 
 We do not claim that multi-agent decomposition cannot work, that these retrieval designs are

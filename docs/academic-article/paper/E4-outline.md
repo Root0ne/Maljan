@@ -20,7 +20,7 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > instrument was frequently wrong in ways that produced plausible results rather than errors.
 >
 > Four of our architectural claims were tested and did not survive. Negotiated multi-agent consensus
-> did not beat a single judge at equal token budget (paired ΔF1 −0.016, 95% CI [−0.084, +0.050], at
+> did not beat a single judge at equal token budget (paired ΔF1 {{consensus_negotiated_delta}}, 95% CI [−0.084, +0.050], at
 > 3.2× the tokens). Three independently built retrieval components — an ATT&CK case-prior index, a
 > family-feature index, and an opcode-hash attribution tier — each work in isolation and contribute
 > +0.003 F1, lose to a frequency prior, and fire on 0 of 18 samples respectively. A deterministic
@@ -30,10 +30,10 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > that would have matched the two arms' reasoning budgets is accepted and ignored there.
 >
 > The verdict model's influence over its own output is not small but **conditional on it working**.
-> Where the model returns a parsable verdict it supplies **0 of 99** techniques in the bundle the
+> Where the model returns a parsable verdict it supplies **{{judge_capped_own_ids}} of {{judge_capped_bundle}}** techniques in the bundle the
 > analyst receives; a post-processing step restores the deterministic set regardless. Where it fails
 > — half of calls, in a degenerate decode our own output cap had never bounded — a text fallback
-> scrapes identifiers out of the unparsable response, and **47 techniques reach the analyst that no
+> scrapes identifiers out of the unparsable response, and **{{fallback_only_capped}} techniques reach the analyst that no
 > evidence source corroborated**, in the same object type as those three sources agreed on. All 45
 > unique identifiers are real ATT&CK techniques, which is what makes them indistinguishable.
 >
@@ -43,7 +43,7 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > composing into an empty result. **Three are ours** — an ablation that varied a deterministic code
 > path and reported a language model, a correlation that ranked a configuration flag and reported a
 > parameter count, and a documented output ceiling renamed during serialisation to a key the
-> inference server does not read. A suite of 2,666 passing tests caught none of them, and the last
+> inference server does not read. A suite of {{test_count}} passing tests caught none of them, and the last
 > three had passing tests over the exact functions concerned. The four boundary defects were all
 > found by one check — how many **distinct** outputs N inputs produced; the other three were not,
 > and we say what did find them.
@@ -54,7 +54,7 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > because the retention rule we adopted after the first failure was scoped to that failure.
 >
 > We contribute the measured negatives, the failure mechanisms with the layer each occurred at, the
-> cheap detector that found four of them, and a no-LLM baseline (F1 0.153, n=97) against which all of
+> cheap detector that found four of them, and a no-LLM baseline (F1 {{baseline_f1}}, n={{baseline_n}}) against which all of
 > it is read. We argue that in a pipeline assembled from other people's servers a server that answers
 > is not the same as a server that answered your question — and that the same shape does not stop at
 > the network boundary: it appears wherever a measurement's cause is assigned rather than measured.
@@ -97,7 +97,7 @@ the servers it depends on. In each case a server answered successfully and answe
 else: an argument the agent never supplied arrived as an explicit `null`; a program reported as
 loaded — by name — never became the one being analysed; a refused load returned HTTP 200 with an
 error in the body; and two bounds designed to protect the analyst composed into a path that
-returned nothing at all. None was caught by 2,666 passing tests, because each needs a *second* case
+returned nothing at all. None was caught by {{test_count}} passing tests, because each needs a *second* case
 in one server lifetime, and a unit test writes one.
 
 Every one of those four was caught the same way: **a number repeated where variation was expected.**

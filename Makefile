@@ -130,3 +130,14 @@ ghidra-watch:
 
 # Legacy alias
 rebuild-ghidra: ghidra-build
+
+# The paper. Facts first, always: build_paper.py refuses to run against a
+# paper_facts.json older than any result it summarises, so this ordering is not
+# a convenience — the reverse order fails loudly, which is the point.
+.PHONY: paper facts
+facts:
+	.venv/bin/python tests/evaluation/paper_facts.py
+
+paper: facts
+	.venv/bin/python tests/evaluation/make_paper_figures.py
+	.venv/bin/python docs/academic-article/paper/build_paper.py

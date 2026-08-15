@@ -33,7 +33,7 @@ answer with no error anywhere.**
 | **M2** | `load_program` reported success *with the right program name* but did not change the server's current program | every sample after the first analysed the first binary |
 | **M3** | a refused load answers **HTTP 200** with an error body | hints and function hashes built from a different binary |
 
-None was caught by a test suite of **2,666 passing tests** — not by accident: M2 and M3 require a
+None was caught by a test suite of **{{test_count}} passing tests** — not by accident: M2 and M3 require a
 *second* case within one server lifetime, and a unit test writes one. A fourth defect, found later
 in the same week, made the analyst return **zero techniques on any binary rich enough to exhaust its
 step budget**, because two protective bounds composed: exceeding the step cap triggers a synthesis

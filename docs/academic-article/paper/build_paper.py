@@ -26,6 +26,7 @@ Run: .venv/bin/python docs/academic-article/paper/build_paper.py
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -191,6 +192,68 @@ def pandoc(md_text: str, label: str) -> str:
     return proc.stdout
 
 
+FACTS_PATH = HERE.parent.parent.parent / "tests" / "evaluation" / "paper_facts.json"
+_PLACEHOLDER = re.compile(r"\{\{([a-z0-9_]+)\}\}")
+
+
+def load_facts() -> dict[str, str]:
+    """Numbers derived from the record, for substitution into the prose.
+
+    Written by ``tests/evaluation/paper_facts.py`` from the committed per-sample
+    artifacts. Absent, the build fails rather than emitting a paper with holes in
+    it — a placeholder rendered literally would be visible, but a build that
+    quietly skipped substitution would not.
+    """
+    if not FACTS_PATH.exists():
+        print(
+            f"missing {FACTS_PATH.name} — run tests/evaluation/paper_facts.py first",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    # Deriving the numbers only helps if the derivation is current. Without this
+    # the staleness simply moves one level: the paper would faithfully quote a
+    # facts file computed before the last run finished. Any artifact newer than
+    # the facts stops the build rather than being averaged into a plausible page.
+    facts_mtime = FACTS_PATH.stat().st_mtime
+    newer = [
+        p.name
+        for p in FACTS_PATH.parent.glob("*.json")
+        if p != FACTS_PATH and p.stat().st_mtime > facts_mtime + 1
+    ]
+    if newer:
+        print(
+            "BUILD FAILED — these results changed after the facts were derived:",
+            file=sys.stderr,
+        )
+        for n in sorted(newer)[:12]:
+            print(f"  {n}", file=sys.stderr)
+        print("  re-run tests/evaluation/paper_facts.py", file=sys.stderr)
+        raise SystemExit(1)
+
+    return json.loads(FACTS_PATH.read_text())
+
+
+def substitute_facts(md: str, facts: dict[str, str], label: str) -> tuple[str, list[str]]:
+    """Replace ``{{name}}`` with the derived value; report every name that is not one.
+
+    Unresolved placeholders are returned rather than raised so the build can list
+    all of them at once. They are fatal: a number the paper asks for and cannot
+    get is the failure this whole mechanism exists to make loud, and the four
+    drifts that motivated it were all silent.
+    """
+    missing: list[str] = []
+
+    def repl(m: re.Match[str]) -> str:
+        name = m.group(1)
+        if name not in facts:
+            missing.append(f"{label}: {{{{{name}}}}}")
+            return m.group(0)
+        return facts[name]
+
+    return _PLACEHOLDER.sub(repl, md), missing
+
+
 def strip_own_title(md: str) -> str:
     """Drop the file's leading H1 — the build already emitted a section title.
 
@@ -242,6 +305,9 @@ def main() -> int:
         return 1
     BUILD.mkdir(exist_ok=True)
 
+    facts = load_facts()
+    unresolved: list[str] = []
+
     outline = (HERE / "E4-outline.md").read_text()
     abstract_md = extract_abstract(outline)
     intro_md = extract_introduction(outline)
@@ -253,6 +319,10 @@ def main() -> int:
     violations += check_anonymity("introduction", intro_md)
 
     body.append("\\section{Introduction}\n")
+    abstract_md, miss = substitute_facts(abstract_md, facts, "abstract")
+    unresolved += miss
+    intro_md, miss = substitute_facts(intro_md, facts, "introduction")
+    unresolved += miss
     intro_clean = strip_manual_numbers(strip_draft_notes(intro_md))
     body.append(demote_headings(pandoc(intro_clean, "introduction")))
 
@@ -263,6 +333,8 @@ def main() -> int:
             continue
         md = strip_draft_notes(rewrite_figures(src.read_text()))
         md = strip_manual_numbers(strip_own_title(md))
+        md, miss = substitute_facts(md, facts, filename)
+        unresolved += miss
         violations += check_anonymity(filename, md)
         body.append(f"\n\\section{{{title}}}\n")
         body.append(demote_headings(pandoc(md, filename)))
@@ -272,11 +344,19 @@ def main() -> int:
     if app_src.exists():
         md = strip_draft_notes(rewrite_figures(app_src.read_text()))
         md = strip_manual_numbers(strip_own_title(md))
+        md, miss = substitute_facts(md, facts, APPENDIX[0])
+        unresolved += miss
         violations += check_anonymity(APPENDIX[0], md)
         body.append("\n\\appendix\n")
         body.append(f"\n\\section{{{APPENDIX[1]}}}\n")
         body.append(demote_headings(pandoc(md, APPENDIX[0])))
         print(f"  converted {APPENDIX[0]} (appendix)")
+
+    if unresolved:
+        print("\nBUILD FAILED — the paper asked for numbers that do not exist:", file=sys.stderr)
+        for u in unresolved:
+            print(f"  {u}", file=sys.stderr)
+        return 1
 
     if violations:
         print("\nBUILD FAILED — the system name reached the paper:", file=sys.stderr)

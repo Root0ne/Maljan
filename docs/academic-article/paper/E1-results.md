@@ -15,9 +15,9 @@ technique IDs deterministically, with no language model anywhere:**
 |---|---|---|
 | precision | 0.2413 | [0.2123, 0.2711] |
 | recall | 0.1328 | [0.1131, 0.1529] |
-| **F1** | **0.1526** | **[0.1344, 0.1709]** |
+| **F1** | **{{baseline_f1}}** | **[0.1344, 0.1709]** |
 
-n = 97, bootstrap CI, seed recorded. CAPE asserted at least one technique on **every** sample
+n = {{baseline_n}}, bootstrap CI, seed recorded. CAPE asserted at least one technique on **every** sample
 (1 minimum, 11 median, 33 maximum), so this is a real predictor rather than an artefact of an empty
 one. Ground truth resolution uses the same alias map as the drift harness, so the two studies score
 identically.
@@ -76,9 +76,9 @@ stochastic-noise control in which one analyst receives irrelevant evidence.
 
 | arm | mean F1 | n |
 |---|---|---|
-| single judge, all evidence at once | **0.4136** | 25 |
-| negotiated multi-agent consensus | 0.3975 | 25 |
-| noise control | 0.3366 | 25 |
+| single judge, all evidence at once | **{{consensus_single_f1}}** | {{consensus_single_n}} |
+| negotiated multi-agent consensus | {{consensus_negotiated_f1}} | {{consensus_negotiated_n}} |
+| noise control | {{consensus_noise_f1}} | {{consensus_noise_n}} |
 
 **Paired delta, negotiated − single: −0.016, 95% CI [−0.084, +0.050]** — an interval containing
 zero, at **3.2× the tokens**. The noise control separates from both, so the harness can detect a
@@ -96,7 +96,7 @@ Same five fixtures, same prompt, same 2,400-token output budget:
 | arm | model | mean F1 | 95% CI | n |
 |---|---|---|---|---|
 | local | Qwen3.6-35B-A3B (IQ3_K_R4) | 0.4136 | — | 25 |
-| frontier | Nemotron-3-Super-120B-A12B | 0.4162 | [0.3596, 0.4711] | 25 |
+| frontier | Nemotron-3-Super-120B-A12B | {{arm_default_f1}} | {{arm_default_ci}} | {{arm_default_n}} |
 
 Both arms see the same five fixtures at the same five repeats, so the comparison is **paired**:
 
@@ -134,8 +134,8 @@ repeats:
 | arm | precision | reasoning | mean F1 | paired vs local | n |
 |---|---|---|---|---|---|
 | local | IQ3_K_R4 (3-bit) | off | 0.4136 | — | 25 |
-| vendor-hosted | full | off | 0.3507 | **−0.0629** [−0.1484, +0.0256] | 25 |
-| vendor-hosted | full | on | 0.0080 | −0.4056 [−0.4667, −0.3418] | 25 |
+| vendor-hosted | full | off | {{arm_qwen35ba3b_nothink_f1}} | **−0.0629** [−0.1484, +0.0256] | 25 |
+| vendor-hosted | full | on | {{arm_qwen35ba3b_f1}} | −0.4056 [−0.4667, −0.3418] | 25 |
 
 Two results follow. First, **quantisation is not this pipeline's handicap**: the 3-bit local
 deployment is not measurably worse than the vendor's own hosting of the same weights, and the
@@ -256,10 +256,10 @@ in. On the four calls that reached it:
 
 | | total | per call |
 |---|---|---|
-| attack-patterns the judge emitted | 50 | 12.5 |
-| carrying a resolvable ATT&CK ID | 12 | 3.0 |
-| **dropped — the model named no technique** | **38 (76.0%)** | 9.5 |
-| **IDs the cascade did not already hold** | **0** | 0.0 |
+| attack-patterns the judge emitted | {{judge_capped_emitted}} | 12.5 |
+| carrying a resolvable ATT&CK ID | {{judge_capped_resolvable}} | 3.0 |
+| **dropped — the model named no technique** | **{{judge_capped_dropped}} ({{judge_capped_dropped_share}})** | 9.5 |
+| **IDs the cascade did not already hold** | **{{judge_capped_own_ids}}** | 0.0 |
 | injected because the judge omitted them | 87 | 21.8 |
 
 Three of the four calls produced nothing nameable at all; the fourth named twelve techniques, every
@@ -293,7 +293,7 @@ is 18,748 to 24,710 characters of degenerate decode, and:
 | `sliver` | **46** | 23 | **23** |
 | `wannacry` | 26 | 16 | **10** |
 
-**Forty-seven techniques reach the analyst that the corroboration cascade never held**, and none
+**{{fallback_only_capped}} techniques reach the analyst that the corroboration cascade never held**, and none
 goes the other way. On one sample the bundle doubles. Because the uncapped run is a control whose
 raw text provably contains no IDs, every one of the 47 is attributable to the model's own output.
 They passed through no filter at all — not the cascade, not the reconciliation step, not the
@@ -397,7 +397,7 @@ never for data already collected.
 third was the 630-second timeout, which is an outcome — deleting an outcome one dislikes is selection
 rather than repair. The recovered pair contributed a −4, against the hint.
 
-Running it, however, surfaced a production defect that the test suite (2,666 passing) did not: on any binary
+Running it, however, surfaced a production defect that the test suite ({{test_count}} passing) did not: on any binary
 rich enough to exhaust the 40-step ReAct budget, the analyst returned **zero techniques**, because
 the salvage path received a fresh copy of a budget it was already inside. Fixed and verified on the
 same sample: **1,677 s → 323 s, 0 → 5 technique IDs**. The fix is partial — one sample still exceeds
