@@ -407,6 +407,7 @@ are eight times slower than assumed.
 
 ## Summary
 
-Of the four architectural claims this system was built around, three are now measured and negative
-or near-null, and the fourth is unmeasured pending sandbox access. What survived measurement is not
-the architecture but the account of measuring it.
+Of the four architectural claims this system was built around, **all four are now measured and every
+one is negative or near-null.** None is left pending sandbox access: the cascade closed on the
+recovered cohort and the attribution tier's remaining half fired on 0 of 18 samples. What survived
+measurement is not the architecture but the account of measuring it.

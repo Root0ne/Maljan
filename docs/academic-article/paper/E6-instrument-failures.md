@@ -293,7 +293,9 @@ serialised.
 
 ## 6.3 What did find them: output cardinality
 
-Each was found by the same observation: **a number that repeated where variation was expected.**
+Five of the seven were found by the same observation: **a number that repeated where variation was
+expected.** M6 and M7 were not, and §6.2 says what did find them — their outputs vary, so there is
+no repetition to notice.
 
 | observation | defect |
 |---|---|
@@ -336,10 +338,10 @@ exists precisely for programs whose correct output is unknown. The inverse — d
 items to verify identical inputs score consistently — is already an eval-harness practice [23]. And
 the genus is described: a longitudinal study of a production LLM agent runtime defines the
 meta-pattern as *"a failure whose error signal never reaches a human in actionable form"* and gives
-a five-class taxonomy [20] into which all four of our **boundary** mechanisms fall. M5 and M6 share
-the meta-pattern but not the setting: no server misled us, and no protocol was involved. They arose
-inside our own analysis code, where the taxonomy's classes — all of which describe a call to
-something else — do not reach.
+a five-class taxonomy [20] into which all four of our **boundary** mechanisms fall. M5, M6 and M7 share
+the meta-pattern but not the setting: no server misled us, and no protocol was involved. Two arose
+inside our own analysis code and one inside the production pipeline, and in all three the
+taxonomy's classes — every one of which describes a call to something else — do not reach.
 
 ## 6.4 What it cost
 

@@ -290,6 +290,23 @@ def fig_arms():
 # --------------------------------------------------------------------------
 # Figure 4 — firing rate decides whether an ablation can be read at all
 # --------------------------------------------------------------------------
+
+
+def _cascade_arms_varied() -> int:
+    """How many ablation arms the cascade study actually varied.
+
+    Hard-coded as 15 until 2026-08-15, which was the *superseded* first pass. The
+    re-run varies 32 arms and the Results text says so in the same paragraph that
+    the figure sits beside — "the null survives all of it, at 32 arms rather than
+    15". The figure was plotting the study the text had already retired, which is
+    precisely the drift this module exists to prevent, so it is derived rather
+    than written down.
+    """
+    rows = load("layer0_verdict_v2_overlap.json")["arms"]
+    base = {(r["sample_id"], r["repeat"]): r["technique_ids"] for r in rows if r["arm"] == "all"}
+    return sum(1 for r in rows if r["arm"] != "all" and (r["sample_id"], r["repeat"]) in base)
+
+
 def fig_firing():
     cap = load("confidence_cap.json")["summary"]
     freq = load("sink_hint_frequency.json")["results"]
@@ -300,7 +317,11 @@ def fig_firing():
     items = [
         ("opcode-hash attribution tier", 0.0, "0 of 18 samples"),
         ("confidence cap", cap["capped_share_of_all_techniques"], "11 of 1,348 techniques"),
-        ("corroboration cascade\n(verdict changed)", 0.0, "0 of 15 varied cases"),
+        (
+            "corroboration cascade\n(verdict changed)",
+            0.0,
+            f"0 of {_cascade_arms_varied()} varied cases",
+        ),
         (
             "sink-reachability hint",
             hint_rate,
