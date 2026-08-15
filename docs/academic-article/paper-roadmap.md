@@ -587,7 +587,13 @@ than quietly inheriting.
       formatting, paraphrase, verbosity and the ground-truth label. [21] was quoted verbatim for a
       sentence that is not in it, exactly as its own audit row had warned. [22] verified clean
       (title, authors, DOI, and the "notorious oracle problem" phrasing we rely on). [24] was
-      already verified. [17]–[19] remain search-result-level and are the last citation debt.
+      already verified. **Citation debt cleared the same day: [16]–[25] have all been fetched.** Three were wrong —
+      [21] quoted a sentence that is not in its source, [23] was cited for a practice its source
+      does not describe, and [18]'s mechanism blended two incompatible accounts (Welleck blames the
+      likelihood objective; the data-side account is a different paper's). [17] re-anchored to the
+      CoNLL-2014 and BEA-2019 shared tasks, which document the F0.5 convention directly. [19]
+      verified word for word. Five arXiv ids that had been carried as company for fetched
+      citations, and never themselves fetched, are dropped rather than kept as decoration.
       *(original entry follows)* — the M6/M7 counter-search folded in as
       [24] and [25] with per-citation verification status, `arXiv:2604.00025` recorded as owning
       M6's phenomenon, and one claim added about where the published taxonomy *ends*: its five

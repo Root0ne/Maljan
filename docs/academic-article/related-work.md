@@ -78,9 +78,12 @@ tuning.
 Finally, the failure that motivates removing identifier recall in the first place. Asked for an
 ATT&CK identifier it does not know, the model enters a degenerate loop, proposing and re-proposing
 wrong identifiers until the budget is gone. **The loop is not novel and neither is the inadequacy
-of the obvious remedy:** neural text degeneration is a studied phenomenon with an established
-account rooted in self-reinforcement and training-data repetition [18], and the limits of a
-uniform repetition penalty are known — it damages tokens that legitimately recur. We reproduce
+of the obvious remedy:** neural text degeneration is a studied phenomenon with competing
+established accounts — Welleck et al. locate the cause in the *likelihood objective itself*, which
+"assigns too much probability to sequences containing repeats", while a later data-side analysis
+finds a strong correlation with **repetition already present in the training data** and argues that
+the earlier self-reinforcement explanations reduce to it [18]. The limits of a uniform repetition
+penalty are known either way — it damages tokens that legitimately recur. We reproduce
 that here and can add one engine-level detail, that the server honours `repeat_penalty` while
 silently ignoring three sibling parameters, which converts a tight loop into a slower enumeration
 without fixing it.
@@ -326,9 +329,9 @@ verification status differs — deliberately recorded rather than smoothed over:
 | # | Source | Verified how |
 |---|---|---|
 | [16] | Abdallah, Holdcroft, Ali & Jatowt, *Are LLM-Based Retrievers Worth Their Cost?*, `arXiv:2604.03676` | **Abstract fetched and read.** The quoted claims are from it |
-| [17] | Grammatical error correction's over-correction literature and the F0.5 convention | **Search results only.** Named, checkable candidates: *Leveraging What's Overfixed: Post-Correction via LLM Grammatical Error Overcorrection*; *Edit-Wise Preference Optimization for GEC* (COLING 2025). **Must be read in full and resolved to specific records before submission** |
-| [18] | Neural text degeneration: Welleck et al., `arXiv:1908.04319`; *Repetition In Repetition Out*, `arXiv:2310.10226` (NeurIPS'23); *Rethinking Repetition Problems of LLMs in Code Generation*, `arXiv:2505.10402` | **Search results only.** Same requirement |
-| [19] | Temporal generalisation: Lazaridou et al., *Mind the Gap* (NeurIPS'21); TemporalWiki `arXiv:2204.14211`; TARDIS `arXiv:2503.18693` | **Search results only.** Same requirement |
+| [17] | The F0.5 convention in grammatical error correction: Ng et al., *The CoNLL-2014 Shared Task on GEC*; Bryant et al., *The BEA-2019 Shared Task on GEC* | **Re-anchored and verified 2026-08-15.** The claim is that GEC weights precision over recall because a false correction costs more than a missed one, and the shared tasks are its primary source: F0.5 is the main metric in both, weighting precision twice recall, chosen to penalise over-correction. The two candidate papers previously listed here were never fetched and are **dropped** — the convention is documented by the tasks themselves and does not need them |
+| [18] | Welleck, Kulikov, Roller, Dinan, Cho & Weston, *Neural Text Generation with Unlikelihood Training*, `arXiv:1908.04319`; Li, Lan, Fu, Cai, Liu, Collier, Watanabe & Su, *Repetition In Repetition Out*, `arXiv:2310.10226` | **Both abstracts fetched 2026-08-15 — and our summary of them was wrong.** We had written "an established account rooted in self-reinforcement and training-data repetition". Welleck's account is neither: it blames *the likelihood objective itself*. The data-side account is the second paper's, which finds a strong correlation with repetition in the training data and argues self-reinforcement explanations reduce to it. Corrected in the body to two named accounts rather than one blended one. The third id previously listed (`arXiv:2505.10402`) was never fetched and is dropped |
+| [19] | Lazaridou, Kuncoro, Gribovskaya, Agrawal, Liska, Terzi, Gimenez, de Masson d'Autume, Kocisky, Ruder, Yogatama, Cao, Young & Blunsom, *Mind the Gap: Assessing Temporal Generalization in Neural Language Models*, NeurIPS 2021, `arXiv:2102.01951` | **Abstract fetched and read 2026-08-15; supports the claim exactly.** Both halves are quoted from it: *"model performance becomes increasingly worse with time"* and *"while increasing model size alone — a key driver behind recent progress — does not solve this problem"*. The arXiv id is recorded now because it was missing and a first attempt to verify this row fetched the wrong paper. TemporalWiki and TARDIS were never fetched and are dropped |
 
 | [20] | Wei Wu, *When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime*, `arXiv:2606.14589` | **Abstract page fetched and read.** Title, sole author, the 22-incident/8-week scope, the *"error signal never reaches a human in actionable form"* definition and the five-class taxonomy are all from the paper. The full text has **not** been read, and the abstract does not itself claim coverage of HTTP-status-versus-body or stale-state failures — our mapping of M1–M3 onto its classes is **our reading and must be checked against the body before submission** |
 | [21] | *From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents*, `arXiv:2507.16044` | **Abstract fetched and read, 2026-08-15 — and it corrected us.** The sentence we had quoted, *"silent downstream reasoning failures rather than explicit, testable errors"*, **is not in the paper**; it came from a search summary, exactly as the previous row warned. Removed. What the abstract does state is quoted now instead: 76% of sampled tools wrap successfully, 94.2% after automated repair. The two companion arXiv ids previously listed here were never fetched and are dropped rather than carried |
@@ -342,6 +345,12 @@ ours before it was made, which is the point of running the search first:**
 |---|---|---|
 | [24] | *Brevity Constraints Reverse Performance Hierarchies in Language Models*, `arXiv:2604.00025` | **Abstract fetched and read.** The 28.4-point underperformance of larger models under spontaneous verbosity, the 7.7–15.9-point inversion under brevity constraints, and the framing of universal evaluation protocols as masking latent capability are all quoted from it. The full text has **not** been read; our claim that our reasoning-flag arm is a brevity-constrained arm under another name is **our reading and must be checked against the body before submission** |
 | [25] | Token-limit incompatibility across OpenAI-compatible servers: `ggml-org/llama.cpp` issue **#8634** (`max_tokens` not respected on the non-chat endpoint, generation continuing to the context limit); `vllm-project/vllm` issue **#11976** (request for a server-side cap) | **Search results only.** The issues have not been read in full. They are cited to *demote* our M7 from a new mechanism to a known integration wart, which is the safe direction; a submitted paper needs them read |
+
+**All of [17]–[25] have now been fetched (2026-08-15), and three of the nine were wrong.** [21]
+was quoted for a sentence not in it; [23] was cited for a practice it does not describe; [18]'s
+mechanism was a blend of two incompatible accounts. Each is corrected above, and the citations that
+were never fetched at all — five arXiv ids carried as company for the ones that were — are dropped
+rather than kept as decoration.
 
 Acting on [17]–[23] now is conservative because each one *demotes* a claim of ours — the safe
 direction. Citing them in a submitted paper on this basis would not be, and the standing rule from
