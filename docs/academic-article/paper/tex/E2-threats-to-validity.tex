@@ -212,6 +212,52 @@ we suggest --- as a proposal, on seven cases from one project --- that the organ
 both is \textbf{attribution rather than boundary}: the shape appears wherever a measurement's cause is
 assigned rather than measured.
 
+\subsection{Could the label have leaked into the evidence?}\label{circularity}
+
+A scored component that derives its output from the same source as the labels is
+scoring a tautology. We tested this rather than assuming it, component by
+component, and report the result including the part that is unflattering.
+
+\textbf{Ground truth} is the MITRE \texttt{malware --uses--> attack-pattern}
+relationship set, built from the public ATT\&CK STIX distribution and resolved to
+a sample through its family signature. It is family-level, which is a ceiling
+this section discusses elsewhere; here what matters is that it comes from MITRE
+and from nothing this project produces.
+
+\textbf{The Sigma layer is not circular.} It reads the technique identifier from
+each rule's own \texttt{attack.tNNNN} tag, and the rules are community-authored
+detections with hand-written tags. Sigma shares ATT\&CK's \emph{vocabulary} with
+the labels and not their \emph{source}: a tag says what a telemetry pattern
+means, ground truth says what a family is catalogued as doing. There is no path
+from a family label into a rule tag.
+
+\textbf{The sandbox baseline is not circular}, and this is the one that would
+have mattered most. Its technique identifiers come from class attributes
+hand-written in each signature module, mapped through the sandbox's own
+identifier table. No family attribution is consulted anywhere on that path, which
+is precisely what makes it a valid baseline rather than a second view of the
+answer.
+
+\textbf{The retrieval corpora do not overlap the evaluation cohorts.} We checked
+by digest rather than by assertion: of the 1,733 cases in the ATT\&CK case
+corpus, none shares a sha256 with the \fact{cohort-n}-sample dynamic cohort or
+with the \fact{drift-n}-sample drift manifest.
+
+\textbf{One construct problem survives, and it is ours.} The case corpus is
+labelled with the technique identifiers \emph{the pipeline itself previously
+attributed}. Scoring the index against those labels measures agreement with its
+own upstream, not accuracy. That number is relabelled as self-consistency in
+Section~\ref{sec:results} and the conclusion rests on the production figure
+beside it, which is scored against MITRE ground truth on held-out samples.
+
+\textbf{One shared vocabulary, named rather than hidden.} The catalogue that
+defines valid technique identifiers is the same file that bounds the label
+universe, so the invalid-identifier rate we report is measured against the
+catalogue the labels are drawn from. That is a shared vocabulary rather than a
+shared source --- a prediction can be catalogue-valid and wrong, which is the
+whole of what that metric claims --- but a reader is entitled to know the two
+come from one build.
+
 \subsection{Construct validity: what the ground truth can and cannot support}\label{construct-validity-what-the-ground-truth-can-and-cannot-support}
 
 Per-sample ground truth is \textbf{family-level MITRE \texttt{uses}}, which is coarse: a single Emotet binary

@@ -426,10 +426,18 @@ contribution end to end
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-ATT\&CK case-prior RAG & yes --- F1 0.620 vs a 0.424 frequency prior & \textbf{loses} to the frequency prior in production (0.111 vs 0.123) \\
+ATT\&CK case-prior RAG & \emph{self-consistency} 0.620 against a 0.424 frequency prior, scored on the corpus's own prior attributions rather than on MITRE ground truth & \textbf{loses} to the frequency prior in production (0.111 vs 0.123, MITRE ground truth) \\
 family-feature RAG & yes --- recall@5 0.199, \textbf{6.3$\times$ chance}, leakage-free split & \textbf{\fact{family-delta-f1} F1}, precision \fact{family-delta-precision}, n=19 \\
 opcode-hash attribution & n/a --- never fires & \textbf{\fact{hash-fired} of \fact{hash-total} samples}; \fact{hash-functions} functions hashed, 0 matches \\
 \end{longtable}
+
+One qualification the first row needs before the pattern can be read. Its isolation figure is
+\emph{not} accuracy: the leave-one-out corpus is labelled with the pipeline's own prior
+attributions, so scoring the index against it measures agreement with its own upstream. We report
+it because the comparison it supports survives that --- a frequency prior scored the same way, on
+the same labels, reaches 0.424, so the index carries information beyond base rates even under its
+own labelling --- and because the production column beside it is scored against MITRE ground truth
+on held-out samples, which is the number the conclusion rests on.
 
 Each was built separately, each is defensible in design, and each is inert once wired to real
 inputs. The mechanisms differ, which is what makes the pattern worth reporting rather than three
