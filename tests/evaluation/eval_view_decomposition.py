@@ -44,6 +44,12 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
+from tests.evaluation import stats  # noqa: E402
+
+# No seed constant existed here: the estimator hard-coded one in its body
+# and wrote none into the artifact, so a published interval could not be
+# reproduced from its own file. Dated to dated to the run that produced the view-decomposition arms.
+SEED = 20260809
 
 _FIXTURE_DIR = _REPO_ROOT / "tests" / "evaluation" / "fixtures"
 # Outputs land in this directory, beside the harness that produced them.
@@ -165,24 +171,21 @@ def _stability(counts: list[int]) -> float:
     return var**0.5
 
 
-def _bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]:
-    """Percentile bootstrap 95% CI for the mean. Deterministic (fixed LCG)."""
-    n = len(values)
-    if n < 2:
-        return (0.0, 0.0)
-    means: list[float] = []
-    seed = 0x9E3779B9
-    for _ in range(iters):
-        acc = 0.0
-        for _ in range(n):
-            seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            # Use the LCG's high bits: the low bits have a short period, so
-            # ``seed % n`` degenerates when n shares factors with 2**31 (e.g.
-            # n a power of two -> the same indices repeat -> a collapsed CI).
-            acc += values[(seed >> 16) % n]
-        means.append(acc / n)
-    means.sort()
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
+def _bootstrap_ci(
+    values: list[float],
+    clusters: list | None = None,
+    iters: int = 2000,
+) -> tuple[float, float]:
+    """95% bootstrap CI for the mean, resampling clusters.
+
+    Arm metric values, one per sample. Rows are clusters.
+    """
+    vals = [float(v) for v in values]
+    if len(vals) < 2:
+        return (vals[0], vals[0]) if vals else (0.0, 0.0)
+    keys = list(clusters) if clusters is not None else list(range(len(vals)))
+    interval = stats.cluster_bootstrap_ci(vals, keys, iters=iters, seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 @dataclass

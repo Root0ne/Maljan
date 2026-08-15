@@ -51,10 +51,13 @@ from maljan.agents.judge_agent import JudgeAgent
 from maljan.analysis.schema_pruner import MalwareCategory
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
+from tests.evaluation import stats
 from tests.evaluation.category_eval_data import (
     CategorySample,
     build_category_samples,
 )
+
+SEED = 20260811
 
 _TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
 _CATS = [
@@ -305,27 +308,20 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-def _bootstrap_ci(deltas: list[float], iters: int = 2000) -> tuple[float, float]:
-    """Percentile bootstrap 95% CI for the mean of paired deltas.
+def _paired_ci(deltas: list[float]) -> tuple[float, float]:
+    """95% CI for the mean paired delta. One delta per sample, so rows are clusters.
 
-    Deterministic: a fixed LCG provides resampling indices (Math.random is
-    unavailable / non-reproducible; this keeps the CI stable across runs).
+    This site kept the estimator the rest of the repo had already abandoned:
+    indices drawn as ``seed % n`` from a linear congruential generator, whose low
+    bits have a short period, so the resample collapses when n shares factors
+    with 2**31 and the interval comes back far too narrow. Three sibling
+    harnesses were patched to the high bits when the defect was found; this one
+    was not, because nothing connected the fix to the remaining copies.
     """
-    n = len(deltas)
-    if n < 2:
+    if len(deltas) < 2:
         return (0.0, 0.0)
-    means: list[float] = []
-    seed = 0x9E3779B9
-    for _ in range(iters):
-        acc = 0.0
-        for _ in range(n):
-            seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            acc += deltas[seed % n]
-        means.append(acc / n)
-    means.sort()
-    lo = means[int(0.025 * iters)]
-    hi = means[int(0.975 * iters)]
-    return (lo, hi)
+    interval = stats.cluster_bootstrap_ci(deltas, list(range(len(deltas))), seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 async def main_async(per_category: int, smoke: bool, checkpoint: Path) -> None:
@@ -443,7 +439,7 @@ def _report(
     wins = sum(1 for d in deltas if d > 1e-9)
     losses = sum(1 for d in deltas if d < -1e-9)
     ties = len(deltas) - wins - losses
-    ci = _bootstrap_ci(deltas)
+    ci = _paired_ci(deltas)
 
     # Aggregates are computed over the hint-present subset (the real comparison).
     on_hp = [on_by[sid] for sid in paired_ids]

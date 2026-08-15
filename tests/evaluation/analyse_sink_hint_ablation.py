@@ -44,10 +44,11 @@ hidden that.
 from __future__ import annotations
 
 import json
-import random
 import sys
 from pathlib import Path
 from typing import Any
+
+from tests.evaluation import stats
 
 _HERE = Path(__file__).resolve().parent
 IN = _HERE / "sink_hint_ablation.json"
@@ -85,16 +86,22 @@ def host_was_degraded(arm: dict[str, Any]) -> bool | None:
     return min(swaps) < SWAP_FLOOR_MB
 
 
-def bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]:
-    if not values:
-        return (0.0, 0.0)
-    if len(values) == 1:
-        return (values[0], values[0])
-    rng = random.Random(SEED)
-    means = sorted(
-        sum(rng.choice(values) for _ in range(len(values))) / len(values) for _ in range(iters)
-    )
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
+def bootstrap_ci(
+    values: list[float],
+    clusters: list | None = None,
+    iters: int = 2000,
+) -> tuple[float, float]:
+    """95% bootstrap CI for the mean, resampling clusters.
+
+    Six paired samples, one delta each, so rows are clusters and the published
+    interval survives the migration unchanged.
+    """
+    vals = [float(v) for v in values]
+    if len(vals) < 2:
+        return (vals[0], vals[0]) if vals else (0.0, 0.0)
+    keys = list(clusters) if clusters is not None else list(range(len(vals)))
+    interval = stats.cluster_bootstrap_ci(vals, keys, iters=iters, seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 def main() -> int:

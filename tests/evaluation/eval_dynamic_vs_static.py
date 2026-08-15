@@ -48,7 +48,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import random
 import subprocess
 import sys
 import time
@@ -62,6 +61,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 import httpx  # noqa: E402
 
+from tests.evaluation import stats  # noqa: E402
 from tests.evaluation.eval_temporal_drift import (  # noqa: E402
     available_fixture_slugs,
     extract_predicted_tids,
@@ -512,14 +512,18 @@ def predicted_from_result(result: Any) -> set[str]:
 
 
 def bootstrap_ci(values: list[float], iters: int = 4000) -> tuple[float, float]:
+    """95% CI for the mean paired delta. One delta per sample, so rows are clusters.
+
+    This study's unit was already correct, and the migration to the shared
+    estimator leaves its numbers unchanged — the cluster bootstrap reduces
+    exactly to the row bootstrap when every cluster holds one observation, which
+    is asserted in ``test_stats.py`` rather than assumed here.
+    """
     vals = [float(v) for v in values]
     if len(vals) < 2:
         return (vals[0], vals[0]) if vals else (0.0, 0.0)
-    rng = random.Random(SEED)
-    means = sorted(
-        sum(rng.choice(vals) for _ in range(len(vals))) / len(vals) for _ in range(iters)
-    )
-    return means[int(0.025 * iters)], means[int(0.975 * iters)]
+    interval = stats.cluster_bootstrap_ci(vals, list(range(len(vals))), iters=iters, seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 # ---------------------------------------------------------------------------

@@ -48,7 +48,14 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from tests.evaluation import stats  # noqa: E402
 from tests.evaluation.metrics import TTPAccuracyMetrics
+
+# No seed constant existed here: the estimator hard-coded one in its body
+# and wrote none into the artifact, so a published interval could not be
+# reproduced from its own file. Dated to the cohort's collection date; the
+# study itself is withdrawn.
+SEED = 20260812
 
 # Outputs land in this directory, beside the harness that produced them.
 #
@@ -204,23 +211,23 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-def _bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]:
-    """Percentile bootstrap 95% CI for the mean. Deterministic (fixed LCG)."""
-    n = len(values)
-    if n < 2:
-        return (0.0, 0.0)
-    means: list[float] = []
-    seed = 0x9E3779B9
-    for _ in range(iters):
-        acc = 0.0
-        for _ in range(n):
-            seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            # High bits only: the LCG's low bits have a short period, so
-            # ``seed % n`` collapses the CI when n is a power of two.
-            acc += values[(seed >> 16) % n]
-        means.append(acc / n)
-    means.sort()
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
+def _bootstrap_ci(
+    values: list[float],
+    clusters: list | None = None,
+    iters: int = 2000,
+) -> tuple[float, float]:
+    """95% bootstrap CI for the mean, resampling clusters.
+
+    This study is withdrawn — its per-sample outputs were written to a Windows
+    path and lost — so the estimator is migrated for consistency rather than for
+    a number anyone will read.
+    """
+    vals = [float(v) for v in values]
+    if len(vals) < 2:
+        return (vals[0], vals[0]) if vals else (0.0, 0.0)
+    keys = list(clusters) if clusters is not None else list(range(len(vals)))
+    interval = stats.cluster_bootstrap_ci(vals, keys, iters=iters, seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 @dataclass

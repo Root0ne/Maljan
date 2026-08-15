@@ -55,16 +55,16 @@
    "differing": 12
   },
   "incidental_degradation_reasons": {
+   "sandbox detected anti-emulation behaviour: antidebug_setunhandledexceptionfilter": 9,
    "analyst failures: static": 1,
    "zero cross-layer corroboration (12 single-layer techniques)": 2,
+   "zero cross-layer corroboration (4 single-layer techniques)": 1,
    "analysts produced no claims: static": 1,
    "analysts produced no claims: dynamic, network": 12,
-   "zero cross-layer corroboration (4 single-layer techniques)": 1,
-   "sandbox detected anti-emulation behaviour: antidebug_setunhandledexceptionfilter": 9,
    "zero cross-layer corroboration (3 single-layer techniques)": 2,
+   "analyst failures: dynamic, network": 1,
    "zero cross-layer corroboration (5 single-layer techniques)": 2,
    "zero cross-layer corroboration (2 single-layer techniques)": 3,
-   "analyst failures: dynamic, network": 1,
    "sandbox detected anti-emulation behaviour: antidebug_setunhandledexceptionfilter (+1 more)": 1,
    "zero cross-layer corroboration (6 single-layer techniques)": 1
   },

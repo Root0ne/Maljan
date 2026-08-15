@@ -22,8 +22,8 @@ import pytest
 from tests.evaluation.eval_consensus_ablation import (
     CHANNELS,
     bind_eval_llm,
-    bootstrap_ci,
     build_channels,
+    cluster_ci,
     extract_tids,
     invalid_id_rate,
     leaked_ids,
@@ -313,27 +313,33 @@ class TestStatistics:
 
     def test_a_bootstrap_ci_brackets_the_mean(self) -> None:
         values = [0.1, 0.2, 0.3, 0.4, 0.5]
-        lo, hi = bootstrap_ci(values, iters=500)
+        lo, hi = cluster_ci(values, list(range(len(values))), iters=500)
         assert lo <= mean(values) <= hi
 
     def test_a_bootstrap_ci_is_deterministic(self) -> None:
         """Reported intervals must not move between runs of the same data."""
         values = [0.1, 0.9, 0.2, 0.8, 0.35]
-        assert bootstrap_ci(values, iters=500) == bootstrap_ci(values, iters=500)
+        keys = list(range(len(values)))
+        assert cluster_ci(values, keys, iters=500) == cluster_ci(values, keys, iters=500)
 
     def test_a_constant_sample_gives_a_degenerate_interval(self) -> None:
-        lo, hi = bootstrap_ci([0.5] * 8, iters=500)
+        lo, hi = cluster_ci([0.5] * 8, list(range(8)), iters=500)
         assert lo == pytest.approx(0.5)
         assert hi == pytest.approx(0.5)
 
     def test_a_power_of_two_sample_size_does_not_collapse_the_interval(self) -> None:
-        """The LCG low-bit trap: ``seed % n`` degenerates when n is a power of
-        two, which silently produced a zero-width CI. Guards the high-bit fix."""
-        lo, hi = bootstrap_ci([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0], iters=1000)
+        """The LCG low-bit trap, kept after the estimator was replaced.
+
+        The original defect drew indices from the low bits of a linear
+        congruential generator, which degenerate when n shares factors with
+        2**31, silently producing a zero-width CI. The shared estimator uses
+        ``random.Random`` and cannot reproduce it — the test stays because it
+        describes a property the replacement must also have."""
+        lo, hi = cluster_ci([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0], list(range(8)), iters=1000)
         assert hi > lo
 
     def test_fewer_than_two_values_reports_no_interval(self) -> None:
-        assert bootstrap_ci([0.4]) == (0.0, 0.0)
+        assert cluster_ci([0.4], [0]) == (0.0, 0.0)
 
     def test_paired_delta_is_elementwise(self) -> None:
         assert paired_delta([0.5, 0.2], [0.3, 0.4]) == pytest.approx([0.2, -0.2])

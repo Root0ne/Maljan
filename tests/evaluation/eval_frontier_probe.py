@@ -64,8 +64,8 @@ if str(_REPO_ROOT / "src") not in sys.path:
 
 from tests.evaluation.eval_consensus_ablation import (  # noqa: E402
     SINGLE_PROMPT,
-    bootstrap_ci,
     build_channels,
+    cluster_ci,
     extract_tids,
     load_samples,
     prf,
@@ -262,10 +262,13 @@ def main() -> int:
     frac = [r["reasoning_fraction"] for r in scored if r["reasoning_fraction"] is not None]
     f1s = [r["f1"] for r in scored]
     # Same estimator as the consensus ablation, so the two intervals mean the
-    # same thing when the arms are put side by side.
-    lo, hi = bootstrap_ci(f1s)
+    # same thing when the arms are put side by side — and the same cluster,
+    # because these 25 rows are 5 samples judged 5 times each.
+    samples = [r["sample_id"] for r in scored]
+    lo, hi = cluster_ci(f1s, samples)
     summary = {
         "n": len(scored),
+        "n_samples": len(set(samples)),
         "failed": len(rows) - len(scored),
         "parsed": sum(1 for r in scored if r["parsed"]),
         "hit_cap": sum(1 for r in scored if r["hit_cap"]),

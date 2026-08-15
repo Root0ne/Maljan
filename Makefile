@@ -134,8 +134,13 @@ rebuild-ghidra: ghidra-build
 # The paper. Facts first, always: build_paper.py refuses to run against a
 # paper_facts.json older than any result it summarises, so this ordering is not
 # a convenience — the reverse order fails loudly, which is the point.
-.PHONY: paper facts
-facts:
+.PHONY: paper facts reanalyse
+# Every interval in the paper, recomputed at the cluster its observations are
+# independent at. Reads committed per-sample artifacts only: no LLM, no network.
+reanalyse:
+	.venv/bin/python tests/evaluation/reanalyse.py
+
+facts: reanalyse
 	.venv/bin/python tests/evaluation/paper_facts.py
 
 paper: facts

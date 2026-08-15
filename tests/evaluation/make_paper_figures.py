@@ -24,14 +24,20 @@ Run: .venv/bin/python tests/evaluation/make_paper_figures.py
 from __future__ import annotations
 
 import json
-import random
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
+import sys
+
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+
+if str(Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tests.evaluation import stats  # noqa: E402
 
 _HERE = Path(__file__).resolve().parent
 OUT = _HERE.parent.parent / "docs/academic-article/paper/figures"
@@ -69,15 +75,23 @@ def load(name: str):
     return json.loads((_HERE / name).read_text())
 
 
-def bootstrap_ci(values, iters: int = 4000):
+def bootstrap_ci(
+    values: list[float],
+    clusters: list | None = None,
+    iters: int = 4000,
+) -> tuple[float, float]:
+    """95% bootstrap CI for the mean, resampling clusters.
+
+    Callers pass the sample id when a figure draws repeated measurements of
+    the same sample; the consensus and frontier arms are five samples repeated
+    five times and drawing them as 25 independent points was the error.
+    """
     vals = [float(v) for v in values]
     if len(vals) < 2:
         return (vals[0], vals[0]) if vals else (0.0, 0.0)
-    rng = random.Random(SEED)
-    means = sorted(
-        sum(rng.choice(vals) for _ in range(len(vals))) / len(vals) for _ in range(iters)
-    )
-    return means[int(0.025 * iters)], means[int(0.975 * iters)]
+    keys = list(clusters) if clusters is not None else list(range(len(vals)))
+    interval = stats.cluster_bootstrap_ci(vals, keys, iters=iters, seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 def save(fig, stem: str):

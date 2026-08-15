@@ -58,6 +58,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Hashable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -69,12 +70,19 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
+from tests.evaluation import stats
 
 _FIXTURE_DIR = _REPO_ROOT / "tests" / "evaluation" / "fixtures"
 _OUT_FILE = _REPO_ROOT / "tests" / "evaluation" / "consensus_ablation.md"
 _JSON_FILE = _REPO_ROOT / "tests" / "evaluation" / "consensus_ablation.json"
 _DEFAULT_CHECKPOINT = Path("/tmp/consensus_ablation_checkpoint.jsonl")
 _DEFAULT_BUDGET = 2400
+
+# This harness and the two that import from it had no seed constant at all: the
+# estimator hard-coded a golden-ratio constant in its own body and wrote no seed
+# into the artifact, so every interval it published was unreproducible from its
+# own file. Dated to the run that produced consensus_ablation.json.
+SEED = 20260809
 
 _TID_RE = re.compile(r"T\d{4}(?:\.\d{3})?")
 
@@ -326,27 +334,24 @@ def mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-def bootstrap_ci(values: list[float], iters: int = 2000) -> tuple[float, float]:
-    """Percentile bootstrap 95% CI for the mean. Deterministic (fixed LCG).
+def cluster_ci(
+    values: list[float], clusters: list[Hashable], iters: int = 2000
+) -> tuple[float, float]:
+    """95% bootstrap CI for the mean, resampling **samples** rather than rows.
 
-    Uses the LCG's high bits: the low bits have a short period, so ``seed % n``
-    degenerates when n shares factors with 2**31 and the CI collapses. Same fix
-    as ``eval_view_decomposition``; kept identical so the two studies' intervals
-    are computed the same way.
+    The arms are 25 rows that are 5 samples repeated 5 times, so the row
+    bootstrap this replaces estimated the uncertainty of the mean over *these
+    five samples* rather than over the population they stand for. Measured
+    afterwards: the intra-cluster correlation on the paired delta is 0.46, the
+    design effect 2.8, and the published interval was 1.6 times too narrow.
+
+    Kept as a named wrapper rather than inlined because three other harnesses
+    import their estimator from this module and must keep getting the same one.
     """
-    n = len(values)
-    if n < 2:
+    if len(values) < 2:
         return (0.0, 0.0)
-    means: list[float] = []
-    seed = 0x9E3779B9
-    for _ in range(iters):
-        acc = 0.0
-        for _ in range(n):
-            seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-            acc += values[(seed >> 16) % n]
-        means.append(acc / n)
-    means.sort()
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
+    interval = stats.cluster_bootstrap_ci(values, clusters, iters=iters, seed=SEED)
+    return (interval.lo, interval.hi)
 
 
 def paired_delta(a: list[float], b: list[float]) -> list[float]:
@@ -513,13 +518,16 @@ def arm_block(arm: str, scores: list[ArmScore]) -> list[str]:
     if not scores:
         return [f"## {arm}", "", "_no samples_", ""]
 
+    # Five samples, five repeats each. The cluster is the sample.
+    clusters: list[Hashable] = [s.sample_id for s in scores]
+
     def _row(label: str, xs: list[float], fmt: str = ".3f") -> str:
-        lo, hi = bootstrap_ci(xs)
+        lo, hi = cluster_ci(xs, clusters)
         return f"| {label} | {mean(xs):{fmt}} | [{lo:{fmt}}, {hi:{fmt}}] |"
 
     calls = scores[0].calls
     return [
-        f"## {arm}  (n={len(scores)}, calls/sample={calls})",
+        f"## {arm}  (n={len(scores)} rows over {len(set(clusters))} samples, calls/sample={calls})",
         "",
         "| metric | mean | 95% bootstrap CI |",
         "|---|---|---|",
@@ -583,27 +591,52 @@ def completeness_block(
 
 
 def paired_block(scores: list[ArmScore], left: str, right: str) -> list[str]:
-    """Paired F1 delta with a bootstrap CI — the sensitive comparison, because
-    every arm saw the same samples in the same order."""
+    """Paired F1 delta at the cluster level, with what the design could have seen.
+
+    Every arm saw the same samples in the same order, so the paired comparison is
+    the sensitive one — but the pairs are not independent: five samples, five
+    repeats each. Three quantities are reported together because any one of them
+    alone misleads:
+
+    * the **cluster bootstrap interval**, which is the honest width;
+    * the **exact sign-flip p**, because the bootstrap p returns ~0 whenever the
+      five cluster means happen to share a sign, whatever the effect size;
+    * the **minimum detectable effect**, because a null from a design that could
+      only have seen effects above 0.22 F1 says nothing about smaller ones, and
+      reading it as equivalence is the error this block exists to prevent.
+    """
     by_key = {(s.arm, s.sample_id, s.repeat): s for s in scores}
     keys = sorted({(k[1], k[2]) for k in by_key if k[0] == left})
-    pairs = [
-        (by_key[(left, sid, r)].f1, by_key[(right, sid, r)].f1)
-        for sid, r in keys
-        if (right, sid, r) in by_key
-    ]
-    if len(pairs) < 2:
+    matched = [(sid, r) for sid, r in keys if (right, sid, r) in by_key]
+    if len(matched) < 2:
         return [f"### {left} - {right}", "", "_insufficient paired observations_", ""]
-    deltas = paired_delta([a for a, _ in pairs], [b for _, b in pairs])
-    lo, hi = bootstrap_ci(deltas)
+    deltas = paired_delta(
+        [by_key[(left, sid, r)].f1 for sid, r in matched],
+        [by_key[(right, sid, r)].f1 for sid, r in matched],
+    )
+    clusters: list[Hashable] = [sid for sid, _ in matched]
+    res = stats.paired_cluster_result(deltas, clusters, seed=SEED)
+
     wins = sum(1 for d in deltas if d > 0)
     losses = sum(1 for d in deltas if d < 0)
     ties = len(deltas) - wins - losses
-    verdict = "CI excludes 0" if (lo > 0 or hi < 0) else "**CI includes 0 — no separation**"
+    iv = res.interval
+    verdict = "CI excludes 0" if iv.excludes(0.0) else "**CI includes 0 — no separation**"
+    detectable = (
+        "the observed effect is above this design's resolution"
+        if abs(res.delta) >= res.mde_t
+        else "**the observed effect is below this design's resolution**"
+    )
     return [
-        f"### {left} - {right}  (paired, n={len(deltas)})",
+        f"### {left} - {right}  (paired, n={len(deltas)} rows over {res.structure.k} samples)",
         "",
-        f"- mean F1 delta **{mean(deltas):+.3f}**, 95% CI [{lo:+.3f}, {hi:+.3f}] — {verdict}",
+        f"- mean F1 delta **{res.delta:+.3f}**, 95% cluster CI "
+        f"[{iv.lo:+.3f}, {iv.hi:+.3f}] — {verdict}",
+        f"- exact cluster sign-flip p = {res.p_exact:.4f} "
+        f"(the smallest this design can reach is {res.p_floor:.4f})",
+        f"- minimum detectable effect at 80% power: {res.mde_t:.3f} F1 — {detectable}",
+        f"- ICC {res.structure.icc:.3f}, design effect {res.structure.design_effect:.2f}, "
+        f"effective n {res.structure.effective_n:.1f}",
         f"- sign test: {left} wins {wins}, {right} wins {losses}, ties {ties}",
         "",
     ]

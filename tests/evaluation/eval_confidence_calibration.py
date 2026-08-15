@@ -58,12 +58,14 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
 
 from maljan.core.config import get_settings
 from maljan.core.container import ServiceContainer
+from tests.evaluation import stats
 from tests.evaluation.eval_consensus_ablation import (
     CHANNELS,
+    SEED,
     bind_eval_llm,
-    bootstrap_ci,
     build_channels,
     channel_prompt,
+    cluster_ci,
     leaked_ids,
     load_samples,
     mean,
@@ -81,27 +83,9 @@ _DEFAULT_BUDGET = 800
 # ---------------------------------------------------------------------------
 
 
-def roc_auc(scores: list[float], labels: list[int]) -> float | None:
-    """P(a positive outranks a negative), ties counted as 0.5.
-
-    Returns **None** when either class is empty — the value is undefined, and
-    returning 0.5 would present missing data as a measured "no discrimination"
-    result. Pairwise rather than rank-based: n is small here and the pairwise
-    form is obviously correct about ties, which is where AUC implementations
-    usually go wrong.
-    """
-    pos = [s for s, y in zip(scores, labels, strict=True) if y == 1]
-    neg = [s for s, y in zip(scores, labels, strict=True) if y == 0]
-    if not pos or not neg:
-        return None
-    total = 0.0
-    for p in pos:
-        for n in neg:
-            if p > n:
-                total += 1.0
-            elif p == n:
-                total += 0.5
-    return total / (len(pos) * len(neg))
+# Moved to ``stats`` so the cluster interval and the point estimate cannot
+# drift apart; re-exported here because three modules import it from this one.
+roc_auc = stats.roc_auc
 
 
 def separation(scores: list[float], labels: list[int]) -> float | None:
@@ -246,24 +230,44 @@ def _fmt(value: float | None, spec: str = ".3f") -> str:
     return "—" if value is None else f"{value:{spec}}"
 
 
+def _design_effect_text(scores: list[float], clusters: list[str], k: int) -> str:
+    """How much of the claim count is real once the nesting is accounted for."""
+    if k < 2:
+        return "—"
+    s = stats.icc_oneway(scores, clusters)
+    return f"ICC {s.icc:.3f}, DE {s.design_effect:.1f}, effective n {s.effective_n:.1f}"
+
+
 def summary_block(title: str, rows: list[ClaimScore]) -> list[str]:
     if not rows:
         return [f"## {title}", "", "_no scoreable claims_", ""]
     scores = [r.confidence for r in rows]
     labels = [r.correct for r in rows]
+    # The claims are nested in samples — 210 of them come from five — so both
+    # intervals resample samples. The AUC had no interval at all before this;
+    # the one it now carries contains 0.5, which is the honest reading of a
+    # number three of the five samples put at or below chance.
+    clusters = [r.sample_id for r in rows]
     auc = roc_auc(scores, labels)
     sep = separation(scores, labels)
-    lo, hi = bootstrap_ci(scores)
+    lo, hi = cluster_ci(scores, clusters)
     n_pos = sum(labels)
+    k = len(set(clusters))
+    auc_text = _fmt(auc)
+    if auc is not None and k >= 2:
+        auc_iv = stats.auc_cluster_ci(scores, labels, clusters, seed=SEED)
+        auc_text = f"{auc:.3f} [{auc_iv.lo:.3f}, {auc_iv.hi:.3f}]"
     lines = [
-        f"## {title}  (n={len(rows)} claims, {n_pos} correct / {len(rows) - n_pos} wrong)",
+        f"## {title}  (n={len(rows)} claims over {k} samples, "
+        f"{n_pos} correct / {len(rows) - n_pos} wrong)",
         "",
         "| metric | value |",
         "|---|---|",
-        f"| **AUC** (does confidence rank correctness?) | **{_fmt(auc)}** |",
+        f"| **AUC** (does confidence rank correctness?) | **{auc_text}** |",
         f"| **separation** (mean correct − mean wrong) | **{_fmt(sep, '+.3f')}** |",
         f"| accuracy | {mean([float(x) for x in labels]):.3f} |",
         f"| mean stated confidence | {mean(scores):.3f} [{lo:.3f}, {hi:.3f}] |",
+        f"| design effect on stated confidence | {_design_effect_text(scores, clusters, k)} |",
         f"| overconfidence (stated − actual) | {overconfidence(scores, labels):+.3f} |",
         f"| ECE (5 bins) | {expected_calibration_error(scores, labels):.3f} |",
         f"| Brier | {brier_score(scores, labels):.3f} |",

@@ -91,7 +91,7 @@ from maljan.core.container import ServiceContainer
 from maljan.core.truncation_ledger import TruncationLedger
 from tests.evaluation.eval_consensus_ablation import (
     bind_eval_llm,
-    bootstrap_ci,
+    cluster_ci,
     mean,
 )
 
@@ -354,6 +354,7 @@ def b3_block(results: list[ArmResult]) -> list[str]:
         if arm == "all":
             continue
         js: list[float] = []
+        js_clusters: list[str] = []
         changed = 0
         for sid, rep in keys:
             base = index.get((sid, "all", rep))
@@ -362,11 +363,12 @@ def b3_block(results: list[ArmResult]) -> list[str]:
                 continue
             a, b = set(base.technique_ids), set(other.technique_ids)
             js.append(jaccard(a, b))
+            js_clusters.append(sid)
             changed += 1 if verdict_changed(a, b) else 0
         if not js:
             lines.append(f"| `{arm[3:]}` | — | — | — | 0 |")
             continue
-        lo, hi = bootstrap_ci(js)
+        lo, hi = cluster_ci(js, js_clusters)
         lines.append(
             f"| `{arm[3:]}` | **{changed}/{len(js)}** | {mean(js):.3f} "
             f"| [{lo:.3f}, {hi:.3f}] | {len(js)} |"

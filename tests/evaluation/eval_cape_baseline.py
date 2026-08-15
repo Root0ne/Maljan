@@ -30,7 +30,6 @@ Reads the local archive written by the report fetcher; no network, no sandbox.
 from __future__ import annotations
 
 import json
-import random
 import sys
 from pathlib import Path
 from typing import Any
@@ -40,6 +39,7 @@ _REPO_ROOT = _HERE.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from tests.evaluation import stats  # noqa: E402
 from tests.evaluation.eval_temporal_drift import (  # noqa: E402
     available_fixture_slugs,
     load_ground_truth,
@@ -73,19 +73,24 @@ def cape_technique_ids(report: dict[str, Any]) -> set[str]:
     return out
 
 
-def bootstrap_ci(values: list[float], iters: int = 2000, seed: int = SEED) -> tuple[float, float]:
-    """Percentile bootstrap CI of the mean. Degenerate input returns the point."""
+def family_ci(
+    values: list[float], families: list[str], iters: int = 2000, seed: int = SEED
+) -> tuple[float, float]:
+    """Percentile bootstrap CI of the mean, resampling **families** not samples.
+
+    Ground truth here is resolved per family — every Emotet binary is scored
+    against one byte-identical label vector — so two samples of a family are not
+    two observations. The 97 rows are 24 families; measured afterwards, the ICC
+    on F1 is 0.69, the design effect 3.1, and the effective sample size 31. The
+    row bootstrap this replaces published the paper's anchor interval about 2.4
+    times too narrow.
+    """
     if not values:
         return (0.0, 0.0)
     if len(values) == 1:
         return (values[0], values[0])
-    rng = random.Random(seed)
-    means = []
-    n = len(values)
-    for _ in range(iters):
-        means.append(sum(rng.choice(values) for _ in range(n)) / n)
-    means.sort()
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
+    interval = stats.cluster_bootstrap_ci(values, families, iters=iters, seed=seed)
+    return (interval.lo, interval.hi)
 
 
 def main() -> int:
@@ -136,13 +141,23 @@ def main() -> int:
         print("nothing to score yet — fetch reports first")
         return 1
 
-    summary: dict[str, Any] = {"n": len(rows)}
+    families = [str(r["slug"]) for r in rows]
+    summary: dict[str, Any] = {"n": len(rows), "n_families": len(set(families))}
     for key in ("precision", "recall", "f1"):
         vals = [r[key] for r in rows]
         mean = sum(vals) / len(vals)
-        lo, hi = bootstrap_ci(vals)
-        summary[key] = {"mean": round(mean, 4), "ci95": [round(lo, 4), round(hi, 4)]}
-        print(f"  {key:9s} mean={mean:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
+        lo, hi = family_ci(vals, families)
+        structure = stats.icc_oneway(vals, families)
+        summary[key] = {
+            "mean": round(mean, 4),
+            "ci95": [round(lo, 4), round(hi, 4)],
+            "cluster": structure.as_json(),
+        }
+        print(
+            f"  {key:9s} mean={mean:.4f}  95% CI [{lo:.4f}, {hi:.4f}]  "
+            f"(ICC {structure.icc:.3f}, effective n {structure.effective_n:.1f} "
+            f"over {structure.k} families)"
+        )
 
     empty = sum(1 for r in rows if r["n_predicted"] == 0)
     print(f"  samples where CAPE asserted no technique at all: {empty}/{len(rows)}")
@@ -158,6 +173,7 @@ def main() -> int:
                 "note": "CAPE's own signature-derived ATT&CK ids, no LLM in the loop",
                 "cohort_digest": cohort["cohort_digest"],
                 "seed": SEED,
+                **stats.provenance(seed=SEED, iters=2000),
                 "summary": summary,
                 "empty_prediction_samples": empty,
                 "skipped": {k: len(v) for k, v in skipped.items()},
