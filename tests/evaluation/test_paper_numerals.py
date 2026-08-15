@@ -99,6 +99,12 @@ _NOT_A_MEASUREMENT = (
     # Protocol and status constants.
     re.compile(r"\bHTTP\s+\d{3}\b"),
     re.compile(r"\bport\s+\d+\b", re.I),
+    # A digit bound into the tail of a hyphenated name is part of the name:
+    # Layer-0, Track-2. The lookbehind in _NUMERAL only refuses a digit after a
+    # word character, and a hyphen is not one, so "Layer-0" was being read as
+    # the measurement 0. Deliberately narrow — the digit must follow a letter
+    # and a hyphen with no space, which "a 28.4-point gap" does not.
+    re.compile(r"\b[A-Za-z][A-Za-z]+-\d+\b"),
     # Versions, named rather than pattern-matched: a bare `\d+\.\d+` rule would
     # exempt every decimal in the paper, which is most of what this checks.
     re.compile(

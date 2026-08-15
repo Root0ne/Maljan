@@ -451,6 +451,68 @@
    "artifact": null,
    "provenance": "unretained-session",
    "note": "257 of 306. Not to be confused with reasoning_share_one_token, which is also 84% and unrelated; the two sat in different sections and an automatic substitution would have swapped them."
+  },
+  "m4_total_minutes": {
+   "value": "28",
+   "claim": "the wall-clock an M4 analysis cost before returning zero techniques",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md:1714-1720; the log excerpt quoted in E6 §M4",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "109.5 s in the ReAct loop plus the 1,530 s hard cap the forced synthesis ran into, which is 27.3 minutes. Both components are in the quoted log block; the run itself was not retained per-sample, which is why this is a record rather than a derivation."
+  },
+  "m4_salvage_minutes": {
+   "value": "25",
+   "claim": "the forced-synthesis call alone, which hit the hard cap",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md:1718",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "The 1,530 s cap is 25.5 minutes. Not the same number as m4_total_minutes, which adds the loop that preceded it; the paper uses both and they are three minutes apart."
+  },
+  "deleted_report_body_bytes": {
+   "value": "63",
+   "claim": "the length of the body the sandbox returns, with HTTP 200, for a report it has deleted",
+   "observed": "2026-08-13",
+   "record_ref": "docs/academic-article/findings-log.md:2290",
+   "artifact": "tests/evaluation/cape_fetch_failures.json",
+   "provenance": "unretained-session",
+   "note": "The artefact retains the parsed message ('api error: Task failed') but not the raw body. The body itself survives only as the log excerpt quoted beside this number in E6, and 63 is its length. Retaining the message and not the envelope is the same retention gap the section is about, which is why this is a record rather than a derivation."
+  },
+  "unbounded_decode_rate": {
+   "value": "46",
+   "claim": "tokens per second the judge was still generating at when the caller gave up",
+   "observed": "2026-08-14",
+   "record_ref": "docs/academic-article/findings-log.md:2881",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "Measured at 1,520% CPU on the one call that was watched to the wrapper's timeout."
+  },
+  "llama_paged_out_gb": {
+   "value": "2.3",
+   "claim": "how much of the model server's address space was on disk when a paired study ran without headroom",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md, the memory-pressure entry; logs/night-guard.log",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "Read from the process's own VmSwap during the run. Nothing sampled it on a schedule, so there is no series to recompute from — the number is the one reading that was taken, and the reason the appendix tells a reader to leave the headroom."
+  },
+  "empty_bundles_local": {
+   "value": "6",
+   "claim": "pairs where the local judge overran the ceiling and fell back to an empty bundle",
+   "observed": "2026-08-08",
+   "record_ref": "docs/academic-article/findings-log.md:510, 525",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "6 of 17 against 1 of 17 for the frontier arm. The per-pair rows of that study were not retained, which is why the count is a record; it is the study whose completion claim the paper treats as the positive result."
+  },
+  "empty_bundles_pairs": {
+   "value": "17",
+   "claim": "the pairs in that comparison",
+   "observed": "2026-08-08",
+   "record_ref": "docs/academic-article/findings-log.md:510",
+   "artifact": null,
+   "provenance": "unretained-session"
   }
  }
 }

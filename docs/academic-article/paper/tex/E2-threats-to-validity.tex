@@ -2,8 +2,8 @@
 \label{sec:threats}
 
 We organise this section around the nine pitfalls of \emph{Chasing Shadows} {[}9{]}, which surveyed all 72
-peer-reviewed LLM-security papers of 2023--2024 and found every one exposed to at least one, with
-only 15.7\% discussing any. We add two checks the survey does not have, both of which caught errors
+peer-reviewed LLM-security papers of 2023--2024 and found every one exposed to at least one,
+with only 15.7\% discussing any {[}9{]}. We add two checks the survey does not have, both of which caught errors
 in this work. Where a pitfall is genuinely closed we say so; where it is not, we say what remains
 rather than what we intend.
 
@@ -12,7 +12,7 @@ rather than what we intend.
 Most threats sections describe hazards. This one begins with damage, because reporting it is the
 paper's main methodological point.
 
-\textbf{One study is withdrawn.} A seven-year, 210-sample temporal-drift analysis was completed, entered
+\textbf{One study is withdrawn.} A seven-year, \fact{drift-n}-sample temporal-drift analysis was completed, entered
 our claim ledger as a novel result, and is now retracted. It drove the full pipeline per sample
 against a long-lived Ghidra server that was never restarted between samples --- which is precisely the
 precondition for a defect we later found, in which a loaded program never becomes the server's
@@ -50,7 +50,7 @@ what it silently produced
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\textbf{M1} & unset optional MCP arguments were sent as \texttt{null} & all 36 sandbox tools refused; the pipeline saw only empty results \\
+\textbf{M1} & unset optional MCP arguments were sent as \texttt{null} & all \fact{cape-tool-count} sandbox tools refused; the pipeline saw only empty results \\
 \textbf{M2} & \texttt{load\_program} reported success \emph{with the right program name} but did not change the server's current program & every sample after the first analysed the first binary \\
 \textbf{M3} & a refused load answers \textbf{HTTP 200} with an error body & hints and function hashes built from a different binary \\
 \end{longtable}
@@ -98,7 +98,7 @@ considered and refused, with a cited rationale.
 testing was performed.
 
 \textbf{P6 Context truncation --- \texttt{EXPOSED}.} Truncation is designed-in throughout --- chunking at function
-boundaries, a per-call evidence cap, a 40-step ReAct budget, an \fact{judge-output-cap}-token verdict cap, a 400-char
+boundaries, a per-call evidence cap, a \fact{react-step-budget}-step ReAct budget, an \fact{judge-output-cap}-token verdict cap, a \setting{400}-char
 hint cap --- and the counters now exist to report frequency, with pass-throughs counted so the rate has
 a correct denominator. What we cannot yet report is the distribution over a full cohort. Two specific
 findings belong here:
@@ -106,15 +106,15 @@ findings belong here:
 \begin{itemize}
 \tightlist
 \item
-  The enumeration of truncation sites was \textbf{itself incomplete}. A 20,000-edge cap on the call-graph
-  fetch was discovered only while instrumenting a different measurement, and it silently truncates
-  1 of 97 samples (§3.15). We therefore describe how our list was built rather than presenting it as
+  The enumeration of truncation sites was \textbf{itself incomplete}. A \setting{20,000}-edge cap on the
+  call-graph fetch was discovered only while instrumenting a different measurement, and it silently
+  truncates \fact{graph-edge-cap-hit} of \fact{hint-total} samples (§3.15). We therefore describe how our list was built rather than presenting it as
   exhaustive.
 \item
   Bounds \textbf{compose}. Exceeding the step cap guarantees an attempt at the time cap, and on rich
   binaries that attempt could not finish --- two limits producing an empty result between them. This
-  is §1.7.1's shape in a new place: there, removing a hint made the judge overrun a 600 s ceiling and
-  return an empty bundle 6/17 times.
+  is §1.7.1's shape in a new place: there, removing a hint made the judge overrun a \setting{600} s
+  ceiling and return an empty bundle \fact{empty-bundles-local}/\fact{empty-bundles-pairs} times.
 \end{itemize}
 
 \textbf{P7 Prompt sensitivity --- \texttt{PARTIAL}.} A structured prompt-variation study exists. Production prompts
@@ -126,7 +126,9 @@ prompt sensitivity surfacing as measurement error.
 machine}: Qwen3.6-35B-A3B at IQ3\_K\_R4, ik\_llama.cpp, single host. Four claims were rescoped to that
 exact identifier. A second endpoint has now run to completion --- a 120B reasoning model on the same
 fixtures, repeats, prompt and token budget --- and \textbf{did not separate from the local model}: paired
-\textbf{$\Delta$F1 +0.003, 95\% CI {[}$-$0.077, +0.081{]}}, n=25, better on 12 and worse on 13 (§3.16). A 3.4$\times$ parameter
+\textbf{$\Delta$F1 \fact{frontier-local-delta}, 95\% cluster CI \fact{frontier-local-ci}},
+n=\fact{frontier-local-pairs}, better on \fact{frontier-local-better} and worse on
+\fact{frontier-local-worse} (§3.16). A \fact{series-param-span}$\times$ parameter
 advantage produces no measurable difference here, which is evidence \emph{against} the pitfall's usual
 worry rather than merely an absence of evidence for it.
 
@@ -136,19 +138,23 @@ truncated by a daily request quota, not by anything about the samples --- the fa
 difference off an underpowered arm, and this audit carried the wrong number for a day.
 
 \textbf{That null is confounded, and the confound cannot be removed on that endpoint.} The local arm runs
-with its reasoning stream disabled; the 120B arm ran with reasoning on, spending 56.5\% of its output
+with its reasoning stream disabled; the \fact{frontier-params-b}B arm ran with reasoning on, spending
+\fact{arm-default-reasoning} of its output
 budget there. We re-ran it with the flag set: the provider accepted the parameter and ignored it ---
-56.2\% reasoning, F1 \fact{arm-default-nothink-f1} against the original \fact{arm-default-f1} (paired $\Delta$ $-$0.0014, CI {[}$-$0.0929, +0.0874{]}).
+\fact{arm-default-nothink-reasoning} reasoning, F1 \fact{arm-default-nothink-f1} against the original
+\fact{arm-default-f1} (paired $\Delta$ \fact{frontier-replication-delta}, cluster CI
+\fact{frontier-replication-ci}).
 The re-run replicates the arm rather than correcting it, and no further re-run will do better,
 because the control is not exposed. We therefore report the null with its confound named. The size
-of what is being confounded is not small: on two separate models the same flag is worth \textbf{0.34 and
-0.45 F1}, the only effect in this paper that exceeds its own design's minimum
+of what is being confounded is not small: on two separate models the same flag is worth
+\textbf{\fact{reasoning-flag-worth-low} and \fact{reasoning-flag-worth-high} F1}, the only effect in this paper that exceeds its own design's minimum
 detectable effect.
 
 \textbf{One quantisation is no longer an unmeasured threat.} The model we run locally is also hosted by
 its vendor at full precision, on an endpoint that does honour the reasoning flag. Paired on the same
-fixtures and repeats, our 3-bit \texttt{IQ3\_K\_R4} deployment scores \textbf{0.0629 higher} than the vendor's
-hosting of the same weights (95\% CI {[}$-$0.1484, +0.0256{]}, n=25) --- an interval containing zero, and
+fixtures and repeats, the vendor's hosting of the same weights scores
+\textbf{\fact{quantisation-delta} F1} against our 3-bit \texttt{IQ3\_K\_R4} deployment (95\% cluster CI
+\fact{quantisation-ci}, n=\fact{quantisation-pairs}) --- an interval containing zero, and a point estimate
 pointing away from the direction the threat assumes. Two serving stacks differ alongside the
 precision, so this bounds \emph{the deployment} rather than quantisation alone; but the specific worry
 that a 3-bit local model understates what these architectures can do is not supported.

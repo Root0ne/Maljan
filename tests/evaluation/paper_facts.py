@@ -165,6 +165,19 @@ def frontier_facts() -> dict[str, Any]:
         out[f"arm_{stem}_ci"] = f"[{lo:.4f}, {hi:.4f}]"
     if "arm_default_f1" not in out:
         raise FactError("no frontier arm files found")
+
+    # What the reasoning flag is worth, on the two models where it can be set at
+    # all. The appendix quotes this as a range because it is the size of the
+    # confound: an arm labelled matched can be running the opposite
+    # configuration, and this is the F1 that hangs on the label being right.
+    worth = [
+        float(out[f"arm_{m}_nothink_f1"]) - float(out[f"arm_{m}_f1"])
+        for m in ("qwen35ba3b", "qwenplus")
+        if f"arm_{m}_nothink_f1" in out and f"arm_{m}_f1" in out
+    ]
+    if len(worth) == 2:
+        out["reasoning_flag_worth_low"] = f"{min(worth):.2f}"
+        out["reasoning_flag_worth_high"] = f"{max(worth):.2f}"
     return out
 
 
@@ -225,11 +238,19 @@ def cascade_facts() -> dict[str, Any]:
 def series_facts() -> dict[str, Any]:
     """Why the parameter-size series refuses, in its own numbers."""
     d = load("parameter_size_series.json")
+    params = [a["total_params_b"] for a in d["arms"]]
+    if not params or min(params) <= 0:
+        raise FactError("parameter_size_series.json has no usable parameter counts")
     return {
         "series_status": d["status"],
         "series_matched": str(d["configuration_matched"]),
         "series_unmatched": str(d["configuration_unmatched"]),
         "series_sizes": str(d["distinct_sizes_matched"]),
+        # The span the correlation was fitted across. Written by hand as "3x"
+        # while the arms say 35B to 120B, which is 3.4 — a small error, but the
+        # span is the whole reason a rank correlation over three models was
+        # thought to mean anything.
+        "series_param_span": f"{max(params) / min(params):.1f}",
     }
 
 
@@ -500,6 +521,11 @@ def corpus_shape_facts() -> dict[str, Any]:
     out: dict[str, Any] = {
         "cardinality_distinct_graphs": str(len(set(graphs))),
         "cardinality_samples": str(len(graphs)),
+        # How often the call-graph edge cap actually bit. The paper's point is
+        # that the cap was found while instrumenting something else, so the rate
+        # has to come from the records rather than from the sentence that
+        # reports the discovery.
+        "graph_edge_cap_hit": str(sum(1 for v in rows if v.get("hit_limit"))),
         "hint_nonempty": str(len(hints)),
         "hint_chars_min": str(min(hints)) if hints else "0",
         "hint_chars_max": str(max(hints)) if hints else "0",
@@ -507,6 +533,10 @@ def corpus_shape_facts() -> dict[str, Any]:
 
     cohort = load("dynamic_cohort_n100.json")
     out["cohort_n"] = str(len(cohort["samples"]))
+    # The selection seed, taken from the cohort it selected rather than from the
+    # sentence that describes it. A seed quoted from memory beside a cohort that
+    # was drawn with a different one is unfalsifiable and reproduces nothing.
+    out["cohort_seed"] = str(cohort["seed"])
 
     # What the analysts were actually fed, on the samples with sandbox reports.
     import statistics

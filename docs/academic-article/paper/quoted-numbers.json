@@ -3,22 +3,95 @@
  "note": "Numbers this paper quotes from work it cites. No derivation can produce someone else's result, so these are exempt from the hand-typed-numeral rule — but only on a line that also carries the citation. A quoted figure separated from its source is indistinguishable from one of ours.",
  "rule": "The checker exempts a listed value only where the citing marker appears on the same line. Moving the number away from its citation re-arms the check.",
  "quoted": [
-  {"value": "28.4", "cite": "24", "of": "the underperformance of larger models under spontaneous verbosity, in points"},
-  {"value": "7.7", "cite": "24", "of": "the low end of the inversion under brevity constraints"},
-  {"value": "15.9", "cite": "24", "of": "the high end of the inversion under brevity constraints"},
-  {"value": "0.85", "cite": "11", "of": "the rank correlation between parameter count and ATT&CK-classification F1"},
-  {"value": "0.014", "cite": "11", "of": "its p-value"},
-  {"value": "76", "cite": "21", "of": "the share of sampled tools that wrap successfully"},
-  {"value": "94.2", "cite": "21", "of": "the share after automated repair"},
-  {"value": "22", "cite": "20", "of": "the incidents in the silent-failure taxonomy"},
-  {"value": "8", "cite": "20", "of": "the weeks it covers"},
-  {"value": "72", "cite": "9", "of": "the peer-reviewed papers surveyed for LLM-security pitfalls"},
-  {"value": "0.7", "cite": "11", "of": "the degradation level at which the multi-agent crossover appears"},
-  {"value": "2.1", "cite": "10", "of": "the low end of the token multiple multi-agent debate costs"},
-  {"value": "3.4", "cite": "10", "of": "the high end of that multiple"},
-  {"value": "43", "cite": "12", "of": "the participants in the reverse-engineering user study"},
-  {"value": "77.5", "cite": "7", "of": "the candidate-space reduction from tactic-first filtering"},
-  {"value": "8634", "cite": "25", "of": "the llama.cpp issue number"},
-  {"value": "11976", "cite": "25", "of": "the vllm issue number"}
+  {
+   "value": "28.4",
+   "cite": "24",
+   "of": "the underperformance of larger models under spontaneous verbosity, in points"
+  },
+  {
+   "value": "7.7",
+   "cite": "24",
+   "of": "the low end of the inversion under brevity constraints"
+  },
+  {
+   "value": "15.9",
+   "cite": "24",
+   "of": "the high end of the inversion under brevity constraints"
+  },
+  {
+   "value": "0.85",
+   "cite": "11",
+   "of": "the rank correlation between parameter count and ATT&CK-classification F1"
+  },
+  {
+   "value": "0.014",
+   "cite": "11",
+   "of": "its p-value"
+  },
+  {
+   "value": "76",
+   "cite": "21",
+   "of": "the share of sampled tools that wrap successfully"
+  },
+  {
+   "value": "94.2",
+   "cite": "21",
+   "of": "the share after automated repair"
+  },
+  {
+   "value": "22",
+   "cite": "20",
+   "of": "the incidents in the silent-failure taxonomy"
+  },
+  {
+   "value": "8",
+   "cite": "20",
+   "of": "the weeks it covers"
+  },
+  {
+   "value": "72",
+   "cite": "9",
+   "of": "the peer-reviewed papers surveyed for LLM-security pitfalls"
+  },
+  {
+   "value": "0.7",
+   "cite": "11",
+   "of": "the degradation level at which the multi-agent crossover appears"
+  },
+  {
+   "value": "2.1",
+   "cite": "10",
+   "of": "the low end of the token multiple multi-agent debate costs"
+  },
+  {
+   "value": "3.4",
+   "cite": "10",
+   "of": "the high end of that multiple"
+  },
+  {
+   "value": "43",
+   "cite": "12",
+   "of": "the participants in the reverse-engineering user study"
+  },
+  {
+   "value": "77.5",
+   "cite": "7",
+   "of": "the candidate-space reduction from tactic-first filtering"
+  },
+  {
+   "value": "8634",
+   "cite": "25",
+   "of": "the llama.cpp issue number"
+  },
+  {
+   "value": "11976",
+   "cite": "25",
+   "of": "the vllm issue number"
+  },
+  {
+   "value": "15.7",
+   "cite": "9",
+   "of": "the share of the surveyed papers that discuss any of the nine pitfalls"
+  }
  ]
 }

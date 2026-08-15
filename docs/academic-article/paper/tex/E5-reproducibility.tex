@@ -93,7 +93,7 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
   --context-shift on --jinja --host 0.0.0.0 --port 8080
 \end{verbatim}
 
-Two caveats a reader needs. The context is served at \textbf{\fact{context-served} --- half the model's native 262,144}.
+Two caveats a reader needs. The context is served at \textbf{\fact{context-served} --- half the model's native \setting{262,144}}.
 And the launch command documented in the repository at one point specified \texttt{-\/-n-cpu-moe\ 36} while
 the service ran \fact{cpu-offload-blocks} blocks on CPU; the command above is what ran.
 
@@ -106,8 +106,8 @@ reproduced here:
 \tightlist
 \item
   \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB
-  after a single full analyst pass. A long paired run must restart it between arms; at temperature 0
-  this is measurement-neutral.
+  after a single full analyst pass. A long paired run must restart it between arms; the restart
+  changes no decoding parameter, so it is measurement-neutral.
 \item
   \textbf{Serving at \setting{64}k instead of \setting{131}k does not lower the peak} (\fact{llama-rss-64k-gb} vs \fact{llama-rss-growth-gb} GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
@@ -125,7 +125,7 @@ host lock-ups preceded this limit being added.
 \textbf{The working set does not fit alongside an interactive session, and that is a reproducibility fact
 rather than an operational one.} Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
 up to \fact{ghidra-mem-limit-gb} GB: on a \setting{31} GiB host this leaves nothing for a desktop. When we ran a paired study without
-that headroom, the swap file was exhausted, the model server had \textbf{2.3 GB of its own address space
+that headroom, the swap file was exhausted, the model server had \textbf{\fact{llama-paged-out-gb} GB of its own address space
 paged out}, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
 generating from disk-backed pages is a different instrument from one generating from RAM, and the
 timings it produces are not comparable to the rest of the table.
@@ -191,7 +191,7 @@ committed
 \bottomrule\noalign{}
 \endlastfoot
 \texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, \textbf{metadata only --- no binaries} & yes \\
-\texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, \textbf{seed 20260810}, digest recorded & yes \\
+\texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, \textbf{seed \fact{cohort-seed}}, digest recorded & yes \\
 \texttt{cape\_task\_ledger\_n100.json} & sha256 $\rightarrow$ CAPE task id for all \fact{cohort-n} submissions & yes \\
 \texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=\fact{cohort-n} attempted & yes \\
 \texttt{cape\_baseline.json} & per-sample CAPE-only scores & yes \\
@@ -281,17 +281,18 @@ n
 \bottomrule\noalign{}
 \endlastfoot
 local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{arm-default-n} \\
-frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & \fact{arm-default-n} $\times$2 \\
+frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & \fact{arm-default-n} $\times$\setting{2} \\
 same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & \fact{arm-qwen35ba3b-nothink-n} \\
 same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & \fact{arm-qwen35ba3b-n} \\
 larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenplus-n} each \\
 \end{longtable}
 
 \textbf{\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter.} Not rejected --- accepted,
-recorded in the result file, and not acted on: the re-run requesting it returned a \textbf{56.2\%}
-reasoning share against \textbf{56.5\%} without it. On DashScope the same request produces \textbf{0.0\%}. This
+recorded in the result file, and not acted on: the re-run requesting it returned a
+\textbf{\fact{arm-default-nothink-reasoning}} reasoning share against \textbf{\fact{arm-default-reasoning}}
+without it. On DashScope the same request produces \textbf{\fact{arm-qwen35ba3b-nothink-reasoning}}. This
 is the line in this appendix that matters most to anyone comparing arms, because the flag is
-worth 0.34--0.45 F1 on the two models where it can be set, and an arm can therefore be labelled
+worth \fact{reasoning-flag-worth-low}--\fact{reasoning-flag-worth-high} F1 on the two models where it can be set, and an arm can therefore be labelled
 matched while running the opposite configuration. \texttt{eval\_parameter\_size\_series.py} selects arms on
 the \textbf{measured} reasoning share for exactly this reason and refuses to correlate when fewer than
 three configuration-matched arms span three parameter counts --- which, on these endpoints, is
@@ -320,7 +321,7 @@ OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature \settin
 that applies whether or not credit has been purchased. The \textbf{first} attempt at this arm exhausted
 the daily quota mid-flight --- \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning HTTP 429 --- and the n=\fact{superseded-frontier-n} estimate it
 produced was not merely imprecise but pointed the wrong way (§2). The arm reported above is the
-completed \textbf{n=\fact{arm-default-n}} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, 0 refusals, \$0 charged against
+completed \textbf{n=\fact{arm-default-n}} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, \setting{0} refusals, \$\setting{0} charged against
 the \$\setting{25} ceiling.
 
 The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
@@ -393,8 +394,8 @@ run alone shows it. Preserved as \texttt{judge\_contribution\_uncapped.*} and \t
 \textbf{Figures are generated from the same retained records as the text.} The script recomputes intervals
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
 cannot drift apart without the script failing to reproduce one of them. This caught a live error: an
-ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because 186
-of \fact{confidence-n} claims are tied at confidence \setting{1.0} and tie handling decides the entire estimate. The text was
+ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because
+\fact{confidence-modal-count} of \fact{confidence-n} claims are tied at confidence \setting{1.0} and tie handling decides the entire estimate. The text was
 right and the first draft of the figure was wrong --- which is the ordinary direction for this check to
 fire, and the reason for wiring it this way.
 
