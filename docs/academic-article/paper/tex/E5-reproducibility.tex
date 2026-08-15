@@ -65,7 +65,7 @@ reproduced here:
   after a single full analyst pass. A long paired run must restart it between arms; at temperature 0
   this is measurement-neutral.
 \item
-  \textbf{Serving at 64k instead of 131k does not lower the peak} (14.6 vs 14.8 GB) --- the baseline is
+  \textbf{Serving at 64k instead of \fact{fallback-bundle-total}k does not lower the peak} (14.6 vs 14.8 GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
 \item
   \textbf{Generation rate varies from 162 to 20 tokens/s across requests.} On this hybrid recurrent
@@ -82,7 +82,7 @@ host lock-ups preceded this limit being added.
 rather than an operational one.} Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
 up to 6 GB: on a 31 GiB host this leaves nothing for a desktop. When we ran a paired study without
 that headroom, the swap file was exhausted, the model server had \textbf{2.3 GB of its own address space
-paged out}, and one arm then exceeded a 594-second budget on a 16,000-character prompt. A model
+paged out}, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
 generating from disk-backed pages is a different instrument from one generating from RAM, and the
 timings it produces are not comparable to the rest of the table.
 
@@ -269,7 +269,7 @@ cap that was requested instead.
 
 \subsubsection{The original frontier arm}\label{the-original-frontier-arm}
 
-OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature 0, 2,400-token output cap.
+OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature 0, \fact{consensus-budget}-token output cap.
 
 \textbf{The free tier allows 50 requests per day} (\texttt{X-RateLimit-Limit:\ 50},
 \texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a 20-requests-per-minute cap

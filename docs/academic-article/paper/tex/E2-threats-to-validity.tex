@@ -130,7 +130,7 @@ fixtures, repeats, prompt and token budget --- and \textbf{did not separate from
 advantage produces no measurable difference here, which is evidence \emph{against} the pitfall's usual
 worry rather than merely an absence of evidence for it.
 
-An interim version of this arm reported 0.5025 at n=9 and read as a lead; completing the sample moved
+An interim version of this arm reported \fact{superseded-frontier-f1} at n=9 and read as a lead; completing the sample moved
 the estimate through the local mean and out the other side. We record that because the arm had been
 truncated by a daily request quota, not by anything about the samples --- the failure mode is reading a
 difference off an underpowered arm, and this audit carried the wrong number for a day.
@@ -246,7 +246,7 @@ every dynamic-versus-static contrast rather than in a footnote, because the cont
 without it.
 
 The same measurement bounds two Layer-0 sources from the other direction. The LOLBin layer and the
-DGA layer produce a claim on \textbf{0 of 97} samples while being fed a median of 8888 recorded API calls
+DGA layer produce a claim on \textbf{0 of 97} samples while being fed a median of \fact{evidence-median-calls} recorded API calls
 and 48--68 domains respectively --- they are offered the evidence and decline it. That is why neither
 appears as an arm in the cascade ablation: giving a mechanism an equal share of ground truth when it
 never engages in the deployment would measure a system that does not exist.
@@ -261,7 +261,7 @@ A threat we did not anticipate and met late: \textbf{the machine a measurement r
 instrument.} Our working set --- model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container up
 to 6 GB --- does not fit a 31 GiB host alongside an interactive session. During a paired ablation the
 swap file was exhausted and the model server had 2.3 GB of its own address space paged out; an arm
-then exceeded a 594-second budget on a prompt trimmed to 16,000 characters. Whether that arm failed
+then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters. Whether that arm failed
 because of the pipeline or because of the host \textbf{cannot be determined}, because we recorded the
 pipeline's outputs and not the host's state.
 

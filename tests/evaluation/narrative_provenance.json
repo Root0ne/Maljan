@@ -1,7 +1,7 @@
 {
  "schema": "maljan-narrative-provenance/v1",
  "note": "Numbers the paper states that no committed artifact can produce. Each is an observation from a live session whose raw output was not retained, recorded at the time in a dated findings-log entry or a unit-test docstring written against the live system. They are not measurements from the record and the paper must not present them as such. A record with neither an artifact nor an explicit unretained-session provenance is a build failure, so a number cannot acquire the authority of a derivation by being added here.",
- "why_this_file_exists": "This is the paper's own retention thesis arriving a second time. The rule we adopted after the n=210 withdrawal was 'retain per-sample outputs for every study'. It was scoped to studies. These six numbers come from diagnostic sessions against live containers, which are not studies and so were never in scope, and their raw output is gone. Rather than delete the incidents or quietly present them as derived, they are quarantined here with the record that carries them.",
+ "why_this_file_exists": "This is the paper's own retention thesis arriving a second time. The rule adopted after the n=210 withdrawal was 'retain per-sample outputs for every study'. It was scoped to studies. Most of these come from diagnostic sessions against live containers, which are not studies and so were never in scope, and their raw output is gone; the rest are settings, which no analysis produces. Rather than delete the incidents or quietly present them as derived, they are quarantined here with the record that carries each one. The count is deliberately not stated: a sentence saying how many records this file holds is a hand-typed number in the file whose purpose is to stop those.",
  "records": {
   "hint_chars_repeated": {
    "value": "2,575",
@@ -102,6 +102,88 @@
    "artifact": null,
    "provenance": "unretained-session",
    "note": "The current artifact records the refusal, not the superseded correlation, because the gate now stops the series before it computes one. The number survives only in the code that documents why it must not be computed."
+  },
+  "consensus_budget": {
+   "value": "2,400",
+   "claim": "the total output-token budget every consensus arm was given",
+   "observed": "2026-08-09",
+   "record_ref": "eval_consensus_ablation.py _DEFAULT_BUDGET",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "react_step_budget": {
+   "value": "40",
+   "claim": "the ReAct step ceiling the static analyst runs under",
+   "observed": "2026-08-11",
+   "record_ref": "src/maljan/core/config.py static max_steps",
+   "artifact": null,
+   "provenance": "configuration-constant",
+   "note": "Raised from 8 after the re-prefill investigation; the salvage-path defect below is a consequence of it."
+  },
+  "salvage_budget_seconds": {
+   "value": "594",
+   "claim": "the wall-clock budget one arm exceeded when the salvage path was handed a fresh copy of a budget it was already inside",
+   "observed": "2026-08-12",
+   "record_ref": "findings-log.md §3.29",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "static_max_chars": {
+   "value": "16,000",
+   "claim": "the static-evidence character ceiling the prompt was trimmed to",
+   "observed": "2026-08-11",
+   "record_ref": "src/maljan/core/config.py static_max_chars",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "host_ram_gib": {
+   "value": "31",
+   "claim": "the host's usable RAM, which the model server plus an interactive session does not fit inside",
+   "observed": "2026-08-12",
+   "record_ref": "E5 §3; /proc/meminfo MemTotal",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "llama_rss_growth_gb": {
+   "value": "14.8",
+   "claim": "the model server's resident size after a long run, still growing with cumulative requests",
+   "observed": "2026-08-12",
+   "record_ref": "eval_sink_hint_ablation.py docstring; E5 §3",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "attck_catalogue_size": {
+   "value": "691",
+   "claim": "the size of the ATT&CK technique catalogue every predicted identifier is validated against",
+   "observed": "2026-08-08",
+   "record_ref": "data/attck_valid_ids.json, built by scripts/prepare_attck_malware_fixtures.py",
+   "artifact": "data/attck_valid_ids.json",
+   "provenance": "derived-elsewhere"
+  },
+  "cape_tool_count": {
+   "value": "36",
+   "claim": "the CAPE MCP tools verified individually, all of which refused under the argument defect",
+   "observed": "2026-08-10",
+   "record_ref": "findings-log.md §3.14",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "superseded_frontier_f1": {
+   "value": "0.5025",
+   "claim": "the frontier arm's mean F1 at n=9, before the run was completed; it did not survive the full sample",
+   "observed": "2026-08-13",
+   "record_ref": "findings-log.md §3.16",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "Kept because it is the paper's own example of a difference read off an underpowered arm."
+  },
+  "superseded_frontier_n": {
+   "value": "9",
+   "claim": "the sample size that interim figure came from, the run having been cut short by a request quota",
+   "observed": "2026-08-13",
+   "record_ref": "findings-log.md §3.16",
+   "artifact": null,
+   "provenance": "unretained-session"
   }
  }
 }

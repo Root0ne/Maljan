@@ -436,6 +436,87 @@ def fixture_ceiling_facts() -> dict[str, Any]:
     }
 
 
+def fallback_table_facts() -> dict[str, Any]:
+    """The per-fixture fallback-versus-cascade table, generated as LaTeX rows.
+
+    Four fixtures, four numbers each, typed by hand into a table that the
+    artifact already holds. A table of measurements is the last place a reader
+    expects a transcription, and it is the easiest place to make one.
+    """
+    d = load("fallback_bundle_content_capped.json")
+    rows = d.get("per_call")
+    if not rows:
+        raise FactError("fallback_bundle_content_capped.json has no per_call rows")
+    body = []
+    for r in sorted(rows, key=lambda x: str(x["sample_id"])):
+        only = len(r["only_in_fallback"])
+        body.append(
+            f"\\texttt{{{r['sample_id']}}} & {r['fallback_n']} & {r['cascade_n']} "
+            f"& \\textbf{{{only}}} \\\\"
+        )
+    leaked = sum(len(r["only_in_fallback"]) for r in rows)
+    if leaked != d["techniques_only_on_fallback_path"]:
+        raise FactError(
+            f"per-call rows sum to {leaked} leaked techniques, the summary says "
+            f"{d['techniques_only_on_fallback_path']}"
+        )
+    # Written to its own file rather than returned as a macro. An ``&`` produced
+    # by expanding a macro is not an alignment tab — TeX has already decided
+    # where the cells are by the time the macro runs — so a generated table body
+    # has to arrive through \input, which is read at the right moment. The
+    # symptom was a four-column table printing "jhuhugit & 32 & 20 & 12" into one
+    # cell, which compiles cleanly and is visibly wrong only on the page.
+    TABLES.mkdir(parents=True, exist_ok=True)
+    (TABLES / "fallback-rows.tex").write_text("\n".join(body) + "\n")
+
+    # ``fallback_bundle_total`` is judge_facts' — one derivation per number — but
+    # the rows are checked against it, because a generated table that disagrees
+    # with the total beside it is worse than either alone.
+    return {
+        "fallback_cascade_total": str(sum(r["cascade_n"] for r in rows)),
+        "fallback_fixtures": str(len(rows)),
+    }
+
+
+def corpus_shape_facts() -> dict[str, Any]:
+    """What the analysed corpus looks like, from the records rather than memory."""
+    d = load("sink_hint_frequency.json")
+    rows = [v for v in d["results"].values() if not v.get("error")]
+    graphs = [v["graph_chars"] for v in rows if v.get("graph_chars")]
+    if not graphs:
+        raise FactError("sink_hint_frequency.json records no call-graph sizes")
+    hints = [v["hint_chars"] for v in rows if v.get("hint_nonempty")]
+    out: dict[str, Any] = {
+        "cardinality_distinct_graphs": str(len(set(graphs))),
+        "cardinality_samples": str(len(graphs)),
+        "hint_nonempty": str(len(hints)),
+        "hint_chars_min": str(min(hints)) if hints else "0",
+        "hint_chars_max": str(max(hints)) if hints else "0",
+    }
+
+    cohort = load("dynamic_cohort_n100.json")
+    out["cohort_n"] = str(len(cohort["samples"]))
+
+    # What the analysts were actually fed, on the samples with sandbox reports.
+    import statistics
+
+    reports_dir = _REPO_ROOT / "data" / "cape_reports"
+    calls, domains = [], []
+    for path in sorted(reports_dir.glob("*.json")):
+        blob = json.loads(path.read_text())
+        behaviour = blob.get("behavior") or {}
+        procs = behaviour.get("processes") or []
+        calls.append(sum(len(p.get("calls") or []) for p in procs if isinstance(p, dict)))
+        domains.append(len((blob.get("network") or {}).get("domains") or []))
+    if not calls:
+        raise FactError("no archived CAPE reports to characterise the corpus with")
+    out["evidence_median_calls"] = str(int(statistics.median(calls)))
+    out["evidence_domains_min"] = str(min(domains))
+    out["evidence_domains_max"] = str(max(domains))
+    out["evidence_reports"] = str(len(calls))
+    return out
+
+
 def cape_audit_facts() -> dict[str, Any]:
     """The sandbox reported every task complete; the timings say otherwise.
 
@@ -654,7 +735,7 @@ def provenance_facts() -> dict[str, Any]:
     # The only provenances a number may claim when no artifact backs it. Anything
     # else is a number with no account of where it came from, which is what this
     # registry exists to make impossible rather than merely discouraged.
-    declared = {"unretained-session", "configuration-constant"}
+    declared = {"unretained-session", "configuration-constant", "derived-elsewhere"}
     out: dict[str, Any] = {}
     for name, rec in sorted((reg.get("records") or {}).items()):
         if not rec.get("artifact") and rec.get("provenance") not in declared:
@@ -684,6 +765,8 @@ BUILDERS = (
     suite_facts,
     cape_audit_facts,
     fixture_ceiling_facts,
+    fallback_table_facts,
+    corpus_shape_facts,
     cluster_stat_facts,
     power_facts,
     multiplicity_facts,
@@ -741,6 +824,7 @@ def tex_value(value: str) -> str:
 # it derived from — a builder that stamped its own inputs would be certifying
 # itself.
 STAMP = TEX_OUT.parent / ".facts-inputs.sha256"
+TABLES = TEX_OUT.parent / "tables"
 
 
 def artifact_digest() -> str:

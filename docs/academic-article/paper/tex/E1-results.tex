@@ -213,7 +213,7 @@ $\alpha$=0.7 on our own model class.
 
 \subsection{A model 3.4 times larger does not separate from the local one}\label{a-model-3.4-times-larger-does-not-separate-from-the-local-one}
 
-Same five fixtures, same prompt, same 2,400-token output budget:
+Same five fixtures, same prompt, same \fact{consensus-budget}-token output budget:
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
@@ -381,7 +381,7 @@ we have above 35B does not permit that match. Two of our arms are configuration-
 are 35B, so the series is two points at one size. We state this as a limitation with a measured
 cause rather than as an untested claim in either direction.
 
-\textbf{An earlier version of this arm reported 0.5025 and was wrong to suggest a lead.} That figure came
+\textbf{An earlier version of this arm reported \fact{superseded-frontier-f1} and was wrong to suggest a lead.} That figure came
 from n=9, the run having been cut short by a daily request quota; the apparent advantage did not
 survive completing the sample. It is recorded here because it is the exact failure mode §4.2 warns
 about --- a difference read off an underpowered arm --- and because we caught it by finishing the run
@@ -631,19 +631,16 @@ fixture & fallback & cascade & \textbf{only in fallback} \\
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\texttt{jhuhugit} & 32 & 20 & \textbf{12} \\
-\texttt{sardonic} & 27 & 25 & \textbf{2} \\
-\texttt{sliver} & \textbf{46} & 23 & \textbf{23} \\
-\texttt{wannacry} & 26 & 16 & \textbf{10} \\
+\input{tables/fallback-rows}
 \end{longtable}
 
 \textbf{\fact{fallback-only-capped} techniques reach the analyst that the corroboration cascade never held}, and none
 goes the other way. On one sample the bundle doubles. Because the uncapped run is a control whose
-raw text provably contains no IDs, every one of the 47 is attributable to the model's own output.
+raw text provably contains no IDs, every one of them is attributable to the model's own output.
 They passed through no filter at all --- not the cascade, not the reconciliation step, not the
 invalid-ID filter, not the integrity pass.
 
-They are also, checked against the 691-technique ATT\&CK catalogue, \textbf{real: 45 of 45 unique IDs
+They are also, checked against the \fact{attck-catalogue-size}-technique ATT\&CK catalogue, \textbf{real: 45 of 45 unique IDs
 exist, none is invented.} That is worth stating because it removes the easy reading. The pipeline
 is not emitting hallucinated identifiers a schema check would catch. It is emitting genuine ATT\&CK
 techniques that no evidence source claimed and no corroboration supports, in the same object type
@@ -653,7 +650,7 @@ tell them apart.
 So the finding that opened this section needs its scope stated exactly. The verdict model has no
 influence over which techniques reach the analyst \textbf{on the path where it works}. On the path where
 it fails it has more influence than on the path where it succeeds: 0 of 99 techniques when
-reconciliation runs, 47 of 131 when it does not. The architecture suppresses the model's
+reconciliation runs, 47 of \fact{fallback-bundle-total} when it does not. The architecture suppresses the model's
 contribution precisely when the model is functioning, and admits it precisely when it is not.
 
 \textbf{This replaces an earlier version of the same result, and the replacement is why we trust it.} The
@@ -677,7 +674,7 @@ conditions measure what we claim they measure.
 
 Two Layer-0 sources are absent from these arms by measurement rather than by choice. Over the 95
 archived reports the LOLBin layer and the DGA layer each produce a claim on \textbf{0 of 97}, while being
-fed a median of 8888 recorded API calls and 48--68 domains per sample respectively. They are offered
+fed a median of \fact{evidence-median-calls} recorded API calls and 48--68 domains per sample respectively. They are offered
 the evidence and decline it; giving either an equal share of the ground truth would have ablated a
 mechanism that never engages in this deployment.
 
@@ -778,7 +775,7 @@ the estimate is the whole of what we have to say about how to read it.}
 
 \textbf{The two \texttt{unattributable} pairs are this paper's own §4.5 recurring against it.} They died while
 the host's swap file was exhausted and the model server had 2.3 GB of its own address space paged
-out; one arm then exceeded a 594-second budget on a prompt trimmed to 16,000 characters, which is
+out; one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters, which is
 inexplicable for a model generating from RAM and unsurprising for one generating from disk. We had
 retained per-sample outputs, as our own rule requires. What went unrecorded was the environment the
 measurement ran in. The harness now captures \texttt{MemAvailable}, \texttt{SwapFree} and the server's

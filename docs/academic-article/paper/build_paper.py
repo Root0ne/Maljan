@@ -114,6 +114,25 @@ def check_anonymity(name: str, tex: str) -> list[str]:
     return [f"{name}: {m.group(0)!r} at offset {m.start()}" for m in FORBIDDEN.finditer(tex)]
 
 
+def check_no_alignment_in_a_macro() -> list[str]:
+    r"""A fact whose value contains ``&`` cannot be a table row.
+
+    TeX decides where an alignment's cells are before a macro in it expands, so
+    an ampersand arriving from ``\fact{...}`` is typeset rather than obeyed. The
+    symptom is a four-column table printing all four values into the first cell:
+    it compiles without a warning and is wrong only on the page. Generated table
+    bodies go in ``tex/tables/`` and arrive through ``\input``, which is read at
+    the right moment.
+    """
+    if not FACTS_JSON.exists():
+        return []
+    bad = []
+    for key, value in json.loads(FACTS_JSON.read_text()).items():
+        if "&" in str(value) or "\\\\" in str(value):
+            bad.append(f"fact {key} holds an alignment tab or row break — make it an \\input file")
+    return bad
+
+
 def check_facts_referenced() -> list[str]:
     """Every ``\\fact`` the sources ask for is defined.
 
@@ -145,6 +164,7 @@ def main() -> int:
     if FACTS_TEX.exists():
         violations += check_anonymity("facts.tex", FACTS_TEX.read_text())
     violations += check_facts_referenced()
+    violations += check_no_alignment_in_a_macro()
 
     if violations:
         print("BUILD REFUSED:", file=sys.stderr)
