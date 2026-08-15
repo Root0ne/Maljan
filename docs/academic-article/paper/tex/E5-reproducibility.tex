@@ -66,7 +66,7 @@ architecture & hybrid recurrent (SSM keys + \texttt{full\_attention\_interval=4}
 \end{longtable}
 
 Naming the imatrix dataset matters: most papers reporting a quantisation level cannot say which
-calibration produced it, and two IQ3 quants of the same model are not the same artifact.
+calibration produced it, and two IQ3 quants of the same model are not the same artefact.
 
 \subsection{The engine, and an honest note about how we know}\label{the-engine-and-an-honest-note-about-how-we-know}
 
@@ -95,7 +95,7 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
 
 Two caveats a reader needs. The context is served at \textbf{\fact{context-served} --- half the model's native 262,144}.
 And the launch command documented in the repository at one point specified \texttt{-\/-n-cpu-moe\ 36} while
-the service actually ran \fact{cpu-offload-blocks} blocks on CPU; the command above is what ran.
+the service ran \fact{cpu-offload-blocks} blocks on CPU; the command above is what ran.
 
 \subsection{Hardware, and the ceiling it imposes}\label{hardware-and-the-ceiling-it-imposes}
 
@@ -167,10 +167,10 @@ snap.code.code-*.scope: Failed with result 'oom-kill'
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Every committed artifact the paper's numbers are derived from, with its size and whether it carries per-sample records.}\label{tab:artifacts}\\
+\caption{Every committed artefact the paper's numbers are derived from, with its size and whether it carries per-sample records.}\label{tab:artefacts}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
-artifact
+artefact
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 what it is
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -180,7 +180,7 @@ committed
 \endfirsthead
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
-artifact
+artefact
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 what it is
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -290,7 +290,7 @@ larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \f
 \textbf{\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter.} Not rejected --- accepted,
 recorded in the result file, and not acted on: the re-run requesting it returned a \textbf{56.2\%}
 reasoning share against \textbf{56.5\%} without it. On DashScope the same request produces \textbf{0.0\%}. This
-is the single most important line in this appendix for anyone comparing arms, because the flag is
+is the line in this appendix that matters most to anyone comparing arms, because the flag is
 worth 0.34--0.45 F1 on the two models where it can be set, and an arm can therefore be labelled
 matched while running the opposite configuration. \texttt{eval\_parameter\_size\_series.py} selects arms on
 the \textbf{measured} reasoning share for exactly this reason and refuses to correlate when fewer than
@@ -301,7 +301,7 @@ always.
 \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read; the cap must also travel in
 \texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}. Measured on this host: \fact{cap-requested} requested, \textbf{\fact{cap-ignored-tokens}
 generated} with the renamed field alone, \textbf{\fact{cap-honoured-tokens}} with both. A reader who omits this will find the
-verdict model decoding to the context limit, which is what happened here for as long as the cap had
+judge decoding to the context limit, which is what happened here for as long as the cap had
 existed. \texttt{probe\_outbound\_parameters.py} re-checks this and the other outbound parameters against a
 running server; it is the regression witness, and it is cheap enough to run before any measurement
 campaign.
@@ -380,7 +380,7 @@ every figure & \texttt{make\_paper\_figures.py} & \textbf{none} --- reads the JS
 Two of these exist only because a result could not be believed, and both are worth running before
 the studies they check rather than after. \texttt{verify\_b3\_mechanism.py} recomputes each ablation arm's
 cascade set from its seeded fixture and compares it against what the arm recorded --- it is what
-established that a published finding of ours had measured a post-processing step rather than a
+established that a published finding of ours had measured the reconciliation step rather than a
 model. \texttt{probe\_outbound\_parameters.py} asks whether the server acts on each parameter we send it,
 by behaviour rather than by reading a response field, because a server that ignores a parameter
 does not report having done so.

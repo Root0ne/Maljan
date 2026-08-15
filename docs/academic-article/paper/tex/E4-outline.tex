@@ -30,11 +30,10 @@ A hint of exactly \fact{hint-chars-repeated} characters for two unrelated binari
 character for samples of \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at \fact{stuck-graph-chars} characters. The check
 costs one line, needs no ground truth, and we now report it beside every batch result.
 
-\textbf{Then three more, and none of them was at a boundary.} An ablation varied a deterministic
-post-processing step and we attributed its output to a language model. A rank correlation over model
+\textbf{Then three more, and none of them was at a boundary.} An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
 size ranked a reasoning-configuration flag instead and recovered the published scaling coefficient
 almost exactly --- agreeing with the literature, which is the direction a result is least likely to be
-questioned. And a documented output ceiling on the verdict model was renamed by our client library
+questioned. And a documented output ceiling on the judge was renamed by our client library
 during serialisation to a key the inference server does not read, so a component we describe as
 bounded had never once been bounded. The detector above does not find these: their outputs \emph{do}
 vary. Two were caught by a number too clean to believe, one by a study that recorded which failure

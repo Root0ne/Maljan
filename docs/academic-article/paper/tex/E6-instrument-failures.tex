@@ -136,7 +136,7 @@ under a partner --- so that only their \emph{corroboration} changes --- the bund
 techniques, \textbf{32 of 32} changed. We wrote this up as a finding about the judge model: that it
 attends to the list of claimed techniques and ignores the evidence-quality apparatus above it.
 
-The judge was not involved. A post-processing step reconciles the bundle against the cascade before
+The judge was not involved. The reconciliation step reconciles the bundle against the cascade before
 it is returned: unresolvable attack-patterns are dropped, and \textbf{every cascade technique missing
 from the bundle is appended to it}. The cascade's technique set is therefore a guaranteed subset
 of every bundle the pipeline emits, whatever the model produced. Recomputing each arm's cascade set
@@ -218,7 +218,7 @@ select on the \emph{measured} reasoning share, never on the flag --- is what the
 The last one is in the production pipeline rather than in an evaluation harness, and it removed a
 guarantee the code states in its own comment.
 
-The verdict model is built with an \fact{judge-output-cap}-token output ceiling, and the line that builds it says
+The judge is built with an \fact{judge-output-cap}-token output ceiling, and the line that builds it says
 why: \emph{``Bound the verdict generation so a degenerate decode can't consume the full wall-clock
 timeout.''} The client library renames that parameter to the API vendor's newer spelling when it
 serialises the request, and our local inference server does not read the newer spelling. It
@@ -268,7 +268,7 @@ corroboration cascade entirely.
   M1 required a second \emph{server}. The behaviour was correct against the only server exercised.
 \item
   M4 required a rich enough \textbf{input} --- the composition only appears when the step budget is
-  actually exhausted, which small fixtures never do.
+exhausted, which small fixtures never do.
 \item
   M5 was \textbf{tested and passing}. \texttt{\_reconcile\_with\_cascade} has unit tests, and they assert exactly
   what it does: unresolvable patterns are dropped, missing cascade techniques are added. The
@@ -294,7 +294,8 @@ Four preconditions --- a second call, a second server, a large input --- are exa
 suite is designed to avoid. The last three are worse: \textbf{M5, M6 and M7 are invisible to unit testing
 in principle}, because every unit involved behaved as specified. Their common shape is that the
 defect lived in the \emph{composition} --- which measurement was attributed to which cause, or which
-representation of a value actually crosses the boundary --- and a test that pins a function's
+representation of a value
+crosses the boundary --- and a test that pins a function's
 behaviour cannot reach an assumption made when its inputs were chosen or when its output was
 serialised.
 
@@ -334,7 +335,7 @@ a 25-minute call that always produced one claim and zero techniques & M4 \\
 a Jaccard of \textbf{\fact{cascade-overlap-jaccard} with a zero-width interval}, from a model asked the same question \fact{cascade-overlap-pairs} times at temperature 0 & M5 \\
 \end{longtable}
 
-M5 extends the detector in a direction worth stating, because it is where the idea is least
+M5 extends the detector in a direction that matters, because it is where the idea is least
 comfortable: the repeated number was \textbf{our own result}, not a server's response, and the variation
 that failed to appear was the model's. A perfect agreement is the same signal as an identical
 digest, and it deserves the same suspicion.
@@ -354,7 +355,7 @@ makes it usable exactly where correctness is hard to check.
 \textbf{The right panel is a schematic, and the reason is the argument of §6.4.} It depicts M3 --- the run
 in which \fact{stuck-graph-run} consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph --- and we cannot
 plot it, because that run predates the per-sample retention policy those very failures caused us to
-adopt. The most important curve in this paper is the one we are unable to draw.
+adopt. The curve this paper turns on is the one we are unable to draw.
 
 We now report it beside every batch result: 50 distinct call-graph sizes across 79 samples, then
 \fact{cardinality-distinct-graphs} across \fact{cardinality-samples}.

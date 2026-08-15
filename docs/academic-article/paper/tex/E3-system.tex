@@ -46,7 +46,7 @@ verdict
 \textbf{sink-reachability hint} & ranks functions reachable to sensitive APIs, injected as prompt steering & \textbf{fires on \fact{hint-rate}}; measured: \textbf{$\Delta$techniqueIDs \fact{sink-delta-tids}, CI \fact{sink-ci-tids}} \\
 \end{longtable}
 
-Two design choices are worth stating because they are \emph{not} what failed, and a reader should not
+Two design choices matter here because they are \emph{not} what failed, and a reader should not
 infer that everything did.
 
 \textbf{Tool exposure is not tool availability.} The reverse-engineering server advertises \textasciitilde165 tools.
@@ -75,11 +75,11 @@ channels, a multi-layer corroboration cascade, two-tier attribution, and falsifi
 confidence --- \textbf{all four are now measured, and every one is negative or near-null.} The last of
 them no longer awaits sandbox access: the cascade was closed on the recovered cohort, and the
 attribution tier's remaining half was measured at \fact{hash-fired} of \fact{hash-total} samples. The components are not broken;
-several work well in isolation and were built for sound reasons. They simply do not move the
+three work well in isolation and were built for sound reasons. They simply do not move the
 end-to-end result, and we could not have known that without measuring each mechanism's firing rate
 before its effect.
 
 That outcome is the reason this paper is about measurement. A system whose parts individually
 justify themselves and collectively change nothing is an ordinary result, and reporting it requires
-only honesty. What required method was discovering that several of those measurements had been
+only honesty. What required method was discovering that seven of those measurements had been
 wrong in the first place.

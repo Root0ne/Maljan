@@ -499,7 +499,7 @@ source was the sole owner of its techniques.
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}@{}}
-\caption{The corroboration cascade under two conditions. Both counts follow from the reconciliation step rather than from the verdict model, which is why they are arithmetic rather than evidence.}\label{tab:cascade}\\
+\caption{The corroboration cascade under two conditions. Both counts follow from the reconciliation step rather than from the judge, which is why they are arithmetic rather than evidence.}\label{tab:cascade}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 condition
@@ -537,7 +537,7 @@ corroborated set in the run summary; none of that reaches the artefact the analy
 
 \textbf{Why the bundle behaves that way is not what we first wrote, and the difference matters.} Our
 initial reading was that the judge attends to the claim list and ignores everything else. It does
-not read either. A post-processing step reconciles the bundle against the cascade: every
+not read either. The reconciliation step reconciles the bundle against the cascade: every
 \texttt{attack-pattern} whose technique ID cannot be resolved is dropped, and every cascade technique
 missing from the bundle is appended. The cascade's technique set is therefore a guaranteed subset
 of every bundle the system emits, independent of what the judge produced. Checked against all 80
@@ -567,7 +567,7 @@ in. On the four calls that reached it:
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{What the verdict model contributed to the artefact the analyst receives, intercepted at the reconciliation seam. Counts are techniques, over four calls.}\label{tab:judge}\\
+\caption{What the judge contributed to the artefact the analyst receives, intercepted at the reconciliation seam. Counts are techniques, over four calls.}\label{tab:judge}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -641,13 +641,13 @@ They passed through no filter at all --- not the cascade, not the reconciliation
 invalid-ID filter, not the integrity pass.
 
 They are also, checked against the \fact{attck-catalogue-size}-technique ATT\&CK catalogue, \textbf{real: 45 of 45 unique IDs
-exist, none is invented.} That is worth stating because it removes the easy reading. The pipeline
+exist, none is invented.} That removes the easy reading: it removes the easy reading. The pipeline
 is not emitting hallucinated identifiers a schema check would catch. It is emitting genuine ATT\&CK
 techniques that no evidence source claimed and no corroboration supports, in the same object type
 and the same bundle as techniques three independent sources agreed on, with nothing downstream to
 tell them apart.
 
-So the finding that opened this section needs its scope stated exactly. The verdict model has no
+So the finding that opened this section needs its scope stated exactly. The judge has no
 influence over which techniques reach the analyst \textbf{on the path where it works}. On the path where
 it fails it has more influence than on the path where it succeeds: 0 of 99 techniques when
 reconciliation runs, 47 of \fact{fallback-bundle-total} when it does not. The architecture suppresses the model's
@@ -678,10 +678,10 @@ fed a median of \fact{evidence-median-calls} recorded API calls and 48--68 domai
 the evidence and decline it; giving either an equal share of the ground truth would have ablated a
 mechanism that never engages in this deployment.
 
-\subsection{Confidence is very nearly a constant}\label{confidence-is-very-nearly-a-constant}
+\subsection{Confidence is nearly a constant}\label{confidence-is-nearly-a-constant}
 
 Verbal confidence, which the cascade and the deterministic gates consume, discriminates correct from
-incorrect claims at \textbf{AUC \fact{confidence-auc}} --- near chance --- and is concentrated on a handful of round values.
+incorrect claims at \textbf{AUC \fact{confidence-auc}} --- near chance --- and is concentrated on \fact{confidence-distinct} round values.
 This matches \texttt{arXiv:2606.29490}'s finding that verbal confidence measures willingness to commit
 rather than correctness, and it means every deterministic gate keyed to that number is keyed to
 noise.

@@ -1,6 +1,29 @@
 \section{Measurement Methodology}
 \label{sec:method}
 
+\subsection{Terms}\label{terms}
+
+Four words are used in one sense throughout and are worth fixing before the
+measurements, because two of them name things this paper spends a figure keeping
+apart.
+
+An \textbf{arm} is one condition of one experiment: a configuration under which
+every input is scored, so that two arms differ in the one thing being tested. A
+\textbf{run} is an execution of a harness, which may produce several arms and may
+be interrupted and resumed.
+
+A \textbf{sample} is a real malware binary from the dated cohort, scored against
+its family's MITRE \texttt{uses} set. A \textbf{fixture} is one of the five
+synthesised inputs used by the equal-budget arms, whose evidence is generated
+from its own technique list and which therefore has a ceiling a real sample does
+not. They are different populations with different ground truth, they are never
+pooled, and where both appear in one figure they appear on separate axes.
+
+The \textbf{reconciliation step} is the deterministic post-processing that
+compares the judge's bundle against the corroboration cascade's set and restores
+what the judge omitted. It is named here because the paper's central architectural
+finding is about what it does, and an earlier draft gave it three different names.
+
 \subsection{Equal budgets, with a noise control}\label{equal-budgets-with-a-noise-control}
 
 Arms are compared at an \textbf{equal total token budget}. A multi-agent arm that makes N calls receives
@@ -9,7 +32,7 @@ design follows Bertalanič \& Fortuna, including a \textbf{stochastic-noise cont
 receives evidence irrelevant to the sample.
 
 The control is not decoration: it establishes that the harness can detect a difference. In our
-consensus study the noise arm separated clearly (\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1}) while the
+consensus study the noise arm separated (\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1}) while the
 treatment did not, which distinguishes ``no effect'' from ``no sensitivity''.
 
 \textbf{For reasoning models the budget must cover reasoning.} Our frontier endpoint reports reasoning
@@ -21,7 +44,8 @@ same nominal budget.
 than it sounds.} We measured this flag on two models at \fact{arm-default-n} calls each: enabling it moved F1 by
 \textbf{\fact{reasoning-flag-third-delta-2dp}} on one and \textbf{\fact{reasoning-flag-vendor35b-delta-2dp}} on the other, in both cases because the model spent its entire output
 budget thinking and returned no answer --- \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls hit the cap on the second model, and one
-answered. That is larger than every architectural effect in this paper combined, so an unmatched
+answered. That is the only effect in this paper that exceeds its own design's
+minimum detectable effect, so an unmatched
 pair does not produce a noisy comparison; it produces a comparison of the flag. Two further
 cautions follow from what it took to hold this constant. The flag cannot be read from the request:
 one of our providers accepts the parameter and ignores it, returning the same reasoning share
@@ -86,7 +110,7 @@ effect toward zero and manufactures a null.
 
 \subsection{Output cardinality, reported beside every batch}\label{output-cardinality-reported-beside-every-batch}
 
-\textbf{How many distinct outputs did the N inputs produce?} If far fewer than N differ on a dimension
+\textbf{Count how many distinct outputs the N inputs produced.} If far fewer than N differ on a dimension
 that should vary, the instrument is repeating itself. The four \emph{boundary} defects in §6 were found
 this way and none by a \fact{test-count}-test suite. The three that are ours rather than a server's were not:
 their outputs do vary, and what found them was a number too clean to believe, an arms table read
@@ -149,5 +173,5 @@ every sample. Output cardinality adds one line.
 
 Against that: one withdrawn study, seven defects that produced plausible wrong data, and three
 retrieval components that would have been reported as working had they only been tested in
-isolation. On this project the practices paid for themselves several times over, which is the only
+isolation. On this project the practices repaid the time they cost, on this project, which is the only
 argument for them we can make from a single system.

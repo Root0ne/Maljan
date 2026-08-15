@@ -96,16 +96,15 @@ and two protective bounds composing into an empty result. \textbf{A suite of \fa
 none of them}, and not because the tests were bad --- each defect requires a second call, a second
 server, or a large input, which is precisely what a fast unit suite is built to avoid.
 
-All four were found by one arithmetic check: \textbf{how many distinct outputs did N inputs produce?} A
+All four were found by one arithmetic check: \textbf{how many distinct outputs N inputs produced} A
 priority hint of exactly \fact{hint-chars-repeated} characters for unrelated binaries; \fact{stuck-graph-run} consecutive samples at exactly
 \fact{stuck-graph-chars}. It needs no ground truth and no oracle, which is what makes it usable where correctness is
 hard to check, and it belongs beside sample size in an evaluation report rather than inside a test.
 
-\textbf{Three more followed, and none of them was at a boundary.} An ablation varied a deterministic
-post-processing step and we attributed its output to a language model. A rank correlation over model
+\textbf{Three more followed, and none of them was at a boundary.} An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
 size ranked a reasoning-configuration flag instead, and recovered the published scaling coefficient
 almost exactly --- agreeing with the literature, which is the direction a wrong result is least likely
-to be questioned. And the verdict model's documented output ceiling was renamed by our client
+to be questioned. And the judge's documented output ceiling was renamed by our client
 library during serialisation to a key the inference server does not read, so a component described
 as bounded had never once been bounded; one call was measured at \fact{unbounded-decode-tokens} generated tokens against an
 \fact{judge-output-cap} cap. The cardinality check does not find these --- their outputs vary. Each had passing unit
@@ -140,7 +139,7 @@ state}, and that is what the question needed. The arms are reported as unattribu
 as failures, and the effect of that mechanism remains unmeasured.
 
 We report this rather than quietly re-running it because it is the paper's own thesis arriving
-uninvited: the rule you wrote after the last failure is scoped to the last failure. Retention
+uninvited: a rule written after a failure is scoped to that failure. Retention
 policies are written about the object under study; the environment the study runs in is also part of
 the instrument.
 
@@ -152,9 +151,9 @@ the four boundary cases and costs one line, together with what found the other t
 baseline of \textbf{F1 \fact{baseline-f1}} \fact{baseline-f1-cluster-ci}, n=\fact{baseline-n}, without which none of our F1 numbers refer to
 anything --- and against which the full pipeline gains \textbf{\fact{h2h-delta} F1}.
 
-We claim one result about the architecture that we did not go looking for: the verdict model's
+We claim one result about the architecture that we did not go looking for: the judge's
 influence on the artefact is \textbf{conditional on the model working}. Where it returns a parsable
-verdict it supplies \fact{judge-capped-own-ids} of \fact{judge-capped-bundle} techniques, because a post-processing step restores the deterministic
+verdict it supplies \fact{judge-capped-own-ids} of \fact{judge-capped-bundle} techniques, because the reconciliation step restores the deterministic
 set regardless; where it fails, a text fallback lifts identifiers out of the unparsable response and
 \fact{fallback-only-capped} techniques reach the analyst that no evidence source corroborated. The design suppresses the
 model's contribution exactly when the model is functioning and admits it exactly when it is not.
