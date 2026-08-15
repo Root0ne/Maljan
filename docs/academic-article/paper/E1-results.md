@@ -95,7 +95,7 @@ Same five fixtures, same prompt, same 2,400-token output budget:
 
 | arm | model | mean F1 | 95% CI | n |
 |---|---|---|---|---|
-| local | Qwen3.6-35B-A3B (IQ3_K_R4) | 0.4136 | — | 25 |
+| local | Qwen3.6-35B-A3B (IQ3_K_R4) | {{consensus_single_f1}} | — | {{consensus_single_n}} |
 | frontier | Nemotron-3-Super-120B-A12B | {{arm_default_f1}} | {{arm_default_ci}} | {{arm_default_n}} |
 
 Both arms see the same five fixtures at the same five repeats, so the comparison is **paired**:
@@ -133,7 +133,7 @@ repeats:
 
 | arm | precision | reasoning | mean F1 | paired vs local | n |
 |---|---|---|---|---|---|
-| local | IQ3_K_R4 (3-bit) | off | 0.4136 | — | 25 |
+| local | IQ3_K_R4 (3-bit) | off | {{consensus_single_f1}} | — | {{consensus_single_n}} |
 | vendor-hosted | full | off | {{arm_qwen35ba3b_nothink_f1}} | **−0.0629** [−0.1484, +0.0256] | 25 |
 | vendor-hosted | full | on | {{arm_qwen35ba3b_f1}} | −0.4056 [−0.4667, −0.3418] | 25 |
 
@@ -174,8 +174,8 @@ This is the paper's most replicated result, and it is negative.
 | component | works in isolation? | contribution end to end |
 |---|---|---|
 | ATT&CK case-prior RAG | yes — F1 0.620 vs a 0.424 frequency prior | **loses** to the frequency prior in production (0.111 vs 0.123) |
-| family-feature RAG | yes — recall@5 0.199, **6.3× chance**, leakage-free split | **+0.003 F1**, precision −0.009, n=19 |
-| opcode-hash attribution | n/a — never fires | **0 of 18 samples**; 7,716 functions hashed, 0 matches |
+| family-feature RAG | yes — recall@5 0.199, **6.3× chance**, leakage-free split | **{{family_delta_f1}} F1**, precision {{family_delta_precision}}, n=19 |
+| opcode-hash attribution | n/a — never fires | **{{hash_fired}} of {{hash_total}} samples**; {{hash_functions}} functions hashed, 0 matches |
 
 Each was built separately, each is defensible in design, and each is inert once wired to real
 inputs. The mechanisms differ, which is what makes the pattern worth reporting rather than three
@@ -192,14 +192,14 @@ interpreted at all.
 
 | mechanism | fires on | consequence |
 |---|---|---|
-| confidence cap (falsification-before-confidence) | **0.82%** of techniques | an ablation would measure nothing; the null is uninterpretable |
-| sink-reachability priority hint | **56.7%** of samples (55/97) | an ablation is interpretable, was run, and returned a null (§7) |
+| confidence cap (falsification-before-confidence) | **{{cap_rate}}** of techniques | an ablation would measure nothing; the null is uninterpretable |
+| sink-reachability priority hint | **{{hint_rate}}** of samples ({{hint_fired}}/{{hint_total}}) | an ablation is interpretable, was run, and returned a null (§7) |
 | STIX integrity pass | measured over 60 fresh judge bundles | reported by removal reason |
 
 For the cap, the mechanism's own preconditions explain the rate: it applies to three technique
 families, only when the sole contributing layer is `static`, and 84% of those claims are YARA-only —
 so no static claim exists for it to discipline. We report the rate rather than an ablation, because
-an ablation over a mechanism that fires on 0.82% of cases produces a null that means nothing.
+an ablation over a mechanism that fires on {{cap_rate}} of cases produces a null that means nothing.
 
 ![Firing rates decide which ablations can be read.](figures/fig4-firing-rate-before-effect.pdf)
 
@@ -340,7 +340,7 @@ mechanism that never engages in this deployment.
 ## 6. Confidence is very nearly a constant
 
 Verbal confidence, which the cascade and the deterministic gates consume, discriminates correct from
-incorrect claims at **AUC 0.550** — near chance — and is concentrated on a handful of round values.
+incorrect claims at **AUC {{confidence_auc}}** — near chance — and is concentrated on a handful of round values.
 This matches `arXiv:2606.29490`'s finding that verbal confidence measures willingness to commit
 rather than correctness, and it means every deterministic gate keyed to that number is keyed to
 noise.
@@ -356,16 +356,16 @@ data is handled.
 
 ## 7. What the ablations cost, and what that revealed
 
-The one mechanism whose firing rate justified an ablation (§4, 56.7%) was ablated, paired, on the
+The one mechanism whose firing rate justified an ablation (§4, {{hint_rate}}) was ablated, paired, on the
 subset where it fires. It does nothing measurable:
 
 | outcome | mean Δ (hint on − off) | 95% CI |
 |---|---|---|
-| **distinct technique IDs** | **+0.50** | **[−3.33, +4.50]** |
+| **distinct technique IDs** | **{{sink_delta_tids}}** | **{{sink_ci_tids}}** |
 | claims | −0.83 | [−4.33, +3.67] |
 | seconds | +52.55 | [−161.93, +268.45] |
 
-n=6 pairs; the hint is better on 2, worse on 2, and tied on 2, with per-pair deltas of +4, −6, 0, 0,
+n={{sink_pairs}} pairs; the hint is better on {{sink_better}}, worse on {{sink_worse}}, and tied on {{sink_tied}}, with per-pair deltas of +4, −6, 0, 0,
 −4 and +9 — large in both directions and cancelling. This is the fourth architectural claim to end in
 a null, and the last one we were in a position to test.
 
@@ -409,5 +409,5 @@ are eight times slower than assumed.
 
 Of the four architectural claims this system was built around, **all four are now measured and every
 one is negative or near-null.** None is left pending sandbox access: the cascade closed on the
-recovered cohort and the attribution tier's remaining half fired on 0 of 18 samples. What survived
+recovered cohort and the attribution tier's remaining half fired on {{hash_fired}} of {{hash_total}} samples. What survived
 measurement is not the architecture but the account of measuring it.

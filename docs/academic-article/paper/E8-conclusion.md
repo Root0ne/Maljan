@@ -16,18 +16,18 @@ did not hold.
 |---|---|
 | negotiated multi-agent consensus beats a single judge | ΔF1 **{{consensus_negotiated_delta}}**, 95% CI [−0.084, +0.050], at **3.2×** the tokens |
 | a multi-layer corroboration cascade improves the verdict | corroboration never reaches the artefact — and the model is not the reason: reconciliation restores every cascade technique the judge omits, and across **80 of 80** arms the judge added nothing of its own, so the ablation's 0-of-32 and 32-of-32 are arithmetic |
-| two-tier attribution identifies families | opcode-hash tier fires on **0 of 18** samples; family-feature retrieval contributes **+0.003 F1** |
-| falsification-before-confidence disciplines claims | the cap fires on **0.82%** of techniques |
+| two-tier attribution identifies families | opcode-hash tier fires on **{{hash_fired}} of {{hash_total}}** samples; family-feature retrieval contributes **{{family_delta_f1}} F1** |
+| falsification-before-confidence disciplines claims | the cap fires on **{{cap_rate}}** of techniques |
 
 None of these components is broken. Several work in isolation, and each was built for a reason we
 would give again. They simply do not move the end-to-end result. We report that as a result rather
-than as a tuning opportunity, and note that the noise control separated cleanly (0.3366 against
-0.3975 and 0.4136) — so these are nulls from an instrument demonstrated able to detect a difference,
+than as a tuning opportunity, and note that the noise control separated cleanly ({{consensus_noise_f1}} against
+{{consensus_negotiated_f1}} and {{consensus_single_f1}}) — so these are nulls from an instrument demonstrated able to detect a difference,
 not from one unable to see anything.
 
 Two further negatives constrain how the rest should be read. Verbal confidence — the number the
 cascade and every deterministic gate consume — discriminates correct from incorrect claims at **AUC
-0.550**, so those gates are keyed to noise. And a 120B reasoning frontier model did not separate from
+{{confidence_auc}}**, so those gates are keyed to noise. And a 120B reasoning frontier model did not separate from
 our local 35B on identical fixtures at equal *nominal* budget — paired **ΔF1 +0.003**, 95% CI
 [−0.077, +0.081], n=25, better on 12 of 25 and worse on 13 — which means the ceiling we kept
 attributing to model capacity is not obviously that. That null carries a confound we could not
@@ -40,7 +40,7 @@ model is not the weaker deployment either: run against its vendor's own full-pre
 ## 8.2 The nulls are interpretable only because firing rates came first
 
 A mechanism that never runs produces an ablation whose null describes the cases where it never ran.
-The confidence cap fires on 0.82% of techniques and the sink-reachability hint on 56.7% of samples;
+The confidence cap fires on {{cap_rate}} of techniques and the sink-reachability hint on {{hint_rate}} of samples;
 an ablation of the first would have been uninterpretable and reported as evidence anyway. Measuring
 **firing rate before effect** changed which experiments were worth running, and it is the cheapest
 practice in this paper.

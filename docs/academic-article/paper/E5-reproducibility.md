@@ -169,8 +169,8 @@ always.
 
 **The local server's output cap must be sent twice.** `ChatOpenAI(max_tokens=N)` reaches the wire as
 `max_completion_tokens`, which `ik_llama.cpp` does not read; the cap must also travel in
-`extra_body` as `max_tokens` and `n_predict`. Measured on this host: 48 requested, **2,805
-generated** with the renamed field alone, **48** with both. A reader who omits this will find the
+`extra_body` as `max_tokens` and `n_predict`. Measured on this host: {{cap_requested}} requested, **{{cap_ignored_tokens}}
+generated** with the renamed field alone, **{{cap_honoured_tokens}}** with both. A reader who omits this will find the
 verdict model decoding to the context limit, which is what happened here for as long as the cap had
 existed. `probe_outbound_parameters.py` re-checks this and the other outbound parameters against a
 running server; it is the regression witness, and it is cheap enough to run before any measurement

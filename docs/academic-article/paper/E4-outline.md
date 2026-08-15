@@ -23,8 +23,8 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 > did not beat a single judge at equal token budget (paired ΔF1 {{consensus_negotiated_delta}}, 95% CI [−0.084, +0.050], at
 > 3.2× the tokens). Three independently built retrieval components — an ATT&CK case-prior index, a
 > family-feature index, and an opcode-hash attribution tier — each work in isolation and contribute
-> +0.003 F1, lose to a frequency prior, and fire on 0 of 18 samples respectively. A deterministic
-> confidence cap fires on 0.82% of techniques. A 120B reasoning model did not separate from our local
+> {{family_delta_f1}} F1, lose to a frequency prior, and fire on {{hash_fired}} of {{hash_total}} samples respectively. A deterministic
+> confidence cap fires on {{cap_rate}} of techniques. A 120B reasoning model did not separate from our local
 > 35B on identical fixtures at equal nominal budget (paired ΔF1 **+0.003**, 95% CI [−0.077, +0.081],
 > n=25) — a null we report with a confound its provider will not let us remove, since the parameter
 > that would have matched the two arms' reasoning budgets is accepted and ignored there.
@@ -82,12 +82,12 @@ pipeline over static, dynamic and network evidence, with a corroboration cascade
 tiers, and deterministic confidence gating. Each component was motivated by a plausible mechanism.
 Measured at equal token budget against simpler alternatives, the multi-agent design does not beat a
 single judge; the corroboration set never changes a verdict; the confidence number the gates consume
-discriminates at AUC 0.550; and all three retrieval components are near-inert end to end despite
+discriminates at AUC {{confidence_auc}}; and all three retrieval components are near-inert end to end despite
 working in isolation. We report these as results rather than as tuning opportunities.
 
 **Second: those nulls are only interpretable because we measured whether each mechanism fired.** A
-deterministic confidence cap that fires on 0.82% of techniques produces an ablation whose null
-result says nothing about the cap. A priority hint that fires on 56.7% of samples produces one that
+deterministic confidence cap that fires on {{cap_rate}} of techniques produces an ablation whose null
+result says nothing about the cap. A priority hint that fires on {{hint_rate}} of samples produces one that
 does. We adopted **firing rate before effect** as a rule after the first case, and it changed which
 experiments were worth running.
 

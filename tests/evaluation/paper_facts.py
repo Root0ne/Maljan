@@ -259,6 +259,90 @@ def suite_facts() -> dict[str, Any]:
     raise FactError("could not read a passing-test count from pytest")
 
 
+def confidence_facts() -> dict[str, Any]:
+    """AUC for the number every deterministic gate consumes.
+
+    Ties decide this one and the figure module says so at length: 186 of 210
+    claims sit at confidence exactly 1.0, a naive descending sort returns 0.458
+    and the rank-based estimator returns 0.550. The same threshold-on-distinct-
+    values construction is used here so the fact, the figure and the sentence
+    cannot disagree — three copies of an estimator is two too many, but the
+    alternative is importing matplotlib to derive a number.
+    """
+    rows = load("confidence_calibration.json")
+    conf = [float(r["confidence"]) for r in rows]
+    correct = [int(r["correct"]) for r in rows]
+    npos, nneg = sum(correct), len(correct) - sum(correct)
+    if not npos or not nneg:
+        raise FactError("confidence calibration has only one class")
+    pts = [(0.0, 0.0)]
+    for t in sorted(set(conf), reverse=True):
+        picked = [i for i, c in enumerate(conf) if c >= t]
+        pts.append(
+            (
+                sum(1 for i in picked if not correct[i]) / nneg,
+                sum(correct[i] for i in picked) / npos,
+            )
+        )
+    auc = sum(
+        (pts[i + 1][0] - pts[i][0]) * (pts[i + 1][1] + pts[i][1]) / 2 for i in range(len(pts) - 1)
+    )
+    top = max(set(conf), key=conf.count)
+    return {
+        "confidence_auc": f"{auc:.3f}",
+        "confidence_n": str(len(rows)),
+        "confidence_modal_count": str(conf.count(top)),
+        "confidence_distinct": str(len(set(conf))),
+    }
+
+
+def firing_rate_facts() -> dict[str, Any]:
+    """How often each mechanism engages — the rule the paper argues for."""
+    cap = load("confidence_cap.json")["summary"]
+    fired = cap["capped"]
+    total = cap["techniques_total"]
+
+    hint = load("sink_hint_frequency.json")["results"]
+    ok = [v for v in hint.values() if not v.get("error")]
+    hint_fired = sum(1 for v in ok if v.get("hint_nonempty"))
+
+    probe = load("function_hash_attribution_probe.json")["results"]
+    rows = list(probe.values()) if isinstance(probe, dict) else probe
+    hash_fired = sum(1 for r in rows if r.get("fires"))
+    functions = sum(int(r.get("n_functions_kept") or 0) for r in rows)
+
+    return {
+        "cap_rate": pct(fired / total, 2),
+        "cap_fired": str(fired),
+        "cap_total": f"{total:,}",
+        "hint_rate": pct(hint_fired / len(ok)),
+        "hint_fired": str(hint_fired),
+        "hint_total": str(len(ok)),
+        "hash_fired": str(hash_fired),
+        "hash_total": str(len(rows)),
+        "hash_functions": f"{functions:,}",
+    }
+
+
+def retrieval_facts() -> dict[str, Any]:
+    """The family-feature A/B, and the sink-hint ablation it motivated."""
+    fa = load("family_rag_ab.json")["delta_on_minus_off"]
+    sa = load("sink_hint_ablation_scored.json")["summary"]
+    tids = sa["technique IDs"]
+    lo, hi = tids["ci95"]
+    d = sa["direction"]
+    return {
+        "family_delta_f1": signed(fa["f1"], 4),
+        "family_delta_precision": signed(fa["precision"], 4),
+        "sink_pairs": str(sa["n_pairs"]),
+        "sink_delta_tids": signed(tids["mean"], 2),
+        "sink_ci_tids": f"[{lo:+.2f}, {hi:+.2f}]",
+        "sink_better": str(d["hint_better"]),
+        "sink_worse": str(d["hint_worse"]),
+        "sink_tied": str(d["tied"]),
+    }
+
+
 BUILDERS = (
     baseline_facts,
     consensus_facts,
@@ -267,6 +351,9 @@ BUILDERS = (
     cascade_facts,
     series_facts,
     probe_facts,
+    confidence_facts,
+    firing_rate_facts,
+    retrieval_facts,
     suite_facts,
 )
 

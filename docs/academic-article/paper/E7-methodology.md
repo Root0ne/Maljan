@@ -12,7 +12,7 @@ design follows Bertalanič & Fortuna, including a **stochastic-noise control** i
 receives evidence irrelevant to the sample.
 
 The control is not decoration: it establishes that the harness can detect a difference. In our
-consensus study the noise arm separated clearly (0.3366 against 0.3975 and 0.4136) while the
+consensus study the noise arm separated clearly ({{consensus_noise_f1}} against {{consensus_negotiated_f1}} and {{consensus_single_f1}}) while the
 treatment did not, which distinguishes "no effect" from "no sensitivity".
 
 **For reasoning models the budget must cover reasoning.** Our frontier endpoint reports reasoning
@@ -50,8 +50,8 @@ look identical in a results table and are not:
 
 | mechanism | fires on | what an ablation would mean |
 |---|---|---|
-| confidence cap | **0.82%** of techniques | nothing — a null describes the 99.2% where it never ran |
-| sink-reachability hint | **56.7%** of samples | a real statement about the hint |
+| confidence cap | **{{cap_rate}}** of techniques | nothing — a null describes the 99.2% where it never ran |
+| sink-reachability hint | **{{hint_rate}}** of samples | a real statement about the hint |
 
 The cap's own preconditions explain its rate — three technique families, only when the sole
 contributing layer is static, and 84% of those claims are YARA-only, so no static claim exists for
