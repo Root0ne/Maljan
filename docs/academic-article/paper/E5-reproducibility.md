@@ -109,7 +109,11 @@ Two consequences for anyone reproducing this work:
 | `cape_task_ledger_n100.json` | sha256 → CAPE task id for all 100 submissions | yes |
 | `sink_hint_frequency.json` | per-sample hint measurement, n=100 attempted | yes |
 | `cape_baseline.json` | per-sample CAPE-only scores | yes |
-| `consensus_ablation.json`, `frontier_probe.json`, … | per-sample arms for every ablation | yes |
+| `consensus_ablation.json`, `frontier_probe*.json`, … | per-sample arms for every ablation, one file per arm and configuration | yes |
+| `parameter_size_series.json` | the size series with each arm's **measured** reasoning share and why it was included or excluded | yes |
+| `judge_contribution_{uncapped,capped}.json` | the judge study in both output-cap conditions, per call, with the branch each failed call took | yes |
+| `fallback_bundle_content_{uncapped,capped}.json` | per-call technique sets on the fallback path against the cascade set each would have received | yes |
+| `outbound_parameter_probe.json` | which parameters the local server acts on, measured | yes |
 | CAPE reports | ~7 MB each, ~660 MB total | **no** — see §5 |
 
 Ground truth resolves a MalwareBazaar family signature to an in-repo MITRE `uses` fixture through an
@@ -140,7 +144,44 @@ Timing, for planning: a new Windows submission is scheduled in **~1 second** and
 **~5.5 minutes**; the 10,348-task backlog is never scheduled and does not queue ahead of new work.
 An n=100 cohort is roughly 9 hours of sandbox time.
 
-## 6. The frontier endpoint
+## 6. The comparison endpoints, and one parameter that decides everything
+
+Three endpoints, and a reader reproducing any of them needs the configuration axis before the
+model names, because it is worth more F1 than any of them.
+
+| arm | endpoint | model | reasoning | n |
+|---|---|---|---|---|
+| local baseline | `ik_llama.cpp`, this host | Qwen3.6-35B-A3B (IQ3_K_R4) | off | 25 |
+| frontier | OpenRouter | `nvidia/nemotron-3-super-120b-a12b:free` | **on — not controllable** | 25 ×2 |
+| same weights, hosted | DashScope International | `qwen3.6-35b-a3b` | off | 25 |
+| same weights, hosted | DashScope International | `qwen3.6-35b-a3b` | on | 25 |
+| larger, hosted | DashScope International | `qwen3.6-plus` | off / on | 25 each |
+
+**`enable_thinking` is honoured on DashScope and ignored on OpenRouter.** Not rejected — accepted,
+recorded in the result file, and not acted on: the re-run requesting it returned a **56.2%**
+reasoning share against **56.5%** without it. On DashScope the same request produces **0.0%**. This
+is the single most important line in this appendix for anyone comparing arms, because the flag is
+worth 0.34–0.45 F1 on the two models where it can be set, and an arm can therefore be labelled
+matched while running the opposite configuration. `eval_parameter_size_series.py` selects arms on
+the **measured** reasoning share for exactly this reason and refuses to correlate when fewer than
+three configuration-matched arms span three parameter counts — which, on these endpoints, is
+always.
+
+**The local server's output cap must be sent twice.** `ChatOpenAI(max_tokens=N)` reaches the wire as
+`max_completion_tokens`, which `ik_llama.cpp` does not read; the cap must also travel in
+`extra_body` as `max_tokens` and `n_predict`. Measured on this host: 48 requested, **2,805
+generated** with the renamed field alone, **48** with both. A reader who omits this will find the
+verdict model decoding to the context limit, which is what happened here for as long as the cap had
+existed. `probe_outbound_parameters.py` re-checks this and the other outbound parameters against a
+running server; it is the regression witness, and it is cheap enough to run before any measurement
+campaign.
+
+Note also that this server **truncates silently**: at the cap it returns `finish_reason: "stop"`,
+never `"length"`, and carries no `stopped_limit` field. Telemetry that detects truncation by finish
+reason will report zero however often the cap binds; compare the generated-token count against the
+cap that was requested instead.
+
+### The original frontier arm
 
 OpenRouter, `nvidia/nemotron-3-super-120b-a12b:free`, temperature 0, 2,400-token output cap.
 
@@ -167,12 +208,31 @@ of the runs in this paper were interrupted by the memory guard and resumed witho
 | result | harness | services needed |
 |---|---|---|
 | consensus ablation (§1) | `eval_consensus_ablation.py` | llama-server |
-| frontier arm (§2) | `eval_frontier_probe.py` | network only |
+| frontier and hosted arms (§2) | `eval_frontier_probe.py --arm <name> [--no-thinking]` | network only |
+| parameter-size series (§2) | `eval_parameter_size_series.py` | **none** — reads the arm files |
 | CAPE baseline (§0) | `eval_cape_baseline.py` | **none** — reads the local report archive |
 | sink-hint frequency (§4) | `eval_sink_hint_frequency.py` | Ghidra |
 | sink-hint ablation (§7) | `eval_sink_hint_ablation.py` | llama-server + Ghidra |
 | opcode-hash attribution (§3) | `eval_function_hash_attribution.py` | Ghidra + Qdrant |
+| Layer-0 verdict arms (§5) | `eval_layer0_verdict.py`, checked by `verify_b3_mechanism.py` | llama-server; the check needs **none** |
+| cascade weight sensitivity (§5) | `eval_weight_sensitivity_six.py` | **none** — reads the report archive |
+| judge contribution (§5) | `eval_judge_contribution.py` | llama-server |
+| fallback bundle content (§5) | `eval_fallback_bundle_content.py --checkpoint <run>` | **none** — reads the run above |
+| outbound parameter check | `probe_outbound_parameters.py` | llama-server |
 | every figure | `make_paper_figures.py` | **none** — reads the JSON the above emit |
+
+Two of these exist only because a result could not be believed, and both are worth running before
+the studies they check rather than after. `verify_b3_mechanism.py` recomputes each ablation arm's
+cascade set from its seeded fixture and compares it against what the arm recorded — it is what
+established that a published finding of ours had measured a post-processing step rather than a
+model. `probe_outbound_parameters.py` asks whether the server acts on each parameter we send it,
+by behaviour rather than by reading a response field, because a server that ignores a parameter
+does not report having done so.
+
+The judge-contribution study is run **twice, in two conditions**, and the pair is kept: once with
+the output cap not reaching the server and once with it binding. The comparison between them is
+what isolates what the model's unparsable output contributes to the analyst's bundle, and neither
+run alone shows it. Preserved as `judge_contribution_uncapped.*` and `judge_contribution_capped.*`.
 
 **Figures are generated from the same retained records as the text.** The script recomputes intervals
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
