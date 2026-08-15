@@ -117,6 +117,25 @@ now_epoch() { printf -v EPOCH '%(%s)T' -1; }
 # Fork-free sampling
 # ---------------------------------------------------------------------------
 
+# Read the first line of a file into the named variable. Succeeds when it got a
+# value, which is the question every caller here is actually asking.
+#
+# `read` returns non-zero at EOF without a trailing newline, *after* assigning
+# what it read. So the idiom this replaces — `read -r x < f || x=fallback` —
+# threw away a perfectly good value whenever the writer omitted the newline, and
+# the writers are other people's programs and the kernel. Two of the sites were
+# load-bearing: stop_job would log "no live job registered" and kill nothing,
+# and volunteer_as_oom_victim would leave the job at its default OOM score, so
+# the kernel would go back to choosing its victim by size — which on 2026-08-11
+# meant the user's editor. A guard that disarms itself over a missing byte is
+# worse than no guard, because the log still says it is watching.
+slurp() {
+    local __var="$1" __val=""
+    read -r __val < "$2" 2>/dev/null
+    [ -n "$__val" ] || return 1
+    printf -v "$__var" '%s' "$__val"
+}
+
 # Sets AVAIL_MB and SWAPFREE_MB. One open, one pass, no subprocess.
 read_meminfo() {
     local key val rest
@@ -153,7 +172,7 @@ find_temp_sensor() {
     local h name
     for h in /sys/class/hwmon/hwmon*; do
         [ -r "$h/name" ] || continue
-        read -r name < "$h/name" 2>/dev/null || continue
+        slurp name "$h/name" || continue
         if [ "$name" = "k10temp" ] && [ -r "$h/temp1_input" ]; then
             TEMP_PATH="$h/temp1_input"   # Tctl
             return 0
@@ -170,7 +189,7 @@ read_temp() {
     local raw
     TEMP_C=-1
     [ -n "$TEMP_PATH" ] || return 0
-    read -r raw < "$TEMP_PATH" 2>/dev/null || return 0
+    slurp raw "$TEMP_PATH" || return 0
     [ -n "$raw" ] && TEMP_C=$((raw / 1000))
 }
 
@@ -195,18 +214,18 @@ volunteer_as_oom_victim() {
     local d name pid
     for d in /proc/[0-9]*; do
         [ -r "$d/comm" ] || continue
-        read -r name < "$d/comm" 2>/dev/null || continue
+        slurp name "$d/comm" || continue
         [ "$name" = "llama-server" ] || continue
         echo 1000 >"$d/oom_score_adj" 2>/dev/null
     done
     if [ -r "$JOB_PID_FILE" ]; then
-        read -r pid < "$JOB_PID_FILE" 2>/dev/null || return 0
+        slurp pid "$JOB_PID_FILE" || return 0
         [ -n "${pid:-}" ] && [ -d "/proc/$pid" ] || return 0
         echo 1000 >"/proc/$pid/oom_score_adj" 2>/dev/null
         for d in /proc/"$pid"/task/*/children; do
             [ -r "$d" ] || continue
             local kids kid
-            read -r kids < "$d" 2>/dev/null || continue
+            slurp kids "$d" || continue
             for kid in $kids; do
                 echo 1000 >"/proc/$kid/oom_score_adj" 2>/dev/null
             done
@@ -226,7 +245,7 @@ stop_job() {
     # rather than in each branch means a future caller cannot reintroduce this.
     warned=1
     if [ -r "$JOB_PID_FILE" ]; then
-        read -r pid < "$JOB_PID_FILE" 2>/dev/null || pid=""
+        slurp pid "$JOB_PID_FILE" || pid=""
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null && log "  SIGTERM -> $pid ($why)"
             sleep 15
@@ -237,6 +256,57 @@ stop_job() {
             log "  no live job registered at $JOB_PID_FILE ($why)"
         fi
     fi
+}
+
+# What the registered job is actually holding, in MB: its own resident set plus
+# its descendants'. Zero when nothing is registered.
+#
+# The kill rule needs this because MemAvailable is a property of the machine and
+# not of the job, and the two get confused the moment something large and
+# unmanaged is resident. Depth-limited so a pathological process tree cannot
+# spin the guard in the one loop that has to stay cheap.
+job_rss_mb() {
+    local pid frontier next p d kids pages total=0
+    [ -r "$JOB_PID_FILE" ] || { printf 0; return 0; }
+    slurp pid "$JOB_PID_FILE" || { printf 0; return 0; }
+    [ -n "${pid:-}" ] && [ -d "/proc/$pid" ] || { printf 0; return 0; }
+    frontier="$pid"
+    for _ in 1 2 3 4 5 6; do
+        [ -n "$frontier" ] || break
+        next=""
+        for p in $frontier; do
+            [ -r "/proc/$p/statm" ] || continue
+            read -r _ pages _ < "/proc/$p/statm" 2>/dev/null || continue
+            total=$((total + pages * 4 / 1024))
+            for d in /proc/"$p"/task/*/children; do
+                [ -r "$d" ] || continue
+                slurp kids "$d" || continue
+                next="$next $kids"
+            done
+        done
+        frontier="$next"
+    done
+    printf '%s' "$total"
+}
+
+# The largest resident process on the machine, for the one log line that has to
+# say who is actually holding the memory. A guard that reports a shortage
+# without naming its owner sends whoever reads the log looking in the wrong
+# place — which is the failure this whole branch exists to stop repeating.
+# Called only when the guard is about to explain itself, never in the steady
+# state.
+largest_holder() {
+    local d name pages best=0 best_name="?" best_pid="?"
+    for d in /proc/[0-9]*; do
+        [ -r "$d/statm" ] || continue
+        read -r _ pages _ < "$d/statm" 2>/dev/null || continue
+        [ "${pages:-0}" -gt "$best" ] 2>/dev/null || continue
+        slurp name "$d/comm" || continue
+        best=$pages
+        best_name=$name
+        best_pid=${d#/proc/}
+    done
+    printf '%s (pid %s, %sMB)' "$best_name" "$best_pid" "$((best * 4 / 1024))"
 }
 
 if find_temp_sensor; then
@@ -252,6 +322,12 @@ now_epoch
 last_pass=$EPOCH
 warned=0
 strikes=0
+# Set once the guard has explained that the shortage is not the job's, so the
+# explanation appears at the start of an episode instead of every pass.
+misattributed=0
+# Set when a kill was tried and the floor did not come back. Both clear on the
+# first pass that recovers, so a genuinely new episode is judged on its own.
+kill_ineffective=0
 thermal_strikes=0
 thermal_hold=0
 pass=0
@@ -327,7 +403,7 @@ while true; do
             # stat(1). An unparseable marker is treated as fresh-but-unknown and
             # therefore stale, which fails safe.
             grace_at=0
-            read -r grace_at < "$GRACE" 2>/dev/null || grace_at=0
+            slurp grace_at "$GRACE" || grace_at=0
             case "$grace_at" in (*[!0-9]* | "") grace_at=0 ;; esac
             if [ "$grace_at" -eq 0 ]; then
                 # An older harness that only touch()es the marker. Fall back to
@@ -354,9 +430,55 @@ while true; do
             sleep "$INTERVAL"
             continue
         fi
-        log "CRITICAL ${mb}MB available (<${KILL_MB}) for ${strikes} checks — stopping the registered job"
+        # Attribute before acting. Killing the registered job recovers at most
+        # what the job is holding; if that still leaves the machine under the
+        # floor, the memory belongs to something the guard does not manage and
+        # the kill is pure loss.
+        #
+        # On 2026-08-15 that loss was 34 minutes of a model run. The guard killed
+        # at 3921MB; available then read 3912, 3928, 3920 over the next 90 s,
+        # because every page the job gave back was immediately taken by swap-in.
+        # It fired again every 90 s for an hour with nothing left to kill. The
+        # floor was the model server's 18 GB of dirty anonymous memory — not
+        # reclaimable, not the job's, and not the guard's to free.
+        #
+        # Swap is the exception. Once it is gone the machine has no headroom to
+        # wait in and something has to go whether or not it is the culprit; that
+        # is the case this guard was written for, and it still kills.
+        # The predictive gate above is not enough on its own, and the incident
+        # proves it: the job's own resident set was larger than the shortfall,
+        # so arithmetic said killing it would clear the floor, and killing it
+        # cleared nothing. With ~6 GB sitting in swap, every page the job
+        # returned was taken straight back by a swap-in, and MemAvailable did
+        # not move. Prediction cannot see that; measurement can. So once a kill
+        # has been tried and failed, the guard stops trying, and says why.
+        if [ "$kill_ineffective" -eq 1 ] && [ "$SWAPFREE_MB" -ge "$SWAP_FLOOR_MB" ]; then
+            : >"$STOP"
+            sleep "$INTERVAL"
+            continue
+        fi
+
+        job_mb=$(job_rss_mb)
+        if [ "$SWAPFREE_MB" -ge "$SWAP_FLOOR_MB" ] && [ $((mb + job_mb)) -lt "$KILL_MB" ]; then
+            if [ "$misattributed" -eq 0 ]; then
+                log "CRITICAL ${mb}MB available (<${KILL_MB}) — the registered job holds ${job_mb}MB, so killing it reaches $((mb + job_mb))MB and is still under the floor. It is not what is holding the memory: $(largest_holder) is. Holding with STOP laid, swap ${SWAPFREE_MB}MB free."
+                misattributed=1
+            fi
+            : >"$STOP"
+            sleep "$INTERVAL"
+            continue
+        fi
+        misattributed=0
+        log "CRITICAL ${mb}MB available (<${KILL_MB}) for ${strikes} checks — the registered job holds ${job_mb}MB, enough for killing it to clear the floor; stopping it"
         stop_job "memory"
         sleep 60
+        # Did it work? A guard that never checks its own remedy will apply it
+        # forever, which is how one run became forty pointless kill attempts.
+        read_meminfo
+        if [ "$AVAIL_MB" -lt "$KILL_MB" ]; then
+            kill_ineffective=1
+            log "  the kill did not recover the floor: ${mb}MB before, ${AVAIL_MB}MB after. Holding from here — $(largest_holder) is what the machine is short of, and no job this guard manages can give that back."
+        fi
         now_epoch
         last_pass=$EPOCH
         strikes=0
@@ -364,6 +486,8 @@ while true; do
     fi
 
     strikes=0
+    misattributed=0
+    kill_ineffective=0
 
     if [ "$mb" -lt "$WARN_MB" ]; then
         [ "$warned" -eq 0 ] && log "LOW ${mb}MB available (<${WARN_MB}) — STOP sentinel laid"
