@@ -1,0 +1,106 @@
+% The paper. Compile with:  make paper
+%
+% XeLaTeX, not pdfLaTeX. The sources are UTF-8 and the em dashes, quotation
+% marks and accented author names in the bibliography resolve without an
+% encoding package. Mathematical symbols do not appear as literals: they are
+% written as maths, and a check refuses the build if one slips through, because
+% a Unicode minus is a dash-shaped glyph at text metrics and this paper reports
+% several hundred signed numbers.
+%
+% Single column deliberately. The paper carries two dozen wide tables of
+% measurements, which cannot live in a two-column body; venue formatting is a
+% last step and a draft whose tables are readable is worth more than one that
+% looks like a proceedings.
+\documentclass[11pt]{article}
+
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Termes}
+\setmonofont[Scale=0.85]{DejaVu Sans Mono}
+% Maths in the body's own family. Without this, fontspec leaves maths to
+% Computer Modern, so the first $-$ in the document embeds CMMI10, CMR10 and
+% CMSY10 alongside Termes — three extra families, and a minus that does not
+% match the digits either side of it.
+\usepackage{unicode-math}
+\setmathfont{TeX Gyre Termes Math}
+
+\usepackage[margin=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{calc}
+\usepackage{caption}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{fancyvrb}
+\usepackage[hidelinks]{hyperref}
+% A section title containing maths becomes a PDF bookmark, and unicode-math's
+% symbols are not expandable in that string — the build died on "Improper
+% alphabetic constant" the first time a heading carried a multiplication sign.
+\pdfstringdefDisableCommands{%
+  \def\times{x}\def\Delta{Delta}\def\rho{rho}\def\alpha{alpha}%
+  \def\beta{beta}\def\sigma{sigma}\def\mu{mu}%
+  \def\ge{>=}\def\le{<=}\def\gg{>>}\def\ll{<<}%
+  \def\approx{~}\def\neq{!=}\def\pm{+/-}\def\rightarrow{->}%
+}
+
+% Long code literals in narrow table columns overrun their neighbour. Verbatim
+% text has no discretionary break points, so a cell wider than its column simply
+% keeps going; allowing breaks inside \texttt fixes the class rather than the
+% instances.
+\usepackage[htt]{hyphenat}
+% Figures are drawn wider than the measure. Bound them to it rather than
+% trusting each figure's own size.
+\setkeys{Gin}{width=\linewidth,keepaspectratio}
+% Let TeX loosen a line rather than push a word past the margin.
+\sloppy
+% \sloppy sets \hfuzz=0.5pt, which stops sub-half-point overruns being reported
+% at all. A zero-overfull log bought that way is not a zero-overfull document,
+% so the tolerance goes back to nothing and the zero has to be earned.
+\hfuzz=0pt
+\vfuzz=0pt
+
+\captionsetup{font=small,labelfont=bf,skip=6pt}
+\setlength{\parskip}{2pt}
+\graphicspath{{../}{./}{../figures/}}
+
+% pandoc's own constructs, and the derived numbers.
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\providecommand{\pandocbounded}[1]{#1}
+\usepackage{facts}
+\input{facts}
+
+% Set once the paper was finished, applying the choice recorded in the outline
+% rather than making a new one: the contribution is the discipline, and the
+% negatives are evidence for it rather than the subject.
+\title{What It Takes to Trust a Measurement:\\
+Instrument Failures in an LLM Malware-Analysis Pipeline}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\input{abstract}
+\end{abstract}
+\vspace{0.6em}
+
+\input{E4-outline}
+\input{related-work}
+\input{E3-system}
+\input{E7-methodology}
+\input{E1-results}
+\input{E6-instrument-failures}
+\input{E0-discussion}
+\input{E2-threats-to-validity}
+\input{E8-conclusion}
+\input{E9-declarations}
+\input{EA-references}
+
+\appendix
+\input{E5-reproducibility}
+
+\end{document}

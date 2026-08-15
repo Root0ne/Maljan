@@ -13,9 +13,9 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
 PAPER_DIR="docs/academic-article/paper"
-BUILD="$PAPER_DIR/build"
-PDF="$BUILD/paper.pdf"
-LOG="$BUILD/paper.log"
+BUILD="$PAPER_DIR/tex"
+PDF="$BUILD/main.pdf"
+LOG="$BUILD/main.log"
 PY=".venv/bin/python"
 
 fails=0
@@ -52,24 +52,40 @@ fi
 # it normalises to it. What this catches is Computer Modern arriving alongside
 # Termes the moment maths appears without \setmathfont — which is exactly what
 # happened when the symbol translator emitted its first minus sign.
-# LC_ALL=C because this box runs a Turkish locale, where [A-Z] is a collation
-# range that does not contain I — so a subset prefix like VPIHHP+ survived the
-# strip and one font counted twice. A range expression is only a byte range in
-# the C locale, and a check that behaves differently per machine is not a check.
-family_list=$(pdffonts "$PDF" 2>/dev/null | awk 'NR>2{print $1}' \
-    | LC_ALL=C sed -E 's/^[A-Z]+\+//; s/[-,].*//; s/Math$//' | LC_ALL=C sort -u | grep -v '^$')
-families=$(echo "$family_list" | grep -c .)
+# Counting is done in Python. Two attempts at doing it in shell were wrong in
+# two different machine-specific ways: [A-Z] is a collation range that excludes I
+# under this box's Turkish locale, and the `grep` on PATH is ugrep, which reads
+# the braces in `label{tab:x}` as an interval quantifier. A check whose answer
+# depends on the locale or on which grep is installed is not a check.
+family_report=$("$PY" - <<'FONTS'
+import re
+import subprocess
+
+out = subprocess.run(
+    ["pdffonts", "docs/academic-article/paper/tex/main.pdf"],
+    capture_output=True, text=True,
+).stdout
+names = [ln.split()[0] for ln in out.splitlines()[2:] if ln.strip()]
+# Strip the six-letter subset prefix, the weight suffix, and the maths companion:
+# TeXGyreTermesMath is the same family as its text face, and the failure this
+# catches is Computer Modern arriving beside Termes when maths has no font set.
+families = sorted({re.sub(r"^[A-Z]+\+|[-,].*$|Math$", "", n) for n in names})
+families = sorted({re.sub(r"Math$", "", f) for f in families if f})
+print(len(families), ",".join(families))
+FONTS
+)
+families=${family_report%% *}
 if [[ "$families" -le 2 ]]; then
-    pass "one serif family plus one monospace ($(echo "$family_list" | paste -sd', '))"
+    pass "one serif family plus one monospace (${family_report#* })"
 else
     fail "$families font families — body, figures and maths should share one serif"
-    echo "$family_list" | sed 's/^/        /'
+    note "${family_report#* }"
 fi
 
 boxes=$(grep -c 'Overfull\|Underfull' "$LOG" 2>/dev/null)
 boxes=${boxes:-0}
 if [[ "$boxes" -eq 0 ]]; then
-    if grep -q '^\\hfuzz=0pt' "$BUILD/paper.tex" 2>/dev/null; then
+    if grep -q '^\\hfuzz=0pt' "$BUILD/main.tex" 2>/dev/null; then
         pass "zero overfull/underfull boxes, at hfuzz=0"
     else
         fail "zero boxes, but hfuzz is not 0 — the zero is suppressed, not earned"
@@ -136,7 +152,7 @@ fi
 # 6. Structure the rubric requires
 # --------------------------------------------------------------------------
 for section in Discussion Declarations References; do
-    if grep -q "\\\\section\*\?{$section}" "$BUILD/paper.tex"; then
+    if grep -qr "\\\\section\*\?{$section}" "$BUILD"/*.tex; then
         pass "has a $section section"
     else
         fail "no $section section"
@@ -144,17 +160,16 @@ for section in Discussion Declarations References; do
 done
 
 abstract_words=$("$PY" - <<'WORDS'
+import json
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, "docs/academic-article/paper")
-import build_paper as B  # noqa: E402
-
-md = Path("docs/academic-article/paper/E4-outline.md").read_text()
-facts = __import__("json").loads(Path("tests/evaluation/paper_facts.json").read_text())
-text, _ = B.substitute_facts(B.extract_abstract(md), facts, "abstract")
-print(len(re.findall(r"[A-Za-z0-9][\w.,%\[\]+×−-]*", text)))
+tex = Path("docs/academic-article/paper/tex/abstract.tex").read_text()
+facts = json.loads(Path("tests/evaluation/paper_facts.json").read_text())
+tex = re.sub(r"\\fact\{([a-z0-9-]+)\}", lambda m: facts.get(m.group(1).replace("-", "_"), "0"), tex)
+tex = re.sub(r"\\[a-zA-Z]+\*?", " ", tex)          # strip control sequences
+tex = re.sub(r"[{}$~\\]", " ", tex)
+print(len(re.findall(r"[A-Za-z0-9][\w.,%\[\]+-]*", tex)))
 WORDS
 )
 if [[ "$abstract_words" -ge 150 && "$abstract_words" -le 250 ]]; then
@@ -164,11 +179,32 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# 6b. Every table is numbered, captioned and referenceable
+# --------------------------------------------------------------------------
+table_report=$("$PY" - <<'TABLES'
+import re
+from pathlib import Path
+
+tex = "".join(p.read_text() for p in sorted(Path("docs/academic-article/paper/tex").glob("*.tex")))
+tables = len(re.findall(r"\\begin\{longtable\}", tex))
+labels = set(re.findall(r"\\label\{(tab:[a-z0-9-]+)\}", tex))
+captions = len(re.findall(r"\\caption\{", tex))
+print(tables, len(labels), captions)
+TABLES
+)
+read -r n_tables n_labels n_captions <<<"$table_report"
+if [[ "$n_tables" -eq "$n_labels" ]]; then
+    pass "all $n_tables tables numbered, captioned and referenceable"
+else
+    fail "$n_tables tables but $n_labels distinct table labels — every table needs one"
+fi
+
+# --------------------------------------------------------------------------
 # 7. Anonymity, over the whole assembled document rather than section by section
 # --------------------------------------------------------------------------
-if grep -qi 'maljan' "$BUILD/paper.tex"; then
-    fail "the system name reached the assembled .tex"
-    grep -oim3 'maljan' "$BUILD/paper.tex" | sed 's/^/        /'
+if grep -qir 'maljan' "$BUILD"/*.tex; then
+    fail "the system name reached a LaTeX source"
+    grep -oihrm3 'maljan' "$BUILD"/*.tex | sed 's/^/        /'
 else
     pass "anonymity clean across the whole document, title and preamble included"
 fi

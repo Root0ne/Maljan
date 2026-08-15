@@ -1,0 +1,48 @@
+% Derived numbers, as macros. Generated content lives in facts.tex; this file is
+% only the mechanism.
+%
+% The rubric this paper is conformed to says: generate every number into macros
+% from the analysis code and \input them, so a re-run of the analysis updates the
+% document and drift becomes impossible. This is that, and the important half is
+% the failure mode rather than the substitution.
+%
+% \fact{name} raises a LaTeX error and stops the build when the name is not
+% defined. The alternative — printing something, or printing nothing — is how a
+% paper comes to contain a blank where a measurement should be, and a blank in a
+% results table is worse than a wrong number because nobody notices it.
+%
+% Keys use hyphens where the Python fact names use underscores. An underscore is
+% catcode 8 and would need protecting at every use site; a hyphen is an ordinary
+% character and needs nothing. tests/evaluation/paper_facts.py does the mapping,
+% and tests/evaluation/test_paper_numerals.py maps it back when it checks that
+% every \fact in the document resolves.
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{facts}[2026/08/15 derived numbers as macros]
+
+\makeatletter
+
+% \deffact{key}{value} — written by paper_facts.py into facts.tex.
+\newcommand{\deffact}[2]{%
+  \@ifundefined{maljan@fact@#1}{}{%
+    \PackageError{facts}{Two derivations claim the fact '#1'}{%
+      A fact name must have exactly one source. Check BUILDERS in paper_facts.py.}%
+  }%
+  \expandafter\gdef\csname maljan@fact@#1\endcsname{#2}%
+}
+
+% \fact{key} — the only way a derived number reaches the page.
+\newcommand{\fact}[1]{%
+  \@ifundefined{maljan@fact@#1}{%
+    \PackageError{facts}{The paper asks for a number that does not exist: '#1'}{%
+      Derive it in tests/evaluation/paper_facts.py, or register it in
+      tests/evaluation/narrative_provenance.json with the record it comes from.}%
+  }{\csname maljan@fact@#1\endcsname}%
+}
+
+% \factdefined{key}{then}{else} — for the rare place that must adapt rather than
+% fail, e.g. a sentence that only appears when a study has been run.
+\newcommand{\factdefined}[3]{\@ifundefined{maljan@fact@#1}{#3}{#2}}
+
+\makeatother
+\endinput

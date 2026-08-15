@@ -38,32 +38,47 @@ import pytest
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent.parent
-_PAPER = _REPO_ROOT / "docs" / "academic-article" / "paper"
+_PAPER = _REPO_ROOT / "docs" / "academic-article" / "paper" / "tex"
 _FACTS = _HERE / "paper_facts.json"
 
-# Sections whose numbers are the paper's own measurements.
+# Sections whose numbers are the paper's own measurements. `related-work.tex` is
+# not here: its numbers are quoted from cited literature, which no derivation can
+# produce.
 _SECTIONS = (
-    "E1-results.md",
-    "E2-threats-to-validity.md",
-    "E3-system.md",
-    "E4-outline.md",
-    "E5-reproducibility.md",
-    "E6-instrument-failures.md",
-    "E7-methodology.md",
-    "E8-conclusion.md",
+    "abstract.tex",
+    "E0-discussion.tex",
+    "E1-results.tex",
+    "E2-threats-to-validity.tex",
+    "E3-system.tex",
+    "E4-outline.tex",
+    "E5-reproducibility.tex",
+    "E6-instrument-failures.tex",
+    "E7-methodology.tex",
+    "E8-conclusion.tex",
+    "E9-declarations.tex",
 )
 
-_FENCED = re.compile(r"```.*?```", re.S)
-_INLINE_CODE = re.compile(r"`[^`\n]*`")
-_PLACEHOLDER = re.compile(r"\{\{[a-z0-9_]+\}\}")
-_CITATION = re.compile(r"\[\d+(?:\s*,\s*\d+)*\]")
-_SECTION_REF = re.compile(r"§+\s?[\dA-Za-z.]+")
-_HEADING_NUMBER = re.compile(r"^#{1,6}\s+[\d.]+\s", re.M)
-_MD_LINK = re.compile(r"\]\([^)]*\)")
+_FENCED = re.compile(
+    r"\\begin\{verbatim\}.*?\\end\{verbatim\}"
+    r"|\\begin\{Shaded\}.*?\\end\{Shaded\}"
+    r"|\\begin\{Highlighting\}.*?\\end\{Highlighting\}",
+    re.S,
+)
+_INLINE_CODE = re.compile(r"\\texttt\{(?:[^{}]|\{[^{}]*\})*\}")
+_PLACEHOLDER = re.compile(r"\\fact\{[a-z0-9-]+\}")
+_CITATION = re.compile(r"\{\[\}\d+(?:\s*,\s*\d+)*\{\]\}|\[\d+(?:\s*,\s*\d+)*\]")
+_SECTION_REF = re.compile(r"§+\s?[\dA-Za-z.]+|\\ref\{[^}]*\}|\\label\{[^}]*\}")
+_HEADING_NUMBER = re.compile(r"^\\(?:sub)*section\*?\{[\d.]+\s", re.M)
+_MD_LINK = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}|\\href\{[^}]*\}")
 _DATE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}-\d{2})?\b")
-_FIGURE_TABLE = re.compile(r"\b(?:Figure|Table|Fig\.|§)\s*\d+[A-Za-z]?\b", re.I)
+_FIGURE_TABLE = re.compile(r"\b(?:Figure|Table|Fig\.|§)~?\s*\d+[A-Za-z]?\b", re.I)
 _TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 _ARXIV = re.compile(r"arXiv:\d+\.\d+")
+# LaTeX's own dimensions and column arithmetic are not measurements.
+_LATEX_DIMS = re.compile(
+    r"\\real\{[\d.]+\}|\d+\\tabcolsep|[\d.]+(?:pt|em|ex|in|cm|mm)\b"
+    r"|\\(?:multicolumn|arraystretch|columnwidth|linewidth)\{?\d*"
+)
 
 # Forms that contain a numeral without stating a result. Each is a name, a
 # protocol constant, or a design parameter the paper chose rather than measured.
@@ -113,6 +128,7 @@ def _strip(text: str) -> str:
     for pattern in (
         _FENCED,
         _INLINE_CODE,
+        _LATEX_DIMS,
         _PLACEHOLDER,
         _CITATION,
         _MD_LINK,
@@ -173,7 +189,7 @@ def test_no_measurement_is_a_hand_typed_numeral(filename: str) -> None:
 
 def test_related_work_is_exempt_and_says_so() -> None:
     """The exemption is asserted so it cannot silently widen to other files."""
-    related = _REPO_ROOT / "docs" / "academic-article" / "related-work.md"
+    related = _PAPER / "related-work.tex"
     assert related.exists()
     assert related.name not in _SECTIONS
 
@@ -184,30 +200,43 @@ def test_every_placeholder_the_paper_uses_resolves() -> None:
         pytest.skip("paper_facts.json not derived yet")
     facts = json.loads(_FACTS.read_text())
     missing: list[str] = []
-    for filename in (*_SECTIONS, "../related-work.md"):
+    for filename in (*_SECTIONS, "related-work.tex"):
         path = _PAPER / filename
         if not path.exists():
             continue
-        for name in re.findall(r"\{\{([a-z0-9_]+)\}\}", path.read_text(encoding="utf-8")):
-            if name not in facts:
+        for name in re.findall(r"\\fact\{([a-z0-9-]+)\}", path.read_text(encoding="utf-8")):
+            if name.replace("-", "_") not in facts:
                 missing.append(f"{filename}: {{{{{name}}}}}")
     assert not missing, "unresolved placeholders: " + "; ".join(sorted(set(missing)))
 
 
-def test_a_malformed_placeholder_is_not_silently_printed() -> None:
-    """``{{Arm_Default_F1}}`` matches no substitution regex and reaches the PDF.
+def test_no_markdown_placeholder_survived_the_latex_migration() -> None:
+    """A ``{{name}}`` left in a .tex source is printed literally into the PDF.
 
-    The resolver's pattern is lowercase-only, so a placeholder with a capital or
-    a hyphen is neither substituted nor reported — it is emitted as literal text.
-    Both the build and this test now treat any ``{{...}}`` that is not a valid
-    fact name as an error.
+    The substitution mechanism it belonged to is gone; LaTeX has no opinion about
+    double braces and will happily typeset them.
     """
-    malformed: list[str] = []
-    for filename in (*_SECTIONS, "../related-work.md"):
-        path = _PAPER / filename
-        if not path.exists():
-            continue
-        for raw in re.findall(r"\{\{([^}]*)\}\}", path.read_text(encoding="utf-8")):
-            if not re.fullmatch(r"[a-z0-9_]+", raw):
-                malformed.append(f"{filename}: {{{{{raw}}}}}")
-    assert not malformed, "malformed placeholders: " + "; ".join(malformed)
+    survivors: list[str] = []
+    # Both the bare form and pandoc's escaped one. The escaped form is the one
+    # that actually happened: the migration substituted `{{name}}` after pandoc
+    # had already rewritten it to `\{\{name\_x\}\}`, so 275 placeholders were
+    # typeset into the PDF as literal text and this test, written to look for the
+    # bare form, said nothing.
+    for path in sorted(_PAPER.glob("*.tex")):
+        text = path.read_text(encoding="utf-8")
+        for pattern in (r"\{\{([^}]*)\}\}", r"\\\{\\\{([^\\]*)\\\}\\\}"):
+            for raw in re.findall(pattern, text):
+                survivors.append(f"{path.name}: {raw}")
+    assert not survivors, "Markdown placeholders in LaTeX sources: " + "; ".join(survivors[:20])
+
+
+def test_the_markdown_sources_are_gone() -> None:
+    """One source per paragraph.
+
+    The sections were authored in Markdown and converted at build time. They are
+    LaTeX now, and leaving the Markdown beside it would be two copies of every
+    paragraph with nothing keeping them equal — which is the drift this whole
+    directory exists to prevent, in the largest possible form.
+    """
+    stale = sorted(p.name for p in (_PAPER.parent).glob("E*.md"))
+    assert not stale, "Markdown sources survive beside the LaTeX: " + ", ".join(stale)

@@ -115,3 +115,14 @@ data/cape_reports/
 
 # built paper artifacts (regenerate with build_paper.py)
 docs/academic-article/paper/build/
+
+# LaTeX build products. The sources and the generated facts.tex are tracked; a
+# .aux is a compiler's scratch file and reviewing its diff is noise.
+docs/academic-article/paper/tex/*.aux
+docs/academic-article/paper/tex/*.log
+docs/academic-article/paper/tex/*.out
+docs/academic-article/paper/tex/*.toc
+docs/academic-article/paper/tex/*.fls
+docs/academic-article/paper/tex/*.xdv
+docs/academic-article/paper/tex/*.fdb_latexmk
+docs/academic-article/paper/tex/.facts-inputs.sha256
