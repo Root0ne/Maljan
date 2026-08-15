@@ -17,7 +17,7 @@ a deterministic layer adjudicates between them.
 | **dynamic analyst** | ReAct loop over a CAPEv2 sandbox via MCP | operational; only Windows PE is analysable on our instance |
 | **network analyst** | local PCAP analysis over the sandbox's capture | operational; depends on the sandbox indirectly |
 | **judge** | synthesises a verdict and emits STIX | operational |
-| **corroboration cascade** | weights layers, marks a technique corroborated when ≥2 layers contribute | **measured: never reaches the artefact** (0/32), and its technique set *replaces* the judge's (80/80) |
+| **corroboration cascade** | weights layers, marks a technique corroborated when ≥2 layers contribute | **measured: never reaches the artefact** (0/32); a reconciliation step restores every cascade technique the judge omits, and across 80 arms the judge added none of its own |
 | **confidence gating** | caps confidence for unsupported obfuscation/injection claims | **measured: fires on 0.82% of techniques** |
 | **case-prior RAG** | retrieves similar past cases to prime mapping | **measured: loses to a label-frequency prior in production** |
 | **family-feature RAG** | retrieves family fingerprints | **measured: +0.003 F1 end to end** |
@@ -50,10 +50,12 @@ for days. Each of those shaped an experiment reported here.
 
 Of the four claims the architecture was built around — multi-agent consensus over heterogeneous
 channels, a multi-layer corroboration cascade, two-tier attribution, and falsification-before-
-confidence — **three are now measured and negative or near-null**, and the fourth awaits sandbox
-access. The components are not broken; several work well in isolation and were built for sound
-reasons. They simply do not move the end-to-end result, and we could not have known that without
-measuring each mechanism's firing rate before its effect.
+confidence — **all four are now measured, and every one is negative or near-null.** The last of
+them no longer awaits sandbox access: the cascade was closed on the recovered cohort, and the
+attribution tier's remaining half was measured at 0 of 18 samples. The components are not broken;
+several work well in isolation and were built for sound reasons. They simply do not move the
+end-to-end result, and we could not have known that without measuring each mechanism's firing rate
+before its effect.
 
 That outcome is the reason this paper is about measurement. A system whose parts individually
 justify themselves and collectively change nothing is an ordinary result, and reporting it requires

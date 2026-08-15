@@ -117,6 +117,12 @@ def rewrite_figures(md: str) -> str:
     return pattern.sub(repl, md)
 
 
+_EDITORIAL_QUOTE = re.compile(
+    r"\*\*Draft|\*\*Revised \d|Organising principle:|research-briefs/|"
+    r"must be resolved to their own records|CITATION-AUDIT"
+)
+
+
 def strip_draft_notes(md: str) -> str:
     """Drop the italic editorial note some sections open with."""
     lines = md.splitlines()
@@ -125,6 +131,17 @@ def strip_draft_notes(md: str) -> str:
         line = lines[i]
         if line.startswith("*Draft for the paper") or line.startswith("*Framing locked"):
             while i < len(lines) and lines[i].strip() != "":
+                i += 1
+            continue
+        # Block-quoted editorial preambles: related-work.md opens with one that
+        # names internal files and dates the draft, and it was reaching the PDF as
+        # the first paragraph of the Related Work section.
+        if line.startswith(">") and _EDITORIAL_QUOTE.search(line):
+            while i < len(lines) and (lines[i].startswith(">") or lines[i].strip() == ""):
+                if lines[i].strip() == "" and not (
+                    i + 1 < len(lines) and lines[i + 1].startswith(">")
+                ):
+                    break
                 i += 1
             continue
         out.append(line)
@@ -142,8 +159,23 @@ def extract_abstract(md: str) -> str:
 
 
 def extract_introduction(md: str) -> str:
+    """The introduction, and nothing the outline keeps after it.
+
+    ``E4-outline.md`` is a working file: after the introduction it carries
+    planning sections — "Methodology (to write)", "Conclusion (to write)" — that
+    exist to track what still needed writing. Taking everything to end-of-file put
+    those in the paper as §1.0.1 and §1.0.2, so the built PDF contained its own
+    to-do list as subsections of the introduction, duplicating §4 and §8 which
+    were by then fully written. Caught by reading the assembled PDF; invisible in
+    the source, where they are obviously notes.
+    """
     m = re.search(r"## Introduction \(draft\)\n(?P<body>.*)", md, re.S)
-    return m.group("body") if m else ""
+    if not m:
+        return ""
+    body = m.group("body")
+    # Stop at the first heading that announces itself as unwritten.
+    cut = re.search(r"^## .*\(to write", body, re.M)
+    return body[: cut.start()] if cut else body
 
 
 def pandoc(md_text: str, label: str) -> str:
@@ -159,12 +191,45 @@ def pandoc(md_text: str, label: str) -> str:
     return proc.stdout
 
 
+def strip_own_title(md: str) -> str:
+    """Drop the file's leading H1 — the build already emitted a section title.
+
+    Every source file opens with its own `# Results` / `# Conclusion`. Demoting
+    that to a subsection produced "5 Results" immediately followed by
+    "5.1 Results" in the PDF, on every section. The build owns the section title;
+    the file's copy of it is redundant by construction.
+    """
+    return re.sub(r"\A\s*#(?!#)[^\n]*\n", "", md, count=1)
+
+
+_MANUAL_NUMBER = re.compile(r"^(#{2,6})\s+\d+(?:\.\d+)*\.?\s+", re.M)
+
+
+def strip_manual_numbers(md: str) -> str:
+    """Remove hand-written section numbers from headings; LaTeX numbers them.
+
+    `## 4.1 Equal budgets` rendered as "4.1.1 4.1 Equal budgets" — the author's
+    number colliding with the counter. The numbers are useful in the source files,
+    which are read on their own, so they are stripped at build time rather than
+    deleted.
+    """
+    return _MANUAL_NUMBER.sub(r"\1 ", md)
+
+
 def demote_headings(tex: str) -> str:
-    """The file's own `##` becomes a subsection under the paper's section."""
-    tex = re.sub(r"\\subsubsection\{", r"\\paragraph{", tex)
-    tex = re.sub(r"\\subsection\{", r"\\subsubsection{", tex)
-    tex = re.sub(r"\\section\{", r"\\subsection{", tex)
-    return tex
+    """Guard against a stray top-level heading; the levels already line up.
+
+    With the file's leading H1 removed by ``strip_own_title``, pandoc's natural
+    mapping is already correct: the build emits ``\\section``, the file's ``##``
+    becomes ``\\subsection``, its ``###`` a ``\\subsubsection``. The previous
+    version demoted everything one further step to make room for the duplicated
+    title, which is what produced "4.1.1 4.1 Equal budgets" in the PDF.
+
+    Only a *second* H1 in a source file would still reach here as ``\\section``
+    and break out of the numbering. Every file has exactly one today, so this
+    rewrites that case rather than trusting it to stay true.
+    """
+    return re.sub(r"\\section\{", r"\\subsection{", tex)
 
 
 def check_anonymity(name: str, text: str) -> list[str]:
@@ -188,7 +253,8 @@ def main() -> int:
     violations += check_anonymity("introduction", intro_md)
 
     body.append("\\section{Introduction}\n")
-    body.append(demote_headings(pandoc(strip_draft_notes(intro_md), "introduction")))
+    intro_clean = strip_manual_numbers(strip_draft_notes(intro_md))
+    body.append(demote_headings(pandoc(intro_clean, "introduction")))
 
     for filename, title in SECTIONS[1:]:
         src = (HERE / filename).resolve()
@@ -196,6 +262,7 @@ def main() -> int:
             print(f"  skipping missing {filename}")
             continue
         md = strip_draft_notes(rewrite_figures(src.read_text()))
+        md = strip_manual_numbers(strip_own_title(md))
         violations += check_anonymity(filename, md)
         body.append(f"\n\\section{{{title}}}\n")
         body.append(demote_headings(pandoc(md, filename)))
@@ -204,6 +271,7 @@ def main() -> int:
     app_src = HERE / APPENDIX[0]
     if app_src.exists():
         md = strip_draft_notes(rewrite_figures(app_src.read_text()))
+        md = strip_manual_numbers(strip_own_title(md))
         violations += check_anonymity(APPENDIX[0], md)
         body.append("\n\\appendix\n")
         body.append(f"\n\\section{{{APPENDIX[1]}}}\n")
