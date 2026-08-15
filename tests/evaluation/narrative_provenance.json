@@ -513,6 +513,42 @@
    "record_ref": "docs/academic-article/findings-log.md:510",
    "artifact": null,
    "provenance": "unretained-session"
+  },
+  "ubiquity_interim_reports": {
+   "value": "43",
+   "claim": "the analyses that had survived when the ubiquity measurement was first run",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the network-ubiquity entry",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "The superseded reading, kept because the paper's argument is that more than doubling the cohort moved it by three points. It cannot be recomputed: the 43-report archive was replaced in place by the recovered one."
+  },
+  "ubiquity_interim_domains": {
+   "value": "130",
+   "claim": "distinct network domains across those analyses",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the network-ubiquity entry",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "The superseded reading, kept because the paper's argument is that more than doubling the cohort moved it by three points. It cannot be recomputed: the 43-report archive was replaced in place by the recovered one."
+  },
+  "ubiquity_interim_ubiquitous": {
+   "value": "40",
+   "claim": "of them present in every one",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the network-ubiquity entry",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "The superseded reading, kept because the paper's argument is that more than doubling the cohort moved it by three points. It cannot be recomputed: the 43-report archive was replaced in place by the recovered one."
+  },
+  "ubiquity_interim_median": {
+   "value": "71.4%",
+   "claim": "the median per-sample ubiquitous share then",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the network-ubiquity entry",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "The superseded reading, kept because the paper's argument is that more than doubling the cohort moved it by three points. It cannot be recomputed: the 43-report archive was replaced in place by the recovered one."
   }
  }
 }

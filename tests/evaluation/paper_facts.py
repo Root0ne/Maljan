@@ -542,19 +542,89 @@ def corpus_shape_facts() -> dict[str, Any]:
     import statistics
 
     reports_dir = _REPO_ROOT / "data" / "cape_reports"
-    calls, domains = [], []
+    calls, domains, per_sample = [], [], []
     for path in sorted(reports_dir.glob("*.json")):
         blob = json.loads(path.read_text())
         behaviour = blob.get("behavior") or {}
         procs = behaviour.get("processes") or []
         calls.append(sum(len(p.get("calls") or []) for p in procs if isinstance(p, dict)))
-        domains.append(len((blob.get("network") or {}).get("domains") or []))
+        entries = (blob.get("network") or {}).get("domains") or []
+        names = {e.get("domain") for e in entries if isinstance(e, dict) and e.get("domain")}
+        domains.append(len(entries))
+        per_sample.append(names)
     if not calls:
         raise FactError("no archived CAPE reports to characterise the corpus with")
     out["evidence_median_calls"] = str(int(statistics.median(calls)))
     out["evidence_domains_min"] = str(min(domains))
     out["evidence_domains_max"] = str(max(domains))
     out["evidence_reports"] = str(len(calls))
+
+    # How much of the "dynamic" network channel is the analysis VM describing
+    # itself. The paper reports this beside every dynamic-versus-static
+    # contrast, so it has to move with the cohort rather than with the sentence:
+    # the earlier 43-report version of this measurement gave different figures,
+    # and the whole point of quoting it is that the contrast cannot be read
+    # without it.
+    populated = [names for names in per_sample if names]
+    if populated:
+        distinct = set().union(*populated)
+        ubiquitous = {d for d in distinct if all(d in names for names in populated)}
+        shares = [len(names & ubiquitous) / len(names) for names in populated]
+        out["network_domains_distinct"] = str(len(distinct))
+        out["network_domains_ubiquitous"] = str(len(ubiquitous))
+        out["network_ubiquitous_min"] = pct(min(shares), 1)
+        out["network_ubiquitous_max"] = pct(max(shares), 1)
+        out["network_ubiquitous_median"] = pct(statistics.median(shares), 1)
+        out["network_samples_with_domains"] = str(len(populated))
+    return out
+
+
+def case_corpus_facts() -> dict[str, Any]:
+    """How many cases the ATT&CK case-prior index was built from.
+
+    Counted from the corpus the retrieval record names, rather than from the
+    sentence, because this number carries the paper's leakage check: the claim
+    is that none of these shares a digest with either evaluation cohort, and a
+    count that does not match the file leaves the reader unable to tell which
+    corpus was checked.
+    """
+    named = load("attck_case_rag_retrieval.json")["corpus"]
+    path = _REPO_ROOT / named
+    if not path.exists():
+        raise FactError(f"the retrieval record names {named}, which is not on disk")
+    blob = json.loads(path.read_text())
+    cases = blob if isinstance(blob, list) else blob.get("cases", blob)
+    return {"case_corpus_n": f"{len(cases):,}"}
+
+
+def layer0_excluded_facts() -> dict[str, Any]:
+    """The two Layer-0 sources that were offered evidence and declined it.
+
+    Derived from the ablation's own record of why it excluded them, not from the
+    current cohort. The distinction is the point: the exclusion was measured on
+    the reports that existed then, and the paper had drifted to quoting today's
+    cohort size and today's median API count beside a decision taken against
+    neither. A denominator that follows the corpus while the measurement does
+    not is a claim about work nobody did.
+    """
+    excluded = load("layer0_verdict_v2_overlap.json").get("excluded_sources") or []
+    if not excluded:
+        raise FactError("layer0_verdict_v2_overlap.json records no excluded sources")
+    out: dict[str, Any] = {"layer0_declined_sources": str(len(excluded))}
+    seen: set[str] = set()
+    for source in excluded:
+        reason = source.get("reason") or ""
+        match = re.search(r"(\d+)\s*/\s*(\d+)\s+archived reports", reason)
+        if not match:
+            raise FactError(f"cannot read the denominator out of: {reason!r}")
+        seen.add(match.group(2))
+        if median := re.search(r"median\s+([\d,]+)\s+API calls", reason):
+            out["layer0_declined_median_calls"] = f"{int(median.group(1).replace(',', '')):,}"
+        if domains := re.search(r"(\d+-\d+)\s+domains", reason):
+            out["layer0_declined_domains"] = domains.group(1).replace("-", "--")
+    if len(seen) != 1:
+        raise FactError(f"the excluded sources disagree on their denominator: {sorted(seen)}")
+    out["layer0_declined_of"] = seen.pop()
     return out
 
 
@@ -926,6 +996,8 @@ BUILDERS = (
     fixture_ceiling_facts,
     fallback_table_facts,
     corpus_shape_facts,
+    case_corpus_facts,
+    layer0_excluded_facts,
     model_size_facts,
     cascade_jaccard_facts,
     drift_facts,

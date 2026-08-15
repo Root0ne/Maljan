@@ -132,7 +132,7 @@ n=\fact{frontier-local-pairs}, better on \fact{frontier-local-better} and worse 
 advantage produces no measurable difference here, which is evidence \emph{against} the pitfall's usual
 worry rather than merely an absence of evidence for it.
 
-An interim version of this arm reported \fact{superseded-frontier-f1} at n=9 and read as a lead; completing the sample moved
+An interim version of this arm reported \fact{superseded-frontier-f1} at n=\fact{superseded-frontier-n} and read as a lead; completing the sample moved
 the estimate through the local mean and out the other side. We record that because the arm had been
 truncated by a daily request quota, not by anything about the samples --- the failure mode is reading a
 difference off an underpowered arm, and this audit carried the wrong number for a day.
@@ -169,12 +169,12 @@ the literature for the wrong reason.
 
 What also remains is \textbf{coverage, not power}: the second model has been measured on five synthetic
 fixtures, not on the malware cohort, where evidence bundles are longer and messier. That is the arm
-the free tier's 50 requests/day makes a two-day run or a paid one.
+the free tier's \setting{50} requests/day makes a two-day run or a paid one.
 
 \textbf{P9 Model ambiguity --- \texttt{PARTIAL}.} Model and engine are both pinned: GGUF digest, HuggingFace
 revision, retrieval date, quantiser, \textbf{and the imatrix calibration dataset} --- which most papers
 reporting a quantisation level cannot name. The engine commit was recovered and \emph{proved} to describe
-the build (identical 837-file source list; exactly one generated file differs). It is \texttt{PARTIAL}
+the build (identical \fact{engine-source-files}-file source list; exactly one generated file differs). It is \texttt{PARTIAL}
 rather than \texttt{CLEAR} for this reason: \textbf{the running binary reports its version as
 \texttt{unknown}}, and the commit was recovered from a vendored copy of the sources rather than from the
 artefact. Build provenance must be captured at build time; ours was reconstructed, and we say so.
@@ -246,7 +246,7 @@ is precisely what makes it a valid baseline rather than a second view of the
 answer.
 
 \textbf{The retrieval corpora do not overlap the evaluation cohorts.} We checked
-by digest rather than by assertion: of the 1,733 cases in the ATT\&CK case
+by digest rather than by assertion: of the \fact{case-corpus-n} cases in the ATT\&CK case
 corpus, none shares a sha256 with the \fact{cohort-n}-sample dynamic cohort or
 with the \fact{drift-n}-sample drift manifest.
 
@@ -288,10 +288,12 @@ we accept rather than argue with:
 \subsection{The dynamic channel is two-thirds constant}\label{the-dynamic-channel-is-two-thirds-constant}
 
 Any claim about what the sandbox contributes has to survive one measurement of what the sandbox
-reports. Across the 97 archived analyses there are \textbf{143 distinct network domains}, and
-\textbf{38 of them appear in every single sample} --- the analysis VM's own vendor telemetry, present in
-each capture whatever was detonated. Per sample, between \textbf{55.9\% and 79.2\%} of observed domains are
-cohort-ubiquitous, median \textbf{67.9\%}.
+reports. Across the \fact{evidence-reports} archived analyses there are
+\textbf{\fact{network-domains-distinct} distinct network domains}, and
+\textbf{\fact{network-domains-ubiquitous} of them appear in every single sample} --- the analysis VM's own
+vendor telemetry, present in each capture whatever was detonated. Per sample, between
+\textbf{\fact{network-ubiquitous-min} and \fact{network-ubiquitous-max}} of observed domains are
+cohort-ubiquitous, median \textbf{\fact{network-ubiquitous-median}}.
 
 So two-thirds of the network evidence in a ``dynamic'' arm is the instrument describing itself. A
 treatment that constant is weaker than its name suggests, and an effect attributed to malware
@@ -300,21 +302,24 @@ every dynamic-versus-static contrast rather than in a footnote, because the cont
 without it.
 
 The same measurement bounds two Layer-0 sources from the other direction. The LOLBin layer and the
-DGA layer produce a claim on \textbf{0 of 97} samples while being fed a median of \fact{evidence-median-calls} recorded API calls
-and 48--68 domains respectively --- they are offered the evidence and decline it. That is why neither
+DGA layer produced a claim on \textbf{none of the \fact{layer0-declined-of}} reports archived when that
+ablation ran, while being fed a median of \fact{layer0-declined-median-calls} recorded API calls and
+\fact{layer0-declined-domains} domains respectively --- they are offered the evidence and decline it. That is why neither
 appears as an arm in the cascade ablation: giving a mechanism an equal share of ground truth when it
 never engages in the deployment would measure a system that does not exist.
 
-An earlier version of this measurement, on the 43 analyses that survived before the cohort was
-recovered, gave 130 domains with 40 ubiquitous and a median share of 71.4\%. More than doubling the
+An earlier version of this measurement, on the \fact{ubiquity-interim-reports} analyses that survived
+before the cohort was recovered, gave \fact{ubiquity-interim-domains} domains with
+\fact{ubiquity-interim-ubiquitous} ubiquitous and a median share of \fact{ubiquity-interim-median}. More than doubling the
 cohort moved the figure by three points and left the conclusion where it was.
 
 \subsection{The host as an uncontrolled variable}\label{the-host-as-an-uncontrolled-variable}
 
 A threat we did not anticipate and met late: \textbf{the machine a measurement runs on is part of the
 instrument.} Our working set --- model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container up
-to 6 GB --- does not fit a \fact{host-ram-gib} GiB host alongside an interactive session. During a paired ablation the
-swap file was exhausted and the model server had 2.3 GB of its own address space paged out; an arm
+to \fact{ghidra-mem-limit-gb} GB --- does not fit a \fact{host-ram-gib} GiB host alongside an interactive session. During a paired ablation the
+swap file was exhausted and the model server had \fact{llama-paged-out-gb} GB of its own address space
+paged out; an arm
 then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters. Whether that arm failed
 because of the pipeline or because of the host \textbf{cannot be determined}, because we recorded the
 pipeline's outputs and not the host's state.
