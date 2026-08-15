@@ -15,49 +15,29 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 
 ## Abstract (draft)
 
-> We report a year of measurements from a multi-agent LLM pipeline that maps malware evidence to
-> MITRE ATT&CK techniques, and the methodological problem those measurements kept running into: the
-> instrument was frequently wrong in ways that produced plausible results rather than errors.
+> Multi-agent LLM pipelines are being built to map malware evidence to MITRE ATT&CK techniques, and
+> their components are rarely measured against the deterministic tooling they sit on top of. We
+> evaluate one such pipeline, and report why several of our own measurements of it were wrong.
 >
-> Four of our architectural claims were tested and did not survive. Negotiated multi-agent consensus
-> did not beat a single judge at equal token budget (paired ΔF1 {{consensus_negotiated_delta}}, 95% CI [−0.084, +0.050], at
-> 3.2× the tokens). Three independently built retrieval components — an ATT&CK case-prior index, a
-> family-feature index, and an opcode-hash attribution tier — each work in isolation and contribute
-> {{family_delta_f1}} F1, lose to a frequency prior, and fire on {{hash_fired}} of {{hash_total}} samples respectively. A deterministic
-> confidence cap fires on {{cap_rate}} of techniques. A 120B reasoning model did not separate from our local
-> 35B on identical fixtures at equal nominal budget (paired ΔF1 **+0.003**, 95% CI [−0.077, +0.081],
-> n=25) — a null we report with a confound its provider will not let us remove, since the parameter
-> that would have matched the two arms' reasoning budgets is accepted and ignored there.
+> Scored per sample on the same binaries and the same ground truth, the full pipeline reaches F1
+> {{h2h_dynamic_f1}} where the sandbox it is built on reaches {{h2h_cape_f1}} — paired
+> {{h2h_delta}}, 95% cluster CI {{h2h_ci}}, at a resolution of {{h2h_mde}}. Negotiated multi-agent
+> consensus does not beat a single judge at equal token budget
+> ({{consensus_negotiated_delta}}, {{consensus_negotiated_ci}}, at {{consensus_token_ratio}}× the
+> tokens). Verbal confidence, the number every deterministic gate consumes, ranks correct claims
+> above incorrect ones at AUC {{confidence_auc}} [{{confidence_auc_lo}}, {{confidence_auc_hi}}] —
+> indistinguishable from chance.
 >
-> The verdict model's influence over its own output is not small but **conditional on it working**.
-> Where the model returns a parsable verdict it supplies **{{judge_capped_own_ids}} of {{judge_capped_bundle}}** techniques in the bundle the
-> analyst receives; a post-processing step restores the deterministic set regardless. Where it fails
-> — half of calls, in a degenerate decode our own output cap had never bounded — a text fallback
-> scrapes identifiers out of the unparsable response, and **{{fallback_only_capped}} techniques reach the analyst that no
-> evidence source corroborated**, in the same object type as those three sources agreed on. All 45
-> unique identifiers are real ATT&CK techniques, which is what makes them indistinguishable.
+> Seven defects in our own instrument produced plausible results rather than errors, and a suite of
+> {{test_count}} passing tests caught none of them. Four crossed a boundary with another server; three
+> did not, and those three share a different shape — a measurement's cause assigned rather than
+> measured. The largest instance is this paper's own statistics: every interval we published
+> resampled rows when the observations were clustered, and correcting it widened our anchor interval
+> {{baseline_f1_widening}}-fold and turned two equivalence claims into bounds.
 >
-> Seven defects produced *plausible wrong answers with no error anywhere*. Four are at boundaries
-> with other people's servers: unset optional arguments sent as `null`, a loaded program that never
-> became the server's current program, a refused load returning HTTP 200, and two protective bounds
-> composing into an empty result. **Three are ours** — an ablation that varied a deterministic code
-> path and reported a language model, a correlation that ranked a configuration flag and reported a
-> parameter count, and a documented output ceiling renamed during serialisation to a key the
-> inference server does not read. A suite of {{test_count}} passing tests caught none of them, and the last
-> three had passing tests over the exact functions concerned. The four boundary defects were all
-> found by one check — how many **distinct** outputs N inputs produced; the other three were not,
-> and we say what did find them.
->
-> One of our studies is withdrawn as a direct consequence, its per-sample outputs not retained and
-> its question no longer askable. The same gap then recurred while this paper was written: a paired
-> ablation halted on host memory and four arms cannot be attributed to the pipeline or the machine,
-> because the retention rule we adopted after the first failure was scoped to that failure.
->
-> We contribute the measured negatives, the failure mechanisms with the layer each occurred at, the
-> cheap detector that found four of them, and a no-LLM baseline (F1 {{baseline_f1}}, n={{baseline_n}}) against which all of
-> it is read. We argue that in a pipeline assembled from other people's servers a server that answers
-> is not the same as a server that answered your question — and that the same shape does not stop at
-> the network boundary: it appears wherever a measurement's cause is assigned rather than measured.
+> We contribute the measured negatives with the minimum detectable effect beside each, seven failure
+> mechanisms with what found them, and a no-LLM baseline (F1 {{baseline_f1}}, n={{baseline_n}} over
+> {{baseline_families}} families) without which none of these numbers refers to anything.
 
 ## Structure
 
@@ -136,11 +116,29 @@ and one of them — the configuration difference masquerading as a scaling resul
 instance of [24] rather than a new phenomenon.
 
 What we add is the setting and the price: an **evaluation pipeline for security research**, where
-the artefact is not a degraded user session but a measurement that is wrong and looks right. Three
-mechanisms at three distinct integration boundaries; a detector reported alongside results; a
-selection rule that follows from a provider accepting a parameter and not acting on it, so arms must
-be matched on their *measured* configuration and not their requested one; and one withdrawn study as
-the demonstrated consequence.
+the artefact is not a degraded user session but a measurement that is wrong and looks right.
+
+**Contributions.** Each maps to one section, and each is a measurement or a mechanism rather than a
+proposal.
+
+1. **A no-LLM baseline for LLM-based ATT&CK mapping**, and the full pipeline scored against it on
+   the same samples and the same ground truth — the comparison without which every F1 in this
+   literature, including our own earlier ones, refers to nothing (§5.1).
+2. **Four measured architectural negatives** — multi-agent consensus at equal budget, a corroboration
+   cascade, two-tier attribution, and a confidence gate — each reported with the minimum detectable
+   effect of the design that produced it, because a null without its resolution is unreadable
+   (§5.2–§5.6).
+3. **Seven instrument failures that produced plausible results rather than errors**, with the layer
+   each occurred at and what actually found it. Four crossed a boundary with another server; three
+   were inside our own code and share a different shape (§6).
+4. **A one-line detector** — how many distinct outputs did N inputs produce — that found all four
+   boundary failures, needs no ground truth, and is reported beside every batch result rather than
+   written as a test (§6.7).
+5. **A selection rule that follows from a provider accepting a parameter and not acting on it**: arms
+   must be matched on their *measured* configuration, not their requested one (§6.5).
+6. **The price, demonstrated rather than hypothesised**: one completed 210-sample study withdrawn
+   because its question can no longer be asked of it, and four arms of a later ablation
+   unattributable for the same reason one level up (§7.4).
 
 ## Methodology (to write — the material exists)
 
