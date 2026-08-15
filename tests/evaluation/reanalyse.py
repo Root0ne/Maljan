@@ -151,6 +151,31 @@ def _consensus_arms_cape() -> tuple[dict[str, dict[tuple[str, int], float]], dic
     if not arms:
         raise ReanalysisError("consensus_cape_checkpoint.jsonl yielded no scored arms")
 
+    # A cluster count is not a completeness check, and treating it as one is how
+    # this project already burned itself: an interim arm reported 0.5025 at n=9,
+    # read as a lead, and completing the sample moved the estimate through the
+    # local mean and out the other side. A partial run of this shape passes a
+    # family threshold long before it is finished, because the families arrive
+    # one at a time.
+    #
+    # The harness writes its rolled-up JSON only when a full pass over every
+    # sample and arm returns. That file is therefore the run's own statement
+    # that it finished, and it is the gate — not the row count.
+    rolled = _HERE / "consensus_ablation_cape.json"
+    finished = False
+    if rolled.exists():
+        cells = {
+            (r["arm"], r["sample_id"], int(r["repeat"]))
+            for r in json.loads(rolled.read_text())
+            if isinstance(r.get("f1"), int | float)
+        }
+        checkpoint_cells = {
+            (arm, sid, rep) for arm, cellmap in arms.items() for sid, rep in cellmap
+        }
+        finished = checkpoint_cells <= cells
+    if not finished:
+        arms = {}
+
     families = _cape_families()
     unmapped = sorted({sid for cells in arms.values() for sid, _ in cells if sid not in families})
     if unmapped:
@@ -199,7 +224,7 @@ def _paired_entry(
 ) -> dict[str, Any]:
     deltas, clusters = _paired(left, right, cluster_of)
     res = stats.paired_cluster_result(deltas, clusters, iters=iters, seed=SEED)
-    return {
+    entry: dict[str, Any] = {
         "id": label,
         "title": title,
         "corpus": corpus,
@@ -208,6 +233,29 @@ def _paired_entry(
         "tied": sum(1 for d in deltas if d == 0),
         **res.as_json(),
     }
+
+    # What the intersection threw away, named rather than absorbed.
+    #
+    # On a complete design nothing is dropped and this is empty. On real
+    # binaries it is not: an arm can fail to produce a cell, and the arms fail
+    # unevenly — the expensive one times out first, on the samples whose
+    # evidence is largest. That is informative missingness, and an interval
+    # computed over the survivors without saying so reports a design that was
+    # never run. The same binary that goes missing here is the one the
+    # sink-hint ablation excluded for exceeding its own time bound.
+    if cluster_of is not None:
+        both = set(left) & set(right)
+        either = set(left) | set(right)
+        lost = sorted({cluster_of[sid] for sid, _ in either - both})
+        entry["clusters_paired"] = len({cluster_of[sid] for sid, _ in both})
+        entry["clusters_unpaired"] = lost
+        if lost:
+            entry["missingness"] = (
+                "not missing at random: these families lack a cell because an arm "
+                "did not return inside its time bound, and the arms do not fail "
+                "evenly across samples"
+            )
+    return entry
 
 
 # ---------------------------------------------------------------------------
