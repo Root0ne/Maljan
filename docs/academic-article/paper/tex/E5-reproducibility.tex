@@ -61,11 +61,11 @@ reproduced here:
 \begin{itemize}
 \tightlist
 \item
-  \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- 10.4 GB fresh, 14.8 GB
+  \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- 10.4 GB fresh, \fact{llama-rss-growth-gb} GB
   after a single full analyst pass. A long paired run must restart it between arms; at temperature 0
   this is measurement-neutral.
 \item
-  \textbf{Serving at 64k instead of \fact{fallback-bundle-total}k does not lower the peak} (14.6 vs 14.8 GB) --- the baseline is
+  \textbf{Serving at 64k instead of \fact{fallback-bundle-total}k does not lower the peak} (14.6 vs \fact{llama-rss-growth-gb} GB) --- the baseline is
   CPU-resident expert weights, and the growth follows the context a pass actually consumes.
 \item
   \textbf{Generation rate varies from 162 to 20 tokens/s across requests.} On this hybrid recurrent
@@ -280,7 +280,7 @@ completed \textbf{n=25} run, taken from a fresh quota: 25 of 25 parsed, 0 refusa
 the \$25 ceiling.
 
 The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
-rather than in dollars: one call per sample over a 97-sample cohort is two days at 50 requests per
+rather than in dollars: one call per sample over a \fact{baseline-n}-sample cohort is two days at 50 requests per
 day, and a full-pipeline arm --- roughly 20 model requests per analysis --- is not reachable on the
 free tier at all. The spend meter is enforced as a precondition on every call rather than reconciled
 afterwards, and projections price output at the full cap because a degenerate decode produces

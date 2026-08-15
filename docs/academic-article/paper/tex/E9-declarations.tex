@@ -3,7 +3,7 @@
 
 \subsection{Ethics and containment}\label{ethics-and-containment}
 
-Every sample analysed in this work is live Windows PE malware. The 97-sample cohort and the 210
+Every sample analysed in this work is live Windows PE malware. The \fact{baseline-n}-sample cohort and the \fact{drift-n}
 dated samples of the withdrawn drift study were obtained from MalwareBazaar (abuse.ch) under its
 terms of use, which permit research redistribution of samples but not of the corpus as a package.
 
@@ -54,10 +54,10 @@ is withheld; it appears nowhere in the archive and is referred to throughout as 
 One dataset used for retrieval-corpus construction is redistributed by its authors under terms that
 do not permit our redistribution, and is referenced rather than included.
 
-\textbf{Not available.} The 210-sample temporal-drift study's per-sample outputs do not exist. They were
+\textbf{Not available.} The \fact{drift-n}-sample temporal-drift study's per-sample outputs do not exist. They were
 written to a path that was valid on the machine the harness was first written on and silently
 relative on the machine it ran on; the study is withdrawn on that account and the withdrawal is
-reported in Results rather than quietly repaired. The manifest of the 210 samples survives and is
+reported in Results rather than quietly repaired. The manifest of the \fact{drift-n} samples survives and is
 included, so the cohort can be reconstructed even though the results cannot.
 
 \subsection{Reproducibility}\label{reproducibility}
@@ -67,7 +67,7 @@ is asserted by a test in the released suite rather than claimed here. Every inte
 seed, the iteration count and the number of clusters it was computed from, in the artifact itself,
 so an interval cannot be read without the information needed to reproduce it.
 
-The live arms are not bit-reproducible and we do not claim they are. Decoding is at temperature 0.1
+The live arms are not bit-reproducible and we do not claim they are. Decoding is at temperature \fact{decode-temperature}
 on the local arm and at each provider's default on the hosted ones, one of which accepts a
 reasoning-configuration parameter and does not act on it --- a fact we established by measurement and
 report as a result. Anyone re-running the live arms should expect the numbers to move and should

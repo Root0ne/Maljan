@@ -191,9 +191,9 @@ many distinct outputs the N inputs produced. If far fewer than N differ on a dim
 vary --- length, digest, element count --- the instrument is repeating itself, and repetition is what a
 stale-state bug looks like from outside. All three boundary defects above were caught this way: a \fact{hint-chars-repeated}-char
 hint repeated across unrelated samples; call graphs identical to the character for binaries of
-241 KB and 139 KB; 66 consecutive samples at exactly \fact{stuck-graph-chars} characters. It costs one line of code and
+\fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at exactly \fact{stuck-graph-chars} characters. It costs one line of code and
 needs no ground truth. We now report it alongside results (50 distinct call-graph sizes across 79
-samples; 63 across 97).
+samples; \fact{cardinality-distinct-graphs} across \fact{cardinality-samples}).
 
 This check is a \textbf{refinement, not a discovery}, and we counter-searched it before claiming
 otherwise: ``distinct inputs should produce distinct outputs'' is an ordinary metamorphic relation
@@ -259,7 +259,7 @@ cohort moved the figure by three points and left the conclusion where it was.
 
 A threat we did not anticipate and met late: \textbf{the machine a measurement runs on is part of the
 instrument.} Our working set --- model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container up
-to 6 GB --- does not fit a 31 GiB host alongside an interactive session. During a paired ablation the
+to 6 GB --- does not fit a \fact{host-ram-gib} GiB host alongside an interactive session. During a paired ablation the
 swap file was exhausted and the model server had 2.3 GB of its own address space paged out; an arm
 then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters. Whether that arm failed
 because of the pipeline or because of the host \textbf{cannot be determined}, because we recorded the

@@ -382,7 +382,7 @@ are 35B, so the series is two points at one size. We state this as a limitation 
 cause rather than as an untested claim in either direction.
 
 \textbf{An earlier version of this arm reported \fact{superseded-frontier-f1} and was wrong to suggest a lead.} That figure came
-from n=9, the run having been cut short by a daily request quota; the apparent advantage did not
+from n=\fact{superseded-frontier-n}, the run having been cut short by a daily request quota; the apparent advantage did not
 survive completing the sample. It is recorded here because it is the exact failure mode §4.2 warns
 about --- a difference read off an underpowered arm --- and because we caught it by finishing the run
 rather than by any insight.
@@ -774,7 +774,7 @@ that context would claim a precision the instrument does not have. \textbf{Repor
 the estimate is the whole of what we have to say about how to read it.}
 
 \textbf{The two \texttt{unattributable} pairs are this paper's own §4.5 recurring against it.} They died while
-the host's swap file was exhausted and the model server had 2.3 GB of its own address space paged
+the host's swap file was exhausted and the model server had \fact{paged-out-working-set} of its own address space paged
 out; one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters, which is
 inexplicable for a model generating from RAM and unsurprising for one generating from disk. We had
 retained per-sample outputs, as our own rule requires. What went unrecorded was the environment the
@@ -788,7 +788,7 @@ third was the 630-second timeout, which is an outcome --- deleting an outcome on
 rather than repair. The recovered pair contributed a $-$4, against the hint.
 
 Running it, however, surfaced a production defect that the test suite (\fact{test-count} passing) did not: on any binary
-rich enough to exhaust the 40-step ReAct budget, the analyst returned \textbf{zero techniques}, because
+rich enough to exhaust the \fact{react-step-budget}-step ReAct budget, the analyst returned \textbf{zero techniques}, because
 the salvage path received a fresh copy of a budget it was already inside. Fixed and verified on the
 same sample: \textbf{1,677 s $\rightarrow$ 323 s, 0 $\rightarrow$ 5 technique IDs}. The fix is partial --- one sample still exceeds
 the bound, and the server's own timings show generation varying from 162 to 20 tokens/s on this

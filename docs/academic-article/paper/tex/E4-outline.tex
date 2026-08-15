@@ -27,7 +27,7 @@ in one server lifetime, and a unit test writes one.
 
 Every one of those four was caught the same way: \textbf{a number repeated where variation was expected.}
 A hint of exactly \fact{hint-chars-repeated} characters for two unrelated binaries; call graphs identical to the
-character for samples of 241 KB and 139 KB; 66 consecutive samples at \fact{stuck-graph-chars} characters. The check
+character for samples of \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at \fact{stuck-graph-chars} characters. The check
 costs one line, needs no ground truth, and we now report it beside every batch result.
 
 \textbf{Then three more, and none of them was at a boundary.} An ablation varied a deterministic
@@ -46,7 +46,7 @@ We report them because the correction is part of the result. Two published findi
 withdrawn or rewritten on their account, and a third was one report away from being published as a
 scaling law.
 
-The cost of not having had it is concrete: \textbf{a completed 210-sample study is withdrawn from this
+The cost of not having had it is concrete: \textbf{a completed \fact{drift-n}-sample study is withdrawn from this
 paper.} It met the precondition for one of the defects, and its per-sample outputs were not
 retained, so whether it was affected cannot be established. We report the withdrawal rather than the
 result.
@@ -90,7 +90,7 @@ proposal.
   \textbf{A selection rule that follows from a provider accepting a parameter and not acting on it}: arms
   must be matched on their \emph{measured} configuration, not their requested one (§6.5).
 \item
-  \textbf{The price, demonstrated rather than hypothesised}: one completed 210-sample study withdrawn
+  \textbf{The price, demonstrated rather than hypothesised}: one completed \fact{drift-n}-sample study withdrawn
   because its question can no longer be asked of it, and four arms of a later ablation
   unattributable for the same reason one level up (§7.4).
 \end{enumerate}

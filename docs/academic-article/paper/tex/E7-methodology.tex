@@ -94,12 +94,12 @@ under a correlation, and a study that recorded which failure branch each call to
 
 It is reported as a result column, not run as a test, because the signal exists only in the batch:
 each individual response was well-formed and plausible. We report 50 distinct call-graph sizes
-across 79 samples, 63 across 97.
+across 79 samples, \fact{cardinality-distinct-graphs} across \fact{cardinality-samples}.
 
 \subsection{Per-sample outputs are retained for every study}\label{per-sample-outputs-are-retained-for-every-study}
 
 Aggregates cannot be re-interrogated. When a defect was found that \emph{might} have affected a completed
-210-sample study, the question could not be asked, because only the summary survived --- and the study
+\fact{drift-n}-sample study, the question could not be asked, because only the summary survived --- and the study
 is withdrawn as a direct consequence.
 
 The policy is therefore not ``keep the numbers'' but \textbf{keep enough to re-ask a question that has not

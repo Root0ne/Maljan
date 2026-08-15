@@ -517,6 +517,35 @@ def corpus_shape_facts() -> dict[str, Any]:
     return out
 
 
+def drift_facts() -> dict[str, Any]:
+    """The withdrawn study's shape, from the one thing that survived it.
+
+    The results are gone — written to a path that was valid on the machine the
+    harness was first written on and silently relative on the machine it ran on.
+    The manifest survives, so the cohort is still describable even though it can
+    no longer be asked its question, and the paper quotes its size six times.
+    """
+    d = load("temporal_manifest.json")
+    cohorts = d.get("cohorts")
+    if not isinstance(cohorts, dict) or not cohorts:
+        raise FactError("temporal_manifest.json has no per-year cohorts")
+    n = sum(len(v) for v in cohorts.values())
+    stored = d.get("counts") or {}
+    if stored and sum(stored.values()) != n:
+        raise FactError(
+            f"the manifest's counts sum to {sum(stored.values())}, its cohorts hold {n}"
+        )
+    families = {s["signature"] for v in cohorts.values() for s in v if s.get("signature")}
+    years = sorted(cohorts)
+    return {
+        "drift_n": str(n),
+        "drift_cohorts": str(len(cohorts)),
+        "drift_families": str(len(families)),
+        "drift_first_year": years[0],
+        "drift_last_year": years[-1],
+    }
+
+
 def cape_audit_facts() -> dict[str, Any]:
     """The sandbox reported every task complete; the timings say otherwise.
 
@@ -767,6 +796,7 @@ BUILDERS = (
     fixture_ceiling_facts,
     fallback_table_facts,
     corpus_shape_facts,
+    drift_facts,
     cluster_stat_facts,
     power_facts,
     multiplicity_facts,

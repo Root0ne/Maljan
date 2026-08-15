@@ -97,7 +97,7 @@ none of them}, and not because the tests were bad --- each defect requires a sec
 server, or a large input, which is precisely what a fast unit suite is built to avoid.
 
 All four were found by one arithmetic check: \textbf{how many distinct outputs did N inputs produce?} A
-priority hint of exactly \fact{hint-chars-repeated} characters for unrelated binaries; 66 consecutive samples at exactly
+priority hint of exactly \fact{hint-chars-repeated} characters for unrelated binaries; \fact{stuck-graph-run} consecutive samples at exactly
 \fact{stuck-graph-chars}. It needs no ground truth and no oracle, which is what makes it usable where correctness is
 hard to check, and it belongs beside sample size in an evaluation report rather than inside a test.
 
@@ -128,13 +128,13 @@ measurement's cause was assigned rather than measured.
 
 \subsection{What it cost, including while writing this}\label{what-it-cost-including-while-writing-this}
 
-One completed study is withdrawn --- a 210-sample temporal-drift analysis that had passed review and
+One completed study is withdrawn --- a \fact{drift-n}-sample temporal-drift analysis that had passed review and
 been cited internally for weeks. It is withdrawn not because the defect certainly affected it, but
 because its per-sample outputs were not retained and \textbf{the question can no longer be asked of it}.
 
 The discipline then caught us a second time, one level up, during the final experiment. A paired
-ablation halted at 10 of 24 arms when the host exhausted its swap file; four arms had died in ways
-that may belong to the pipeline or to a machine whose model server had 2.3 GB of itself paged out.
+ablation halted at \fact{halted-arms} arms when the host exhausted its swap file; four arms had died in ways
+that may belong to the pipeline or to a machine whose model server had \fact{paged-out-working-set} of itself paged out.
 We had retained per-sample outputs, as our own rule requires. We had not retained per-sample \textbf{host
 state}, and that is what the question needed. The arms are reported as unattributable rather than
 as failures, and the effect of that mechanism remains unmeasured.
@@ -149,8 +149,8 @@ the instrument.
 We claim: the measured negatives above; seven failure mechanisms with the layer each occurred at,
 four of them at a boundary with another server and three inside our own code; a detector that found
 the four boundary cases and costs one line, together with what found the other three; and a no-LLM
-baseline of \textbf{F1 \fact{baseline-f1}} {[}0.134, 0.171{]}, n=\fact{baseline-n}, without which none of our F1 numbers refer to
-anything --- and against which the full pipeline gains \textbf{0.003 F1}.
+baseline of \textbf{F1 \fact{baseline-f1}} \fact{baseline-f1-cluster-ci}, n=\fact{baseline-n}, without which none of our F1 numbers refer to
+anything --- and against which the full pipeline gains \textbf{\fact{h2h-delta} F1}.
 
 We claim one result about the architecture that we did not go looking for: the verdict model's
 influence on the artefact is \textbf{conditional on the model working}. Where it returns a parsable

@@ -184,6 +184,14 @@
    "record_ref": "findings-log.md §3.16",
    "artifact": null,
    "provenance": "unretained-session"
+  },
+  "decode_temperature": {
+   "value": "0.1",
+   "claim": "the decoding temperature every local arm ran at",
+   "observed": "2026-08-09",
+   "record_ref": "src/maljan/core/config.py expert temperature",
+   "artifact": null,
+   "provenance": "configuration-constant"
   }
  }
 }
