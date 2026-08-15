@@ -64,7 +64,7 @@ contribution is the discipline, and the negatives are evidence for it rather tha
 | § | Section | Source | Status |
 |---|---|---|---|
 | 1 | Introduction | this file | draft below |
-| 2 | Background & Related Work | `../related-work.md` §§1–6 | written; [17]–[23] need full-text verification |
+| 2 | Background & Related Work | `../related-work.md` §§1–6 | written; [21]–[25] verified 2026-08-15 (two corrected); [17]–[19] still need full text |
 | 3 | System, briefly | `E3-system.md` | written — deliberately short; the system is the setting, not the claim |
 | 4 | Measurement methodology | `E7-methodology.md` | written — equal budgets, paired designs, firing-rate-before-effect, output cardinality |
 | 5 | Results | `E1-results.md` | written |

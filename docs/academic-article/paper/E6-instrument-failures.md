@@ -334,8 +334,9 @@ across 97.
 
 **This is a refinement, not a discovery, and we checked before saying otherwise.** "Distinct inputs
 should produce distinct outputs" is an ordinary metamorphic relation [22]; metamorphic testing
-exists precisely for programs whose correct output is unknown. The inverse — duplicating dataset
-items to verify identical inputs score consistently — is already an eval-harness practice [23]. And
+exists precisely for programs whose correct output is unknown — the *"notorious oracle problem"*
+its own survey names. Stress-testing an LLM judge's consistency under input variation is likewise
+established practice [23]. And
 the genus is described: a longitudinal study of a production LLM agent runtime defines the
 meta-pattern as *"a failure whose error signal never reaches a human in actionable form"* and gives
 a five-class taxonomy [20] into which all four of our **boundary** mechanisms fall. M5, M6 and M7 share

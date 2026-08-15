@@ -581,7 +581,14 @@ than quietly inheriting.
       here). P3's residual — the LLM's training data is unknown to us and memorisation was never
       probed — is acknowledged there as the pitfall itself recommends. Left open for the final
       read-through.
-- [x] **E3 — Related Work, final** `[done]` **2026-08-15** — the M6/M7 counter-search folded in as
+- [x] **E3 — Related Work, final** `[done]` **2026-08-15**, citations verified the same day —
+      **[21] and [23] were both wrong and are corrected.** [23] was cited for "duplicating dataset
+      items to verify identical inputs score consistently"; the paper does not do that — it perturbs
+      formatting, paraphrase, verbosity and the ground-truth label. [21] was quoted verbatim for a
+      sentence that is not in it, exactly as its own audit row had warned. [22] verified clean
+      (title, authors, DOI, and the "notorious oracle problem" phrasing we rely on). [24] was
+      already verified. [17]–[19] remain search-result-level and are the last citation debt.
+      *(original entry follows)* — the M6/M7 counter-search folded in as
       [24] and [25] with per-citation verification status, `arXiv:2604.00025` recorded as owning
       M6's phenomenon, and one claim added about where the published taxonomy *ends*: its five
       classes each describe a call to something else, and three of our seven mechanisms crossed no

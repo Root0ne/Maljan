@@ -170,7 +170,8 @@ samples; 63 across 97).
 
 This check is a **refinement, not a discovery**, and we counter-searched it before claiming
 otherwise: "distinct inputs should produce distinct outputs" is an ordinary metamorphic relation
-[22], the inverse is already an eval-harness practice [23], and the genus — silent failures in
+[22], stress-testing a judge's consistency under input variation is established practice [23], and
+the genus — silent failures in
 production LLM agent runtimes, defined as *"a failure whose error signal never reaches a human in
 actionable form"* — is described with a five-class taxonomy our defects fall into [20]. What we add
 is the setting: an evaluation pipeline for security research, where the output is not a degraded

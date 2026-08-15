@@ -234,14 +234,16 @@ design-assumption mismatches, error swallowing and dilution, chained hallucinati
 omission — covers our three defects without strain: an unset optional argument sent as `null` and a
 `load_program` that does not change what the server is looking at are **design-assumption
 mismatches**; a refused load answering HTTP 200 is **error swallowing**. Adjacent work reaches the
-same place from the interface side, finding that automatically generated MCP servers are often
-unfaithful to their source APIs and that minor response changes produce *"silent downstream
-reasoning failures rather than explicit, testable errors"* [21].
+same place from the interface side: an empirical study of automatically wrapping REST APIs as MCP
+servers finds baseline generation succeeds for only **76% of sampled tools**, rising to 94.2% with
+automated repair [21] — an interface layer that is unfaithful to its source often enough to be a
+measured quantity rather than an anecdote.
 
 **The detector is not new either.** "Distinct inputs should produce distinct outputs" is an
 ordinary metamorphic relation, and metamorphic testing exists precisely for programs whose correct
-output is unknown [22]; the inverse — duplicating dataset items to check that identical inputs
-score consistently — is already an eval-harness practice [23].
+output is unknown [22] — the "notorious oracle problem" its own survey names. Stress-testing an
+LLM judge's consistency under input variation is likewise established: [23] perturbs formatting,
+paraphrase, verbosity and ground-truth labels and measures how the judgment moves.
 
 **And the newest of our mechanisms is a domain instance, not a discovery.** In the course of
 building a parameter-size series we produced a rank correlation of +0.866 between model size and
@@ -329,9 +331,9 @@ verification status differs — deliberately recorded rather than smoothed over:
 | [19] | Temporal generalisation: Lazaridou et al., *Mind the Gap* (NeurIPS'21); TemporalWiki `arXiv:2204.14211`; TARDIS `arXiv:2503.18693` | **Search results only.** Same requirement |
 
 | [20] | Wei Wu, *When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime*, `arXiv:2606.14589` | **Abstract page fetched and read.** Title, sole author, the 22-incident/8-week scope, the *"error signal never reaches a human in actionable form"* definition and the five-class taxonomy are all from the paper. The full text has **not** been read, and the abstract does not itself claim coverage of HTTP-status-versus-body or stale-state failures — our mapping of M1–M3 onto its classes is **our reading and must be checked against the body before submission** |
-| [21] | *From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents*, `arXiv:2507.16044`; MCP tool-description quality and runtime-server studies (`arXiv:2607.11086`, `arXiv:2607.11098`) | **Search results only.** The "silent downstream reasoning failures rather than explicit, testable errors" phrasing comes from a search summary and must be located in the source |
-| [22] | Metamorphic testing; *Metamorphic Relation Generation: State of the Art and Research Directions*, ACM TOSEM `10.1145/3708521` | **Search results only.** The framework is textbook and the demotion it forces is safe, but the specific survey must be read before it is cited |
-| [23] | *Judge Reliability Harness: Stress Testing the Reliability of LLM Judges*, `arXiv:2603.05399` | **Search results only.** Cited for the duplicate-item consistency check; verify that this is what it does |
+| [21] | *From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents*, `arXiv:2507.16044` | **Abstract fetched and read, 2026-08-15 — and it corrected us.** The sentence we had quoted, *"silent downstream reasoning failures rather than explicit, testable errors"*, **is not in the paper**; it came from a search summary, exactly as the previous row warned. Removed. What the abstract does state is quoted now instead: 76% of sampled tools wrap successfully, 94.2% after automated repair. The two companion arXiv ids previously listed here were never fetched and are dropped rather than carried |
+| [22] | Li, Liu, Poon, Towey, Sun, Zheng, Zhou & Chen, *Metamorphic Relation Generation: State of the Art and Research Directions*, ACM TOSEM `10.1145/3708521` (preprint `arXiv:2406.05397`) | **Verified 2026-08-15.** Title, authors, venue and DOI confirmed; the abstract states metamorphic testing addresses *"the notorious oracle problem"*, which is what we cite it for. The ACM page is paywalled to the fetcher, so the preprint is given alongside for a reader |
+| [23] | Dev, Sloan, Kavner, Kong & Sandler, *Judge Reliability Harness: Stress Testing the Reliability of LLM Judges*, `arXiv:2603.05399` | **Abstract fetched and read, 2026-08-15 — and it does not say what we cited it for.** We claimed it established "duplicating dataset items to verify identical inputs score consistently" as eval-harness practice. It does not: it perturbs formatting, paraphrase, verbosity and the ground-truth label, and measures how the judgment moves. That is adjacent, not the same, and the claim has been rewritten to what the source supports. **We have no verified source for the duplicate-item practice and therefore no longer assert one** — which weakens a demotion of our own detector, i.e. moves in the direction that flatters us, so it is flagged here rather than quietly enjoyed |
 
 **[24]–[25] were added on 2026-08-15 by the counter-search for M6 and M7. Both demoted a claim of
 ours before it was made, which is the point of running the search first:**

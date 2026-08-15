@@ -39,7 +39,14 @@ BUILD = HERE / "build"
 # The name that must never reach the paper, in any casing.
 FORBIDDEN = re.compile(r"maljan", re.IGNORECASE)
 
-TITLE_PLACEHOLDER = r"\textbf{[TITLE DEFERRED --- written once the paper is complete]}"
+# Set 2026-08-15, applying the choice recorded in E4-outline.md's "Working title"
+# section rather than making a new one: the contribution is the discipline, and
+# the negatives are evidence for it rather than the subject. Deferred until the
+# paper was complete, which was the standing instruction.
+TITLE = (
+    "What It Takes to Trust a Measurement:\\\\ "
+    "Instrument Failures in an LLM Malware-Analysis Pipeline"
+)
 
 # Ordered: (source markdown, LaTeX section command, section title)
 SECTIONS: list[tuple[str, str]] = [
@@ -381,9 +388,7 @@ def main() -> int:
 
     abstract_tex = pandoc(abstract_md, "abstract")
     doc = (
-        PREAMBLE.replace("TITLEPLACEHOLDER", TITLE_PLACEHOLDER).replace(
-            "ABSTRACTPLACEHOLDER", abstract_tex
-        )
+        PREAMBLE.replace("TITLEPLACEHOLDER", TITLE).replace("ABSTRACTPLACEHOLDER", abstract_tex)
         + "\n".join(body)
         + "\n\\end{document}\n"
     )
