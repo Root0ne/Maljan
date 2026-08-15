@@ -549,6 +549,215 @@
    "artifact": null,
    "provenance": "unretained-session",
    "note": "The superseded reading, kept because the paper's argument is that more than doubling the cohort moved it by three points. It cannot be recomputed: the 43-report archive was replaced in place by the recovered one."
+  },
+  "integrity_bundles": {
+   "value": "60",
+   "claim": "fresh judge-generated bundles the STIX integrity pass was measured over",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md:1307 (§3.10)",
+   "artifact": null,
+   "provenance": "unretained-session",
+   "note": "Not the Layer-0 arms' integrity counters, which total 51 across both conditions and measure a different population. The C7 study generated its own 60 bundles because the archived ones predate the spec_version fix."
+  },
+  "integrity_fired": {
+   "value": "3",
+   "claim": "bundles where the pass removed something, every removal an empty pattern",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md:1307 (§3.10)",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "reasoning_one_token_output": {
+   "value": "92",
+   "claim": "output tokens on the call whose answer was a single technique ID",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md:1860",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "reasoning_one_token_thinking": {
+   "value": "77",
+   "claim": "of those tokens spent in the reasoning stream",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md:1860",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "hash_corpus_samples": {
+   "value": "3",
+   "claim": "samples in the opcode-hash attribution corpus",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md, the opcode-hash entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "hash_corpus_labels": {
+   "value": "2",
+   "claim": "generic family labels those samples carry between them",
+   "observed": "2026-08-11",
+   "record_ref": "docs/academic-article/findings-log.md, the opcode-hash entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "m4_fix_before_seconds": {
+   "value": "1,677",
+   "claim": "the sample's wall-clock before the salvage-budget fix",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "m4_fix_after_seconds": {
+   "value": "323",
+   "claim": "the same sample after it",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "m4_fix_before_tids": {
+   "value": "0",
+   "claim": "technique IDs it returned before",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "m4_fix_after_tids": {
+   "value": "5",
+   "claim": "and after",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "decode_rate_fast": {
+   "value": "162",
+   "claim": "the fastest generation rate the server reported on this sample, tokens/s",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "decode_rate_slow": {
+   "value": "20",
+   "claim": "and the slowest, on the same hybrid recurrent architecture",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "sink_recovered_pair_delta": {
+   "value": "$-$4",
+   "claim": "the delta the re-run pair contributed, against the hint",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "degenerate_claims_min": {
+   "value": "49",
+   "claim": "claims emitted by the least degenerate of the three excluded arms",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "degenerate_claims_max": {
+   "value": "117",
+   "claim": "and by the most",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "degenerate_tids_min": {
+   "value": "2",
+   "claim": "technique IDs those claims spread across, at the low end",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "degenerate_tids_max": {
+   "value": "14",
+   "claim": "and at the high end",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "degenerate_ratio_min": {
+   "value": "8.4",
+   "claim": "the resulting claims-per-ID ratio, lowest",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "degenerate_ratio_max": {
+   "value": "34.3",
+   "claim": "and highest",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, the sink-hint entry",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "weights_arms_superseded": {
+   "value": "15",
+   "claim": "arms in the withdrawn weight-sensitivity study",
+   "observed": "2026-08-09",
+   "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "weights_unchanged_superseded": {
+   "value": "0",
+   "claim": "of those arms where the verdict changed",
+   "observed": "2026-08-09",
+   "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "sigma_fires": {
+   "value": "94",
+   "claim": "samples the Sigma layer fires on",
+   "observed": "2026-08-09",
+   "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "sigma_fires_of": {
+   "value": "97",
+   "claim": "of the archived cohort",
+   "observed": "2026-08-09",
+   "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "sigma_weight": {
+   "value": "0.55",
+   "claim": "the Sigma layer's trust weight, above every static layer that study varied",
+   "observed": "2026-08-09",
+   "record_ref": "src/maljan/analysis/ttp_cascade.py",
+   "artifact": null,
+   "provenance": "configuration-constant"
+  },
+  "weights_fixture_tids_min": {
+   "value": "12",
+   "claim": "techniques in the smallest fixture the re-run uses",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
+   "artifact": null,
+   "provenance": "unretained-session"
+  },
+  "weights_fixture_tids_max": {
+   "value": "51",
+   "claim": "and in the largest",
+   "observed": "2026-08-12",
+   "record_ref": "docs/academic-article/findings-log.md, §3 weight sensitivity",
+   "artifact": null,
+   "provenance": "unretained-session"
   }
  }
 }

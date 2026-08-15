@@ -198,9 +198,32 @@ def judge_facts() -> dict[str, Any]:
         out[f"judge_{cond}_dropped"] = str(tot["judge_patterns_unresolvable_dropped"])
         out[f"judge_{cond}_dropped_share"] = pct(d["unresolvable_share_of_judge_patterns"])
         out[f"judge_{cond}_nothing_nameable"] = str(d["calls_with_nothing_nameable"])
+        out[f"judge_{cond}_injected"] = str(tot["injected_because_judge_omitted"])
+
+        # The paper's table reports each of these per call as well as in total,
+        # and the per-call column was typed. Dividing by the calls that reached
+        # the judge — not by every call attempted — is what makes 50 read as
+        # 12.5, and getting that denominator wrong is the difference between
+        # "the model emitted twelve patterns a call" and "six".
+        calls = d["n_calls"]
+        if calls:
+            for name, value in (
+                ("emitted", tot["judge_patterns_emitted"]),
+                ("resolvable", tot["judge_patterns_resolvable"]),
+                ("dropped", tot["judge_patterns_unresolvable_dropped"]),
+                ("own_ids", d["judge_ids_outside_cascade_total"]),
+                ("injected", tot["injected_because_judge_omitted"]),
+            ):
+                out[f"judge_{cond}_{name}_per_call"] = f"{value / calls:.1f}"
 
     leak = load("fallback_bundle_content_capped.json")
     out["fallback_only_capped"] = str(leak["techniques_only_on_fallback_path"])
+    # Occurrences and distinct identifiers are different counts, and the paper
+    # uses both a line apart: 47 techniques reach the analyst, 45 of them
+    # distinct, and every one is a real ATT&CK ID rather than an invention.
+    out["fallback_only_capped_unique"] = str(
+        len({tid for c in leak["per_call"] for tid in c["only_in_fallback"]})
+    )
     out["fallback_only_reconciled"] = str(leak["techniques_only_on_reconciled_path"])
     out["fallback_calls"] = str(leak["n_calls"])
     control = load("fallback_bundle_content_uncapped.json")
@@ -211,6 +234,17 @@ def judge_facts() -> dict[str, Any]:
     # beside the 0-of-N on the working path, so it is derived the same way.
     total_capped = sum(c["fallback_n"] for c in leak["per_call"])
     out["fallback_bundle_total"] = str(total_capped)
+
+    # How much degenerate decode the cap produced. The paper contrasts this with
+    # the uncapped condition, where the response is the literal string [TIMEOUT]
+    # and carries no identifiers at all — so the range is the size of the thing
+    # the fallback builder then scraped for ATT&CK IDs.
+    capped_calls = load("judge_contribution_capped.json")["per_call_fallback"]
+    chars = [c["response_chars"] for c in capped_calls if c.get("response_chars")]
+    if not chars:
+        raise FactError("judge_contribution_capped.json records no response lengths")
+    out["fallback_decode_chars_min"] = f"{min(chars):,}"
+    out["fallback_decode_chars_max"] = f"{max(chars):,}"
     return out
 
 
@@ -232,6 +266,18 @@ def cascade_facts() -> dict[str, Any]:
         )
         out[f"cascade_{cond}_arms"] = str(len(varied))
         out[f"cascade_{cond}_changed"] = str(changed)
+        # Per fixture as well as per arm. The paper argues the two conditions
+        # from set arithmetic — a duplicated source cannot change the cascade's
+        # set, a sole owner must — and states that as a count of fixtures, which
+        # is a different denominator from the arm count beside it.
+        fixtures = {r["sample_id"] for r in varied}
+        moved = {
+            r["sample_id"]
+            for r in varied
+            if frozenset(r["technique_ids"] or []) != base[(r["sample_id"], r["repeat"])]
+        }
+        out[f"cascade_{cond}_fixtures"] = str(len(fixtures))
+        out[f"cascade_{cond}_fixtures_changed"] = str(len(moved))
     return out
 
 
@@ -335,6 +381,7 @@ def confidence_facts() -> dict[str, Any]:
         "confidence_auc": f"{auc:.3f}",
         "confidence_n": str(len(rows)),
         "confidence_modal_count": str(conf.count(top)),
+        "confidence_modal_share": pct(conf.count(top) / len(rows), 0),
         "confidence_distinct": str(len(set(conf))),
     }
 
@@ -353,6 +400,11 @@ def firing_rate_facts() -> dict[str, Any]:
     rows = list(probe.values()) if isinstance(probe, dict) else probe
     hash_fired = sum(1 for r in rows if r.get("fires"))
     functions = sum(int(r.get("n_functions_kept") or 0) for r in rows)
+    # Why it never fires, from the same rows: half the corpus has at most one
+    # function that clears the instruction floor, which is a property of the
+    # binaries and not of the index. Populating the corpus would not move it.
+    hash_matches = sum(int(r.get("n_matches") or 0) for r in rows)
+    hash_starved = sum(1 for r in rows if int(r.get("n_functions_kept") or 0) <= 1)
 
     return {
         "cap_rate": pct(fired / total, 2),
@@ -374,6 +426,8 @@ def firing_rate_facts() -> dict[str, Any]:
         "hint_total": str(len(ok)),
         "hash_fired": str(hash_fired),
         "hash_total": str(len(rows)),
+        "hash_matches": str(hash_matches),
+        "hash_starved": str(hash_starved),
         "hash_functions": f"{functions:,}",
     }
 
@@ -381,20 +435,52 @@ def firing_rate_facts() -> dict[str, Any]:
 def retrieval_facts() -> dict[str, Any]:
     """The family-feature A/B, and the sink-hint ablation it motivated."""
     fa = load("family_rag_ab.json")["delta_on_minus_off"]
-    sa = load("sink_hint_ablation_scored.json")["summary"]
-    tids = sa["technique IDs"]
-    lo, hi = tids["ci95"]
+    blob = load("sink_hint_ablation_scored.json")
+    sa = blob["summary"]
     d = sa["direction"]
-    return {
+    out = {
         "family_delta_f1": signed(fa["f1"], 4),
         "family_delta_precision": signed(fa["precision"], 4),
         "sink_pairs": str(sa["n_pairs"]),
-        "sink_delta_tids": signed(tids["mean"], 2),
-        "sink_ci_tids": f"[{lo:+.2f}, {hi:+.2f}]",
         "sink_better": str(d["hint_better"]),
         "sink_worse": str(d["hint_worse"]),
         "sink_tied": str(d["tied"]),
     }
+    # All three outcomes, not only the one the paper leads with. The table
+    # reports them side by side and only the first row was derived, which is how
+    # a table comes to mix a current number with two that stopped moving.
+    for outcome, key in (("technique IDs", "tids"), ("claims", "claims"), ("seconds", "seconds")):
+        row = sa[outcome]
+        lo, hi = row["ci95"]
+        out[f"sink_delta_{key}"] = signed(row["mean"], 2)
+        out[f"sink_ci_{key}"] = f"[{lo:+.2f}, {hi:+.2f}]"
+
+    # The per-pair deltas the paper lists to show the spread. Read from the rows
+    # rather than transcribed, because "large in both directions and cancelling"
+    # is an argument about exactly these numbers.
+    pairs = blob.get("per_pair") or []
+    if len(pairs) != sa["n_pairs"]:
+        raise FactError(f"{len(pairs)} per-pair rows against a summary claiming {sa['n_pairs']}")
+    deltas = sorted((p["on"]["tids"] - p["off"]["tids"] for p in pairs), reverse=True)
+    # Plain signs; tex_value turns them into maths on the way out, the same as
+    # it does for every other signed fact. Writing $-$ here instead would work
+    # and would be the one place that knows about TeX.
+    out["sink_pair_deltas"] = ", ".join("0" if v == 0 else f"{v:+g}" for v in deltas)
+
+    # What the study lost, by reason. The paper's argument is that the loss rate
+    # bounds what any ablation here can detect, so the rate has to be the one
+    # the exclusions actually produce rather than a round number beside them.
+    excluded = blob.get("excluded") or {}
+    lost = sum(len(v) for v in excluded.values())
+    attempted = lost + sa["n_pairs"]
+    if not attempted:
+        raise FactError("the sink-hint ablation records neither pairs nor exclusions")
+    for reason, ids in excluded.items():
+        out[f"sink_excluded_{reason}"] = str(len(ids))
+    out["sink_excluded_total"] = str(lost)
+    out["sink_attempted"] = str(attempted)
+    out["sink_pair_loss_rate"] = pct(lost / attempted, 0)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +681,38 @@ def case_corpus_facts() -> dict[str, Any]:
     blob = json.loads(path.read_text())
     cases = blob if isinstance(blob, list) else blob.get("cases", blob)
     return {"case_corpus_n": f"{len(cases):,}"}
+
+
+def retrieval_scores_facts() -> dict[str, Any]:
+    """The two retrieval indices, each scored twice.
+
+    Every one of these is a pair, and the pairing is the argument: the case
+    index beats a frequency prior on the corpus's own labels and loses to it on
+    MITRE ground truth, and the family index beats chance on a held-out split
+    and moves nothing end to end. A number from one half of a pair typed beside
+    a number derived from the other is how a paper comes to compare two things
+    that were never measured the same way.
+    """
+    case = load("attck_case_rag_retrieval.json")
+    native, runtime = case["native"], case["runtime"]
+    fam = load("family_rag_retrieval.json")
+    ab = load("family_rag_ab.json")
+    chance = fam["random_baseline_recall_at_5"]
+    if not chance:
+        raise FactError("family_rag_retrieval.json records no random baseline")
+    return {
+        # Self-consistency: scored against the corpus's own prior attributions.
+        "case_prior_self_f1": f"{native['rag']['novel']['f1']:.3f}",
+        "case_prior_self_frequency_f1": f"{native['frequency_prior']['f1']:.3f}",
+        # Production: scored against MITRE ground truth on held-out samples.
+        "case_prior_prod_f1": f"{runtime['rag_shipped_query']['f1']:.3f}",
+        "case_prior_prod_frequency_f1": f"{runtime['frequency_prior']['f1']:.3f}",
+        "case_prior_prod_samples": str(runtime["samples"]),
+        "case_prior_top_k": str(case["params"]["top_k"]),
+        "family_recall_at_5": f"{fam['recall_at_5']:.3f}",
+        "family_recall_chance_ratio": f"{fam['recall_at_5'] / chance:.1f}",
+        "family_ab_samples": str(ab["on"]["samples"]),
+    }
 
 
 def layer0_excluded_facts() -> dict[str, Any]:
@@ -830,6 +948,10 @@ def cluster_stat_facts() -> dict[str, Any]:
         out[f"{name}_q_exact"] = f"{c['q_exact']:.4f}"
         out[f"{name}_k"] = str(c["structure"]["k"])
         out[f"{name}_pairs"] = str(c.get("n_pairs") or c["interval"]["n_rows"])
+        # The worst case the interval still admits, as a magnitude. Several
+        # sentences read an interval aloud — "admits a penalty of over 0.2 F1" —
+        # and a bound restated by hand stops moving when the interval does.
+        out[f"{name}_worst"] = f"{max(abs(iv['lo']), abs(iv['hi'])):.4f}"
         if "better" in c:
             out[f"{name}_better"] = str(c["better"])
             out[f"{name}_worse"] = str(c["worse"])
@@ -997,6 +1119,7 @@ BUILDERS = (
     fallback_table_facts,
     corpus_shape_facts,
     case_corpus_facts,
+    retrieval_scores_facts,
     layer0_excluded_facts,
     model_size_facts,
     cascade_jaccard_facts,
