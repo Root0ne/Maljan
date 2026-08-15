@@ -255,15 +255,34 @@ def fig_confidence():
 # Figure 3 — every arm on one axis, against the baseline that gives it meaning
 # --------------------------------------------------------------------------
 def fig_arms():
+    """Two panels that never share an F1 axis, because they are two populations.
+
+    The single-axis version of this figure put the five-fixture arms and the
+    97-sample no-LLM baseline on one scale. They are not comparable: the fixture
+    corpus is synthesised evidence generated from its own technique lists, scored
+    against per-sample truth; the CAPE corpus is real binaries scored against
+    family-level MITRE ``uses`` sets. Different inputs, different truth
+    granularity, different ceilings. Read together, the 0.15 baseline against the
+    0.41 arms looked like a large pipeline win, and the like-for-like comparison
+    on one population is +0.003.
+
+    So: the left panel is the fixture corpus and carries no baseline, because none
+    can exist for it — a deterministic regular expression over the artifact
+    dictionary that generated its evidence scores 1.000 by construction. The right
+    panel is the one population where pipeline and baseline can be compared, and
+    carries all three arms.
+    """
     ca = load("consensus_ablation.json")
     arms: dict[str, list[float]] = {}
+    clusters: dict[str, list[str]] = {}
     for r in ca:
         arms.setdefault(r["arm"], []).append(float(r["f1"]))
+        clusters.setdefault(r["arm"], []).append(str(r["sample_id"]))
 
-    base = load("cape_baseline.json")["summary"]
-    fr = load("frontier_probe.json")["summary"]
+    cluster = load("cluster_analysis.json")
+    fr = cluster["arms"]["frontier_probe"]
 
-    entries = []
+    fixture_entries = []
     for key, label in (
         ("single", "single judge, all evidence"),
         ("negotiated", "negotiated multi-agent consensus"),
@@ -272,44 +291,62 @@ def fig_arms():
         v = arms.get(key)
         if not v:
             continue
-        lo, hi = bootstrap_ci(v)
-        entries.append((label, sum(v) / len(v), lo, hi, len(v), ACCENT))
-    entries.append(
+        lo, hi = bootstrap_ci(v, clusters[key])
+        fixture_entries.append((label, sum(v) / len(v), lo, hi, len(v), ACCENT))
+    fixture_entries.append(
         (
-            "120B reasoning model, same fixtures",
-            fr["mean_f1"],
-            fr["f1_ci95"][0],
-            fr["f1_ci95"][1],
-            fr["n"],
+            "120B reasoning model",
+            fr["interval"]["point"],
+            fr["interval"]["lo"],
+            fr["interval"]["hi"],
+            fr["interval"]["n_rows"],
             MUTE,
         )
     )
-    entries.append(
-        (
-            "no-LLM baseline (sandbox signatures)",
-            base["f1"]["mean"],
-            base["f1"]["ci95"][0],
-            base["f1"]["ci95"][1],
-            base["n"],
-            WARN,
-        )
+
+    h2h = cluster["head_to_head"]
+    real_entries = [
+        ("pipeline, with sandbox report", h2h["dynamic_f1"], ACCENT),
+        ("pipeline, static evidence only", h2h["static_only_f1"], ACCENT),
+        ("no-LLM baseline (sandbox signatures)", h2h["cape_f1"], WARN),
+    ]
+
+    fig, (left, right) = plt.subplots(
+        1, 2, figsize=(7.2, 2.5), gridspec_kw={"width_ratios": [1.05, 1.0]}
     )
 
-    fig, ax = plt.subplots(figsize=(7.2, 2.7))
-    ys = list(range(len(entries)))[::-1]
-    for y, (_label, mean, lo, hi, n, colour) in zip(ys, entries, strict=False):
-        ax.plot([lo, hi], [y, y], color=colour, lw=1.5, solid_capstyle="butt")
-        ax.plot([lo, lo], [y - 0.13, y + 0.13], color=colour, lw=1.1)
-        ax.plot([hi, hi], [y - 0.13, y + 0.13], color=colour, lw=1.1)
-        ax.plot([mean], [y], "o", color=colour, ms=4.6, zorder=4)
-        ax.text(hi + 0.012, y, f"{mean:.3f}  (n={n})", va="center", fontsize=7.5, color=INK)
+    def draw(ax, rows, xlim, title):
+        ys = list(range(len(rows)))[::-1]
+        for y, (_label, mean, lo, hi, n, colour) in zip(ys, rows, strict=False):
+            ax.plot([lo, hi], [y, y], color=colour, lw=1.5, solid_capstyle="butt")
+            for edge in (lo, hi):
+                ax.plot([edge, edge], [y - 0.13, y + 0.13], color=colour, lw=1.1)
+            ax.plot([mean], [y], "o", color=colour, ms=4.6, zorder=4)
+            ax.text(hi + 0.012, y, f"{mean:.3f} (n={n})", va="center", fontsize=7, color=INK)
+        ax.set_yticks(ys)
+        ax.set_yticklabels([r[0] for r in rows], fontsize=7.5)
+        ax.set_xlim(*xlim)
+        ax.set_xlabel("F1 (mean, 95% cluster interval)", fontsize=8)
+        ax.set_title(title, fontsize=8.5, loc="left", color=INK)
+        ax.grid(axis="x", color=LIGHT, lw=0.5)
+        ax.set_axisbelow(True)
 
-    ax.set_yticks(ys)
-    ax.set_yticklabels([e[0] for e in entries], fontsize=8)
-    ax.set_xlabel("F1 (mean, 95% bootstrap interval)")
-    ax.set_xlim(0.10, 0.78)
-    ax.grid(axis="x", color=LIGHT, lw=0.5)
-    ax.set_axisbelow(True)
+    draw(
+        left,
+        fixture_entries,
+        (0.20, 0.72),
+        "5 synthesised fixtures — no baseline is definable",
+    )
+    draw(
+        right,
+        [
+            (label, blob["mean"], blob["interval"]["lo"], blob["interval"]["hi"], h2h["n"], colour)
+            for label, blob, colour in real_entries
+        ],
+        (0.02, 0.26),
+        f"{h2h['n']} real samples, {h2h['k']} families — one population",
+    )
+    fig.tight_layout()
     save(fig, "fig3-arms-against-baseline")
 
 

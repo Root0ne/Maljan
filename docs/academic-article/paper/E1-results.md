@@ -79,15 +79,25 @@ We report the baseline first because without it a pipeline F1 is uninterpretable
 sets a bar the pipeline must clear to have contributed anything. Earlier drafts of this work
 reported F1 values against nothing at all.
 
-![Every arm on one F1 axis, against the baseline that gives the axis meaning.](figures/fig3-arms-against-baseline.pdf)
+![On the one population where pipeline and baseline are comparable, they overlap.](figures/fig3-arms-against-baseline.pdf)
 
-**Figure 1: Every arm on one axis, with the baseline that makes the axis mean something.** Points are
-means over per-sample F1; bars are 95% bootstrap intervals recomputed from the retained per-sample
-records with the seed fixed. The three equal-budget arms are the consensus study (§1); the noise
-control separates from both treatments, which is what licenses reading the treatments' overlap as a
-null rather than as an insensitive harness. The 120B arm (§2) runs the same fixtures and repeats at
-the same output budget, so it too is n=25; it lands on the local single-judge arm, and the paired
-difference between them is +0.003 with an interval eight times wider than the effect.
+**Figure 1: On the one population where pipeline and baseline are comparable, they overlap.** Points
+are means over per-sample F1; bars are 95% intervals resampling the cluster the observations are
+independent at, recomputed from the retained per-sample records with the seed fixed.
+
+**The two panels do not share an axis, and that is the point.** An earlier version of this figure put
+all five arms on one scale, where a no-LLM baseline near {{baseline_f1}} beneath treatment arms near
+{{consensus_single_f1}} read as a large pipeline win. It is not one: the left panel's arms run on
+{{fixture_clusters}} synthesised inputs whose evidence is generated from their own technique lists and
+are scored against per-sample truth, while the baseline runs on real binaries scored against
+family-level truth. Different inputs, different truth granularity, different attainable ceilings.
+No baseline is definable for the left panel at all — a deterministic regular expression over the
+dictionary that generated its evidence scores 1.000 there by construction.
+
+The right panel is the comparison that can be made: the {{h2h_n}} samples over {{h2h_families}}
+families that completed both arms of §5, with CAPE scored on the same binaries against the same
+ground truth by the same code. The three intervals overlap, and the paired pipeline-minus-baseline
+difference is {{h2h_delta}} {{h2h_ci}} on a design able to resolve {{h2h_mde}}.
 
 ## 1. Multi-agent consensus does not pay for itself at equal budget
 
