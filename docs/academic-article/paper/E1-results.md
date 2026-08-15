@@ -397,7 +397,7 @@ never for data already collected.
 third was the 630-second timeout, which is an outcome — deleting an outcome one dislikes is selection
 rather than repair. The recovered pair contributed a −4, against the hint.
 
-Running it, however, surfaced a production defect that the 1,995-test suite did not: on any binary
+Running it, however, surfaced a production defect that the test suite (2,666 passing) did not: on any binary
 rich enough to exhaust the 40-step ReAct budget, the analyst returned **zero techniques**, because
 the salvage path received a fresh copy of a budget it was already inside. Fixed and verified on the
 same sample: **1,677 s → 323 s, 0 → 5 technique IDs**. The fix is partial — one sample still exceeds

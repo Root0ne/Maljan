@@ -33,7 +33,7 @@ answer with no error anywhere.**
 | **M2** | `load_program` reported success *with the right program name* but did not change the server's current program | every sample after the first analysed the first binary |
 | **M3** | a refused load answers **HTTP 200** with an error body | hints and function hashes built from a different binary |
 
-None was caught by a test suite of **1,995 passing tests** — not by accident: M2 and M3 require a
+None was caught by a test suite of **2,666 passing tests** — not by accident: M2 and M3 require a
 *second* case within one server lifetime, and a unit test writes one. A fourth defect, found later
 in the same week, made the analyst return **zero techniques on any binary rich enough to exhaust its
 step budget**, because two protective bounds composed: exceeding the step cap triggers a synthesis
@@ -152,7 +152,7 @@ conditions for the two to diverge.
 **The eleventh check — count the distinct outputs.** Before trusting a batch measurement, ask how
 many distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should
 vary — length, digest, element count — the instrument is repeating itself, and repetition is what a
-stale-state bug looks like from outside. All three defects above were caught this way: a 2,575-char
+stale-state bug looks like from outside. All three boundary defects above were caught this way: a 2,575-char
 hint repeated across unrelated samples; call graphs identical to the character for binaries of
 241 KB and 139 KB; 66 consecutive samples at exactly 75,426 characters. It costs one line of code and
 needs no ground truth. We now report it alongside results (50 distinct call-graph sizes across 79

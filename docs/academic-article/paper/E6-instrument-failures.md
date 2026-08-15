@@ -257,7 +257,7 @@ corroboration cascade entirely.
 
 ## 6.2 Why the test suite did not help
 
-**1,995 tests passed throughout.** This is not a gap in test quality but in test *shape*:
+**2,666 tests passed throughout.** This is not a gap in test quality but in test *shape*:
 
 * M2 and M3 require a **second** case within one server lifetime. A unit test loads one program,
   asserts, and tears down. The state that goes wrong is created by the second call and cannot exist

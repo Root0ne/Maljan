@@ -64,8 +64,10 @@ effect toward zero and manufactures a null.
 ## 4.4 Output cardinality, reported beside every batch
 
 **How many distinct outputs did the N inputs produce?** If far fewer than N differ on a dimension
-that should vary, the instrument is repeating itself. All four defects in §6 were found this way,
-and none by a 1,995-test suite.
+that should vary, the instrument is repeating itself. The four *boundary* defects in §6 were found
+this way and none by a 2,666-test suite. The three that are ours rather than a server's were not:
+their outputs do vary, and what found them was a number too clean to believe, an arms table read
+under a correlation, and a study that recorded which failure branch each call took.
 
 It is reported as a result column, not run as a test, because the signal exists only in the batch:
 each individual response was well-formed and plausible. We report 50 distinct call-graph sizes
@@ -117,7 +119,7 @@ The firing-rate rule adds a measurement before every ablation. Per-sample retent
 (~660 MB of sandbox reports for one cohort). Fresh state per sample adds ~20 seconds of restart to
 every sample. Output cardinality adds one line.
 
-Against that: one withdrawn study, four defects that produced plausible wrong data, and three
+Against that: one withdrawn study, seven defects that produced plausible wrong data, and three
 retrieval components that would have been reported as working had they only been tested in
 isolation. On this project the practices paid for themselves several times over, which is the only
 argument for them we can make from a single system.

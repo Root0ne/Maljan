@@ -581,10 +581,28 @@ than quietly inheriting.
       here). P3's residual — the LLM's training data is unknown to us and memorisation was never
       probed — is acknowledged there as the pitfall itself recommends. Left open for the final
       read-through.
-- [ ] **E3 — Related Work, final** — `related-work.md` exists as a draft; fold in the new results
+- [x] **E3 — Related Work, final** `[done]` **2026-08-15** — the M6/M7 counter-search folded in as
+      [24] and [25] with per-citation verification status, `arXiv:2604.00025` recorded as owning
+      M6's phenomenon, and one claim added about where the published taxonomy *ends*: its five
+      classes each describe a call to something else, and three of our seven mechanisms crossed no
+      boundary at all. Offered as a proposal — attribution rather than boundary — not a taxonomy.
+      *(Original scope text: `related-work.md` exists as a draft; fold in the new results.)*
       and whatever A4's counter-searches turn up
-- [ ] **E4 — LaTeX skeleton, then the paper** — after D3 locks the framing
-- [ ] **E5 — Reproducibility appendix** — scripts, data manifests, seeds, the model digest and
+- [~] **E4 — the paper** — skeleton and build pipeline done (`build_paper.py`, markdown → LaTeX →
+      39 pages, anonymity check in the build); **abstract and introduction rewritten 2026-08-15**,
+      which they needed: they described four boundary defects when there are seven mechanisms and
+      three are not at a boundary, credited the cardinality detector with all of them, quoted a
+      test count 671 short, and omitted the strongest result of the week. Cross-section number
+      sweep run afterwards — no stale count survives. **Remaining: venue formatting and a
+      read-through of the assembled PDF rather than of the sections.**
+- [x] **E5 — Reproducibility appendix** `[done]` **2026-08-15** — the comparison endpoints now lead
+      with the configuration axis rather than the model names, because `enable_thinking` is honoured
+      on one provider and accepted-and-ignored on another and the flag outweighs every model in the
+      table. Adds the two things a reader reproducing on `ik_llama.cpp` would otherwise lose a day
+      to: the output cap must travel in `extra_body`, and the server truncates silently at
+      `finish_reason: "stop"`. Six harnesses and five artifacts added to the manifests; every file
+      named was verified present.
+      *(Original scope text: scripts, data manifests, seeds, the model digest and)*
       engine commit from A2, harness commands. The full answer to P9.
 
 ---
