@@ -737,10 +737,31 @@ def load_cape_corpus(limit: int = 0) -> list[tuple[str, list[str], dict[str, str
         build = cape_channels.build_channels(reports[sha], ubiquitous=ubiquitous)
         if len(build.populated) < len(CHANNELS):
             continue
-        out.append((sha, sorted(str(t).upper() for t in truth), build.channels))
-        if limit and len(out) >= limit:
+        out.append((slug, sha, sorted(str(t).upper() for t in truth), build.channels))
+
+    if not limit or len(out) <= limit:
+        return [(sha, truth, ch) for _slug, sha, truth, ch in out]
+
+    # Stratify rather than truncate. The cluster bootstrap resamples families, so
+    # the family count is what buys resolution — taking the first N by hash would
+    # spend the budget on whichever families happen to sort early and could halve
+    # k for no gain. Round-robin over families, in a fixed order, so a smaller run
+    # is a prefix-stable subset of a larger one rather than a different study.
+    by_family: dict[str, list[tuple[str, str, list[str], dict[str, str]]]] = {}
+    for row in out:
+        by_family.setdefault(row[0], []).append(row)
+    picked: list[tuple[str, str, list[str], dict[str, str]]] = []
+    depth = 0
+    while len(picked) < limit:
+        added = False
+        for slug in sorted(by_family):
+            if depth < len(by_family[slug]) and len(picked) < limit:
+                picked.append(by_family[slug][depth])
+                added = True
+        if not added:
             break
-    return out
+        depth += 1
+    return [(sha, truth, ch) for _slug, sha, truth, ch in picked]
 
 
 def main_async(

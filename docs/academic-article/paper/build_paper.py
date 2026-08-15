@@ -56,9 +56,19 @@ SECTIONS: list[tuple[str, str]] = [
     ("E7-methodology.md", "Measurement Methodology"),
     ("E1-results.md", "Results"),
     ("E6-instrument-failures.md", "Instrument Failures"),
+    ("E0-discussion.md", "Discussion"),
     ("E2-threats-to-validity.md", "Threats to Validity"),
     ("E8-conclusion.md", "Conclusion"),
+    # Many venues want these before the bibliography; both are unnumbered, which
+    # is why they are emitted with \section* rather than joining the count.
+    ("E9-declarations.md", "Declarations"),
+    ("EA-references.md", "References"),
 ]
+
+# Sections that carry no number: declarations and the bibliography are apparatus,
+# not argument, and numbering them makes the paper look like it has ten results
+# chapters.
+UNNUMBERED = {"Declarations", "References"}
 
 APPENDIX = ("E5-reproducibility.md", "Reproducibility")
 
@@ -358,7 +368,8 @@ def main() -> int:
         md, miss = substitute_facts(md, facts, filename)
         unresolved += miss
         violations += check_anonymity(filename, md)
-        body.append(f"\n\\section{{{title}}}\n")
+        star = "*" if title in UNNUMBERED else ""
+        body.append(f"\n\\section{star}{{{title}}}\n")
         body.append(demote_headings(pandoc(md, filename)))
         print(f"  converted {filename}")
 

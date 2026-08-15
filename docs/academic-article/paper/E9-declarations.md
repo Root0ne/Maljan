@@ -1,0 +1,94 @@
+# Declarations
+
+## Ethics and containment
+
+Every sample analysed in this work is live Windows PE malware. The 97-sample cohort and the 210
+dated samples of the withdrawn drift study were obtained from MalwareBazaar (abuse.ch) under its
+terms of use, which permit research redistribution of samples but not of the corpus as a package.
+
+**Containment.** Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image,
+reverted to a clean snapshot between analyses. The sandbox host is reachable from one network
+segment and from no public route; it holds no credentials for any other system, and no analysis
+machine shares a filesystem with the host that runs the pipeline. Binaries are held only in a
+directory excluded from the host's real-time scanner, are never committed to version control, and
+are not redistributed with this paper. Network traffic generated during detonation leaves the guest
+through that one segment and is captured; it is not proxied to any third-party service.
+
+We note a limitation of that arrangement rather than claiming it is sufficient: the guest reaches
+the public internet during detonation, because a sample that cannot resolve its command-and-control
+infrastructure produces different behaviour from one that can, and the network evidence channel
+would otherwise be empty for every sample. Live detonation with egress is the standard arrangement
+for behavioural sandboxing and it is the arrangement whose consequences we report, including that
+the domains every sample in the cohort contacted turn out to be the guest image describing itself
+rather than anything the samples did.
+
+**No human subjects.** No user study was conducted, no personal data was collected, and no human
+analyst scored any output. That last point is a limitation of the evaluation, stated as such in
+Threats to Validity, not a claim about ethics.
+
+## Data availability
+
+The evaluation harnesses, the derivation of every number in this paper, the per-sample records they
+read, and the scripts that build the figures and assemble the document are released with the paper.
+The archive contains:
+
+* every per-sample record retained by every study reported here, in the JSON the harness wrote;
+* the offline re-analysis that recomputes every interval, design effect, minimum detectable effect
+  and adjusted p-value from those records, with its random seed;
+* the ATT&CK ground-truth fixtures, derived from the public `mitre-attack/attack-stix-data`
+  repository under the ATT&CK Terms of Use;
+* the model digest and inference-engine commit needed to reproduce the local arm.
+
+**Withheld, and why.** Malware binaries are not released; they are obtainable from the sources named
+in Background by their SHA-256 digests, which are in the archive. Sandbox reports are not released
+in full because they embed strings and memory contents from the samples. The sandbox host's address
+is withheld; it appears nowhere in the archive and is referred to throughout as a private address.
+One dataset used for retrieval-corpus construction is redistributed by its authors under terms that
+do not permit our redistribution, and is referenced rather than included.
+
+**Not available.** The 210-sample temporal-drift study's per-sample outputs do not exist. They were
+written to a path that was valid on the machine the harness was first written on and silently
+relative on the machine it ran on; the study is withdrawn on that account and the withdrawal is
+reported in Results rather than quietly repaired. The manifest of the 210 samples survives and is
+included, so the cohort can be reconstructed even though the results cannot.
+
+## Reproducibility
+
+Two runs of the offline analysis over the released records produce byte-identical output, and this
+is asserted by a test in the released suite rather than claimed here. Every interval carries the
+seed, the iteration count and the number of clusters it was computed from, in the artifact itself,
+so an interval cannot be read without the information needed to reproduce it.
+
+The live arms are not bit-reproducible and we do not claim they are. Decoding is at temperature 0.1
+on the local arm and at each provider's default on the hosted ones, one of which accepts a
+reasoning-configuration parameter and does not act on it — a fact we established by measurement and
+report as a result. Anyone re-running the live arms should expect the numbers to move and should
+read the intervals accordingly.
+
+## Use of generative AI
+
+Large language models are the object of study in this work: the pipeline under evaluation is built
+from them, and every measurement reported here is a measurement of their behaviour in it.
+
+Separately from that, generative AI was used as an authoring and engineering aid — drafting and
+revising prose, writing evaluation harnesses and their tests, and performing literature searches
+whose results were then verified by fetching each source. The verification is not incidental to this
+disclosure: of the nine citations added by those searches and checked one by one, **three said
+something the source did not**. One was quoted for a sentence absent from the paper, one was cited
+for a practice it does not describe, and one blended two incompatible published accounts into a
+single attribution. All three are corrected in the text and the corrections are recorded, because a
+search summary that reads as a citation is the same class of failure this paper is about.
+
+An internal readability assessment of report narratives was performed with a language model as a
+development aid. Its results are deliberately excluded from this paper and no LLM was used to score
+any result reported here.
+
+The authors take responsibility for all content, including every number, every citation, and every
+claim about what the measurements support.
+
+## Competing interests
+
+The authors declare no competing financial or non-financial interests. No external funding
+supported this work. All measurements were taken on hardware owned by the authors, except for calls
+to three commercially hosted inference endpoints, which were paid for at their public list prices
+and whose providers had no involvement in, or advance knowledge of, this evaluation.
