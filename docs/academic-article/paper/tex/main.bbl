@@ -114,6 +114,11 @@ A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
   Findings of the Association for Computational Linguistics (ACL), 2025,
   arXiv:2505.11988.
 
+\bibitem{morbiato2026hierarchical}
+F.~Morbiato, M.~Keller, P.~Nair, L.~Romano, Hierarchical retrieval augmented
+  generation for adversarial technique annotation in cyber threat intelligence
+  text, {PREPRINT} --- not peer reviewed. arXiv:2604.14166 (2026).
+
 \bibitem{buchel2025sok}
 M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
   Automated {TTP} extraction from {CTI} reports --- are we there yet?, in: 34th
@@ -121,8 +126,8 @@ M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
 
 \bibitem{doosterlinck2024incontext}
 K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
-  In-context learning for extreme multi-label classification, pREPRINT --- not
-  peer reviewed. arXiv:2401.12178 (2024).
+  In-context learning for extreme multi-label classification, {PREPRINT} ---
+  not peer reviewed. arXiv:2401.12178 (2024).
 
 \bibitem{lange2024annoctr}
 L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
@@ -168,7 +173,7 @@ H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
 \bibitem{ttpdetect2026}
 Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
   X.~Zhang, Identifying adversary tactics and techniques in malware binaries
-  with an {LLM} agent, pREPRINT --- not peer reviewed. TTPDetect.
+  with an {LLM} agent, {PREPRINT} --- not peer reviewed. TTPDetect.
   arXiv:2602.06325. Kept because it is the nearest system to ours and the
   sentence citing it concedes ground rather than claims it; dropping it for
   want of a venue would let this paper imply it holds that ground itself. No
@@ -176,11 +181,11 @@ Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
 
 \bibitem{tran2026single}
 D.~Tran, D.~Kiela, Single-agent {LLMs} outperform multi-agent systems on
-  multi-hop reasoning under equal thinking token budgets, pREPRINT --- not peer
-  reviewed. arXiv:2604.02460. Kept because it says our null is not the first of
-  its kind, and because the crossover figure it reports for our own model class
-  has no reviewed equivalent we could verify. Bertalani{\v c} and Fortuna reach
-  the same conclusion in a reviewed venue (2026).
+  multi-hop reasoning under equal thinking token budgets, {PREPRINT} --- not
+  peer reviewed. arXiv:2604.02460. Kept because it says our null is not the
+  first of its kind, and because the crossover figure it reports for our own
+  model class has no reviewed equivalent we could verify. Bertalani{\v c} and
+  Fortuna reach the same conclusion in a reviewed venue (2026).
 
 \bibitem{bertalanic2026consensus}
 B.~Bertalani{\v c}, C.~Fortuna, The cost of consensus: Isolated self-correction
@@ -208,7 +213,7 @@ J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
 \bibitem{metz2015comparing}
 J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
   multi-label classifier performance measures to the ones obtained by a simple
-  multi-label baseline classifier, pREPRINT --- not peer reviewed.
+  multi-label baseline classifier, {PREPRINT} --- not peer reviewed.
   arXiv:1503.06952. Kept because it supports the requirement to compare against
   a trivial baseline, which this paper obeys and which weakens its own numbers;
   no reviewed equivalent was verified (2015).
@@ -250,7 +255,7 @@ S.~Dev, A.~Sloan, J.~Kavner, N.~Kong, M.~Sandler, Judge reliability harness:
 \bibitem{ryan2026attck}
 A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
   open-source {LLMs} for multi-label {ATT\&CK} technique classification on
-  {CTI} reports, pREPRINT --- not peer reviewed. arXiv:2606.18166. Full text
+  {CTI} reports, {PREPRINT} --- not peer reviewed. arXiv:2606.18166. Full text
   read 2026-08-16 to verify the correlation this paper quotes: ``the Spearman
   rank correlation confirms a statistically significant relationship between
   parameter size and $F_1$ scores in this CTI classification task ($\rho$=0.85,
@@ -284,13 +289,13 @@ M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
   {\path{doi:10.18653/v1/2024.findings-acl.108}}.
 
 \bibitem{llamacpp8634}
-\texttt{max\_tokens} not respected on the non-chat endpoint, pREPRINT --- not
+\texttt{max\_tokens} not respected on the non-chat endpoint, {PREPRINT} --- not
   peer reviewed. ggml-org/llama.cpp issue \#8634. Search result; the issue has
   not been read in full. Cited with the vllm issue to demote our own mechanism
   to a known integration wart, which is the conservative direction (2024).
 
 \bibitem{vllm11976}
-Request for a server-side output cap, pREPRINT --- not peer reviewed.
+Request for a server-side output cap, {PREPRINT} --- not peer reviewed.
   vllm-project/vllm issue \#11976 (2024).
 
 \end{thebibliography}

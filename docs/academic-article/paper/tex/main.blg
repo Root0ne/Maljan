@@ -22,45 +22,45 @@ Warning--empty pages in lazaridou2021mind
 Warning--empty pages in dev2026judge
 Warning--empty pages in snell2025testtime
 Warning--empty pages in hassid2024budget
-You've used 39 entries,
+You've used 40 entries,
             2952 wiz_defined-function locations,
-            884 strings with 19084 characters,
-and the built_in function-call counts, 13428 in all, are:
-= -- 1169
-> -- 582
+            888 strings with 19355 characters,
+and the built_in function-call counts, 13657 in all, are:
+= -- 1183
+> -- 595
 < -- 8
-+ -- 220
-- -- 181
-* -- 867
-:= -- 1745
-add.period$ -- 51
-call.type$ -- 39
-change.case$ -- 74
++ -- 225
+- -- 185
+* -- 879
+:= -- 1779
+add.period$ -- 52
+call.type$ -- 40
+change.case$ -- 68
 chr.to.int$ -- 0
-cite$ -- 58
-duplicate$ -- 495
-empty$ -- 1603
-format.name$ -- 218
-if$ -- 3562
+cite$ -- 59
+duplicate$ -- 503
+empty$ -- 1630
+format.name$ -- 223
+if$ -- 3619
 int.to.chr$ -- 0
-int.to.str$ -- 39
+int.to.str$ -- 40
 missing$ -- 32
-newline$ -- 137
-num.names$ -- 37
-pop$ -- 339
+newline$ -- 140
+num.names$ -- 38
+pop$ -- 349
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 0
-skip$ -- 979
+skip$ -- 1004
 stack$ -- 0
-substring$ -- 370
-swap$ -- 112
+substring$ -- 372
+swap$ -- 113
 text.length$ -- 8
 text.prefix$ -- 0
 top$ -- 0
 type$ -- 0
 warning$ -- 19
-while$ -- 64
-width$ -- 41
-write$ -- 378
+while$ -- 65
+width$ -- 42
+write$ -- 386
 (There were 19 warnings)

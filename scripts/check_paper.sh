@@ -183,9 +183,24 @@ fi
 # at 2609 passed, because by then the writer had nothing left to write. A
 # here-string is a temporary file rather than a pipe, so there is no writer to
 # signal and no race to lose.
+#
+# The leading character class allows whitespace, and that is load-bearing:
+# pdftotext emits a form feed (\f) at the start of the first line of every page,
+# so a heading that happens to fall at a page top reads as "\fDeclarations" and
+# a pattern anchored on `^[0-9. ]*` cannot match it. This check was written
+# without that and passed anyway, because on a 54-page draft all three headings
+# landed mid-page. Adding two pages moved Declarations and References to page
+# tops and both went red at once, with the sections present and correct.
+#
+# So this is the second time these three checks have failed for a reason that
+# had nothing to do with the sections: first SIGPIPE, now pagination. The lesson
+# is the same one the paper argues about instruments — a check that passes can
+# be passing by luck, and only a deliberate attempt to break it tells them
+# apart. POSIX [[:space:]] includes \f, which is why it is used here rather than
+# a literal space.
 pdf_text=$(pdftotext "$BUILD/main.pdf" - 2>/dev/null)
 for section in Discussion Declarations References; do
-    if grep -qE "^[0-9. ]*$section[[:space:]]*$" <<<"$pdf_text"; then
+    if grep -qE "^[[:space:]0-9.]*$section[[:space:]]*$" <<<"$pdf_text"; then
         pass "has a $section section"
     else
         fail "no $section section"
@@ -240,6 +255,58 @@ if grep -qir 'maljan' "$BUILD"/*.tex; then
     grep -oihrm3 'maljan' "$BUILD"/*.tex | sed 's/^/        /'
 else
     pass "anonymity clean across the whole document, title and preamble included"
+fi
+
+# --------------------------------------------------------------------------
+# 8. The unreviewed sources declare themselves in the document a reader gets
+# --------------------------------------------------------------------------
+# The tests check that every citation to an unreviewed source carries the
+# marker in the *sources*. They cannot see what BibTeX did with it. On
+# 2026-08-16 the answer was: elsarticle-num lowercases the first letter of a
+# note field, so all eight declarations rendered as "pREPRINT — not peer
+# reviewed" — the one word carrying the disclosure, visibly broken, in the
+# reference list of a paper whose subject is citation discipline. Nothing
+# caught it because nothing read the artefact.
+#
+# So this reads the artefact. Both halves of the disclosure must survive: the
+# in-body [preprint] marker at every use site, and one intact PREPRINT note per
+# declared entry.
+expected=$("$PY" - <<'DECL'
+import json
+import re
+from pathlib import Path
+
+paper = Path("docs/academic-article/paper")
+status = json.loads((paper / "preprint-status.json").read_text())
+unreviewed = set(status["entries"]) | set(status["not_papers"])
+# One marker per macro *invocation*, not per key: \preprintcite{a,b} cites two
+# unreviewed sources and prints one [preprint] covering both. Counting keys
+# here reported a missing marker for a paper that had them all.
+markers = 0
+for path in sorted((paper / "tex").glob("*.tex")):
+    text = path.read_text()
+    markers += len(re.findall(r"\\preprintcite\{[^}]*\}", text))
+    # Plus any typed straight into the prose — the citation audit quotes the
+    # marker when it explains what the marker means.
+    markers += len(re.findall(r"\[preprint\]", text))
+print(len(unreviewed), markers)
+DECL
+)
+read -r n_entries n_markers <<<"$expected"
+notes=$(grep -oE '\bPREPRINT\b' <<<"$pdf_text" | wc -l)
+mangled=$(grep -oE '\bpREPRINT\b' <<<"$pdf_text" | wc -l)
+markers=$(grep -oF '[preprint]' <<<"$pdf_text" | wc -l)
+
+if [[ "$mangled" -gt 0 ]]; then
+    fail "$mangled reference note(s) render as 'pREPRINT' — the bst case-folded the disclosure"
+    note "brace-protect it in refs.bib: note = {{PREPRINT} --- ...}"
+elif [[ "$notes" -ne "$n_entries" ]]; then
+    fail "$n_entries sources are declared unreviewed but $notes say so in the reference list"
+    note "every entry in preprint-status.json needs a PREPRINT note in refs.bib"
+elif [[ "$markers" -ne "$n_markers" ]]; then
+    fail "$n_markers [preprint] marker(s) are written in the sources but $markers reached the page"
+else
+    pass "all $n_entries unreviewed sources declared, at $markers marked use sites and in the reference list"
 fi
 
 echo

@@ -17,9 +17,11 @@ TTPDrill --- through neural extractors such as EXTRACTOR, AttacKG and LADDER, to
 retrieval-augmented generation. \textbf{TechniqueRAG} \cite{lekssays2025techniquerag} pairs off-the-shelf retrievers with an
 instruction-tuned re-ranker and fine-tunes only the generator, motivated by the field's data
 scarcity: ATT\&CK defines over 550 (sub-)techniques while roughly 10,000 annotated examples exist
-publicly. Its hierarchical successor injects the tactic$\rightarrow$technique taxonomy as an inductive bias,
-filtering at tactic level first to cut the candidate space by 77.5\% for a 3.8\% F1 gain and a
-62.4\% latency reduction. \textbf{TTPrint} takes an orthogonal route, decomposing reports into atomic
+publicly. A \emph{separate} group's hierarchical successor, \textbf{H-TechniqueRAG} \preprintcite{morbiato2026hierarchical}, injects the tactic$\rightarrow$technique taxonomy as an inductive bias, filtering at tactic level first to cut the candidate space by 77.5\%.
+It also reports an F1 gain and a latency reduction over TechniqueRAG. We do not restate those two
+figures: they are unreviewed and self-reported against a baseline that the SoK below finds
+``largely incomparable'' to its neighbours, so quoting them here would contradict the paragraph
+after this one. \textbf{TTPrint} takes an orthogonal route, decomposing reports into atomic
 behaviours and retaining only candidates supported by both localised evidence spans and the
 MITRE definition.
 
@@ -342,8 +344,9 @@ AttacKG, LADDER, PhishDebate, LongFuncEval, ReCopilot, LLM4Decompile, Nova --- a
 verified sources that discuss them and \textbf{must be resolved to their own records before
 submission}; see the citation audit for which were fetched directly and which were not.
 
-\textbf{The four below were added on 2026-08-09 by the adjacent-field counter-search, and their
-verification status differs --- deliberately recorded rather than smoothed over:}
+\textbf{The rows below were added by the adjacent-field counter-searches of 2026-08-09 and
+2026-08-15, and carry what the review passes since then did to them. Verification status differs
+per row --- deliberately recorded rather than smoothed over:}
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
@@ -376,12 +379,12 @@ Verified how
 \cite{ng2014conll,bryant2019bea} & The F0.5 convention in grammatical error correction: Ng et al., \emph{The CoNLL-2014 Shared Task on GEC}; Bryant et al., \emph{The BEA-2019 Shared Task on GEC} & \textbf{Re-anchored and verified 2026-08-15.} The claim is that GEC weights precision over recall because a false correction costs more than a missed one, and the shared tasks are its primary source: F0.5 is the main metric in both, weighting precision twice recall, chosen to penalise over-correction. The two candidate papers previously listed here were never fetched and are \textbf{dropped} --- the convention is documented by the tasks themselves and does not need them \\
 \cite{welleck2019unlikelihood,li2023repetition} & Welleck, Kulikov, Roller, Dinan, Cho \& Weston, \emph{Neural Text Generation with Unlikelihood Training}, \texttt{arXiv:1908.04319}; Li, Lan, Fu, Cai, Liu, Collier, Watanabe \& Su, \emph{Repetition In Repetition Out}, \texttt{arXiv:2310.10226} & \textbf{Both abstracts fetched 2026-08-15 --- and our summary of them was wrong.} We had written ``an established account rooted in self-reinforcement and training-data repetition''. Welleck's account is neither: it blames \emph{the likelihood objective itself}. The data-side account is the second paper's, which finds a strong correlation with repetition in the training data and argues self-reinforcement explanations reduce to it. Corrected in the body to two named accounts rather than one blended one. The third id previously listed (\texttt{arXiv:2505.10402}) was never fetched and is dropped \\
 \cite{lazaridou2021mind} & Lazaridou, Kuncoro, Gribovskaya, Agrawal, Liska, Terzi, Gimenez, de Masson d'Autume, Kocisky, Ruder, Yogatama, Cao, Young \& Blunsom, \emph{Mind the Gap: Assessing Temporal Generalization in Neural Language Models}, NeurIPS 2021, \texttt{arXiv:2102.01951} & \textbf{Abstract fetched and read 2026-08-15; supports the claim exactly.} Both halves are quoted from it: \emph{``model performance becomes increasingly worse with time''} and \emph{``while increasing model size alone --- a key driver behind recent progress --- does not solve this problem''}. The arXiv id is recorded now because it was missing and a first attempt to verify this row fetched the wrong paper. TemporalWiki and TARDIS were never fetched and are dropped \\
+\emph{withdrawn 2026-08-16} & Wei Wu, \emph{When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime}, \texttt{arXiv:2606.14589} & \textbf{Correctly cited, and removed anyway.} The abstract was fetched and supported what we took from it; what it never had was peer review. Replaced with \cite{gunawi2008eio,yuan2014simple,alquraan2018partition} for the meta-pattern and where the signal is lost, and \cite{xue2025agentbugs,liu2026inference} for the LLM-runtime instance. The replacement is stronger than what it replaces --- measured error loss at module boundaries, and a ruling that a log-only handler is an ignored error --- but it costs us the one thing the preprint had: a taxonomy of an LLM agent runtime specifically. \textbf{We no longer claim that combination is described} \\
+\emph{withdrawn 2026-08-16} & \emph{From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents}, \texttt{arXiv:2507.16044} & \textbf{Corrected twice, then removed.} On 2026-08-15 a sentence we had quoted from it turned out not to be in it; it came from a search summary. On 2026-08-16 a search summary asserted --- twice --- that the paper is published in ACM TOSEM 2026. \textbf{It is not.} Four checks (arXiv v4, DBLP, Crossref, Semantic Scholar) return no venue; the TOSEM paper the summariser was thinking of is a different MCP study. Writing that venue in would have put a fabricated citation in a paper about unverified attribution. Replaced with \cite{oyelayo2026mcp} and \cite{martinlopez2019deps}; the 76\%/94.2\% figures had no reviewed equivalent and are gone \\
+\cite{li2024metamorphic} & Li, Liu, Poon, Towey, Sun, Zheng, Zhou \& Chen, \emph{Metamorphic Relation Generation: State of the Art and Research Directions}, ACM TOSEM \texttt{10.1145/3708521} (preprint \texttt{arXiv:2406.05397}) & \textbf{Verified 2026-08-15.} Title, authors, venue and DOI confirmed; the abstract states metamorphic testing addresses \emph{``the notorious oracle problem''}, which is what we cite it for. The ACM page is paywalled to the fetcher, so the preprint is given alongside for a reader \\
+\cite{dev2026judge} & Dev, Sloan, Kavner, Kong \& Sandler, \emph{Judge Reliability Harness: Stress Testing the Reliability of LLM Judges}, \texttt{arXiv:2603.05399} & \textbf{Abstract fetched and read, 2026-08-15 --- and it does not say what we cited it for.} We claimed it established ``duplicating dataset items to verify identical inputs score consistently'' as eval-harness practice. It does not: it perturbs formatting, paraphrase, verbosity and the ground-truth label, and measures how the judgment moves. That is adjacent, not the same, and the claim has been rewritten to what the source supports. \textbf{We have no verified source for the duplicate-item practice and therefore no longer assert one} --- which weakens a demotion of our own detector, i.e.~moves in the direction that flatters us, so it is flagged here rather than quietly enjoyed \\
+\emph{reattributed 2026-08-16} & Morbiato, Keller, Nair \& Romano, \emph{Hierarchical Retrieval Augmented Generation for Adversarial Technique Annotation in Cyber Threat Intelligence Text} (H-TechniqueRAG), \texttt{arXiv:2604.14166} & \textbf{The 77.5\% was credited to the wrong paper.} Our registry attributed it to \cite{lekssays2025techniquerag}, whose abstract does not contain it, while the body named no source at all --- only ``its hierarchical successor''. It belongs to H-TechniqueRAG, a \emph{different} group's follow-up, whose abstract was fetched and states it. Three checks (arXiv, DBLP, Crossref) return no venue, so it is cited as a marked preprint. Its F1 and latency gains over TechniqueRAG are \textbf{not} restated: they are self-reported comparisons of the kind \cite{buchel2025sok} calls ``largely incomparable'' three sentences later, and reprinting them would have had this paper contradict its own next paragraph \\
 \end{longtable}
-
-\emph{withdrawn 2026-08-16} \textbar{} Wei Wu, \emph{When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime}, \texttt{arXiv:2606.14589} \textbar{} \textbf{Correctly cited, and removed anyway.} The abstract was fetched and supported what we took from it; what it never had was peer review. Replaced with \cite{gunawi2008eio,yuan2014simple,alquraan2018partition} for the meta-pattern and where the signal is lost, and \cite{xue2025agentbugs,liu2026inference} for the LLM-runtime instance. The replacement is stronger than what it replaces --- measured error loss at module boundaries, and a ruling that a log-only handler is an ignored error --- but it costs us the one thing the preprint had: a taxonomy of an LLM agent runtime specifically. \textbf{We no longer claim that combination is described} \textbar{}\\
-\emph{withdrawn 2026-08-16} \textbar{} \emph{From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents}, \texttt{arXiv:2507.16044} \textbar{} \textbf{Corrected twice, then removed.} On 2026-08-15 a sentence we had quoted from it turned out not to be in it; it came from a search summary. On 2026-08-16 a search summary asserted --- twice --- that the paper is published in ACM TOSEM 2026. \textbf{It is not.} Four checks (arXiv v4, DBLP, Crossref, Semantic Scholar) return no venue; the TOSEM paper the summariser was thinking of is a different MCP study. Writing that venue in would have put a fabricated citation in a paper about unverified attribution. Replaced with \cite{oyelayo2026mcp} and \cite{martinlopez2019deps}; the 76\%/94.2\% figures had no reviewed equivalent and are gone \textbar{}\\
-\cite{li2024metamorphic} \textbar{} Li, Liu, Poon, Towey, Sun, Zheng, Zhou \& Chen, \emph{Metamorphic Relation Generation: State of the Art and Research Directions}, ACM TOSEM \texttt{10.1145/3708521} (preprint \texttt{arXiv:2406.05397}) \textbar{} \textbf{Verified 2026-08-15.} Title, authors, venue and DOI confirmed; the abstract states metamorphic testing addresses \emph{``the notorious oracle problem''}, which is what we cite it for. The ACM page is paywalled to the fetcher, so the preprint is given alongside for a reader \textbar{}\\
-\cite{dev2026judge} \textbar{} Dev, Sloan, Kavner, Kong \& Sandler, \emph{Judge Reliability Harness: Stress Testing the Reliability of LLM Judges}, \texttt{arXiv:2603.05399} \textbar{} \textbf{Abstract fetched and read, 2026-08-15 --- and it does not say what we cited it for.} We claimed it established ``duplicating dataset items to verify identical inputs score consistently'' as eval-harness practice. It does not: it perturbs formatting, paraphrase, verbosity and the ground-truth label, and measures how the judgment moves. That is adjacent, not the same, and the claim has been rewritten to what the source supports. \textbf{We have no verified source for the duplicate-item practice and therefore no longer assert one} --- which weakens a demotion of our own detector, i.e.~moves in the direction that flatters us, so it is flagged here rather than quietly enjoyed \textbar{}
 
 \textbf{The two below were added on 2026-08-15 by the counter-search for M6 and M7. Both demoted a
 claim of ours before it was made, which is the point of running the search first:}
@@ -427,13 +430,23 @@ rather than kept as decoration.
 \textbf{A second pass on 2026-08-16 checked something the first did not ask: whether each source had
 been reviewed at all.} It found five entries we had recorded as preprints that are in fact published
 --- SIGIR, ICLR, NeurIPS, an ACM conference --- and four author lists wrong, three of them missing
-entirely. It also found a figure attributed to a paper on a different subject: the rank correlation
-between parameter size and ATT\&CK-classification F1 belongs to \preprintcite{ryan2026attck}, whose
-full text we read to confirm it, not to the multi-hop reasoning study the old numbering pointed at.
+entirely. It also found \textbf{two} figures attributed to papers that do not report them. The rank
+correlation between parameter size and ATT\&CK-classification F1 belongs to \preprintcite{ryan2026attck},
+whose full text we read to confirm it, not to the multi-hop reasoning study the old numbering
+pointed at. The 77.5\% candidate-space reduction belongs to \preprintcite{morbiato2026hierarchical},
+not to \cite{lekssays2025techniquerag}, which the registry had credited for it.
 Three unreviewed sources were replaced with peer-reviewed work and are recorded above as withdrawals.
-Seven remain unreviewed and are marked \textbf{[preprint]} at every use: each exists to concede
+Eight remain unreviewed and are marked \textbf{[preprint]} at every use: each exists to concede
 ground rather than claim it, and removing them for want of a venue would have made this paper appear
 more original than it is.
+
+The two misattributions have a shape in common, and it is worth naming because it is the one this
+paper's own machinery was blind to. Neither number was invented; both are real figures from real
+papers. What went wrong was the \emph{binding} --- a value recorded against a key that never
+reported it --- and a checker that asks only ``is this number registered?'' cannot see that. The
+registry is now checked in the opposite direction as well: a quoted value must appear in the text
+beside the citation it is declared to come from, so a binding that has drifted fails the build
+rather than reading as verified.
 
 Acting on \cite{ng2014conll,bryant2019bea}--\cite{dev2026judge} now is conservative because each one \emph{demotes} a claim of ours --- the safe
 direction. Citing them in a submitted paper on this basis would not be, and the standing rule from

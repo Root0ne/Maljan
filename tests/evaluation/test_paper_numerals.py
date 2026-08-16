@@ -160,6 +160,37 @@ def _strip(text: str) -> str:
     return text
 
 
+# Sentence splitting, kept deliberately dumb. A period ends a sentence when
+# whitespace and then something that starts one follow it -- a capital, a control
+# sequence, an opening quote or bracket. The abbreviations below are the ones this
+# paper actually contains that would otherwise split mid-sentence; "et al. Their
+# Finding 4" is the live example. Decimals need no guard: the character after the
+# point is a digit, not a space.
+_ABBREV = ("al.", "e.g.", "i.e.", "cf.", "vs.", "Fig.", "Eq.", "No.", "Sec.", "approx.")
+_SENTENCE_END = re.compile(r"(?<=[.!?])[ \t\n]+(?=[A-Z\\`\"'(\[])")
+
+
+def _sentences(text: str) -> list[str]:
+    """Paragraph-aware sentence split over LaTeX source.
+
+    Paragraphs first, because a blank line ends a sentence whatever punctuation
+    precedes it, and joining across one would bind a number to a citation in an
+    unrelated block.
+    """
+    out: list[str] = []
+    for para in re.split(r"\n\s*\n", text):
+        flat = " ".join(para.split())
+        start = 0
+        for m in _SENTENCE_END.finditer(flat):
+            head = flat[start : m.start()]
+            if any(head.endswith(a) for a in _ABBREV):
+                continue
+            out.append(head)
+            start = m.end()
+        out.append(flat[start:])
+    return [s for s in out if s.strip()]
+
+
 def _quoted_index() -> dict[str, set[str]]:
     """value -> the citation keys it may be quoted under.
 
@@ -280,6 +311,83 @@ def test_related_work_is_exempt_and_says_so() -> None:
     related = _PAPER / "related-work.tex"
     assert related.exists()
     assert related.name not in _SECTIONS
+
+
+def test_every_registered_quote_sits_beside_the_source_it_is_declared_to_come_from() -> None:
+    r"""The registry read backwards, which is the direction that catches a bad binding.
+
+    ``_offenders`` asks of a numeral: is this registered? That question passed
+    both of the misattributions this paper's citation audit found. Neither number
+    was invented --- rho=0.85 and the 77.5% candidate-space reduction are real
+    figures from real papers --- and both were listed in the registry. What was
+    wrong was the *binding*: the value was recorded against a key that never
+    reported it. A forward-only check cannot see that, because the entry it looks
+    up is present and well-formed.
+
+    So the registry is also checked from the other end. If a value is declared to
+    come from key K, some line of the paper must show that value next to a
+    citation of K. That fails on the two shapes the audit actually met:
+
+    * the number is in the text but its declared key is cited nowhere near it ---
+      the 77.5% case, where the body said only ``its hierarchical successor'' and
+      the nearest citation was to a different paper;
+    * the declared key is cited but no longer carries that number --- what a
+      later edit leaves behind when a figure is dropped and the record is not.
+
+    This runs over every source, ``related-work.tex`` included. That file is
+    exempt from the forward rule because its numbers are quoted rather than
+    derived; it is emphatically not exempt from the rule that a quotation names
+    the right source, and it is where both misattributions lived.
+
+    The unit is the **sentence**, not the line. The forward rule can demand the
+    same line because whoever writes a derived number puts it where it belongs;
+    a reverse rule cannot, because it reads prose that was hard-wrapped for the
+    editor. Five figures fail a same-line reading here purely because the
+    citation wrapped onto the line above, and rewrapping the source to satisfy a
+    checker would be the checker choosing how the paper is written. The sentence
+    is also the honest unit: it is what "the paper presents this number as coming
+    from that source" actually means. It still catches the 77.5% case, whose
+    sentence cited nobody at all.
+    """
+    quoted = _QUOTED
+    if not quoted.exists():
+        pytest.skip("quoted-numbers.json not present")
+    records = json.loads(quoted.read_text())["quoted"]
+
+    sentences: list[str] = []
+    for path in sorted(_PAPER.glob("*.tex")):
+        sentences.extend(_sentences(path.read_text(encoding="utf-8")))
+
+    unbound: list[str] = []
+    for rec in records:
+        value = str(rec["value"])
+        key = str(rec["cite"]) if rec.get("cite") else _UNRESOLVED_MARKER
+        # Bounded, so "85" does not match inside "85.5" or "185" and report a
+        # binding the paper never made.
+        pattern = re.compile(r"(?<![\d.,])" + re.escape(value) + r"(?![\d,]|\.\d)")
+        found = False
+        for sentence in sentences:
+            if not pattern.search(sentence):
+                continue
+            if key == _UNRESOLVED_MARKER:
+                if _UNRESOLVED_MARKER in sentence:
+                    found = True
+                    break
+                continue
+            cited: set[str] = set()
+            for group in re.findall(r"\\(?:cite|preprintcite)\{([^}]*)\}", sentence):
+                cited.update(k.strip() for k in group.split(",") if k.strip())
+            if key in cited:
+                found = True
+                break
+        if not found:
+            unbound.append(f"{value} declared from {key}")
+
+    assert not unbound, (
+        f"{len(unbound)} quoted figure(s) never appear beside the source they are declared to "
+        "come from — the registry and the text disagree about who reported the number: "
+        + "; ".join(unbound)
+    )
 
 
 def test_every_placeholder_the_paper_uses_resolves() -> None:

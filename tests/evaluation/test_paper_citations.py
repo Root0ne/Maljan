@@ -7,17 +7,21 @@ template, so a key that does not exist now renders as ``[?]`` instead of failing
 loudly — the same hole ``\\fact{}`` was built to keep out of the numbers.
 
 **Every preprint is declared.** Journals discount arXiv-only citations because
-they carry no review. Twelve of this paper's twenty-eight entries have no
-peer-reviewed venue, and five of those are load-bearing: the paper quotes a
-number from them. That is a real submission risk and it is easy to forget,
-because a preprint citation looks exactly like any other in the rendered PDF.
-So each one is declared with a resolution, and a new one added without a status
-fails here.
+they carry no review. Eight of this paper's forty entries have no peer-reviewed
+venue, and three of those are load-bearing: the paper quotes a number from them.
+That is a real submission risk and it is easy to forget, because a preprint
+citation looks exactly like any other in the rendered PDF. So each one is
+declared with a resolution, and a new one added without a status fails here.
 
 The registry may not name a venue that has not been verified. Guessing one is
-the failure this paper's own citation audit has now caught four times: three
-sources cited for something they do not say, and one figure attributed to a
-paper about a different subject entirely.
+the failure this paper's own citation audit has now caught five times: three
+sources cited for something they do not say, and two figures attributed to
+papers that never reported them.
+
+Those last two are the reason ``test_paper_numerals.py`` also reads the quoted-
+number registry backwards. Both figures were registered, both were real, and
+both were bound to the wrong key --- a state no forward "is this number
+declared?" check can distinguish from a correct one.
 """
 
 from __future__ import annotations
