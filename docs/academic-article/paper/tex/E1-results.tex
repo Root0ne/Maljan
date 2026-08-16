@@ -4,7 +4,7 @@
 \subsection{The baseline, first}\label{the-baseline-first}
 
 Every accuracy number in this work is read against one reference, and we state it before any of our
-own. \textbf{CAPE alone --- the sandbox the pipeline is built on, mapping its signature hits to ATT\&CK
+own. \textbf{CAPE alone, the sandbox the pipeline is built on, mapping its signature hits to ATT\&CK
 technique IDs deterministically, with no language model anywhere:}
 
 \begin{longtable}[]{@{}
@@ -13,7 +13,7 @@ technique IDs deterministically, with no language model anywhere:}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}@{}}
-\caption{The no-LLM baseline. CAPE's own signature-derived technique identifiers, scored against family-level MITRE ground truth. Intervals resample \textbf{families}, not samples: ground truth is resolved per family, so two binaries of one family are scored against a byte-identical label vector and are not two observations.}\label{tab:results-1}\\
+\caption{The no-LLM baseline.}\label{tab:results-1}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -47,20 +47,23 @@ recall & \fact{baseline-recall} & \fact{baseline-recall-cluster-ci} & \fact{base
 \textbf{F1} & \textbf{\fact{baseline-f1}} & \textbf{\fact{baseline-f1-cluster-ci}} & \fact{baseline-f1-icc} & \fact{baseline-f1-effective-n} \\
 \end{longtable}
 
+CAPE's own signature-derived technique identifiers, scored against family-level MITRE ground truth. Intervals resample \textbf{families}, not samples. Ground truth is resolved per family, so two binaries of one family are scored against a byte-identical label vector and are not two observations.
+
+
 n = \fact{baseline-n} samples over \fact{baseline-families} families, mean \fact{baseline-mean-cluster} samples
 per family; bootstrap seed recorded with the interval. CAPE asserted at least one technique on
-\textbf{every} sample, so this is a predictor rather than an artefact of an empty one. Ground truth
+every sample, so this is a predictor rather than an artefact of an empty one. Ground truth
 resolution uses the same alias map as the drift harness, so the two studies score identically.
 
 We report these intervals at the family level because our first version of this table did not, and
-the difference is not decorative: resampling samples rather than families gave an F1 interval
+the difference is not decorative. Resampling samples rather than families gave an F1 interval
 \fact{baseline-f1-widening} times narrower than the one above, on data whose intra-cluster correlation
 is \fact{baseline-f1-icc}. The row count is \fact{baseline-n}; the count that supports an inference is
 \fact{baseline-f1-effective-n}.
 
 \textbf{And here is what the pipeline adds to it.} On the \fact{h2h-n} samples that completed both arms of
-the paired study of §5 --- the only samples where pipeline and baseline have been run on the same
-inputs --- all three scored per sample against the same ground truth by the same code:
+the paired study of Section~5, the only samples where pipeline and baseline have been run on the same
+inputs, all three scored per sample against the same ground truth by the same code:
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
@@ -93,38 +96,37 @@ pipeline, with the sandbox report & \textbf{\fact{h2h-dynamic-f1}} & \fact{h2h-d
 \end{longtable}
 
 n = \fact{h2h-n} samples over \fact{h2h-families} families. Paired, because every sample went through both:
-\textbf{\fact{h2h-delta} F1}, 95\% cluster CI \fact{h2h-ci}, exact cluster sign-flip p = \fact{h2h-p-exact}, better on
+\fact{h2h-delta} F1, 95\% cluster CI \fact{h2h-ci}, exact cluster sign-flip p = \fact{h2h-p-exact}, better on
 \fact{h2h-better} of \fact{h2h-n}.
 
 Three analyst agents, a negotiation loop, a revision pass, an LLM judge and a weighted corroboration
 cascade land within \fact{h2h-delta} F1 of the signature engine they are built on top of. Two of the
-means agreeing to four decimal places is a coincidence, and was checked rather than reported: the
-samples differ individually in both directions. The system is not reproducing the sandbox's answers
---- it reaches different answers of the same quality.
+means agreeing to four decimal places is a coincidence, and was checked rather than reported. The
+samples differ individually in both directions. The system is not reproducing the sandbox's answers; it reaches different answers of the same quality.
 
-The interval on that difference is what should be read, not the point: at \fact{h2h-families} families
-this design could detect a difference of \textbf{\fact{h2h-mde} F1} at 80\% power, and it did not detect one.
+The interval on that difference is what should be read, not the point. At \fact{h2h-families} families
+this design could detect a difference of \fact{h2h-mde} F1 at 80\% power, and it did not detect one.
 That is a bound on the pipeline's contribution, not a demonstration that the contribution is zero.
 
 \textbf{Why the cohort is \fact{baseline-n} and not \fact{audit-tasks}, and why the reason is not the one we
 first wrote down.} The cohort was submitted as one batch and the sandbox reported every task as
 complete. It had not been. Querying each task's timing shows a split with nothing between the modes:
 the \fact{audit-real} tasks whose reports survived ran for \fact{audit-real-min}--\fact{audit-real-max} s, and
-the other \fact{audit-instant} ran for \textbf{under a second}, all \fact{audit-reported-but-instant} of them
+the other \fact{audit-instant} ran for under a second, all \fact{audit-reported-but-instant} of them
 still marked \texttt{reported}, none with a report directory. A Windows PE does not detonate in one second.
-The ordering implicates the instrument rather than the samples --- real analyses run through one
-afternoon and every task after that returns instantly --- and re-submitting the same binaries from the
+The ordering implicates the instrument rather than the samples, real analyses run through one
+afternoon and every task after that returns instantly, and re-submitting the same binaries from the
 same
 local files two days later produced full-length analyses on the same instance. \fact{audit-recovered} of the
-\fact{audit-instant} were recovered that way. The remaining \fact{audit-lost} are permanently gone --- and all
+\fact{audit-instant} were recovered that way. The remaining \fact{audit-lost} are permanently gone, and all
 \fact{audit-lost-still-reporting-success} of them are \emph{still} marked \texttt{reported}, at zero seconds, with no
 report directory. The one task in the cohort that admitted a failure is one that was recovered.
 
 We had originally written that the analyses ran and their reports had expired. That was the
 comfortable reading of \texttt{Reports\ directory\ does\ not\ exist}, and it was wrong. The correction matters
-beyond the sample count: a completion status from this instrument is not evidence that anything
+beyond the sample count. A completion status from this instrument is not evidence that anything
 happened, which is why the retrieval path now checks each analysis's wall-clock duration before
-accepting its report (§E6).
+accepting its report (Section~E6).
 
 We report the baseline first because without it a pipeline F1 is uninterpretable, and because it
 sets a bar the pipeline must clear to have contributed anything. Earlier drafts of this work
@@ -132,27 +134,31 @@ reported F1 values against nothing at all.
 
 \begin{figure}
 \centering
-\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 1: On the one population where pipeline and baseline are comparable, they overlap. Points are means over per-sample F1; bars are 95\% intervals resampling the cluster the observations are independent at, recomputed from the retained per-sample records with the seed fixed.}]{figures/fig3-arms-against-baseline.pdf}}
-\caption{\textbf{Figure 1: On the one population where pipeline and baseline are comparable, they overlap.} Points are means over per-sample F1; bars are 95\% intervals resampling the cluster the observations are independent at, recomputed from the retained per-sample records with the seed fixed.}
+\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 1: every measured arm on one F1 axis. Panel a) is the synthesised fixtures, panel b) the real-sample population where pipeline and baseline are comparable.}]{figures/fig3-arms-against-baseline.pdf}}
+\caption{Every measured arm on one F1 axis. a) the synthesised fixtures, b) the real-sample population.}
 \end{figure}
+
+Points are means over per-sample F1, and bars are 95\% intervals resampling the cluster the
+observations are independent at, recomputed from the retained per-sample records with the seed
+fixed. On the one population where pipeline and baseline are comparable, panel b), they overlap.
 
 \textbf{The two panels do not share an axis, and that is the point.} An earlier version of this figure put
 all five arms on one scale, where a no-LLM baseline near \fact{baseline-f1} beneath treatment arms near
-\fact{consensus-single-f1} read as a large pipeline win. It is not one: the left panel's arms run on
+\fact{consensus-single-f1} read as a large pipeline win. It is not one, because panel a)'s arms run on
 \fact{fixture-clusters} synthesised inputs whose evidence is generated from their own technique lists and
 are scored against per-sample truth, while the baseline runs on real binaries scored against
 family-level truth. Different inputs, different truth granularity, different attainable ceilings.
-No baseline is definable for the left panel at all --- a deterministic regular expression over the
+No baseline is definable for panel a) at all; a deterministic regular expression over the
 dictionary that generated its evidence scores \fact{fixture-extractor-f1} there by construction.
 
-The right panel is the comparison that can be made: the \fact{h2h-n} samples over \fact{h2h-families}
-families that completed both arms of §5, with CAPE scored on the same binaries against the same
+Panel b) is the comparison that can be made, the \fact{h2h-n} samples over \fact{h2h-families}
+families that completed both arms of Section~5, with CAPE scored on the same binaries against the same
 ground truth by the same code. The three intervals overlap, and the paired pipeline-minus-baseline
 difference is \fact{h2h-delta} \fact{h2h-ci} on a design able to resolve \fact{h2h-mde}.
 
 \subsection{Multi-agent consensus does not pay for itself at equal budget}\label{multi-agent-consensus-does-not-pay-for-itself-at-equal-budget}
 
-Design after Bertalanič \& Fortuna: three arms at an \textbf{equal total token budget}, including a
+Design after Bertalanič \& Fortuna. Three arms at an equal total token budget, including a
 stochastic-noise control in which one analyst receives irrelevant evidence.
 
 \begin{longtable}[]{@{}
@@ -160,7 +166,7 @@ stochastic-noise control in which one analyst receives irrelevant evidence.
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}@{}}
-\caption{The equal-budget consensus arms. n is rows; the unit that supports an inference is the sample, of which there are \fact{fixture-clusters}.}\label{tab:results-3}\\
+\caption{The equal-budget consensus arms.}\label{tab:results-3}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 arm
@@ -192,25 +198,29 @@ negotiated multi-agent consensus & \fact{consensus-negotiated-f1} & \fact{consen
 noise control & \fact{consensus-noise-f1} & \fact{consensus-noise-n} & \fact{fixture-clusters} \\
 \end{longtable}
 
-\textbf{Paired delta, negotiated $-$ single: \fact{consensus-negotiated-delta}, 95\% cluster CI
-\fact{consensus-negotiated-ci}} --- an interval containing zero, at \textbf{\fact{consensus-token-ratio}$\times$ the
-tokens}. At 80\% power this design could have detected a difference of \textbf{\fact{mde-consensus-negotiated}
-F1}; the observed difference is two orders of magnitude smaller than that. The null is a bound on
+Here n is rows, while the unit that supports an inference is the sample, of which there are
+\fact{fixture-clusters}.
+
+
+Paired delta, negotiated $-$ single: \fact{consensus-negotiated-delta}, 95\% cluster CI
+\fact{consensus-negotiated-ci}, an interval containing zero, at \fact{consensus-token-ratio}$\times$ the
+tokens. At 80\% power this design could have detected a difference of \fact{mde-consensus-negotiated}
+F1; the observed difference is two orders of magnitude smaller than that. The null is a bound on
 what the design could see, not a demonstration that the two arms are equivalent.
 
 \textbf{What the noise control does and does not license.} Earlier drafts read the control's separation as
 proof that the harness can detect a difference when one exists. It does not carry that weight. The
-control moves by \fact{consensus-noise-delta}, \fact{consensus-noise-ci} --- every one of the
-\fact{fixture-clusters} samples in the same direction --- but the effect is \emph{below this design's own
+control moves by \fact{consensus-noise-delta}, \fact{consensus-noise-ci}, every one of the
+\fact{fixture-clusters} samples in the same direction, but the effect is \emph{below this design's own
 minimum detectable effect} of \fact{mde-consensus-noise}, and the exact cluster permutation test returns
-p = \fact{consensus-noise-p-exact}. That is the smallest p the design can produce: with
+p = \fact{consensus-noise-p-exact}. That is the smallest p the design can produce. With
 \fact{fixture-clusters} clusters the two-sided sign-flip test floors at \fact{fixture-signflip-floor}, so
-\textbf{no comparison on this corpus can reach $\alpha$ = 0.05 whatever its effect size}. The honest statement is
+no comparison on this corpus can reach $\alpha$ = 0.05 whatever its effect size. The honest statement is
 that all \fact{fixture-clusters} samples moved the same way, which is worth reporting and is not a
 demonstration of sensitivity.
 
 This was pre-registered as the experiment that would decide the paper's framing. The literature's
-prior ran the same way: Bertalani\v{c} and Fortuna \cite{bertalanic2026consensus} find debate
+prior ran the same way. Bertalani\v{c} and Fortuna \cite{bertalanic2026consensus} find debate
 consuming more tokens for equal or lower accuracy on open-weight models of our size, and a second
 study reports a crossover at $\alpha$=0.7 on our own model class \preprintcite{tran2026single}.
 
@@ -225,7 +235,7 @@ cluster holds a single observation and the family count is the cluster count. At
 enumerated, and the method is reported with each p.
 
 \begin{longtable}[]{@{}lrrrr@{}}
-\caption{The consensus arms on real binaries. Scored against the same family-level MITRE ground truth as the no-LLM baseline, so the F1 values are comparable to Table~\ref{tab:results-2} and not to the fixture table above.}\label{tab:consensus-cape}\\
+\caption{The consensus arms on real binaries.}\label{tab:consensus-cape}\\
 \toprule\noalign{}
 arm & F1 & output tokens & $\times$ single & calls \\
 \midrule\noalign{}
@@ -241,33 +251,33 @@ negotiated consensus & \textbf{\fact{cape-consensus-negotiated-f1}} & \fact{cape
 noise control & \textbf{\fact{cape-consensus-noise-f1}} & \fact{cape-consensus-noise-tokens} & \fact{cape-consensus-noise-ratio} & \fact{cape-consensus-noise-calls} \\
 \end{longtable}
 
+Scored against the same family-level MITRE ground truth as the no-LLM baseline, so the F1 values are comparable to Table~\ref{tab:results-2} and not to the fixture table above.
+
+
 \textbf{Both multi-agent arms beat the single judge, and neither beats the other.} Negotiated minus
-single is \textbf{\fact{cape-negotiated-delta}}, 95\% cluster CI \fact{cape-negotiated-ci}, q =
+single is \fact{cape-negotiated-delta}, 95\% cluster CI \fact{cape-negotiated-ci}, q =
 \fact{cape-negotiated-q-exact}, better on \fact{cape-negotiated-better} of
 \fact{cape-negotiated-pairs} families. The noise control minus single is
-\textbf{\fact{cape-noise-delta}}, \fact{cape-noise-ci}, q = \fact{cape-noise-q-exact}. The two
+\fact{cape-noise-delta}, \fact{cape-noise-ci}, q = \fact{cape-noise-q-exact}. The two
 differences are the same difference.
 
 \textbf{The contrast that isolates the mechanism returns nothing, and this time that means
 something.} Negotiated minus noise is \fact{cape-mechanism-delta},
 \fact{cape-mechanism-ci}, q = \fact{cape-mechanism-q-exact}. This design resolves
-\fact{mde-cape-mechanism} F1 at 80\% power, and the effect the negotiation would have to carry ---
-the \fact{cape-negotiated-delta} its neighbours show --- is above that resolution. A null below its
+\fact{mde-cape-mechanism} F1 at 80\% power, and the effect the negotiation would have to carry, the \fact{cape-negotiated-delta} its neighbours show, is above that resolution. A null below its
 own minimum detectable effect says nothing; this one is not that. If the negotiation were doing the
 work, this design would have seen it.
 
-What separates the multi-agent arms from the single judge is therefore the thing they share:
+What separates the multi-agent arms from the single judge is therefore the thing they share;
 \fact{cape-consensus-negotiated-calls} model calls instead of
 \fact{cape-consensus-single-calls}, at \fact{cape-consensus-negotiated-ratio}$\times$ and
 \fact{cape-consensus-noise-ratio}$\times$ the output tokens. \textbf{Spending more calls on a sample
 helps; making them argue does not.} That is a claim about this pipeline at this budget on this
-corpus, and it is the claim the noise control was added to make possible --- a control that
+corpus, and it is the claim the noise control was added to make possible. A control that
 separates from the treatment is a control that has done nothing, and this one does not separate.
 
 \textbf{The fixture corpus gave the opposite sign, which is the sharpest evidence we have about that
-corpus.} There the noise control ran \fact{consensus-noise-delta} against the single judge --- worse,
-every sample in the same direction --- and here it runs \fact{cape-noise-delta}, better, at the same
-q as the negotiation. Nothing about the arms changed between the two runs; the evidence did. A
+corpus.} There the noise control ran \fact{consensus-noise-delta} against the single judge and was worse on every sample in the same direction. Here it runs \fact{cape-noise-delta} and is better, at the same q as the negotiation. Nothing about the arms changed between the two runs; the evidence did. A
 corpus whose inputs are generated from its own answer key does not merely have less power than one
 of real binaries. It can rank the arms the other way round.
 
@@ -316,10 +326,10 @@ local & Qwen3.6-35B-A3B (IQ3\_K\_R4) & \fact{consensus-single-f1} & \fact{consen
 frontier & Nemotron-3-Super-120B-A12B & \fact{arm-default-f1} & \fact{arm-default-n} & \fact{fixture-clusters} \\
 \end{longtable}
 
-Both arms see the same fixtures at the same repeats, so the comparison is \textbf{paired}:
+Both arms see the same fixtures at the same repeats, so the comparison is paired:
 
 \begin{quote}
-\textbf{frontier $-$ local = \fact{frontier-local-delta}}, 95\% cluster CI \textbf{\fact{frontier-local-ci}},
+frontier $-$ local = \fact{frontier-local-delta}, 95\% cluster CI \fact{frontier-local-ci},
 \fact{frontier-local-pairs} rows over \fact{fixture-clusters} samples.
 The frontier model is better on \fact{frontier-local-better} and worse on \fact{frontier-local-worse}.
 \end{quote}
@@ -329,7 +339,7 @@ within three thousandths of F1 of a 35B model quantised to run on one desktop GP
 across samples is a coin flip.
 
 \textbf{That null is not a claim of equivalence, and the interval is the reason.} At 80\% power this design
-could have detected a difference of \textbf{\fact{mde-frontier-local} F1} --- coarser than every architectural
+could have detected a difference of \fact{mde-frontier-local} F1, coarser than every architectural
 effect reported in this paper, and coarser than the largest configuration effect we found. A design
 that could only ever have seen effects above \fact{mde-frontier-local} says nothing about the
 \fact{frontier-local-delta} it returned. We report the null because it is what we measured and because
@@ -337,16 +347,14 @@ it is the direction the literature's prior already pointed; we do not report it 
 two models are alike.
 
 \textbf{We have since found that the two arms were not configured alike, and we report the null with that
-caveat attached.} The local arm runs with its reasoning stream disabled --- necessarily, because the
-local server otherwise returns an empty answer --- while the frontier arm ran with reasoning on and
+caveat attached.} The local arm runs with its reasoning stream disabled, necessarily so because the local server otherwise returns an empty answer, while the frontier arm ran with reasoning on and
 spent \fact{arm-default-reasoning} of its budget there. The nominal budget was equal; the budget
 available for an \emph{answer} was not. How much this matters we can bound from a third endpoint measured
-later on the same fixtures: with reasoning enabled it spent \fact{arm-qwenplus-reasoning} of every
-call's budget thinking and scored \textbf{\fact{arm-qwenplus-f1}} across all \fact{arm-qwenplus-n} calls, and
-with reasoning disabled the same model scored \textbf{\fact{arm-qwenplus-nothink-f1}}. That flag is worth
-\textbf{\fact{reasoning-flag-third-delta} F1}, \fact{reasoning-flag-third-ci} --- the largest effect measured on
-any arm in this paper. The frontier arm above was not crippled that way (it parsed
-\fact{arm-default-n} of \fact{arm-default-n}), so the null is not an artefact of a collapsed arm; but it is
+later on the same fixtures. With reasoning enabled it spent \fact{arm-qwenplus-reasoning} of every
+call's budget thinking and scored \fact{arm-qwenplus-f1} across all \fact{arm-qwenplus-n} calls, and
+with reasoning disabled the same model scored \fact{arm-qwenplus-nothink-f1}. That flag is worth
+\fact{reasoning-flag-third-delta} F1, \fact{reasoning-flag-third-ci}, the largest effect measured on
+any arm in this paper. The frontier arm above was not crippled that way having parsed \fact{arm-default-n} of \fact{arm-default-n}, so the null is not an artefact of a collapsed arm; but it is
 not the single-variable comparison it appears to be.
 
 \textbf{The matched arm cannot be built on that endpoint, and we established this by measurement rather
@@ -370,7 +378,7 @@ repeats:
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}@{}}
-\caption{The same weights at two precisions, with and without the reasoning flag. Paired against the local arm; intervals resample samples.}\label{tab:results-5}\\
+\caption{The same weights at two precisions, with and without the reasoning flag.}\label{tab:results-5}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 arm
@@ -405,37 +413,38 @@ paired vs local
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-local & IQ3\_K\_R4 (3-bit) & off & \fact{consensus-single-f1} & --- & --- \\
+local & IQ3\_K\_R4 (3-bit) & off & \fact{consensus-single-f1} &, &, \\
 vendor-hosted & full & off & \fact{arm-qwen35ba3b-nothink-f1} & \textbf{\fact{quantisation-delta}} & \fact{quantisation-ci} \\
 vendor-hosted & full & on & \fact{arm-qwen35ba3b-f1} & \fact{vendor-think-delta} & \fact{vendor-think-ci} \\
 \end{longtable}
 
-Two results follow, and the first is weaker than we first wrote it. \textbf{We cannot detect a quantisation
-penalty, and we cannot rule out a large one}: the paired difference is \fact{quantisation-delta} with
+Paired against the local arm; intervals resample samples.
+
+
+Two results follow, and the first is weaker than we first wrote it. We cannot detect a quantisation
+penalty, and we cannot rule out a large one: the paired difference is \fact{quantisation-delta} with
 an interval of \fact{quantisation-ci}, which admits a penalty of up to \fact{quantisation-worst} F1 against our local
 deployment, and this design's minimum detectable effect is \fact{mde-quantisation}. What the data
 support is that 3-bit quantisation is not \emph{demonstrably} this pipeline's handicap, not that it is
-not one. Second, \textbf{the reasoning flag replicates at \fact{reasoning-flag-vendor35b-delta} paired}
-(\fact{reasoning-flag-vendor35b-ci}) on a second model --- this time the one we host --- with
+not one. Second, the reasoning flag replicates at \fact{reasoning-flag-vendor35b-delta} paired
+(\fact{reasoning-flag-vendor35b-ci}) on a second model, this time the one we host, with
 \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls exhausting the output budget on reasoning.
 The flag is the only effect in this paper that exceeds its own design's minimum detectable effect
 (\fact{mde-reasoning-flag-vendor35b} here, \fact{mde-reasoning-flag-third} on the third endpoint). The
 largest effect we have measured on any arm is a configuration flag, not an architecture and not a
 parameter count.
 
-Two qualifications belong with that, because it is the paper's one positive result. The flag
-comparisons are \textbf{post-hoc} --- they were run after the confound was discovered, not planned --- and are
-corrected as a family of \fact{family-posthoc-m}, at which their q-values are
+Two qualifications belong with that, because it is the paper's one positive result. The flag comparisons are post-hoc, run after the confound was discovered rather than planned, and are corrected as a family of \fact{family-posthoc-m}, at which their q-values are
 \fact{reasoning-flag-vendor35b-q-exact} and \fact{reasoning-flag-third-q-exact}. And like every comparison
 on this corpus they sit at the exact test's floor of \fact{fixture-signflip-floor}. They are reported as
 sign-consistent across all \fact{fixture-clusters} samples with an effect several times their detection
 threshold, which is the strongest statement this design can support and is not a claim of
 significance.
 
-We report the frontier null because the literature's prior predicts otherwise:
+We report the frontier null because the literature's prior predicts otherwise;
 \texttt{arXiv:2606.18166} found parameter size the \emph{only} statistically significant predictor of
 ATT\&CK-classification F1 ($\rho$=0.85, p=0.014 \preprintcite{ryan2026attck}) on the nearest task. On this task, at this budget, we do
-not reproduce that --- and we cannot test it as a series either: a rank correlation over model size
+not reproduce that, and we cannot test it as a series either. A rank correlation over model size
 needs the arms matched on the flag that is worth more than the size effect, and the only endpoint
 we have above 35B does not permit that match. Two of our arms are configuration-matched and both
 are 35B, so the series is two points at one size. We state this as a limitation with a measured
@@ -443,16 +452,16 @@ cause rather than as an untested claim in either direction.
 
 \textbf{An earlier version of this arm reported \fact{superseded-frontier-f1} and was wrong to suggest a lead.} That figure came
 from n=\fact{superseded-frontier-n}, the run having been cut short by a daily request quota; the apparent advantage did not
-survive completing the sample. It is recorded here because it is the exact failure mode §4.2 warns
-about --- a difference read off an underpowered arm --- and because we caught it by finishing the run
+survive completing the sample. It is recorded here because it is the exact failure mode Section~4.2 warns
+about, a difference read off an underpowered arm, and because we caught it by finishing the run
 rather than by any insight.
 
-The completed run parsed \textbf{\fact{arm-default-n} of \fact{arm-default-n}} calls with no refusals
+The completed run parsed \fact{arm-default-n} of \fact{arm-default-n} calls with no refusals
 and \fact{arm-default-hit-cap} hitting the output cap.
 
 \textbf{Where the larger model's budget went:} across the \fact{arm-default-n} calls,
-\textbf{\fact{arm-default-reasoning} of output tokens were reasoning}, and on a one-token answer,
-\fact{reasoning-share-one-token} --- \fact{reasoning-one-token-output} output tokens,
+\fact{arm-default-reasoning} of output tokens were reasoning, and on a one-token answer,
+\fact{reasoning-share-one-token}, at \fact{reasoning-one-token-output} output tokens,
 \fact{reasoning-one-token-thinking} of them thinking. An equal-budget
 comparison must therefore cap \emph{total} output including reasoning; capping content alone would hand
 the reasoning model roughly twice the generation for the same nominal budget, and the null above
@@ -466,7 +475,7 @@ This is the paper's most replicated result, and it is negative.
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Three retrieval components, each measured in isolation and again end to end. Every one works where it was built and moves nothing where it is wired in, and the three fail for three different reasons.}\label{tab:retrievers}\\
+\caption{Three retrieval components, each measured in isolation and again end to end.}\label{tab:retrievers}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 component
@@ -490,26 +499,29 @@ contribution end to end
 \bottomrule\noalign{}
 \endlastfoot
 ATT\&CK case-prior RAG & \emph{self-consistency} \fact{case-prior-self-f1} against a \fact{case-prior-self-frequency-f1} frequency prior, scored on the corpus's own prior attributions rather than on MITRE ground truth & \textbf{loses} to the frequency prior in production (\fact{case-prior-prod-f1} vs \fact{case-prior-prod-frequency-f1}, MITRE ground truth) \\
-family-feature RAG & yes --- recall@\fact{case-prior-top-k} \fact{family-recall-at-5}, \textbf{\fact{family-recall-chance-ratio}$\times$ chance}, leakage-free split & \textbf{\fact{family-delta-f1} F1}, precision \fact{family-delta-precision}, n=\fact{family-ab-samples} \\
-opcode-hash attribution & n/a --- never fires & \textbf{\fact{hash-fired} of \fact{hash-total} samples}; \fact{hash-functions} functions hashed, \fact{hash-matches} matches \\
+family-feature RAG & yes, recall@\fact{case-prior-top-k} \fact{family-recall-at-5}, \textbf{\fact{family-recall-chance-ratio}$\times$ chance}, leakage-free split & \textbf{\fact{family-delta-f1} F1}, precision \fact{family-delta-precision}, n=\fact{family-ab-samples} \\
+opcode-hash attribution & n/a, never fires & \textbf{\fact{hash-fired} of \fact{hash-total} samples}; \fact{hash-functions} functions hashed, \fact{hash-matches} matches \\
 \end{longtable}
 
+Every one works where it was built and moves nothing where it is wired in, and the three fail for three different reasons.
+
+
 One qualification the first row needs before the pattern can be read. Its isolation figure is
-\emph{not} accuracy: the leave-one-out corpus is labelled with the pipeline's own prior
+\emph{not} accuracy. The leave-one-out corpus is labelled with the pipeline's own prior
 attributions, so scoring the index against it measures agreement with its own upstream. We report
-it because the comparison it supports survives that --- a frequency prior scored the same way, on
+it because the comparison it supports survives that. A frequency prior scored the same way, on
 the same labels, reaches \fact{case-prior-self-frequency-f1}, so the index carries information beyond base rates even under its
-own labelling --- and because the production column beside it is scored against MITRE ground truth
+own labelling, and because the production column beside it is scored against MITRE ground truth
 on held-out samples, which is the number the conclusion rests on.
 
 Each was built separately, each is defensible in design, and each is inert once wired to real
 inputs. The mechanisms differ, which is what makes the pattern worth reporting rather than three
-disappointments: the first fails on \textbf{vocabulary mismatch} between query and corpus, visible only
+disappointments. The first fails on vocabulary mismatch between query and corpus, visible only
 in the score distribution while top-k accuracy stayed healthy; the second is simply small; the third
-fails for \textbf{two independent reasons} --- its corpus holds \fact{hash-corpus-samples} samples under
+fails for two independent reasons. Its corpus holds \fact{hash-corpus-samples} samples under
 \fact{hash-corpus-labels} generic labels, and the \setting{8}-instruction floor that correctly excludes
-thunks leaves \textbf{\fact{hash-starved} of \fact{hash-total} real samples with one hashable function
-or none}, a sharply bimodal distribution that populating the corpus would not fix.
+thunks leaves \fact{hash-starved} of \fact{hash-total} real samples with one hashable function
+or none, a sharply bimodal distribution that populating the corpus would not fix.
 
 \subsection{Mechanisms measured before their effects}\label{mechanisms-measured-before-their-effects}
 
@@ -520,7 +532,7 @@ interpreted at all.
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Firing rate before effect. A mechanism's ablation can only be read where the mechanism runs, and two of these run too rarely for an ablation to say anything.}\label{tab:firing}\\
+\caption{Firing rate before effect.}\label{tab:firing}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 mechanism
@@ -544,26 +556,34 @@ consequence
 \bottomrule\noalign{}
 \endlastfoot
 confidence cap (falsification-before-confidence) & \textbf{\fact{cap-rate}} of techniques & an ablation would measure nothing; the null is uninterpretable \\
-sink-reachability priority hint & \textbf{\fact{hint-rate}} of samples (\fact{hint-fired}/\fact{hint-total}) & an ablation is interpretable, was run, and returned a null (§7) \\
+sink-reachability priority hint & \textbf{\fact{hint-rate}} of samples (\fact{hint-fired}/\fact{hint-total}) & an ablation is interpretable, was run, and returned a null (Section~7) \\
 STIX integrity pass & measured over \fact{integrity-bundles} fresh judge bundles & reported by removal reason \\
 \end{longtable}
 
+A mechanism's ablation can only be read where the mechanism runs, and two of these run too rarely for an ablation to say anything.
+
+
 For the cap, the mechanism's own preconditions explain the rate: it applies to three technique
-families, only when the sole contributing layer is \texttt{static}, and \fact{cap-gated-yara-only-share} of those claims are YARA-only ---
+families, only when the sole contributing layer is \texttt{static}, and \fact{cap-gated-yara-only-share} of those claims are YARA-only,
 so no static claim exists for it to discipline. We report the rate rather than an ablation, because
 an ablation over a mechanism that fires on \fact{cap-rate} of cases produces a null that means nothing.
 
 \begin{figure}
 \centering
-\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 2: Firing rate decides whether an ablation can be read at all. Three of the four mechanisms the architecture was built around engage on almost nothing, and an ablation of any of them would return a null describing the cases where the mechanism never ran. Only the sink-reachability hint clears a rate at which an ablation would carry information --- which is why it is the one we ablated, and §7 reports the null it returned.}]{figures/fig4-firing-rate-before-effect.pdf}}
-\caption{\textbf{Figure 2: Firing rate decides whether an ablation can be read at all.} Three of the four mechanisms the architecture was built around engage on almost nothing, and an ablation of any of them would return a null describing the cases where the mechanism never ran. Only the sink-reachability hint clears a rate at which an ablation would carry information --- which is why it is the one we ablated, and §7 reports the null it returned.}
+\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 2: firing rate decides whether an ablation can be read at all.}]{figures/fig4-firing-rate-before-effect.pdf}}
+\caption{Firing rate decides whether an ablation can be read at all.}
 \end{figure}
+
+Three of the four mechanisms the architecture was built around engage on almost nothing, and an
+ablation of any of them would return a null describing the cases where the mechanism never ran.
+Only the sink-reachability hint clears a rate at which an ablation would carry information, which
+is why it is the one we ablated, and Section~7 reports the null it returned.
 
 \subsection{The corroboration cascade does not reach the verdict}\label{the-corroboration-cascade-does-not-reach-the-verdict}
 
 The multi-layer corroboration set is the design's central claim about evidence quality. We remove
 one Layer-0 source at a time and compare the bundle the analyst receives against the bundle produced
-with all of them, under two conditions that differ in exactly one respect --- whether the removed
+with all of them, under two conditions that differ in exactly one respect, whether the removed
 source was the sole owner of its techniques.
 
 \begin{longtable}[]{@{}
@@ -571,7 +591,7 @@ source was the sole owner of its techniques.
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}@{}}
-\caption{The corroboration cascade under two conditions. Both counts follow from the reconciliation step rather than from the judge, which is why they are arithmetic rather than evidence.}\label{tab:cascade}\\
+\caption{The corroboration cascade under two conditions.}\label{tab:cascade}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 condition
@@ -602,38 +622,41 @@ disjoint & its techniques disappear; nothing else claims them & \textbf{\fact{ca
 overlap & its techniques survive under a partner source, but their \textbf{corroboration} changes & \textbf{\fact{cascade-overlap-changed}/\fact{cascade-overlap-arms}} & \textbf{\fact{cascade-overlap-jaccard} {[}\fact{cascade-overlap-jaccard-min}, \fact{cascade-overlap-jaccard-max}{]}} \\
 \end{longtable}
 
+Both counts follow from the reconciliation step rather than from the judge, which is why they are arithmetic rather than evidence.
+
+
 Take a technique away and the bundle loses it. Leave the technique in place and destroy the
-cross-domain agreement behind it --- the thing the cascade exists to compute --- and the bundle is
+cross-domain agreement behind it, the thing the cascade exists to compute, and the bundle is
 byte-identical. The cascade runs, weights each source by a trust coefficient, and reports a
 corroborated set in the run summary; none of that reaches the artefact the analyst is given.
 
 \textbf{Why the bundle behaves that way is not what we first wrote, and the difference matters.} Our
 initial reading was that the judge attends to the claim list and ignores everything else. It does
-not read either. The reconciliation step reconciles the bundle against the cascade: every
+not read either. The reconciliation step reconciles the bundle against the cascade. Every
 \texttt{attack-pattern} whose technique ID cannot be resolved is dropped, and every cascade technique
 missing from the bundle is appended. The cascade's technique set is therefore a guaranteed subset
 of every bundle the system emits, independent of what the judge produced. Checked against all
 \fact{judge-mechanism-arms} stored arms by recomputing each arm's cascade set from the same seeded
-fixtures: \textbf{the bundle is exactly the cascade's technique set in \fact{judge-mechanism-arms} of
-\fact{judge-mechanism-arms}, and the judge contributes zero techniques to any of them.}
+fixtures. The bundle is exactly the cascade's technique set in \fact{judge-mechanism-arms} of
+\fact{judge-mechanism-arms}, and the judge contributes zero techniques to any of them.
 
 Both rows of the table then follow from set arithmetic. Under overlap, removing a source whose
-claims a partner also makes leaves the cascade's set unchanged, so the bundle cannot change ---
+claims a partner also makes leaves the cascade's set unchanged, so the bundle cannot change;
 \fact{cascade-overlap-changed} of \fact{cascade-overlap-arms} is a necessity, not a measurement of
 restraint. Under disjoint, removing a source deletes its techniques from that set, so the bundle
-shrinks --- \fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms}, equally necessary. The Jaccard of
-\fact{cascade-overlap-jaccard} with a zero-width interval was the tell we missed: across
+shrinks, at \fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms}, equally necessary. The Jaccard of
+\fact{cascade-overlap-jaccard} with a zero-width interval was the tell we missed. Across
 \fact{cascade-overlap-pairs} ablated arms at temperature \fact{decode-temperature}, a language model
 does not agree with itself that exactly. We read a constant as a strong null.
 
 The architectural conclusion is unchanged and, if anything, sharper. Corroboration does not reach
-the analyst's artefact. But the reason is not that a model overlooked it: \textbf{the judge cannot
-subtract from the bundle's technique set, and across \fact{judge-mechanism-arms} arms it added nothing to it.} Omissions
+the analyst's artefact. But the reason is not that a model overlooked it. The judge cannot
+subtract from the bundle's technique set, and across \fact{judge-mechanism-arms} arms it added nothing to it. Omissions
 are restored by reconciliation; additions would have survived, and there were none.
 
 We stated that bound rather than the stronger claim it invites, because the evidence could not
 distinguish a judge whose output was unusable and wholly replaced from one that reproduced the
-cascade's set exactly. \textbf{That measurement has since been taken}, by intercepting the
+cascade's set exactly. That measurement has since been taken, by intercepting the
 reconciliation step and recording what the model produced before the deterministic set was merged
 in. On the four calls that reached it:
 
@@ -641,7 +664,7 @@ in. On the four calls that reached it:
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{What the judge contributed to the artefact the analyst receives, intercepted at the reconciliation seam. Counts are techniques, over four calls.}\label{tab:judge}\\
+\caption{What the judge contributed to the artefact the analyst receives, intercepted at the reconciliation seam.}\label{tab:judge}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -664,38 +687,41 @@ per call
 \endlastfoot
 attack-patterns the judge emitted & \fact{judge-capped-emitted} & \fact{judge-capped-emitted-per-call} \\
 carrying a resolvable ATT\&CK ID & \fact{judge-capped-resolvable} & \fact{judge-capped-resolvable-per-call} \\
-\textbf{dropped --- the model named no technique} & \textbf{\fact{judge-capped-dropped} (\fact{judge-capped-dropped-share})} & \fact{judge-capped-dropped-per-call} \\
+\textbf{dropped, the model named no technique} & \textbf{\fact{judge-capped-dropped} (\fact{judge-capped-dropped-share})} & \fact{judge-capped-dropped-per-call} \\
 \textbf{IDs the cascade did not already hold} & \textbf{\fact{judge-capped-own-ids}} & \fact{judge-capped-own-ids-per-call} \\
 injected because the judge omitted them & \fact{judge-capped-injected} & \fact{judge-capped-injected-per-call} \\
 \end{longtable}
 
+Counts are techniques, over four calls.
+
+
 Three of the four calls produced nothing nameable at all; the fourth named twelve techniques, every
 one already in the cascade. Three quarters of the model's own attack-patterns asserted a behaviour
 it could not map to a technique and were discarded. Of the two pipelines the bound allowed, the
-evidence points at the second: the bundle is the cascade's set wearing the judge's name.
+evidence points at the second. The bundle is the cascade's set wearing the judge's name.
 
 \textbf{And half the calls never reached that step.} Four of the eight timed out at the verdict ceiling,
 and on a timeout \texttt{give\_verdict} returns a text-fallback bundle that never calls the reconciliation
-routine --- so the cascade is not consulted on that path at all. The timeouts are not a property of
+routine, so the cascade is not consulted on that path at all. The timeouts are not a property of
 the fixtures: the judge's \fact{judge-output-cap}-token output cap was renamed by our client library to a parameter
 the local inference server does not read, so the model decoded unbounded until the caller gave up
-(§6, M7). One such call was measured at \textbf{\fact{unbounded-decode-tokens} generated tokens} and was still going.
+(Section~6, M7). One such call was measured at \fact{unbounded-decode-tokens} generated tokens and was still going.
 
 \textbf{Repeating the study with the cap fixed turns the pair into a controlled experiment, and the
 result inverts the section's own conclusion.} With the ceiling binding, the same four fixtures
 fail and the same four succeed; the judge's share of the bundle is \fact{judge-capped-share} in both conditions; every
-number on the reconciled path is identical. What changes is only how the failure arrives --- \fact{judge-output-cap}
+number on the reconciled path is identical. What changes is only how the failure arrives, \fact{judge-output-cap}
 tokens of unparseable output in three and a half minutes, instead of a ten-minute timeout.
 
-But the artefact is not the same. The fallback builder scrapes ATT\&CK IDs from two places: the
+But the artefact is not the same. The fallback builder scrapes ATT\&CK IDs from two places. The
 evidence claims, and the model's own raw response. In the uncapped condition that response is the
 literal string \texttt{{[}TIMEOUT{]}} and contains no IDs, so the fallback bundle was exactly the
-evidence-derived set --- identical to the cascade set on all four calls. In the capped condition it
+evidence-derived set, identical to the cascade set on all four calls. In the capped condition it
 is \fact{fallback-decode-chars-min} to \fact{fallback-decode-chars-max} characters of degenerate
 decode, and:
 
 \begin{longtable}[]{@{}llll@{}}
-\caption{Techniques reaching the analyst on the text-fallback path against those the corroboration cascade held, per fixture. The last column is the set no evidence source corroborated.}\label{tab:fallback}\\
+\caption{Techniques reaching the analyst on the text-fallback path against those the corroboration cascade held, per fixture.}\label{tab:fallback}\\
 \toprule\noalign{}
 fixture & fallback & cascade & \textbf{only in fallback} \\
 \midrule\noalign{}
@@ -709,28 +735,31 @@ fixture & fallback & cascade & \textbf{only in fallback} \\
 \input{tables/fallback-rows}
 \end{longtable}
 
-\textbf{\fact{fallback-only-capped} techniques reach the analyst that the corroboration cascade never held}, and none
+The last column is the set no evidence source corroborated.
+
+
+\fact{fallback-only-capped} techniques reach the analyst that the corroboration cascade never held, and none
 goes the other way. On one sample the bundle doubles. Because the uncapped run is a control whose
 raw text provably contains no IDs, every one of them is attributable to the model's own output.
-They passed through no filter at all --- not the cascade, not the reconciliation step, not the
+They passed through no filter at all. Not the cascade, not the reconciliation step, not the
 invalid-ID filter, not the integrity pass.
 
-They are also, checked against the \fact{attck-catalogue-size}-technique ATT\&CK catalogue, \textbf{real: \fact{fallback-only-capped-unique} of \fact{fallback-only-capped-unique} unique IDs
-exist, none is invented.} That removes the easy reading. The pipeline
+They are also, checked against the \fact{attck-catalogue-size}-technique ATT\&CK catalogue, real; \fact{fallback-only-capped-unique} of \fact{fallback-only-capped-unique} unique IDs
+exist, none is invented. That removes the easy reading. The pipeline
 is not emitting hallucinated identifiers a schema check would catch. It is emitting genuine ATT\&CK
 techniques that no evidence source claimed and no corroboration supports, in the same object type
 and the same bundle as techniques three independent sources agreed on, with nothing downstream to
 tell them apart.
 
 So the finding that opened this section needs its scope stated exactly. The judge has no
-influence over which techniques reach the analyst \textbf{on the path where it works}. On the path where
-it fails it has more influence than on the path where it succeeds: \fact{judge-capped-own-ids} of
+influence over which techniques reach the analyst on the path where it works. On the path where
+it fails it has more influence than on the path where it succeeds; \fact{judge-capped-own-ids} of
 \fact{judge-capped-bundle} techniques when reconciliation runs, \fact{fallback-only-capped} of
 \fact{fallback-bundle-total} when it does not. The architecture suppresses the model's
 contribution precisely when the model is functioning, and admits it precisely when it is not.
 
 \textbf{This replaces an earlier version of the same result, and the replacement is why we trust it.} The
-first pass varied three of six Layer-0 sources --- the three needing no sandbox --- over fixtures
+first pass varied three of six Layer-0 sources, the three needing no sandbox, over fixtures
 carrying five techniques, and reported the verdict unchanged in \fact{weights-unchanged-superseded} of
 \fact{weights-arms-superseded} cases. Two defects were
 found in it afterwards. The absent sources included the Sigma layer, which fires on
@@ -745,17 +774,17 @@ all of it, at \fact{cascade-overlap-arms} arms rather than \fact{weights-arms-su
 
 \textbf{One pre-registered prediction, resolved in both directions.} We predicted that removing the
 tool-artifact layer would change nothing, because it emits on YARA's cascade domain and therefore
-cannot contribute corroboration. In the overlap condition that is exactly right:
+cannot contribute corroboration. In the overlap condition that is exactly right;
 \fact{cascade-overlap-fixtures-changed} of \fact{cascade-overlap-fixtures}. In the disjoint condition it
-is wrong: \fact{cascade-disjoint-fixtures-changed} of \fact{cascade-disjoint-fixtures}, because there
+is wrong; \fact{cascade-disjoint-fixtures-changed} of \fact{cascade-disjoint-fixtures}, because there
 that source solely owns its techniques and
 removing it removes them. The prediction was about corroboration and it holds precisely where
-corroboration is the only thing varying --- which is the sharpest evidence we have that the two
+corroboration is the only thing varying, which is the sharpest evidence we have that the two
 conditions measure what we claim they measure.
 
 Two Layer-0 sources are absent from these arms by measurement rather than by choice. Over the
 \fact{layer0-declined-of} reports archived when that ablation ran, the LOLBin layer and the DGA layer
-each produced a claim on \textbf{none of them}, while being fed a median of
+each produced a claim on none of them, while being fed a median of
 \fact{layer0-declined-median-calls} recorded API calls and \fact{layer0-declined-domains} domains per
 sample respectively. They are offered
 the evidence and decline it; giving either an equal share of the ground truth would have ablated a
@@ -764,27 +793,35 @@ mechanism that never engages in this deployment.
 \subsection{Confidence is nearly a constant}\label{confidence-is-nearly-a-constant}
 
 Verbal confidence, which the cascade and the deterministic gates consume, discriminates correct from
-incorrect claims at \textbf{AUC \fact{confidence-auc}} --- near chance --- and is concentrated on \fact{confidence-distinct} round values.
+incorrect claims at AUC \fact{confidence-auc}, near chance, and is concentrated on \fact{confidence-distinct} round values.
 This matches \texttt{arXiv:2606.29490}'s finding that verbal confidence measures willingness to commit
 rather than correctness, and it means every deterministic gate keyed to that number is keyed to
 noise.
 
 \begin{figure}
 \centering
-\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 3: The number the gates consume barely orders anything. Left, the ROC over 210 claims scored against resolved ground truth. Right, why: most of those claims carry the same confidence, so the score has almost no ordering to contribute. The estimate is rank-based with ties averaged, which for this distribution is not a detail --- sorting the tied claims arbitrarily instead moves it, and the difference between the two numbers is entirely an artefact of how the tied majority is handled.}]{figures/fig2-confidence-discrimination.pdf}}
-\caption{\textbf{Figure 3: The number the gates consume barely orders anything.} Left, the ROC over \fact{confidence-n} claims scored against resolved ground truth. Right, why: \textbf{\fact{confidence-modal-count} of those \fact{confidence-n} claims carry confidence exactly \setting{1.0}}, so the score has almost no ordering to contribute. The estimate is rank-based with ties averaged, which for this distribution is not a detail --- sorting the tied claims arbitrarily instead returns \fact{confidence-auc-naive-legacy}, and the difference between the two numbers is entirely an artefact of how \fact{confidence-modal-share} of the data is handled.}
+\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 3: the number the gates consume barely orders anything. Panel a) is the ROC against resolved ground truth, panel b) the distribution of emitted confidence.}]{figures/fig2-confidence-discrimination.pdf}}
+\caption{The number the gates consume barely orders anything. a) the ROC against resolved ground truth, b) the confidence actually emitted.}
 \end{figure}
+
+Panel a) is the ROC over \fact{confidence-n} claims scored against resolved ground truth, and panel
+b) shows why it is nearly the diagonal. \fact{confidence-modal-count} of those \fact{confidence-n}
+claims carry confidence exactly \setting{1.0}, so the score has almost no ordering to contribute.
+The estimate is rank-based with ties averaged, which for this distribution is not a detail.
+Sorting the tied claims arbitrarily instead returns \fact{confidence-auc-naive-legacy}, and the
+difference between the two numbers is entirely an artefact of how \fact{confidence-modal-share}
+of the data is handled.
 
 \subsection{What the ablations cost, and what that revealed}\label{what-the-ablations-cost-and-what-that-revealed}
 
-The one mechanism whose firing rate justified an ablation (§4, \fact{hint-rate}) was ablated, paired, on the
+The one mechanism whose firing rate justified an ablation (Section~4, \fact{hint-rate}) was ablated, paired, on the
 subset where it fires. It does nothing measurable:
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{The sink-reachability hint, paired on the samples where it fires. Units differ per row and are named in the row.}\label{tab:hint}\\
+\caption{The sink-reachability hint, paired on the samples where it fires.}\label{tab:hint}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 outcome
@@ -812,18 +849,21 @@ claims & \fact{sink-delta-claims} & \fact{sink-ci-claims} \\
 seconds & \fact{sink-delta-seconds} & \fact{sink-ci-seconds} \\
 \end{longtable}
 
+Units differ per row and are named in the row.
+
+
 n=\fact{sink-pairs} pairs; the hint is better on \fact{sink-better}, worse on \fact{sink-worse}, and tied on \fact{sink-tied}, with per-pair deltas of
-\fact{sink-pair-deltas} --- large in both directions and cancelling. This is the fourth architectural claim to end in
+\fact{sink-pair-deltas}, large in both directions and cancelling. This is the fourth architectural claim to end in
 a null, and the last one we were in a position to test.
 
-\textbf{The result that constrains the result: half the experiment was not scoreable.} Twelve pairs were
+\textbf{The result that constrains the result. Half the experiment was not scoreable.} Twelve pairs were
 attempted and six survived screening.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Every sample excluded from the paired study, with the reason and the count. Reported because a loss rate bounds what any ablation on this pipeline can detect.}\label{tab:exclusions}\\
+\caption{Every sample excluded from the paired study, with the reason and the count.}\label{tab:exclusions}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 excluded
@@ -848,8 +888,11 @@ why
 \endlastfoot
 degenerate decode & \fact{sink-excluded-degenerate} & an arm emitting \fact{degenerate-claims-min}--\fact{degenerate-claims-max} claims across \fact{degenerate-tids-min}--\fact{degenerate-tids-max} technique IDs (ratios \fact{degenerate-ratio-min}--\fact{degenerate-ratio-max}) \\
 unattributable & \fact{sink-excluded-unattributable} & both arms dead, and the host state needed to decide whether the pipeline or the machine failed was never recorded \\
-incomplete & \fact{sink-excluded-incomplete} & an arm exceeded the \setting{630} s bound --- a genuine outcome, but it costs the pair \\
+incomplete & \fact{sink-excluded-incomplete} & an arm exceeded the \setting{630} s bound, a genuine outcome, but it costs the pair \\
 \end{longtable}
+
+Reported because a loss rate bounds what any ablation on this pipeline can detect.
+
 
 A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation on this pipeline can detect. An effect smaller than the
 noise from losing half the samples is not measurable here, and quoting
@@ -857,25 +900,25 @@ noise from losing half the samples is not measurable here, and quoting
 that context would claim a precision the instrument does not have. \textbf{Reporting the loss rate beside
 the estimate is the whole of what we have to say about how to read it.}
 
-\textbf{The two \texttt{unattributable} pairs are this paper's own §4.5 recurring against it.} They died while
+\textbf{The two \texttt{unattributable} pairs are this paper's own Section~4.5 recurring against it.} They died while
 the host's swap file was exhausted and the model server had \fact{paged-out-working-set} of its own address space paged
 out; one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters, which is
 inexplicable for a model generating from RAM and unsurprising for one generating from disk. We had
 retained per-sample outputs, as our own rule requires. What went unrecorded was the environment the
 measurement ran in. The harness now captures \texttt{MemAvailable}, \texttt{SwapFree} and the server's
-resident-versus-swapped split at both ends of every arm and the scorer screens on it --- forward only,
+resident-versus-swapped split at both ends of every arm and the scorer screens on it, forward only,
 never for data already collected.
 
 \textbf{Three arms failed outright; two were re-run and one deliberately was not.} Two carried a
 \texttt{Connection\ error} from a restart race, meaning the measurement never happened, and were re-run. The
-third was the \setting{630}-second timeout, which is an outcome --- deleting an outcome one dislikes is selection
+third was the \setting{630}-second timeout, which is an outcome. Deleting an outcome one dislikes is selection
 rather than repair. The recovered pair contributed a \fact{sink-recovered-pair-delta}, against the hint.
 
 Running it, however, surfaced a production defect that the test suite (\fact{test-count} passing) did not: on any binary
-rich enough to exhaust the \fact{react-step-budget}-step ReAct budget, the analyst returned \textbf{zero techniques}, because
+rich enough to exhaust the \fact{react-step-budget}-step ReAct budget, the analyst returned zero techniques, because
 the salvage path received a fresh copy of a budget it was already inside. Fixed and verified on the
-same sample: \textbf{\fact{m4-fix-before-seconds} s $\rightarrow$ \fact{m4-fix-after-seconds} s,
-\fact{m4-fix-before-tids} $\rightarrow$ \fact{m4-fix-after-tids} technique IDs}. The fix is partial --- one sample still exceeds
+same sample; \fact{m4-fix-before-seconds} s $\rightarrow$ \fact{m4-fix-after-seconds} s,
+\fact{m4-fix-before-tids} $\rightarrow$ \fact{m4-fix-after-tids} technique IDs. The fix is partial. One sample still exceeds
 the bound, and the server's own timings show generation varying from \fact{decode-rate-fast} to
 \fact{decode-rate-slow} tokens/s on this
 hybrid recurrent architecture, so a bounded input does not rescue a case where the tokens themselves
@@ -883,7 +926,7 @@ are eight times slower than assumed.
 
 \subsection{Summary}\label{summary}
 
-Of the four architectural claims this system was built around, \textbf{all four are now measured and every
-one is negative or near-null.} None is left pending sandbox access: the cascade closed on the
+Of the four architectural claims this system was built around, all four are now measured and every
+one is negative or near-null. None is left pending sandbox access. The cascade closed on the
 recovered cohort and the attribution tier's remaining half fired on \fact{hash-fired} of \fact{hash-total} samples. What survived
 measurement is not the architecture but the account of measuring it.

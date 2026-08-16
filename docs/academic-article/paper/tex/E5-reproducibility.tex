@@ -16,28 +16,20 @@ The rule is scoped to its reason, and the scope is stated here rather than left
 implicit, so that a reader can tell a deliberate exemption from an oversight.
 Three kinds of number are deliberately literal.
 
-\begin{itemize}
-\tightlist
-\item
-  \textbf{Settings.} A port, a thread count, a context length, a step budget, a
-  GPU model. No analysis produces them and they cannot go stale. They are marked
-  \texttt{\textbackslash setting\{\}} in the source at the point of use, because
-  the distinction is not visible in the digits --- \setting{31}\,GiB of host
-  memory is a setting and \fact{paged-out-working-set} paged out is a
-  measurement, and both are a number and a unit.
-\item
-  \textbf{Values quoted from cited work.} No derivation of ours produces someone
-  else's result. These are registered with the citation each belongs to and are
-  permitted only on a line that carries that citation, so a quoted figure cannot
-  drift away from its source and become indistinguishable from one of ours.
-\item
-  \textbf{Observations whose raw output was not retained.} A handful of the
-  incidents in Section~\ref{sec:failures} were seen in diagnostic sessions
-  against live containers rather than in a study, and those sessions were never
-  in scope for the retention rule --- which is Section~\ref{sec:threats}'s point
-  arriving one more time. Each is registered with the dated record that carries
-  it and is presented as an observation, not as a measurement from the archive.
-\end{itemize}
+The first kind is settings. A port, a thread count, a context length, a step budget, a GPU model.
+No analysis produces them and they cannot go stale, so they are marked
+\texttt{\textbackslash setting\{\}} in the source at the point of use, because the distinction is
+not visible in the digits; \setting{31}\,GiB of host memory is a setting and
+\fact{paged-out-working-set} paged out is a measurement, and both are a number and a unit. The
+second kind is values quoted from cited work, since no derivation of ours produces someone else's
+result. These are registered with the citation each belongs to and are permitted only on a line that
+carries that citation, so a quoted figure cannot drift away from its source and become
+indistinguishable from one of ours. The third kind is observations whose raw output was not
+retained. A handful of the incidents in Section~\ref{sec:failures} were seen in diagnostic sessions
+against live containers rather than in a study, and those sessions were never in scope for the
+retention rule, which is Section~\ref{sec:threats}'s point arriving one more time. Each is
+registered with the dated record that carries it and is presented as an observation rather than a
+measurement from the archive.
 
 A check enforces all of this, and refuses the third and second categories
 without their record or their citation. It also refuses a
@@ -50,7 +42,7 @@ constant.
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}@{}}
-\caption{The local model and inference engine, pinned by digest and commit. Without both, the sampler finding in this appendix cannot be reproduced.}\label{tab:model}\\
+\caption{The local model and inference engine, pinned by digest and commit.}\label{tab:model}\\
 \toprule\noalign{}
 \endfirsthead
 \toprule\noalign{}
@@ -58,30 +50,33 @@ constant.
 \bottomrule\noalign{}
 \endlastfoot
 model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised \textbf{IQ3\_K\_R4} by Unsloth \\
-GGUF sha256 & \texttt{d0de70ef…c4ea} --- computed locally \textbf{and} matching the HuggingFace etag \\
+GGUF sha256 & \texttt{d0de70ef…c4ea}, computed locally \textbf{and} matching the HuggingFace etag \\
 HF revision & \texttt{cfd350fd…1f0d} \\
 retrieved & 2026-05-11 \\
-imatrix calibration dataset & \textbf{named in §2.0} \\
+imatrix calibration dataset & \textbf{named in Section~2.0} \\
 architecture & hybrid recurrent (SSM keys + \texttt{full\_attention\_interval=4}), confirmed from the GGUF metadata \\
 \end{longtable}
 
-Naming the imatrix dataset matters: most papers reporting a quantisation level cannot say which
+Without both, the sampler finding in this appendix cannot be reproduced.
+
+
+Naming the imatrix dataset matters. Most papers reporting a quantisation level cannot say which
 calibration produced it, and two IQ3 quants of the same model are not the same artefact.
 
 \subsection{The engine, and an honest note about how we know}\label{the-engine-and-an-honest-note-about-how-we-know}
 
-Engine: \texttt{ik\_llama.cpp}, commit \textbf{\texttt{eb570eb96689c235933b813693ca28ab9d3d26de}}
+Engine; \texttt{ik\_llama.cpp}, commit \texttt{eb570eb96689c235933b813693ca28ab9d3d26de}
 (\emph{``MTP: Avoid per step SSM copy (\#\fact{engine-commit-pr})''}).
 
 \textbf{The binary could not identify itself.} \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)},
 because the build tree was never a git checkout. The commit was recovered from a depth-\setting{1} clone
 vendored elsewhere in the project and then \emph{proved} to describe the build: identical \fact{engine-source-files}-file source
-lists, and with line endings normalised \textbf{exactly one file differs --- the generated
-\texttt{common/build-info.cpp}}.
+lists, and with line endings normalised exactly one file differs, the generated
+\texttt{common/build-info.cpp}.
 
 We report the reconstruction rather than presenting the identifier as though it had been recorded.
-The transferable lesson is the one we learned the hard way: \textbf{build provenance must be captured at
-build time.} A retracted first version of this row concluded the commit was unrecoverable; it was
+The transferable lesson is the one we learned the hard way. Build provenance must be captured at
+build time. A retracted first version of this row concluded the commit was unrecoverable; it was
 recovered only because a vendored copy happened to exist.
 
 \subsubsection{Serving command}\label{serving-command}
@@ -93,7 +88,7 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
   --context-shift on --jinja --host 0.0.0.0 --port 8080
 \end{verbatim}
 
-Two caveats a reader needs. The context is served at \textbf{\fact{context-served} --- half the model's native \setting{262,144}}.
+Two caveats a reader needs. The context is served at \fact{context-served}, half the model's native \setting{262,144}.
 And the launch command documented in the repository at one point specified \texttt{-\/-n-cpu-moe\ 36} while
 the service ran \fact{cpu-offload-blocks} blocks on CPU; the command above is what ran.
 
@@ -102,56 +97,50 @@ the service ran \fact{cpu-offload-blocks} blocks on CPU; the command above is wh
 Single host: RTX \fact{host-gpu}, \setting{31} GiB RAM, \setting{16} threads. Three measured properties that shape what can be
 reproduced here:
 
-\begin{itemize}
-\tightlist
-\item
-  \textbf{\texttt{llama-server} grows with cumulative requests and does not plateau} --- \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB
-  after a single full analyst pass, and \fact{llama-rss-sustained-gb} GB after
-  \fact{llama-rss-sustained-minutes} minutes of multi-arm load. The growth is anonymous and
-  unreclaimable: it can go to swap and nowhere else, so on this host it is the ceiling on how long
-  any run can be. A long paired run must therefore restart the server between arms; the restart
-  changes no decoding parameter, so it is measurement-neutral.
-  \texttt{scripts/run\_with\_restarts.sh} does this from the checkpoint, and is released with the
-  rest --- an evaluation that outlasts its own instrument needs the cycling to be part of the
-  method rather than something the operator remembers.
-\item
-  \textbf{Serving at \setting{64}k instead of \setting{131}k does not lower the peak} (\fact{llama-rss-64k-gb} vs \fact{llama-rss-growth-gb} GB) --- the baseline is
-  CPU-resident expert weights, and the growth follows the context a pass actually consumes.
-\item
-  \textbf{Generation rate varies from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s across requests.} On this hybrid recurrent
-  architecture, llama.cpp writes and erases a \textbf{\fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred
-  tokens} at \textasciitilde39k tokens of context. Long-context calls are therefore not slow in proportion ---
-  they fall off a cliff.
-\end{itemize}
+\texttt{llama-server} grows with cumulative requests and does not plateau, at
+\fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after a single full analyst pass,
+and \fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes of multi-arm
+load. The growth is anonymous and unreclaimable, so it can go to swap and nowhere else, which on
+this host is the ceiling on how long any run can be. A long paired run must therefore restart the
+server between arms; the restart changes no decoding parameter, so it is measurement-neutral.
+\texttt{scripts/run\_with\_restarts.sh} does this from the checkpoint, and is released with the
+rest. An evaluation that outlasts its own instrument needs the cycling to be part of the method
+rather than something the operator remembers.
 
-The Ghidra container is capped at \textbf{\fact{ghidra-mem-limit-gb} GB} (\texttt{mem\_limit}). Its JVM \texttt{-Xmx4g} bounds the heap only;
+Serving at \setting{64}k instead of \setting{131}k does not lower the peak, at
+\fact{llama-rss-64k-gb} against \fact{llama-rss-growth-gb} GB. The baseline is CPU-resident expert
+weights, and the growth follows the context a pass actually consumes. Generation rate also varies
+from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s across requests. On this
+hybrid recurrent architecture, llama.cpp writes and erases a \fact{recurrent-checkpoint-mib} MiB
+recurrent-state checkpoint every few hundred tokens at \textasciitilde39k tokens of context, so
+long-context calls are not slow in proportion; they fall off a cliff.
+
+The Ghidra container is capped at \fact{ghidra-mem-limit-gb} GB (\texttt{mem\_limit}). Its JVM \texttt{-Xmx4g} bounds the heap only;
 the database is memory-mapped and measured RSS reached \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap. Two
 host lock-ups preceded this limit being added.
 
 \textbf{The working set does not fit alongside an interactive session, and that is a reproducibility fact
 rather than an operational one.} Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
 up to \fact{ghidra-mem-limit-gb} GB: on a \setting{31} GiB host this leaves nothing for a desktop. When we ran a paired study without
-that headroom, the swap file was exhausted, the model server had \textbf{\fact{llama-paged-out-gb} GB of its own address space
-paged out}, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
+that headroom, the swap file was exhausted, the model server had \fact{llama-paged-out-gb} GB of its own address space
+paged out, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
 generating from disk-backed pages is a different instrument from one generating from RAM, and the
 timings it produces are not comparable to the rest of the table.
 
-Two consequences for anyone reproducing this work:
+Two consequences for anyone reproducing this work;
 
-\begin{itemize}
-\item
-  \textbf{Give the run the machine.} Long paired studies here are run against an otherwise-idle host. This
-  is not a performance recommendation; arms measured under memory pressure are not commensurable with
-  arms that were not.
-\item
-  \textbf{Record the host state per arm, not per study.} Our harnesses capture \texttt{MemAvailable}, \texttt{SwapFree}
-  and the model server's resident-versus-swapped split at both ends of every arm, and the scoring
-  script excludes arms whose host was degraded. This screen can only be applied forward: for arms
-  already collected without it, the state is gone and the honest label is \texttt{unattributable}. That is
-  the label our own halted ablation carries.
-\item
-  \textbf{Start the model server in its own cgroup, not the harness's.} This one cost us three
-  interrupted runs before we read the kernel log carefully enough:
+\textbf{Give the run the machine.} Long paired studies here are run against an otherwise-idle host.
+This is not a performance recommendation; arms measured under memory pressure are not commensurable
+with arms that were not.
+
+\textbf{Record the host state per arm, not per study.} Our harnesses capture \texttt{MemAvailable},
+\texttt{SwapFree} and the model server's resident-versus-swapped split at both ends of every arm,
+and the scoring script excludes arms whose host was degraded. This screen can only be applied
+forward, because for arms already collected without it the state is gone and the honest label is
+\texttt{unattributable}. That is the label our own halted ablation carries.
+
+\textbf{Start the model server in its own cgroup, not the harness's.} This one cost us three
+interrupted runs before we read the kernel log carefully enough.
 
 \begin{verbatim}
 task_memcg=/user.slice/.../snap.code.code-*.scope, task=llama-server
@@ -159,13 +148,13 @@ Out of memory: Killed process (llama-server) oom_score_adj:\fact{oom-score-adj}
 snap.code.code-*.scope: Failed with result 'oom-kill'
 \end{verbatim}
 
-  The harness had launched the server as a child process, so it inherited the cgroup of whatever
-  started the harness --- an editor's integrated terminal --- and its \textasciitilde16 GB was accounted to the
-  editor's scope. We had already made the server the kernel's preferred victim, and that was the
-  wrong level: choosing \emph{which process} dies cannot change \emph{whose accounting it dies inside}.
-  Launching it as a transient unit with an explicit \texttt{MemoryMax} puts the measurement's memory where
-  it belongs and lets the server hit a limit of its own before the host has to arbitrate.
-\end{itemize}
+The harness had launched the server as a child process, so it inherited the cgroup of whatever
+started the harness, an editor's integrated terminal, and its \textasciitilde16 GB was accounted to
+the editor's scope. We had already made the server the kernel's preferred victim, and that was the
+wrong level, because choosing \emph{which process} dies cannot change \emph{whose accounting it dies
+inside}. Launching it as a transient unit with an explicit \texttt{MemoryMax} puts the measurement's
+memory where it belongs and lets the server hit a limit of its own before the host has to
+arbitrate.
 
 \subsection{Data}\label{data}
 
@@ -196,7 +185,7 @@ committed
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, \textbf{metadata only --- no binaries} & yes \\
+\texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, \textbf{metadata only, no binaries} & yes \\
 \texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, \textbf{seed \fact{cohort-seed}}, digest recorded & yes \\
 \texttt{cape\_task\_ledger\_n100.json} & sha256 $\rightarrow$ CAPE task id for all \fact{cohort-n} submissions & yes \\
 \texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=\fact{cohort-n} attempted & yes \\
@@ -206,11 +195,11 @@ committed
 \texttt{judge\_contribution\_\{uncapped,capped\}.json} & the judge study in both output-cap conditions, per call, with the branch each failed call took & yes \\
 \texttt{fallback\_bundle\_content\_\{uncapped,capped\}.json} & per-call technique sets on the fallback path against the cascade set each would have received & yes \\
 \texttt{outbound\_parameter\_probe.json} & which parameters the local server acts on, measured & yes \\
-CAPE reports & \textasciitilde7 MB each, \textasciitilde660 MB total & \textbf{no} --- see §5 \\
+CAPE reports & \textasciitilde7 MB each, \textasciitilde660 MB total & \textbf{no}, see Section~5 \\
 \end{longtable}
 
 Ground truth resolves a MalwareBazaar family signature to an in-repo MITRE \texttt{uses} fixture through an
-explicit alias map plus a CamelCase-split fallback. It is \textbf{uncurated at technique level}, which
+explicit alias map plus a CamelCase-split fallback. It is uncurated at technique level, which
 Threats to Validity treats as a construct-validity limit rather than a footnote.
 
 \textbf{Per-sample outputs are stored for every study in this paper.} This is a policy adopted after it
@@ -221,27 +210,20 @@ later found that could have affected it, the question could not be asked. That s
 
 CAPE 2.5 at a private address, reachable only from one network.
 
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  \textbf{One analysis machine} (\texttt{win10}, x64), no Linux VM. Only Windows PE can be analysed dynamically
-  whatever the code's stated scope, which is why the cohort is Windows-only. An ELF submitted there
-  joins the \fact{cape-backlog} tasks that are never scheduled.
-\item
-  \textbf{Reports are retained for days, not indefinitely.} Sampled across the full task-id range, \textbf{\fact{cape-report-retention-sampled}
-  of \fact{cape-report-retention-sampled}} older tasks return \texttt{"Reports\ directory\ does\ not\ exist"}; a report from four days earlier
-  survived. The local archive of fetched reports is therefore \textbf{the only copy}, and ``submit the
-  same samples'' is not a reproduction recipe on its own.
-\item
-  \textbf{The instance rate-limits, and its throttle response is byte-identical to its auth refusal} ---
-  \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases. A harness that reads that string as a capability
-  verdict will mis-classify a throttle as a missing permission; we did, briefly. Re-call a tool that
-  worked minutes earlier to tell them apart.
-\end{enumerate}
+It has one analysis machine (\texttt{win10}, x64) and no Linux VM, so only Windows PE can be
+analysed dynamically whatever the code's stated scope, which is why the cohort is Windows-only. An
+ELF submitted there joins the \fact{cape-backlog} tasks that are never scheduled. Reports are
+retained for days rather than indefinitely; sampled across the full task-id range,
+\fact{cape-report-retention-sampled} of \fact{cape-report-retention-sampled} older tasks return
+\texttt{"Reports\ directory\ does\ not\ exist"}, while a report from four days earlier survived. The
+local archive of fetched reports is therefore the only copy, and ``submit the same samples'' is not
+a reproduction recipe on its own. The instance also rate-limits, and its throttle response is
+byte-identical to its auth refusal, \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases. A
+harness that reads that string as a capability verdict will mis-classify a throttle as a missing
+permission, as we did, briefly. Re-call a tool that worked minutes earlier to tell them apart.
 
-Timing, for planning: a new Windows submission is scheduled in \textbf{\textasciitilde1 second} and completes in
-\textbf{\textasciitilde5.5 minutes}; the \fact{cape-backlog}-task backlog is never scheduled and does not queue ahead of new work.
+Timing, for planning. A new Windows submission is scheduled in \textasciitilde1 second and completes in
+\textasciitilde5.5 minutes; the \fact{cape-backlog}-task backlog is never scheduled and does not queue ahead of new work.
 An n=\fact{cohort-n} cohort is roughly \fact{cohort-sandbox-hours} hours of sandbox time.
 
 \subsection{The comparison endpoints, and one parameter that decides everything}\label{the-comparison-endpoints-and-one-parameter-that-decides-everything}
@@ -287,33 +269,33 @@ n
 \bottomrule\noalign{}
 \endlastfoot
 local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{arm-default-n} \\
-frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on --- not controllable} & \fact{arm-default-n} $\times$\setting{2} \\
+frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on, not controllable} & \fact{arm-default-n} $\times$\setting{2} \\
 same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & \fact{arm-qwen35ba3b-nothink-n} \\
 same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & \fact{arm-qwen35ba3b-n} \\
 larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenplus-n} each \\
 \end{longtable}
 
-\textbf{\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter.} Not rejected --- accepted,
-recorded in the result file, and not acted on: the re-run requesting it returned a
-\textbf{\fact{arm-default-nothink-reasoning}} reasoning share against \textbf{\fact{arm-default-reasoning}}
-without it. On DashScope the same request produces \textbf{\fact{arm-qwen35ba3b-nothink-reasoning}}. This
+\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter. Not rejected, but accepted,
+recorded in the result file, and not acted on. The re-run requesting it returned a
+\fact{arm-default-nothink-reasoning} reasoning share against \fact{arm-default-reasoning}
+without it. On DashScope the same request produces \fact{arm-qwen35ba3b-nothink-reasoning}. This
 is the line in this appendix that matters most to anyone comparing arms, because the flag is
 worth \fact{reasoning-flag-worth-low}--\fact{reasoning-flag-worth-high} F1 on the two models where it can be set, and an arm can therefore be labelled
 matched while running the opposite configuration. \texttt{eval\_parameter\_size\_series.py} selects arms on
-the \textbf{measured} reasoning share for exactly this reason and refuses to correlate when fewer than
-three configuration-matched arms span three parameter counts --- which, on these endpoints, is
+the measured reasoning share for exactly this reason and refuses to correlate when fewer than
+three configuration-matched arms span three parameter counts, which, on these endpoints, is
 always.
 
 \textbf{The local server's output cap must be sent twice.} \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire as
 \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read; the cap must also travel in
-\texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}. Measured on this host: \fact{cap-requested} requested, \textbf{\fact{cap-ignored-tokens}
-generated} with the renamed field alone, \textbf{\fact{cap-honoured-tokens}} with both. A reader who omits this will find the
+\texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}. Measured on this host: \fact{cap-requested} requested, \fact{cap-ignored-tokens}
+generated with the renamed field alone, \fact{cap-honoured-tokens} with both. A reader who omits this will find the
 judge decoding to the context limit, which is what happened here for as long as the cap had
 existed. \texttt{probe\_outbound\_parameters.py} re-checks this and the other outbound parameters against a
 running server; it is the regression witness, and it is cheap enough to run before any measurement
 campaign.
 
-Note also that this server \textbf{truncates silently}: at the cap it returns \texttt{finish\_reason:\ "stop"},
+Note also that this server truncates silently: at the cap it returns \texttt{finish\_reason:\ "stop"},
 never \texttt{"length"}, and carries no \texttt{stopped\_limit} field. Telemetry that detects truncation by finish
 reason will report zero however often the cap binds; compare the generated-token count against the
 cap that was requested instead.
@@ -322,24 +304,24 @@ cap that was requested instead.
 
 OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature \setting{0}, \fact{consensus-budget}-token output cap.
 
-\textbf{The free tier allows \fact{openrouter-daily-limit} requests per day} (\texttt{X-RateLimit-Limit:\ 50},
+The free tier allows \fact{openrouter-daily-limit} requests per day (\texttt{X-RateLimit-Limit:\ 50},
 \texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a \fact{openrouter-burst-limit}-requests-per-minute cap
-that applies whether or not credit has been purchased. The \textbf{first} attempt at this arm exhausted
-the daily quota mid-flight --- \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning HTTP 429 --- and the n=\fact{superseded-frontier-n} estimate it
-produced was not merely imprecise but pointed the wrong way (§2). The arm reported above is the
-completed \textbf{n=\fact{arm-default-n}} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, \setting{0} refusals, \$\setting{0} charged against
+that applies whether or not credit has been purchased. The first attempt at this arm exhausted
+the daily quota mid-flight, \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning HTTP 429, and the n=\fact{superseded-frontier-n} estimate it
+produced was not merely imprecise but pointed the wrong way (Section~2). The arm reported above is the
+completed n=\fact{arm-default-n} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, \setting{0} refusals, \$\setting{0} charged against
 the \$\setting{25} ceiling.
 
 The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
 rather than in dollars: one call per sample over a \fact{baseline-n}-sample cohort is two days at \fact{openrouter-daily-limit} requests per
-day, and a full-pipeline arm --- roughly \fact{requests-per-analysis} model requests per analysis --- is not reachable on the
+day, and a full-pipeline arm, roughly \fact{requests-per-analysis} model requests per analysis, is not reachable on the
 free tier at all. The spend meter is enforced as a precondition on every call rather than reconciled
 afterwards, and projections price output at the full cap because a degenerate decode produces
 exactly that.
 
 \subsection{Reproducing each result}\label{reproducing-each-result}
 
-All harnesses are committed under \texttt{tests/evaluation/} and are checkpointed and resumable --- several
+All harnesses are committed under \texttt{tests/evaluation/} and are checkpointed and resumable; several
 of the runs in this paper were interrupted by the memory guard and resumed without loss.
 
 \begin{longtable}[]{@{}
@@ -369,47 +351,47 @@ services needed
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-consensus ablation (§1) & \texttt{eval\_consensus\_ablation.py} & llama-server \\
-frontier and hosted arms (§2) & \texttt{eval\_frontier\_probe.py\ -\/-arm\ \textless{}name\textgreater{}\ {[}-\/-no-thinking{]}} & network only \\
-parameter-size series (§2) & \texttt{eval\_parameter\_size\_series.py} & \textbf{none} --- reads the arm files \\
-CAPE baseline (§0) & \texttt{eval\_cape\_baseline.py} & \textbf{none} --- reads the local report archive \\
-sink-hint frequency (§4) & \texttt{eval\_sink\_hint\_frequency.py} & Ghidra \\
-sink-hint ablation (§7) & \texttt{eval\_sink\_hint\_ablation.py} & llama-server + Ghidra \\
-opcode-hash attribution (§3) & \texttt{eval\_function\_hash\_attribution.py} & Ghidra + Qdrant \\
-Layer-0 verdict arms (§5) & \texttt{eval\_layer0\_verdict.py}, checked by \texttt{verify\_b3\_mechanism.py} & llama-server; the check needs \textbf{none} \\
-cascade weight sensitivity (§5) & \texttt{eval\_weight\_sensitivity\_six.py} & \textbf{none} --- reads the report archive \\
-judge contribution (§5) & \texttt{eval\_judge\_contribution.py} & llama-server \\
-fallback bundle content (§5) & \texttt{eval\_fallback\_bundle\_content.py\ -\/-checkpoint\ \textless{}run\textgreater{}} & \textbf{none} --- reads the run above \\
+consensus ablation (Section~1) & \texttt{eval\_consensus\_ablation.py} & llama-server \\
+frontier and hosted arms (Section~2) & \texttt{eval\_frontier\_probe.py\ -\/-arm\ \textless{}name\textgreater{}\ {[}-\/-no-thinking{]}} & network only \\
+parameter-size series (Section~2) & \texttt{eval\_parameter\_size\_series.py} & \textbf{none}, reads the arm files \\
+CAPE baseline (Section~0) & \texttt{eval\_cape\_baseline.py} & \textbf{none}, reads the local report archive \\
+sink-hint frequency (Section~4) & \texttt{eval\_sink\_hint\_frequency.py} & Ghidra \\
+sink-hint ablation (Section~7) & \texttt{eval\_sink\_hint\_ablation.py} & llama-server + Ghidra \\
+opcode-hash attribution (Section~3) & \texttt{eval\_function\_hash\_attribution.py} & Ghidra + Qdrant \\
+Layer-0 verdict arms (Section~5) & \texttt{eval\_layer0\_verdict.py}, checked by \texttt{verify\_b3\_mechanism.py} & llama-server; the check needs \textbf{none} \\
+cascade weight sensitivity (Section~5) & \texttt{eval\_weight\_sensitivity\_six.py} & \textbf{none}, reads the report archive \\
+judge contribution (Section~5) & \texttt{eval\_judge\_contribution.py} & llama-server \\
+fallback bundle content (Section~5) & \texttt{eval\_fallback\_bundle\_content.py\ -\/-checkpoint\ \textless{}run\textgreater{}} & \textbf{none}, reads the run above \\
 outbound parameter check & \texttt{probe\_outbound\_parameters.py} & llama-server \\
-every figure & \texttt{make\_paper\_figures.py} & \textbf{none} --- reads the JSON the above emit \\
+every figure & \texttt{make\_paper\_figures.py} & \textbf{none}, reads the JSON the above emit \\
 \end{longtable}
 
 Two of these exist only because a result could not be believed, and both are worth running before
 the studies they check rather than after. \texttt{verify\_b3\_mechanism.py} recomputes each ablation arm's
-cascade set from its seeded fixture and compares it against what the arm recorded --- it is what
+cascade set from its seeded fixture and compares it against what the arm recorded; it is what
 established that a published finding of ours had measured the reconciliation step rather than a
 model. \texttt{probe\_outbound\_parameters.py} asks whether the server acts on each parameter we send it,
 by behaviour rather than by reading a response field, because a server that ignores a parameter
 does not report having done so.
 
-The judge-contribution study is run \textbf{twice, in two conditions}, and the pair is kept: once with
+The judge-contribution study is run twice, in two conditions, and the pair is kept. Once with
 the output cap not reaching the server and once with it binding. The comparison between them is
 what isolates what the model's unparsable output contributes to the analyst's bundle, and neither
 run alone shows it. Preserved as \texttt{judge\_contribution\_uncapped.*} and \texttt{judge\_contribution\_capped.*}.
 
 \textbf{Figures are generated from the same retained records as the text.} The script recomputes intervals
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
-cannot drift apart without the script failing to reproduce one of them. This caught a live error: an
+cannot drift apart without the script failing to reproduce one of them. This caught a live error. An
 ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because
 \fact{confidence-modal-count} of \fact{confidence-n} claims are tied at confidence \setting{1.0} and tie handling decides the entire estimate. The text was
-right and the first draft of the figure was wrong --- which is the ordinary direction for this check to
+right and the first draft of the figure was wrong, which is the ordinary direction for this check to
 fire, and the reason for wiring it this way.
 
-Three harness properties are deliberate and worth copying. Every sweep \textbf{restarts the server it
-depends on between samples}, because a read timeout leaves the Ghidra JVM mid-analysis and every
-subsequent load is refused --- a whole window of samples was lost to this before it was understood.
-Every sweep reports \textbf{how many distinct outputs the N inputs produced}, because that one line is the
+Three harness properties are deliberate and worth copying. Every sweep restarts the server it
+depends on between samples, because a read timeout leaves the Ghidra JVM mid-analysis and every
+subsequent load is refused, and a whole window of samples was lost to this before it was understood.
+Every sweep reports how many distinct outputs the N inputs produced, because that one line is the
 cheapest detector for the stale-state defects described in Threats to Validity. And every sweep
-records the \textbf{host's memory state at both ends of each unit of work}, so that a failed unit can
-afterwards be attributed to the pipeline or excluded as an artefact of the machine --- a question that
-cannot be reopened later, as §3 above describes.
+records the host's memory state at both ends of each unit of work, so that a failed unit can
+afterwards be attributed to the pipeline or excluded as an artefact of the machine, a question that
+cannot be reopened later, as Section~3 above describes.

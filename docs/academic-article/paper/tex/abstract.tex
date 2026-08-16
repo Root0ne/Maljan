@@ -3,19 +3,19 @@ rarely measured against the deterministic tooling they sit on. We evaluate one, 
 several of our own measurements of it were wrong.
 
 Scored per sample on the same binaries and ground truth, the full pipeline reaches F1
-\fact{h2h-dynamic-f1} against \fact{h2h-cape-f1} for the sandbox it is built on --- paired
+\fact{h2h-dynamic-f1} against \fact{h2h-cape-f1} for the sandbox it is built on, paired
 \fact{h2h-delta} \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. On
 \fact{cape-consensus-families} real samples, one per family, negotiated multi-agent consensus beats
-a single judge by \fact{cape-negotiated-delta} F1 \fact{cape-negotiated-ci} --- and so does a noise
+a single judge by \fact{cape-negotiated-delta} F1 \fact{cape-negotiated-ci}, and so does a noise
 control, by \fact{cape-noise-delta}. The two differ by \fact{cape-mechanism-delta} at a resolution
-of \fact{mde-cape-mechanism}: what helps is the calls the arms share, not the negotiation. Verbal
+of \fact{mde-cape-mechanism}. What helps is the calls the arms share, not the negotiation. Verbal
 confidence, which every deterministic gate consumes, ranks correct claims above incorrect ones at
 AUC \fact{confidence-auc}, on an interval containing chance.
 
 Seven defects in our own instrument produced plausible results rather than errors, and
 \fact{test-count} passing tests caught none. Four crossed a boundary with another server; the other
-three share a shape --- a measurement's cause assigned rather than measured. The
-largest is this paper's own statistics: every interval we published resampled rows when the
+three share a shape, a measurement's cause assigned rather than measured. The
+largest is this paper's own statistics. Every interval we published resampled rows when the
 observations were clustered, and correcting it widened our anchor interval
 \fact{baseline-f1-widening}-fold and turned two equivalence claims into bounds.
 

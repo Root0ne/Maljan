@@ -31,21 +31,12 @@ Threats to Validity, not a claim about ethics.
 
 The evaluation harnesses, the derivation of every number in this paper, the per-sample records they
 read, and the scripts that build the figures and assemble the document are released with the paper.
-The archive contains:
-
-\begin{itemize}
-\tightlist
-\item
-  every per-sample record retained by every study reported here, in the JSON the harness wrote;
-\item
-  the offline re-analysis that recomputes every interval, design effect, minimum detectable effect
-  and adjusted p-value from those records, with its random seed;
-\item
-  the ATT\&CK ground-truth fixtures, derived from the public \texttt{mitre-attack/attack-stix-data}
-  repository under the ATT\&CK Terms of Use;
-\item
-  the model digest and inference-engine commit needed to reproduce the local arm.
-\end{itemize}
+The archive contains every per-sample record retained by every study reported here, in the JSON the
+harness wrote, together with the offline re-analysis that recomputes every interval, design effect,
+minimum detectable effect and adjusted p-value from those records, and its random seed. It also
+contains the ATT\&CK ground-truth fixtures, derived from the public
+\texttt{mitre-attack/attack-stix-data} repository under the ATT\&CK Terms of Use, and the model
+digest and inference-engine commit needed to reproduce the local arm.
 
 \textbf{Withheld, and why.} Malware binaries are not released; they are obtainable from the sources named
 in Background by their SHA-256 digests, which are in the archive. Sandbox reports are not released
@@ -69,20 +60,20 @@ so an interval cannot be read without the information needed to reproduce it.
 
 The live arms are not bit-reproducible and we do not claim they are. Decoding is at temperature \fact{decode-temperature}
 on the local arm and at each provider's default on the hosted ones, one of which accepts a
-reasoning-configuration parameter and does not act on it --- a fact we established by measurement and
+reasoning-configuration parameter and does not act on it, a fact we established by measurement and
 report as a result. Anyone re-running the live arms should expect the numbers to move and should
 read the intervals accordingly.
 
 \subsection{Use of generative AI}\label{use-of-generative-ai}
 
-Large language models are the object of study in this work: the pipeline under evaluation is built
+Large language models are the object of study in this work. The pipeline under evaluation is built
 from them, and every measurement reported here is a measurement of their behaviour in it.
 
-Separately from that, generative AI was used as an authoring and engineering aid --- drafting and
+Separately from that, generative AI was used as an authoring and engineering aid, for drafting and
 revising prose, writing evaluation harnesses and their tests, and performing literature searches
 whose results were then verified by fetching each source. The verification is not incidental to this
-disclosure: of the nine citations added by those searches and checked one by one, \textbf{three said
-something the source did not}. One was quoted for a sentence absent from the paper, one was cited
+disclosure. Of the nine citations added by those searches and checked one by one, three said
+something the source did not. One was quoted for a sentence absent from the paper, one was cited
 for a practice it does not describe, and one blended two incompatible published accounts into a
 single attribution. All three are corrected in the text and the corrections are recorded, because a
 search summary that reads as a citation is the same class of failure this paper is about.

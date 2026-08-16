@@ -70,7 +70,7 @@ M.~Mizrahi, G.~Kaplan, D.~Malkin, R.~Dror, D.~Shahaf, G.~Stanovsky, State of
   what art? {A} call for multi-prompt {LLM} evaluation, Transactions of the
   Association for Computational Linguistics 12 (2024) 933--949, 6.5M instances
   over 20 models and 39 tasks: ``different instruction templates lead to very
-  different performance, both absolute and relative'' --- the relative part is
+  different performance, both absolute and relative'', and the relative part is
   the ranking.
 \newblock \href {https://doi.org/10.1162/tacl_a_00681}
   {\path{doi:10.1162/tacl_a_00681}}.
@@ -136,7 +136,7 @@ K.~Satvat, R.~Gjomemo, V.~N. Venkatakrishnan, {EXTRACTOR}: Extracting attack
 
 \bibitem{li2022attackg}
 Z.~Li, J.~Zeng, Y.~Chen, Z.~Liang, {AttacKG}: Constructing technique knowledge
-  graph from cyber threat intelligence reports, in: Computer Security ---
+  graph from cyber threat intelligence reports, in: Computer Security --
   ESORICS, 2022, pp. 589--609.
 \newblock \href {https://doi.org/10.1007/978-3-031-17140-6_29}
   {\path{doi:10.1007/978-3-031-17140-6_29}}.
@@ -157,25 +157,25 @@ A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
 \bibitem{morbiato2026hierarchical}
 F.~Morbiato, M.~Keller, P.~Nair, L.~Romano, Hierarchical retrieval augmented
   generation for adversarial technique annotation in cyber threat intelligence
-  text, {PREPRINT} --- not peer reviewed. arXiv:2604.14166 (2026).
+  text, {PREPRINT}, not peer reviewed. arXiv:2604.14166 (2026).
 
 \bibitem{cheng2026ttprint}
 Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
   Evidence-grounded {TTP} extraction via diverge-then-converge verification,
-  {PREPRINT} --- not peer reviewed. arXiv:2605.25836; the Comments field says
-  so in as many words. Kept because its evidence-grounding requirement is the
+  {PREPRINT}, not peer reviewed. arXiv:2605.25836; the Comments field says so
+  in as many words. Kept because its evidence-grounding requirement is the
   design constraint our own gate obeys, so dropping it would let us appear to
   have set that bar ourselves (2026).
 
 \bibitem{buchel2025sok}
 M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
-  Automated {TTP} extraction from {CTI} reports --- are we there yet?, in: 34th
+  Automated {TTP} extraction from {CTI} reports -- are we there yet?, in: 34th
   USENIX Security Symposium, 2025, pp. 4621--4641.
 
 \bibitem{doosterlinck2024incontext}
 K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
-  In-context learning for extreme multi-label classification, {PREPRINT} ---
-  not peer reviewed. arXiv:2401.12178, v1 only, no Comments and no journal
+  In-context learning for extreme multi-label classification, {PREPRINT}, not
+  peer reviewed. arXiv:2401.12178, v1 only, no Comments and no journal
   reference; checked 2026-08-16. Recorded as "likely published" for a week on
   no evidence beyond how well-known it is, which is the reasoning this paper
   exists to distrust (2024).
@@ -223,8 +223,8 @@ H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
 
 \bibitem{chen2025recopilot}
 G.~Chen, H.~Sun, D.~Liu, Z.~Wang, Q.~Wang, B.~Yin, L.~Liu, L.~Ying,
-  {ReCopilot}: Reverse engineering copilot in binary analysis, {PREPRINT} ---
-  not peer reviewed. arXiv:2505.16366, v1 only, no Comments and no journal
+  {ReCopilot}: Reverse engineering copilot in binary analysis, {PREPRINT}, not
+  peer reviewed. arXiv:2505.16366, v1 only, no Comments and no journal
   reference. Cited only as one of the open-weight binary specialists that
   establish the model-tier split (2025).
 
@@ -244,7 +244,7 @@ N.~Jiang, C.~Wang, K.~Liu, X.~Xu, L.~Tan, X.~Zhang, P.~Babkin, {Nova}:
 \bibitem{ttpdetect2026}
 Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
   X.~Zhang, Identifying adversary tactics and techniques in malware binaries
-  with an {LLM} agent, {PREPRINT} --- not peer reviewed. TTPDetect.
+  with an {LLM} agent, {PREPRINT}, not peer reviewed. TTPDetect.
   arXiv:2602.06325. Kept because it is the nearest system to ours and the
   sentence citing it concedes ground rather than claims it; dropping it for
   want of a venue would let this paper imply it holds that ground itself. No
@@ -253,7 +253,7 @@ Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
 \bibitem{kate2025longfunceval}
 K.~Kate, T.~Pedapati, K.~Basu, Y.~Rizk, V.~Chenthamarakshan, S.~Chaudhury,
   M.~Agarwal, I.~Abdelaziz, {LongFuncEval}: Measuring the effectiveness of long
-  context models for function calling, {PREPRINT} --- not peer reviewed.
+  context models for function calling, {PREPRINT}, not peer reviewed.
   arXiv:2505.10570, v1 only, no Comments and no journal reference. Kept because
   it says the tool-catalogue degradation we report is already documented in
   general, which is the direction that costs us (2025).
@@ -276,11 +276,11 @@ W.~Li, S.~Manickam, Y.-w. Chong, S.~Karuppayah, {PhishDebate}: An {LLM}-based
 
 \bibitem{tran2026single}
 D.~Tran, D.~Kiela, Single-agent {LLMs} outperform multi-agent systems on
-  multi-hop reasoning under equal thinking token budgets, {PREPRINT} --- not
-  peer reviewed. arXiv:2604.02460. Kept because it says our null is not the
-  first of its kind, and because the crossover figure it reports for our own
-  model class has no reviewed equivalent we could verify. Bertalani{\v c} and
-  Fortuna reach the same conclusion in a reviewed venue (2026).
+  multi-hop reasoning under equal thinking token budgets, {PREPRINT}, not peer
+  reviewed. arXiv:2604.02460. Kept because it says our null is not the first of
+  its kind, and because the crossover figure it reports for our own model class
+  has no reviewed equivalent we could verify. Bertalani{\v c} and Fortuna reach
+  the same conclusion in a reviewed venue (2026).
 
 \bibitem{bertalanic2026consensus}
 B.~Bertalani{\v c}, C.~Fortuna, The cost of consensus: Isolated self-correction
@@ -308,7 +308,7 @@ J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
 \bibitem{metz2012baselines}
 J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
   predictive evaluation measure baselines for multi-label learning, in:
-  Advances in Artificial Intelligence --- IBERAMIA, Lecture Notes in Computer
+  Advances in Artificial Intelligence -- IBERAMIA, Lecture Notes in Computer
   Science, 2012, pp. 189--198, verified against Crossref 2026-08-16. Crossref
   types LNCS proceedings as book-chapter by convention; the container title is
   the IBERAMIA 2012 proceedings.
@@ -318,7 +318,7 @@ J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
 \bibitem{metz2015comparing}
 J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
   multi-label classifier performance measures to the ones obtained by a simple
-  multi-label baseline classifier, {PREPRINT} --- not peer reviewed.
+  multi-label baseline classifier, {PREPRINT}, not peer reviewed.
   arXiv:1503.06952, v1 only, Comments give a page count and no venue; checked
   2026-08-16. Kept for its systematic-review finding rather than for the
   requirement itself, which now rests on the reviewed IBERAMIA 2012 paper by
@@ -361,7 +361,7 @@ S.~Dev, A.~Sloan, J.~Kavner, N.~Kong, M.~Sandler, Judge reliability harness:
 \bibitem{ryan2026attck}
 A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
   open-source {LLMs} for multi-label {ATT\&CK} technique classification on
-  {CTI} reports, {PREPRINT} --- not peer reviewed. arXiv:2606.18166. Full text
+  {CTI} reports, {PREPRINT}, not peer reviewed. arXiv:2606.18166. Full text
   read 2026-08-16 to verify the correlation this paper quotes: ``the Spearman
   rank correlation confirms a statistically significant relationship between
   parameter size and $F_1$ scores in this CTI classification task ($\rho$=0.85,
@@ -395,13 +395,13 @@ M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
   {\path{doi:10.18653/v1/2024.findings-acl.108}}.
 
 \bibitem{llamacpp8634}
-\texttt{max\_tokens} not respected on the non-chat endpoint, {PREPRINT} --- not
+\texttt{max\_tokens} not respected on the non-chat endpoint, {PREPRINT}, not
   peer reviewed. ggml-org/llama.cpp issue \#8634. Search result; the issue has
   not been read in full. Cited with the vllm issue to demote our own mechanism
   to a known integration wart, which is the conservative direction (2024).
 
 \bibitem{vllm11976}
-Request for a server-side output cap, {PREPRINT} --- not peer reviewed.
+Request for a server-side output cap, {PREPRINT}, not peer reviewed.
   vllm-project/vllm issue \#11976 (2024).
 
 \end{thebibliography}

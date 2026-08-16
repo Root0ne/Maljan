@@ -10,48 +10,48 @@ single judge; the corroboration set never changes a verdict; the confidence numb
 discriminates at AUC \fact{confidence-auc}; and all three retrieval components are near-inert end to end despite
 working in isolation. We report these as results rather than as tuning opportunities.
 
-\textbf{Second: those nulls are only interpretable because we measured whether each mechanism fired.} A
+\textbf{Second. Those nulls are only interpretable because we measured whether each mechanism fired.} A
 deterministic confidence cap that fires on \fact{cap-rate} of techniques produces an ablation whose null
 result says nothing about the cap. A priority hint that fires on \fact{hint-rate} of samples produces one that
-does. We adopted \textbf{firing rate before effect} as a rule after the first case, and it changed which
+does. We adopted firing rate before effect as a rule after the first case, and it changed which
 experiments were worth running.
 
-\textbf{Third, and the reason for the paper's title: the instrument was repeatedly wrong in ways that
+\textbf{Third, and the reason for the paper's title. The instrument was repeatedly wrong in ways that
 looked like data.} Over one week we found four defects at the boundaries between the pipeline and
 the servers it depends on. In each case a server answered successfully and answered about something
 else: an argument the agent never supplied arrived as an explicit \texttt{null}; a program reported as
-loaded --- by name --- never became the one being analysed; a refused load returned HTTP 200 with an
+loaded, by name, never became the one being analysed; a refused load returned HTTP 200 with an
 error in the body; and two bounds designed to protect the analyst composed into a path that
 returned nothing at all. None was caught by \fact{test-count} passing tests, because each needs a \emph{second} case
 in one server lifetime, and a unit test writes one.
 
-Every one of those four was caught the same way: \textbf{a number repeated where variation was expected.}
+Every one of those four was caught the same way. A number repeated where variation was expected.
 A hint of exactly \fact{hint-chars-repeated} characters for two unrelated binaries; call graphs identical to the
 character for samples of \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at \fact{stuck-graph-chars} characters. The check
 costs one line, needs no ground truth, and we now report it beside every batch result.
 
 \textbf{Then three more, and none of them was at a boundary.} An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
 size ranked a reasoning-configuration flag instead and recovered the published scaling coefficient
-almost exactly --- agreeing with the literature, which is the direction a result is least likely to be
+almost exactly, agreeing with the literature, which is the direction a result is least likely to be
 questioned. And a documented output ceiling on the judge was renamed by our client library
 during serialisation to a key the inference server does not read, so a component we describe as
-bounded had never once been bounded. The detector above does not find these: their outputs \emph{do}
+bounded had never once been bounded. The detector above does not find these. Their outputs \emph{do}
 vary. Two were caught by a number too clean to believe, one by a study that recorded which failure
 branch each call took. Each had passing unit tests over the exact function concerned, because the
-defect was never in a function --- it was in which measurement was attributed to which cause, or in
+defect was never in a function; it was in which measurement was attributed to which cause, or in
 which representation of a value crossed a boundary.
 
 We report them because the correction is part of the result. Two published findings of ours were
 withdrawn or rewritten on their account, and a third was one report away from being published as a
 scaling law.
 
-The cost of not having had it is concrete: \textbf{a completed \fact{drift-n}-sample study is withdrawn from this
-paper.} It met the precondition for one of the defects, and its per-sample outputs were not
+The cost of not having had it is concrete. A completed \fact{drift-n}-sample study is withdrawn from this
+paper. It met the precondition for one of the defects, and its per-sample outputs were not
 retained, so whether it was affected cannot be established. We report the withdrawal rather than the
 result.
 
 We do not claim the category, and we counter-searched the newest mechanisms before claiming them
-either. Silent failure --- an error that produces wrong behaviour without an actionable signal --- is a
+either. Silent failure, an error that produces wrong behaviour without an actionable signal, is a
 long-established and taxonomised class in production software
 \cite{gunawi2008eio,yuan2014simple,alquraan2018partition}, and LLM-specific runtimes are now being
 taxonomised along the same lines \cite{xue2025agentbugs,liu2026inference}. ``Distinct inputs should
@@ -66,40 +66,29 @@ inference engines we use \cite{liu2026inference}.
 does not, and we say which.} We found no reviewed source establishing that OpenAI-compatible servers
 disagree about \emph{which} token-limit parameter they honour; that specific divergence is recorded
 only in the servers' own issue trackers, which we cite as such rather than as literature. We
-therefore claim no priority for it either: the general failure mode is known, and whether this
+therefore claim no priority for it either. The general failure mode is known, and whether this
 particular instance of it is new is a question we cannot settle from reviewed work.
 
-What we add is the setting and the price: an \textbf{evaluation pipeline for security research}, where
+What we add is the setting and the price. An evaluation pipeline for security research, where
 the artefact is not a degraded user session but a measurement that is wrong and looks right.
 
-\textbf{Contributions.} Each maps to one section, and each is a measurement or a mechanism rather than a
-proposal.
+\textbf{Contributions.} Each maps to one section, and each is a measurement or a mechanism rather than a proposal.
 
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  \textbf{A no-LLM baseline for LLM-based ATT\&CK mapping}, and the full pipeline scored against it on
-  the same samples and the same ground truth --- the comparison without which every F1 in this
-  literature, including our own earlier ones, refers to nothing (§5.1).
-\item
-  \textbf{Four measured architectural negatives} --- multi-agent consensus at equal budget, a corroboration
-  cascade, two-tier attribution, and a confidence gate --- each reported with the minimum detectable
-  effect of the design that produced it, because a null without its resolution is unreadable
-  (§5.2--§5.6).
-\item
-  \textbf{Seven instrument failures that produced plausible results rather than errors}, with the layer
-  each occurred at and what actually found it. Four crossed a boundary with another server; three
-  were inside our own code and share a different shape (§6).
-\item
-  \textbf{A one-line detector} --- how many distinct outputs did N inputs produce --- that found all four
-  boundary failures, needs no ground truth, and is reported beside every batch result rather than
-  written as a test (§6.7).
-\item
-  \textbf{A selection rule that follows from a provider accepting a parameter and not acting on it}: arms
-  must be matched on their \emph{measured} configuration, not their requested one (§6.5).
-\item
-  \textbf{The price, demonstrated rather than hypothesised}: one completed \fact{drift-n}-sample study withdrawn
-  because its question can no longer be asked of it, and four arms of a later ablation
-  unattributable for the same reason one level up (§7.4).
-\end{enumerate}
+We report a no-LLM baseline for LLM-based ATT\&CK mapping, and the full pipeline scored against it
+on the same samples and the same ground truth, the comparison without which every F1 in this
+literature, including our own earlier ones, refers to nothing (Section~5.1). We report four measured
+architectural negatives, multi-agent consensus at equal budget, a corroboration cascade, two-tier
+attribution and a confidence gate, each with the minimum detectable effect of the design that
+produced it, because a null without its resolution is unreadable (Section~5.2 to Section~5.6). We
+report seven instrument failures that produced plausible results rather than errors, with the layer
+each occurred at and what actually found it; four crossed a boundary with another server, and three
+were inside our own code and share a different shape (Section~6).
+
+Two things follow from those failures. One is a one-line detector, how many distinct outputs did N
+inputs produce, which found all four boundary failures, needs no ground truth, and is reported
+beside every batch result rather than written as a test (Section~6.7). The other is a selection
+rule that follows from a provider accepting a parameter and not acting on it, namely that arms must
+be matched on their \emph{measured} configuration rather than their requested one (Section~6.5).
+The price is demonstrated rather than hypothesised. One completed \fact{drift-n}-sample study is
+withdrawn because its question can no longer be asked of it, and four arms of a later ablation are
+unattributable for the same reason one level up (Section~7.4).

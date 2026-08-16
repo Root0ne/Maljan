@@ -7,20 +7,17 @@ inference, over three protocols. Each boundary is a place where a request can su
 mean what the caller assumed.
 
 This section reports seven such failures. We report them together because they share a shape that a
-test suite is poorly positioned to catch and a results table cannot show: \textbf{the instrument answered
-successfully, and answered about something else.} The last three are ours rather than someone
-else's server --- two in the analysis code that produces our results, one in the pipeline that
-produces the artefact --- which is the point: the shape does not stop at the network boundary, and it
-does not stop at the evaluation harness either.
+test suite is poorly positioned to catch and a results table cannot show. The instrument answered
+successfully, and answered about something else. The last three are ours rather than someone else's server, two of them in the analysis code that produces our results and one in the pipeline that produces the artefact. That is the point. The shape does not stop at the network boundary, and it does not stop at the evaluation harness either.
 
 \subsection{Seven mechanisms}\label{seven-mechanisms}
 
-\subsubsection{M1 --- An unset argument arrives as an assertion}\label{m1-an-unset-argument-arrives-as-an-assertion}
+\subsubsection{M1. An unset argument arrives as an assertion}\label{m1-an-unset-argument-arrives-as-an-assertion}
 
 The sandbox's MCP interface declares \fact{cape-tool-count} tools. Every one takes an optional \texttt{token} parameter with a
 declared default of \texttt{""}. Our client built its argument model with ``required, else \texttt{None}'', and the
 agent framework fills every declared field before invoking. So an argument the agent never mentioned
-reached the server as an \textbf{explicit null}, and a field typed \texttt{str} rejected it:
+reached the server as an explicit null, and a field typed \texttt{str} rejected it:
 
 \begin{verbatim}
 1 validation error for call[verify_auth]
@@ -31,16 +28,16 @@ token
 All \fact{cape-tool-count} tools failed. \emph{Unset} and \emph{null} are different statements, and the client was making the
 second while intending the first.
 
-\textbf{Why it survived to first contact.} The reverse-engineering server --- the only one this client had
-ever talked to --- declares no optional parameter with a typed default, so the same malformed argument
+\textbf{Why it survived to first contact.} The reverse-engineering server, the only one this client had
+ever talked to, declares no optional parameter with a typed default, so the same malformed argument
 dictionary happened to be acceptable there. A defect in shared client code was invisible because
 only one of the two servers it served had ever been exercised.
 
-\subsubsection{M2 --- A load that does not change what the server is looking at}\label{m2-a-load-that-does-not-change-what-the-server-is-looking-at}
+\subsubsection{M2. A load that does not change what the server is looking at}\label{m2-a-load-that-does-not-change-what-the-server-is-looking-at}
 
 \texttt{load\_program} imports a binary and answers \texttt{\{"success":\ true,\ "program":\ "\textless{}name\textgreater{}"\}}. Every caller
 read that as ``the server is now looking at this binary''. The server maintains a separate notion of
-the \textbf{current program}, and \texttt{load\_program} sets it only when nothing is current yet:
+the current program, and \texttt{load\_program} sets it only when nothing is current yet:
 
 \begin{verbatim}
 load A        -> {"success": true, "program": "A"}   current: A
@@ -49,14 +46,12 @@ run_analysis  -> {"program": "A", "new_functions": 0}
 call graph    -> A's graph, byte-identical, for every sample
 \end{verbatim}
 
-From the \textbf{second sample of a container's lifetime onwards}, everything derived --- decompilation,
-imports, strings, call graph, function hashes --- described the first binary while the report named
-the current one. The response even contained the correct program name, which is what made it
+From the second sample of a container's lifetime onwards, everything derived from it described the first binary while the report named the current one. That covered the decompilation, the imports, the strings, the call graph and the function hashes. The response even contained the correct program name, which is what made it
 convincing.
 
-\subsubsection{M3 --- A refusal wearing a success}\label{m3-a-refusal-wearing-a-success}
+\subsubsection{M3. A refusal wearing a success}\label{m3-a-refusal-wearing-a-success}
 
-The same server answers a load it cannot perform with \textbf{HTTP 200} and an error in the body:
+The same server answers a load it cannot perform with HTTP 200 and an error in the body:
 
 \begin{verbatim}
 {"error": "Failed to load program from: /data/samples/x.exe"}
@@ -64,15 +59,15 @@ The same server answers a load it cannot perform with \textbf{HTTP 200} and an e
 
 \texttt{raise\_for\_status()} sees nothing wrong. Downstream code then analysed and described whichever
 program remained current. When the server began refusing loads after roughly thirty in one
-lifetime, \textbf{\fact{stuck-graph-run} consecutive samples produced a call graph of exactly \fact{stuck-graph-chars} characters} before
+lifetime, \fact{stuck-graph-run} consecutive samples produced a call graph of exactly \fact{stuck-graph-chars} characters before
 anyone noticed.
 
-\subsubsection{M4 --- Two bounds composing into an empty result}\label{m4-two-bounds-composing-into-an-empty-result}
+\subsubsection{M4. Two bounds composing into an empty result}\label{m4-two-bounds-composing-into-an-empty-result}
 
 The analyst's ReAct loop has a \fact{react-step-budget}-step budget; exceeding it triggers a salvage that re-invokes the
-model to synthesise from what was gathered. That salvage received a \textbf{fresh copy of the full time
-budget} --- so loop-plus-salvage exceeded the hard cap by construction. On any binary rich enough to
-exhaust the step budget the analysis returned \textbf{zero techniques}, at a cost of
+model to synthesise from what was gathered. That salvage received a fresh copy of the full time
+budget, so loop-plus-salvage exceeded the hard cap by construction. On any binary rich enough to
+exhaust the step budget the analysis returned zero techniques, at a cost of
 \fact{m4-total-minutes} minutes:
 
 \begin{verbatim}
@@ -84,33 +79,33 @@ static no-tools fallback exceeded the 1530s hard cap
 Neither bound was wrong alone. Exceeding the first \emph{guarantees} an attempt at the second, and the
 composition was never considered.
 
-\subsubsection{The same mechanism at a fifth boundary --- caught before it produced data}\label{the-same-mechanism-at-a-fifth-boundary-caught-before-it-produced-data}
+\subsubsection{The same mechanism at a fifth boundary, caught before it produced data}\label{the-same-mechanism-at-a-fifth-boundary-caught-before-it-produced-data}
 
 M1--M4 were all found after the fact, in data already collected. The fifth was not, and the
 difference is the whole argument of this paper.
 
 Fetching the sandbox cohort's reports, we found that a request for a report the sandbox has since
-deleted is answered with \textbf{HTTP 200} and a \fact{deleted-report-body-bytes}-byte body:
+deleted is answered with HTTP 200 and a \fact{deleted-report-body-bytes}-byte body:
 
 \begin{verbatim}
 {"error":true,"error_value":"Reports directory does not exist"}
 \end{verbatim}
 
-Fifty-six of one hundred tasks answer this way --- the analyses ran, and their reports have aged out of
+Fifty-six of one hundred tasks answer this way; the analyses ran, and their reports have aged out of
 retention. A fetcher that trusted the status code would have written fifty-six of those bodies into
 the archive under the filename of the sample they were supposed to describe, and the three studies
 that read that archive would each have scored them.
 
 They did not, because the fetcher was written to verify the report's own \texttt{target.file.sha256} against
 the identifier it asked for before writing anything. That check exists only because M3 taught us the
-shape: an HTTP status is a statement about the transport, not about the answer. \textbf{This is the first
-time the discipline paid forward rather than backward}, and it cost four lines.
+shape. An HTTP status is a statement about the transport, not about the answer. This is the first
+time the discipline paid forward rather than backward, and it cost four lines.
 
-We first recorded the consequence as a retention limit: the reports had existed and expired. That
+We first recorded the consequence as a retention limit. The reports had existed and expired. That
 explanation was wrong, and finding out how wrong is the fifth failure in this list. Asking the
-sandbox how long each analysis had taken produced a split with nothing between the modes --- the \fact{audit-real}
+sandbox how long each analysis had taken produced a split with nothing between the modes. The \fact{audit-real}
 tasks whose reports survived ran \fact{audit-real-min}--\fact{audit-real-max} s, and the other
-\fact{audit-instant} ran \textbf{under a second}, all \fact{audit-reported-but-instant} of them
+\fact{audit-instant} ran under a second, all \fact{audit-reported-but-instant} of them
 still marked \texttt{reported}. A Windows PE does not detonate in one second. Nothing had expired; nothing
 had happened, and the instrument said otherwise.
 
@@ -119,47 +114,47 @@ analyses on the same instance, which recovers \fact{audit-recovered} of the \fac
 the cohort at \fact{baseline-n}. The remaining \fact{audit-lost} produced no report on either attempt,
 and none of them failed: all \fact{audit-lost-still-reporting-success} are \emph{still} marked
 \texttt{reported}, at zero seconds, with no report directory. They are absent from the cohort rather
-than lost --- their binaries are on disk and their task identifiers are in the ledger, so the only
+than lost; their binaries are on disk and their task identifiers are in the ledger, so the only
 thing between them and a report is another submission from the sandbox's network.
 
 The lesson generalises past this instrument. A completion status is a statement about a queue, not
 about an analysis, and it is exactly as trustworthy as an HTTP 200. The retrieval path now reads
-each task's wall-clock duration and refuses anything under \setting{60} s --- an order of magnitude below the
-shortest real analysis on this instance --- before it will accept a report. We would rather report a
+each task's wall-clock duration and refuses anything under \setting{60} s, an order of magnitude below the
+shortest real analysis on this instance, before it will accept a report. We would rather report a
 smaller honest n than a full one built on error bodies, and we would rather state the reason we
 verified than the one that first sounded plausible.
 
-\subsubsection{M5 --- An ablation that measured a code path and reported a language model}\label{m5-an-ablation-that-measured-a-code-path-and-reported-a-language-model}
+\subsubsection{M5. An ablation that measured a code path and reported a language model}\label{m5-an-ablation-that-measured-a-code-path-and-reported-a-language-model}
 
 The four above are failures of other people's servers. This one is ours, it is the most recent
 (2026-08-14), and it is the only one that reached a results table.
 
 We ablated the corroboration cascade by removing one evidence source at a time and comparing the
 STIX bundle the analyst receives. Under the condition where a removed source's techniques survive
-under a partner --- so that only their \emph{corroboration} changes --- the bundle was identical in
-every one of \textbf{\fact{cascade-overlap-arms}} arms, at Jaccard \fact{cascade-overlap-jaccard}. Under the
+under a partner, so that only their \emph{corroboration} changes, the bundle was identical in
+every one of \fact{cascade-overlap-arms} arms, at Jaccard \fact{cascade-overlap-jaccard}. Under the
 condition where the removed source solely owned its techniques,
-\textbf{\fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms}} changed. We wrote this up as a finding about the judge model: that it
+\fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms} changed. We wrote this up as a finding about the judge model. That it
 attends to the list of claimed techniques and ignores the evidence-quality apparatus above it.
 
 The judge was not involved. The reconciliation step reconciles the bundle against the cascade before
-it is returned: unresolvable attack-patterns are dropped, and \textbf{every cascade technique missing
-from the bundle is appended to it}. The cascade's technique set is therefore a guaranteed subset
+it is returned. Unresolvable attack-patterns are dropped, and every cascade technique missing
+from the bundle is appended to it. The cascade's technique set is therefore a guaranteed subset
 of every bundle the pipeline emits, whatever the model produced. Recomputing each arm's cascade set
-from the same seeded fixtures shows the bundle is \emph{exactly} that set in \textbf{\fact{judge-mechanism-arms} of \fact{judge-mechanism-arms}} arms, with the
-model contributing \textbf{zero} techniques to any of them.
+from the same seeded fixtures shows the bundle is \emph{exactly} that set in \fact{judge-mechanism-arms} of \fact{judge-mechanism-arms} arms, with the
+model contributing zero techniques to any of them.
 
 Both results then follow from set arithmetic. Removing a source with a duplicate partner does not
 change the cascade's set, so the bundle cannot change; removing a sole owner does, so it must. The
 two numbers we reported are necessities of an \texttt{if} statement, and the experiment could not have
 returned anything else.
 
-\textbf{The architectural conclusion survives the correction --- corroboration does not reach the analyst's
-artefact --- but the mechanism is not the one we described.} The model cannot subtract from the
+\textbf{The architectural conclusion survives the correction, corroboration does not reach the analyst's
+artefact, but the mechanism is not the one we described.} The model cannot subtract from the
 bundle's technique set and, across \fact{judge-mechanism-arms} arms, added nothing to it. Whether its output was unusable
 and wholly replaced, or happened to reproduce the cascade's set, this evidence cannot say; both
 leave the same trace, and separating them needs the pre-reconciliation output measured directly.
-What is certain is narrower and sufficient: the model has no influence over which techniques reach
+What is certain is narrower and sufficient. The model has no influence over which techniques reach
 the analyst. And a second study, already written and about to run,
 was designed to compare a weighted cascade against a flat union of the same claims. Both of its
 arms would have shared one reconciliation set, so it would have reported ``no difference'' after an
@@ -172,30 +167,30 @@ ablated arms, each compared against the unablated arm of its own fixture, at tem
 \fact{decode-temperature}. A language model does not agree with itself that exactly. We read a
 constant as an unusually clean null, because a clean null was the result we were prepared to find.
 
-\subsubsection{M6 --- A configuration difference wearing a parameter count}\label{m6-a-configuration-difference-wearing-a-parameter-count}
+\subsubsection{M6. A configuration difference wearing a parameter count}\label{m6-a-configuration-difference-wearing-a-parameter-count}
 
-The most recent (2026-08-14), and the only one whose wrong answer \textbf{agreed with the literature}.
+The most recent (2026-08-14), and the only one whose wrong answer agreed with the literature.
 
 We assembled a parameter-size series to test a published finding that parameter count is the only
 significant predictor of ATT\&CK-classification F1 ($\rho$=0.85 \preprintcite{ryan2026attck}). The harness read every completed arm
-file, ranked mean F1 against total parameters, and reported \textbf{$\rho$=\fact{superseded-rho}} --- reproducing the prior
+file, ranked mean F1 against total parameters, and reported $\rho$=\fact{superseded-rho}, reproducing the prior
 almost exactly, across a \fact{series-param-span}$\times$ span, with the confounds it could not remove printed honestly beneath.
 
 The five rows were three models. One model appeared twice because it had been run in two
 configurations, and another twice because it had been run twice. The duplicate configurations were
-not a labelling detail: the same weights score \textbf{\fact{arm-qwen35ba3b-nothink-f1}} with the reasoning stream disabled and
-\textbf{\fact{arm-qwen35ba3b-f1}} with it enabled, because \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls then spend their entire output budget reasoning
+not a labelling detail. The same weights score \fact{arm-qwen35ba3b-nothink-f1} with the reasoning stream disabled and
+\fact{arm-qwen35ba3b-f1} with it enabled, because \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls then spend their entire output budget reasoning
 and never answer. The \fact{arm-qwen35ba3b-f1} row sat at the small end of the parameter axis, where it set the sign
 of the correlation. What the series measured was a flag, ordered by coincidence against size.
 
 \textbf{The failure is not the duplicate rows; it is that the arm-selection rule did not exist.} The
-harness had careful arithmetic --- averaged ranks so file order cannot break ties, an exact
+harness had careful arithmetic, with averaged ranks so file order cannot break ties, an exact
 permutation p because four points cannot reach significance, a common-cell restriction so endpoint
-availability cannot masquerade as model size --- and every one of those guards was about a way the
+availability cannot masquerade as model size, and every one of those guards was about a way the
 \emph{numbers} could mislead. None was about whether the rows were comparable in the first place.
 
-The rule now keys on the \textbf{measured} reasoning share of each arm rather than the flag the harness
-requested, because those two disagree: one provider accepts the parameter and ignores it, so an arm
+The rule now keys on the measured reasoning share of each arm rather than the flag the harness
+requested, because those two disagree. One provider accepts the parameter and ignores it, so an arm
 selected on intent would enter the series labelled matched while running the opposite
 configuration. With the rule applied, two arms qualify and both are 35B, so the series refuses and
 says which arm was excluded and at what measured reasoning share. Nine unit tests pin the rule.
@@ -204,12 +199,12 @@ says which arm was excluded and at what measured reasoning share. Nine unit test
 too clean to believe; this one produced a number in exactly the range a reader would expect, in the
 direction the literature predicts, with its limitations already stated. There was nothing anomalous
 to notice. It was caught by reading the arms table under the correlation and asking why one model
-was on it twice --- which is a question no result, however wrong, would have prompted.
+was on it twice, which is a question no result, however wrong, would have prompted.
 
 \textbf{And the phenomenon is not ours.} Sun et al.~\cite{sun2025length} show that under a strict
-output-length constraint the ordering of models by capability \emph{does not hold}: inside a
+output-length constraint the ordering of models by capability \emph{does not hold}. Inside a
 constrained budget window a smaller model can match or beat a larger one, with the ordinary ordering
-restored once the budget relaxes. They state the same for reasoning modes specifically: under the
+restored once the budget relaxes. They state the same for reasoning modes specifically. Under the
 same constraint, reasoning models do not always beat instruction-tuned ones.
 Our reasoning flag consumes the answer budget, which makes the disabled arm a brevity-constrained
 arm under a different name, so M6 is a domain instance of that finding rather than a new phenomenon.
@@ -217,28 +212,27 @@ We claim the local form of the result and not a global reversal, because the loc
 reviewed literature carries.
 
 What we would add is narrower and sits in the remedy rather than the phenomenon: their protocol is
-adapted per model, ours has to be \textbf{verified per arm}, because matching on the requested
+adapted per model, ours has to be verified per arm, because matching on the requested
 configuration is not sufficient when a provider accepts the parameter and does not act on it
-(§3.32). An arm can be labelled matched and be running the opposite setting. The rule that follows ---
-select on the \emph{measured} reasoning share, never on the flag --- is what the gate implements.
+(Section~3.32). An arm can be labelled matched and be running the opposite setting. The rule that follows is to select on the \emph{measured} reasoning share and never on the flag, and that is what the gate implements.
 
-\subsubsection{M7 --- A safety property that was configured, documented, and never sent}\label{m7-a-safety-property-that-was-configured-documented-and-never-sent}
+\subsubsection{M7. A safety property that was configured, documented, and never sent}\label{m7-a-safety-property-that-was-configured-documented-and-never-sent}
 
 The last one is in the production pipeline rather than in an evaluation harness, and it removed a
 guarantee the code states in its own comment.
 
 The judge is built with an \fact{judge-output-cap}-token output ceiling, and the line that builds it says
-why: \emph{``Bound the verdict generation so a degenerate decode can't consume the full wall-clock
+why; \emph{``Bound the verdict generation so a degenerate decode can't consume the full wall-clock
 timeout.''} The client library renames that parameter to the API vendor's newer spelling when it
 serialises the request, and our local inference server does not read the newer spelling. It
 accepted the field, ignored it, and decoded without a ceiling.
 
-Measured on one call: a \fact{unbounded-decode-prompt-tokens}-token prompt, \textbf{\fact{unbounded-decode-tokens} tokens generated}, still generating at \fact{unbounded-decode-rate}
+Measured on one call: a \fact{unbounded-decode-prompt-tokens}-token prompt, \fact{unbounded-decode-tokens} tokens generated, still generating at \fact{unbounded-decode-rate}
 tokens per second when the caller's ten-minute wrapper gave up. The only thing that ever stopped a
 verdict was wall-clock.
 
 The consequence is not a slow call. Four of eight fixtures in a separate study never returned a
-verdict at all, and for each of them the pipeline emitted a bundle through its text-fallback path ---
+verdict at all, and for each of them the pipeline emitted a bundle through its text-fallback path,
 which does not run the reconciliation step, so the corroboration cascade contributed nothing and
 the analyst received techniques copied straight from the raw evidence claims. A component we
 describe as bounded was unbounded, and its failure mode was to hand the analyst a differently-built
@@ -249,8 +243,8 @@ object held it. It survived every later rebinding intact. Only the serialised re
 and nothing in the system reads the serialised request. Every check anyone would think to perform
 would have confirmed the property that did not hold.
 
-\textbf{What found it.} Not a test and not a review. A study measuring something else --- what the verdict
-model contributes to the bundle --- recorded \emph{which branch} each failed call took rather than only
+\textbf{What found it.} Not a test and not a review. A study measuring something else, what the verdict
+model contributes to the bundle, recorded \emph{which branch} each failed call took rather than only
 that it failed. Four calls named the timeout branch, which prompted the question of why a
 temperature-zero model would need ten minutes, which led to the server's own log and a token
 counter that had passed thirty thousand. The instrumentation that caught it was written for a
@@ -261,67 +255,54 @@ OpenAI-compatible servers disagree about token-limit parameters is documented in
 trackers. \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634} reports that ``the limit is respected when requesting a chat
 completion, but for non-chat ones, the model keeps generating tokens forever (until ctx-len is
 reached)''; it has been open since July 2024. \texttt{vLLM} \#11976 \preprintcite{vllm11976} asked for a server-side cap
-because the default is the whole remaining context, and \textbf{was completed in February 2025} ---
+because the default is the whole remaining context, and was completed in February 2025,
 so one of the two servers has since closed the gap, and we say so rather than leaving the
 impression that both remain open. We are not reporting a new integration wart. We are reporting
-what one costs inside a measurement: a documented safety property silently absent for as long as it
+what one costs inside a measurement. A documented safety property silently absent for as long as it
 has existed, and half of a study's calls diverted onto a bundle-construction path that skips the
 corroboration cascade entirely.
 
 \subsection{Why the test suite did not help}\label{why-the-test-suite-did-not-help}
 
-\textbf{\fact{test-count} tests passed throughout.} This is not a gap in test quality but in test \emph{shape}:
+\fact{test-count} tests passed throughout. This is not a gap in test quality but in test \emph{shape}.
 
-\begin{itemize}
-\item
-  M2 and M3 require a \textbf{second} case within one server lifetime. A unit test loads one program,
-  asserts, and tears down. The state that goes wrong is created by the second call and cannot exist
-  in a single-call test.
-\item
-  M1 required a second \emph{server}. The behaviour was correct against the only server exercised.
-\item
-  M4 required a rich enough \textbf{input} --- the composition only appears when the step budget is
-exhausted, which small fixtures never do.
-\item
-  M5 was \textbf{tested and passing}. \texttt{\_reconcile\_with\_cascade} has unit tests, and they assert exactly
-  what it does: unresolvable patterns are dropped, missing cascade techniques are added. The
-  function was never wrong. What was wrong was an experiment that varied the cascade's input and
-  attributed the output to a model downstream of it --- and no test of a component can catch a
-  misattribution made three modules away.
-\item
-  M6 was \textbf{tested more carefully than anything else in the harness, and the tests were about the
-  wrong question.} The series arithmetic had a test file of its own: averaged ranks so file order
-  cannot break ties, an exact permutation p because four points cannot reach significance, a
-  common-cell restriction so endpoint availability cannot pass for model size. Every test asserted
-  something true. None asked whether the rows entering the correlation were comparable, because the
-  answer had been assumed at the point where the arms were assembled rather than decided anywhere a
-  test could see it.
-\item
-  M7 had \textbf{nothing left to assert on}. A unit test would build the model and check that its output
-  ceiling is \fact{judge-output-cap} --- and it is, at every level the object model exposes. The defect existed only in
-  the serialised request, which no test in this suite inspects and which no application code reads.
-  Testing the property as the system represents it confirms exactly the thing that is not true.
-\end{itemize}
+M2 and M3 require a second case within one server lifetime, and a unit test loads one program,
+asserts, and tears down; the state that goes wrong is created by the second call and cannot exist in
+a single-call test. M1 required a second \emph{server}, and the behaviour was correct against the
+only server exercised. M4 required a rich enough input, since the composition only appears when the
+step budget is exhausted, which small fixtures never do.
 
-Four preconditions --- a second call, a second server, a large input --- are exactly what a fast unit
-suite is designed to avoid. The last three are worse: \textbf{M5, M6 and M7 are invisible to unit testing
-in principle}, because every unit involved behaved as specified. Their common shape is that the
-defect lived in the \emph{composition} --- which measurement was attributed to which cause, or which
-representation of a value
-crosses the boundary --- and a test that pins a function's
-behaviour cannot reach an assumption made when its inputs were chosen or when its output was
+The last three failed differently. M5 was tested and passing. \texttt{\_reconcile\_with\_cascade} has
+unit tests and they assert exactly what it does, that unresolvable patterns are dropped and missing
+cascade techniques are added. The function was never wrong. What was wrong was an experiment that
+varied the cascade's input and attributed the output to a model downstream of it, and no test of a
+component can catch a misattribution made three modules away. M6 was tested more carefully than
+anything else in the harness, and the tests were about the wrong question. The series arithmetic had
+a test file of its own, with averaged ranks so file order cannot break ties, an exact permutation p
+because four points cannot reach significance, and a common-cell restriction so endpoint
+availability cannot pass for model size. Every test asserted something true. None asked whether the
+rows entering the correlation were comparable, because the answer had been assumed at the point
+where the arms were assembled rather than decided anywhere a test could see it. M7 had nothing left
+to assert on. A unit test would build the model and check that its output ceiling is
+\fact{judge-output-cap}, and it is, at every level the object model exposes. The defect existed only
+in the serialised request, which no test in this suite inspects and which no application code reads,
+so testing the property as the system represents it confirms exactly the thing that is not true.
+
+Four preconditions, a second call, a second server, a large input, are exactly what a fast unit
+suite is designed to avoid. The last three are worse: M5, M6 and M7 are invisible to unit testing
+in principle, because every unit involved behaved as specified. Their common shape is that the defect lived in the \emph{composition}, in which measurement was attributed to which cause, or in which representation of a value crosses the boundary. A test that pins a function's behaviour cannot reach an assumption made when its inputs were chosen or when its output was
 serialised.
 
 \subsection{What did find them: output cardinality}\label{what-did-find-them-output-cardinality}
 
-Five of the seven were found by the same observation: \textbf{a number that repeated where variation was
-expected.} M6 and M7 were not, and §6.2 says what did find them --- their outputs vary, so there is
+Five of the seven were found by the same observation. A number that repeated where variation was
+expected. M6 and M7 were not, and Section~6.2 says what did find them; their outputs vary, so there is
 no repetition to notice.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}@{}}
-\caption{What the output-cardinality check saw and which defect each observation turned out to be. Every row is a number repeated where variation was expected.}\label{tab:detector}\\
+\caption{What the output-cardinality check saw and which defect each observation turned out to be.}\label{tab:detector}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 observation
@@ -348,34 +329,42 @@ a \fact{m4-salvage-minutes}-minute call that always produced one claim and zero 
 a Jaccard of \textbf{\fact{cascade-overlap-jaccard} with a zero-width interval} across \fact{cascade-overlap-pairs} ablated arms at temperature \fact{decode-temperature} & M5 \\
 \end{longtable}
 
+Every row is a number repeated where variation was expected.
+
+
 M5 extends the detector in a direction that matters, because it is where the idea is least
-comfortable: the repeated number was \textbf{our own result}, not a server's response, and the variation
+comfortable: the repeated number was our own result, not a server's response, and the variation
 that failed to appear was the model's. A perfect agreement is the same signal as an identical
 digest, and it deserves the same suspicion.
 
-The generalisation is one line of arithmetic: \textbf{before trusting a batch measurement, ask how many
-distinct outputs the N inputs produced.} If far fewer than N differ on a dimension that should
-vary --- output length, digest, element count --- the instrument is repeating itself, and repetition is
+The generalisation is one line of arithmetic. Before trusting a batch measurement, ask how many
+distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should vary, such as output length, digest or element count, the instrument is repeating itself, and repetition is
 what stale state looks like from outside. It needs no ground truth and no oracle, which is what
 makes it usable exactly where correctness is hard to check.
 
 \begin{figure}
 \centering
-\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 4: The whole detector, drawn. Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while a stuck one goes flat --- no ground truth required, because the diagnosis is in the shape. The left panel is measured, its staircase's flat treads being genuinely identical binaries rather than a fault.}]{figures/fig1-output-cardinality.pdf}}
-\caption{\textbf{The whole detector, drawn.} Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while a stuck one goes flat --- no ground truth required, because the diagnosis is in the shape. Left is measured: \fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples} samples, the staircase's flat treads being genuinely identical binaries rather than a fault.}
+\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 4: the whole detector, drawn. Panel a) is a measured run, panel b) a schematic of a stuck instrument.}]{figures/fig1-output-cardinality.pdf}}
+\caption{The whole detector, drawn. a) a measured run, b) a schematic of a stuck instrument.}
 \end{figure}
 
-\textbf{The right panel is a schematic, and the reason is the argument of §6.4.} It depicts M3 --- the run
-in which \fact{stuck-graph-run} consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph --- and we cannot
+Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while
+a stuck one goes flat. No ground truth is required, because the diagnosis is in the shape. Panel a)
+is measured, at \fact{cardinality-distinct-graphs} distinct call-graph sizes across
+\fact{cardinality-samples} samples, its staircase's flat treads being genuinely identical
+binaries rather than a fault.
+
+\textbf{Panel b) is a schematic, and the reason is the argument of Section~6.4.} It depicts M3, the run
+in which \fact{stuck-graph-run} consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph, and we cannot
 plot it, because that run predates the per-sample retention policy those very failures caused us to
 adopt. The curve this paper turns on is the one we are unable to draw.
 
-We now report it beside every batch result: \fact{cardinality-distinct-graphs} distinct call-graph
+We now report it beside every batch result; \fact{cardinality-distinct-graphs} distinct call-graph
 sizes across \fact{cardinality-samples} samples.
 
 \textbf{This is a refinement, not a discovery, and we checked before saying otherwise.} ``Distinct inputs
 should produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}; metamorphic testing
-exists precisely for programs whose correct output is unknown --- the \emph{``notorious oracle problem''}
+exists precisely for programs whose correct output is unknown, the \emph{``notorious oracle problem''}
 its own survey names. Stress-testing an LLM judge's consistency under input variation is likewise
 established practice \cite{dev2026judge}. And
 the genus is described, in systems work older than this field. Alquraan et
@@ -385,65 +374,51 @@ for resolution''; Yuan et al.~\cite{yuan2014simple} count a handler that only lo
 error, and attribute a quarter of catastrophic failures to exactly that; Gunawi et
 al.~\cite{gunawi2008eio} measure where the signal is lost, at calls between modules. Bug taxonomies
 for LLM agent frameworks and inference engines now report the same shape
-\cite{xue2025agentbugs,liu2026inference}. All four of our \textbf{boundary} mechanisms fall inside it. M5, M6 and M7 share
-the meta-pattern but not the setting: no server misled us, and no protocol was involved. Two arose
+\cite{xue2025agentbugs,liu2026inference}. All four of our boundary mechanisms fall inside it. M5, M6 and M7 share
+the meta-pattern but not the setting. No server misled us, and no protocol was involved. Two arose
 inside our own analysis code and one inside the production pipeline, and in all three the
-taxonomy's classes --- every one of which describes a call to something else --- do not reach.
+taxonomy's classes, every one of which describes a call to something else, do not reach.
 
 \subsection{What it cost}\label{what-it-cost}
 
 A completed study is withdrawn from this paper.
 
 A seven-year, \fact{drift-n}-sample temporal-drift analysis ran the full pipeline per sample against a
-long-lived server that was never restarted between samples --- M2's precondition exactly. Whether it
-was affected \textbf{cannot be determined}, because its per-sample outputs were not retained. The result
+long-lived server that was never restarted between samples, M2's precondition exactly. Whether it
+was affected cannot be determined, because its per-sample outputs were not retained. The result
 had passed review, entered the claim ledger as novel, and was cited internally for weeks.
 
-Two policies follow, and both are cheap:
+Two policies follow, and both are cheap.
 
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  \textbf{Retain per-sample outputs for every study.} The withdrawal is not caused by the defect; it is
-  caused by the defect \emph{plus} the inability to re-ask the question afterwards. Aggregates cannot be
-  re-interrogated.
-\item
-  \textbf{Restart the shared server between samples.} In our sweeps this recovered \fact{switch-recovered} of \fact{switch-attempted} samples
-  previously recorded as unmeasurable --- the failures belonged to the \emph{state they inherited}, not to
-  the samples. Fresh state per sample removes a whole class of the failures above.
-\end{enumerate}
+The first is to retain per-sample outputs for every study. The withdrawal is not caused by the
+defect; it is caused by the defect \emph{plus} the inability to re-ask the question afterwards, and
+aggregates cannot be re-interrogated. The second is to restart the shared server between samples. In
+our sweeps this recovered \fact{switch-recovered} of \fact{switch-attempted} samples previously
+recorded as unmeasurable; the failures belonged to the \emph{state they inherited}, not to the
+samples, and fresh state per sample removes a whole class of the failures above.
 
 \subsection{The claim we are making}\label{the-claim-we-are-making}
 
-Not that silent failures exist at tool boundaries --- that is documented. Ours is narrower:
+Not that silent failures exist at tool boundaries, that is documented. Ours is narrower.
 
-\begin{itemize}
-\tightlist
-\item
-  three mechanisms at three \textbf{distinct} integration boundaries (argument encoding, server-side
-  session state, HTTP status versus body), plus one from \textbf{composing} two local safety bounds;
-\item
-  the setting --- an \textbf{evaluation pipeline for security research}, where the artefact is not a
-  degraded user session but a \textbf{measurement that is wrong and looks right}, and where the failure
-  therefore propagates into a published claim rather than into a support ticket;
-\item
-  a detector reported \textbf{alongside results} rather than run as a test, because the failure appears in
-  the batch and not in any single call;
-\item
-  two further failures (M5, M6) with \textbf{no server involved at all} --- an ablation that varied a
-  deterministic code path and reported a language model, and a correlation that ranked a
-  configuration flag and reported a parameter count. Both had passing unit tests over the exact
-  functions concerned. They extend the claim from ``other people's servers can mislead you'' to \emph{the
-  same shape occurs wherever a measurement's cause is assigned rather than measured};
-\item
-  and one (M7) in the \textbf{production pipeline}, where a documented safety property --- a bounded
-  verdict generation --- was configured correctly at every level the code can inspect and removed
-  entirely by a parameter rename during serialisation. It is the case that shows the shape is not
-  peculiar to evaluation: the artefact the analyst receives was affected, not a number in a table;
-\item
-  and a demonstrated price rather than a hypothesised one.
-\end{itemize}
+We report three mechanisms at three distinct integration boundaries, in argument encoding,
+server-side session state, and HTTP status versus body, plus one from composing two local safety
+bounds. We report the setting, an evaluation pipeline for security research, where the artefact is
+not a degraded user session but a measurement that is wrong and looks right, and where the failure
+therefore propagates into a published claim rather than into a support ticket. We report a detector
+run alongside results rather than as a test, because the failure appears in the batch and not in any
+single call.
+
+Two further failures, M5 and M6, had no server involved at all, an ablation that varied a
+deterministic code path and reported a language model, and a correlation that ranked a configuration
+flag and reported a parameter count. Both had passing unit tests over the exact functions concerned.
+They extend the claim from ``other people's servers can mislead you'' to \emph{the same shape occurs
+wherever a measurement's cause is assigned rather than measured}. One more, M7, is in the production
+pipeline, where a documented safety property, a bounded verdict generation, was configured correctly
+at every level the code can inspect and removed entirely by a parameter rename during serialisation.
+It is the case that shows the shape is not peculiar to evaluation, because the artefact the analyst
+receives was affected rather than a number in a table. And the price is demonstrated rather than
+hypothesised.
 
 In a pipeline assembled from other people's servers, the correctness of the model is not the binding
 constraint on the correctness of the result. \textbf{A server that answers is not the same as a server

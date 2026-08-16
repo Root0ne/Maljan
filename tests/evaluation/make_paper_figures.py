@@ -106,6 +106,28 @@ def bootstrap_ci(
     return (interval.lo, interval.hi)
 
 
+def panel_labels(*axes, y: float = -0.30):
+    """Stamp a), b), ... under each panel of a multi-panel figure.
+
+    House style names panels in the caption, so the panels have to carry the
+    names. Putting them in the image rather than in LaTeX keeps the label with
+    the plot in the PNG, in the alt text's description, and anywhere the figure
+    is reused outside the paper. Placed below the axes so nothing is drawn over
+    the data.
+    """
+    for ax, letter in zip(axes, "abcdefgh", strict=False):
+        ax.text(
+            0.0,
+            y,
+            f"{letter})",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            color=INK,
+        )
+
+
 def save(fig, stem: str):
     OUT.mkdir(parents=True, exist_ok=True)
     for ext in ("pdf", "png"):
@@ -173,7 +195,7 @@ def fig_cardinality():
     ax2.text(
         0.5,
         -0.30,
-        "drawn, not measured — that run predates per-sample retention,\n"
+        "drawn, not measured; that run predates per-sample retention,\n"
         "which is why its sizes cannot be plotted here",
         transform=ax2.transAxes,
         ha="center",
@@ -183,6 +205,7 @@ def fig_cardinality():
         style="italic",
     )
 
+    panel_labels(ax, ax2, y=-0.48)
     save(fig, "fig1-output-cardinality")
 
 
@@ -247,6 +270,7 @@ def fig_confidence():
         ax2.text(f"{v:g}", c + max(counts) * 0.015, str(int(c)), ha="center", fontsize=7, color=INK)
     ax2.set_ylim(0, max(counts) * 1.15)
 
+    panel_labels(ax, ax2)
     save(fig, "fig2-confidence-discrimination")
     return auc
 
@@ -335,7 +359,7 @@ def fig_arms():
         left,
         fixture_entries,
         (0.20, 0.72),
-        "5 synthesised fixtures — no baseline is definable",
+        "5 synthesised fixtures, no baseline is definable",
     )
     draw(
         right,
@@ -344,9 +368,10 @@ def fig_arms():
             for label, blob, colour in real_entries
         ],
         (0.02, 0.26),
-        f"{h2h['n']} real samples, {h2h['k']} families — one population",
+        f"{h2h['n']} real samples, {h2h['k']} families, one population",
     )
     fig.tight_layout()
+    panel_labels(left, right)
     save(fig, "fig3-arms-against-baseline")
 
 

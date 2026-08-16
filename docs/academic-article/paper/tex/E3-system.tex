@@ -11,7 +11,7 @@ a deterministic layer adjudicates between them.
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{The pipeline's components and what each contributes, as built. Whether each contributes anything measurable is the subject of Section~\\ref{sec:results}.}\label{tab:system}\\
+\caption{The pipeline's components and what each contributes, as built.}\label{tab:system}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 component
@@ -34,7 +34,7 @@ verdict
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\textbf{static analyst} & ReAct loop over a headless reverse-engineering server (decompilation, imports, strings, call graph), \fact{static-curated-functions} tools from a curated allowlist & operational; its salvage path was defective (§6) \\
+\textbf{static analyst} & ReAct loop over a headless reverse-engineering server (decompilation, imports, strings, call graph), \fact{static-curated-functions} tools from a curated allowlist & operational; its salvage path was defective (Section~6) \\
 \textbf{dynamic analyst} & ReAct loop over a CAPEv2 sandbox via MCP & operational; only Windows PE is analysable on our instance \\
 \textbf{network analyst} & local PCAP analysis over the sandbox's capture & operational; depends on the sandbox indirectly \\
 \textbf{judge} & synthesises a verdict and emits STIX & operational \\
@@ -46,23 +46,26 @@ verdict
 \textbf{sink-reachability hint} & ranks functions reachable to sensitive APIs, injected as prompt steering & \textbf{fires on \fact{hint-rate}}; measured: \textbf{$\Delta$techniqueIDs \fact{sink-delta-tids}, CI \fact{sink-ci-tids}} \\
 \end{longtable}
 
+Whether each contributes anything measurable is the subject of Section~\\ref{sec:results}.
+
+
 Two design choices matter here because they are \emph{not} what failed, and a reader should not
 infer that everything did.
 
 \textbf{Tool exposure is not tool availability.} The reverse-engineering server advertises \textasciitilde165 tools.
-Exposing the full catalogue to a 3B-active-parameter MoE is infeasible --- the model's tool selection
-degrades before the context does --- so the analyst is given a curated \fact{static-curated-functions}. This is a deliberate
+Exposing the full catalogue to a 3B-active-parameter MoE is infeasible, the model's tool selection
+degrades before the context does, so the analyst is given a curated \fact{static-curated-functions}. This is a deliberate
 narrowing with a measurement behind it, and it held.
 
 \textbf{The pipeline degrades rather than fails when a service is absent.} With the sandbox unreachable
 the dynamic path is skipped and the run completes on static evidence, which is pinned by a test. This
-mattered during the study: the sandbox was reachable only from one network, and every static-only
+mattered during the study. The sandbox was reachable only from one network, and every static-only
 result in this paper was produced by that degradation working as designed.
 
 \subsection{What runs it}\label{what-runs-it}
 
-One local model --- Qwen3.6-35B-A3B at IQ3\_K\_R4, served by ik\_llama.cpp on a single RTX 5060 host with
-hybrid MoE offload --- plus a headless reverse-engineering container, a Qdrant vector store, and a
+The system runs one local model,  Qwen3.6-35B-A3B at IQ3\_K\_R4, served by ik\_llama.cpp on a single RTX 5060 host with
+hybrid MoE offload . Alongside it run a headless reverse-engineering container, a Qdrant vector store, and a
 CAPEv2 sandbox on a separate machine. Exact identifiers are in the reproducibility appendix, and
 their limits are not incidental: the model server's memory grows with cumulative requests, generation
 rate varies eightfold with context length on this architecture, and the sandbox retains its reports
@@ -70,10 +73,10 @@ for days. Each of those shaped an experiment reported here.
 
 \subsection{Why the system is not the contribution}\label{why-the-system-is-not-the-contribution}
 
-Of the four claims the architecture was built around --- multi-agent consensus over heterogeneous
+The architecture was built around four claims. They are multi-agent consensus over heterogeneous
 channels, a multi-layer corroboration cascade, two-tier attribution, and falsification-before-
-confidence --- \textbf{all four are now measured, and every one is negative or near-null.} The last of
-them no longer awaits sandbox access: the cascade was closed on the recovered cohort, and the
+confidence. \textbf{All four are now measured, and every one is negative or near-null.} The last of
+them no longer awaits sandbox access. The cascade was closed on the recovered cohort, and the
 attribution tier's remaining half was measured at \fact{hash-fired} of \fact{hash-total} samples. The components are not broken;
 three work well in isolation and were built for sound reasons. They simply do not move the
 end-to-end result, and we could not have known that without measuring each mechanism's firing rate

@@ -14,16 +14,15 @@ paper's main methodological point.
 
 \textbf{One study is withdrawn.} A seven-year, \fact{drift-n}-sample temporal-drift analysis was completed, entered
 our claim ledger as a novel result, and is now retracted. It drove the full pipeline per sample
-against a long-lived Ghidra server that was never restarted between samples --- which is precisely the
+against a long-lived Ghidra server that was never restarted between samples, which is precisely the
 precondition for a defect we later found, in which a loaded program never becomes the server's
-\emph{current} program, so every sample after the first is described using the \textbf{first sample's binary}
-(§3.14). Whether that run was affected cannot be determined: its per-sample outputs were not
-retained. The result is therefore not restated anywhere in this paper, and the axis it measured ---
-input-era drift, as distinct from train/test temporal misalignment --- is presented as an open
+\emph{current} program, so every sample after the first is described using the first sample's binary
+(Section~3.14). Whether that run was affected cannot be determined. Its per-sample outputs were not
+retained. The result is therefore not restated anywhere in this paper, and the axis it measured, input-era drift, as distinct from train/test temporal misalignment, is presented as an open
 question with a corrected instrument required before any bound is claimed.
 
-Three defects of this kind were found in a single day, all sharing one shape: \textbf{a plausible wrong
-answer with no error anywhere.}
+Three defects of this kind were found in a single day, all sharing one shape. A plausible wrong
+answer with no error anywhere.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
@@ -55,12 +54,12 @@ what it silently produced
 \textbf{M3} & a refused load answers \textbf{HTTP 200} with an error body & hints and function hashes built from a different binary \\
 \end{longtable}
 
-None was caught by a test suite of \textbf{\fact{test-count} passing tests} --- not by accident: M2 and M3 require a
+None was caught by a test suite of \fact{test-count} passing tests, not by accident. M2 and M3 require a
 \emph{second} case within one server lifetime, and a unit test writes one. A fourth defect, found later
-in the same week, made the analyst return \textbf{zero techniques on any binary rich enough to exhaust its
-step budget}, because two protective bounds composed: exceeding the step cap triggers a synthesis
+in the same week, made the analyst return zero techniques on any binary rich enough to exhaust its
+step budget, because two protective bounds composed. Exceeding the step cap triggers a synthesis
 call that received a \emph{fresh} copy of the full time budget, so loop-plus-synthesis overran the hard
-cap by construction (§3.15).
+cap by construction (Section~3.15).
 
 \textbf{Three further defects were found later, and none of them involved a server.} An ablation varied a
 deterministic reconciliation step and we attributed its output to a language model; a rank
@@ -68,93 +67,86 @@ correlation over model size ranked a reasoning-configuration flag instead and re
 published scaling coefficient almost exactly; and the judge's documented \fact{judge-output-cap}-token output
 ceiling was renamed by our client library during serialisation to a key the inference server does
 not read, so a component described as bounded had never once been bounded. These three had passing
-unit tests over the exact functions concerned, which the four above did not --- the defect was never
+unit tests over the exact functions concerned, which the four above did not; the defect was never
 in a function, but in which measurement was attributed to which cause, or in which representation
-of a value crossed a boundary. §6 reports all seven with the layer each occurred at.
+of a value crossed a boundary. Section~6 reports all seven with the layer each occurred at.
 
 We report these because we believe the interesting threat to an LLM-plus-tooling pipeline is not
-that the model is wrong. It is that \textbf{the instrument answers a different question than the one asked,
-convincingly.}
+that the model is wrong. It is that the instrument answers a different question than the one asked,
+convincingly.
 
 \subsection{The nine pitfalls}\label{the-nine-pitfalls}
 
-\textbf{P1 Data poisoning --- \texttt{CLEAR}.} Nothing is trained. Retrieval corpora are curated and their
+\textbf{P1 Data poisoning.} \texttt{CLEAR}. Nothing is trained. Retrieval corpora are curated and their
 provenance is documented.
 
-\textbf{P2 Label inaccuracy --- \texttt{CLEAR}.} Ground truth is MITRE-curated, and \textbf{no LLM scored any result in
-this work.} This was a standing constraint, not an outcome: an internal readability assessment was
+\textbf{P2 Label inaccuracy.} \texttt{CLEAR}. Ground truth is MITRE-curated, and no LLM scored any result in
+this work. This was a standing constraint, not an outcome. An internal readability assessment was
 performed with an LLM as a development aid and is deliberately excluded from this paper, so that the
-absence of LLM-as-a-judge scoring remains unqualified. A consequence is stated under E.7: no human
+absence of LLM-as-a-judge scoring remains unqualified. A consequence is stated under E.7. No human
 analyst rated any report either.
 
-\textbf{P3 Data leakage --- \texttt{PARTIAL}.} One instance was found by us, disclosed and mitigated. It was never
-systematically audited, and the pitfall's own recommendation applies: \textbf{the model's training data is
-unknown to us and memorisation was not probed.} We acknowledge this rather than argue around it.
+\textbf{P3 Data leakage.} \texttt{PARTIAL}. One instance was found by us, disclosed and mitigated. It was never
+systematically audited, and the pitfall's own recommendation applies. The model's training data is
+unknown to us and memorisation was not probed. We acknowledge this rather than argue around it.
 
-\textbf{P4 Model collapse --- \texttt{CLEAR}.} Augmenting the long-term memory corpus with LLM-generated cases was
+\textbf{P4 Model collapse.} \texttt{CLEAR}. Augmenting the long-term memory corpus with LLM-generated cases was
 considered and refused, with a cited rationale.
 
-\textbf{P5 Spurious correlations --- \texttt{PARTIAL}.} Two were found and are reported. No systematic perturbation
+\textbf{P5 Spurious correlations.} \texttt{PARTIAL}. Two were found and are reported. No systematic perturbation
 testing was performed.
 
-\textbf{P6 Context truncation --- \texttt{EXPOSED}.} Truncation is designed-in throughout --- chunking at function
+\textbf{P6 Context truncation.} \texttt{EXPOSED}. Truncation is designed-in throughout, through chunking at function
 boundaries, a per-call evidence cap, a \fact{react-step-budget}-step ReAct budget, an \fact{judge-output-cap}-token verdict cap, a \setting{400}-char
-hint cap --- and the counters now exist to report frequency, with pass-throughs counted so the rate has
-a correct denominator. What we cannot yet report is the distribution over a full cohort. Two specific
-findings belong here:
+hint cap, and the counters now exist to report frequency, with pass-throughs counted so the rate has
+a correct denominator. What we cannot yet report is the distribution over a full cohort. Two
+specific findings belong here. The first is that the enumeration of truncation sites was itself
+incomplete. A \fact{graph-edge-cap}-edge cap on the call-graph fetch was discovered only while
+instrumenting a different measurement, and it silently truncates \fact{graph-edge-cap-hit} of
+\fact{hint-total} samples, as Section~3.15 records, so we describe how our list was built rather
+than presenting it as exhaustive. The second is that bounds compose. Exceeding the step cap
+guarantees an attempt at the time cap, and on rich binaries that attempt could not finish, two
+limits producing an empty result between them. That is Section~1.7.1's shape in a new place, where
+removing a hint made the judge overrun a \setting{600} s ceiling and return an empty bundle
+\fact{empty-bundles-local}/\fact{empty-bundles-pairs} times.
 
-\begin{itemize}
-\tightlist
-\item
-  The enumeration of truncation sites was \textbf{itself incomplete}. A \fact{graph-edge-cap}-edge cap on the
-  call-graph fetch was discovered only while instrumenting a different measurement, and it silently
-  truncates \fact{graph-edge-cap-hit} of \fact{hint-total} samples (§3.15). We therefore describe how our list was built rather than presenting it as
-  exhaustive.
-\item
-  Bounds \textbf{compose}. Exceeding the step cap guarantees an attempt at the time cap, and on rich
-  binaries that attempt could not finish --- two limits producing an empty result between them. This
-  is §1.7.1's shape in a new place: there, removing a hint made the judge overrun a \setting{600} s
-  ceiling and return an empty bundle \fact{empty-bundles-local}/\fact{empty-bundles-pairs} times.
-\end{itemize}
-
-\textbf{P7 Prompt sensitivity --- \texttt{PARTIAL}.} A structured prompt-variation study exists. Production prompts
+\textbf{P7 Prompt sensitivity.} \texttt{PARTIAL}. A structured prompt-variation study exists. Production prompts
 are fixed and were not varied per model. Related: our own instrument-validity failure, in which a
 single-run parsed-claim count ranked the same arms differently at different decoding budgets, is
 prompt sensitivity surfacing as measurement error.
 
-\textbf{P8 Surrogate fallacy --- \texttt{PARTIAL}, on evidence.} Every local result comes from \textbf{one model on one
-machine}: Qwen3.6-35B-A3B at IQ3\_K\_R4, ik\_llama.cpp, single host. Four claims were rescoped to that
-exact identifier. A second endpoint has now run to completion --- a 120B reasoning model on the same
-fixtures, repeats, prompt and token budget --- and \textbf{did not separate from the local model}: paired
-\textbf{$\Delta$F1 \fact{frontier-local-delta}, 95\% cluster CI \fact{frontier-local-ci}},
+\textbf{P8 Surrogate fallacy.} \texttt{PARTIAL}, on evidence. Every local result comes from one model on one
+machine: Qwen3.6-35B-A3B at IQ3\_K\_R4, ik\_llama.cpp, single host. Four claims were rescoped to that
+exact identifier. A second endpoint has now run to completion, a 120B reasoning model on the same fixtures, repeats, prompt and token budget. It did not separate from the local model, at paired
+$\Delta$F1 \fact{frontier-local-delta}, 95\% cluster CI \fact{frontier-local-ci},
 n=\fact{frontier-local-pairs}, better on \fact{frontier-local-better} and worse on
-\fact{frontier-local-worse} (§3.16). A \fact{series-param-span}$\times$ parameter
+\fact{frontier-local-worse} (Section~3.16). A \fact{series-param-span}$\times$ parameter
 advantage produces no measurable difference here, which is evidence \emph{against} the pitfall's usual
 worry rather than merely an absence of evidence for it.
 
 An interim version of this arm reported \fact{superseded-frontier-f1} at n=\fact{superseded-frontier-n} and read as a lead; completing the sample moved
 the estimate through the local mean and out the other side. We record that because the arm had been
-truncated by a daily request quota, not by anything about the samples --- the failure mode is reading a
+truncated by a daily request quota, not by anything about the samples. The failure mode is reading a
 difference off an underpowered arm, and this audit carried the wrong number for a day.
 
 \textbf{That null is confounded, and the confound cannot be removed on that endpoint.} The local arm runs
 with its reasoning stream disabled; the \fact{frontier-params-b}B arm ran with reasoning on, spending
 \fact{arm-default-reasoning} of its output
-budget there. We re-ran it with the flag set: the provider accepted the parameter and ignored it ---
+budget there. We re-ran it with the flag set: the provider accepted the parameter and ignored it, at
 \fact{arm-default-nothink-reasoning} reasoning, F1 \fact{arm-default-nothink-f1} against the original
 \fact{arm-default-f1} (paired $\Delta$ \fact{frontier-replication-delta}, cluster CI
 \fact{frontier-replication-ci}).
 The re-run replicates the arm rather than correcting it, and no further re-run will do better,
 because the control is not exposed. We therefore report the null with its confound named. The size
-of what is being confounded is not small: on two separate models the same flag is worth
-\textbf{\fact{reasoning-flag-worth-low} and \fact{reasoning-flag-worth-high} F1}, the only effect in this paper that exceeds its own design's minimum
+of what is being confounded is not small. On two separate models the same flag is worth
+\fact{reasoning-flag-worth-low} and \fact{reasoning-flag-worth-high} F1, the only effect in this paper that exceeds its own design's minimum
 detectable effect.
 
 \textbf{One quantisation is no longer an unmeasured threat.} The model we run locally is also hosted by
 its vendor at full precision, on an endpoint that does honour the reasoning flag. Paired on the same
 fixtures and repeats, the vendor's hosting of the same weights scores
-\textbf{\fact{quantisation-delta} F1} against our 3-bit \texttt{IQ3\_K\_R4} deployment (95\% cluster CI
-\fact{quantisation-ci}, n=\fact{quantisation-pairs}) --- an interval containing zero, and a point estimate
+\fact{quantisation-delta} F1 against our 3-bit \texttt{IQ3\_K\_R4} deployment (95\% cluster CI
+\fact{quantisation-ci}, n=\fact{quantisation-pairs}), an interval containing zero, and a point estimate
 pointing away from the direction the threat assumes. Two serving stacks differ alongside the
 precision, so this bounds \emph{the deployment} rather than quantisation alone; but the specific worry
 that a 3-bit local model understates what these architectures can do is not supported.
@@ -163,65 +155,60 @@ that a 3-bit local model understates what these architectures can do is not supp
 Testing \texttt{arXiv:2606.18166}'s parameter-size trend needs three arms at three sizes, matched on the
 flag that outweighs size. Of the endpoints available, the one that honours the flag hosts the same
 35B model we already run, and the one above 35B does not honour it. Two matched arms exist and both
-are 35B. We state this as a limitation rather than reporting a correlation over unmatched arms ---
+are 35B. We state this as a limitation rather than reporting a correlation over unmatched arms,
 which, run once before this constraint was enforced, returned $\rho$=\fact{superseded-rho} and would have agreed with
 the literature for the wrong reason.
 
-What also remains is \textbf{coverage, not power}: the second model has been measured on five synthetic
+What also remains is coverage, not power: the second model has been measured on five synthetic
 fixtures, not on the malware cohort, where evidence bundles are longer and messier. That is the arm
 the free tier's \setting{50} requests/day makes a two-day run or a paid one.
 
-\textbf{P9 Model ambiguity --- \texttt{PARTIAL}.} Model and engine are both pinned: GGUF digest, HuggingFace
-revision, retrieval date, quantiser, \textbf{and the imatrix calibration dataset} --- which most papers
+\textbf{P9 Model ambiguity.} \texttt{PARTIAL}. Model and engine are both pinned: GGUF digest, HuggingFace
+revision, retrieval date, quantiser, and the imatrix calibration dataset, which most papers
 reporting a quantisation level cannot name. The engine commit was recovered and \emph{proved} to describe
-the build (identical \fact{engine-source-files}-file source list; exactly one generated file differs). It is \texttt{PARTIAL}
-rather than \texttt{CLEAR} for this reason: \textbf{the running binary reports its version as
-\texttt{unknown}}, and the commit was recovered from a vendored copy of the sources rather than from the
+the build from an identical \fact{engine-source-files}-file source list, with exactly one generated file differing. It is \texttt{PARTIAL}
+rather than \texttt{CLEAR} for this reason. The running binary reports its version as
+\texttt{unknown}, and the commit was recovered from a vendored copy of the sources rather than from the
 artefact. Build provenance must be captured at build time; ours was reconstructed, and we say so.
 
 \subsection{Two checks the survey does not include}\label{two-checks-the-survey-does-not-include}
 
 Both were added after they caught errors here.
 
-\textbf{The tenth check --- diff the claim register against the evidence log.} All nine pitfalls concern the
+\textbf{The tenth check is to diff the claim register against the evidence log.} All nine pitfalls concern the
 relationship between claims and experiments. Two failures sat one level below that. A claim was
 recorded as novel one hour after our own findings log had described it as a replication; and this
 audit mis-stated one of its own rows, attaching a model caveat to a result produced by a server-free
-harness. Neither needed a literature search --- only reading two of our own documents against each
-other. Applied again later, it found \textbf{three ledger rows that had drifted from the evidence log},
+harness. Neither needed a literature search, only reading two of our own documents against each
+other. Applied again later, it found three ledger rows that had drifted from the evidence log,
 including one still carrying an interim figure after the final measurement had landed. A project
 disciplined enough to keep both a findings log and a claim ledger has, by that fact, created the
 conditions for the two to diverge.
 
 \textbf{The output-cardinality check.} Before trusting a batch measurement, ask how
-many distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should
-vary --- length, digest, element count --- the instrument is repeating itself, and repetition is what a
-stale-state bug looks like from outside. All three boundary defects above were caught this way: a \fact{hint-chars-repeated}-char
+many distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should vary, such as length, digest or element count, the instrument is repeating itself, and repetition is what a
+stale-state bug looks like from outside. All three boundary defects above were caught this way. A \fact{hint-chars-repeated}-char
 hint repeated across unrelated samples; call graphs identical to the character for binaries of
 \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at exactly \fact{stuck-graph-chars} characters. It costs one line of code and
 needs no ground truth. We now report it alongside results
-(\fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples}
-samples).
+at \fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples} samples.
 
-This check is a \textbf{refinement, not a discovery}, and we counter-searched it before claiming
+This check is a refinement, not a discovery, and we counter-searched it before claiming
 otherwise: ``distinct inputs should produce distinct outputs'' is an ordinary metamorphic relation
 \cite{li2024metamorphic}, stress-testing a judge's consistency under input variation is established practice \cite{dev2026judge}, and
-the genus --- a failure whose error signal never reaches
-a human in actionable form --- is long established: the majority of network-partition failures in
+the genus, a failure whose error signal never reaches
+a human in actionable form, is long established: the majority of network-partition failures in
 cloud systems are silent, and the warnings the rest produce are ``confusing, with no clear mechanism
 for resolution'' \cite{alquraan2018partition}, while a quarter of catastrophic failures in
 distributed systems come from errors that were signalled and then ignored \cite{yuan2014simple}.
 Agent and inference runtimes are now being taxonomised on the same lines
 \cite{xue2025agentbugs,liu2026inference}. What we add
 is the setting: an evaluation pipeline for security research, where the output is not a degraded
-user session but \textbf{a measurement that is wrong and looks right}, together with three mechanisms at
+user session but a measurement that is wrong and looks right, together with three mechanisms at
 three integration boundaries and one withdrawn study as the demonstrated cost.
 
 The taxonomy's five classes each describe a call to something else, and three of our seven crossed
-no boundary at all. They share its meta-pattern and sit outside every class it offers, which is why
-we suggest --- as a proposal, on seven cases from one project --- that the organising principle covering
-both is \textbf{attribution rather than boundary}: the shape appears wherever a measurement's cause is
-assigned rather than measured.
+no boundary at all. They share its meta-pattern and sit outside every class it offers, which is why we suggest, as a proposal resting on seven cases from one project, that the organising principle covering both is attribution rather than boundary. The shape appears wherever a measurement's cause is assigned rather than measured.
 
 \subsection{Could the label have leaked into the evidence?}\label{circularity}
 
@@ -229,7 +216,7 @@ A scored component that derives its output from the same source as the labels is
 scoring a tautology. We tested this rather than assuming it, component by
 component, and report the result including the part that is unflattering.
 
-\textbf{Ground truth} is the MITRE \texttt{malware --uses--> attack-pattern}
+Ground truth is the MITRE \texttt{malware --uses--> attack-pattern}
 relationship set, built from the public ATT\&CK STIX distribution and resolved to
 a sample through its family signature. It is family-level, which is a ceiling
 this section discusses elsewhere; here what matters is that it comes from MITRE
@@ -238,11 +225,11 @@ and from nothing this project produces.
 \textbf{The Sigma layer is not circular.} It reads the technique identifier from
 each rule's own \texttt{attack.tNNNN} tag, and the rules are community-authored
 detections with hand-written tags. Sigma shares ATT\&CK's \emph{vocabulary} with
-the labels and not their \emph{source}: a tag says what a telemetry pattern
+the labels and not their \emph{source}. A tag says what a telemetry pattern
 means, ground truth says what a family is catalogued as doing. There is no path
 from a family label into a rule tag.
 
-\textbf{The sandbox baseline is not circular}, and this is the one that would
+The sandbox baseline is not circular, and this is the one that would
 have mattered most. Its technique identifiers come from class attributes
 hand-written in each signature module, mapped through the sandbox's own
 identifier table. No family attribution is consulted anywhere on that path, which
@@ -250,7 +237,7 @@ is precisely what makes it a valid baseline rather than a second view of the
 answer.
 
 \textbf{The retrieval corpora do not overlap the evaluation cohorts.} We checked
-by digest rather than by assertion: of the \fact{case-corpus-n} cases in the ATT\&CK case
+by digest rather than by assertion. Of the \fact{case-corpus-n} cases in the ATT\&CK case
 corpus, none shares a sha256 with the \fact{cohort-n}-sample dynamic cohort or
 with the \fact{drift-n}-sample drift manifest.
 
@@ -265,39 +252,31 @@ beside it, which is scored against MITRE ground truth on held-out samples.
 defines valid technique identifiers is the same file that bounds the label
 universe, so the invalid-identifier rate we report is measured against the
 catalogue the labels are drawn from. That is a shared vocabulary rather than a
-shared source --- a prediction can be catalogue-valid and wrong, which is the
-whole of what that metric claims --- but a reader is entitled to know the two
+shared source, a prediction can be catalogue-valid and wrong, which is the
+whole of what that metric claims, but a reader is entitled to know the two
 come from one build.
 
 \subsection{Construct validity: what the ground truth can and cannot support}\label{construct-validity-what-the-ground-truth-can-and-cannot-support}
 
-Per-sample ground truth is \textbf{family-level MITRE \texttt{uses}}, which is coarse: a single Emotet binary
+Per-sample ground truth is family-level MITRE \texttt{uses}, which is coarse. A single Emotet binary
 need not exhibit all \textasciitilde47 techniques catalogued for Emotet, and a packed sample exhibits fewer still.
-Absolute recall therefore carries a structural ceiling and precision carries noise. Two consequences
-we accept rather than argue with:
-
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  Absolute F1 values in this paper are \textbf{not comparable to work using per-sample expert labels}.
-\item
-  The bias is approximately constant across arms, so within-study contrasts are the defensible
-  reading --- which is exactly why a baseline matters. \textbf{The sandbox alone, with no LLM anywhere,
-  scores F1 \fact{baseline-f1}} \fact{baseline-f1-cluster-ci} on our cohort of \fact{baseline-n}. Every
-  pipeline figure is read against that rather than against zero, and on the samples where both have
-  run the full pipeline is \fact{h2h-delta} F1 above it.
-\end{enumerate}
+Absolute recall therefore carries a structural ceiling and precision carries noise. We accept two
+consequences rather than argue with them. Absolute F1 values in this paper are not comparable to
+work using per-sample expert labels, and the bias is approximately constant across arms, so
+within-study contrasts are the defensible reading, which is exactly why a baseline matters. The
+sandbox alone, with no LLM anywhere, scores F1 \fact{baseline-f1} \fact{baseline-f1-cluster-ci} on
+our cohort of \fact{baseline-n}. Every pipeline figure is read against that rather than against
+zero, and on the samples where both have run the full pipeline is \fact{h2h-delta} F1 above it.
 
 \subsection{The dynamic channel is two-thirds constant}\label{the-dynamic-channel-is-two-thirds-constant}
 
 Any claim about what the sandbox contributes has to survive one measurement of what the sandbox
 reports. Across the \fact{evidence-reports} archived analyses there are
-\textbf{\fact{network-domains-distinct} distinct network domains}, and
-\textbf{\fact{network-domains-ubiquitous} of them appear in every single sample} --- the analysis VM's own
+\fact{network-domains-distinct} distinct network domains, and
+\fact{network-domains-ubiquitous} of them appear in every single sample, the analysis VM's own
 vendor telemetry, present in each capture whatever was detonated. Per sample, between
-\textbf{\fact{network-ubiquitous-min} and \fact{network-ubiquitous-max}} of observed domains are
-cohort-ubiquitous, median \textbf{\fact{network-ubiquitous-median}}.
+\fact{network-ubiquitous-min} and \fact{network-ubiquitous-max} of observed domains are
+cohort-ubiquitous, median \fact{network-ubiquitous-median}.
 
 So two-thirds of the network evidence in a ``dynamic'' arm is the instrument describing itself. A
 treatment that constant is weaker than its name suggests, and an effect attributed to malware
@@ -306,10 +285,10 @@ every dynamic-versus-static contrast rather than in a footnote, because the cont
 without it.
 
 The same measurement bounds two Layer-0 sources from the other direction. The LOLBin layer and the
-DGA layer produced a claim on \textbf{none of the \fact{layer0-declined-of}} reports archived when that
+DGA layer produced a claim on none of the \fact{layer0-declined-of} reports archived when that
 ablation ran, while being fed a median of \fact{layer0-declined-median-calls} recorded API calls and
-\fact{layer0-declined-domains} domains respectively --- they are offered the evidence and decline it. That is why neither
-appears as an arm in the cascade ablation: giving a mechanism an equal share of ground truth when it
+\fact{layer0-declined-domains} domains respectively; they are offered the evidence and decline it. That is why neither
+appears as an arm in the cascade ablation. Giving a mechanism an equal share of ground truth when it
 never engages in the deployment would measure a system that does not exist.
 
 An earlier version of this measurement, on the \fact{ubiquity-interim-reports} analyses that survived
@@ -319,41 +298,33 @@ cohort moved the figure by three points and left the conclusion where it was.
 
 \subsection{The host as an uncontrolled variable}\label{the-host-as-an-uncontrolled-variable}
 
-A threat we did not anticipate and met late: \textbf{the machine a measurement runs on is part of the
-instrument.} Our working set --- model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container up
-to \fact{ghidra-mem-limit-gb} GB --- does not fit a \fact{host-ram-gib} GiB host alongside an interactive session. During a paired ablation the
+A threat we did not anticipate and met late. The machine a measurement runs on is part of the
+instrument. Our working set does not fit a \fact{host-ram-gib} GiB host alongside an interactive session. The model server holds 	extasciitilde16 GB, the analysis worker 	extasciitilde8 GB, and the disassembly container up to \fact{ghidra-mem-limit-gb} GB. During a paired ablation the
 swap file was exhausted and the model server had \fact{llama-paged-out-gb} GB of its own address space
 paged out; an arm
 then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters. Whether that arm failed
-because of the pipeline or because of the host \textbf{cannot be determined}, because we recorded the
+because of the pipeline or because of the host cannot be determined, because we recorded the
 pipeline's outputs and not the host's state.
 
 The affected arms are reported as \texttt{unattributable} rather than as failures, and the ablation is
 reported as incomplete rather than as a null. We flag three things a reader should take from this
-rather than from our fix:
+rather than from our fix.
 
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  \textbf{Wall-clock bounds are host-dependent measurements wearing the costume of a system property.}
-  Any result in this paper that turns on a timeout --- the salvage-path failure of §6, the timing
-  column of §7 --- is a statement about this pipeline \emph{on this machine under whatever load it had}.
-\item
-  \textbf{The retention rule we adopted after the first failure did not cover this one.} §4.5 says to
-  retain per-sample outputs, and we did. The rule was written about the object under study, and what
-  went unrecorded was the environment the study ran in.
-\item
-  \textbf{A screen for this can only be applied forward.} Arms already collected without host state
-  cannot be re-screened, which is the same structural problem that withdrew our drift study, in a
-  new variable.
-\end{enumerate}
+Three things follow. Wall-clock bounds are host-dependent measurements wearing the costume of a
+system property, so any result in this paper that turns on a timeout, the salvage-path failure of
+Section~6 and the timing column of Section~7 among them, is a statement about this pipeline
+\emph{on this machine under whatever load it had}. The retention rule we adopted after the first
+failure did not cover this one; Section~4.5 says to retain per-sample outputs and we did, but the
+rule was written about the object under study, and what went unrecorded was the environment the
+study ran in. And a screen for this can only be applied forward, because arms already collected
+without host state cannot be re-screened, which is the same structural problem that withdrew our
+drift study, in a new variable.
 
 \textbf{A postscript, because it took three attempts to see.} Two of the interruptions above we
 attributed to memory pressure and treated with progressively better limits: a floor, then a strike
 counter, then an allowance for declared allocations, then marking the model server as the kernel's
 preferred OOM victim. All four were correct and none was the cause. The harness had started the
-server as a \textbf{child process}, so it ran inside the cgroup of the terminal that launched it and its
+server as a child process, so it ran inside the cgroup of the terminal that launched it and its
 memory was accounted to that scope; the kernel's log named the scope plainly and we did not read it
 until the third failure. Every fix we made chose \emph{which process} the kernel would kill, and the
 defect was \emph{whose accounting it was killed inside}.
@@ -361,7 +332,7 @@ defect was \emph{whose accounting it was killed inside}.
 We report this because it is the same error as M1--M4 in a different register: a mechanism that looked
 like it was working, an intervention that addressed a real thing at the wrong layer, and a log line
 that had contained the answer for two days. A measurement environment is not a backdrop to the
-measurement, and the discipline that catches this is not cleverness --- it is reading the error
+measurement, and the discipline that catches this is not cleverness; it is reading the error
 message that was already there.
 
 \subsection{Scope}\label{scope}

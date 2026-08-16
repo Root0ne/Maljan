@@ -258,6 +258,48 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# 7b. House style, checked in the rendered document
+# --------------------------------------------------------------------------
+# Two typographic rules with no exceptions, so both are gates rather than
+# advice. They are checked in the extracted PDF text and not in the sources,
+# because the source spelling and the printed character are different things:
+# `---` is what an author types and U+2014 is what a reader sees, and a `---`
+# living in a .bib note or a matplotlib annotation reaches the page by a route
+# no grep over *.tex would find. Three did.
+#
+# An en dash survives. It is a different character doing a different job, and
+# three cited titles are set with one by their own publishers; replacing those
+# would misquote them.
+emdash=$(grep -oF '—' <<<"$pdf_text" | wc -l)
+if [[ "$emdash" -eq 0 ]]; then
+    pass "no em dash in the rendered text"
+else
+    fail "$emdash em dash(es) reached the page"
+    grep -oF -m3 -B0 -A0 '—' <<<"$pdf_text" >/dev/null
+    grep -n -m3 -oE '.{40}—.{40}' <<<"$pdf_text" | sed 's/^/        /'
+    note "sources spell it ---; check refs.bib and make_paper_figures.py too"
+fi
+
+section_sign=$(grep -oF '§' <<<"$pdf_text" | wc -l)
+if [[ "$section_sign" -eq 0 ]]; then
+    pass "no section sign in the rendered text"
+else
+    fail "$section_sign section sign(s) reached the page"
+    note "write Section~N instead"
+fi
+
+# Bulleted structure, checked in the sources because that is where it is
+# authored. Prose is the house default; a list has to be argued for.
+lists=$(grep -c 'begin{itemize}\|begin{enumerate}\|begin{description}' "$BUILD"/*.tex 2>/dev/null \
+        | awk -F: '{s+=$2} END{print s+0}')
+if [[ "$lists" -eq 0 ]]; then
+    pass "no bulleted lists; the argument is carried in prose"
+else
+    fail "$lists list environment(s) in the sources"
+    note "thirteen were converted to prose; a new one needs a reason"
+fi
+
+# --------------------------------------------------------------------------
 # 8. The unreviewed sources declare themselves in the document a reader gets
 # --------------------------------------------------------------------------
 # The tests check that every citation to an unreviewed source carries the

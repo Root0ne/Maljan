@@ -70,7 +70,13 @@ _FENCED = re.compile(
 _INLINE_CODE = re.compile(r"\\texttt\{(?:[^{}]|\{[^{}]*\})*\}")
 _PLACEHOLDER = re.compile(r"\\fact\{[a-z0-9-]+\}|\\setting\{[^}]*\}")
 _CITATION = re.compile(r"\{\[\}\d+(?:\s*,\s*\d+)*\{\]\}|\[\d+(?:\s*,\s*\d+)*\]")
-_SECTION_REF = re.compile(r"§+\s?[\dA-Za-z.]+|\\ref\{[^}]*\}|\\label\{[^}]*\}")
+# House style spells a cross-reference "Section~4.5"; the section sign is gone
+# from the document. Both forms are stripped, because the old one still appears
+# in this repository's history and a checker that only knew the new spelling
+# would report forty-five cross-references as hand-typed measurements. It did.
+_SECTION_REF = re.compile(
+    r"§+\s?[\dA-Za-z.]+|\bSections?~?\s?[\dA-Za-z.]+|\\ref\{[^}]*\}|\\label\{[^}]*\}"
+)
 _HEADING_NUMBER = re.compile(r"^\\(?:sub)*section\*?\{[\d.]+\s", re.M)
 _MD_LINK = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}|\\href\{[^}]*\}")
 _DATE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}-\d{2})?\b")

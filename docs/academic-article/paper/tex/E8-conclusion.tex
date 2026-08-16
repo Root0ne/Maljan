@@ -14,7 +14,7 @@ did not hold.
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Four architectural claims against what the measurements support. Every interval resamples the unit the observations are independent at; the minimum detectable effect says what the design could have seen.}\label{tab:conclusion-12}\\
+\caption{Four architectural claims against what the measurements support.}\label{tab:conclusion-12}\\
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 claim
@@ -38,10 +38,13 @@ this design could detect
 \bottomrule\noalign{}
 \endlastfoot
 negotiated multi-agent consensus beats a single judge & $\Delta$F1 \textbf{\fact{consensus-negotiated-delta}}, 95\% cluster CI \fact{consensus-negotiated-ci}, at \textbf{\fact{consensus-token-ratio}$\times$} the tokens & \fact{mde-consensus-negotiated} F1 \\
-a multi-layer corroboration cascade improves the verdict & corroboration never reaches the artefact --- and the model is not the reason: reconciliation restores every cascade technique the judge omits, and the judge added a technique of its own on \textbf{\fact{judge-mechanism-added} of \fact{judge-mechanism-samples}} samples & a per-sample rate of \fact{judge-mechanism-upper-bound} \\
-two-tier attribution identifies families & opcode-hash tier fires on \textbf{\fact{hash-fired} of \fact{hash-total}} samples; family-feature retrieval contributes \textbf{\fact{family-delta-f1} F1} & --- \\
-falsification-before-confidence disciplines claims & the cap fires on \textbf{\fact{cap-rate}} of techniques & --- \\
+a multi-layer corroboration cascade improves the verdict & corroboration never reaches the artefact, and the model is not the reason: reconciliation restores every cascade technique the judge omits, and the judge added a technique of its own on \textbf{\fact{judge-mechanism-added} of \fact{judge-mechanism-samples}} samples & a per-sample rate of \fact{judge-mechanism-upper-bound} \\
+two-tier attribution identifies families & opcode-hash tier fires on \textbf{\fact{hash-fired} of \fact{hash-total}} samples; family-feature retrieval contributes \textbf{\fact{family-delta-f1} F1} &, \\
+falsification-before-confidence disciplines claims & the cap fires on \textbf{\fact{cap-rate}} of techniques &, \\
 \end{longtable}
+
+Every interval resamples the unit the observations are independent at; the minimum detectable effect says what the design could have seen.
+
 
 None of these components is broken. Some work in isolation, and each was built for a reason we would
 give again. They do not move the end-to-end result. We report that as a result rather than as a
@@ -49,8 +52,8 @@ tuning opportunity.
 
 \textbf{What we may not say about those nulls, and said in an earlier draft.} We wrote that the noise
 control separated cleanly and that the nulls therefore came from an instrument shown able to detect a
-difference. The control does move --- \fact{consensus-noise-delta}, \fact{consensus-noise-ci}, all
-\fact{fixture-clusters} samples in the same direction --- but the effect is smaller than the design's own
+difference. The control does move, \fact{consensus-noise-delta}, \fact{consensus-noise-ci}, all
+\fact{fixture-clusters} samples in the same direction, but the effect is smaller than the design's own
 minimum detectable effect of \fact{mde-consensus-noise}, and the exact cluster permutation test returns
 \fact{consensus-noise-p-exact}, which at \fact{fixture-clusters} clusters is the smallest value the test can
 return. No comparison on that corpus can reach $\alpha$ = 0.05 whatever its effect size. The nulls stand as
@@ -59,7 +62,7 @@ bound rather than an equivalence.
 
 \textbf{One of those bounds has since been replaced by a measurement, and it changed the answer.}
 Re-run on \fact{cape-consensus-families} real samples, one per family, the negotiated arm beats the
-single judge by \fact{cape-negotiated-delta} (\fact{cape-negotiated-ci}) --- and the noise control
+single judge by \fact{cape-negotiated-delta} (\fact{cape-negotiated-ci}), and the noise control
 beats it by \fact{cape-noise-delta} (\fact{cape-noise-ci}). Negotiated against noise is
 \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so the design could have
 seen the mechanism and did not. What helps is the
@@ -68,23 +71,23 @@ seen the mechanism and did not. What helps is the
 does nothing. The architectural claim fails in a more specific way than the fixture null could
 express, and it took a corpus that could produce a significant result to say so.
 
-Two further negatives constrain how the rest should be read. Verbal confidence --- the number the
-cascade and every deterministic gate consume --- ranks correct above incorrect claims at \textbf{AUC
-\fact{confidence-auc}}, but the interval that resamples samples rather than claims is
+Two further negatives constrain how the rest should be read. Verbal confidence, the number the
+cascade and every deterministic gate consume, ranks correct above incorrect claims at AUC
+\fact{confidence-auc}, but the interval that resamples samples rather than claims is
 {[}\fact{confidence-auc-lo}, \fact{confidence-auc-hi}{]} and contains chance;
 \fact{confidence-at-or-below-chance} of the \fact{confidence-clusters} samples are at or below it, and the
 pooled figure is carried by the one that reaches \fact{confidence-best-cluster-auc}. Verbal confidence
-is \textbf{indistinguishable from chance here}, which is a stronger statement than the one we set out to
+is indistinguishable from chance here, which is a stronger statement than the one we set out to
 make and a worse one for the gates that consume it. And a 120B reasoning frontier model did not
-separate from our local 35B on identical fixtures at equal \emph{nominal} budget --- paired \textbf{$\Delta$F1
-\fact{frontier-local-delta}}, 95\% cluster CI \fact{frontier-local-ci}, better on
-\fact{frontier-local-better} and worse on \fact{frontier-local-worse} --- at a design resolution of
+separate from our local 35B on identical fixtures at equal \emph{nominal} budget, paired $\Delta$F1
+\fact{frontier-local-delta}, 95\% cluster CI \fact{frontier-local-ci}, better on
+\fact{frontier-local-better} and worse on \fact{frontier-local-worse}, at a design resolution of
 \fact{mde-frontier-local} F1, which is coarser than every architectural effect in this paper. That null
 means the design could not see a difference, not that there is none. It also carries a confound we
-could not remove: the frontier arm reasoned and the local one did not, and the endpoint accepts the
+could not remove. The frontier arm reasoned and the local one did not, and the endpoint accepts the
 parameter that would have matched them without acting on it. We report the confound's size rather
-than its absence --- on two other models the same flag is worth
-\textbf{\fact{reasoning-flag-vendor35b-delta} and \fact{reasoning-flag-third-delta} F1} --- and note that we
+than its absence. On two other models the same flag is worth
+\fact{reasoning-flag-vendor35b-delta} and \fact{reasoning-flag-third-delta} F1, and note that we
 cannot show the local model to be the weaker deployment either: against its vendor's own
 full-precision hosting the paired difference is \fact{quantisation-delta}, \fact{quantisation-ci}, an
 interval wide enough to admit a substantial penalty in either direction.
@@ -94,7 +97,7 @@ interval wide enough to admit a substantial penalty in either direction.
 A mechanism that never runs produces an ablation whose null describes the cases where it never ran.
 The confidence cap fires on \fact{cap-rate} of techniques and the sink-reachability hint on \fact{hint-rate} of samples;
 an ablation of the first would have been uninterpretable and reported as evidence anyway. Measuring
-\textbf{firing rate before effect} changed which experiments were worth running, and it is the cheapest
+firing rate before effect changed which experiments were worth running, and it is the cheapest
 practice in this paper.
 
 \subsection{The instrument was repeatedly wrong in ways that looked like data}\label{the-instrument-was-repeatedly-wrong-in-ways-that-looked-like-data}
@@ -103,22 +106,22 @@ This is the finding we did not expect to be the paper. Four defects at the bound
 pipeline and the servers it depends on each produced \emph{plausible results rather than errors}: an
 unset optional argument arriving as an explicit \texttt{null}; a program reported as loaded, by name, that
 never became the one being analysed; a refused load returning HTTP 200 with the error in the body;
-and two protective bounds composing into an empty result. \textbf{A suite of \fact{test-count} passing tests caught
-none of them}, and not because the tests were bad --- each defect requires a second call, a second
+and two protective bounds composing into an empty result. A suite of \fact{test-count} passing tests caught
+none of them, and not because the tests were bad. Each defect requires a second call, a second
 server, or a large input, which is precisely what a fast unit suite is built to avoid.
 
-All four were found by one arithmetic check: \textbf{how many distinct outputs N inputs produced} A
+All four were found by one arithmetic check. How many distinct outputs N inputs produced A
 priority hint of exactly \fact{hint-chars-repeated} characters for unrelated binaries; \fact{stuck-graph-run} consecutive samples at exactly
 \fact{stuck-graph-chars}. It needs no ground truth and no oracle, which is what makes it usable where correctness is
 hard to check, and it belongs beside sample size in an evaluation report rather than inside a test.
 
 \textbf{Three more followed, and none of them was at a boundary.} An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
 size ranked a reasoning-configuration flag instead, and recovered the published scaling coefficient
-almost exactly --- agreeing with the literature, which is the direction a wrong result is least likely
+almost exactly, agreeing with the literature, which is the direction a wrong result is least likely
 to be questioned. And the judge's documented output ceiling was renamed by our client
 library during serialisation to a key the inference server does not read, so a component described
 as bounded had never once been bounded; one call was measured at \fact{unbounded-decode-tokens} generated tokens against an
-\fact{judge-output-cap} cap. The cardinality check does not find these --- their outputs vary. Each had passing unit
+\fact{judge-output-cap} cap. The cardinality check does not find these; their outputs vary. Each had passing unit
 tests over the exact function concerned, because the defect was never in a function.
 
 We are careful about what is new here, and we counter-searched before claiming. Silent failure at
@@ -126,31 +129,31 @@ tool boundaries is documented, the metamorphic relation behind our detector is o
 has a published taxonomy, that an inference-time constraint can invert model rankings inside a
 constrained budget regime is established \cite{sun2025length,mizrahi2024multiprompt}, and silent
 overruling of a request parameter is a named failure mode \cite{xu2013misconfig,liu2026inference}. Our contribution is narrower: three distinct integration boundaries plus one composition
-of local bounds, in a setting where the artefact is \textbf{a measurement that is wrong and looks right};
+of local bounds, in a setting where the artefact is a measurement that is wrong and looks right;
 a selection rule that follows from a provider accepting a parameter and not acting on it, so arms
 must be matched on their measured configuration rather than their requested one; and a demonstrated
 price rather than a hypothesised one.
 
 One observation we offer as a proposal rather than a result. The published taxonomy organises these
-failures by the boundary crossed, and three of ours crossed none --- no server misled us, and no
-protocol was involved. What the seven share is not a boundary but an attribution: in each case a
+failures by the boundary crossed, and three of ours crossed none; no server misled us, and no
+protocol was involved. What the seven share is not a boundary but an attribution. In each case a
 measurement's cause was assigned rather than measured.
 
 \subsection{What it cost, including while writing this}\label{what-it-cost-including-while-writing-this}
 
-One completed study is withdrawn --- a \fact{drift-n}-sample temporal-drift analysis that had passed review and
+One completed study is withdrawn, a \fact{drift-n}-sample temporal-drift analysis that had passed review and
 been cited internally for weeks. It is withdrawn not because the defect certainly affected it, but
-because its per-sample outputs were not retained and \textbf{the question can no longer be asked of it}.
+because its per-sample outputs were not retained and the question can no longer be asked of it.
 
 The discipline then caught us a second time, one level up, during the final experiment. A paired
 ablation halted at \fact{halted-arms} arms when the host exhausted its swap file; four arms had died in ways
 that may belong to the pipeline or to a machine whose model server had \fact{paged-out-working-set} of itself paged out.
-We had retained per-sample outputs, as our own rule requires. We had not retained per-sample \textbf{host
-state}, and that is what the question needed. The arms are reported as unattributable rather than
+We had retained per-sample outputs, as our own rule requires. We had not retained per-sample host
+state, and that is what the question needed. The arms are reported as unattributable rather than
 as failures, and the effect of that mechanism remains unmeasured.
 
 We report this rather than quietly re-running it because it is the paper's own thesis arriving
-uninvited: a rule written after a failure is scoped to that failure. Retention
+uninvited. A rule written after a failure is scoped to that failure. Retention
 policies are written about the object under study; the environment the study runs in is also part of
 the instrument.
 
@@ -159,11 +162,11 @@ the instrument.
 We claim: the measured negatives above; seven failure mechanisms with the layer each occurred at,
 four of them at a boundary with another server and three inside our own code; a detector that found
 the four boundary cases and costs one line, together with what found the other three; and a no-LLM
-baseline of \textbf{F1 \fact{baseline-f1}} \fact{baseline-f1-cluster-ci}, n=\fact{baseline-n}, without which none of our F1 numbers refer to
-anything --- and against which the full pipeline gains \textbf{\fact{h2h-delta} F1}.
+baseline of F1 \fact{baseline-f1} \fact{baseline-f1-cluster-ci}, n=\fact{baseline-n}, without which none of our F1 numbers refer to
+anything, and against which the full pipeline gains \fact{h2h-delta} F1.
 
-We claim one result about the architecture that we did not go looking for: the judge's
-influence on the artefact is \textbf{conditional on the model working}. Where it returns a parsable
+We claim one result about the architecture that we did not go looking for. The judge's
+influence on the artefact is conditional on the model working. Where it returns a parsable
 verdict it supplies \fact{judge-capped-own-ids} of \fact{judge-capped-bundle} techniques, because the reconciliation step restores the deterministic
 set regardless; where it fails, a text fallback lifts identifiers out of the unparsable response and
 \fact{fallback-only-capped} techniques reach the analyst that no evidence source corroborated. The design suppresses the
@@ -176,5 +179,5 @@ experiments this design most needs remain gated behind sandbox access and are no
 
 What we do assert is a change of default. In a pipeline assembled from other people's servers, the
 correctness of the model is not the binding constraint on the correctness of the result. Long before
-a benchmark score is a claim about a system, it is a claim about an instrument --- and \textbf{a server that
-answers is not the same as a server that answered your question.}
+a benchmark score is a claim about a system, it is a claim about an instrument, and a server that
+answers is not the same as a server that answered your question.
