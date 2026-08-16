@@ -108,6 +108,46 @@ S.~Saha, et~al., {MaLAware}: Automating the comprehension of malicious software
   behaviours using {LLMs}, in: IEEE/ACM International Conference on Mining
   Software Repositories (MSR), 2025, arXiv:2504.01145.
 
+\bibitem{mitre2023tram}
+{Center for Threat-Informed Defense}, {TRAM}: Threat report {ATT\&CK} mapper,
+  Open-source software, MITRE Engenuity, not a paper and cited as the artefact
+  it is: the repository names no preferred citation. Approved for public
+  release, document numbers CT0035 and CT0075 (2023).
+
+\bibitem{legoy2020rcatt}
+V.~Legoy, M.~Caselli, C.~Seifert, A.~Peter, Automated retrieval of {ATT\&CK}
+  tactics and techniques for cyber threat reports, in: 1st Cyber Threat
+  Intelligence Symposium (CTI), 2020, arXiv:2004.14322. Venue confirmed from
+  the University of Twente research portal, which records it as a conference
+  contribution; it is not indexed under this title in dblp.
+
+\bibitem{husari2017ttpdrill}
+G.~Husari, E.~Al-Shaer, M.~Ahmed, B.~Chu, X.~Niu, {TTPDrill}: Automatic and
+  accurate extraction of threat actions from unstructured text of {CTI}
+  sources, in: Proceedings of the 33rd Annual Computer Security Applications
+  Conference (ACSAC), 2017, pp. 103--115.
+\newblock \href {https://doi.org/10.1145/3134600.3134646}
+  {\path{doi:10.1145/3134600.3134646}}.
+
+\bibitem{satvat2021extractor}
+K.~Satvat, R.~Gjomemo, V.~N. Venkatakrishnan, {EXTRACTOR}: Extracting attack
+  behavior from threat reports, in: IEEE European Symposium on Security and
+  Privacy (EuroS\&P), 2021, pp. 598--615.
+
+\bibitem{li2022attackg}
+Z.~Li, J.~Zeng, Y.~Chen, Z.~Liang, {AttacKG}: Constructing technique knowledge
+  graph from cyber threat intelligence reports, in: Computer Security ---
+  ESORICS, 2022, pp. 589--609.
+\newblock \href {https://doi.org/10.1007/978-3-031-17140-6_29}
+  {\path{doi:10.1007/978-3-031-17140-6_29}}.
+
+\bibitem{alam2023ladder}
+M.~T. Alam, D.~Bhusal, Y.~Park, N.~Rastogi, Looking beyond {IoCs}:
+  Automatically extracting attack patterns from external {CTI}, in: 26th
+  International Symposium on Research in Attacks, Intrusions and Defenses
+  (RAID), 2023, pp. 92--108, the {LADDER} framework. A search summary placed
+  this at an ACL venue; dblp records RAID.
+
 \bibitem{lekssays2025techniquerag}
 A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
   augmented generation for adversarial technique annotation in {CTI} text, in:
@@ -118,6 +158,14 @@ A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
 F.~Morbiato, M.~Keller, P.~Nair, L.~Romano, Hierarchical retrieval augmented
   generation for adversarial technique annotation in cyber threat intelligence
   text, {PREPRINT} --- not peer reviewed. arXiv:2604.14166 (2026).
+
+\bibitem{cheng2026ttprint}
+Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
+  Evidence-grounded {TTP} extraction via diverge-then-converge verification,
+  {PREPRINT} --- not peer reviewed. arXiv:2605.25836; the Comments field says
+  so in as many words. Kept because its evidence-grounding requirement is the
+  design constraint our own gate obeys, so dropping it would let us appear to
+  have set that bar ourselves (2026).
 
 \bibitem{buchel2025sok}
 M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
@@ -170,6 +218,26 @@ H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
   Systems (NeurIPS), 2023, arXiv:2310.10226. Argues that self-reinforcement
   explanations reduce to the training-data account.
 
+\bibitem{chen2025recopilot}
+G.~Chen, H.~Sun, D.~Liu, Z.~Wang, Q.~Wang, B.~Yin, L.~Liu, L.~Ying,
+  {ReCopilot}: Reverse engineering copilot in binary analysis, {PREPRINT} ---
+  not peer reviewed. arXiv:2505.16366, v1 only, no Comments and no journal
+  reference. Cited only as one of the open-weight binary specialists that
+  establish the model-tier split (2025).
+
+\bibitem{tan2024llm4decompile}
+H.~Tan, Q.~Luo, J.~Li, Y.~Zhang, {LLM4Decompile}: Decompiling binary code with
+  large language models, in: Proceedings of the 2024 Conference on Empirical
+  Methods in Natural Language Processing (EMNLP), 2024, pp. 3473--3487.
+\newblock \href {https://doi.org/10.18653/v1/2024.emnlp-main.203}
+  {\path{doi:10.18653/v1/2024.emnlp-main.203}}.
+
+\bibitem{jiang2025nova}
+N.~Jiang, C.~Wang, K.~Liu, X.~Xu, L.~Tan, X.~Zhang, P.~Babkin, {Nova}:
+  Generative language models for assembly code with hierarchical attention and
+  contrastive learning, in: International Conference on Learning
+  Representations (ICLR), 2025, poster. arXiv:2311.13721.
+
 \bibitem{ttpdetect2026}
 Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
   X.~Zhang, Identifying adversary tactics and techniques in malware binaries
@@ -178,6 +246,30 @@ Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
   sentence citing it concedes ground rather than claims it; dropping it for
   want of a venue would let this paper imply it holds that ground itself. No
   peer-reviewed system with the same scope was found (2026).
+
+\bibitem{kate2025longfunceval}
+K.~Kate, T.~Pedapati, K.~Basu, Y.~Rizk, V.~Chenthamarakshan, S.~Chaudhury,
+  M.~Agarwal, I.~Abdelaziz, {LongFuncEval}: Measuring the effectiveness of long
+  context models for function calling, {PREPRINT} --- not peer reviewed.
+  arXiv:2505.10570, v1 only, no Comments and no journal reference. Kept because
+  it says the tool-catalogue degradation we report is already documented in
+  general, which is the direction that costs us (2025).
+
+\bibitem{paramanayakam2025lessismore}
+V.~Paramanayakam, A.~Karatzas, I.~Anagnostopoulos, D.~Stamoulis, Less is more:
+  Optimizing function calling for {LLM} execution on edge devices, in: Design,
+  Automation and Test in Europe Conference (DATE), 2025, arXiv:2411.15399.
+  Found on 2026-08-16 as the source of two figures the paper reported with no
+  attribution at all; both were confirmed against the full text.
+
+\bibitem{li2025phishdebate}
+W.~Li, S.~Manickam, Y.-w. Chong, S.~Karuppayah, {PhishDebate}: An {LLM}-based
+  multi-agent framework for phishing website detection, in: IEEE International
+  Conference on Big Data (BigData), 2025, pp. 6606--6615, arXiv:2506.15656.
+  Recorded as a preprint until the arXiv Comments field was read, which gives
+  the published citation in full.
+\newblock \href {https://doi.org/10.1109/BigData66926.2025.11401440}
+  {\path{doi:10.1109/BigData66926.2025.11401440}}.
 
 \bibitem{tran2026single}
 D.~Tran, D.~Kiela, Single-agent {LLMs} outperform multi-agent systems on

@@ -7,11 +7,12 @@ template, so a key that does not exist now renders as ``[?]`` instead of failing
 loudly — the same hole ``\\fact{}`` was built to keep out of the numbers.
 
 **Every preprint is declared.** Journals discount arXiv-only citations because
-they carry no review. Eight of this paper's forty entries have no peer-reviewed
-venue, and three of those are load-bearing: the paper quotes a number from them.
-That is a real submission risk and it is easy to forget, because a preprint
-citation looks exactly like any other in the rendered PDF. So each one is
-declared with a resolution, and a new one added without a status fails here.
+they carry no review. Twelve of this paper's fifty-three entries have no
+peer-reviewed venue — nine preprints, two issue trackers and one tool — and four
+of them are load-bearing: the paper quotes a number from them. That is a real
+submission risk and it is easy to forget, because a preprint citation looks
+exactly like any other in the rendered PDF. So each one is declared with a
+resolution, and a new one added without a status fails here.
 
 The registry may not name a venue that has not been verified. Guessing one is
 the failure this paper's own citation audit has now caught five times: three
@@ -90,9 +91,32 @@ def test_every_entry_is_cited() -> None:
     assert not orphans, f"{len(orphans)} entry(ies) listed but never cited: " + ", ".join(orphans)
 
 
+def _unreviewed(status: dict) -> set[str]:
+    r"""Entries whose citations must carry the visible marker.
+
+    ``entries`` are preprints. ``not_papers`` are non-papers cited *as
+    evidence* — an issue tracker offered as proof that a defect is known — and
+    they carry the marker for the same reason a preprint does: the reader is
+    being asked to believe something on unreviewed authority.
+
+    ``artefacts`` are excluded. A tool, a corpus or a released model cited as
+    the object it is asserts nothing a reader could decline, and stamping
+    software with ``[preprint]`` would be a false label rather than a cautious
+    one. TRAM is the case that forced the distinction: it has no venue and
+    never will, and marking it unreviewed would have said something untrue in
+    the body of a paper about saying only checked things.
+    """
+    return set(status["entries"]) | set(status["not_papers"])
+
+
+def _declared(status: dict) -> set[str]:
+    """Everything the registry accounts for, marker or no marker."""
+    return _unreviewed(status) | set(status.get("artefacts", {}))
+
+
 def test_every_preprint_is_declared_with_a_resolution() -> None:
     status = json.loads(_STATUS.read_text(encoding="utf-8"))
-    declared = set(status["entries"]) | set(status["not_papers"])
+    declared = _declared(status)
     preprints = {k for k, body in _entries().items() if not _VENUE.search(body)}
 
     undeclared = sorted(preprints - declared)
@@ -177,7 +201,7 @@ def test_an_unreviewed_source_is_never_cited_without_saying_so() -> None:
     unreviewed entry fails here.
     """
     status = json.loads(_STATUS.read_text(encoding="utf-8"))
-    unreviewed = set(status["entries"]) | set(status["not_papers"])
+    unreviewed = _unreviewed(status)
     bare = [(fname, key) for fname, macro, key in _cites() if key in unreviewed and macro == "cite"]
     assert not bare, (
         f"{len(bare)} citation(s) to an unreviewed source without \\preprintcite: "
@@ -193,7 +217,7 @@ def test_a_reviewed_source_is_not_marked_as_a_preprint() -> None:
     lose the marker with them.
     """
     status = json.loads(_STATUS.read_text(encoding="utf-8"))
-    unreviewed = set(status["entries"]) | set(status["not_papers"])
+    unreviewed = _unreviewed(status)
     wrong = [
         (fname, key)
         for fname, macro, key in _cites()

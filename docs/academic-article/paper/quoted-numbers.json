@@ -77,6 +77,26 @@
    "value": "85",
    "cite": "martinlopez2019deps",
    "of": "the share of reviewed APIs carrying inter-parameter dependencies"
+  },
+  {
+   "value": "98.2",
+   "cite": "li2025phishdebate",
+   "of": "the recall PhishDebate reports on a real-world phishing dataset"
+  },
+  {
+   "value": "93.25",
+   "cite": "ttpdetect2026",
+   "of": "TTPDetect's function-level precision"
+  },
+  {
+   "value": "93.81",
+   "cite": "ttpdetect2026",
+   "of": "TTPDetect's function-level recall"
+  },
+  {
+   "value": "87.37",
+   "cite": "ttpdetect2026",
+   "of": "TTPDetect's precision on real-world malware"
   }
  ]
 }

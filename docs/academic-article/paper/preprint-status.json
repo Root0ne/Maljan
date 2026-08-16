@@ -1,6 +1,6 @@
 {
  "schema": "maljan-preprint-status/v1",
- "note": "Bibliography entries with no peer-reviewed venue. Every entry was checked against arXiv, dblp, Crossref and publisher pages on 2026-08-16. Five that had been recorded as preprints turned out to be published and left this file; three were replaced with peer-reviewed work and left the bibliography; one (morbiato2026hierarchical) was added by the same pass, because a figure the paper already quoted turned out to come from a source the bibliography did not contain at all. The eight that remain were kept deliberately: each one concedes ground rather than claiming it, so removing it for want of a venue would make the paper appear more original than it is. Every citation to them carries a visible [preprint] marker, enforced by tests/evaluation/test_paper_citations.py.",
+ "note": "Bibliography entries with no peer-reviewed venue. Every entry was checked against arXiv, dblp, Crossref and publisher pages on 2026-08-16. Five that had been recorded as preprints turned out to be published and left this file; three were replaced with peer-reviewed work and left the bibliography; one (morbiato2026hierarchical) was added by the same pass, because a figure the paper already quoted turned out to come from a source the bibliography did not contain at all. A further three arrived on the same day from the twelve systems the paper had named without citing (TTPrint, LongFuncEval, ReCopilot), and TRAM joined the non-papers. The eleven that remain were kept deliberately: each one concedes ground rather than claiming it, so removing it for want of a venue would make the paper appear more original than it is. Every citation to them carries a visible [preprint] marker, enforced by tests/evaluation/test_paper_citations.py.",
  "rule": "Every entry in refs.bib without a booktitle or journal must appear here. A new preprint added without a status fails tests/evaluation/test_paper_citations.py. Nothing here may name a venue that has not been verified against the publisher: guessing a venue is the failure this paper's citation audit already caught five times.",
  "quotes_declined": "An optional list of figures the source reports that the paper chose NOT to quote. It exists because 'we did not cite this number' and 'we never saw this number' are different states, and only the first is a decision. Recording it stops a later pass from helpfully adding the figure back.",
  "verified_offline": false,
@@ -14,10 +14,14 @@
    "action": "Kept and marked. Says our null is not the first of its kind. Bertalanic and Fortuna reach the same conclusion in a reviewed venue and now carry the paragraph, but the crossover figure for our own model class has no reviewed equivalent."
   },
   "ttpdetect2026": {
-   "quotes": [],
-   "load_bearing": false,
+   "quotes": [
+    "93.25",
+    "93.81",
+    "87.37"
+   ],
+   "load_bearing": true,
    "status": "unresolved",
-   "action": "Kept and marked. It is the nearest system to ours and the sentence citing it concedes ground rather than claims it; no peer-reviewed system with the same scope was found, and dropping it would let the paper imply it holds that ground itself."
+   "action": "Kept and marked. It is the nearest system to ours and the sentence citing it concedes ground rather than claims it; no peer-reviewed system with the same scope was found, and dropping it would let the paper imply it holds that ground itself. Recorded as load-bearing on 2026-08-16: the paper quotes three of its figures, which had never been registered because related-work.tex is exempt from the forward numeral rule. A reader who declines it loses those three numbers."
   },
   "doosterlinck2024incontext": {
    "quotes": [],
@@ -51,10 +55,32 @@
    "load_bearing": true,
    "status": "unresolved",
    "action": "Identified on 2026-08-16 as the source of the rank correlation the paper had been attributing to a paper about multi-hop reasoning. The full text was read to confirm the figures, which the abstract does not give. Still a preprint; search for a published version before submission."
+  },
+  "cheng2026ttprint": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "unresolved",
+   "action": "Kept and marked. Its evidence-grounding requirement is the design constraint our own gate obeys, so dropping it for want of a venue would let us appear to have set that bar ourselves. arXiv:2605.25836; the Comments field says 'Preprint' in as many words."
+  },
+  "kate2025longfunceval": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "unresolved",
+   "action": "Kept and marked. Says the tool-catalogue degradation we report is already documented in general, which is the direction that costs us. arXiv:2505.10570 v1, no Comments and no journal reference. The 7-85% range it reports is quoted; both endpoints are too generic to bind in quoted-numbers.json, so the binding rests on the marked citation alone."
+  },
+  "chen2025recopilot": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "unresolved",
+   "action": "Kept and marked. Cited only as one of the open-weight binary specialists that establish the model-tier split; no figure is taken from it. arXiv:2505.16366 v1, no Comments and no journal reference."
   }
  },
  "not_papers": {
   "llamacpp8634": "An issue tracker entry, cited as an artefact rather than as a source. It is evidence that the incompatibility is known, and a reviewed paper would not serve that purpose better.",
   "vllm11976": "As above."
- }
+ },
+ "artefacts": {
+  "mitre2023tram": "The Threat Report ATT&CK Mapper, cited as the artefact it is. Its repository names no preferred citation and a reviewed paper would not serve the purpose better: the claim is that this tool exists and defines the TRAM2 corpus, not that a result of its holds."
+ },
+ "artefacts_rule": "Entries cited as objects rather than as evidence: a tool, a corpus, a released model. They carry no venue and never will, and they do NOT take the [preprint] marker. The marker tells a reader which sentences rest on unreviewed evidence; naming the tool a corpus comes from asserts nothing to discount, and labelling software a preprint would be false. not_papers is the other case -- an issue tracker cited as evidence that a defect is known -- and those do take the marker."
 }

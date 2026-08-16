@@ -499,3 +499,168 @@
             reviewed equivalent we could verify. Bertalani{\v c} and Fortuna
             reach the same conclusion in a reviewed venue}
 }
+
+% ---------------------------------------------------------------------------
+% The systems this paper named but never cited.
+%
+% Twelve systems were mentioned by name in the related-work section with no
+% record of their own -- "cited via the verified sources that discuss them",
+% which is a polite way of saying the paper asserted twelve attributions it had
+% not checked. The reference note flagged this as a debt to clear before
+% submission. Cleared here, on 2026-08-16, against dblp, publisher pages and
+% arXiv abs pages.
+%
+% Two things fell out of doing it. LADDER is RAID 2023, not the EACL venue a
+% search summary suggested. PhishDebate turned out to be published at IEEE
+% BigData 2025, which the arXiv Comments field states and no summary mentioned.
+% And a thirteenth source was added: the 46-to-19 tool-catalogue figure had no
+% named source at all, in a sentence that reported two numbers from it.
+% ---------------------------------------------------------------------------
+
+@misc{mitre2023tram,
+  author       = {{Center for Threat-Informed Defense}},
+  title        = {{TRAM}: Threat Report {ATT\&CK} Mapper},
+  year         = {2023},
+  howpublished = {Open-source software, MITRE Engenuity},
+  note         = {Not a paper and cited as the artefact it is: the repository
+                  names no preferred citation. Approved for public release,
+                  document numbers CT0035 and CT0075}
+}
+
+@inproceedings{legoy2020rcatt,
+  author    = {Legoy, Valentine and Caselli, Marco and Seifert, Christin and
+               Peter, Andreas},
+  title     = {Automated Retrieval of {ATT\&CK} Tactics and Techniques for
+               Cyber Threat Reports},
+  booktitle = {1st Cyber Threat Intelligence Symposium (CTI)},
+  year      = {2020},
+  note      = {arXiv:2004.14322. Venue confirmed from the University of Twente
+               research portal, which records it as a conference contribution;
+               it is not indexed under this title in dblp}
+}
+
+@inproceedings{husari2017ttpdrill,
+  author    = {Husari, Ghaith and Al-Shaer, Ehab and Ahmed, Mohiuddin and
+               Chu, Bill and Niu, Xi},
+  title     = {{TTPDrill}: Automatic and Accurate Extraction of Threat Actions
+               from Unstructured Text of {CTI} Sources},
+  booktitle = {Proceedings of the 33rd Annual Computer Security Applications
+               Conference (ACSAC)},
+  pages     = {103--115},
+  year      = {2017},
+  doi       = {10.1145/3134600.3134646}
+}
+
+@inproceedings{satvat2021extractor,
+  author    = {Satvat, Kiavash and Gjomemo, Rigel and
+               Venkatakrishnan, V. N.},
+  title     = {{EXTRACTOR}: Extracting Attack Behavior from Threat Reports},
+  booktitle = {IEEE European Symposium on Security and Privacy (EuroS\&P)},
+  pages     = {598--615},
+  year      = {2021}
+}
+
+@inproceedings{li2022attackg,
+  author    = {Li, Zhenyuan and Zeng, Jun and Chen, Yan and Liang, Zhenkai},
+  title     = {{AttacKG}: Constructing Technique Knowledge Graph from Cyber
+               Threat Intelligence Reports},
+  booktitle = {Computer Security --- ESORICS},
+  pages     = {589--609},
+  year      = {2022},
+  doi       = {10.1007/978-3-031-17140-6_29}
+}
+
+@inproceedings{alam2023ladder,
+  author    = {Alam, Md Tanvirul and Bhusal, Dipkamal and Park, Youngja and
+               Rastogi, Nidhi},
+  title     = {Looking Beyond {IoCs}: Automatically Extracting Attack Patterns
+               from External {CTI}},
+  booktitle = {26th International Symposium on Research in Attacks, Intrusions
+               and Defenses (RAID)},
+  pages     = {92--108},
+  year      = {2023},
+  note      = {The {LADDER} framework. A search summary placed this at an ACL
+               venue; dblp records RAID}
+}
+
+@misc{cheng2026ttprint,
+  author = {Cheng, Yutong and Li, Changze and Basuki, Raihan Sultan Pasha and
+            Cui, Qian and Ding, Wei and Gao, Peng},
+  title  = {{TTPrint}: Evidence-Grounded {TTP} Extraction via
+            Diverge-then-Converge Verification},
+  year   = {2026},
+  note   = {{PREPRINT} --- not peer reviewed. arXiv:2605.25836; the Comments
+            field says so in as many words. Kept because its evidence-grounding
+            requirement is the design constraint our own gate obeys, so
+            dropping it would let us appear to have set that bar ourselves}
+}
+
+@inproceedings{li2025phishdebate,
+  author    = {Li, Wenhao and Manickam, Selvakumar and Chong, Yung-wey and
+               Karuppayah, Shankar},
+  title     = {{PhishDebate}: An {LLM}-Based Multi-Agent Framework for Phishing
+               Website Detection},
+  booktitle = {IEEE International Conference on Big Data (BigData)},
+  pages     = {6606--6615},
+  year      = {2025},
+  doi       = {10.1109/BigData66926.2025.11401440},
+  note      = {arXiv:2506.15656. Recorded as a preprint until the arXiv
+               Comments field was read, which gives the published citation in
+               full}
+}
+
+@misc{kate2025longfunceval,
+  author = {Kate, Kiran and Pedapati, Tejaswini and Basu, Kinjal and
+            Rizk, Yara and Chenthamarakshan, Vijil and Chaudhury, Subhajit and
+            Agarwal, Mayank and Abdelaziz, Ibrahim},
+  title  = {{LongFuncEval}: Measuring the Effectiveness of Long Context Models
+            for Function Calling},
+  year   = {2025},
+  note   = {{PREPRINT} --- not peer reviewed. arXiv:2505.10570, v1 only, no
+            Comments and no journal reference. Kept because it says the
+            tool-catalogue degradation we report is already documented in
+            general, which is the direction that costs us}
+}
+
+@misc{chen2025recopilot,
+  author = {Chen, Guoqiang and Sun, Huiqi and Liu, Daguang and Wang, Zhiqi and
+            Wang, Qiang and Yin, Bin and Liu, Lu and Ying, Lingyun},
+  title  = {{ReCopilot}: Reverse Engineering Copilot in Binary Analysis},
+  year   = {2025},
+  note   = {{PREPRINT} --- not peer reviewed. arXiv:2505.16366, v1 only, no
+            Comments and no journal reference. Cited only as one of the
+            open-weight binary specialists that establish the model-tier split}
+}
+
+@inproceedings{tan2024llm4decompile,
+  author    = {Tan, Hanzhuo and Luo, Qi and Li, Jing and Zhang, Yuqun},
+  title     = {{LLM4Decompile}: Decompiling Binary Code with Large Language
+               Models},
+  booktitle = {Proceedings of the 2024 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP)},
+  pages     = {3473--3487},
+  year      = {2024},
+  doi       = {10.18653/v1/2024.emnlp-main.203}
+}
+
+@inproceedings{jiang2025nova,
+  author    = {Jiang, Nan and Wang, Chengxiao and Liu, Kevin and Xu, Xiangzhe
+               and Tan, Lin and Zhang, Xiangyu and Babkin, Petr},
+  title     = {{Nova}: Generative Language Models for Assembly Code with
+               Hierarchical Attention and Contrastive Learning},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2025},
+  note      = {Poster. arXiv:2311.13721}
+}
+
+@inproceedings{paramanayakam2025lessismore,
+  author    = {Paramanayakam, Varatheepan and Karatzas, Andreas and
+               Anagnostopoulos, Iraklis and Stamoulis, Dimitrios},
+  title     = {Less is More: Optimizing Function Calling for {LLM} Execution on
+               Edge Devices},
+  booktitle = {Design, Automation and Test in Europe Conference (DATE)},
+  year      = {2025},
+  note      = {arXiv:2411.15399. Found on 2026-08-16 as the source of two
+               figures the paper reported with no attribution at all; both were
+               confirmed against the full text}
+}

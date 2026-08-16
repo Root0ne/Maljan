@@ -7,6 +7,7 @@ Warning--empty pages in gunawi2008eio
 Warning--empty pages in yuan2014simple
 Warning--empty pages in yu2024maltracker
 Warning--empty pages in saha2025malaware
+Warning--empty pages in legoy2020rcatt
 Warning--empty pages in lekssays2025techniquerag
 Warning--empty pages in lange2024annoctr
 Warning--empty pages in abdallah2026retrievers
@@ -14,6 +15,8 @@ Warning--empty pages in ng2014conll
 Warning--empty pages in bryant2019bea
 Warning--empty pages in welleck2019unlikelihood
 Warning--empty pages in li2023repetition
+Warning--empty pages in jiang2025nova
+Warning--empty pages in paramanayakam2025lessismore
 Warning--empty pages in bertalanic2026consensus
 Warning--empty pages in lea2025rex86
 Warning--empty pages in evertz2026chasing
@@ -22,45 +25,45 @@ Warning--empty pages in lazaridou2021mind
 Warning--empty pages in dev2026judge
 Warning--empty pages in snell2025testtime
 Warning--empty pages in hassid2024budget
-You've used 40 entries,
+You've used 53 entries,
             2952 wiz_defined-function locations,
-            888 strings with 19355 characters,
-and the built_in function-call counts, 13657 in all, are:
-= -- 1183
-> -- 595
-< -- 8
-+ -- 225
-- -- 185
-* -- 879
-:= -- 1779
-add.period$ -- 52
-call.type$ -- 40
-change.case$ -- 68
+            957 strings with 23802 characters,
+and the built_in function-call counts, 18661 in all, are:
+= -- 1638
+> -- 794
+< -- 14
++ -- 300
+- -- 247
+* -- 1185
+:= -- 2399
+add.period$ -- 69
+call.type$ -- 53
+change.case$ -- 87
 chr.to.int$ -- 0
-cite$ -- 59
-duplicate$ -- 503
-empty$ -- 1630
-format.name$ -- 223
-if$ -- 3619
+cite$ -- 75
+duplicate$ -- 694
+empty$ -- 2209
+format.name$ -- 297
+if$ -- 4952
 int.to.chr$ -- 0
-int.to.str$ -- 40
-missing$ -- 32
-newline$ -- 140
-num.names$ -- 38
-pop$ -- 349
+int.to.str$ -- 53
+missing$ -- 41
+newline$ -- 183
+num.names$ -- 51
+pop$ -- 471
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 0
-skip$ -- 1004
+skip$ -- 1377
 stack$ -- 0
-substring$ -- 372
-swap$ -- 113
-text.length$ -- 8
+substring$ -- 593
+swap$ -- 181
+text.length$ -- 14
 text.prefix$ -- 0
 top$ -- 0
 type$ -- 0
-warning$ -- 19
-while$ -- 65
-width$ -- 42
-write$ -- 386
-(There were 19 warnings)
+warning$ -- 22
+while$ -- 96
+width$ -- 55
+write$ -- 510
+(There were 22 warnings)
