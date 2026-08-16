@@ -52,7 +52,7 @@ question to ask of an evaluation than the one boundary-oriented thinking suggest
 component fail silently}, but \emph{for each number I am about to report, did I measure its cause or
 assign it}.
 
-The correction described in Section~5 is that question turned on ourselves and answered badly. Every
+The correction described in Section~\ref{paired-designs-bootstrap-intervals-and-never-a-single-run} is that question turned on ourselves and answered badly. Every
 interval in an earlier draft of this paper attributed its width to sampling variation among
 independent observations. The observations were not independent, the width was an artefact of the
 unit we resampled at, and nothing in the pipeline, the tests or the review caught it, because the
@@ -62,24 +62,24 @@ defect was never in a function.
 
 We are wary of drawing implementation advice from one pipeline on one machine, so this is narrow.
 
-\textbf{Measure the firing rate before the effect.} A mechanism that engages on \fact{cap-rate} of its
+Measure the firing rate before the effect. A mechanism that engages on \fact{cap-rate} of its
 inputs produces an ablation whose null describes the cases where it never ran. This is the cheapest
 practice in the paper and it changed which experiments were worth running rather than merely how
 they were reported.
 
-\textbf{Count the distinct outputs.} Four of our seven defects were found by asking how many distinct
+Count the distinct outputs. Four of our seven defects were found by asking how many distinct
 outputs N inputs produced. It needs no ground truth and no oracle, which is what makes it usable
 where correctness is hard to check. It belongs beside the sample size in an evaluation report rather
 than inside a test, because the failures it catches need a second call in one server lifetime and a
 unit test writes one.
 
-\textbf{Retain per-sample outputs, and then ask what else the study is made of.} We adopted per-sample
+Retain per-sample outputs, and then ask what else the study is made of. We adopted per-sample
 retention after losing a study to its absence, and the rule was scoped to the object under study.
 The next failure was in the environment: four arms of a paired ablation died on host memory, we had
 their outputs and not the host state, and they remain unattributable. The rule you write after a
 failure is scoped to that failure.
 
-\textbf{A server that answers is not the same as a server that answered your question.} Four of our
+A server that answers is not the same as a server that answered your question. Four of our
 defects are instances of it, and the class is documented \cite{yuan2014simple,alquraan2018partition}. Our contribution is the setting and
 the price. In an evaluation pipeline the artefact of such a failure is not a degraded user session
 but a measurement that is wrong and looks right, and the price we paid was a completed \fact{drift-n}-sample

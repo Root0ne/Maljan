@@ -7,7 +7,7 @@ Every sample analysed in this work is live Windows PE malware. The \fact{baselin
 dated samples of the withdrawn drift study were obtained from MalwareBazaar (abuse.ch) under its
 terms of use, which permit research redistribution of samples but not of the corpus as a package.
 
-\textbf{Containment.} Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image,
+Containment. Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image,
 reverted to a clean snapshot between analyses. The sandbox host is reachable from one network
 segment and from no public route; it holds no credentials for any other system, and no analysis
 machine shares a filesystem with the host that runs the pipeline. Binaries are held only in a
@@ -23,7 +23,7 @@ for behavioural sandboxing and it is the arrangement whose consequences we repor
 the domains every sample in the cohort contacted turn out to be the guest image describing itself
 rather than anything the samples did.
 
-\textbf{No human subjects.} No user study was conducted, no personal data was collected, and no human
+No human subjects. No user study was conducted, no personal data was collected, and no human
 analyst scored any output. That last point is a limitation of the evaluation, stated as such in
 Threats to Validity, not a claim about ethics.
 
@@ -38,14 +38,14 @@ contains the ATT\&CK ground-truth fixtures, derived from the public
 \texttt{mitre-attack/attack-stix-data} repository under the ATT\&CK Terms of Use, and the model
 digest and inference-engine commit needed to reproduce the local arm.
 
-\textbf{Withheld, and why.} Malware binaries are not released; they are obtainable from the sources named
+Withheld, and why. Malware binaries are not released; they are obtainable from the sources named
 in Background by their SHA-256 digests, which are in the archive. Sandbox reports are not released
 in full because they embed strings and memory contents from the samples. The sandbox host's address
 is withheld; it appears nowhere in the archive and is referred to throughout as a private address.
 One dataset used for retrieval-corpus construction is redistributed by its authors under terms that
 do not permit our redistribution, and is referenced rather than included.
 
-\textbf{Not available.} The \fact{drift-n}-sample temporal-drift study's per-sample outputs do not exist. They were
+Not available. The \fact{drift-n}-sample temporal-drift study's per-sample outputs do not exist. They were
 written to a path that was valid on the machine the harness was first written on and silently
 relative on the machine it ran on; the study is withdrawn on that account and the withdrawal is
 reported in Results rather than quietly repaired. The manifest of the \fact{drift-n} samples survives and is

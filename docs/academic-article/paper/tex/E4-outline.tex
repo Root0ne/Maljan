@@ -2,7 +2,7 @@
 
 Three claims organise this paper.
 
-\textbf{First: the architecture we built did not survive its own evaluation.} The system is a multi-agent
+First: the architecture we built did not survive its own evaluation. The system is a multi-agent
 pipeline over static, dynamic and network evidence, with a corroboration cascade, two retrieval
 tiers, and deterministic confidence gating. Each component was motivated by a plausible mechanism.
 Measured at equal token budget against simpler alternatives, the multi-agent design does not beat a
@@ -10,14 +10,14 @@ single judge; the corroboration set never changes a verdict; the confidence numb
 discriminates at AUC \fact{confidence-auc}; and all three retrieval components are near-inert end to end despite
 working in isolation. We report these as results rather than as tuning opportunities.
 
-\textbf{Second. Those nulls are only interpretable because we measured whether each mechanism fired.} A
+Second. Those nulls are only interpretable because we measured whether each mechanism fired. A
 deterministic confidence cap that fires on \fact{cap-rate} of techniques produces an ablation whose null
 result says nothing about the cap. A priority hint that fires on \fact{hint-rate} of samples produces one that
 does. We adopted firing rate before effect as a rule after the first case, and it changed which
 experiments were worth running.
 
-\textbf{Third, and the reason for the paper's title. The instrument was repeatedly wrong in ways that
-looked like data.} Over one week we found four defects at the boundaries between the pipeline and
+Third, and the reason for the paper's title. The instrument was repeatedly wrong in ways that
+looked like data. Over one week we found four defects at the boundaries between the pipeline and
 the servers it depends on. In each case a server answered successfully and answered about something
 else: an argument the agent never supplied arrived as an explicit \texttt{null}; a program reported as
 loaded, by name, never became the one being analysed; a refused load returned HTTP 200 with an
@@ -30,7 +30,7 @@ A hint of exactly \fact{hint-chars-repeated} characters for two unrelated binari
 character for samples of \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at \fact{stuck-graph-chars} characters. The check
 costs one line, needs no ground truth, and we now report it beside every batch result.
 
-\textbf{Then three more, and none of them was at a boundary.} An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
+Then three more, and none of them was at a boundary. An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
 size ranked a reasoning-configuration flag instead and recovered the published scaling coefficient
 almost exactly, agreeing with the literature, which is the direction a result is least likely to be
 questioned. And a documented output ceiling on the judge was renamed by our client library
@@ -62,8 +62,8 @@ overruling a request parameter to a default is a named failure mode with a measu
 \cite{xu2013misconfig}, and request-parsing defects with silent symptoms are documented in the
 inference engines we use \cite{liu2026inference}.
 
-\textbf{Three of our four boundary mechanisms therefore sit inside a peer-reviewed class. The fourth
-does not, and we say which.} We found no reviewed source establishing that OpenAI-compatible servers
+Three of our four boundary mechanisms therefore sit inside a peer-reviewed class. The fourth
+does not, and we say which. We found no reviewed source establishing that OpenAI-compatible servers
 disagree about \emph{which} token-limit parameter they honour; that specific divergence is recorded
 only in the servers' own issue trackers, which we cite as such rather than as literature. We
 therefore claim no priority for it either. The general failure mode is known, and whether this
@@ -72,23 +72,23 @@ particular instance of it is new is a question we cannot settle from reviewed wo
 What we add is the setting and the price. An evaluation pipeline for security research, where
 the artefact is not a degraded user session but a measurement that is wrong and looks right.
 
-\textbf{Contributions.} Each maps to one section, and each is a measurement or a mechanism rather than a proposal.
+Contributions. Each maps to one section, and each is a measurement or a mechanism rather than a proposal.
 
 We report a no-LLM baseline for LLM-based ATT\&CK mapping, and the full pipeline scored against it
 on the same samples and the same ground truth, the comparison without which every F1 in this
-literature, including our own earlier ones, refers to nothing (Section~5.1). We report four measured
+literature, including our own earlier ones, refers to nothing (Section~\ref{the-baseline-first}). We report four measured
 architectural negatives, multi-agent consensus at equal budget, a corroboration cascade, two-tier
 attribution and a confidence gate, each with the minimum detectable effect of the design that
-produced it, because a null without its resolution is unreadable (Section~5.2 to Section~5.6). We
+produced it, because a null without its resolution is unreadable (Section~\ref{multi-agent-consensus-does-not-pay-for-itself-at-equal-budget} to Section~\ref{confidence-is-nearly-a-constant}). We
 report seven instrument failures that produced plausible results rather than errors, with the layer
 each occurred at and what actually found it; four crossed a boundary with another server, and three
-were inside our own code and share a different shape (Section~6).
+were inside our own code and share a different shape (Section~\ref{sec:failures}).
 
 Two things follow from those failures. One is a one-line detector, how many distinct outputs did N
 inputs produce, which found all four boundary failures, needs no ground truth, and is reported
-beside every batch result rather than written as a test (Section~6.7). The other is a selection
+beside every batch result rather than written as a test (Section~\ref{what-did-find-them-output-cardinality}). The other is a selection
 rule that follows from a provider accepting a parameter and not acting on it, namely that arms must
-be matched on their \emph{measured} configuration rather than their requested one (Section~6.5).
+be matched on their \emph{measured} configuration rather than their requested one (Section~\ref{m6-a-configuration-difference-wearing-a-parameter-count}).
 The price is demonstrated rather than hypothesised. One completed \fact{drift-n}-sample study is
 withdrawn because its question can no longer be asked of it, and four arms of a later ablation are
-unattributable for the same reason one level up (Section~7.4).
+unattributable for the same reason one level up (Section~\ref{what-it-cost}).

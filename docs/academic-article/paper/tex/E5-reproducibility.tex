@@ -39,23 +39,22 @@ constant.
 
 \subsection{The model, exactly}\label{the-model-exactly}
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The local model and inference engine, pinned by digest and commit.}\label{tab:model}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}@{}}
-\caption{The local model and inference engine, pinned by digest and commit.}\label{tab:model}\\
-\toprule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised \textbf{IQ3\_K\_R4} by Unsloth \\
-GGUF sha256 & \texttt{d0de70ef…c4ea}, computed locally \textbf{and} matching the HuggingFace etag \\
+\toprule
+model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised IQ3\_K\_R4 by Unsloth \\
+GGUF sha256 & \texttt{d0de70ef…c4ea}, computed locally and matching the HuggingFace etag \\
 HF revision & \texttt{cfd350fd…1f0d} \\
 retrieved & 2026-05-11 \\
-imatrix calibration dataset & \textbf{named in Section~2.0} \\
-architecture & hybrid recurrent (SSM keys + \texttt{full\_attention\_interval=4}), confirmed from the GGUF metadata \\
-\end{longtable}
+imatrix calibration dataset & \texttt{\seqsplit{unsloth\_calibration\_Qwen3.6-35B-A3B.txt}}, \setting{510} entries over \setting{76} chunks, from \texttt{\seqsplit{Qwen3.6-35B-A3B-GGUF/imatrix\_unsloth.gguf}} \\
+architecture & hybrid recurrent (SSM keys + \texttt{\seqsplit{full\_attention\_interval=4}}), confirmed from the GGUF metadata \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Without both, the sampler finding in this appendix cannot be reproduced.
 
@@ -65,10 +64,10 @@ calibration produced it, and two IQ3 quants of the same model are not the same a
 
 \subsection{The engine, and an honest note about how we know}\label{the-engine-and-an-honest-note-about-how-we-know}
 
-Engine; \texttt{ik\_llama.cpp}, commit \texttt{eb570eb96689c235933b813693ca28ab9d3d26de}
+Engine; \texttt{ik\_llama.cpp}, commit \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}}
 (\emph{``MTP: Avoid per step SSM copy (\#\fact{engine-commit-pr})''}).
 
-\textbf{The binary could not identify itself.} \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)},
+The binary could not identify itself. \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)},
 because the build tree was never a git checkout. The commit was recovered from a depth-\setting{1} clone
 vendored elsewhere in the project and then \emph{proved} to describe the build: identical \fact{engine-source-files}-file source
 lists, and with line endings normalised exactly one file differs, the generated
@@ -119,8 +118,8 @@ The Ghidra container is capped at \fact{ghidra-mem-limit-gb} GB (\texttt{mem\_li
 the database is memory-mapped and measured RSS reached \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap. Two
 host lock-ups preceded this limit being added.
 
-\textbf{The working set does not fit alongside an interactive session, and that is a reproducibility fact
-rather than an operational one.} Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
+The working set does not fit alongside an interactive session, and that is a reproducibility fact
+rather than an operational one. Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
 up to \fact{ghidra-mem-limit-gb} GB: on a \setting{31} GiB host this leaves nothing for a desktop. When we ran a paired study without
 that headroom, the swap file was exhausted, the model server had \fact{llama-paged-out-gb} GB of its own address space
 paged out, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
@@ -129,17 +128,17 @@ timings it produces are not comparable to the rest of the table.
 
 Two consequences for anyone reproducing this work;
 
-\textbf{Give the run the machine.} Long paired studies here are run against an otherwise-idle host.
+Give the run the machine. Long paired studies here are run against an otherwise-idle host.
 This is not a performance recommendation; arms measured under memory pressure are not commensurable
 with arms that were not.
 
-\textbf{Record the host state per arm, not per study.} Our harnesses capture \texttt{MemAvailable},
+Record the host state per arm, not per study. Our harnesses capture \texttt{MemAvailable},
 \texttt{SwapFree} and the model server's resident-versus-swapped split at both ends of every arm,
 and the scoring script excludes arms whose host was degraded. This screen can only be applied
 forward, because for arms already collected without it the state is gone and the honest label is
 \texttt{unattributable}. That is the label our own halted ablation carries.
 
-\textbf{Start the model server in its own cgroup, not the harness's.} This one cost us three
+Start the model server in its own cgroup, not the harness's. This one cost us three
 interrupted runs before we read the kernel log carefully enough.
 
 \begin{verbatim}
@@ -158,51 +157,36 @@ arbitrate.
 
 \subsection{Data}\label{data}
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Every committed artefact the paper's numbers are derived from, with its size and whether it carries per-sample records.}\label{tab:artefacts}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Every committed artefact the paper's numbers are derived from, with its size and whether it carries per-sample records.}\label{tab:artefacts}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-artefact
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what it is
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-committed
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-artefact
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what it is
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-committed
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, \textbf{metadata only, no binaries} & yes \\
-\texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, \textbf{seed \fact{cohort-seed}}, digest recorded & yes \\
-\texttt{cape\_task\_ledger\_n100.json} & sha256 $\rightarrow$ CAPE task id for all \fact{cohort-n} submissions & yes \\
+\toprule
+artefact & what it is & committed \\
+\midrule
+\texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, metadata only, no binaries & yes \\
+\texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, seed \fact{cohort-seed}, digest recorded & yes \\
+\texttt{\seqsplit{cape\_task\_ledger\_n100.json}} & sha256 $\rightarrow$ CAPE task id for all \fact{cohort-n} submissions & yes \\
 \texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=\fact{cohort-n} attempted & yes \\
 \texttt{cape\_baseline.json} & per-sample CAPE-only scores & yes \\
 \texttt{consensus\_ablation.json}, \texttt{frontier\_probe*.json}, \ldots{} & per-sample arms for every ablation, one file per arm and configuration & yes \\
-\texttt{parameter\_size\_series.json} & the size series with each arm's \textbf{measured} reasoning share and why it was included or excluded & yes \\
-\texttt{judge\_contribution\_\{uncapped,capped\}.json} & the judge study in both output-cap conditions, per call, with the branch each failed call took & yes \\
-\texttt{fallback\_bundle\_content\_\{uncapped,capped\}.json} & per-call technique sets on the fallback path against the cascade set each would have received & yes \\
-\texttt{outbound\_parameter\_probe.json} & which parameters the local server acts on, measured & yes \\
-CAPE reports & \textasciitilde7 MB each, \textasciitilde660 MB total & \textbf{no}, see Section~5 \\
-\end{longtable}
+\texttt{\seqsplit{parameter\_size\_series.json}} & the size series with each arm's measured reasoning share and why it was included or excluded & yes \\
+\texttt{\seqsplit{judge\_contribution\_\{uncapped,capped\}.json}} & the judge study in both output-cap conditions, per call, with the branch each failed call took & yes \\
+\texttt{\seqsplit{fallback\_bundle\_content\_\{uncapped,capped\}.json}} & per-call technique sets on the fallback path against the cascade set each would have received & yes \\
+\texttt{\seqsplit{outbound\_parameter\_probe.json}} & which parameters the local server acts on, measured & yes \\
+CAPE reports & \textasciitilde7 MB each, \textasciitilde660 MB total & no, see Section~\ref{data-availability} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Ground truth resolves a MalwareBazaar family signature to an in-repo MITRE \texttt{uses} fixture through an
 explicit alias map plus a CamelCase-split fallback. It is uncurated at technique level, which
 Threats to Validity treats as a construct-validity limit rather than a footnote.
 
-\textbf{Per-sample outputs are stored for every study in this paper.} This is a policy adopted after it
+Per-sample outputs are stored for every study in this paper. This is a policy adopted after it
 cost us a result: an earlier study's per-sample outputs were not retained, and when a defect was
 later found that could have affected it, the question could not be asked. That study is withdrawn.
 
@@ -231,49 +215,26 @@ An n=\fact{cohort-n} cohort is roughly \fact{cohort-sandbox-hours} hours of sand
 Three endpoints, and a reader reproducing any of them needs the configuration axis before the
 model names, because it is worth more F1 than any of them.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The inference endpoints each arm ran against, with the configuration measured rather than the configuration requested.}\label{tab:endpoints}
+\centering\footnotesize
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}@{}}
-\caption{The inference endpoints each arm ran against, with the configuration measured rather than the configuration requested.}\label{tab:endpoints}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-endpoint
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-model
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-reasoning
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-n
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-endpoint
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-model
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-reasoning
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-n
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+arm & endpoint & model & reasoning & n \\
+\midrule
 local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{arm-default-n} \\
-frontier & OpenRouter & \texttt{nvidia/nemotron-3-super-120b-a12b:free} & \textbf{on, not controllable} & \fact{arm-default-n} $\times$\setting{2} \\
-same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & off & \fact{arm-qwen35ba3b-nothink-n} \\
-same weights, hosted & DashScope International & \texttt{qwen3.6-35b-a3b} & on & \fact{arm-qwen35ba3b-n} \\
+frontier & OpenRouter & \texttt{\seqsplit{nvidia/nemotron-3-super-120b-a12b:free}} & on, not controllable & \fact{arm-default-n} $\times$\setting{2} \\
+same weights, hosted & DashScope International & \texttt{\seqsplit{qwen3.6-35b-a3b}} & off & \fact{arm-qwen35ba3b-nothink-n} \\
+same weights, hosted & DashScope International & \texttt{\seqsplit{qwen3.6-35b-a3b}} & on & \fact{arm-qwen35ba3b-n} \\
 larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenplus-n} each \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 \texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter. Not rejected, but accepted,
 recorded in the result file, and not acted on. The re-run requesting it returned a
@@ -286,7 +247,7 @@ the measured reasoning share for exactly this reason and refuses to correlate wh
 three configuration-matched arms span three parameter counts, which, on these endpoints, is
 always.
 
-\textbf{The local server's output cap must be sent twice.} \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire as
+The local server's output cap must be sent twice. \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire as
 \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read; the cap must also travel in
 \texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}. Measured on this host: \fact{cap-requested} requested, \fact{cap-ignored-tokens}
 generated with the renamed field alone, \fact{cap-honoured-tokens} with both. A reader who omits this will find the
@@ -308,7 +269,7 @@ The free tier allows \fact{openrouter-daily-limit} requests per day (\texttt{X-R
 \texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a \fact{openrouter-burst-limit}-requests-per-minute cap
 that applies whether or not credit has been purchased. The first attempt at this arm exhausted
 the daily quota mid-flight, \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning HTTP 429, and the n=\fact{superseded-frontier-n} estimate it
-produced was not merely imprecise but pointed the wrong way (Section~2). The arm reported above is the
+produced was not merely imprecise but pointed the wrong way (Section~\ref{frontier-does-not-separate}). The arm reported above is the
 completed n=\fact{arm-default-n} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, \setting{0} refusals, \$\setting{0} charged against
 the \$\setting{25} ceiling.
 
@@ -324,47 +285,32 @@ exactly that.
 All harnesses are committed under \texttt{tests/evaluation/} and are checkpointed and resumable; several
 of the runs in this paper were interrupted by the memory guard and resumed without loss.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Which harness produced which result, and the command that reruns it.}\label{tab:harnesses}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Which harness produced which result, and the command that reruns it.}\label{tab:harnesses}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-result
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-harness
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-services needed
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-result
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-harness
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-services needed
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-consensus ablation (Section~1) & \texttt{eval\_consensus\_ablation.py} & llama-server \\
-frontier and hosted arms (Section~2) & \texttt{eval\_frontier\_probe.py\ -\/-arm\ \textless{}name\textgreater{}\ {[}-\/-no-thinking{]}} & network only \\
-parameter-size series (Section~2) & \texttt{eval\_parameter\_size\_series.py} & \textbf{none}, reads the arm files \\
-CAPE baseline (Section~0) & \texttt{eval\_cape\_baseline.py} & \textbf{none}, reads the local report archive \\
-sink-hint frequency (Section~4) & \texttt{eval\_sink\_hint\_frequency.py} & Ghidra \\
-sink-hint ablation (Section~7) & \texttt{eval\_sink\_hint\_ablation.py} & llama-server + Ghidra \\
-opcode-hash attribution (Section~3) & \texttt{eval\_function\_hash\_attribution.py} & Ghidra + Qdrant \\
-Layer-0 verdict arms (Section~5) & \texttt{eval\_layer0\_verdict.py}, checked by \texttt{verify\_b3\_mechanism.py} & llama-server; the check needs \textbf{none} \\
-cascade weight sensitivity (Section~5) & \texttt{eval\_weight\_sensitivity\_six.py} & \textbf{none}, reads the report archive \\
-judge contribution (Section~5) & \texttt{eval\_judge\_contribution.py} & llama-server \\
-fallback bundle content (Section~5) & \texttt{eval\_fallback\_bundle\_content.py\ -\/-checkpoint\ \textless{}run\textgreater{}} & \textbf{none}, reads the run above \\
-outbound parameter check & \texttt{probe\_outbound\_parameters.py} & llama-server \\
-every figure & \texttt{make\_paper\_figures.py} & \textbf{none}, reads the JSON the above emit \\
-\end{longtable}
+\toprule
+result & harness & services needed \\
+\midrule
+consensus ablation (Section~\ref{multi-agent-consensus-does-not-pay-for-itself-at-equal-budget}) & \texttt{\seqsplit{eval\_consensus\_ablation.py}} & llama-server \\
+frontier and hosted arms (Section~\ref{frontier-does-not-separate}) & \texttt{\seqsplit{eval\_frontier\_probe.py\ -\/-arm\ \textless{}name\textgreater{}\ {[}-\/-no-thinking{]}}} & network only \\
+parameter-size series (Section~\ref{frontier-does-not-separate}) & \texttt{\seqsplit{eval\_parameter\_size\_series.py}} & none, reads the arm files \\
+CAPE baseline (Section~\ref{the-baseline-first}) & \texttt{eval\_cape\_baseline.py} & none, reads the local report archive \\
+sink-hint frequency (Section~\ref{mechanisms-measured-before-their-effects}) & \texttt{\seqsplit{eval\_sink\_hint\_frequency.py}} & Ghidra \\
+sink-hint ablation (Section~\ref{what-the-ablations-cost-and-what-that-revealed}) & \texttt{\seqsplit{eval\_sink\_hint\_ablation.py}} & llama-server + Ghidra \\
+opcode-hash attribution (Section~\ref{three-independently-built-retrieval-components-all-near-inert-in-production}) & \texttt{\seqsplit{eval\_function\_hash\_attribution.py}} & Ghidra + Qdrant \\
+Layer-0 verdict arms (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{eval\_layer0\_verdict.py}, checked by \texttt{verify\_b3\_mechanism.py} & llama-server; the check needs none \\
+cascade weight sensitivity (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{\seqsplit{eval\_weight\_sensitivity\_six.py}} & none, reads the report archive \\
+judge contribution (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{\seqsplit{eval\_judge\_contribution.py}} & llama-server \\
+fallback bundle content (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{\seqsplit{eval\_fallback\_bundle\_content.py\ -\/-checkpoint\ \textless{}run\textgreater{}}} & none, reads the run above \\
+outbound parameter check & \texttt{\seqsplit{probe\_outbound\_parameters.py}} & llama-server \\
+every figure & \texttt{make\_paper\_figures.py} & none, reads the JSON the above emit \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Two of these exist only because a result could not be believed, and both are worth running before
 the studies they check rather than after. \texttt{verify\_b3\_mechanism.py} recomputes each ablation arm's
@@ -379,7 +325,7 @@ the output cap not reaching the server and once with it binding. The comparison 
 what isolates what the model's unparsable output contributes to the analyst's bundle, and neither
 run alone shows it. Preserved as \texttt{judge\_contribution\_uncapped.*} and \texttt{judge\_contribution\_capped.*}.
 
-\textbf{Figures are generated from the same retained records as the text.} The script recomputes intervals
+Figures are generated from the same retained records as the text. The script recomputes intervals
 with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
 cannot drift apart without the script failing to reproduce one of them. This caught a live error. An
 ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because
@@ -394,4 +340,4 @@ Every sweep reports how many distinct outputs the N inputs produced, because tha
 cheapest detector for the stale-state defects described in Threats to Validity. And every sweep
 records the host's memory state at both ends of each unit of work, so that a failed unit can
 afterwards be attributed to the pipeline or excluded as an artefact of the machine, a question that
-cannot be reopened later, as Section~3 above describes.
+cannot be reopened later, as Section~\ref{hardware-and-the-ceiling-it-imposes} above describes.

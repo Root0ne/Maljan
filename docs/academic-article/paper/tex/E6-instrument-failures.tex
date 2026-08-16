@@ -28,7 +28,7 @@ token
 All \fact{cape-tool-count} tools failed. \emph{Unset} and \emph{null} are different statements, and the client was making the
 second while intending the first.
 
-\textbf{Why it survived to first contact.} The reverse-engineering server, the only one this client had
+Why it survived to first contact. The reverse-engineering server, the only one this client had
 ever talked to, declares no optional parameter with a typed default, so the same malformed argument
 dictionary happened to be acceptable there. A defect in shared client code was invisible because
 only one of the two servers it served had ever been exercised.
@@ -149,8 +149,8 @@ change the cascade's set, so the bundle cannot change; removing a sole owner doe
 two numbers we reported are necessities of an \texttt{if} statement, and the experiment could not have
 returned anything else.
 
-\textbf{The architectural conclusion survives the correction, corroboration does not reach the analyst's
-artefact, but the mechanism is not the one we described.} The model cannot subtract from the
+The architectural conclusion survives the correction, corroboration does not reach the analyst's
+artefact, but the mechanism is not the one we described. The model cannot subtract from the
 bundle's technique set and, across \fact{judge-mechanism-arms} arms, added nothing to it. Whether its output was unusable
 and wholly replaced, or happened to reproduce the cascade's set, this evidence cannot say; both
 leave the same trace, and separating them needs the pre-reconciliation output measured directly.
@@ -161,7 +161,7 @@ arms would have shared one reconciliation set, so it would have reported ``no di
 hour of computation, correctly and vacuously. It was stopped four minutes in, by the same log line
 that exposed M5.
 
-\textbf{What made this one hard to see.} The tell was in the results the whole time: a Jaccard of
+What made this one hard to see. The tell was in the results the whole time: a Jaccard of
 \fact{cascade-overlap-jaccard} with a zero-width bootstrap interval across \fact{cascade-overlap-pairs}
 ablated arms, each compared against the unablated arm of its own fixture, at temperature
 \fact{decode-temperature}. A language model does not agree with itself that exactly. We read a
@@ -183,7 +183,7 @@ not a labelling detail. The same weights score \fact{arm-qwen35ba3b-nothink-f1} 
 and never answer. The \fact{arm-qwen35ba3b-f1} row sat at the small end of the parameter axis, where it set the sign
 of the correlation. What the series measured was a flag, ordered by coincidence against size.
 
-\textbf{The failure is not the duplicate rows; it is that the arm-selection rule did not exist.} The
+The failure is not the duplicate rows; it is that the arm-selection rule did not exist. The
 harness had careful arithmetic, with averaged ranks so file order cannot break ties, an exact
 permutation p because four points cannot reach significance, a common-cell restriction so endpoint
 availability cannot masquerade as model size, and every one of those guards was about a way the
@@ -195,13 +195,13 @@ selected on intent would enter the series labelled matched while running the opp
 configuration. With the rule applied, two arms qualify and both are 35B, so the series refuses and
 says which arm was excluded and at what measured reasoning share. Nine unit tests pin the rule.
 
-\textbf{What made this one hard to see.} It agreed with the published result. M5 was caught by a number
+What made this one hard to see. It agreed with the published result. M5 was caught by a number
 too clean to believe; this one produced a number in exactly the range a reader would expect, in the
 direction the literature predicts, with its limitations already stated. There was nothing anomalous
 to notice. It was caught by reading the arms table under the correlation and asking why one model
 was on it twice, which is a question no result, however wrong, would have prompted.
 
-\textbf{And the phenomenon is not ours.} Sun et al.~\cite{sun2025length} show that under a strict
+And the phenomenon is not ours. Sun et al.~\cite{sun2025length} show that under a strict
 output-length constraint the ordering of models by capability \emph{does not hold}. Inside a
 constrained budget window a smaller model can match or beat a larger one, with the ordinary ordering
 restored once the budget relaxes. They state the same for reasoning modes specifically. Under the
@@ -214,7 +214,7 @@ reviewed literature carries.
 What we would add is narrower and sits in the remedy rather than the phenomenon: their protocol is
 adapted per model, ours has to be verified per arm, because matching on the requested
 configuration is not sufficient when a provider accepts the parameter and does not act on it
-(Section~3.32). An arm can be labelled matched and be running the opposite setting. The rule that follows is to select on the \emph{measured} reasoning share and never on the flag, and that is what the gate implements.
+(Section~\ref{m6-a-configuration-difference-wearing-a-parameter-count}). An arm can be labelled matched and be running the opposite setting. The rule that follows is to select on the \emph{measured} reasoning share and never on the flag, and that is what the gate implements.
 
 \subsubsection{M7. A safety property that was configured, documented, and never sent}\label{m7-a-safety-property-that-was-configured-documented-and-never-sent}
 
@@ -238,19 +238,19 @@ the analyst received techniques copied straight from the raw evidence claims. A 
 describe as bounded was unbounded, and its failure mode was to hand the analyst a differently-built
 artefact without saying so.
 
-\textbf{Where it was invisible.} The configured value was correct. The container passed it. The model
+Where it was invisible. The configured value was correct. The container passed it. The model
 object held it. It survived every later rebinding intact. Only the serialised request was wrong,
 and nothing in the system reads the serialised request. Every check anyone would think to perform
 would have confirmed the property that did not hold.
 
-\textbf{What found it.} Not a test and not a review. A study measuring something else, what the verdict
+What found it. Not a test and not a review. A study measuring something else, what the verdict
 model contributes to the bundle, recorded \emph{which branch} each failed call took rather than only
 that it failed. Four calls named the timeout branch, which prompted the question of why a
 temperature-zero model would need ten minutes, which led to the server's own log and a token
 counter that had passed thirty thousand. The instrumentation that caught it was written for a
 different question three hours earlier.
 
-\textbf{The incompatibility itself is known; the consequence is what we contribute.} That
+The incompatibility itself is known; the consequence is what we contribute. That
 OpenAI-compatible servers disagree about token-limit parameters is documented in their own issue
 trackers. \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634} reports that ``the limit is respected when requesting a chat
 completion, but for non-chat ones, the model keeps generating tokens forever (until ctx-len is
@@ -296,38 +296,27 @@ serialised.
 \subsection{What did find them: output cardinality}\label{what-did-find-them-output-cardinality}
 
 Five of the seven were found by the same observation. A number that repeated where variation was
-expected. M6 and M7 were not, and Section~6.2 says what did find them; their outputs vary, so there is
+expected. M6 and M7 were not, and Section~\ref{what-did-find-them-output-cardinality} says what did find them; their outputs vary, so there is
 no repetition to notice.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{What the output-cardinality check saw and which defect each observation turned out to be.}\label{tab:detector}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}@{}}
-\caption{What the output-cardinality check saw and which defect each observation turned out to be.}\label{tab:detector}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-observation
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-defect
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-observation
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-defect
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+observation & defect \\
+\midrule
 a priority hint of exactly \fact{hint-chars-repeated} characters for two unrelated binaries, and a third in an earlier session & M2 \\
 call graphs identical to the character (\fact{call-graph-chars} chars, \fact{call-graph-lines} lines) for samples of \fact{call-graph-sample-sizes} & M2 \\
 \fact{stuck-graph-run} consecutive samples at exactly \fact{stuck-graph-chars} characters & M3 \\
 every tool call returning the same validation error & M1 \\
 a \fact{m4-salvage-minutes}-minute call that always produced one claim and zero techniques & M4 \\
-a Jaccard of \textbf{\fact{cascade-overlap-jaccard} with a zero-width interval} across \fact{cascade-overlap-pairs} ablated arms at temperature \fact{decode-temperature} & M5 \\
-\end{longtable}
+a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width interval across \fact{cascade-overlap-pairs} ablated arms at temperature \fact{decode-temperature} & M5 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Every row is a number repeated where variation was expected.
 
@@ -354,7 +343,7 @@ is measured, at \fact{cardinality-distinct-graphs} distinct call-graph sizes acr
 \fact{cardinality-samples} samples, its staircase's flat treads being genuinely identical
 binaries rather than a fault.
 
-\textbf{Panel b) is a schematic, and the reason is the argument of Section~6.4.} It depicts M3, the run
+Panel b) is a schematic, and the reason is the argument of Section~\ref{what-it-cost}. It depicts M3, the run
 in which \fact{stuck-graph-run} consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph, and we cannot
 plot it, because that run predates the per-sample retention policy those very failures caused us to
 adopt. The curve this paper turns on is the one we are unable to draw.
@@ -362,7 +351,7 @@ adopt. The curve this paper turns on is the one we are unable to draw.
 We now report it beside every batch result; \fact{cardinality-distinct-graphs} distinct call-graph
 sizes across \fact{cardinality-samples} samples.
 
-\textbf{This is a refinement, not a discovery, and we checked before saying otherwise.} ``Distinct inputs
+This is a refinement, not a discovery, and we checked before saying otherwise. ``Distinct inputs
 should produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}; metamorphic testing
 exists precisely for programs whose correct output is unknown, the \emph{``notorious oracle problem''}
 its own survey names. Stress-testing an LLM judge's consistency under input variation is likewise
@@ -421,5 +410,5 @@ receives was affected rather than a number in a table. And the price is demonstr
 hypothesised.
 
 In a pipeline assembled from other people's servers, the correctness of the model is not the binding
-constraint on the correctness of the result. \textbf{A server that answers is not the same as a server
-that answered your question.}
+constraint on the correctness of the result. A server that answers is not the same as a server
+that answered your question.

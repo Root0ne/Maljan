@@ -14,7 +14,7 @@
 % is prepared as a preprint and typeset by the journal. Switching to `final,5p`
 % later is a one-word change to this line and a rebuild of those tables, which
 % is the journal's job to trigger and not a decision to pre-empt.
-\documentclass[preprint,11pt]{elsarticle}
+\documentclass[preprint,11pt,a4paper]{elsarticle}
 
 % elsarticle loads natbib itself and numbers with elsarticle-num below.
 \usepackage{fontspec}
@@ -27,17 +27,26 @@
 \usepackage{unicode-math}
 \setmathfont{TeX Gyre Termes Math}
 
-% elsarticle sets its own measure. The tables here were laid out against a
-% wider one, so the margin is kept — narrowing it now would reintroduce the
-% overfull boxes the build refuses, and the journal resets both anyway.
-\usepackage[margin=0.75in]{geometry}
+% No geometry here, deliberately, and the reason is narrower than it first
+% looked. elsarticle's own \geometry call sits inside \ifnum\jtype=1/3/5, so the
+% class sets a measure for the typeset options and sets none for `preprint`. It
+% leaves the article default, which is what a preprint should be. There is
+% therefore nothing to override, and this file used to override it anyway: to US
+% Letter at 506pt, 32% wider, so that two dozen tables laid out for the wider
+% measure would fit. The tables were narrowed instead, and the page size comes
+% from the class option above, because Elsevier is an A4 publisher.
 \usepackage{graphicx}
+% Long code literals in a narrow table cell have no break point of their own:
+% TeX will not break at an underscore or a slash, and a 38-character model
+% identifier ran 132pt past its column. seqsplit gives the cell somewhere to
+% break; it is applied only where a literal is too long for its column.
+\usepackage{seqsplit}
 \usepackage{booktabs}
-\usepackage{longtable}
 \usepackage{array}
 \usepackage{calc}
-\usepackage{caption}
-\usepackage{microtype}
+% Expansion is a pdftex feature; XeTeX refuses it outright. Protrusion works
+% and is what microtype can contribute to justification here.
+\usepackage[protrusion=true]{microtype}
 \usepackage{xcolor}
 \usepackage{amsmath}
 \usepackage{fancyvrb}
@@ -57,19 +66,43 @@
 % keeps going; allowing breaks inside \texttt fixes the class rather than the
 % instances.
 \usepackage[htt]{hyphenat}
+% Verbatim blocks are transcripts of real output and cannot be re-wrapped
+% without falsifying them, so they are set smaller rather than broken. The
+% widest is 79 characters and the measure no longer carries that at body size.
+\makeatletter
+\def\verbatim@font{\ttfamily\scriptsize}
+\makeatother
 % Figures are drawn wider than the measure. Bound them to it rather than
 % trusting each figure's own size.
 \setkeys{Gin}{width=\linewidth,keepaspectratio}
-% Let TeX loosen a line rather than push a word past the margin.
-\sloppy
+% Float placement. LaTeX's defaults reserve most of a page for text and cap how
+% many floats a page may carry, and with two dozen tables that meant every one
+% of them was deferred to the end of the document: the first table appeared on
+% page 69 of 80, sixty pages from the sentence it belongs to. These are the
+% standard relaxations, and they put each table back on or beside its own page.
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}
+% Rather than \sloppy, which sets tolerance to 9999 and emergencystretch to 3em
+% and buys a clean right margin with visibly loose lines. At the class measure
+% that trade produced eleven underfull lines; these numbers are the tightest
+% setting that still reaches zero overfull.
+\tolerance=1800
+\emergencystretch=1.5em
 % \sloppy sets \hfuzz=0.5pt, which stops sub-half-point overruns being reported
 % at all. A zero-overfull log bought that way is not a zero-overfull document,
 % so the tolerance goes back to nothing and the zero has to be earned.
 \hfuzz=0pt
 \vfuzz=0pt
 
-\captionsetup{font=small,labelfont=bf,skip=6pt}
-\setlength{\parskip}{2pt}
+% No \captionsetup and no \parskip either, for the same reason. elsarticle
+% defines its own \@makecaption -- footnotesize, "Table 1: text", label not
+% bold -- and setting labelfont=bf overrode the class to put bold on the page in
+% the one place a reader cannot avoid it.
 \graphicspath{{../}{./}{../figures/}}
 
 % pandoc's own constructs, and the derived numbers.

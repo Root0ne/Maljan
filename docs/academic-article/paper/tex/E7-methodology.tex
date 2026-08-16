@@ -35,13 +35,13 @@ The control is not decoration. It establishes that the harness can detect a diff
 consensus study the noise arm separated (\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1}) while the
 treatment did not, which distinguishes ``no effect'' from ``no sensitivity''.
 
-\textbf{For reasoning models the budget must cover reasoning.} Our frontier endpoint reports reasoning
+For reasoning models the budget must cover reasoning. Our frontier endpoint reports reasoning
 tokens separately from content, and \fact{arm-default-reasoning} of its output was reasoning across \fact{arm-default-n} real prompts
 (\fact{reasoning-share-one-token} on a one-token answer). Capping content alone would have granted it roughly twice the generation for the
 same nominal budget.
 
-\textbf{And the arms must be on the same side of the reasoning switch, which is a stronger requirement
-than it sounds.} We measured this flag on two models at \fact{arm-default-n} calls each: enabling it moved F1 by
+And the arms must be on the same side of the reasoning switch, which is a stronger requirement
+than it sounds. We measured this flag on two models at \fact{arm-default-n} calls each: enabling it moved F1 by
 \fact{reasoning-flag-third-delta-2dp} on one and \fact{reasoning-flag-vendor35b-delta-2dp} on the other, in both cases because the model spent its entire output
 budget thinking and returned no answer; \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls hit the cap on the second model, and one
 answered. That is the only effect in this paper that exceeds its own design's
@@ -59,7 +59,7 @@ axis on which one point was a disabled model rather than a small one.
 Every arm sees the same samples in the same order; differences are computed per sample and then
 aggregated, with 95\% bootstrap confidence intervals over the paired deltas.
 
-\textbf{Resampled at the cluster, and tested at the cluster.} The observations are nested, with many claims from one sample and many samples from one family, so the bootstrap resamples whole clusters
+Resampled at the cluster, and tested at the cluster. The observations are nested, with many claims from one sample and many samples from one family, so the bootstrap resamples whole clusters
 and the p-value comes from flipping the sign of whole cluster means rather than of rows. Two
 properties of that test have to be reported with it. The first is its floor. With $k$ clusters the
 two-sided version cannot return a p below $2/2^k$, which at $k$=\setting{5} is
@@ -85,36 +85,21 @@ claim count from one run is not an instrument, and we now say so where that resu
 Before ablating a mechanism, measure how often it engages. The rule came from two cases that
 look identical in a results table and are not:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Firing rates measured before any ablation was run, and what each rate licenses the ablation to say.}\label{tab:firing-method}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Firing rates measured before any ablation was run, and what each rate licenses the ablation to say.}\label{tab:firing-method}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-mechanism
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-fires on
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what an ablation would mean
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-mechanism
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-fires on
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what an ablation would mean
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-confidence cap & \textbf{\fact{cap-rate}} of techniques & nothing, a null describes the \fact{cap-rate-complement} where it never ran \\
-sink-reachability hint & \textbf{\fact{hint-rate}} of samples & a real statement about the hint \\
-\end{longtable}
+\toprule
+mechanism & fires on & what an ablation would mean \\
+\midrule
+confidence cap & \fact{cap-rate} of techniques & nothing, a null describes the \fact{cap-rate-complement} where it never ran \\
+sink-reachability hint & \fact{hint-rate} of samples & a real statement about the hint \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 The cap's own preconditions explain its rate, three technique families, only when the sole
 contributing layer is static, and \fact{cap-gated-yara-only-share} of those claims are YARA-only, so
@@ -126,8 +111,8 @@ effect toward zero and manufactures a null.
 
 \subsection{Output cardinality, reported beside every batch}\label{output-cardinality-reported-beside-every-batch}
 
-\textbf{Count how many distinct outputs the N inputs produced.} If far fewer than N differ on a dimension
-that should vary, the instrument is repeating itself. The four \emph{boundary} defects in Section~6 were found
+Count how many distinct outputs the N inputs produced. If far fewer than N differ on a dimension
+that should vary, the instrument is repeating itself. The four \emph{boundary} defects in Section~\ref{sec:failures} were found
 this way and none by a \fact{test-count}-test suite. The three that are ours rather than a server's were not:
 their outputs do vary, and what found them was a number too clean to believe, an arms table read
 under a correlation, and a study that recorded which failure branch each call took.
@@ -161,12 +146,12 @@ The same applies to the model server: it grows with cumulative requests and does
 
 \subsection{Two audits that cost minutes and caught real errors}\label{two-audits-that-cost-minutes-and-caught-real-errors}
 
-\textbf{Diff the claim register against the evidence log.} Both documents are maintained; that is exactly
+Diff the claim register against the evidence log. Both documents are maintained; that is exactly
 what allows them to diverge. Applied twice here, it found a claim recorded as novel one hour after
 our own text called it a replication, an audit row mis-attributing a model caveat to a server-free
 harness, and three ledger rows still carrying superseded figures.
 
-\textbf{Counter-search each novelty claim in an adjacent field's vocabulary.} A claim of novelty is a
+Counter-search each novelty claim in an adjacent field's vocabulary. A claim of novelty is a
 \emph{searched absence}, and searching in one's own field's words finds nothing by construction. Five
 claims were demoted this way, including the one central to this paper, when the silent-failure genus
 turned out to be already taxonomised. Two rules came out of doing it. The first is that a search

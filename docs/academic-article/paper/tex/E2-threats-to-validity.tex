@@ -12,56 +12,43 @@ rather than what we intend.
 Most threats sections describe hazards. This one begins with damage, because reporting it is the
 paper's main methodological point.
 
-\textbf{One study is withdrawn.} A seven-year, \fact{drift-n}-sample temporal-drift analysis was completed, entered
+One study is withdrawn. A seven-year, \fact{drift-n}-sample temporal-drift analysis was completed, entered
 our claim ledger as a novel result, and is now retracted. It drove the full pipeline per sample
 against a long-lived Ghidra server that was never restarted between samples, which is precisely the
 precondition for a defect we later found, in which a loaded program never becomes the server's
 \emph{current} program, so every sample after the first is described using the first sample's binary
-(Section~3.14). Whether that run was affected cannot be determined. Its per-sample outputs were not
+(Section~\ref{m2-a-load-that-does-not-change-what-the-server-is-looking-at}). Whether that run was affected cannot be determined. Its per-sample outputs were not
 retained. The result is therefore not restated anywhere in this paper, and the axis it measured, input-era drift, as distinct from train/test temporal misalignment, is presented as an open
 question with a corrected instrument required before any bound is claimed.
 
 Three defects of this kind were found in a single day, all sharing one shape. A plausible wrong
 answer with no error anywhere.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The three boundary mechanisms that reached published results, with what each affected and how it was found.}\label{tab:mechanisms}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{The three boundary mechanisms that reached published results, with what each affected and how it was found.}\label{tab:mechanisms}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mechanism
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what it silently produced
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mechanism
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what it silently produced
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\textbf{M1} & unset optional MCP arguments were sent as \texttt{null} & all \fact{cape-tool-count} sandbox tools refused; the pipeline saw only empty results \\
-\textbf{M2} & \texttt{load\_program} reported success \emph{with the right program name} but did not change the server's current program & every sample after the first analysed the first binary \\
-\textbf{M3} & a refused load answers \textbf{HTTP 200} with an error body & hints and function hashes built from a different binary \\
-\end{longtable}
+\toprule
+& mechanism & what it silently produced \\
+\midrule
+M1 & unset optional MCP arguments were sent as \texttt{null} & all \fact{cape-tool-count} sandbox tools refused; the pipeline saw only empty results \\
+M2 & \texttt{load\_program} reported success \emph{with the right program name} but did not change the server's current program & every sample after the first analysed the first binary \\
+M3 & a refused load answers HTTP 200 with an error body & hints and function hashes built from a different binary \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 None was caught by a test suite of \fact{test-count} passing tests, not by accident. M2 and M3 require a
 \emph{second} case within one server lifetime, and a unit test writes one. A fourth defect, found later
 in the same week, made the analyst return zero techniques on any binary rich enough to exhaust its
 step budget, because two protective bounds composed. Exceeding the step cap triggers a synthesis
 call that received a \emph{fresh} copy of the full time budget, so loop-plus-synthesis overran the hard
-cap by construction (Section~3.15).
+cap by construction (Section~\ref{m4-two-bounds-composing-into-an-empty-result}).
 
-\textbf{Three further defects were found later, and none of them involved a server.} An ablation varied a
+Three further defects were found later, and none of them involved a server. An ablation varied a
 deterministic reconciliation step and we attributed its output to a language model; a rank
 correlation over model size ranked a reasoning-configuration flag instead and recovered the
 published scaling coefficient almost exactly; and the judge's documented \fact{judge-output-cap}-token output
@@ -69,7 +56,7 @@ ceiling was renamed by our client library during serialisation to a key the infe
 not read, so a component described as bounded had never once been bounded. These three had passing
 unit tests over the exact functions concerned, which the four above did not; the defect was never
 in a function, but in which measurement was attributed to which cause, or in which representation
-of a value crossed a boundary. Section~6 reports all seven with the layer each occurred at.
+of a value crossed a boundary. Section~\ref{sec:failures} reports all seven with the layer each occurred at.
 
 We report these because we believe the interesting threat to an LLM-plus-tooling pipeline is not
 that the model is wrong. It is that the instrument answers a different question than the one asked,
@@ -77,50 +64,50 @@ convincingly.
 
 \subsection{The nine pitfalls}\label{the-nine-pitfalls}
 
-\textbf{P1 Data poisoning.} \texttt{CLEAR}. Nothing is trained. Retrieval corpora are curated and their
+P1 Data poisoning. \texttt{CLEAR}. Nothing is trained. Retrieval corpora are curated and their
 provenance is documented.
 
-\textbf{P2 Label inaccuracy.} \texttt{CLEAR}. Ground truth is MITRE-curated, and no LLM scored any result in
+P2 Label inaccuracy. \texttt{CLEAR}. Ground truth is MITRE-curated, and no LLM scored any result in
 this work. This was a standing constraint, not an outcome. An internal readability assessment was
 performed with an LLM as a development aid and is deliberately excluded from this paper, so that the
 absence of LLM-as-a-judge scoring remains unqualified. A consequence is stated under E.7. No human
 analyst rated any report either.
 
-\textbf{P3 Data leakage.} \texttt{PARTIAL}. One instance was found by us, disclosed and mitigated. It was never
+P3 Data leakage. \texttt{PARTIAL}. One instance was found by us, disclosed and mitigated. It was never
 systematically audited, and the pitfall's own recommendation applies. The model's training data is
 unknown to us and memorisation was not probed. We acknowledge this rather than argue around it.
 
-\textbf{P4 Model collapse.} \texttt{CLEAR}. Augmenting the long-term memory corpus with LLM-generated cases was
+P4 Model collapse. \texttt{CLEAR}. Augmenting the long-term memory corpus with LLM-generated cases was
 considered and refused, with a cited rationale.
 
-\textbf{P5 Spurious correlations.} \texttt{PARTIAL}. Two were found and are reported. No systematic perturbation
+P5 Spurious correlations. \texttt{PARTIAL}. Two were found and are reported. No systematic perturbation
 testing was performed.
 
-\textbf{P6 Context truncation.} \texttt{EXPOSED}. Truncation is designed-in throughout, through chunking at function
+P6 Context truncation. \texttt{EXPOSED}. Truncation is designed-in throughout, through chunking at function
 boundaries, a per-call evidence cap, a \fact{react-step-budget}-step ReAct budget, an \fact{judge-output-cap}-token verdict cap, a \setting{400}-char
 hint cap, and the counters now exist to report frequency, with pass-throughs counted so the rate has
 a correct denominator. What we cannot yet report is the distribution over a full cohort. Two
 specific findings belong here. The first is that the enumeration of truncation sites was itself
 incomplete. A \fact{graph-edge-cap}-edge cap on the call-graph fetch was discovered only while
 instrumenting a different measurement, and it silently truncates \fact{graph-edge-cap-hit} of
-\fact{hint-total} samples, as Section~3.15 records, so we describe how our list was built rather
+\fact{hint-total} samples, as Section~\ref{m4-two-bounds-composing-into-an-empty-result} records, so we describe how our list was built rather
 than presenting it as exhaustive. The second is that bounds compose. Exceeding the step cap
 guarantees an attempt at the time cap, and on rich binaries that attempt could not finish, two
-limits producing an empty result between them. That is Section~1.7.1's shape in a new place, where
+limits producing an empty result between them. That is Section~\ref{what-the-ablations-cost-and-what-that-revealed}'s shape in a new place, where
 removing a hint made the judge overrun a \setting{600} s ceiling and return an empty bundle
 \fact{empty-bundles-local}/\fact{empty-bundles-pairs} times.
 
-\textbf{P7 Prompt sensitivity.} \texttt{PARTIAL}. A structured prompt-variation study exists. Production prompts
+P7 Prompt sensitivity. \texttt{PARTIAL}. A structured prompt-variation study exists. Production prompts
 are fixed and were not varied per model. Related: our own instrument-validity failure, in which a
 single-run parsed-claim count ranked the same arms differently at different decoding budgets, is
 prompt sensitivity surfacing as measurement error.
 
-\textbf{P8 Surrogate fallacy.} \texttt{PARTIAL}, on evidence. Every local result comes from one model on one
+P8 Surrogate fallacy. \texttt{PARTIAL}, on evidence. Every local result comes from one model on one
 machine: Qwen3.6-35B-A3B at IQ3\_K\_R4, ik\_llama.cpp, single host. Four claims were rescoped to that
 exact identifier. A second endpoint has now run to completion, a 120B reasoning model on the same fixtures, repeats, prompt and token budget. It did not separate from the local model, at paired
 $\Delta$F1 \fact{frontier-local-delta}, 95\% cluster CI \fact{frontier-local-ci},
 n=\fact{frontier-local-pairs}, better on \fact{frontier-local-better} and worse on
-\fact{frontier-local-worse} (Section~3.16). A \fact{series-param-span}$\times$ parameter
+\fact{frontier-local-worse} (Section~\ref{frontier-does-not-separate}). A \fact{series-param-span}$\times$ parameter
 advantage produces no measurable difference here, which is evidence \emph{against} the pitfall's usual
 worry rather than merely an absence of evidence for it.
 
@@ -129,7 +116,7 @@ the estimate through the local mean and out the other side. We record that becau
 truncated by a daily request quota, not by anything about the samples. The failure mode is reading a
 difference off an underpowered arm, and this audit carried the wrong number for a day.
 
-\textbf{That null is confounded, and the confound cannot be removed on that endpoint.} The local arm runs
+That null is confounded, and the confound cannot be removed on that endpoint. The local arm runs
 with its reasoning stream disabled; the \fact{frontier-params-b}B arm ran with reasoning on, spending
 \fact{arm-default-reasoning} of its output
 budget there. We re-ran it with the flag set: the provider accepted the parameter and ignored it, at
@@ -142,7 +129,7 @@ of what is being confounded is not small. On two separate models the same flag i
 \fact{reasoning-flag-worth-low} and \fact{reasoning-flag-worth-high} F1, the only effect in this paper that exceeds its own design's minimum
 detectable effect.
 
-\textbf{One quantisation is no longer an unmeasured threat.} The model we run locally is also hosted by
+One quantisation is no longer an unmeasured threat. The model we run locally is also hosted by
 its vendor at full precision, on an endpoint that does honour the reasoning flag. Paired on the same
 fixtures and repeats, the vendor's hosting of the same weights scores
 \fact{quantisation-delta} F1 against our 3-bit \texttt{IQ3\_K\_R4} deployment (95\% cluster CI
@@ -151,7 +138,7 @@ pointing away from the direction the threat assumes. Two serving stacks differ a
 precision, so this bounds \emph{the deployment} rather than quantisation alone; but the specific worry
 that a 3-bit local model understates what these architectures can do is not supported.
 
-\textbf{What P8 cannot close is the size series, and the reason is measured rather than budgetary.}
+What P8 cannot close is the size series, and the reason is measured rather than budgetary.
 Testing \texttt{arXiv:2606.18166}'s parameter-size trend needs three arms at three sizes, matched on the
 flag that outweighs size. Of the endpoints available, the one that honours the flag hosts the same
 35B model we already run, and the one above 35B does not honour it. Two matched arms exist and both
@@ -163,7 +150,7 @@ What also remains is coverage, not power: the second model has been measured on 
 fixtures, not on the malware cohort, where evidence bundles are longer and messier. That is the arm
 the free tier's \setting{50} requests/day makes a two-day run or a paid one.
 
-\textbf{P9 Model ambiguity.} \texttt{PARTIAL}. Model and engine are both pinned: GGUF digest, HuggingFace
+P9 Model ambiguity. \texttt{PARTIAL}. Model and engine are both pinned: GGUF digest, HuggingFace
 revision, retrieval date, quantiser, and the imatrix calibration dataset, which most papers
 reporting a quantisation level cannot name. The engine commit was recovered and \emph{proved} to describe
 the build from an identical \fact{engine-source-files}-file source list, with exactly one generated file differing. It is \texttt{PARTIAL}
@@ -175,7 +162,7 @@ artefact. Build provenance must be captured at build time; ours was reconstructe
 
 Both were added after they caught errors here.
 
-\textbf{The tenth check is to diff the claim register against the evidence log.} All nine pitfalls concern the
+The tenth check is to diff the claim register against the evidence log. All nine pitfalls concern the
 relationship between claims and experiments. Two failures sat one level below that. A claim was
 recorded as novel one hour after our own findings log had described it as a replication; and this
 audit mis-stated one of its own rows, attaching a model caveat to a result produced by a server-free
@@ -185,7 +172,7 @@ including one still carrying an interim figure after the final measurement had l
 disciplined enough to keep both a findings log and a claim ledger has, by that fact, created the
 conditions for the two to diverge.
 
-\textbf{The output-cardinality check.} Before trusting a batch measurement, ask how
+The output-cardinality check. Before trusting a batch measurement, ask how
 many distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should vary, such as length, digest or element count, the instrument is repeating itself, and repetition is what a
 stale-state bug looks like from outside. All three boundary defects above were caught this way. A \fact{hint-chars-repeated}-char
 hint repeated across unrelated samples; call graphs identical to the character for binaries of
@@ -222,7 +209,7 @@ a sample through its family signature. It is family-level, which is a ceiling
 this section discusses elsewhere; here what matters is that it comes from MITRE
 and from nothing this project produces.
 
-\textbf{The Sigma layer is not circular.} It reads the technique identifier from
+The Sigma layer is not circular. It reads the technique identifier from
 each rule's own \texttt{attack.tNNNN} tag, and the rules are community-authored
 detections with hand-written tags. Sigma shares ATT\&CK's \emph{vocabulary} with
 the labels and not their \emph{source}. A tag says what a telemetry pattern
@@ -236,19 +223,19 @@ identifier table. No family attribution is consulted anywhere on that path, whic
 is precisely what makes it a valid baseline rather than a second view of the
 answer.
 
-\textbf{The retrieval corpora do not overlap the evaluation cohorts.} We checked
+The retrieval corpora do not overlap the evaluation cohorts. We checked
 by digest rather than by assertion. Of the \fact{case-corpus-n} cases in the ATT\&CK case
 corpus, none shares a sha256 with the \fact{cohort-n}-sample dynamic cohort or
 with the \fact{drift-n}-sample drift manifest.
 
-\textbf{One construct problem survives, and it is ours.} The case corpus is
+One construct problem survives, and it is ours. The case corpus is
 labelled with the technique identifiers \emph{the pipeline itself previously
 attributed}. Scoring the index against those labels measures agreement with its
 own upstream, not accuracy. That number is relabelled as self-consistency in
 Section~\ref{sec:results} and the conclusion rests on the production figure
 beside it, which is scored against MITRE ground truth on held-out samples.
 
-\textbf{One shared vocabulary, named rather than hidden.} The catalogue that
+One shared vocabulary, named rather than hidden. The catalogue that
 defines valid technique identifiers is the same file that bounds the label
 universe, so the invalid-identifier rate we report is measured against the
 catalogue the labels are drawn from. That is a shared vocabulary rather than a
@@ -312,15 +299,15 @@ rather than from our fix.
 
 Three things follow. Wall-clock bounds are host-dependent measurements wearing the costume of a
 system property, so any result in this paper that turns on a timeout, the salvage-path failure of
-Section~6 and the timing column of Section~7 among them, is a statement about this pipeline
+Section~\ref{sec:failures} and the timing column of Section~\ref{what-the-ablations-cost-and-what-that-revealed} among them, is a statement about this pipeline
 \emph{on this machine under whatever load it had}. The retention rule we adopted after the first
-failure did not cover this one; Section~4.5 says to retain per-sample outputs and we did, but the
+failure did not cover this one; Section~\ref{per-sample-outputs-are-retained-for-every-study} says to retain per-sample outputs and we did, but the
 rule was written about the object under study, and what went unrecorded was the environment the
 study ran in. And a screen for this can only be applied forward, because arms already collected
 without host state cannot be re-screened, which is the same structural problem that withdrew our
 drift study, in a new variable.
 
-\textbf{A postscript, because it took three attempts to see.} Two of the interruptions above we
+A postscript, because it took three attempts to see. Two of the interruptions above we
 attributed to memory pressure and treated with progressively better limits: a floor, then a strike
 counter, then an allowance for declared allocations, then marking the model server as the kernel's
 preferred OOM victim. All four were correct and none was the cause. The harness had started the

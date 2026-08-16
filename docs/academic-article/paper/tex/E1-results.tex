@@ -4,50 +4,29 @@
 \subsection{The baseline, first}\label{the-baseline-first}
 
 Every accuracy number in this work is read against one reference, and we state it before any of our
-own. \textbf{CAPE alone, the sandbox the pipeline is built on, mapping its signature hits to ATT\&CK
-technique IDs deterministically, with no language model anywhere:}
+own. CAPE alone, the sandbox the pipeline is built on, mapping its signature hits to ATT\&CK
+technique IDs deterministically, with no language model anywhere:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The no-LLM baseline.}\label{tab:results-1}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}@{}}
-\caption{The no-LLM baseline.}\label{tab:results-1}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% cluster CI
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-ICC
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-effective n
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% cluster CI
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-ICC
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-effective n
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+& mean & 95\% cluster CI & ICC & effective n \\
+\midrule
 precision & \fact{baseline-precision} & \fact{baseline-precision-cluster-ci} & \fact{baseline-precision-icc} & \fact{baseline-precision-effective-n} \\
 recall & \fact{baseline-recall} & \fact{baseline-recall-cluster-ci} & \fact{baseline-recall-icc} & \fact{baseline-recall-effective-n} \\
-\textbf{F1} & \textbf{\fact{baseline-f1}} & \textbf{\fact{baseline-f1-cluster-ci}} & \fact{baseline-f1-icc} & \fact{baseline-f1-effective-n} \\
-\end{longtable}
+F1 & \fact{baseline-f1} & \fact{baseline-f1-cluster-ci} & \fact{baseline-f1-icc} & \fact{baseline-f1-effective-n} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-CAPE's own signature-derived technique identifiers, scored against family-level MITRE ground truth. Intervals resample \textbf{families}, not samples. Ground truth is resolved per family, so two binaries of one family are scored against a byte-identical label vector and are not two observations.
+CAPE's own signature-derived technique identifiers, scored against family-level MITRE ground truth. Intervals resample families, not samples. Ground truth is resolved per family, so two binaries of one family are scored against a byte-identical label vector and are not two observations.
 
 
 n = \fact{baseline-n} samples over \fact{baseline-families} families, mean \fact{baseline-mean-cluster} samples
@@ -61,39 +40,26 @@ the difference is not decorative. Resampling samples rather than families gave a
 is \fact{baseline-f1-icc}. The row count is \fact{baseline-n}; the count that supports an inference is
 \fact{baseline-f1-effective-n}.
 
-\textbf{And here is what the pipeline adds to it.} On the \fact{h2h-n} samples that completed both arms of
-the paired study of Section~5, the only samples where pipeline and baseline have been run on the same
+And here is what the pipeline adds to it. On the \fact{h2h-n} samples that completed both arms of
+the paired study of Section~\ref{the-baseline-first}, the only samples where pipeline and baseline have been run on the same
 inputs, all three scored per sample against the same ground truth by the same code:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Pipeline against the engine it is built on, like for like.}\label{tab:results-2}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Pipeline against the engine it is built on, like for like.}\label{tab:results-2}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% cluster CI
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% cluster CI
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-CAPE alone, no language model & \textbf{\fact{h2h-cape-f1}} & \fact{h2h-cape-ci} \\
-pipeline, static evidence only & \textbf{\fact{h2h-static-f1}} & \fact{h2h-static-ci} \\
-pipeline, with the sandbox report & \textbf{\fact{h2h-dynamic-f1}} & \fact{h2h-dynamic-ci} \\
-\end{longtable}
+\toprule
+& mean F1 & 95\% cluster CI \\
+\midrule
+CAPE alone, no language model & \fact{h2h-cape-f1} & \fact{h2h-cape-ci} \\
+pipeline, static evidence only & \fact{h2h-static-f1} & \fact{h2h-static-ci} \\
+pipeline, with the sandbox report & \fact{h2h-dynamic-f1} & \fact{h2h-dynamic-ci} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 n = \fact{h2h-n} samples over \fact{h2h-families} families. Paired, because every sample went through both:
 \fact{h2h-delta} F1, 95\% cluster CI \fact{h2h-ci}, exact cluster sign-flip p = \fact{h2h-p-exact}, better on
@@ -108,8 +74,8 @@ The interval on that difference is what should be read, not the point. At \fact{
 this design could detect a difference of \fact{h2h-mde} F1 at 80\% power, and it did not detect one.
 That is a bound on the pipeline's contribution, not a demonstration that the contribution is zero.
 
-\textbf{Why the cohort is \fact{baseline-n} and not \fact{audit-tasks}, and why the reason is not the one we
-first wrote down.} The cohort was submitted as one batch and the sandbox reported every task as
+Why the cohort is \fact{baseline-n} and not \fact{audit-tasks}, and why the reason is not the one we
+first wrote down. The cohort was submitted as one batch and the sandbox reported every task as
 complete. It had not been. Querying each task's timing shows a split with nothing between the modes:
 the \fact{audit-real} tasks whose reports survived ran for \fact{audit-real-min}--\fact{audit-real-max} s, and
 the other \fact{audit-instant} ran for under a second, all \fact{audit-reported-but-instant} of them
@@ -142,7 +108,7 @@ Points are means over per-sample F1, and bars are 95\% intervals resampling the 
 observations are independent at, recomputed from the retained per-sample records with the seed
 fixed. On the one population where pipeline and baseline are comparable, panel b), they overlap.
 
-\textbf{The two panels do not share an axis, and that is the point.} An earlier version of this figure put
+The two panels do not share an axis, and that is the point. An earlier version of this figure put
 all five arms on one scale, where a no-LLM baseline near \fact{baseline-f1} beneath treatment arms near
 \fact{consensus-single-f1} read as a large pipeline win. It is not one, because panel a)'s arms run on
 \fact{fixture-clusters} synthesised inputs whose evidence is generated from their own technique lists and
@@ -152,7 +118,7 @@ No baseline is definable for panel a) at all; a deterministic regular expression
 dictionary that generated its evidence scores \fact{fixture-extractor-f1} there by construction.
 
 Panel b) is the comparison that can be made, the \fact{h2h-n} samples over \fact{h2h-families}
-families that completed both arms of Section~5, with CAPE scored on the same binaries against the same
+families that completed both arms of Section~\ref{the-baseline-first}, with CAPE scored on the same binaries against the same
 ground truth by the same code. The three intervals overlap, and the paired pipeline-minus-baseline
 difference is \fact{h2h-delta} \fact{h2h-ci} on a design able to resolve \fact{h2h-mde}.
 
@@ -161,42 +127,23 @@ difference is \fact{h2h-delta} \fact{h2h-ci} on a design able to resolve \fact{h
 Design after Bertalanič \& Fortuna. Three arms at an equal total token budget, including a
 stochastic-noise control in which one analyst receives irrelevant evidence.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The equal-budget consensus arms.}\label{tab:results-3}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}@{}}
-\caption{The equal-budget consensus arms.}\label{tab:results-3}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-rows
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-samples
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-rows
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-samples
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-single judge, all evidence at once & \textbf{\fact{consensus-single-f1}} & \fact{consensus-single-n} & \fact{fixture-clusters} \\
+\toprule
+arm & mean F1 & rows & samples \\
+\midrule
+single judge, all evidence at once & \fact{consensus-single-f1} & \fact{consensus-single-n} & \fact{fixture-clusters} \\
 negotiated multi-agent consensus & \fact{consensus-negotiated-f1} & \fact{consensus-negotiated-n} & \fact{fixture-clusters} \\
 noise control & \fact{consensus-noise-f1} & \fact{consensus-noise-n} & \fact{fixture-clusters} \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 Here n is rows, while the unit that supports an inference is the sample, of which there are
 \fact{fixture-clusters}.
@@ -208,7 +155,7 @@ tokens. At 80\% power this design could have detected a difference of \fact{mde-
 F1; the observed difference is two orders of magnitude smaller than that. The null is a bound on
 what the design could see, not a demonstration that the two arms are equivalent.
 
-\textbf{What the noise control does and does not license.} Earlier drafts read the control's separation as
+What the noise control does and does not license. Earlier drafts read the control's separation as
 proof that the harness can detect a difference when one exists. It does not carry that weight. The
 control moves by \fact{consensus-noise-delta}, \fact{consensus-noise-ci}, every one of the
 \fact{fixture-clusters} samples in the same direction, but the effect is \emph{below this design's own
@@ -234,35 +181,32 @@ cluster holds a single observation and the family count is the cluster count. At
 \fact{fixture-signflip-floor}; above twenty clusters the assignments are sampled rather than
 enumerated, and the method is reported with each p.
 
-\begin{longtable}[]{@{}lrrrr@{}}
-\caption{The consensus arms on real binaries.}\label{tab:consensus-cape}\\
-\toprule\noalign{}
+\begin{table}[!htbp]
+\caption{The consensus arms on real binaries.}\label{tab:consensus-cape}
+\centering\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
 arm & F1 & output tokens & $\times$ single & calls \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-arm & F1 & output tokens & $\times$ single & calls \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\midrule
 single judge & \fact{cape-consensus-single-f1} & \fact{cape-consensus-single-tokens} & \fact{cape-consensus-single-ratio} & \fact{cape-consensus-single-calls} \\
-negotiated consensus & \textbf{\fact{cape-consensus-negotiated-f1}} & \fact{cape-consensus-negotiated-tokens} & \fact{cape-consensus-negotiated-ratio} & \fact{cape-consensus-negotiated-calls} \\
-noise control & \textbf{\fact{cape-consensus-noise-f1}} & \fact{cape-consensus-noise-tokens} & \fact{cape-consensus-noise-ratio} & \fact{cape-consensus-noise-calls} \\
-\end{longtable}
+negotiated consensus & \fact{cape-consensus-negotiated-f1} & \fact{cape-consensus-negotiated-tokens} & \fact{cape-consensus-negotiated-ratio} & \fact{cape-consensus-negotiated-calls} \\
+noise control & \fact{cape-consensus-noise-f1} & \fact{cape-consensus-noise-tokens} & \fact{cape-consensus-noise-ratio} & \fact{cape-consensus-noise-calls} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Scored against the same family-level MITRE ground truth as the no-LLM baseline, so the F1 values are comparable to Table~\ref{tab:results-2} and not to the fixture table above.
 
 
-\textbf{Both multi-agent arms beat the single judge, and neither beats the other.} Negotiated minus
+Both multi-agent arms beat the single judge, and neither beats the other. Negotiated minus
 single is \fact{cape-negotiated-delta}, 95\% cluster CI \fact{cape-negotiated-ci}, q =
 \fact{cape-negotiated-q-exact}, better on \fact{cape-negotiated-better} of
 \fact{cape-negotiated-pairs} families. The noise control minus single is
 \fact{cape-noise-delta}, \fact{cape-noise-ci}, q = \fact{cape-noise-q-exact}. The two
 differences are the same difference.
 
-\textbf{The contrast that isolates the mechanism returns nothing, and this time that means
-something.} Negotiated minus noise is \fact{cape-mechanism-delta},
+The contrast that isolates the mechanism returns nothing, and this time that means
+something. Negotiated minus noise is \fact{cape-mechanism-delta},
 \fact{cape-mechanism-ci}, q = \fact{cape-mechanism-q-exact}. This design resolves
 \fact{mde-cape-mechanism} F1 at 80\% power, and the effect the negotiation would have to carry, the \fact{cape-negotiated-delta} its neighbours show, is above that resolution. A null below its
 own minimum detectable effect says nothing; this one is not that. If the negotiation were doing the
@@ -271,13 +215,13 @@ work, this design would have seen it.
 What separates the multi-agent arms from the single judge is therefore the thing they share;
 \fact{cape-consensus-negotiated-calls} model calls instead of
 \fact{cape-consensus-single-calls}, at \fact{cape-consensus-negotiated-ratio}$\times$ and
-\fact{cape-consensus-noise-ratio}$\times$ the output tokens. \textbf{Spending more calls on a sample
-helps; making them argue does not.} That is a claim about this pipeline at this budget on this
+\fact{cape-consensus-noise-ratio}$\times$ the output tokens. Spending more calls on a sample
+helps; making them argue does not. That is a claim about this pipeline at this budget on this
 corpus, and it is the claim the noise control was added to make possible. A control that
 separates from the treatment is a control that has done nothing, and this one does not separate.
 
-\textbf{The fixture corpus gave the opposite sign, which is the sharpest evidence we have about that
-corpus.} There the noise control ran \fact{consensus-noise-delta} against the single judge and was worse on every sample in the same direction. Here it runs \fact{cape-noise-delta} and is better, at the same q as the negotiation. Nothing about the arms changed between the two runs; the evidence did. A
+The fixture corpus gave the opposite sign, which is the sharpest evidence we have about that
+corpus. There the noise control ran \fact{consensus-noise-delta} against the single judge and was worse on every sample in the same direction. Here it runs \fact{cape-noise-delta} and is better, at the same q as the negotiation. Nothing about the arms changed between the two runs; the evidence did. A
 corpus whose inputs are generated from its own answer key does not merely have less power than one
 of real binaries. It can rank the arms the other way round.
 
@@ -285,46 +229,23 @@ of real binaries. It can rank the arms the other way round.
 
 Same five fixtures, same prompt, same \fact{consensus-budget}-token output budget:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Local against frontier, same fixtures, same nominal budget.}\label{tab:results-4}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep - 2pt) * \real{0.2000}}@{}}
-\caption{Local against frontier, same fixtures, same nominal budget.}\label{tab:results-4}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-model
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-rows
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-samples
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-model
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-rows
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-samples
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+arm & model & mean F1 & rows & samples \\
+\midrule
 local & Qwen3.6-35B-A3B (IQ3\_K\_R4) & \fact{consensus-single-f1} & \fact{consensus-single-n} & \fact{fixture-clusters} \\
 frontier & Nemotron-3-Super-120B-A12B & \fact{arm-default-f1} & \fact{arm-default-n} & \fact{fixture-clusters} \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 Both arms see the same fixtures at the same repeats, so the comparison is paired:
 
@@ -338,7 +259,7 @@ A \fact{param-ratio}$\times$ larger reasoning model, given the same evidence and
 within three thousandths of F1 of a 35B model quantised to run on one desktop GPU, and its direction
 across samples is a coin flip.
 
-\textbf{That null is not a claim of equivalence, and the interval is the reason.} At 80\% power this design
+That null is not a claim of equivalence, and the interval is the reason. At 80\% power this design
 could have detected a difference of \fact{mde-frontier-local} F1, coarser than every architectural
 effect reported in this paper, and coarser than the largest configuration effect we found. A design
 that could only ever have seen effects above \fact{mde-frontier-local} says nothing about the
@@ -346,8 +267,8 @@ that could only ever have seen effects above \fact{mde-frontier-local} says noth
 it is the direction the literature's prior already pointed; we do not report it as evidence that the
 two models are alike.
 
-\textbf{We have since found that the two arms were not configured alike, and we report the null with that
-caveat attached.} The local arm runs with its reasoning stream disabled, necessarily so because the local server otherwise returns an empty answer, while the frontier arm ran with reasoning on and
+We have since found that the two arms were not configured alike, and we report the null with that
+caveat attached. The local arm runs with its reasoning stream disabled, necessarily so because the local server otherwise returns an empty answer, while the frontier arm ran with reasoning on and
 spent \fact{arm-default-reasoning} of its budget there. The nominal budget was equal; the budget
 available for an \emph{answer} was not. How much this matters we can bound from a third endpoint measured
 later on the same fixtures. With reasoning enabled it spent \fact{arm-qwenplus-reasoning} of every
@@ -357,8 +278,8 @@ with reasoning disabled the same model scored \fact{arm-qwenplus-nothink-f1}. Th
 any arm in this paper. The frontier arm above was not crippled that way having parsed \fact{arm-default-n} of \fact{arm-default-n}, so the null is not an artefact of a collapsed arm; but it is
 not the single-variable comparison it appears to be.
 
-\textbf{The matched arm cannot be built on that endpoint, and we established this by measurement rather
-than by assumption.} We re-ran the 120B arm with the reasoning parameter set. The provider accepted
+The matched arm cannot be built on that endpoint, and we established this by measurement rather
+than by assumption. We re-ran the 120B arm with the reasoning parameter set. The provider accepted
 it and ignored it: \fact{arm-default-nothink-reasoning} of the output was still reasoning, against
 \fact{arm-default-reasoning} without it, and the arm returned \fact{arm-default-nothink-f1} where the first
 run returned \fact{arm-default-f1} (paired $\Delta$ = \fact{frontier-replication-delta}, 95\% cluster CI
@@ -366,57 +287,30 @@ run returned \fact{arm-default-f1} (paired $\Delta$ = \fact{frontier-replication
 not a correction of it. The confound in this comparison is a property of the endpoint, and we report
 the null with the confound stated rather than promising a cleaner version of it.
 
-\textbf{A matched comparison is available on different weights, and it bounds two things at once.} The
+A matched comparison is available on different weights, and it bounds two things at once. The
 model we run locally, \texttt{qwen3.6-35b-a3b}, is also hosted by its vendor at full precision on an
 endpoint that does honour the flag. Against our local 3-bit deployment, on the same fixtures and
 repeats:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The same weights at two precisions, with and without the reasoning flag.}\label{tab:results-5}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep - 2pt) * \real{0.1667}}@{}}
-\caption{The same weights at two precisions, with and without the reasoning flag.}\label{tab:results-5}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-precision
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-reasoning
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-paired vs local
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% cluster CI
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-arm
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-precision
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-reasoning
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean F1
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-paired vs local
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% cluster CI
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+arm & precision & reasoning & mean F1 & paired vs local & 95\% cluster CI \\
+\midrule
 local & IQ3\_K\_R4 (3-bit) & off & \fact{consensus-single-f1} &, &, \\
-vendor-hosted & full & off & \fact{arm-qwen35ba3b-nothink-f1} & \textbf{\fact{quantisation-delta}} & \fact{quantisation-ci} \\
+vendor-hosted & full & off & \fact{arm-qwen35ba3b-nothink-f1} & \fact{quantisation-delta} & \fact{quantisation-ci} \\
 vendor-hosted & full & on & \fact{arm-qwen35ba3b-f1} & \fact{vendor-think-delta} & \fact{vendor-think-ci} \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 Paired against the local arm; intervals resample samples.
 
@@ -450,16 +344,16 @@ we have above 35B does not permit that match. Two of our arms are configuration-
 are 35B, so the series is two points at one size. We state this as a limitation with a measured
 cause rather than as an untested claim in either direction.
 
-\textbf{An earlier version of this arm reported \fact{superseded-frontier-f1} and was wrong to suggest a lead.} That figure came
+An earlier version of this arm reported \fact{superseded-frontier-f1} and was wrong to suggest a lead. That figure came
 from n=\fact{superseded-frontier-n}, the run having been cut short by a daily request quota; the apparent advantage did not
-survive completing the sample. It is recorded here because it is the exact failure mode Section~4.2 warns
+survive completing the sample. It is recorded here because it is the exact failure mode Section~\ref{paired-designs-bootstrap-intervals-and-never-a-single-run} warns
 about, a difference read off an underpowered arm, and because we caught it by finishing the run
 rather than by any insight.
 
 The completed run parsed \fact{arm-default-n} of \fact{arm-default-n} calls with no refusals
 and \fact{arm-default-hit-cap} hitting the output cap.
 
-\textbf{Where the larger model's budget went:} across the \fact{arm-default-n} calls,
+Where the larger model's budget went: across the \fact{arm-default-n} calls,
 \fact{arm-default-reasoning} of output tokens were reasoning, and on a one-token answer,
 \fact{reasoning-share-one-token}, at \fact{reasoning-one-token-output} output tokens,
 \fact{reasoning-one-token-thinking} of them thinking. An equal-budget
@@ -471,37 +365,22 @@ would have been a win bought with tokens.
 
 This is the paper's most replicated result, and it is negative.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Three retrieval components, each measured in isolation and again end to end.}\label{tab:retrievers}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Three retrieval components, each measured in isolation and again end to end.}\label{tab:retrievers}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-component
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-works in isolation?
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-contribution end to end
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-component
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-works in isolation?
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-contribution end to end
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-ATT\&CK case-prior RAG & \emph{self-consistency} \fact{case-prior-self-f1} against a \fact{case-prior-self-frequency-f1} frequency prior, scored on the corpus's own prior attributions rather than on MITRE ground truth & \textbf{loses} to the frequency prior in production (\fact{case-prior-prod-f1} vs \fact{case-prior-prod-frequency-f1}, MITRE ground truth) \\
-family-feature RAG & yes, recall@\fact{case-prior-top-k} \fact{family-recall-at-5}, \textbf{\fact{family-recall-chance-ratio}$\times$ chance}, leakage-free split & \textbf{\fact{family-delta-f1} F1}, precision \fact{family-delta-precision}, n=\fact{family-ab-samples} \\
-opcode-hash attribution & n/a, never fires & \textbf{\fact{hash-fired} of \fact{hash-total} samples}; \fact{hash-functions} functions hashed, \fact{hash-matches} matches \\
-\end{longtable}
+\toprule
+component & works in isolation? & contribution end to end \\
+\midrule
+ATT\&CK case-prior RAG & \emph{self-consistency} \fact{case-prior-self-f1} against a \fact{case-prior-self-frequency-f1} frequency prior, scored on the corpus's own prior attributions rather than on MITRE ground truth & loses to the frequency prior in production (\fact{case-prior-prod-f1} vs \fact{case-prior-prod-frequency-f1}, MITRE ground truth) \\
+family-feature RAG & yes, recall@\fact{case-prior-top-k} \fact{family-recall-at-5}, \fact{family-recall-chance-ratio}$\times$ chance, leakage-free split & \fact{family-delta-f1} F1, precision \fact{family-delta-precision}, n=\fact{family-ab-samples} \\
+opcode-hash attribution & n/a, never fires & \fact{hash-fired} of \fact{hash-total} samples; \fact{hash-functions} functions hashed, \fact{hash-matches} matches \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Every one works where it was built and moves nothing where it is wired in, and the three fail for three different reasons.
 
@@ -528,37 +407,22 @@ or none, a sharply bimodal distribution that populating the corpus would not fix
 A recurring finding is that a mechanism's \emph{firing rate} determines whether its ablation can be
 interpreted at all.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Firing rate before effect.}\label{tab:firing}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Firing rate before effect.}\label{tab:firing}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-mechanism
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-fires on
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-consequence
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-mechanism
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-fires on
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-consequence
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-confidence cap (falsification-before-confidence) & \textbf{\fact{cap-rate}} of techniques & an ablation would measure nothing; the null is uninterpretable \\
-sink-reachability priority hint & \textbf{\fact{hint-rate}} of samples (\fact{hint-fired}/\fact{hint-total}) & an ablation is interpretable, was run, and returned a null (Section~7) \\
+\toprule
+mechanism & fires on & consequence \\
+\midrule
+confidence cap (falsification-before-confidence) & \fact{cap-rate} of techniques & an ablation would measure nothing; the null is uninterpretable \\
+sink-reachability priority hint & \fact{hint-rate} of samples (\fact{hint-fired}/\fact{hint-total}) & an ablation is interpretable, was run, and returned a null (Section~\ref{what-the-ablations-cost-and-what-that-revealed}) \\
 STIX integrity pass & measured over \fact{integrity-bundles} fresh judge bundles & reported by removal reason \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 A mechanism's ablation can only be read where the mechanism runs, and two of these run too rarely for an ablation to say anything.
 
@@ -577,7 +441,7 @@ an ablation over a mechanism that fires on \fact{cap-rate} of cases produces a n
 Three of the four mechanisms the architecture was built around engage on almost nothing, and an
 ablation of any of them would return a null describing the cases where the mechanism never ran.
 Only the sink-reachability hint clears a rate at which an ablation would carry information, which
-is why it is the one we ablated, and Section~7 reports the null it returned.
+is why it is the one we ablated, and Section~\ref{what-the-ablations-cost-and-what-that-revealed} reports the null it returned.
 
 \subsection{The corroboration cascade does not reach the verdict}\label{the-corroboration-cascade-does-not-reach-the-verdict}
 
@@ -586,41 +450,22 @@ one Layer-0 source at a time and compare the bundle the analyst receives against
 with all of them, under two conditions that differ in exactly one respect, whether the removed
 source was the sole owner of its techniques.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The corroboration cascade under two conditions.}\label{tab:cascade}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep - 2pt) * \real{0.2500}}@{}}
-\caption{The corroboration cascade under two conditions.}\label{tab:cascade}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-condition
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what removing a source does to the evidence
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-verdict changed
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Jaccard vs all-sources
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-condition
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-what removing a source does to the evidence
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-verdict changed
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Jaccard vs all-sources
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-disjoint & its techniques disappear; nothing else claims them & \textbf{\fact{cascade-disjoint-changed}/\fact{cascade-disjoint-arms}} & \textbf{\fact{cascade-disjoint-jaccard} {[}\fact{cascade-disjoint-jaccard-min}, \fact{cascade-disjoint-jaccard-max}{]}} \\
-overlap & its techniques survive under a partner source, but their \textbf{corroboration} changes & \textbf{\fact{cascade-overlap-changed}/\fact{cascade-overlap-arms}} & \textbf{\fact{cascade-overlap-jaccard} {[}\fact{cascade-overlap-jaccard-min}, \fact{cascade-overlap-jaccard-max}{]}} \\
-\end{longtable}
+\toprule
+condition & what removing a source does to the evidence & verdict changed & Jaccard vs all-sources \\
+\midrule
+disjoint & its techniques disappear; nothing else claims them & \fact{cascade-disjoint-changed}/\fact{cascade-disjoint-arms} & \fact{cascade-disjoint-jaccard} {[}\fact{cascade-disjoint-jaccard-min}, \fact{cascade-disjoint-jaccard-max}{]} \\
+overlap & its techniques survive under a partner source, but their corroboration changes & \fact{cascade-overlap-changed}/\fact{cascade-overlap-arms} & \fact{cascade-overlap-jaccard} {[}\fact{cascade-overlap-jaccard-min}, \fact{cascade-overlap-jaccard-max}{]} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Both counts follow from the reconciliation step rather than from the judge, which is why they are arithmetic rather than evidence.
 
@@ -630,7 +475,7 @@ cross-domain agreement behind it, the thing the cascade exists to compute, and t
 byte-identical. The cascade runs, weights each source by a trust coefficient, and reports a
 corroborated set in the run summary; none of that reaches the artefact the analyst is given.
 
-\textbf{Why the bundle behaves that way is not what we first wrote, and the difference matters.} Our
+Why the bundle behaves that way is not what we first wrote, and the difference matters. Our
 initial reading was that the judge attends to the claim list and ignores everything else. It does
 not read either. The reconciliation step reconciles the bundle against the cascade. Every
 \texttt{attack-pattern} whose technique ID cannot be resolved is dropped, and every cascade technique
@@ -660,37 +505,24 @@ cascade's set exactly. That measurement has since been taken, by intercepting th
 reconciliation step and recording what the model produced before the deterministic set was merged
 in. On the four calls that reached it:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{What the judge contributed to the artefact the analyst receives, intercepted at the reconciliation seam.}\label{tab:judge}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{What the judge contributed to the artefact the analyst receives, intercepted at the reconciliation seam.}\label{tab:judge}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-total
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-per call
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-total
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-per call
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+& total & per call \\
+\midrule
 attack-patterns the judge emitted & \fact{judge-capped-emitted} & \fact{judge-capped-emitted-per-call} \\
 carrying a resolvable ATT\&CK ID & \fact{judge-capped-resolvable} & \fact{judge-capped-resolvable-per-call} \\
-\textbf{dropped, the model named no technique} & \textbf{\fact{judge-capped-dropped} (\fact{judge-capped-dropped-share})} & \fact{judge-capped-dropped-per-call} \\
-\textbf{IDs the cascade did not already hold} & \textbf{\fact{judge-capped-own-ids}} & \fact{judge-capped-own-ids-per-call} \\
+dropped, the model named no technique & \fact{judge-capped-dropped} (\fact{judge-capped-dropped-share}) & \fact{judge-capped-dropped-per-call} \\
+IDs the cascade did not already hold & \fact{judge-capped-own-ids} & \fact{judge-capped-own-ids-per-call} \\
 injected because the judge omitted them & \fact{judge-capped-injected} & \fact{judge-capped-injected-per-call} \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 Counts are techniques, over four calls.
 
@@ -700,15 +532,15 @@ one already in the cascade. Three quarters of the model's own attack-patterns as
 it could not map to a technique and were discarded. Of the two pipelines the bound allowed, the
 evidence points at the second. The bundle is the cascade's set wearing the judge's name.
 
-\textbf{And half the calls never reached that step.} Four of the eight timed out at the verdict ceiling,
+And half the calls never reached that step. Four of the eight timed out at the verdict ceiling,
 and on a timeout \texttt{give\_verdict} returns a text-fallback bundle that never calls the reconciliation
 routine, so the cascade is not consulted on that path at all. The timeouts are not a property of
 the fixtures: the judge's \fact{judge-output-cap}-token output cap was renamed by our client library to a parameter
 the local inference server does not read, so the model decoded unbounded until the caller gave up
-(Section~6, M7). One such call was measured at \fact{unbounded-decode-tokens} generated tokens and was still going.
+(Section~\ref{m7-a-safety-property-that-was-configured-documented-and-never-sent}, M7). One such call was measured at \fact{unbounded-decode-tokens} generated tokens and was still going.
 
-\textbf{Repeating the study with the cap fixed turns the pair into a controlled experiment, and the
-result inverts the section's own conclusion.} With the ceiling binding, the same four fixtures
+Repeating the study with the cap fixed turns the pair into a controlled experiment, and the
+result inverts the section's own conclusion. With the ceiling binding, the same four fixtures
 fail and the same four succeed; the judge's share of the bundle is \fact{judge-capped-share} in both conditions; every
 number on the reconciled path is identical. What changes is only how the failure arrives, \fact{judge-output-cap}
 tokens of unparseable output in three and a half minutes, instead of a ten-minute timeout.
@@ -720,20 +552,17 @@ evidence-derived set, identical to the cascade set on all four calls. In the cap
 is \fact{fallback-decode-chars-min} to \fact{fallback-decode-chars-max} characters of degenerate
 decode, and:
 
-\begin{longtable}[]{@{}llll@{}}
-\caption{Techniques reaching the analyst on the text-fallback path against those the corroboration cascade held, per fixture.}\label{tab:fallback}\\
-\toprule\noalign{}
-fixture & fallback & cascade & \textbf{only in fallback} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-fixture & fallback & cascade & \textbf{only in fallback} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\input{tables/fallback-rows}
-\end{longtable}
+\begin{table}[!htbp]
+\caption{Techniques reaching the analyst on the text-fallback path against those the corroboration cascade held, per fixture.}\label{tab:fallback}
+\centering\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+fixture & fallback & cascade & only in fallback \\
+\midrule
+\input{tables/fallback-rows} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 The last column is the set no evidence source corroborated.
 
@@ -758,7 +587,7 @@ it fails it has more influence than on the path where it succeeds; \fact{judge-c
 \fact{fallback-bundle-total} when it does not. The architecture suppresses the model's
 contribution precisely when the model is functioning, and admits it precisely when it is not.
 
-\textbf{This replaces an earlier version of the same result, and the replacement is why we trust it.} The
+This replaces an earlier version of the same result, and the replacement is why we trust it. The
 first pass varied three of six Layer-0 sources, the three needing no sandbox, over fixtures
 carrying five techniques, and reported the verdict unchanged in \fact{weights-unchanged-superseded} of
 \fact{weights-arms-superseded} cases. Two defects were
@@ -772,7 +601,7 @@ every source carries at least three claims, includes the Sigma layer, and adds a
 pair that does not involve YARA so that no arm's result is a foregone conclusion. The null survives
 all of it, at \fact{cascade-overlap-arms} arms rather than \fact{weights-arms-superseded}.
 
-\textbf{One pre-registered prediction, resolved in both directions.} We predicted that removing the
+One pre-registered prediction, resolved in both directions. We predicted that removing the
 tool-artifact layer would change nothing, because it emits on YARA's cascade domain and therefore
 cannot contribute corroboration. In the overlap condition that is exactly right;
 \fact{cascade-overlap-fixtures-changed} of \fact{cascade-overlap-fixtures}. In the disjoint condition it
@@ -814,40 +643,25 @@ of the data is handled.
 
 \subsection{What the ablations cost, and what that revealed}\label{what-the-ablations-cost-and-what-that-revealed}
 
-The one mechanism whose firing rate justified an ablation (Section~4, \fact{hint-rate}) was ablated, paired, on the
+The one mechanism whose firing rate justified an ablation (Section~\ref{firing-rate-before-effect}, \fact{hint-rate}) was ablated, paired, on the
 subset where it fires. It does nothing measurable:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{The sink-reachability hint, paired on the samples where it fires.}\label{tab:hint}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{The sink-reachability hint, paired on the samples where it fires.}\label{tab:hint}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-outcome
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean $\Delta$ (hint on $-$ off)
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% CI
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-outcome
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-mean $\Delta$ (hint on $-$ off)
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-95\% CI
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\textbf{distinct technique IDs} & \textbf{\fact{sink-delta-tids}} & \textbf{\fact{sink-ci-tids}} \\
+\toprule
+outcome & mean $\Delta$ (hint on $-$ off) & 95\% CI \\
+\midrule
+distinct technique IDs & \fact{sink-delta-tids} & \fact{sink-ci-tids} \\
 claims & \fact{sink-delta-claims} & \fact{sink-ci-claims} \\
 seconds & \fact{sink-delta-seconds} & \fact{sink-ci-seconds} \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 Units differ per row and are named in the row.
 
@@ -856,40 +670,25 @@ n=\fact{sink-pairs} pairs; the hint is better on \fact{sink-better}, worse on \f
 \fact{sink-pair-deltas}, large in both directions and cancelling. This is the fourth architectural claim to end in
 a null, and the last one we were in a position to test.
 
-\textbf{The result that constrains the result. Half the experiment was not scoreable.} Twelve pairs were
+The result that constrains the result. Half the experiment was not scoreable. Twelve pairs were
 attempted and six survived screening.
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Every sample excluded from the paired study, with the reason and the count.}\label{tab:exclusions}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Every sample excluded from the paired study, with the reason and the count.}\label{tab:exclusions}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-excluded
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-n
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-why
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-excluded
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-n
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-why
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
+\toprule
+excluded & n & why \\
+\midrule
 degenerate decode & \fact{sink-excluded-degenerate} & an arm emitting \fact{degenerate-claims-min}--\fact{degenerate-claims-max} claims across \fact{degenerate-tids-min}--\fact{degenerate-tids-max} technique IDs (ratios \fact{degenerate-ratio-min}--\fact{degenerate-ratio-max}) \\
 unattributable & \fact{sink-excluded-unattributable} & both arms dead, and the host state needed to decide whether the pipeline or the machine failed was never recorded \\
 incomplete & \fact{sink-excluded-incomplete} & an arm exceeded the \setting{630} s bound, a genuine outcome, but it costs the pair \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table}
 
 Reported because a loss rate bounds what any ablation on this pipeline can detect.
 
@@ -897,10 +696,10 @@ Reported because a loss rate bounds what any ablation on this pipeline can detec
 A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation on this pipeline can detect. An effect smaller than the
 noise from losing half the samples is not measurable here, and quoting
 \fact{sink-delta-tids} \fact{sink-ci-tids} without
-that context would claim a precision the instrument does not have. \textbf{Reporting the loss rate beside
-the estimate is the whole of what we have to say about how to read it.}
+that context would claim a precision the instrument does not have. Reporting the loss rate beside
+the estimate is the whole of what we have to say about how to read it.
 
-\textbf{The two \texttt{unattributable} pairs are this paper's own Section~4.5 recurring against it.} They died while
+The two \texttt{unattributable} pairs are this paper's own Section~\ref{per-sample-outputs-are-retained-for-every-study} recurring against it. They died while
 the host's swap file was exhausted and the model server had \fact{paged-out-working-set} of its own address space paged
 out; one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to \fact{static-max-chars} characters, which is
 inexplicable for a model generating from RAM and unsurprising for one generating from disk. We had
@@ -909,7 +708,7 @@ measurement ran in. The harness now captures \texttt{MemAvailable}, \texttt{Swap
 resident-versus-swapped split at both ends of every arm and the scorer screens on it, forward only,
 never for data already collected.
 
-\textbf{Three arms failed outright; two were re-run and one deliberately was not.} Two carried a
+Three arms failed outright; two were re-run and one deliberately was not. Two carried a
 \texttt{Connection\ error} from a restart race, meaning the measurement never happened, and were re-run. The
 third was the \setting{630}-second timeout, which is an outcome. Deleting an outcome one dislikes is selection
 rather than repair. The recovered pair contributed a \fact{sink-recovered-pair-delta}, against the hint.

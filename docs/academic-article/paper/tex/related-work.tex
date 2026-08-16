@@ -32,13 +32,13 @@ solutions are ``largely incomparable'' because they use custom ontologies and in
 datasets, and, counterintuitively, that traditional NLP approaches outperform modern
 embedder-based and generative approaches in realistic settings.
 
-\textbf{Position.} Our describe-then-map design removes technique-ID recall from the model entirely.
+Position. Our describe-then-map design removes technique-ID recall from the model entirely.
 The analyst describes behaviour and a deterministic index assigns the identifier. This is a
 domain instantiation of Infer-Retrieve-Rank \preprintcite{doosterlinck2024incontext}, which established the general program, multi-step LM/retriever interaction that decouples inference from assignment over a
 many-thousand-class label space, reaching state of the art on three benchmarks with tens of
 labelled examples. Ours is stricter than \preprintcite{doosterlinck2024incontext} and than \cite{lekssays2025techniquerag}. In both of those the language model
 still ranks or selects among retrieved candidates, whereas here it never emits an identifier and
-any correction is gated to the provably-safe invalid$\rightarrow$valid case. \textbf{We do not claim the idea.}
+any correction is gated to the provably-safe invalid$\rightarrow$valid case. We do not claim the idea.
 
 What we contribute is a decomposition of the SoK's insight. \cite{buchel2025sok} reports that embedders lose; we
 measure \emph{where}. Ranking quality and gate quality behave as separable axes here. Dense embeddings
@@ -47,7 +47,7 @@ index ranks worse while gating cleanly. Composing the per-axis winners beats eit
 on both, measured on TRAM2 \cite{mitre2023tram} (N=4,913) and replicated on the independently annotated AnnoCTR
 corpus \cite{lange2024annoctr}.
 
-\textbf{The separation itself is not ours, and an earlier draft of this section claimed it was.}
+The separation itself is not ours, and an earlier draft of this section claimed it was.
 Abdallah et al.~\cite{abdallah2026retrievers} evaluate retrieval confidence, AUROC for predicting query success, as a
 dimension explicitly distinct from retrieval effectiveness, find calibration ``consistently weak
 across model families'', and conclude raw scores are ``unreliable for downstream routing without
@@ -69,8 +69,8 @@ tuning.
 
 Finally, the failure that motivates removing identifier recall in the first place. Asked for an
 ATT\&CK identifier it does not know, the model enters a degenerate loop, proposing and re-proposing
-wrong identifiers until the budget is gone. \textbf{The loop is not novel and neither is the inadequacy
-of the obvious remedy:} neural text degeneration is a studied phenomenon with competing
+wrong identifiers until the budget is gone. The loop is not novel and neither is the inadequacy
+of the obvious remedy: neural text degeneration is a studied phenomenon with competing
 established accounts. Welleck et al.~locate the cause in the \emph{likelihood objective itself}, which
 ``assigns too much probability to sequences containing repeats'', while a later data-side analysis
 finds a strong correlation with repetition already present in the training data and argues that
@@ -83,7 +83,7 @@ without fixing it.
 What we can contribute is the consequence. The degeneration literature measures repetition
 rate and text quality; here the budget is exhausted inside an operational deadline, the verdict
 stage times out, and the analyst receives an empty STIX bundle, degeneration as a failure to
-\emph{deliver}, not a failure of prose. We measure that channel directly in Section~1.7.1, where empty bundles fall from 6/17 to 1/17. Constrained decoding would also solve the original loop, and we say so; the point is
+\emph{deliver}, not a failure of prose. We measure that channel directly in Section~\ref{what-the-ablations-cost-and-what-that-revealed}, where empty bundles fall from 6/17 to 1/17. Constrained decoding would also solve the original loop, and we say so; the point is
 that the cheaper mitigation a practitioner reaches for first does not.
 
 \subsection{LLM agents over binaries}\label{llm-agents-over-binaries}
@@ -96,10 +96,10 @@ identifies TTPs in stripped malware binaries using dense plus neural retrieval t
 analysis entry points, then a function-level agent with incremental context retrieval, reporting
 93.25\% precision and 93.81\% recall at function level and 87.37\% precision on real-world malware.
 
-\textbf{Position.} We do not claim binary evidence as an input modality; \preprintcite{ttpdetect2026} holds that ground. Two
+Position. We do not claim binary evidence as an input modality; \preprintcite{ttpdetect2026} holds that ground. Two
 differences remain and only one is currently defensible. First, \preprintcite{ttpdetect2026} appears to demonstrate on a
 cloud model while our pipeline runs on a \textasciitilde3B-active local MoE, a deployment claim, addressed in
-Section~4 rather than here. Second, \preprintcite{ttpdetect2026} reasons at function level over decompiled code while we fuse
+Section~\ref{what-runs-it} rather than here. Second, \preprintcite{ttpdetect2026} reasons at function level over decompiled code while we fuse
 six deterministic detectors, three domain analysts and a corroboration cascade; that is a
 different system, but ``different'' is not a contribution until the difference is measured.
 
@@ -128,7 +128,7 @@ lower accuracy, and name three failure modes, namely sycophantic conformity (mod
 85.5\%), contextual fragility, and consensus collapse discarding correct answers already present
 in the generation pool.
 
-\textbf{Position.} We do not claim that multi-agent analysis beats a single agent, and we report the
+Position. We do not claim that multi-agent analysis beats a single agent, and we report the
 equal-budget comparison rather than assuming it. Both \cite{bertalanic2026consensus} and \preprintcite{tran2026single} scope their negative results
 to \emph{homogeneous} agents decomposing a \emph{single} context, and both name the exception, degraded
 or noisy context, which is the regime a 600-import binary plus a sandbox report plus network
@@ -161,7 +161,7 @@ without reaching significance (p=0.189). The capability gap is quantified: the U
 Institute places open-weight cyber capability 4--7 months behind the closed frontier, narrowing
 from 6--10 months, at roughly 45$\times$ lower cost per task.
 
-\textbf{Position.} We inherit this constraint and cite it; we do not claim it. Our deployment
+Position. We inherit this constraint and cite it; we do not claim it. Our deployment
 contribution is narrower and practitioner-facing: on a hybrid-offload MoE, KV cache costs
 $\approx$10.85 KiB/token and context length barely moves system RAM because the cost is the
 offloaded weights, a closed-form estimate over-predicted KV by \textasciitilde4$\times$ and was overturned by
@@ -177,7 +177,7 @@ LLM-security papers from 2023--2024 and finding that every one contains at least
 pitfalls, with only 15.7\% explicitly discussed. Broader benchmark audits reach the same place
 from the construct-validity direction across 445 LLM benchmarks.
 
-\textbf{Position.} Our instrument-validity finding, that a single-run parsed-claim count produced
+Position. Our instrument-validity finding, that a single-run parsed-claim count produced
 contradictory rankings of the same arms across decoding budgets, is a worked example inside
 \cite{evertz2026chasing}'s category, not a new observation, and we present it as such. The nuisance parameter
 identified, the inversion measured. Likewise our narrative result. That template-based
@@ -210,7 +210,7 @@ rather than temporal misalignment of the model itself.
 On that axis we find no LLM-based equivalent, and the axis is worth naming even though we no
 longer have a result to report on it. Our n=210 drift study is withdrawn: it drove the full
 pipeline per sample against a long-lived shared Ghidra server that was never restarted, which is
-the precondition for the stale-program defect described in Section~6, and its per-sample outputs were not
+the precondition for the stale-program defect described in Section~\ref{sec:failures}, and its per-sample outputs were not
 retained, so whether it was affected cannot be determined after the fact. The earlier
 earliest-to-latest figure is not restated here. What survives is the framing, input-era drift is a
 distinct axis from temporal misalignment, and a re-run under the corrected instrument is required
@@ -221,7 +221,7 @@ before any bound is claimed.
 The paper's methodological spine belongs to an area that already exists, and locating it there
 precisely matters more than claiming the ground.
 
-\textbf{The genus is described, and the description is older than this field.} Gunawi et
+The genus is described, and the description is older than this field. Gunawi et
 al.~\cite{gunawi2008eio} measured where an error signal is lost, finding that 13\% of propagation
 channels drop an error code without handling it, and calls between modules are a major cause. Yuan
 et al.~\cite{yuan2014simple} ruled that a handler which only logs is a handler that ignores, and
@@ -247,13 +247,13 @@ express are ``the norm, rather than the exception, with 85\% of the reviewed API
 them \cite{martinlopez2019deps}. An interface layer unfaithful to its source is a measured quantity
 rather than an anecdote.
 
-\textbf{The detector is not new either.} ``Distinct inputs should produce distinct outputs'' is an
+The detector is not new either. ``Distinct inputs should produce distinct outputs'' is an
 ordinary metamorphic relation, and metamorphic testing exists precisely for programs whose correct
 output is unknown \cite{li2024metamorphic}, the ``notorious oracle problem'' its own survey names. Stress-testing an
 LLM judge's consistency under input variation is likewise established: \cite{dev2026judge} perturbs formatting,
 paraphrase, verbosity and ground-truth labels and measures how the judgment moves.
 
-\textbf{And the newest of our mechanisms is a domain instance, not a discovery.} In the course of
+And the newest of our mechanisms is a domain instance, not a discovery. In the course of
 building a parameter-size series we produced a rank correlation of +0.866 between model size and
 F1, reproducing the $\rho$=0.85 the nearest prior work reports \preprintcite{ryan2026attck}, from five rows that were three models,
 one of them present twice at two reasoning settings. The low-scoring row was a model disabled by a
@@ -274,7 +274,7 @@ relative''. The relative half is the ranking, which is what a single-configurati
 silently fixes. Budget-dependent model choice runs the same way from the other side, where extra
 test-time compute lets a smaller model overtake a much larger one \cite{snell2025testtime,hassid2024budget}.
 
-\textbf{And the literature does not run one way, which we say because a reviewer will know it.}
+And the literature does not run one way, which we say because a reviewer will know it.
 Jin et al.~\cite{jin2024steplength} find that \emph{lengthening} reasoning steps improves accuracy.
 Read together, the two results say the effect is task- and budget-dependent rather than monotone in
 either direction, which is our argument rather than an objection to it. A ranking measured at one
@@ -290,7 +290,7 @@ documented in their own issue trackers \preprintcite{llamacpp8634,vllm11976}, so
 but what one costs inside a measurement, a documented output ceiling absent for as long as it had
 existed, and half of a study's calls diverted onto a different artefact-construction path.
 
-\textbf{What we add is therefore narrow and stated narrowly.} Three instances of the described genus,
+What we add is therefore narrow and stated narrowly. Three instances of the described genus,
 drawn not from a user-facing assistant but from an evaluation pipeline for security research,
 where the consequence is neither a bad answer to a user nor a degraded session but a measurement
 that is wrong and looks right. We contribute: the three concrete mechanisms at three different
@@ -300,7 +300,7 @@ retained and the question can no longer be asked of it. The last of these is the
 seen elsewhere. The taxonomies report incidents, and we report what an incident of this class does
 to a result that has already been written down.
 
-\textbf{One further claim, and it is about where the genus ends rather than what is in it.} The
+One further claim, and it is about where the genus ends rather than what is in it. The
 taxonomies above are organised by the boundary crossed: an error dropped at an inter-module call
 \cite{gunawi2008eio}, a signal ignored by its handler \cite{yuan2014simple}, a partition that
 produces no actionable warning \cite{alquraan2018partition}. Each describes a call to something
@@ -352,102 +352,72 @@ paper and is cited as one.
 
 Two of the twelve had been misplaced by exactly the mechanism this section documents. LADDER sits
 at RAID 2023; a search summary offered an ACL venue, and only the indexed record settled it.
-PhishDebate is published at IEEE BigData 2025, which its own arXiv Comments field states and no summary mentioned, so a source we were about to mark unreviewed is not. \textbf{A thirteenth
-entry was added by the same pass:} the sentence reporting that a tool catalogue cut from 46 to 19
+PhishDebate is published at IEEE BigData 2025, which its own arXiv Comments field states and no summary mentioned, so a source we were about to mark unreviewed is not. A thirteenth
+entry was added by the same pass: the sentence reporting that a tool catalogue cut from 46 to 19
 saves up to 70\% of execution time named no source whatever. It is \cite{paramanayakam2025lessismore},
 and both figures were confirmed against its full text.
 
-\textbf{The rows below were added by the adjacent-field counter-searches of 2026-08-09 and
+The rows below were added by the adjacent-field counter-searches of 2026-08-09 and
 2026-08-15, and carry what the review passes since then did to them. Verification status differs
-per row, deliberately recorded rather than smoothed over:}
+per row, deliberately recorded rather than smoothed over:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Sources added by the adjacent-field counter-search, with how each was verified.}\label{tab:citations-a}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Sources added by the adjacent-field counter-search, with how each was verified.}\label{tab:citations-a}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\#
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Source
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Verified how
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\#
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Source
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Verified how
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\cite{abdallah2026retrievers} & Abdallah, Holdcroft, Ali \& Jatowt, \emph{Are LLM-Based Retrievers Worth Their Cost?}, \texttt{arXiv:2604.03676} & \textbf{Abstract fetched and read.} The quoted claims are from it \\
-\cite{ng2014conll,bryant2019bea} & The F0.5 convention in grammatical error correction: Ng et al., \emph{The CoNLL-2014 Shared Task on GEC}; Bryant et al., \emph{The BEA-2019 Shared Task on GEC} & \textbf{Re-anchored and verified 2026-08-15.} The claim is that GEC weights precision over recall because a false correction costs more than a missed one, and the shared tasks are its primary source: F0.5 is the main metric in both, weighting precision twice recall, chosen to penalise over-correction. The two candidate papers previously listed here were never fetched and are \textbf{dropped}; the convention is documented by the tasks themselves and does not need them \\
-\cite{welleck2019unlikelihood,li2023repetition} & Welleck, Kulikov, Roller, Dinan, Cho \& Weston, \emph{Neural Text Generation with Unlikelihood Training}, \texttt{arXiv:1908.04319}; Li, Lan, Fu, Cai, Liu, Collier, Watanabe \& Su, \emph{Repetition In Repetition Out}, \texttt{arXiv:2310.10226} & \textbf{Both abstracts fetched 2026-08-15, and our summary of them was wrong.} We had written ``an established account rooted in self-reinforcement and training-data repetition''. Welleck's account is neither: it blames \emph{the likelihood objective itself}. The data-side account is the second paper's, which finds a strong correlation with repetition in the training data and argues self-reinforcement explanations reduce to it. Corrected in the body to two named accounts rather than one blended one. The third id previously listed (\texttt{arXiv:2505.10402}) was never fetched and is dropped \\
-\cite{lazaridou2021mind} & Lazaridou, Kuncoro, Gribovskaya, Agrawal, Liska, Terzi, Gimenez, de Masson d'Autume, Kocisky, Ruder, Yogatama, Cao, Young \& Blunsom, \emph{Mind the Gap: Assessing Temporal Generalization in Neural Language Models}, NeurIPS 2021, \texttt{arXiv:2102.01951} & \textbf{Abstract fetched and read 2026-08-15; supports the claim exactly.} Both halves are quoted from it: \emph{``model performance becomes increasingly worse with time''} and \emph{``while increasing model size alone, a key driver behind recent progress, does not solve this problem''}. The arXiv id is recorded now because it was missing and a first attempt to verify this row fetched the wrong paper. TemporalWiki and TARDIS were never fetched and are dropped \\
-\emph{withdrawn 2026-08-16} & Wei Wu, \emph{When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime}, \texttt{arXiv:2606.14589} & \textbf{Correctly cited, and removed anyway.} The abstract was fetched and supported what we took from it; what it never had was peer review. Replaced with \cite{gunawi2008eio,yuan2014simple,alquraan2018partition} for the meta-pattern and where the signal is lost, and \cite{xue2025agentbugs,liu2026inference} for the LLM-runtime instance. The replacement is stronger than what it replaces, measured error loss at module boundaries, and a ruling that a log-only handler is an ignored error, but it costs us the one thing the preprint had: a taxonomy of an LLM agent runtime specifically. \textbf{We no longer claim that combination is described} \\
-\emph{withdrawn 2026-08-16} & \emph{From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents}, \texttt{arXiv:2507.16044} & \textbf{Corrected twice, then removed.} On 2026-08-15 a sentence we had quoted from it turned out not to be in it; it came from a search summary. On 2026-08-16 a search summary asserted, twice, that the paper is published in ACM TOSEM 2026. \textbf{It is not.} Four checks (arXiv v4, DBLP, Crossref, Semantic Scholar) return no venue; the TOSEM paper the summariser was thinking of is a different MCP study. Writing that venue in would have put a fabricated citation in a paper about unverified attribution. Replaced with \cite{oyelayo2026mcp} and \cite{martinlopez2019deps}; the 76\%/94.2\% figures had no reviewed equivalent and are gone \\
-\cite{li2024metamorphic} & Li, Liu, Poon, Towey, Sun, Zheng, Zhou \& Chen, \emph{Metamorphic Relation Generation: State of the Art and Research Directions}, ACM TOSEM \texttt{10.1145/3708521} (preprint \texttt{arXiv:2406.05397}) & \textbf{Verified 2026-08-15.} Title, authors, venue and DOI confirmed; the abstract states metamorphic testing addresses \emph{``the notorious oracle problem''}, which is what we cite it for. The ACM page is paywalled to the fetcher, so the preprint is given alongside for a reader \\
-\cite{dev2026judge} & Dev, Sloan, Kavner, Kong \& Sandler, \emph{Judge Reliability Harness: Stress Testing the Reliability of LLM Judges}, \texttt{arXiv:2603.05399} & \textbf{Abstract fetched and read, 2026-08-15, and it does not say what we cited it for.} We claimed it established ``duplicating dataset items to verify identical inputs score consistently'' as eval-harness practice. It does not: it perturbs formatting, paraphrase, verbosity and the ground-truth label, and measures how the judgment moves. That is adjacent, not the same, and the claim has been rewritten to what the source supports. \textbf{We have no verified source for the duplicate-item practice and therefore no longer assert one}, which weakens a demotion of our own detector, i.e.~moves in the direction that flatters us, so it is flagged here rather than quietly enjoyed \\
-\emph{reattributed 2026-08-16} & Morbiato, Keller, Nair \& Romano, \emph{Hierarchical Retrieval Augmented Generation for Adversarial Technique Annotation in Cyber Threat Intelligence Text} (H-TechniqueRAG), \texttt{arXiv:2604.14166} & \textbf{The 77.5\% was credited to the wrong paper.} Our registry attributed it to \cite{lekssays2025techniquerag}, whose abstract does not contain it, while the body named no source at all, only ``its hierarchical successor''. It belongs to H-TechniqueRAG, a \emph{different} group's follow-up, whose abstract was fetched and states it. Three checks (arXiv, DBLP, Crossref) return no venue, so it is cited as a marked preprint. Its F1 and latency gains over TechniqueRAG are \textbf{not} restated: they are self-reported comparisons of the kind \cite{buchel2025sok} calls ``largely incomparable'' three sentences later, and reprinting them would have had this paper contradict its own next paragraph \\
-\end{longtable}
+\toprule
+\# & Source & Verified how \\
+\midrule
+\cite{abdallah2026retrievers} & Abdallah, Holdcroft, Ali \& Jatowt, \emph{Are LLM-Based Retrievers Worth Their Cost?}, \texttt{arXiv:2604.03676} & Abstract fetched and read. The quoted claims are from it \\
+\cite{ng2014conll,bryant2019bea} & The F0.5 convention in grammatical error correction: Ng et al., \emph{The CoNLL-2014 Shared Task on GEC}; Bryant et al., \emph{The BEA-2019 Shared Task on GEC} & Re-anchored and verified 2026-08-15. The claim is that GEC weights precision over recall because a false correction costs more than a missed one, and the shared tasks are its primary source: F0.5 is the main metric in both, weighting precision twice recall, chosen to penalise over-correction. The two candidate papers previously listed here were never fetched and are dropped; the convention is documented by the tasks themselves and does not need them \\
+\cite{welleck2019unlikelihood,li2023repetition} & Welleck, Kulikov, Roller, Dinan, Cho \& Weston, \emph{Neural Text Generation with Unlikelihood Training}, \texttt{arXiv:1908.04319}; Li, Lan, Fu, Cai, Liu, Collier, Watanabe \& Su, \emph{Repetition In Repetition Out}, \texttt{arXiv:2310.10226} & Both abstracts fetched 2026-08-15, and our summary of them was wrong. We had written ``an established account rooted in self-reinforcement and training-data repetition''. Welleck's account is neither: it blames \emph{the likelihood objective itself}. The data-side account is the second paper's, which finds a strong correlation with repetition in the training data and argues self-reinforcement explanations reduce to it. Corrected in the body to two named accounts rather than one blended one. The third id previously listed (\texttt{arXiv:2505.10402}) was never fetched and is dropped \\
+\cite{lazaridou2021mind} & Lazaridou, Kuncoro, Gribovskaya, Agrawal, Liska, Terzi, Gimenez, de Masson d'Autume, Kocisky, Ruder, Yogatama, Cao, Young \& Blunsom, \emph{Mind the Gap: Assessing Temporal Generalization in Neural Language Models}, NeurIPS 2021, \texttt{arXiv:2102.01951} & Abstract fetched and read 2026-08-15; supports the claim exactly. Both halves are quoted from it: \emph{``model performance becomes increasingly worse with time''} and \emph{``while increasing model size alone, a key driver behind recent progress, does not solve this problem''}. The arXiv id is recorded now because it was missing and a first attempt to verify this row fetched the wrong paper. TemporalWiki and TARDIS were never fetched and are dropped \\
+\emph{withdrawn 2026-08-16} & Wei Wu, \emph{When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime}, \texttt{arXiv:2606.14589} & Correctly cited, and removed anyway. The abstract was fetched and supported what we took from it; what it never had was peer review. Replaced with \cite{gunawi2008eio,yuan2014simple,alquraan2018partition} for the meta-pattern and where the signal is lost, and \cite{xue2025agentbugs,liu2026inference} for the LLM-runtime instance. The replacement is stronger than what it replaces, measured error loss at module boundaries, and a ruling that a log-only handler is an ignored error, but it costs us the one thing the preprint had: a taxonomy of an LLM agent runtime specifically. We no longer claim that combination is described \\
+\emph{withdrawn 2026-08-16} & \emph{From REST to MCP: An Empirical Study of API Wrapping and Automated Server Generation for LLM Agents}, \texttt{arXiv:2507.16044} & Corrected twice, then removed. On 2026-08-15 a sentence we had quoted from it turned out not to be in it; it came from a search summary. On 2026-08-16 a search summary asserted, twice, that the paper is published in ACM TOSEM 2026. It is not. Four checks (arXiv v4, DBLP, Crossref, Semantic Scholar) return no venue; the TOSEM paper the summariser was thinking of is a different MCP study. Writing that venue in would have put a fabricated citation in a paper about unverified attribution. Replaced with \cite{oyelayo2026mcp} and \cite{martinlopez2019deps}; the 76\%/94.2\% figures had no reviewed equivalent and are gone \\
+\cite{li2024metamorphic} & Li, Liu, Poon, Towey, Sun, Zheng, Zhou \& Chen, \emph{Metamorphic Relation Generation: State of the Art and Research Directions}, ACM TOSEM \texttt{10.1145/3708521} (preprint \texttt{arXiv:2406.05397}) & Verified 2026-08-15. Title, authors, venue and DOI confirmed; the abstract states metamorphic testing addresses \emph{``the notorious oracle problem''}, which is what we cite it for. The ACM page is paywalled to the fetcher, so the preprint is given alongside for a reader \\
+\cite{dev2026judge} & Dev, Sloan, Kavner, Kong \& Sandler, \emph{Judge Reliability Harness: Stress Testing the Reliability of LLM Judges}, \texttt{arXiv:2603.05399} & Abstract fetched and read, 2026-08-15, and it does not say what we cited it for. We claimed it established ``duplicating dataset items to verify identical inputs score consistently'' as eval-harness practice. It does not: it perturbs formatting, paraphrase, verbosity and the ground-truth label, and measures how the judgment moves. That is adjacent, not the same, and the claim has been rewritten to what the source supports. We have no verified source for the duplicate-item practice and therefore no longer assert one, which weakens a demotion of our own detector, i.e.~moves in the direction that flatters us, so it is flagged here rather than quietly enjoyed \\
+\emph{reattributed 2026-08-16} & Morbiato, Keller, Nair \& Romano, \emph{Hierarchical Retrieval Augmented Generation for Adversarial Technique Annotation in Cyber Threat Intelligence Text} (H-TechniqueRAG), \texttt{arXiv:2604.14166} & The 77.5\% was credited to the wrong paper. Our registry attributed it to \cite{lekssays2025techniquerag}, whose abstract does not contain it, while the body named no source at all, only ``its hierarchical successor''. It belongs to H-TechniqueRAG, a \emph{different} group's follow-up, whose abstract was fetched and states it. Three checks (arXiv, DBLP, Crossref) return no venue, so it is cited as a marked preprint. Its F1 and latency gains over TechniqueRAG are not restated: they are self-reported comparisons of the kind \cite{buchel2025sok} calls ``largely incomparable'' three sentences later, and reprinting them would have had this paper contradict its own next paragraph \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Three were cited for something the source does not say.
 
 
-\textbf{The two below were added on 2026-08-15 by the counter-search for M6 and M7. Both demoted a
-claim of ours before it was made, which is the point of running the search first:}
+The two below were added on 2026-08-15 by the counter-search for M6 and M7. Both demoted a
+claim of ours before it was made, which is the point of running the search first:
 
-\begin{longtable}[]{@{}
+\begin{table}[!htbp]
+\caption{Sources added by the counter-search for the last two mechanisms.}\label{tab:citations-b}
+\centering\small
+\begin{tabular}{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\caption{Sources added by the counter-search for the last two mechanisms.}\label{tab:citations-b}\\
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\#
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Source
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Verified how
-\end{minipage} \\
-\midrule\noalign{}
-\endfirsthead
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-\#
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Source
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Verified how
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\emph{withdrawn 2026-08-16} & \emph{Brevity Constraints Reverse Performance Hierarchies in Language Models}, \texttt{arXiv:2604.00025} & \textbf{Removed for want of review, and the claim narrowed with it.} Replaced by \cite{sun2025length} (EMNLP 2025), which reports that under strict output-length constraints performance ``might not scale monotonically with the model size''. The reviewed result is \emph{local to a budget window} rather than a global reversal, so our sentence was narrowed to match it; the 28.4-point figure went with the preprint. The only work stating the unqualified reversal is itself unreviewed \\
-\preprintcite{llamacpp8634,vllm11976} & Token-limit incompatibility across OpenAI-compatible servers: \texttt{ggml-org/llama.cpp} issue \textbf{\#8634} (\texttt{max\_tokens} not respected on the non-chat endpoint, generation continuing to the context limit); \texttt{vllm-project/vllm} issue \textbf{\#11976} (request for a server-side cap) & \textbf{Read in full 2026-08-16, and one of them had moved.} \#8634 is \emph{open} since 2024-07-22, labelled \texttt{bug-unconfirmed} and high severity, and its text says the cap is honoured on the chat endpoint but not the other. \#11976 is \textbf{closed as completed} (2025-01-13 to 2025-02-11): vLLM shipped the server-side cap. Cited to \emph{demote} our M7 from a new mechanism to a known integration wart, which is the safe direction, but the instrument-failure section now names which server fixed it, because ``documented in their issue trackers'' reads as ``still broken in both'' and one is not \\
-\end{longtable}
+\toprule
+\# & Source & Verified how \\
+\midrule
+\emph{withdrawn 2026-08-16} & \emph{Brevity Constraints Reverse Performance Hierarchies in Language Models}, \texttt{arXiv:2604.00025} & Removed for want of review, and the claim narrowed with it. Replaced by \cite{sun2025length} (EMNLP 2025), which reports that under strict output-length constraints performance ``might not scale monotonically with the model size''. The reviewed result is \emph{local to a budget window} rather than a global reversal, so our sentence was narrowed to match it; the 28.4-point figure went with the preprint. The only work stating the unqualified reversal is itself unreviewed \\
+\preprintcite{llamacpp8634,vllm11976} & Token-limit incompatibility across OpenAI-compatible servers: \texttt{ggml-org/llama.cpp} issue \#8634 (\texttt{max\_tokens} not respected on the non-chat endpoint, generation continuing to the context limit); \texttt{vllm-project/vllm} issue \#11976 (request for a server-side cap) & Read in full 2026-08-16, and one of them had moved. \#8634 is \emph{open} since 2024-07-22, labelled \texttt{bug-unconfirmed} and high severity, and its text says the cap is honoured on the chat endpoint but not the other. \#11976 is closed as completed (2025-01-13 to 2025-02-11): vLLM shipped the server-side cap. Cited to \emph{demote} our M7 from a new mechanism to a known integration wart, which is the safe direction, but the instrument-failure section now names which server fixed it, because ``documented in their issue trackers'' reads as ``still broken in both'' and one is not \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Both demoted a claim of ours before it was made.
 
 
-\textbf{All nine sources added by the counter-search were fetched on 2026-08-15, and three of the
-nine were wrong.} The REST-to-MCP study was quoted for a sentence not in it; \cite{dev2026judge} was
+All nine sources added by the counter-search were fetched on 2026-08-15, and three of the
+nine were wrong. The REST-to-MCP study was quoted for a sentence not in it; \cite{dev2026judge} was
 cited for a practice it does not describe; \cite{welleck2019unlikelihood,li2023repetition}'s
 mechanism was a blend of two incompatible accounts. Each is corrected above, and the citations that
 were never fetched at all, five arXiv ids carried as company for the ones that were, are dropped
 rather than kept as decoration.
 
-\textbf{A second pass on 2026-08-16 checked something the first did not ask: whether each source had
-been reviewed at all.} It found five entries we had recorded as preprints that are in fact published at SIGIR, ICLR, NeurIPS and an ACM conference, and four author lists wrong, three of them missing
+A second pass on 2026-08-16 checked something the first did not ask: whether each source had
+been reviewed at all. It found five entries we had recorded as preprints that are in fact published at SIGIR, ICLR, NeurIPS and an ACM conference, and four author lists wrong, three of them missing
 entirely. It also found two figures attributed to papers that do not report them. The rank
 correlation between parameter size and ATT\&CK-classification F1 belongs to \preprintcite{ryan2026attck},
 whose full text we read to confirm it, not to the multi-hop reasoning study the old numbering
@@ -471,9 +441,9 @@ direction. Citing them in a submitted paper on this basis would not be, and the 
 the 2026-08-08 citation audit applies. A search summary is a lead, not a source. That audit exists
 because one fabricated a claim.
 
-\textbf{And one nearly did again, 2026-08-11.} While counter-searching Section~6, a search summary asserted that
+And one nearly did again, 2026-08-11. While counter-searching Section~\ref{sec:failures}, a search summary asserted that
 a paper documented harness-level silent failures misattributed to the model and resolved by
-auditing platform source code, close and useful prior art, had it existed. \textbf{Both candidate papers
-were fetched and neither contained it.} The summary was a plausible synthesis of several results.
+auditing platform source code, close and useful prior art, had it existed. Both candidate papers
+were fetched and neither contained it. The summary was a plausible synthesis of several results.
 The rule held only because it was applied; it is recorded here because the failure it prevents is
 the one this section is about, one level up.

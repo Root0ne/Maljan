@@ -152,7 +152,7 @@ def fig_cardinality():
         distinct.append(len(seen))
     n = len(sizes)
 
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(7.2, 2.9), width_ratios=[1.15, 1])
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5.3, 2.9), width_ratios=[1.15, 1])
 
     ax.plot([0, n], [0, n], color=LIGHT, lw=1.0, ls="--", zorder=1)
     ax.annotate(
@@ -234,7 +234,7 @@ def fig_confidence():
     tpr, fpr = np.array(tpr), np.array(fpr)
     auc = float(np.trapezoid(tpr, fpr))
 
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(7.2, 2.9), width_ratios=[1, 1.1])
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5.3, 2.9), width_ratios=[1, 1.1])
 
     ax.plot([0, 1], [0, 1], color=LIGHT, lw=1.0, ls="--")
     ax.plot(fpr, tpr, color=WARN, lw=1.7)
@@ -336,7 +336,7 @@ def fig_arms():
     ]
 
     fig, (left, right) = plt.subplots(
-        1, 2, figsize=(7.2, 2.5), gridspec_kw={"width_ratios": [1.05, 1.0]}
+        1, 2, figsize=(5.3, 2.5), gridspec_kw={"width_ratios": [1.05, 1.0]}
     )
 
     def draw(ax, rows, xlim, title):
@@ -418,7 +418,7 @@ def fig_firing():
     ]
     items.sort(key=lambda t: t[1])
 
-    fig, ax = plt.subplots(figsize=(7.2, 2.5))
+    fig, ax = plt.subplots(figsize=(5.3, 2.5))
     ys = list(range(len(items)))
     for y, (_label, rate, note) in zip(ys, items, strict=False):
         readable = rate > 0.10

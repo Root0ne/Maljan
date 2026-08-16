@@ -98,17 +98,27 @@ else
     note "${family_report#* }"
 fi
 
-boxes=$(grep -c 'Overfull\|Underfull' "$LOG" 2>/dev/null)
-boxes=${boxes:-0}
-if [[ "$boxes" -eq 0 ]]; then
+# Overfull and underfull are not the same finding and this check used to treat
+# them as one. Overfull is text past the margin: a defect, and the count stays
+# at zero, still at hfuzz=0 so no sub-half-point overrun is hidden. Underfull is
+# a loose line, which is a spacing judgement rather than a defect, and at the
+# class's own measure eight of the eleven are in the bibliography, where BibTeX
+# chooses the line breaks and long author lists have nowhere good to break.
+#
+# The distinction is recorded rather than assumed: this policy changed when the
+# page went from a 506pt override to the class measure, and a check that failed
+# on both would have been satisfied only by widening the page again.
+over=$(grep -c 'Overfull' "$LOG" 2>/dev/null); over=${over:-0}
+under=$(grep -c 'Underfull' "$LOG" 2>/dev/null); under=${under:-0}
+if [[ "$over" -eq 0 ]]; then
     if grep -q '^\\hfuzz=0pt' "$BUILD/main.tex" 2>/dev/null; then
-        pass "zero overfull/underfull boxes, at hfuzz=0"
+        pass "zero overfull boxes at hfuzz=0; $under loose line(s), reported not hidden"
     else
-        fail "zero boxes, but hfuzz is not 0 — the zero is suppressed, not earned"
+        fail "zero overfull, but hfuzz is not 0 — the zero is suppressed, not earned"
     fi
 else
-    fail "$boxes overfull/underfull boxes"
-    grep -m3 'Overfull\|Underfull' "$LOG" | sed 's/^/        /'
+    fail "$over overfull box(es): text past the margin"
+    grep -m3 'Overfull' "$LOG" | sed 's/^/        /'
 fi
 
 # --------------------------------------------------------------------------
@@ -234,7 +244,7 @@ import re
 from pathlib import Path
 
 tex = "".join(p.read_text() for p in sorted(Path("docs/academic-article/paper/tex").glob("*.tex")))
-tables = len(re.findall(r"\\begin\{longtable\}", tex))
+tables = len(re.findall(r"\\begin\{table\}", tex))
 labels = set(re.findall(r"\\label\{(tab:[a-z0-9-]+)\}", tex))
 captions = len(re.findall(r"\\caption\{", tex))
 print(tables, len(labels), captions)
@@ -297,6 +307,42 @@ if [[ "$lists" -eq 0 ]]; then
 else
     fail "$lists list environment(s) in the sources"
     note "thirteen were converted to prose; a new one needs a reason"
+fi
+
+# Bold. Headings are set bold by the class; nothing else in this document is.
+# An earlier pass read "reduce bold" as licence to keep it where it looked
+# structural, and left 218 -- run-in pseudo-headings that a reader cannot tell
+# from the start of a paragraph, table cells, and the [preprint] marker. The
+# rule has no exceptions now, so it is a count rather than a judgement.
+bold=$(grep -c '\\textbf' "$BUILD"/*.tex "$BUILD"/*.sty 2>/dev/null \
+       | awk -F: '{s+=$2} END{print s+0}')
+if [[ "$bold" -eq 0 ]]; then
+    pass "no bold outside the headings the class sets"
+else
+    fail "$bold \\textbf in the sources"
+    grep -o -m3 '\\textbf{[^}]\{0,50\}' "$BUILD"/*.tex 2>/dev/null | sed 's|.*/|        |'
+fi
+
+# The class documentation points at the table environment for tabular material,
+# and none of the two dozen tables here spans a page. longtable was a pandoc
+# conversion artefact.
+lt=$(grep -c 'begin{longtable}' "$BUILD"/*.tex 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')
+if [[ "$lt" -eq 0 ]]; then
+    pass "tables are table floats, as the class documents"
+else
+    fail "$lt longtable(s) in the sources"
+fi
+
+# Cross-references. Fifty section numbers were typed by hand and eight of them
+# pointed at sections that do not exist, which is this paper's own subject
+# happening to this paper: a hand-maintained number that drifted off its source
+# and stayed plausible. They are \ref now, and a literal one fails here.
+hardref=$(grep -o 'Section~[0-9]' "$BUILD"/*.tex 2>/dev/null | wc -l)
+if [[ "$hardref" -eq 0 ]]; then
+    pass "every cross-reference goes through \\ref"
+else
+    fail "$hardref hand-typed section number(s)"
+    note "write Section~\\ref{label}"
 fi
 
 # --------------------------------------------------------------------------

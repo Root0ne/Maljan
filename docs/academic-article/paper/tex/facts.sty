@@ -77,7 +77,7 @@
 % who declines unreviewed evidence can see exactly which sentence to discount,
 % and the check in tests/evaluation/test_paper_citations.py refuses a citation
 % to an unreviewed entry on a line that does not carry this marker.
-\newcommand{\preprintcite}[1]{\cite{#1}~\textbf{[preprint]}}
+\newcommand{\preprintcite}[1]{\cite{#1}~[preprint]}
 
 % \unresolvedcite — a quoted figure whose source is not verified.
 %
@@ -94,7 +94,7 @@
 % ships: the numeral checker exempts these two values *only* on a line carrying
 % this marker, so removing the marker without resolving the source fails the
 % build.
-\newcommand{\unresolvedcite}{\textbf{[source unresolved]}}
+\newcommand{\unresolvedcite}{[source unresolved]}
 
 \makeatother
 \endinput
