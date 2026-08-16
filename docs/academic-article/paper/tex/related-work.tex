@@ -197,7 +197,9 @@ share only their boilerplate --- dense retrieval being the standard remedy for v
 makes this a failure of the remedy, visible only in the retriever's \textbf{score distribution} while
 top-k accuracy stayed healthy. A published negative RAG result in malware analysis exists \cite{ng2026evaluating},
 by a different mechanism --- retrieved context diluting a signal-extraction task --- and the
-requirement to compare against a trivial label-only baseline is long established \preprintcite{metz2015comparing}. Second,
+requirement to compare against a trivial label-only baseline is long established \cite{metz2012baselines}, and a
+systematic review by the same group found a considerable share of published multi-label results to be
+no better than that baseline, with no explanation offered \preprintcite{metz2015comparing}. Second,
 an advisory prompt hint whose measurable effect was \textbf{completion under an operational time
 budget} rather than mapping accuracy, reducing empty fallback bundles from 6/17 to 1/17; we
 found no work measuring generation completion as a channel through which prompt changes act.
@@ -436,7 +438,7 @@ Verified how
 \bottomrule\noalign{}
 \endlastfoot
 \emph{withdrawn 2026-08-16} & \emph{Brevity Constraints Reverse Performance Hierarchies in Language Models}, \texttt{arXiv:2604.00025} & \textbf{Removed for want of review, and the claim narrowed with it.} Replaced by \cite{sun2025length} (EMNLP 2025), which reports that under strict output-length constraints performance ``might not scale monotonically with the model size''. The reviewed result is \emph{local to a budget window} rather than a global reversal, so our sentence was narrowed to match it; the 28.4-point figure went with the preprint. The only work stating the unqualified reversal is itself unreviewed \\
-\preprintcite{llamacpp8634,vllm11976} & Token-limit incompatibility across OpenAI-compatible servers: \texttt{ggml-org/llama.cpp} issue \textbf{\#8634} (\texttt{max\_tokens} not respected on the non-chat endpoint, generation continuing to the context limit); \texttt{vllm-project/vllm} issue \textbf{\#11976} (request for a server-side cap) & \textbf{Search results only.} The issues have not been read in full. They are cited to \emph{demote} our M7 from a new mechanism to a known integration wart, which is the safe direction; a submitted paper needs them read \\
+\preprintcite{llamacpp8634,vllm11976} & Token-limit incompatibility across OpenAI-compatible servers: \texttt{ggml-org/llama.cpp} issue \textbf{\#8634} (\texttt{max\_tokens} not respected on the non-chat endpoint, generation continuing to the context limit); \texttt{vllm-project/vllm} issue \textbf{\#11976} (request for a server-side cap) & \textbf{Read in full 2026-08-16, and one of them had moved.} \#8634 is \emph{open} since 2024-07-22, labelled \texttt{bug-unconfirmed} and high severity, and its text says the cap is honoured on the chat endpoint but not the other. \#11976 is \textbf{closed as completed} (2025-01-13 to 2025-02-11): vLLM shipped the server-side cap. Cited to \emph{demote} our M7 from a new mechanism to a known integration wart, which is the safe direction --- but the instrument-failure section now names which server fixed it, because ``documented in their issue trackers'' reads as ``still broken in both'' and one is not \\
 \end{longtable}
 
 \textbf{All nine sources added by the counter-search were fetched on 2026-08-15, and three of the

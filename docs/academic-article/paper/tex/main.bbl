@@ -175,7 +175,10 @@ M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
 \bibitem{doosterlinck2024incontext}
 K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
   In-context learning for extreme multi-label classification, {PREPRINT} ---
-  not peer reviewed. arXiv:2401.12178 (2024).
+  not peer reviewed. arXiv:2401.12178, v1 only, no Comments and no journal
+  reference; checked 2026-08-16. Recorded as "likely published" for a week on
+  no evidence beyond how well-known it is, which is the reasoning this paper
+  exists to distrust (2024).
 
 \bibitem{lange2024annoctr}
 L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
@@ -302,13 +305,24 @@ R.~Evertz, N.~Risse, C.~Neuer, N.~M{\"u}ller, S.~Normann, et~al., Chasing
 J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
   explainable malware analysis, in: ACM SecDev, 2026, poster. arXiv:2605.03140.
 
+\bibitem{metz2012baselines}
+J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
+  predictive evaluation measure baselines for multi-label learning, in:
+  Advances in Artificial Intelligence --- IBERAMIA, Lecture Notes in Computer
+  Science, 2012, pp. 189--198, verified against Crossref 2026-08-16. Crossref
+  types LNCS proceedings as book-chapter by convention; the container title is
+  the IBERAMIA 2012 proceedings.
+\newblock \href {https://doi.org/10.1007/978-3-642-34654-5_20}
+  {\path{doi:10.1007/978-3-642-34654-5_20}}.
+
 \bibitem{metz2015comparing}
 J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
   multi-label classifier performance measures to the ones obtained by a simple
   multi-label baseline classifier, {PREPRINT} --- not peer reviewed.
-  arXiv:1503.06952. Kept because it supports the requirement to compare against
-  a trivial baseline, which this paper obeys and which weakens its own numbers;
-  no reviewed equivalent was verified (2015).
+  arXiv:1503.06952, v1 only, Comments give a page count and no venue; checked
+  2026-08-16. Kept for its systematic-review finding rather than for the
+  requirement itself, which now rests on the reviewed IBERAMIA 2012 paper by
+  the same group (2015).
 
 \bibitem{lazaridou2021mind}
 A.~Lazaridou, A.~Kuncoro, E.~Gribovskaya, et~al., Mind the gap: Assessing

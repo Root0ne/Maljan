@@ -26,14 +26,14 @@
   "doosterlinck2024incontext": {
    "quotes": [],
    "load_bearing": false,
-   "status": "likely-published-unverified",
-   "action": "Infer-Retrieve-Rank is the program our design instantiates, so a reviewed citation would carry weight. Resolve before adding."
+   "status": "unresolved",
+   "action": "Checked 2026-08-16 and it is genuinely unpublished: arXiv:2401.12178, v1 only, no Comments and no journal reference. It had been carried as 'likely-published-unverified' on no evidence beyond how well known Infer-Retrieve-Rank is, which is the reasoning this paper exists to distrust. Kept and marked: it is the program our design instantiates, so dropping it would let us appear to claim the idea."
   },
   "metz2015comparing": {
    "quotes": [],
    "load_bearing": false,
-   "status": "likely-published-unverified",
-   "action": "Kept and marked. Supports the requirement to compare against a trivial baseline — a requirement this paper obeys and which weakens its own numbers."
+   "status": "unresolved",
+   "action": "Checked 2026-08-16: arXiv:1503.06952, v1 only, Comments give a page count and name no venue. A peer-reviewed equivalent was found and added -- metz2012baselines, IBERAMIA 2012, by the same group, which proposed the baseline classifier and is now what carries the 'long established' requirement. This entry is kept and marked only for its systematic-review finding, which the 2012 paper predates and does not contain."
   },
   "morbiato2026hierarchical": {
    "quotes": [
@@ -76,8 +76,8 @@
   }
  },
  "not_papers": {
-  "llamacpp8634": "An issue tracker entry, cited as an artefact rather than as a source. It is evidence that the incompatibility is known, and a reviewed paper would not serve that purpose better.",
-  "vllm11976": "As above."
+  "llamacpp8634": "An issue tracker entry, cited as an artefact rather than as a source. Read in full 2026-08-16: open since 2024-07-22, labelled bug-unconfirmed and high severity, and its text says the cap is honoured on the chat endpoint but not the other. A reviewed paper would not serve that purpose better.",
+  "vllm11976": "As above, and read on the same day -- but it has moved: closed as completed on 2025-02-11, five weeks after it was opened. vLLM shipped the server-side cap. The paper now says so, because citing two trackers for 'this is a known wart' implied both were still open."
  },
  "artefacts": {
   "mitre2023tram": "The Threat Report ATT&CK Mapper, cited as the artefact it is. Its repository names no preferred citation and a reviewed paper would not serve the purpose better: the claim is that this tool exists and defines the TRAM2 corpus, not that a result of its holds."

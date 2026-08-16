@@ -258,8 +258,12 @@ different question three hours earlier.
 
 \textbf{The incompatibility itself is known; the consequence is what we contribute.} That
 OpenAI-compatible servers disagree about token-limit parameters is documented in their own issue
-trackers --- \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634,vllm11976} reports generation continuing to the context limit when the
-cap is not honoured on one of its endpoints. We are not reporting a new integration wart. We are reporting
+trackers. \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634} reports that ``the limit is respected when requesting a chat
+completion, but for non-chat ones, the model keeps generating tokens forever (until ctx-len is
+reached)''; it has been open since July 2024. \texttt{vLLM} \#11976 \preprintcite{vllm11976} asked for a server-side cap
+because the default is the whole remaining context, and \textbf{was completed in February 2025} ---
+so one of the two servers has since closed the gap, and we say so rather than leaving the
+impression that both remain open. We are not reporting a new integration wart. We are reporting
 what one costs inside a measurement: a documented safety property silently absent for as long as it
 has existed, and half of a study's calls diverted onto a bundle-construction path that skips the
 corroboration cascade entirely.
