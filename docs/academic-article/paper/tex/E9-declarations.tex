@@ -49,37 +49,31 @@ included, so the cohort can be reconstructed even though the results cannot.
 
 \subsection*{Reproducibility}\label{reproducibility}
 
-Two runs of the offline analysis over the released records produce byte-identical output, and this
-is asserted by a test in the released suite rather than claimed here. Every interval carries the
-seed, the iteration count and the number of clusters it was computed from, in the artefact itself,
-so an interval cannot be read without the information needed to reproduce it.
-
-The live arms are not bit-reproducible and we do not claim they are. Decoding is at temperature \fact{decode-temperature}
+Two runs of the offline analysis over the released records produce byte-identical output, asserted
+by a test in the released suite rather than claimed here, and every interval carries the seed, the
+iteration count and the number of clusters it was computed from in the artefact itself, so an
+interval cannot be read without what is needed to reproduce it. The live arms are not
+bit-reproducible and we do not claim they are. Decoding is at temperature \fact{decode-temperature}
 on the local arm and at each provider's default on the hosted ones, one of which accepts a
-reasoning-configuration parameter and does not act on it, a fact we established by measurement and
-report as a result. Anyone re-running the live arms should expect the numbers to move and should
-read the intervals accordingly.
+reasoning-configuration parameter and does not act on it. Anyone re-running them should expect the
+numbers to move and should read the intervals accordingly.
 
 \subsection*{Use of generative AI}\label{use-of-generative-ai}
 
-Large language models are the object of study in this work. The pipeline under evaluation is built
-from them, and every measurement reported here is a measurement of their behaviour in it.
-
-Separately from that, generative AI was used as an authoring and engineering aid, for drafting and
-revising prose, writing evaluation harnesses and their tests, and performing literature searches
-whose results were then verified by fetching each source. The verification is not incidental to this
-disclosure. Of the nine citations added by those searches and checked one by one, three said
-something the source did not. One was quoted for a sentence absent from the paper, one was cited
-for a practice it does not describe, and one blended two incompatible published accounts into a
-single attribution. All three are corrected in the text and the corrections are recorded, because a
-search summary that reads as a citation is the same class of failure this paper is about.
-
-An internal readability assessment of report narratives was performed with a language model as a
-development aid. Its results are deliberately excluded from this paper and no LLM was used to score
-any result reported here.
-
-The authors take responsibility for all content, including every number, every citation, and every
-claim about what the measurements support.
+Large language models are the object of study in this work, so the pipeline under evaluation is
+built from them and every measurement reported here is a measurement of their behaviour in it.
+Separately, generative AI was used as an authoring and engineering aid, for drafting and revising
+prose, writing evaluation harnesses and their tests, and performing literature searches whose
+results were then verified by fetching each source. The verification is not incidental to this
+disclosure: of the nine citations added by those searches and checked one by one, three said
+something the source did not, one quoted for a sentence absent from the paper, one cited for a
+practice it does not describe, and one blending two incompatible published accounts into a single
+attribution. All three are corrected in the text and the corrections are recorded, because a search
+summary that reads as a citation is the same class of failure this paper is about. An internal
+readability assessment of report narratives was performed with a language model as a development
+aid; its results are deliberately excluded and no LLM scored any result reported here. The authors
+take responsibility for all content, including every number, every citation, and every claim about
+what the measurements support.
 
 \subsection*{Competing interests}\label{competing-interests}
 

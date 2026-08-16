@@ -91,38 +91,31 @@ deleted is answered with HTTP 200 and a \fact{deleted-report-body-bytes}-byte bo
 {"error":true,"error_value":"Reports directory does not exist"}
 \end{verbatim}
 
-Fifty-six of one hundred tasks answer this way; the analyses ran, and their reports have aged out of
-retention. A fetcher that trusted the status code would have written fifty-six of those bodies into
-the archive under the filename of the sample they were supposed to describe, and the three studies
-that read that archive would each have scored them.
+Fifty-six of one hundred tasks answer this way. A fetcher that trusted the status code would have
+written fifty-six of those bodies into the archive under the filename of the sample they were
+supposed to describe, and the three studies reading that archive would each have scored them. It did
+not, because the fetcher verifies the report's own \texttt{target.file.sha256} against the
+identifier it asked for before writing anything, a check that exists only because M3 taught us the
+shape. This is the first time the discipline paid forward rather than backward, and it cost four
+lines.
 
-They did not, because the fetcher was written to verify the report's own \texttt{target.file.sha256} against
-the identifier it asked for before writing anything. That check exists only because M3 taught us the
-shape. An HTTP status is a statement about the transport, not about the answer. This is the first
-time the discipline paid forward rather than backward, and it cost four lines.
+We first recorded the consequence as a retention limit, that the reports had existed and expired.
+That explanation was wrong, and finding out how wrong is the fifth failure. Asking the sandbox how
+long each analysis had taken produced a split with nothing between the modes: the \fact{audit-real}
+tasks whose reports survived ran \fact{audit-real-min} to \fact{audit-real-max} s and the other
+\fact{audit-instant} ran under a second, all \fact{audit-reported-but-instant} of them still marked
+\texttt{reported}. A Windows PE does not detonate in one second. Nothing had expired; nothing had
+happened, and the instrument said otherwise. Re-submitting the same binaries two days later produced
+full-length analyses on the same instance, recovering \fact{audit-recovered} of the
+\fact{audit-instant} and putting the cohort at \fact{baseline-n}. The remaining \fact{audit-lost}
+produced no report on either attempt and none of them failed, all
+\fact{audit-lost-still-reporting-success} being \emph{still} marked \texttt{reported} at zero seconds
+with no report directory.
 
-We first recorded the consequence as a retention limit. The reports had existed and expired. That
-explanation was wrong, and finding out how wrong is the fifth failure in this list. Asking the
-sandbox how long each analysis had taken produced a split with nothing between the modes. The \fact{audit-real}
-tasks whose reports survived ran \fact{audit-real-min} to \fact{audit-real-max} s, and the other
-\fact{audit-instant} ran under a second, all \fact{audit-reported-but-instant} of them
-still marked \texttt{reported}. A Windows PE does not detonate in one second. Nothing had expired; nothing
-had happened, and the instrument said otherwise.
-
-Re-submitting the same binaries from the same local files two days later produced full-length
-analyses on the same instance, which recovers \fact{audit-recovered} of the \fact{audit-instant} and puts
-the cohort at \fact{baseline-n}. The remaining \fact{audit-lost} produced no report on either attempt,
-and none of them failed: all \fact{audit-lost-still-reporting-success} are \emph{still} marked
-\texttt{reported}, at zero seconds, with no report directory. They are absent from the cohort rather
-than lost; their binaries are on disk and their task identifiers are in the ledger, so the only
-thing between them and a report is another submission from the sandbox's network.
-
-The lesson generalises past this instrument. A completion status is a statement about a queue, not
-about an analysis, and it is exactly as trustworthy as an HTTP 200. The retrieval path now reads
-each task's wall-clock duration and refuses anything under \setting{60} s, an order of magnitude below the
-shortest real analysis on this instance, before it will accept a report. We would rather report a
-smaller honest n than a full one built on error bodies, and we would rather state the reason we
-verified than the one that first sounded plausible.
+The lesson generalises past this instrument. A completion status is a statement about a queue rather
+than about an analysis, and it is exactly as trustworthy as an HTTP 200. The retrieval path now
+reads each task's wall-clock duration and refuses anything under \setting{60} s, an order of
+magnitude below the shortest real analysis here, before it will accept a report.
 
 \subsubsection{M5. An ablation that measured a code path and reported a language model}\label{m5-an-ablation-that-measured-a-code-path-and-reported-a-language-model}
 
@@ -130,42 +123,26 @@ The four above are failures of other people's servers. This one is ours, it is t
 (2026-08-14), and it is the only one that reached a results table.
 
 We ablated the corroboration cascade by removing one evidence source at a time and comparing the
-STIX bundle the analyst receives. Under the condition where a removed source's techniques survive
-under a partner, so that only their \emph{corroboration} changes, the bundle was identical in
-every one of \fact{cascade-overlap-arms} arms, at Jaccard \fact{cascade-overlap-jaccard}. Under the
-condition where the removed source solely owned its techniques,
-\fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms} changed. We wrote this up as a finding about the judge model. That it
-attends to the list of claimed techniques and ignores the evidence-quality apparatus above it.
+STIX bundle the analyst receives, and wrote the two conditions of
+Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict} up as a finding about the judge
+model, that it attends to the list of claimed techniques and ignores the evidence-quality apparatus
+above it. The judge was not involved. A deterministic reconciliation step drops unresolvable
+attack-patterns and appends every cascade technique missing from the bundle, so the cascade's set is
+a guaranteed subset of every bundle whatever the model produced, and both of our numbers are
+necessities of an \texttt{if} statement rather than measurements of restraint. The experiment could
+not have returned anything else.
 
-The judge was not involved. The reconciliation step reconciles the bundle against the cascade before
-it is returned. Unresolvable attack-patterns are dropped, and every cascade technique missing
-from the bundle is appended to it. The cascade's technique set is therefore a guaranteed subset
-of every bundle the pipeline emits, whatever the model produced. Recomputing each arm's cascade set
-from the same seeded fixtures shows the bundle is \emph{exactly} that set in \fact{judge-mechanism-arms} of \fact{judge-mechanism-arms} arms, with the
-model contributing zero techniques to any of them.
+The architectural conclusion survives the correction and the mechanism does not. A second study,
+already written and about to run, was designed to compare a weighted cascade against a flat union of
+the same claims; both of its arms would have shared one reconciliation set, so it would have
+reported no difference after an hour of computation, correctly and vacuously. It was stopped four
+minutes in by the same log line that exposed M5.
 
-Both results then follow from set arithmetic. Removing a source with a duplicate partner does not
-change the cascade's set, so the bundle cannot change; removing a sole owner does, so it must. The
-two numbers we reported are necessities of an \texttt{if} statement, and the experiment could not have
-returned anything else.
-
-The architectural conclusion survives the correction, corroboration does not reach the analyst's
-artefact, but the mechanism is not the one we described. The model cannot subtract from the
-bundle's technique set and, across \fact{judge-mechanism-arms} arms, added nothing to it. Whether its output was unusable
-and wholly replaced, or happened to reproduce the cascade's set, this evidence cannot say; both
-leave the same trace, and separating them needs the pre-reconciliation output measured directly.
-What is certain is narrower and sufficient. The model has no influence over which techniques reach
-the analyst. And a second study, already written and about to run,
-was designed to compare a weighted cascade against a flat union of the same claims. Both of its
-arms would have shared one reconciliation set, so it would have reported ``no difference'' after an
-hour of computation, correctly and vacuously. It was stopped four minutes in, by the same log line
-that exposed M5.
-
-What made this one hard to see. The tell was in the results the whole time: a Jaccard of
-\fact{cascade-overlap-jaccard} with a zero-width bootstrap interval across \fact{cascade-overlap-pairs}
-ablated arms, each compared against the unablated arm of its own fixture, at temperature
-\fact{decode-temperature}. A language model does not agree with itself that exactly. We read a
-constant as an unusually clean null, because a clean null was the result we were prepared to find.
+What made this one hard to see is that the tell was in the results the whole time. A Jaccard of
+\fact{cascade-overlap-jaccard} with a zero-width bootstrap interval across
+\fact{cascade-overlap-pairs} ablated arms at temperature \fact{decode-temperature} is not something a
+language model produces; it is what a constant looks like. We read it as an unusually clean null,
+because a clean null was the result we were prepared to find.
 
 \subsubsection{M6. A configuration difference wearing a parameter count}\label{m6-a-configuration-difference-wearing-a-parameter-count}
 
@@ -176,18 +153,20 @@ significant predictor of ATT\&CK-classification F1 ($\rho$=0.85 \preprintcite{ry
 file, ranked mean F1 against total parameters, and reported $\rho$=\fact{superseded-rho}, reproducing the prior
 almost exactly, across a \fact{series-param-span}$\times$ span, with the confounds it could not remove printed honestly beneath.
 
-The five rows were three models. One model appeared twice because it had been run in two
-configurations, and another twice because it had been run twice. The duplicate configurations were
-not a labelling detail. The same weights score \fact{arm-qwen35ba3b-nothink-f1} with the reasoning stream disabled and
-\fact{arm-qwen35ba3b-f1} with it enabled, because \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls then spend their entire output budget reasoning
-and never answer. The \fact{arm-qwen35ba3b-f1} row sat at the small end of the parameter axis, where it set the sign
-of the correlation. What the series measured was a flag, ordered by coincidence against size.
+The five rows were three models, one appearing twice because it had been run in two configurations
+and another twice because it had been run twice. The duplicate configurations were not a labelling
+detail: the same weights score \fact{arm-qwen35ba3b-nothink-f1} with the reasoning stream disabled
+and \fact{arm-qwen35ba3b-f1} with it enabled, because \fact{arm-qwen35ba3b-hit-cap} of
+\fact{arm-qwen35ba3b-n} calls then spend their entire output budget reasoning and never answer, and
+the \fact{arm-qwen35ba3b-f1} row sat at the small end of the parameter axis where it set the sign.
+What the series measured was a flag, ordered by coincidence against size.
 
-The failure is not the duplicate rows; it is that the arm-selection rule did not exist. The
-harness had careful arithmetic, with averaged ranks so file order cannot break ties, an exact
-permutation p because four points cannot reach significance, a common-cell restriction so endpoint
-availability cannot masquerade as model size, and every one of those guards was about a way the
-\emph{numbers} could mislead. None was about whether the rows were comparable in the first place.
+The failure is not the duplicate rows but that the arm-selection rule did not exist. The harness had
+careful arithmetic, with averaged ranks so file order cannot break ties, an exact permutation p
+because four points cannot reach significance, and a common-cell restriction so endpoint
+availability cannot masquerade as model size. Every one of those guards was about a way the
+\emph{numbers} could mislead, and none was about whether the rows were comparable in the first
+place.
 
 The rule now keys on the measured reasoning share of each arm rather than the flag the harness
 requested, because those two disagree. One provider accepts the parameter and ignores it, so an arm
@@ -230,29 +209,26 @@ the analyst received techniques copied straight from the raw evidence claims. A 
 describe as bounded was unbounded, and its failure mode was to hand the analyst a differently-built
 artefact without saying so.
 
-Where it was invisible. The configured value was correct. The container passed it. The model
-object held it. It survived every later rebinding intact. Only the serialised request was wrong,
-and nothing in the system reads the serialised request. Every check anyone would think to perform
-would have confirmed the property that did not hold.
+It was invisible because the configured value was correct at every level anything reads. The
+container passed it, the model object held it, and it survived every later rebinding intact; only
+the serialised request was wrong, and nothing in the system reads the serialised request. Every
+check anyone would think to perform would have confirmed the property that did not hold. What found
+it was neither a test nor a review but a study measuring something else, which recorded
+\emph{which branch} each failed call took rather than only that it failed. Four calls named the
+timeout branch, which prompted the question of why a temperature-zero model would need ten minutes,
+which led to the server's own log and a token counter past thirty thousand. The instrumentation that
+caught it had been written for a different question three hours earlier.
 
-What found it. Not a test and not a review. A study measuring something else, what the verdict
-model contributes to the bundle, recorded \emph{which branch} each failed call took rather than only
-that it failed. Four calls named the timeout branch, which prompted the question of why a
-temperature-zero model would need ten minutes, which led to the server's own log and a token
-counter that had passed thirty thousand. The instrumentation that caught it was written for a
-different question three hours earlier.
-
-The incompatibility itself is known; the consequence is what we contribute. That
-OpenAI-compatible servers disagree about token-limit parameters is documented in their own issue
-trackers. \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634} reports that ``the limit is respected when requesting a chat
-completion, but for non-chat ones, the model keeps generating tokens forever (until ctx-len is
-reached)''; it has been open since July 2024. \texttt{vLLM} \#11976 \preprintcite{vllm11976} asked for a server-side cap
-because the default is the whole remaining context, and was completed in February 2025,
-so one of the two servers has since closed the gap, and we say so rather than leaving the
-impression that both remain open. We are not reporting a new integration wart. We are reporting
-what one costs inside a measurement. A documented safety property silently absent for as long as it
-has existed, and half of a study's calls diverted onto a bundle-construction path that skips the
-corroboration cascade entirely.
+The incompatibility itself is known and the consequence is what we contribute.
+\texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634} reports that ``the limit is respected when
+requesting a chat completion, but for non-chat ones, the model keeps generating tokens forever
+(until ctx-len is reached)'' and has been open since July 2024, while
+\texttt{vLLM} \#11976 \preprintcite{vllm11976} asked for a server-side cap and was completed in
+February 2025, so one of
+the two has since closed the gap and we say so rather than leaving the impression that both remain
+open. What one costs inside a measurement is the part we report: a documented safety property
+silently absent for as long as it has existed, and half of a study's calls diverted onto a
+bundle-construction path that skips the corroboration cascade entirely.
 
 \subsection{Why the test suite did not help}\label{why-the-test-suite-did-not-help}
 
@@ -308,14 +284,15 @@ a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width interval across \f
 \end{table}
 
 
-M5 extends the detector in a direction that matters, because it is where the idea is least
-comfortable: the repeated number was our own result, not a server's response, and the variation
-that failed to appear was the model's. A perfect agreement is the same signal as an identical
-digest, and it deserves the same suspicion.
+M5 extends the detector where the idea is least comfortable, because there the repeated number was
+our own result rather than a server's response and the variation that failed to appear was the
+model's. A perfect agreement is the same signal as an identical digest and deserves the same
+suspicion.
 
 The generalisation is one line of arithmetic. Before trusting a batch measurement, ask how many
-distinct outputs the N inputs produced. If far fewer than N differ on a dimension that should vary, such as output length, digest or element count, the instrument is repeating itself, and repetition is
-what stale state looks like from outside. It needs no ground truth and no oracle, which is what
+distinct outputs the N inputs produced; if far fewer than N differ on a dimension that should vary,
+such as output length, digest or element count, the instrument is repeating itself, and repetition
+is what stale state looks like from outside. It needs no ground truth and no oracle, which is what
 makes it usable exactly where correctness is hard to check.
 
 \begin{figure}
@@ -324,19 +301,16 @@ makes it usable exactly where correctness is hard to check.
 \caption{The whole detector, drawn. a) a measured run, b) a schematic of a stuck instrument.}
 \end{figure}
 
-Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal, while
-a stuck one goes flat. No ground truth is required, because the diagnosis is in the shape. Panel a)
-is measured, at \fact{cardinality-distinct-graphs} distinct call-graph sizes across
-\fact{cardinality-samples} samples, its staircase's flat treads being genuinely identical
-binaries rather than a fault.
-
-Panel b) is a schematic, and the reason is the argument of Section~\ref{what-it-cost}. It depicts M3, the run
-in which \fact{stuck-graph-run} consecutive samples returned a byte-identical \fact{stuck-graph-chars}-character call graph, and we cannot
-plot it, because that run predates the per-sample retention policy those very failures caused us to
-adopt. The curve this paper turns on is the one we are unable to draw.
-
-We now report it beside every batch result; \fact{cardinality-distinct-graphs} distinct call-graph
-sizes across \fact{cardinality-samples} samples.
+Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal while a
+stuck one goes flat, so the diagnosis is in the shape and no ground truth is required. Panel a) is
+measured, at \fact{cardinality-distinct-graphs} distinct call-graph sizes across
+\fact{cardinality-samples} samples, its staircase's flat treads being genuinely identical binaries
+rather than a fault, and that is the figure we now report beside every batch result. Panel b) is a
+schematic, and the reason is the argument of Section~\ref{what-it-cost}: it depicts M3, the run in
+which \fact{stuck-graph-run} consecutive samples returned a byte-identical
+\fact{stuck-graph-chars}-character call graph, and we cannot plot it because that run predates the
+per-sample retention policy those very failures caused us to adopt. The curve this paper turns on is
+the one we are unable to draw.
 
 This is a refinement rather than a discovery, and Section~\ref{silent-failure-at-tool-boundaries}
 places both the detector and the genus in the literature that already carries them. All four
@@ -346,18 +320,16 @@ describe a call to something else.
 
 \subsection{What it cost}\label{what-it-cost}
 
-A completed study is withdrawn from this paper.
+A completed study is withdrawn from this paper. A seven-year \fact{drift-n}-sample temporal-drift
+analysis ran the full pipeline per sample against a long-lived server that was never restarted
+between samples, M2's precondition exactly, and whether it was affected cannot be determined because
+its per-sample outputs were not retained. The result had passed review, entered the claim ledger as
+novel, and was cited internally for weeks.
 
-A seven-year, \fact{drift-n}-sample temporal-drift analysis ran the full pipeline per sample against a
-long-lived server that was never restarted between samples, M2's precondition exactly. Whether it
-was affected cannot be determined, because its per-sample outputs were not retained. The result
-had passed review, entered the claim ledger as novel, and was cited internally for weeks.
-
-Two policies follow, and both are cheap.
-
-The first is to retain per-sample outputs for every study. The withdrawal is not caused by the
-defect; it is caused by the defect \emph{plus} the inability to re-ask the question afterwards, and
-aggregates cannot be re-interrogated. The second is to restart the shared server between samples. In
+Two policies follow and both are cheap. The first is to retain per-sample outputs for every study,
+because the withdrawal is caused not by the defect but by the defect \emph{plus} the inability to
+re-ask the question afterwards, and aggregates cannot be re-interrogated. The second is to restart
+the shared server between samples. In
 our sweeps this recovered \fact{switch-recovered} of \fact{switch-attempted} samples previously
 recorded as unmeasurable; the failures belonged to the \emph{state they inherited}, not to the
 samples, and fresh state per sample removes a whole class of the failures above.

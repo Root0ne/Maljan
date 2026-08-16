@@ -125,21 +125,19 @@ tokens. At 80\% power this design could have detected a difference of \fact{mde-
 F1; the observed difference is two orders of magnitude smaller than that. The null is a bound on
 what the design could see, not a demonstration that the two arms are equivalent.
 
-What the noise control does and does not license. Earlier drafts read the control's separation as
-proof that the harness can detect a difference when one exists. It does not carry that weight. The
-control moves by \fact{consensus-noise-delta}, \fact{consensus-noise-ci}, every one of the
-\fact{fixture-clusters} samples in the same direction, but the effect is \emph{below this design's own
-minimum detectable effect} of \fact{mde-consensus-noise}, and the exact cluster permutation test returns
-p = \fact{consensus-noise-p-exact}. That is the smallest p the design can produce. With
-\fact{fixture-clusters} clusters the two-sided sign-flip test floors at \fact{fixture-signflip-floor}, so
-no comparison on this corpus can reach $\alpha$ = 0.05 whatever its effect size. The honest statement is
-that all \fact{fixture-clusters} samples moved the same way, which is worth reporting and is not a
-demonstration of sensitivity.
-
-This was pre-registered as the experiment that would decide the paper's framing. The literature's
-prior ran the same way. Bertalani\v{c} and Fortuna \cite{bertalanic2026consensus} find debate
-consuming more tokens for equal or lower accuracy on open-weight models of our size, and a second
-study reports a crossover at $\alpha$=0.7 on our own model class \preprintcite{tran2026single}.
+Earlier drafts read the noise control's separation as proof that the harness can detect a difference
+when one exists, and it does not carry that weight. The control moves by
+\fact{consensus-noise-delta}, \fact{consensus-noise-ci}, every one of the \fact{fixture-clusters}
+samples in the same direction, but the effect is \emph{below this design's own minimum detectable
+effect} of \fact{mde-consensus-noise} and the exact cluster permutation test returns p =
+\fact{consensus-noise-p-exact}, the smallest p the design can produce, because at
+\fact{fixture-clusters} clusters the two-sided sign-flip test floors at
+\fact{fixture-signflip-floor}. The honest statement is that all \fact{fixture-clusters} samples moved
+the same way, which is worth reporting and is not a demonstration of sensitivity. This was
+pre-registered as the experiment that would decide the paper's framing, and the literature's prior
+ran the same way: debate consumes more tokens for equal or lower accuracy on open-weight models of
+our size \cite{bertalanic2026consensus}, and a second study reports a crossover at
+$\alpha$=0.7 on our own model class \preprintcite{tran2026single}.
 
 \subsubsection{The same three arms on real binaries, where the design can
 see}\label{consensus-replication}
@@ -340,13 +338,13 @@ opcode-hash attribution & n/a, never fires & \fact{hash-fired} of \fact{hash-tot
 Every one works where it was built and moves nothing where it is wired in, and the three fail for three different reasons.
 
 
-One qualification the first row needs before the pattern can be read. Its isolation figure is
-\emph{not} accuracy. The leave-one-out corpus is labelled with the pipeline's own prior
-attributions, so scoring the index against it measures agreement with its own upstream. We report
-it because the comparison it supports survives that. A frequency prior scored the same way, on
-the same labels, reaches \fact{case-prior-self-frequency-f1}, so the index carries information beyond base rates even under its
-own labelling, and because the production column beside it is scored against MITRE ground truth
-on held-out samples, which is the number the conclusion rests on.
+The first row needs one qualification before the pattern can be read: its isolation figure is
+\emph{not} accuracy, because the leave-one-out corpus is labelled with the pipeline's own prior
+attributions, so scoring the index against it measures agreement with its own upstream. It is
+reported because the comparison survives that. A frequency prior scored the same way on the same
+labels reaches \fact{case-prior-self-frequency-f1}, so the index carries information beyond base
+rates even under its own labelling, and the production column beside it is scored against MITRE
+ground truth on held-out samples, which is the number the conclusion rests on.
 
 Each was built separately, each is defensible in design, and each is inert once wired to real
 inputs. The mechanisms differ, which is what makes the pattern worth reporting rather than three
@@ -382,21 +380,17 @@ STIX integrity pass & measured over \fact{integrity-bundles} fresh judge bundles
 A mechanism's ablation can only be read where the mechanism runs, and two of these run too rarely for an ablation to say anything.
 
 
-For the cap, the mechanism's own preconditions explain the rate: it applies to three technique
-families, only when the sole contributing layer is \texttt{static}, and \fact{cap-gated-yara-only-share} of those claims are YARA-only,
-so no static claim exists for it to discipline. We report the rate rather than an ablation, because
-an ablation over a mechanism that fires on \fact{cap-rate} of cases produces a null that means nothing.
-
 \begin{figure}
 \centering
 \pandocbounded{\includegraphics[keepaspectratio,alt={Figure 2: firing rate decides whether an ablation can be read at all.}]{figures/fig4-firing-rate-before-effect.pdf}}
 \caption{Firing rate decides whether an ablation can be read at all.}
 \end{figure}
 
-Three of the four mechanisms the architecture was built around engage on almost nothing, and an
-ablation of any of them would return a null describing the cases where the mechanism never ran.
-Only the sink-reachability hint clears a rate at which an ablation would carry information, which
-is why it is the one we ablated, and Section~\ref{what-the-ablations-cost-and-what-that-revealed} reports the null it returned.
+Three of the four mechanisms the architecture was built around engage on almost nothing, so an
+ablation of any of them would return a null describing the cases where the mechanism never ran, for
+the reason Section~\ref{firing-rate-before-effect} gives. Only the sink-reachability hint clears a
+rate at which an ablation would carry information, which is why it is the one we ablated, and
+Section~\ref{what-the-ablations-cost-and-what-that-revealed} reports the null it returned.
 
 \subsection{The corroboration cascade does not reach the verdict}\label{the-corroboration-cascade-does-not-reach-the-verdict}
 
