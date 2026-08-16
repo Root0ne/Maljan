@@ -111,15 +111,14 @@ S.~Saha, et~al., {MaLAware}: Automating the comprehension of malicious software
 \bibitem{mitre2023tram}
 {Center for Threat-Informed Defense}, {TRAM}: Threat report {ATT\&CK} mapper,
   Open-source software, MITRE Engenuity, not a paper and cited as the artefact
-  it is: the repository names no preferred citation. Approved for public
-  release, document numbers CT0035 and CT0075 (2023).
+  it is; the repository names no preferred citation (2023).
 
 \bibitem{legoy2020rcatt}
 V.~Legoy, M.~Caselli, C.~Seifert, A.~Peter, Automated retrieval of {ATT\&CK}
   tactics and techniques for cyber threat reports, in: 1st Cyber Threat
-  Intelligence Symposium (CTI), 2020, arXiv:2004.14322. Venue confirmed from
-  the University of Twente research portal, which records it as a conference
-  contribution; it is not indexed under this title in dblp.
+  Intelligence Symposium (CTI), 2020, arXiv:2004.14322. Recorded as a
+  conference contribution by the University of Twente research portal; not
+  indexed under this title in dblp.
 
 \bibitem{husari2017ttpdrill}
 G.~Husari, E.~Al-Shaer, M.~Ahmed, B.~Chu, X.~Niu, {TTPDrill}: Automatic and
@@ -145,8 +144,7 @@ Z.~Li, J.~Zeng, Y.~Chen, Z.~Liang, {AttacKG}: Constructing technique knowledge
 M.~T. Alam, D.~Bhusal, Y.~Park, N.~Rastogi, Looking beyond {IoCs}:
   Automatically extracting attack patterns from external {CTI}, in: 26th
   International Symposium on Research in Attacks, Intrusions and Defenses
-  (RAID), 2023, pp. 92--108, the {LADDER} framework. A search summary placed
-  this at an ACL venue; dblp records RAID.
+  (RAID), 2023, pp. 92--108, the {LADDER} framework.
 
 \bibitem{lekssays2025techniquerag}
 A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
@@ -176,9 +174,7 @@ M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
 K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
   In-context learning for extreme multi-label classification, {PREPRINT}, not
   peer reviewed. arXiv:2401.12178, v1 only, no Comments and no journal
-  reference; checked 2026-08-16. Recorded as "likely published" for a week on
-  no evidence beyond how well-known it is, which is the reasoning this paper
-  exists to distrust (2024).
+  reference (2024).
 
 \bibitem{lange2024annoctr}
 L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
@@ -197,9 +193,7 @@ H.~T. Ng, et~al., The {CoNLL}-2014 shared task on grammatical error correction,
   in: Proceedings of the Eighteenth Conference on Computational Natural
   Language Learning: Shared Task, 2014, cited with the BEA-2019 shared task for
   the $F_{0.5}$ convention, which weights precision twice recall to penalise
-  over-correction. Re-anchored 2026-08-15: two candidate papers previously
-  listed here were never fetched and are dropped; the convention is documented
-  by the shared tasks themselves.
+  over-correction. The convention is documented by the shared tasks themselves.
 
 \bibitem{bryant2019bea}
 C.~Bryant, M.~Felice, {\O}.~E. Andersen, T.~Briscoe, The {BEA}-2019 shared task
@@ -209,10 +203,9 @@ C.~Bryant, M.~Felice, {\O}.~E. Andersen, T.~Briscoe, The {BEA}-2019 shared task
 \bibitem{welleck2019unlikelihood}
 S.~Welleck, I.~Kulikov, S.~Roller, E.~Dinan, K.~Cho, J.~Weston, Neural text
   generation with unlikelihood training, in: International Conference on
-  Learning Representations (ICLR), 2020, arXiv:1908.04319. Corrected
-  2026-08-15: an earlier draft attributed a single blended account to this
-  paper and to Li et al.\ Welleck et al.\ blame the likelihood objective
-  itself; the training-data account is the other paper's.
+  Learning Representations (ICLR), 2020, arXiv:1908.04319. Welleck et al.\
+  blame the likelihood objective itself; the training-data account is the other
+  paper's.
 
 \bibitem{li2023repetition}
 H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
@@ -261,16 +254,14 @@ K.~Kate, T.~Pedapati, K.~Basu, Y.~Rizk, V.~Chenthamarakshan, S.~Chaudhury,
 \bibitem{paramanayakam2025lessismore}
 V.~Paramanayakam, A.~Karatzas, I.~Anagnostopoulos, D.~Stamoulis, Less is more:
   Optimizing function calling for {LLM} execution on edge devices, in: Design,
-  Automation and Test in Europe Conference (DATE), 2025, arXiv:2411.15399.
-  Found on 2026-08-16 as the source of two figures the paper reported with no
-  attribution at all; both were confirmed against the full text.
+  Automation and Test in Europe Conference (DATE), 2025, arXiv:2411.15399. Both
+  quoted figures were confirmed against the full text.
 
 \bibitem{li2025phishdebate}
 W.~Li, S.~Manickam, Y.-w. Chong, S.~Karuppayah, {PhishDebate}: An {LLM}-based
   multi-agent framework for phishing website detection, in: IEEE International
-  Conference on Big Data (BigData), 2025, pp. 6606--6615, arXiv:2506.15656.
-  Recorded as a preprint until the arXiv Comments field was read, which gives
-  the published citation in full.
+  Conference on Big Data (BigData), 2025, pp. 6606--6615, arXiv:2506.15656. The
+  published citation is given in the arXiv Comments field.
 \newblock \href {https://doi.org/10.1109/BigData66926.2025.11401440}
   {\path{doi:10.1109/BigData66926.2025.11401440}}.
 
@@ -309,9 +300,8 @@ J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
 J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
   predictive evaluation measure baselines for multi-label learning, in:
   Advances in Artificial Intelligence, IBERAMIA, Lecture Notes in Computer
-  Science, 2012, pp. 189--198, verified against Crossref 2026-08-16. Crossref
-  types LNCS proceedings as book-chapter by convention; the container title is
-  the IBERAMIA 2012 proceedings.
+  Science, 2012, pp. 189--198, crossref types LNCS proceedings as book-chapter
+  by convention; the container title is the IBERAMIA 2012 proceedings.
 \newblock \href {https://doi.org/10.1007/978-3-642-34654-5_20}
   {\path{doi:10.1007/978-3-642-34654-5_20}}.
 
@@ -319,10 +309,9 @@ J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
 J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
   multi-label classifier performance measures to the ones obtained by a simple
   multi-label baseline classifier, {PREPRINT}, not peer reviewed.
-  arXiv:1503.06952, v1 only, Comments give a page count and no venue; checked
-  2026-08-16. Kept for its systematic-review finding rather than for the
-  requirement itself, which now rests on the reviewed IBERAMIA 2012 paper by
-  the same group (2015).
+  arXiv:1503.06952, v1 only, no venue. Kept for its systematic-review finding
+  rather than for the requirement itself, which now rests on the reviewed
+  IBERAMIA 2012 paper by the same group (2015).
 
 \bibitem{lazaridou2021mind}
 A.~Lazaridou, A.~Kuncoro, E.~Gribovskaya, et~al., Mind the gap: Assessing
@@ -352,21 +341,18 @@ A.~Martin-Lopez, S.~Segura, A.~Ruiz-Cort{\'e}s, A catalogue of inter-parameter
 S.~Dev, A.~Sloan, J.~Kavner, N.~Kong, M.~Sandler, Judge reliability harness:
   Stress testing the reliability of {LLM} judges, in: Agents in the Wild:
   Safety, Security, and Beyond Workshop, International Conference on Learning
-  Representations (ICLR), 2026, arXiv:2603.05399. Corrected 2026-08-15: this
-  paper does not establish the duplicate-item practice we previously cited it
-  for; it perturbs formatting, paraphrase, verbosity and labels. We have no
-  verified source for that practice and no longer assert one, which weakens a
-  demotion of our own detector.
+  Representations (ICLR), 2026, arXiv:2603.05399. Corrected: this paper does
+  not establish the duplicate- item practice an earlier draft cited it for; it
+  perturbs formatting, paraphrase, verbosity and labels.
 
 \bibitem{ryan2026attck}
 A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
   open-source {LLMs} for multi-label {ATT\&CK} technique classification on
-  {CTI} reports, {PREPRINT}, not peer reviewed. arXiv:2606.18166. Full text
-  read 2026-08-16 to verify the correlation this paper quotes: ``the Spearman
-  rank correlation confirms a statistically significant relationship between
+  {CTI} reports, {PREPRINT}, not peer reviewed. arXiv:2606.18166. The quoted
+  correlation is from the full text, not the abstract: ``the Spearman rank
+  correlation confirms a statistically significant relationship between
   parameter size and $F_1$ scores in this CTI classification task ($\rho$=0.85,
-  p=0.014)''. The abstract states the relationship but not the figures, so the
-  body was read rather than the summary (2026).
+  p=0.014)'' (2026).
 
 \bibitem{snell2025testtime}
 C.~Snell, J.~Lee, K.~Xu, A.~Kumar, Scaling {LLM} test-time compute optimally

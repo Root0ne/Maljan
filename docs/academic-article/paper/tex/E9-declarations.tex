@@ -1,49 +1,45 @@
 \section*{Declarations}
 \label{sec:declarations}
 
-\subsection{Ethics and containment}\label{ethics-and-containment}
+\subsection*{Ethics and containment}\label{ethics-and-containment}
 
 Every sample analysed in this work is live Windows PE malware. The \fact{baseline-n}-sample cohort and the \fact{drift-n}
 dated samples of the withdrawn drift study were obtained from MalwareBazaar (abuse.ch) under its
 terms of use, which permit research redistribution of samples but not of the corpus as a package.
 
-Containment. Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image,
-reverted to a clean snapshot between analyses. The sandbox host is reachable from one network
-segment and from no public route; it holds no credentials for any other system, and no analysis
-machine shares a filesystem with the host that runs the pipeline. Binaries are held only in a
-directory excluded from the host's real-time scanner, are never committed to version control, and
-are not redistributed with this paper. Network traffic generated during detonation leaves the guest
-through that one segment and is captured; it is not proxied to any third-party service.
+Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image reverted to a clean
+snapshot between analyses. The sandbox host is reachable from one network segment and from no public
+route, holds no credentials for any other system, and shares no filesystem with the host that runs
+the pipeline. Binaries are held only in a directory excluded from the host's real-time scanner, are
+never committed to version control, and are not redistributed with this paper. We note a limitation
+of that arrangement rather than claiming it sufficient: the guest reaches the public internet during
+detonation, because a sample that cannot resolve its command-and-control infrastructure behaves
+differently from one that can and the network evidence channel would otherwise be empty for every
+sample. Live detonation with egress is the standard arrangement for behavioural sandboxing, and it
+is the arrangement whose consequences we report, including that the domains every sample contacted
+turn out to be the guest image describing itself.
 
-We note a limitation of that arrangement rather than claiming it is sufficient: the guest reaches
-the public internet during detonation, because a sample that cannot resolve its command-and-control
-infrastructure produces different behaviour from one that can, and the network evidence channel
-would otherwise be empty for every sample. Live detonation with egress is the standard arrangement
-for behavioural sandboxing and it is the arrangement whose consequences we report, including that
-the domains every sample in the cohort contacted turn out to be the guest image describing itself
-rather than anything the samples did.
+No user study was conducted, no personal data was collected, and no human analyst scored any output.
+That last point is a limitation of the evaluation, stated as such in Threats to Validity, rather
+than a claim about ethics.
 
-No human subjects. No user study was conducted, no personal data was collected, and no human
-analyst scored any output. That last point is a limitation of the evaluation, stated as such in
-Threats to Validity, not a claim about ethics.
-
-\subsection{Data availability}\label{data-availability}
+\subsection*{Data availability}\label{data-availability}
 
 The evaluation harnesses, the derivation of every number in this paper, the per-sample records they
-read, and the scripts that build the figures and assemble the document are released with the paper.
-The archive contains every per-sample record retained by every study reported here, in the JSON the
+read and the scripts that build the figures and assemble the document are released with the paper.
+The archive holds every per-sample record retained by every study reported here, in the JSON the
 harness wrote, together with the offline re-analysis that recomputes every interval, design effect,
-minimum detectable effect and adjusted p-value from those records, and its random seed. It also
-contains the ATT\&CK ground-truth fixtures, derived from the public
-\texttt{mitre-attack/attack-stix-data} repository under the ATT\&CK Terms of Use, and the model
-digest and inference-engine commit needed to reproduce the local arm.
+minimum detectable effect and adjusted p-value from those records and its random seed, the ATT\&CK
+ground-truth fixtures derived from the public \texttt{mitre-attack/attack-stix-data} repository
+under the ATT\&CK Terms of Use, and the model digest and engine commit needed to reproduce the local
+arm.
 
-Withheld, and why. Malware binaries are not released; they are obtainable from the sources named
-in Background by their SHA-256 digests, which are in the archive. Sandbox reports are not released
-in full because they embed strings and memory contents from the samples. The sandbox host's address
-is withheld; it appears nowhere in the archive and is referred to throughout as a private address.
-One dataset used for retrieval-corpus construction is redistributed by its authors under terms that
-do not permit our redistribution, and is referenced rather than included.
+Four things are withheld. Malware binaries are not released and are obtainable from the sources
+named in Background by the SHA-256 digests in the archive. Sandbox reports are not released in full
+because they embed strings and memory contents from the samples. The sandbox host's address appears
+nowhere in the archive and is referred to throughout as a private address. And one dataset used for
+retrieval-corpus construction is redistributed by its authors under terms that do not permit our
+redistribution, so it is referenced rather than included.
 
 Not available. The \fact{drift-n}-sample temporal-drift study's per-sample outputs do not exist. They were
 written to a path that was valid on the machine the harness was first written on and silently
@@ -51,7 +47,7 @@ relative on the machine it ran on; the study is withdrawn on that account and th
 reported in Results rather than quietly repaired. The manifest of the \fact{drift-n} samples survives and is
 included, so the cohort can be reconstructed even though the results cannot.
 
-\subsection{Reproducibility}\label{reproducibility}
+\subsection*{Reproducibility}\label{reproducibility}
 
 Two runs of the offline analysis over the released records produce byte-identical output, and this
 is asserted by a test in the released suite rather than claimed here. Every interval carries the
@@ -64,7 +60,7 @@ reasoning-configuration parameter and does not act on it, a fact we established 
 report as a result. Anyone re-running the live arms should expect the numbers to move and should
 read the intervals accordingly.
 
-\subsection{Use of generative AI}\label{use-of-generative-ai}
+\subsection*{Use of generative AI}\label{use-of-generative-ai}
 
 Large language models are the object of study in this work. The pipeline under evaluation is built
 from them, and every measurement reported here is a measurement of their behaviour in it.
@@ -85,7 +81,7 @@ any result reported here.
 The authors take responsibility for all content, including every number, every citation, and every
 claim about what the measurements support.
 
-\subsection{Competing interests}\label{competing-interests}
+\subsection*{Competing interests}\label{competing-interests}
 
 The authors declare no competing financial or non-financial interests. No external funding
 supported this work. All measurements were taken on hardware owned by the authors, except for calls

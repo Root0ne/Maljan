@@ -201,20 +201,12 @@ direction the literature predicts, with its limitations already stated. There wa
 to notice. It was caught by reading the arms table under the correlation and asking why one model
 was on it twice, which is a question no result, however wrong, would have prompted.
 
-And the phenomenon is not ours. Sun et al.~\cite{sun2025length} show that under a strict
-output-length constraint the ordering of models by capability \emph{does not hold}. Inside a
-constrained budget window a smaller model can match or beat a larger one, with the ordinary ordering
-restored once the budget relaxes. They state the same for reasoning modes specifically. Under the
-same constraint, reasoning models do not always beat instruction-tuned ones.
-Our reasoning flag consumes the answer budget, which makes the disabled arm a brevity-constrained
-arm under a different name, so M6 is a domain instance of that finding rather than a new phenomenon.
-We claim the local form of the result and not a global reversal, because the local form is what the
-reviewed literature carries.
-
-What we would add is narrower and sits in the remedy rather than the phenomenon: their protocol is
-adapted per model, ours has to be verified per arm, because matching on the requested
-configuration is not sufficient when a provider accepts the parameter and does not act on it
-(Section~\ref{m6-a-configuration-difference-wearing-a-parameter-count}). An arm can be labelled matched and be running the opposite setting. The rule that follows is to select on the \emph{measured} reasoning share and never on the flag, and that is what the gate implements.
+The phenomenon is not ours. Under a strict output-length constraint the ordering of models by
+capability does not hold \cite{sun2025length}, and our reasoning flag consumes the answer budget,
+which makes the disabled arm a brevity-constrained arm under a different name. M6 is a domain
+instance of that rather than a new phenomenon, and what we would add sits in the remedy:
+Section~\ref{sec:related} states the protocol difference, that matching on the requested
+configuration is not sufficient when a provider accepts a parameter without acting on it.
 
 \subsubsection{M7. A safety property that was configured, documented, and never sent}\label{m7-a-safety-property-that-was-configured-documented-and-never-sent}
 
@@ -272,32 +264,29 @@ a single-call test. M1 required a second \emph{server}, and the behaviour was co
 only server exercised. M4 required a rich enough input, since the composition only appears when the
 step budget is exhausted, which small fixtures never do.
 
-The last three failed differently. M5 was tested and passing. \texttt{\_reconcile\_with\_cascade} has
-unit tests and they assert exactly what it does, that unresolvable patterns are dropped and missing
-cascade techniques are added. The function was never wrong. What was wrong was an experiment that
-varied the cascade's input and attributed the output to a model downstream of it, and no test of a
-component can catch a misattribution made three modules away. M6 was tested more carefully than
-anything else in the harness, and the tests were about the wrong question. The series arithmetic had
-a test file of its own, with averaged ranks so file order cannot break ties, an exact permutation p
-because four points cannot reach significance, and a common-cell restriction so endpoint
-availability cannot pass for model size. Every test asserted something true. None asked whether the
-rows entering the correlation were comparable, because the answer had been assumed at the point
-where the arms were assembled rather than decided anywhere a test could see it. M7 had nothing left
-to assert on. A unit test would build the model and check that its output ceiling is
-\fact{judge-output-cap}, and it is, at every level the object model exposes. The defect existed only
-in the serialised request, which no test in this suite inspects and which no application code reads,
-so testing the property as the system represents it confirms exactly the thing that is not true.
+The last three failed differently, because every unit involved behaved as specified. M5's
+\texttt{\_reconcile\_with\_cascade} has unit tests that assert exactly what it does, and the function
+was never wrong; what was wrong was an experiment that varied the cascade's input and attributed the
+output to a model downstream of it, and no test of a component can catch a misattribution made three
+modules away. M6 was tested more carefully than anything else in the harness and the tests were
+about the wrong question, since every guard concerned a way the numbers could mislead and none asked
+whether the rows entering the correlation were comparable, that having been assumed where the arms
+were assembled rather than decided anywhere a test could see. M7 had nothing left to assert on: a
+unit test would check that the output ceiling is \fact{judge-output-cap} and it is, at every level
+the object model exposes, because the defect existed only in the serialised request, which no test
+inspects and no application code reads.
 
-Four preconditions, a second call, a second server, a large input, are exactly what a fast unit
-suite is designed to avoid. The last three are worse: M5, M6 and M7 are invisible to unit testing
-in principle, because every unit involved behaved as specified. Their common shape is that the defect lived in the \emph{composition}, in which measurement was attributed to which cause, or in which representation of a value crosses the boundary. A test that pins a function's behaviour cannot reach an assumption made when its inputs were chosen or when its output was
-serialised.
+Preconditions such as a second call, a second server or a large input are exactly what a fast unit
+suite is designed to avoid. The last three are worse than avoided, they are invisible to unit
+testing in principle, because the defect lived in the composition, in which measurement was
+attributed to which cause or in which representation of a value crossed a boundary.
 
 \subsection{What did find them: output cardinality}\label{what-did-find-them-output-cardinality}
 
-Five of the seven were found by the same observation. A number that repeated where variation was
-expected. M6 and M7 were not, and Section~\ref{what-did-find-them-output-cardinality} says what did find them; their outputs vary, so there is
-no repetition to notice.
+Five of the seven were found by the same observation, a number that repeated where variation was
+expected. M6 and M7 were not, because their outputs vary and there is no repetition to notice; M6
+was caught by reading the arms table under the correlation and M7 by a study that recorded which
+failure branch each call took.
 
 \begin{table}[!htbp]
 \caption{What the output-cardinality check saw and which defect each observation turned out to be.}\label{tab:detector}
@@ -317,8 +306,6 @@ a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width interval across \f
 \bottomrule
 \end{tabular}
 \end{table}
-
-Every row is a number repeated where variation was expected.
 
 
 M5 extends the detector in a direction that matters, because it is where the idea is least
@@ -351,22 +338,11 @@ adopt. The curve this paper turns on is the one we are unable to draw.
 We now report it beside every batch result; \fact{cardinality-distinct-graphs} distinct call-graph
 sizes across \fact{cardinality-samples} samples.
 
-This is a refinement, not a discovery, and we checked before saying otherwise. ``Distinct inputs
-should produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}; metamorphic testing
-exists precisely for programs whose correct output is unknown, the \emph{``notorious oracle problem''}
-its own survey names. Stress-testing an LLM judge's consistency under input variation is likewise
-established practice \cite{dev2026judge}. And
-the genus is described, in systems work older than this field. Alquraan et
-al.~\cite{alquraan2018partition} find that the majority of network-partition failures in cloud
-systems are silent and that every warning the rest produced was ``confusing, with no clear mechanism
-for resolution''; Yuan et al.~\cite{yuan2014simple} count a handler that only logs as ignoring the
-error, and attribute a quarter of catastrophic failures to exactly that; Gunawi et
-al.~\cite{gunawi2008eio} measure where the signal is lost, at calls between modules. Bug taxonomies
-for LLM agent frameworks and inference engines now report the same shape
-\cite{xue2025agentbugs,liu2026inference}. All four of our boundary mechanisms fall inside it. M5, M6 and M7 share
-the meta-pattern but not the setting. No server misled us, and no protocol was involved. Two arose
-inside our own analysis code and one inside the production pipeline, and in all three the
-taxonomy's classes, every one of which describes a call to something else, do not reach.
+This is a refinement rather than a discovery, and Section~\ref{silent-failure-at-tool-boundaries}
+places both the detector and the genus in the literature that already carries them. All four
+boundary mechanisms fall inside that genus. M5, M6 and M7 share its meta-pattern but not its
+setting, since no server misled us and no protocol was involved, and the taxonomy's classes each
+describe a call to something else.
 
 \subsection{What it cost}\label{what-it-cost}
 
@@ -388,27 +364,12 @@ samples, and fresh state per sample removes a whole class of the failures above.
 
 \subsection{The claim we are making}\label{the-claim-we-are-making}
 
-Not that silent failures exist at tool boundaries, that is documented. Ours is narrower.
-
-We report three mechanisms at three distinct integration boundaries, in argument encoding,
-server-side session state, and HTTP status versus body, plus one from composing two local safety
-bounds. We report the setting, an evaluation pipeline for security research, where the artefact is
-not a degraded user session but a measurement that is wrong and looks right, and where the failure
-therefore propagates into a published claim rather than into a support ticket. We report a detector
-run alongside results rather than as a test, because the failure appears in the batch and not in any
-single call.
-
-Two further failures, M5 and M6, had no server involved at all, an ablation that varied a
-deterministic code path and reported a language model, and a correlation that ranked a configuration
-flag and reported a parameter count. Both had passing unit tests over the exact functions concerned.
-They extend the claim from ``other people's servers can mislead you'' to \emph{the same shape occurs
-wherever a measurement's cause is assigned rather than measured}. One more, M7, is in the production
-pipeline, where a documented safety property, a bounded verdict generation, was configured correctly
-at every level the code can inspect and removed entirely by a parameter rename during serialisation.
-It is the case that shows the shape is not peculiar to evaluation, because the artefact the analyst
-receives was affected rather than a number in a table. And the price is demonstrated rather than
-hypothesised.
-
-In a pipeline assembled from other people's servers, the correctness of the model is not the binding
-constraint on the correctness of the result. A server that answers is not the same as a server
-that answered your question.
+Not that silent failures exist at tool boundaries, which is documented. Ours is narrower: three
+mechanisms at three distinct integration boundaries, in argument encoding, server-side session state
+and HTTP status versus body, plus one from composing two local safety bounds; the setting, an
+evaluation pipeline where the failure propagates into a published claim rather than into a support
+ticket; and a detector run alongside results rather than as a test, because the failure appears in
+the batch and not in any single call. M5 and M6 extend that from other people's servers misleading
+you to the same shape occurring wherever a measurement's cause is assigned rather than measured, and
+M7 shows the shape is not peculiar to evaluation, because there the artefact the analyst receives
+was affected rather than a number in a table.

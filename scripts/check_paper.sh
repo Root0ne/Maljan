@@ -338,6 +338,23 @@ else
     note "write Section~N instead"
 fi
 
+# A doubled backslash in front of a macro name. `\\ref{sec:results}` is a line
+# break followed by the literal text `ref`, and braces are grouping characters,
+# so it printed as "the subject of Section" then a new line reading
+# "refsec:results." Nothing else caught it: \ref never ran, so there is no `??`
+# to find, and the cross-reference gate counts hand-typed `Section~N`, which
+# this is not. Checked in the sources because the rendered form is unremarkable
+# text. `\\` before an ordinary word is a legitimate line break; before one of
+# these names it is always a mangled control sequence.
+doubled=$(grep -c '\\\\\(ref\|cite\|preprintcite\|fact\|setting\|label\|emph\|texttt\|textasciitilde\){' \
+          "$BUILD"/*.tex "$BUILD"/*.sty 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')
+if [[ "$doubled" -eq 0 ]]; then
+    pass "no macro name behind a doubled backslash"
+else
+    fail "$doubled mangled control sequence(s) in the sources"
+    grep -n -m3 '\\\\\(ref\|cite\|fact\|label\){' "$BUILD"/*.tex 2>/dev/null | sed 's|.*/|        |'
+fi
+
 # Bulleted structure, checked in the sources because that is where it is
 # authored. Prose is the house default; a list has to be argued for.
 lists=$(grep -c 'begin{itemize}\|begin{enumerate}\|begin{description}' "$BUILD"/*.tex 2>/dev/null \

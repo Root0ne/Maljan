@@ -1,50 +1,39 @@
 \section{Reproducibility}
 \label{app:repro}
 
-\subsection{How the numbers in this paper get onto the page}\label{numeral-policy}
+The harnesses, the derivation of every number in this paper, the per-sample records they read and
+the scripts that build the figures and assemble this document are released with the paper under
+\texttt{tests/evaluation/}, checkpointed and resumable, with the repository recording which harness
+produced which result. Everything procedural therefore lives there, and this appendix carries only
+what a reader needs in order to interpret the measurements rather than to re-run them.
 
-Every number this paper states about its own results is generated from the
-committed per-sample records into a macro and referenced, never typed. A key the
-document asks for and the derivation cannot produce stops the build rather than
-leaving a hole in the page. The reason is drift and not tidiness: over this
-project's history the same measurement was typed into five places and went stale
-in all of them, a superseded interval survived a correction because it had been
-typed rather than referenced, and a figure caption disagreed with the paragraph
-beside it for a month.
+\subsection{How the numbers get onto the page}\label{numeral-policy}
 
-The rule is scoped to its reason, and the scope is stated here rather than left
-implicit, so that a reader can tell a deliberate exemption from an oversight.
-Three kinds of number are deliberately literal.
+Every number this paper states about its own results is generated from the committed per-sample
+records into a macro and referenced, never typed, and a key the document asks for that the
+derivation cannot produce stops the build rather than leaving a hole in the page. The reason is
+drift rather than tidiness. Over this project's history the same measurement was typed into five
+places and went stale in all of them, and a figure caption disagreed with the paragraph beside it
+for a month.
 
-The first kind is settings. A port, a thread count, a context length, a step budget, a GPU model.
-No analysis produces them and they cannot go stale, so they are marked
-\texttt{\textbackslash setting\{\}} in the source at the point of use, because the distinction is
-not visible in the digits; \setting{31}\,GiB of host memory is a setting and
-\fact{paged-out-working-set} paged out is a measurement, and both are a number and a unit. The
-second kind is values quoted from cited work, since no derivation of ours produces someone else's
-result. These are registered with the citation each belongs to and are permitted only on a line that
-carries that citation, so a quoted figure cannot drift away from its source and become
-indistinguishable from one of ours. The third kind is observations whose raw output was not
-retained. A handful of the incidents in Section~\ref{sec:failures} were seen in diagnostic sessions
-against live containers rather than in a study, and those sessions were never in scope for the
-retention rule, which is Section~\ref{sec:threats}'s point arriving one more time. Each is
-registered with the dated record that carries it and is presented as an observation rather than a
-measurement from the archive.
+Three kinds of number are deliberately literal and marked as such at the point of use, so that a
+reader can tell a deliberate exemption from an oversight. Settings, such as a port or a step budget,
+which no analysis produces and which cannot go stale; the distinction is not visible in the digits,
+since \setting{31}\,GiB of host memory is a setting and \fact{paged-out-working-set} paged out is a
+measurement. Values quoted from cited work, registered with the citation each belongs to and
+permitted only on a line carrying that citation, so a quoted figure cannot drift away from its
+source. And observations from diagnostic sessions whose raw output was never in scope for the
+retention rule, each registered with the dated record that carries it and presented as an
+observation rather than as a measurement from the archive. A check enforces all three, and refuses a
+declared setting whose value is one the analysis already derives, because that would be a way of
+laundering a measurement into a constant.
 
-A check enforces all of this, and refuses the third and second categories
-without their record or their citation. It also refuses a
-\texttt{\textbackslash setting\{\}} whose value is one the analysis already
-derives, because that would be a way of laundering a measurement into a
-constant.
-
-\subsection{The model, exactly}\label{the-model-exactly}
+\subsection{The model, the engine and the host}\label{the-model-exactly}
 
 \begin{table}[!htbp]
 \caption{The local model and inference engine, pinned by digest and commit.}\label{tab:model}
 \centering\small
-\begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep - 2pt) * \real{0.5000}}@{}}
+\begin{tabular}{@{}lp{0.65\linewidth}@{}}
 \toprule
 model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised IQ3\_K\_R4 by Unsloth \\
 GGUF sha256 & \texttt{d0de70ef…c4ea}, computed locally and matching the HuggingFace etag \\
@@ -56,29 +45,18 @@ architecture & hybrid recurrent (SSM keys + \texttt{\seqsplit{full\_attention\_i
 \end{tabular}
 \end{table}
 
-Without both, the sampler finding in this appendix cannot be reproduced.
-
-
 Naming the imatrix dataset matters. Most papers reporting a quantisation level cannot say which
 calibration produced it, and two IQ3 quants of the same model are not the same artefact.
 
-\subsection{The engine, and an honest note about how we know}\label{the-engine-and-an-honest-note-about-how-we-know}
-
-Engine; \texttt{ik\_llama.cpp}, commit \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}}
-(\emph{``MTP: Avoid per step SSM copy (\#\fact{engine-commit-pr})''}).
-
-The binary could not identify itself. \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)},
-because the build tree was never a git checkout. The commit was recovered from a depth-\setting{1} clone
-vendored elsewhere in the project and then \emph{proved} to describe the build: identical \fact{engine-source-files}-file source
-lists, and with line endings normalised exactly one file differs, the generated
-\texttt{common/build-info.cpp}.
-
-We report the reconstruction rather than presenting the identifier as though it had been recorded.
-The transferable lesson is the one we learned the hard way. Build provenance must be captured at
-build time. A retracted first version of this row concluded the commit was unrecoverable; it was
-recovered only because a vendored copy happened to exist.
-
-\subsubsection{Serving command}\label{serving-command}
+The engine is \texttt{ik\_llama.cpp} at commit
+\texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}}, \emph{``MTP: Avoid per step SSM copy
+(\#\fact{engine-commit-pr})''}. The binary could not identify itself, because
+\texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was
+never a git checkout. The commit was recovered from a depth-\setting{1} clone vendored elsewhere in
+the project and then \emph{proved} to describe the build, with identical \fact{engine-source-files}-file
+source lists and, once line endings are normalised, exactly one file differing. We report the
+reconstruction rather than presenting the identifier as though it had been recorded, because build
+provenance must be captured at build time.
 
 \begin{verbatim}
 llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
@@ -87,133 +65,69 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
   --context-shift on --jinja --host 0.0.0.0 --port 8080
 \end{verbatim}
 
-Two caveats a reader needs. The context is served at \fact{context-served}, half the model's native \setting{262,144}.
-And the launch command documented in the repository at one point specified \texttt{-\/-n-cpu-moe\ 36} while
-the service ran \fact{cpu-offload-blocks} blocks on CPU; the command above is what ran.
+The context is served at \fact{context-served}, half the model's native \setting{262,144}, and the
+launch command documented in the repository at one point specified \texttt{-\/-n-cpu-moe\ 36} while
+the service ran \fact{cpu-offload-blocks} blocks on CPU. The command above is what ran.
 
-\subsection{Hardware, and the ceiling it imposes}\label{hardware-and-the-ceiling-it-imposes}
-
-Single host: RTX \fact{host-gpu}, \setting{31} GiB RAM, \setting{16} threads. Three measured properties that shape what can be
-reproduced here:
-
-\texttt{llama-server} grows with cumulative requests and does not plateau, at
-\fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after a single full analyst pass,
-and \fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes of multi-arm
-load. The growth is anonymous and unreclaimable, so it can go to swap and nowhere else, which on
-this host is the ceiling on how long any run can be. A long paired run must therefore restart the
-server between arms; the restart changes no decoding parameter, so it is measurement-neutral.
-\texttt{scripts/run\_with\_restarts.sh} does this from the checkpoint, and is released with the
-rest. An evaluation that outlasts its own instrument needs the cycling to be part of the method
-rather than something the operator remembers.
-
-Serving at \setting{64}k instead of \setting{131}k does not lower the peak, at
-\fact{llama-rss-64k-gb} against \fact{llama-rss-growth-gb} GB. The baseline is CPU-resident expert
-weights, and the growth follows the context a pass actually consumes. Generation rate also varies
-from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s across requests. On this
-hybrid recurrent architecture, llama.cpp writes and erases a \fact{recurrent-checkpoint-mib} MiB
-recurrent-state checkpoint every few hundred tokens at \textasciitilde39k tokens of context, so
-long-context calls are not slow in proportion; they fall off a cliff.
-
-The Ghidra container is capped at \fact{ghidra-mem-limit-gb} GB (\texttt{mem\_limit}). Its JVM \texttt{-Xmx4g} bounds the heap only;
-the database is memory-mapped and measured RSS reached \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap. Two
-host lock-ups preceded this limit being added.
+The host is a single RTX \fact{host-gpu} with \setting{31} GiB of RAM and \setting{16} threads, and
+four measured properties bound what can be reproduced on it. \texttt{llama-server} grows with
+cumulative requests and does not plateau, from \fact{llama-rss-fresh-gb} GB fresh to
+\fact{llama-rss-growth-gb} GB after a single full analyst pass and \fact{llama-rss-sustained-gb} GB
+after \fact{llama-rss-sustained-minutes} minutes of multi-arm load. The growth is anonymous and
+unreclaimable, so a long paired run must restart the server between arms, which changes no decoding
+parameter and is therefore measurement-neutral. Serving at \setting{64}k instead of \setting{131}k
+does not lower the peak, at \fact{llama-rss-64k-gb} against \fact{llama-rss-growth-gb} GB, because
+the baseline is CPU-resident expert weights and the growth follows the context a pass actually
+consumes. Generation varies from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s
+across requests, because on this hybrid recurrent architecture llama.cpp writes and erases a
+\fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred tokens at
+\textasciitilde39k tokens of context, so long-context calls are not slow in proportion; they fall
+off a cliff. And the Ghidra container is capped at \fact{ghidra-mem-limit-gb} GB, its JVM
+\texttt{-Xmx4g} bounding the heap only, with measured RSS reaching \fact{ghidra-rss-gb} GB against
+that nominal \fact{ghidra-jvm-heap-gb} GB cap.
 
 The working set does not fit alongside an interactive session, and that is a reproducibility fact
-rather than an operational one. Model server \textasciitilde16 GB, analysis worker \textasciitilde8 GB, disassembly container
-up to \fact{ghidra-mem-limit-gb} GB: on a \setting{31} GiB host this leaves nothing for a desktop. When we ran a paired study without
-that headroom, the swap file was exhausted, the model server had \fact{llama-paged-out-gb} GB of its own address space
-paged out, and one arm then exceeded a \fact{salvage-budget-seconds}-second budget on a \fact{static-max-chars}-character prompt. A model
-generating from disk-backed pages is a different instrument from one generating from RAM, and the
-timings it produces are not comparable to the rest of the table.
+rather than an operational one. Model server \textasciitilde16 GB, analysis worker
+\textasciitilde8 GB and disassembly container up to \fact{ghidra-mem-limit-gb} GB leave nothing on a
+\setting{31} GiB host, and arms measured under memory pressure are not commensurable with arms that
+were not. Long paired studies here are therefore run against an otherwise-idle host, and the
+harnesses record \texttt{MemAvailable}, \texttt{SwapFree} and the model server's
+resident-versus-swapped split at both ends of every arm. That screen can only be applied forward,
+because for arms already collected without it the state is gone and the honest label is
+\texttt{unattributable}, which is what Section~\ref{the-host-as-an-uncontrolled-variable} reports it
+cost.
 
-Two consequences for anyone reproducing this work;
+\subsection{Data and the sandbox}\label{data}
 
-Give the run the machine. Long paired studies here are run against an otherwise-idle host.
-This is not a performance recommendation; arms measured under memory pressure are not commensurable
-with arms that were not.
+The dynamic cohort is n=\fact{cohort-n}, Windows PE only, stratified by year at seed
+\fact{cohort-seed} with its digest recorded. The withdrawn drift study's manifest survives as
+\fact{drift-n} dated samples over \fact{drift-cohorts} cohorts and \fact{drift-families} families,
+metadata only and no binaries, so that cohort can be reconstructed even though its results cannot.
+Per-sample outputs are stored for every study in this paper, a policy adopted after their absence
+cost us a result. Ground truth resolves a MalwareBazaar family signature to an in-repo MITRE
+\texttt{uses} fixture through an explicit alias map plus a CamelCase-split fallback, and it is
+uncurated at technique level, which Threats to Validity treats as a construct-validity limit rather
+than a footnote.
 
-Record the host state per arm, not per study. Our harnesses capture \texttt{MemAvailable},
-\texttt{SwapFree} and the model server's resident-versus-swapped split at both ends of every arm,
-and the scoring script excludes arms whose host was degraded. This screen can only be applied
-forward, because for arms already collected without it the state is gone and the honest label is
-\texttt{unattributable}. That is the label our own halted ablation carries.
-
-Start the model server in its own cgroup, not the harness's. This one cost us three
-interrupted runs before we read the kernel log carefully enough.
-
-\begin{verbatim}
-task_memcg=/user.slice/.../snap.code.code-*.scope, task=llama-server
-Out of memory: Killed process (llama-server) oom_score_adj:\fact{oom-score-adj}
-snap.code.code-*.scope: Failed with result 'oom-kill'
-\end{verbatim}
-
-The harness had launched the server as a child process, so it inherited the cgroup of whatever
-started the harness, an editor's integrated terminal, and its \textasciitilde16 GB was accounted to
-the editor's scope. We had already made the server the kernel's preferred victim, and that was the
-wrong level, because choosing \emph{which process} dies cannot change \emph{whose accounting it dies
-inside}. Launching it as a transient unit with an explicit \texttt{MemoryMax} puts the measurement's
-memory where it belongs and lets the server hit a limit of its own before the host has to
-arbitrate.
-
-\subsection{Data}\label{data}
-
-\begin{table}[!htbp]
-\caption{Every committed artefact the paper's numbers are derived from, with its size and whether it carries per-sample records.}\label{tab:artefacts}
-\centering\small
-\begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\toprule
-artefact & what it is & committed \\
-\midrule
-\texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, metadata only, no binaries & yes \\
-\texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, seed \fact{cohort-seed}, digest recorded & yes \\
-\texttt{\seqsplit{cape\_task\_ledger\_n100.json}} & sha256 to CAPE task id for all \fact{cohort-n} submissions & yes \\
-\texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=\fact{cohort-n} attempted & yes \\
-\texttt{cape\_baseline.json} & per-sample CAPE-only scores & yes \\
-\texttt{consensus\_ablation.json}, \texttt{frontier\_probe*.json}, \ldots{} & per-sample arms for every ablation, one file per arm and configuration & yes \\
-\texttt{\seqsplit{parameter\_size\_series.json}} & the size series with each arm's measured reasoning share and why it was included or excluded & yes \\
-\texttt{\seqsplit{judge\_contribution\_\{uncapped,capped\}.json}} & the judge study in both output-cap conditions, per call, with the branch each failed call took & yes \\
-\texttt{\seqsplit{fallback\_bundle\_content\_\{uncapped,capped\}.json}} & per-call technique sets on the fallback path against the cascade set each would have received & yes \\
-\texttt{\seqsplit{outbound\_parameter\_probe.json}} & which parameters the local server acts on, measured & yes \\
-CAPE reports & \textasciitilde7 MB each, \textasciitilde660 MB total & no, see Section~\ref{data-availability} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Ground truth resolves a MalwareBazaar family signature to an in-repo MITRE \texttt{uses} fixture through an
-explicit alias map plus a CamelCase-split fallback. It is uncurated at technique level, which
-Threats to Validity treats as a construct-validity limit rather than a footnote.
-
-Per-sample outputs are stored for every study in this paper. This is a policy adopted after it
-cost us a result: an earlier study's per-sample outputs were not retained, and when a defect was
-later found that could have affected it, the question could not be asked. That study is withdrawn.
-
-\subsection{The sandbox, and three things that will block a reader}\label{the-sandbox-and-three-things-that-will-block-a-reader}
-
-CAPE 2.5 at a private address, reachable only from one network.
-
-It has one analysis machine (\texttt{win10}, x64) and no Linux VM, so only Windows PE can be
-analysed dynamically whatever the code's stated scope, which is why the cohort is Windows-only. An
-ELF submitted there joins the \fact{cape-backlog} tasks that are never scheduled. Reports are
-retained for days rather than indefinitely; sampled across the full task-id range,
+The sandbox is CAPE 2.5 at a private address, reachable only from one network. It has one analysis
+machine and no Linux VM, so only Windows PE can be analysed dynamically whatever the code's stated
+scope, and an ELF submitted there joins the \fact{cape-backlog} tasks that are never scheduled.
+Reports are retained for days rather than indefinitely: sampled across the full task-id range,
 \fact{cape-report-retention-sampled} of \fact{cape-report-retention-sampled} older tasks return
-\texttt{"Reports\ directory\ does\ not\ exist"}, while a report from four days earlier survived. The
-local archive of fetched reports is therefore the only copy, and ``submit the same samples'' is not
-a reproduction recipe on its own. The instance also rate-limits, and its throttle response is
-byte-identical to its auth refusal, \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases. A
+\texttt{"Reports\ directory\ does\ not\ exist"} while a report from four days earlier survived, so
+the local archive of fetched reports is the only copy and submitting the same samples is not a
+reproduction recipe on its own. The instance also rate-limits, and its throttle response is
+byte-identical to its auth refusal, \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases, so a
 harness that reads that string as a capability verdict will mis-classify a throttle as a missing
-permission, as we did, briefly. Re-call a tool that worked minutes earlier to tell them apart.
-
-Timing, for planning. A new Windows submission is scheduled in \textasciitilde1 second and completes in
-\textasciitilde5.5 minutes; the \fact{cape-backlog}-task backlog is never scheduled and does not queue ahead of new work.
-An n=\fact{cohort-n} cohort is roughly \fact{cohort-sandbox-hours} hours of sandbox time.
+permission, as we did briefly; re-calling a tool that worked minutes earlier tells them apart. A new
+Windows submission is scheduled in \textasciitilde1 second and completes in \textasciitilde5.5
+minutes, which makes an n=\fact{cohort-n} cohort roughly \fact{cohort-sandbox-hours} hours of sandbox
+time.
 
 \subsection{The comparison endpoints, and one parameter that decides everything}\label{the-comparison-endpoints-and-one-parameter-that-decides-everything}
 
-Three endpoints, and a reader reproducing any of them needs the configuration axis before the
-model names, because it is worth more F1 than any of them.
+A reader reproducing any arm needs the configuration axis before the model names, because it is
+worth more F1 than any of them.
 
 \begin{table}[!htbp]
 \caption{The inference endpoints each arm ran against, with the configuration measured rather than the configuration requested.}\label{tab:endpoints}
@@ -236,108 +150,56 @@ larger, hosted & DashScope International & \texttt{qwen3.6-plus} & off / on & \f
 \end{tabular}
 \end{table}
 
-\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter. Not rejected, but accepted,
-recorded in the result file, and not acted on. The re-run requesting it returned a
-\fact{arm-default-nothink-reasoning} reasoning share against \fact{arm-default-reasoning}
-without it. On DashScope the same request produces \fact{arm-qwen35ba3b-nothink-reasoning}. This
-is the line in this appendix that matters most to anyone comparing arms, because the flag is
-worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1 on the two models where it can be set, and an arm can therefore be labelled
-matched while running the opposite configuration. \texttt{eval\_parameter\_size\_series.py} selects arms on
-the measured reasoning share for exactly this reason and refuses to correlate when fewer than
-three configuration-matched arms span three parameter counts, which, on these endpoints, is
-always.
+\texttt{enable\_thinking} is honoured on DashScope and ignored on OpenRouter. Not rejected, but
+accepted, recorded in the result file, and not acted on. The re-run requesting it returned a
+\fact{arm-default-nothink-reasoning} reasoning share against \fact{arm-default-reasoning} without it,
+while on DashScope the same request produces \fact{arm-qwen35ba3b-nothink-reasoning}. This is the
+line in this appendix that matters most to anyone comparing arms, because the flag is worth
+\fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1 on the two models where it can
+be set, and an arm can therefore be labelled matched while running the opposite configuration.
+\texttt{eval\_parameter\_size\_series.py} selects arms on the measured reasoning share for exactly
+this reason, and refuses to correlate when fewer than three configuration-matched arms span three
+parameter counts, which on these endpoints is always.
 
-The local server's output cap must be sent twice. \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire as
-\texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read; the cap must also travel in
-\texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}. Measured on this host: \fact{cap-requested} requested, \fact{cap-ignored-tokens}
-generated with the renamed field alone, \fact{cap-honoured-tokens} with both. A reader who omits this will find the
-judge decoding to the context limit, which is what happened here for as long as the cap had
-existed. \texttt{probe\_outbound\_parameters.py} re-checks this and the other outbound parameters against a
-running server; it is the regression witness, and it is cheap enough to run before any measurement
-campaign.
+The local server's output cap must be sent twice. \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire
+as \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read, so the cap must also
+travel in \texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}. Measured on this
+host, \fact{cap-requested} requested yields \fact{cap-ignored-tokens} generated with the renamed
+field alone and \fact{cap-honoured-tokens} with both. That server also truncates silently, returning
+\texttt{finish\_reason:\ "stop"} at the cap and never \texttt{"length"}, with no
+\texttt{stopped\_limit} field, so telemetry that detects truncation by finish reason will report zero
+however often the cap binds. Compare the generated-token count against the cap that was requested
+instead.
 
-Note also that this server truncates silently: at the cap it returns \texttt{finish\_reason:\ "stop"},
-never \texttt{"length"}, and carries no \texttt{stopped\_limit} field. Telemetry that detects truncation by finish
-reason will report zero however often the cap binds; compare the generated-token count against the
-cap that was requested instead.
+The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit} requests per day with a
+\fact{openrouter-burst-limit}-per-minute cap that applies whether or not credit has been purchased.
+The first attempt exhausted the daily quota mid-flight, \fact{quota-calls-landed} calls landing and
+\fact{quota-calls-refused} returning HTTP 429, and the n=\fact{superseded-frontier-n} estimate it
+produced was not merely imprecise but pointed the wrong way
+(Section~\ref{frontier-does-not-separate}). The arm reported here is the completed
+n=\fact{arm-default-n} run from a fresh quota. The quota governs what a cohort-scale frontier arm
+costs in wall-clock rather than in dollars, since one call per sample over a \fact{baseline-n}-sample
+cohort is two days at that rate and a full-pipeline arm, at roughly \fact{requests-per-analysis}
+model requests per analysis, is not reachable on the free tier at all.
 
-\subsubsection{The original frontier arm}\label{the-original-frontier-arm}
+\subsection{Two checks worth running before the studies they check}\label{reproducing-each-result}
 
-OpenRouter, \texttt{nvidia/nemotron-3-super-120b-a12b:free}, temperature \setting{0}, \fact{consensus-budget}-token output cap.
+Two harnesses exist only because a result could not be believed.
+\texttt{verify\_b3\_mechanism.py} recomputes each ablation arm's cascade set from its seeded fixture
+and compares it against what the arm recorded; it is what established that a published finding of
+ours had measured the reconciliation step rather than a model.
+\texttt{probe\_outbound\_parameters.py} asks whether the server acts on each parameter we send it, by
+behaviour rather than by reading a response field, because a server that ignores a parameter does not
+report having done so. Separately, the judge-contribution study is run twice and the pair is kept,
+once with the output cap not reaching the server and once with it binding, because the comparison
+between the two is what isolates what the model's unparsable output contributes and neither run alone
+shows it.
 
-The free tier allows \fact{openrouter-daily-limit} requests per day (\texttt{X-RateLimit-Limit:\ 50},
-\texttt{limit\_source:\ openrouter\_free\_tier\_daily}), resetting daily, with a \fact{openrouter-burst-limit}-requests-per-minute cap
-that applies whether or not credit has been purchased. The first attempt at this arm exhausted
-the daily quota mid-flight, \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning HTTP 429, and the n=\fact{superseded-frontier-n} estimate it
-produced was not merely imprecise but pointed the wrong way (Section~\ref{frontier-does-not-separate}). The arm reported above is the
-completed n=\fact{arm-default-n} run, taken from a fresh quota: \fact{arm-default-n} of \fact{arm-default-n} parsed, \setting{0} refusals, \$\setting{0} charged against
-the \$\setting{25} ceiling.
-
-The quota is stated here because it governs what a cohort-scale frontier arm costs in wall-clock
-rather than in dollars: one call per sample over a \fact{baseline-n}-sample cohort is two days at \fact{openrouter-daily-limit} requests per
-day, and a full-pipeline arm, roughly \fact{requests-per-analysis} model requests per analysis, is not reachable on the
-free tier at all. The spend meter is enforced as a precondition on every call rather than reconciled
-afterwards, and projections price output at the full cap because a degenerate decode produces
-exactly that.
-
-\subsection{Reproducing each result}\label{reproducing-each-result}
-
-All harnesses are committed under \texttt{tests/evaluation/} and are checkpointed and resumable; several
-of the runs in this paper were interrupted by the memory guard and resumed without loss.
-
-\begin{table}[!htbp]
-\caption{Which harness produced which result, and the command that reruns it.}\label{tab:harnesses}
-\centering\small
-\begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\toprule
-result & harness & services needed \\
-\midrule
-consensus ablation (Section~\ref{multi-agent-consensus-does-not-pay-for-itself-at-equal-budget}) & \texttt{\seqsplit{eval\_consensus\_ablation.py}} & llama-server \\
-frontier and hosted arms (Section~\ref{frontier-does-not-separate}) & \texttt{\seqsplit{eval\_frontier\_probe.py\ -\/-arm\ \textless{}name\textgreater{}\ {[}-\/-no-thinking{]}}} & network only \\
-parameter-size series (Section~\ref{frontier-does-not-separate}) & \texttt{\seqsplit{eval\_parameter\_size\_series.py}} & none, reads the arm files \\
-CAPE baseline (Section~\ref{the-baseline-first}) & \texttt{eval\_cape\_baseline.py} & none, reads the local report archive \\
-sink-hint frequency (Section~\ref{mechanisms-measured-before-their-effects}) & \texttt{\seqsplit{eval\_sink\_hint\_frequency.py}} & Ghidra \\
-sink-hint ablation (Section~\ref{what-the-ablations-cost-and-what-that-revealed}) & \texttt{\seqsplit{eval\_sink\_hint\_ablation.py}} & llama-server + Ghidra \\
-opcode-hash attribution (Section~\ref{three-independently-built-retrieval-components-all-near-inert-in-production}) & \texttt{\seqsplit{eval\_function\_hash\_attribution.py}} & Ghidra + Qdrant \\
-Layer-0 verdict arms (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{eval\_layer0\_verdict.py}, checked by \texttt{verify\_b3\_mechanism.py} & llama-server; the check needs none \\
-cascade weight sensitivity (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{\seqsplit{eval\_weight\_sensitivity\_six.py}} & none, reads the report archive \\
-judge contribution (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{\seqsplit{eval\_judge\_contribution.py}} & llama-server \\
-fallback bundle content (Section~\ref{the-corroboration-cascade-does-not-reach-the-verdict}) & \texttt{\seqsplit{eval\_fallback\_bundle\_content.py\ -\/-checkpoint\ \textless{}run\textgreater{}}} & none, reads the run above \\
-outbound parameter check & \texttt{\seqsplit{probe\_outbound\_parameters.py}} & llama-server \\
-every figure & \texttt{make\_paper\_figures.py} & none, reads the JSON the above emit \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Two of these exist only because a result could not be believed, and both are worth running before
-the studies they check rather than after. \texttt{verify\_b3\_mechanism.py} recomputes each ablation arm's
-cascade set from its seeded fixture and compares it against what the arm recorded; it is what
-established that a published finding of ours had measured the reconciliation step rather than a
-model. \texttt{probe\_outbound\_parameters.py} asks whether the server acts on each parameter we send it,
-by behaviour rather than by reading a response field, because a server that ignores a parameter
-does not report having done so.
-
-The judge-contribution study is run twice, in two conditions, and the pair is kept. Once with
-the output cap not reaching the server and once with it binding. The comparison between them is
-what isolates what the model's unparsable output contributes to the analyst's bundle, and neither
-run alone shows it. Preserved as \texttt{judge\_contribution\_uncapped.*} and \texttt{judge\_contribution\_capped.*}.
-
-Figures are generated from the same retained records as the text. The script recomputes intervals
-with the seeded bootstrap rather than reading them out of a summary, so a figure and a sentence
-cannot drift apart without the script failing to reproduce one of them. This caught a live error. An
-ROC computed by naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the \fact{confidence-auc} in our text, because
-\fact{confidence-modal-count} of \fact{confidence-n} claims are tied at confidence \setting{1.0} and tie handling decides the entire estimate. The text was
-right and the first draft of the figure was wrong, which is the ordinary direction for this check to
-fire, and the reason for wiring it this way.
-
-Three harness properties are deliberate and worth copying. Every sweep restarts the server it
-depends on between samples, because a read timeout leaves the Ghidra JVM mid-analysis and every
-subsequent load is refused, and a whole window of samples was lost to this before it was understood.
-Every sweep reports how many distinct outputs the N inputs produced, because that one line is the
-cheapest detector for the stale-state defects described in Threats to Validity. And every sweep
-records the host's memory state at both ends of each unit of work, so that a failed unit can
-afterwards be attributed to the pipeline or excluded as an artefact of the machine, a question that
-cannot be reopened later, as Section~\ref{hardware-and-the-ceiling-it-imposes} above describes.
+Figures are generated from the same retained records as the text, with intervals recomputed by the
+seeded bootstrap rather than read out of a summary, so a figure and a sentence cannot drift apart
+without the script failing to reproduce one of them. This caught a live error. An ROC computed by
+naive descending sort returned AUC \fact{confidence-auc-naive-legacy} against the
+\fact{confidence-auc} in our text, because \fact{confidence-modal-count} of \fact{confidence-n} claims
+are tied at confidence \setting{1.0} and tie handling decides the entire estimate. The text was right
+and the first draft of the figure was wrong, which is the ordinary direction for this check to fire
+and the reason for wiring it this way.

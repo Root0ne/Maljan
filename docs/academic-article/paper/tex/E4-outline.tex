@@ -30,47 +30,39 @@ A hint of exactly \fact{hint-chars-repeated} characters for two unrelated binari
 character for samples of \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at \fact{stuck-graph-chars} characters. The check
 costs one line, needs no ground truth, and we now report it beside every batch result.
 
-Then three more, and none of them was at a boundary. An ablation varied a deterministic reconciliation step and we attributed its output to a language model. A rank correlation over model
+Then three more, and none of them was at a boundary. An ablation varied a deterministic
+reconciliation step and we attributed its output to a language model. A rank correlation over model
 size ranked a reasoning-configuration flag instead and recovered the published scaling coefficient
 almost exactly, agreeing with the literature, which is the direction a result is least likely to be
-questioned. And a documented output ceiling on the judge was renamed by our client library
-during serialisation to a key the inference server does not read, so a component we describe as
-bounded had never once been bounded. The detector above does not find these. Their outputs \emph{do}
-vary. Two were caught by a number too clean to believe, one by a study that recorded which failure
-branch each call took. Each had passing unit tests over the exact function concerned, because the
-defect was never in a function; it was in which measurement was attributed to which cause, or in
-which representation of a value crossed a boundary.
+questioned. And a documented output ceiling on the judge was renamed by our client library during
+serialisation to a key the inference server does not read, so a component we describe as bounded had
+never once been bounded. The detector above does not find these, because their outputs \emph{do}
+vary; two were caught by a number too clean to believe and one by a study that recorded which
+failure branch each call took. Each had passing unit tests over the exact function concerned,
+because the defect was never in a function but in which measurement was attributed to which cause,
+or in which representation of a value crossed a boundary.
 
 We report them because the correction is part of the result. Two published findings of ours were
-withdrawn or rewritten on their account, and a third was one report away from being published as a
-scaling law.
+withdrawn or rewritten on their account, a third was one report away from being published as a
+scaling law, and a completed \fact{drift-n}-sample study is withdrawn from this paper because it met
+the precondition for one of the defects and its per-sample outputs were not retained, so whether it
+was affected cannot be established.
 
-The cost of not having had it is concrete. A completed \fact{drift-n}-sample study is withdrawn from this
-paper. It met the precondition for one of the defects, and its per-sample outputs were not
-retained, so whether it was affected cannot be established. We report the withdrawal rather than the
-result.
-
-We do not claim the category, and we counter-searched the newest mechanisms before claiming them
-either. Silent failure, an error that produces wrong behaviour without an actionable signal, is a
+We do not claim the category, and we counter-searched the newest mechanisms before claiming them.
+Silent failure, an error that produces wrong behaviour without an actionable signal, is a
 long-established and taxonomised class in production software
-\cite{gunawi2008eio,yuan2014simple,alquraan2018partition}, and LLM-specific runtimes are now being
-taxonomised along the same lines \cite{xue2025agentbugs,liu2026inference}. ``Distinct inputs should
-produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}. That an
-inference-time constraint can invert model rankings inside a constrained budget regime, and so
-confound a comparison, is established \cite{sun2025length,mizrahi2024multiprompt}. Silently
-overruling a request parameter to a default is a named failure mode with a measured prevalence
-\cite{xu2013misconfig}, and request-parsing defects with silent symptoms are documented in the
-inference engines we use \cite{liu2026inference}.
+\cite{gunawi2008eio,yuan2014simple,alquraan2018partition}, LLM-specific runtimes are now being
+taxonomised along the same lines \cite{xue2025agentbugs,liu2026inference}, ``distinct inputs should
+produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}, an
+inference-time constraint inverting model rankings inside a constrained budget is established
+\cite{sun2025length,mizrahi2024multiprompt}, and silently overruling a request parameter to a
+default is a named failure mode with a measured prevalence \cite{xu2013misconfig}. Three of our four
+boundary mechanisms therefore sit inside a peer-reviewed class. The fourth does not, and we say
+which: we found no reviewed source establishing that OpenAI-compatible servers disagree about
+\emph{which} token-limit parameter they honour, so we claim no priority for it either.
 
-Three of our four boundary mechanisms therefore sit inside a peer-reviewed class. The fourth
-does not, and we say which. We found no reviewed source establishing that OpenAI-compatible servers
-disagree about \emph{which} token-limit parameter they honour; that specific divergence is recorded
-only in the servers' own issue trackers, which we cite as such rather than as literature. We
-therefore claim no priority for it either. The general failure mode is known, and whether this
-particular instance of it is new is a question we cannot settle from reviewed work.
-
-What we add is the setting and the price. An evaluation pipeline for security research, where
-the artefact is not a degraded user session but a measurement that is wrong and looks right.
+What we add is the setting and the price. An evaluation pipeline for security research, where the
+artefact is not a degraded user session but a measurement that is wrong and looks right.
 
 Contributions. Each maps to one section, and each is a measurement or a mechanism rather than a proposal.
 

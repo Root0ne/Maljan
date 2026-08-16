@@ -86,6 +86,12 @@ _ARXIV = re.compile(r"arXiv:\d+\.\d+")
 # LaTeX's own dimensions and column arithmetic are not measurements.
 _LATEX_DIMS = re.compile(
     r"\\real\{[\d.]+\}|\d+\\tabcolsep|[\d.]+(?:pt|em|ex|in|cm|mm)\b"
+    # A fraction written directly onto a length, `0.68\linewidth`, is the plain
+    # LaTeX spelling of what pandoc writes the long way round as
+    # `(\linewidth - 2\tabcolsep) * \real{0.68}`. The long form was already
+    # exempt and the short one was not, so re-specifying a table's columns by
+    # hand made a column width read as an unregistered measurement.
+    r"|[\d.]+\\(?:linewidth|columnwidth|textwidth|hsize)\b"
     r"|\\(?:multicolumn|arraystretch|columnwidth|linewidth)\{?\d*"
 )
 

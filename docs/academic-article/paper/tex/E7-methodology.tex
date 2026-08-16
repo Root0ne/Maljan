@@ -82,31 +82,18 @@ claim count from one run is not an instrument, and we now say so where that resu
 
 \subsection{Firing rate before effect}\label{firing-rate-before-effect}
 
-Before ablating a mechanism, measure how often it engages. The rule came from two cases that
-look identical in a results table and are not:
+Before ablating a mechanism, measure how often it engages. The rule came from two cases that look
+identical in a results table and are not. The confidence cap fires on \fact{cap-rate} of techniques,
+so an ablation of it would say nothing, its null describing the \fact{cap-rate-complement} where the
+cap never ran; the sink-reachability hint fires on \fact{hint-rate} of samples, so an ablation of it
+is a real statement about the hint. Table~\ref{tab:firing} reports the measured rates. The cap's own
+preconditions explain its rate, since it applies to three technique families only when the sole
+contributing layer is static and \fact{cap-gated-yara-only-share} of those claims are YARA-only, so
+no static claim exists for it to discipline. Reporting the rate is more informative than ablating
+it, and cheaper.
 
-\begin{table}[!htbp]
-\caption{Firing rates measured before any ablation was run, and what each rate licenses the ablation to say.}\label{tab:firing-method}
-\centering\small
-\begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
-\toprule
-mechanism & fires on & what an ablation would mean \\
-\midrule
-confidence cap & \fact{cap-rate} of techniques & nothing, a null describes the \fact{cap-rate-complement} where it never ran \\
-sink-reachability hint & \fact{hint-rate} of samples & a real statement about the hint \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The cap's own preconditions explain its rate, three technique families, only when the sole
-contributing layer is static, and \fact{cap-gated-yara-only-share} of those claims are YARA-only, so
-no static claim exists for it to discipline. Reporting the rate is more informative than an ablation of it, and cheaper.
-
-A corollary. An ablation must be restricted to the samples where the mechanism fires, and must
-report the remainder separately. Averaging a feature over inputs it never touched dilutes a real
+A corollary. An ablation must be restricted to the samples where the mechanism fires and must report
+the remainder separately, because averaging a feature over inputs it never touched dilutes a real
 effect toward zero and manufactures a null.
 
 \subsection{Output cardinality, reported beside every batch}\label{output-cardinality-reported-beside-every-batch}

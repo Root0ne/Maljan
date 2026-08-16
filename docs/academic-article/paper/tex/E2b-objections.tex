@@ -1,168 +1,89 @@
 \subsection{Five objections}\label{objections}
 
-We wrote down the five strongest objections we could raise against this paper and
-then answered them, or failed to and said so. Four are answered by measurements
-reported here. The fourth was answered late, by running the experiment the
-objection asked for rather than by arguing with it, and the answer cost the
-result the objection was aimed at. The fifth is not answerable with what we
-have, and is stated below with the experiment that would settle it.
+We wrote down the five strongest objections we could raise against this paper and then answered
+them, or failed to and said so.
 
-\subsubsection{The central experiment's corpus is generated from its own answer
-key}\label{obj-fixtures}
+The first is that the central experiment's corpus is generated from its own answer key. The
+equal-budget consensus comparison, the frontier comparison and the confidence calibration all run on
+\fact{fixture-clusters} synthesised fixtures whose evidence is assembled by walking each fixture's
+ground-truth technique list and emitting one hand-written sentence per technique, so evidence and
+answer key are in bijection, and a deterministic regular expression over the dictionary that
+produced that evidence scores F1 \fact{fixture-extractor-f1} on \fact{fixture-extractor-n} of
+\fact{fixture-extractor-n}. We concede it, and it changes what those arms are for. They are a pilot
+that isolates one variable at a time under conditions where nothing else can move, which is worth
+something for a mechanism question and nothing for an accuracy claim, and we report no accuracy
+claim from them; the pipeline's accuracy is stated only against the no-LLM baseline on real samples
+in Table~\ref{tab:results-2}. The corpus also bounds inference in a way no amount of collection
+inside it would relieve, since at \fact{fixture-clusters} clusters the exact two-sided cluster
+permutation test cannot return a value below \fact{fixture-signflip-floor} and repeats add rows
+inside clusters while the test counts clusters. What settled it was running the same three arms on
+\fact{cape-consensus-families} real samples, one per family
+(Section~\ref{consensus-replication}), and the answer went against the fixture version: on real
+binaries the noise control runs \fact{cape-noise-delta} against the single judge where on fixtures it
+ran \fact{consensus-noise-delta}. The same control and the same arms, opposite signs. A corpus
+generated from its own answer key did not merely have less power here; it ordered the arms the other
+way round. Two of the three arms are therefore no longer a pilot, and the frontier comparison and
+confidence calibration still are.
 
-The objection. The equal-budget consensus comparison, the frontier
-comparison and the confidence calibration all run on \fact{fixture-clusters}
-synthesised fixtures whose evidence is assembled by walking each fixture's
-ground-truth technique list and emitting one hand-written sentence per technique.
-Evidence and answer key are in bijection. A deterministic regular expression over
-the dictionary that produced that evidence scores F1 \fact{fixture-extractor-f1}
-on \fact{fixture-extractor-n} of \fact{fixture-extractor-n}. Whatever those arms
-measure, it is not what a pipeline does to a binary.
+The second is that the system does not beat its baseline, so the component analysis is
+uninteresting. On the samples where both were run the full pipeline scores \fact{h2h-dynamic-f1}
+against the sandbox's own signature mapping at \fact{h2h-cape-f1}, a paired difference of
+\fact{h2h-delta}, \fact{h2h-ci}. We answer it only partly, because the inference is not valid in the
+direction the objection runs: an end-to-end null does not entail component-level nulls, and two of
+the components measured here are not inert but \emph{suppressed}, since the corroboration cascade is
+computed and then discarded at the reconciliation step, which is a mechanism finding that would hold
+at any end-to-end score. Where the objection does land is on what the paper is for. It is not a
+systems paper, the architecture did not survive its own evaluation, and a reader who wants a system
+that beats its baseline will not find one here.
 
-We concede it, and it changes what those arms are for. They are a pilot.
-They isolate one variable at a time under conditions where nothing else can move,
-which is worth something for a mechanism question such as whether the negotiation aggregates or reconciles, or whether the flag consumes the answer budget, and worth nothing for an accuracy claim. We report no accuracy claim from them. The
-pipeline's accuracy is stated only against the no-LLM baseline on real samples
-(Table~\ref{tab:results-2}), where the two are scored on one population against
-one ground truth.
+The third is that one of the retrieval numbers is self-consistency rather than accuracy. The ATT\&CK
+case-prior index is reported as working in isolation at F1 0.620 against a 0.424 frequency prior,
+but that evaluation is leave-one-out over a corpus of 1,733 cases whose labels are the pipeline's
+own prior attributions. We concede it and have relabelled the number as self-consistency. It is
+retained rather than deleted because a frequency prior scored the same way reaches 0.424, so the
+index carries information beyond base rates even under its own labelling, and because the production
+number beside it is scored against MITRE ground truth on held-out samples, where the index loses to
+the prior at 0.111 against 0.123. That second number is the one the paper's conclusion rests on. We
+also ran the leakage check the objection implies rather than asserting disjointness, and no sha256
+in the case corpus appears in either evaluation cohort, so the construct problem is the labelling
+and not overlap.
 
-The corpus also bounds inference in a way no amount of data collection inside it
-would relieve. With \fact{fixture-clusters} clusters, the exact two-sided cluster
-permutation test cannot return a value below \fact{fixture-signflip-floor}, so no
-comparison measured there can reach $\alpha$ = 0.05 whatever its effect size. Adding
-decoding repeats does not help; repeats add rows inside clusters, and the test
-counts clusters.
+The fourth is that the judge findings rest on four calls. The result that the judge supplies
+\fact{judge-capped-own-ids} of \fact{judge-capped-bundle} techniques when it works, and that
+\fact{fallback-only-capped} uncorroborated techniques reach the analyst when it fails, is measured on
+four judge calls. We concede the sample size and defend the design, which are different things. The
+intercept patches the reconciliation seam and the text-fallback builder and records every technique
+crossing each, so it requires a live judge call per observation, and four is what the quota and the
+host allowed. What the four support is narrower than the sentence they are usually quoted in. On the
+working path the finding is deductive rather than statistical, because the reconciliation step
+restores the cascade's set by construction and the \fact{judge-mechanism-arms}-arm mechanism check
+confirms the bundle equals the cascade set on every arm, with the judge contributing one of its own
+on \fact{judge-mechanism-added} of \fact{judge-mechanism-samples} samples, an upper bound of
+\fact{judge-mechanism-upper-bound} on the per-sample rate. On the failing path it is an existence
+claim: uncorroborated identifiers do reach the analyst, demonstrated on four calls against an
+uncapped control whose raw text provably contains none. Neither claim is a rate. What would settle
+it is the same intercept over the \fact{baseline-n}-sample cohort, which needs no new
+instrumentation, only the host.
 
-What settled it, and what it cost the fixture results. We ran the same
-three arms on \fact{cape-consensus-families} real samples, one per family
-(Section~\ref{consensus-replication}). The corpus objection is now answered for the
-consensus arms and answered against the fixture version of them: on real
-binaries the noise control runs \fact{cape-noise-delta} against the single
-judge, and on fixtures it ran \fact{consensus-noise-delta}, the same control,
-the same arms, opposite signs. A corpus generated from its own answer key did
-not merely have less power here. It ordered the arms the other way round, and no
-amount of data collection inside it would have revealed that.
+The fifth is that seven defects in your own code is a post-mortem rather than a result. This is the
+one we can least answer and we do not claim the category. Every mechanism was counter-searched in an
+adjacent field's vocabulary before being claimed and the search demoted more than it confirmed, so
+what we assert is narrower than a class: a setting where the artefact of such a failure is not a
+degraded user session but a measurement that is wrong and looks right, and a price paid rather than
+hypothesised. Two things we cannot show. We cannot show these recur in other teams' pipelines,
+because we have one pipeline. And we cannot show the detector generalises, because it found four
+defects retrospectively, on batches we already had reason to distrust; the prospective test,
+reporting output cardinality beside every batch for a year and counting how many defects it catches
+before anything else does, is the experiment and we have not run it.
 
-Two of the three arms are therefore no longer a pilot. The frontier comparison
-and the confidence calibration still are. They were not re-run, for the reason
-below rather than for a better one.
-
-\subsubsection{The system does not beat its baseline, so the component analysis
-is uninteresting}\label{obj-baseline}
-
-The objection. On the samples where both were run, the full pipeline
-scores \fact{h2h-dynamic-f1} against the sandbox's own signature mapping at
-\fact{h2h-cape-f1}, a paired difference of \fact{h2h-delta},
-\fact{h2h-ci}. If the whole system is indistinguishable from the deterministic
-tool it wraps, then of course its components move nothing, and a paper of
-component-level nulls inside a system that does not work is a paper about
-nothing.
-
-We answer it, but only partly. The inference is not valid in the
-direction the objection runs. An end-to-end null does not entail component-level
-nulls, and two of the components measured here are not inert but
-\emph{suppressed}. The corroboration cascade is computed and then discarded at
-the reconciliation step, which is a mechanism finding that would hold at any
-end-to-end score. The reverse inference is the one we are careful about, and we
-do not make it.
-
-Where the objection lands is on what the paper is for. It is not a systems paper
-and says so. The architecture did not survive its own evaluation, and the
-contribution is the account of measuring it. A reader who wants a system that
-beats its baseline will not find one here.
-
-\subsubsection{One of the retrieval numbers is self-consistency, not
-accuracy}\label{obj-circularity}
-
-The objection. The ATT\&CK case-prior index is reported as working in
-isolation at F1 0.620 against a 0.424 frequency prior. That evaluation is
-leave-one-out over a corpus of 1,733 cases whose labels are \emph{the pipeline's
-own prior attributions}. Scoring a retriever against the labels its own upstream
-produced measures agreement with itself.
-
-We concede it and have relabelled it. The number is self-consistency and
-is now presented as such. It is retained rather than deleted because the
-comparison it supports is still meaningful. A frequency prior scored the same
-way reaches 0.424, so the index carries information beyond base rates even under
-its own labelling, and because the production number beside it is scored
-against MITRE ground truth on held-out samples, where the index loses to the
-prior (0.111 against 0.123). That second number is the one the paper's conclusion
-rests on.
-
-We also ran the leakage check the objection implies rather than asserting the
-corpus is disjoint. No sha256 in the case corpus appears in either evaluation
-cohort. The construct problem is the labelling, not overlap.
-
-\subsubsection{The judge findings rest on four calls}\label{obj-small-n}
-
-The objection. The paper's most quoted architectural result, that the
-judge supplies \fact{judge-capped-own-ids} of \fact{judge-capped-bundle}
-techniques when it works and that \fact{fallback-only-capped} uncorroborated
-techniques reach the analyst when it fails, is measured on four judge calls.
-Four. The mechanism check that generalises it covers
-\fact{judge-mechanism-samples} samples. A reviewer is entitled to ask why, with
-\fact{baseline-n} samples and archived reports for all of them, the study that
-carries the headline used four.
-
-We concede the sample size and defend the design, and they are different
-things. The intercept is expensive. It patches the reconciliation seam and the
-text-fallback builder and records every technique crossing each, which requires a
-live judge call per observation and produced the run this paper reports. Four is
-what the quota and the host allowed.
-
-What the four support is narrower than the sentence they are usually quoted in.
-On the working path the finding is deductive rather than statistical; the
-reconciliation step restores the cascade's set by construction, and the
-\fact{judge-mechanism-arms}-arm mechanism check confirms the bundle equals the
-cascade set on every arm, with the judge contributing one of its own on
-\fact{judge-mechanism-added} of \fact{judge-mechanism-samples} samples, an
-upper bound of \fact{judge-mechanism-upper-bound} on the per-sample rate. On the failing path it is an existence claim. Uncorroborated identifiers
-\emph{do} reach the analyst, demonstrated on four calls with an uncapped control
-whose raw text provably contains none. Neither claim is a rate, and the paper
-should not be read as offering one.
-
-What would settle it. The same intercept over the
-\fact{baseline-n}-sample cohort. It needs no new instrumentation, only the host.
-
-\subsubsection{Seven defects in your own code is a post-mortem, not a
-result}\label{obj-postmortem}
-
-The objection. A paper reporting that its authors made seven mistakes is
-a claim about those authors. A more careful team would have avoided them; the
-mechanisms are ordinary; and nothing here shows they recur elsewhere.
-
-This is the objection we can least answer, and we do not claim the
-category. Every mechanism was counter-searched in an adjacent field's vocabulary
-before being claimed, and the search demoted more than it confirmed: silent
-failure at tool boundaries is documented and taxonomised, the metamorphic
-relation behind our detector is ordinary, and that an inference-time constraint
-can invert model rankings is established elsewhere with a larger effect than
-ours. What we assert is narrower than a class: a setting, where the artefact of
-such a failure is not a degraded user session but a measurement that is wrong and
-looks right, and a price paid rather than hypothesised.
-
-Two things we cannot show. We cannot show these recur in other teams' pipelines,
-because we have one pipeline. And we cannot show our detector generalises: it
-found four defects, but it found them retrospectively, on batches we already had
-reason to distrust. A prospective test, report output cardinality beside every
-batch for a year and count how many defects it catches before anything else does, is the experiment, and we have not run it.
-
-\subsubsection{What the five have in common}\label{obj-common}
-
-The objections that remained open were blocked by the same thing. A host on
-which the model server does not fit alongside anything else.
-Section~\ref{sec:threats} reports the environment as an uncontrolled variable
-that cost four arms of a completed ablation, and it is the reason this paper's
-weakest results are weak. An evaluation's ceiling is set by its machine at least
-as often as by its method, and we would rather state which of our limits are
-which.
-
-\ref{obj-fixtures} shows what it takes to lift one. The blocker was never the
-method; it was that the server's resident set climbs with cumulative requests
-and does not come back down, at \fact{llama-rss-fresh-gb} GB loaded,
-\fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes}
-minutes, and unreclaimable, so a long run walks the host into its own memory
-guard. Cycling the server from the checkpoint between stretches of work turned a
-run that could not finish into one that did, which is a change to the method and
-not to the machine. \ref{obj-small-n} is still open and needs the same treatment
+The objections that remained open were blocked by the same thing, a host on which the model server
+does not fit alongside anything else. Section~\ref{the-host-as-an-uncontrolled-variable} reports the
+environment as an uncontrolled variable that cost four arms of a completed ablation, and it is the
+reason this paper's weakest results are weak. Lifting the first objection shows what that takes. The
+blocker was never the method; it was that the server's resident set climbs with cumulative requests
+and does not come back down, at \fact{llama-rss-fresh-gb} GB loaded and
+\fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes, unreclaimable, so
+a long run walks the host into its own memory guard. Cycling the server from the checkpoint between
+stretches of work turned a run that could not finish into one that did, which is a change to the
+method and not to the machine. The judge objection is still open and needs the same treatment
 applied to a more expensive intercept.
