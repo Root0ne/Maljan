@@ -58,7 +58,7 @@
   \def\times{x}\def\Delta{Delta}\def\rho{rho}\def\alpha{alpha}%
   \def\beta{beta}\def\sigma{sigma}\def\mu{mu}%
   \def\ge{>=}\def\le{<=}\def\gg{>>}\def\ll{<<}%
-  \def\approx{~}\def\neq{!=}\def\pm{+/-}\def\rightarrow{->}%
+  \def\approx{~}\def\neq{!=}\def\pm{+/-}%
 }
 
 % Long code literals in narrow table columns overrun their neighbour. Verbatim
@@ -100,8 +100,8 @@
 \vfuzz=0pt
 
 % No \captionsetup and no \parskip either, for the same reason. elsarticle
-% defines its own \@makecaption -- footnotesize, "Table 1: text", label not
-% bold -- and setting labelfont=bf overrode the class to put bold on the page in
+% defines its own \@makecaption, at footnotesize, "Table 1: text", label not
+% bold, and setting labelfont=bf overrode the class to put bold on the page in
 % the one place a reader cannot avoid it.
 \graphicspath{{../}{./}{../figures/}}
 

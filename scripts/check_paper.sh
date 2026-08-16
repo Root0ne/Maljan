@@ -277,9 +277,10 @@ fi
 # living in a .bib note or a matplotlib annotation reaches the page by a route
 # no grep over *.tex would find. Three did.
 #
-# An en dash survives. It is a different character doing a different job, and
-# three cited titles are set with one by their own publishers; replacing those
-# would misquote them.
+# The en dash goes the same way, and the arrow with it. Both had the same
+# spelling problem in reverse: the source says `--` and `$\rightarrow$`, so a
+# grep for the printed character over the sources finds nothing while 35 dashes
+# and 7 arrows sit on the page.
 emdash=$(grep -oF '—' <<<"$pdf_text" | wc -l)
 if [[ "$emdash" -eq 0 ]]; then
     pass "no em dash in the rendered text"
@@ -288,6 +289,45 @@ else
     grep -oF -m3 -B0 -A0 '—' <<<"$pdf_text" >/dev/null
     grep -n -m3 -oE '.{40}—.{40}' <<<"$pdf_text" | sed 's/^/        /'
     note "sources spell it ---; check refs.bib and make_paper_figures.py too"
+fi
+
+# En dash, with one carve-out that is stated rather than assumed. Everything the
+# paper writes for itself is checked at zero. The reference list is not written
+# by the paper: elsarticle-num.bst runs every `pages` field through n.dashify,
+# which rewrites a hyphen into `--` on the way to the .bbl, so `51-68` in the
+# .bib comes back as 51–68 regardless of what is typed. Patching that would mean
+# shipping an altered Elsevier bst, and Elsevier recompiles from the .bib at
+# submission, so the patch would not survive the journal anyway. Page ranges are
+# therefore the style's dash and not ours. The carve-out is deliberately narrow:
+# digits either side, and only after the References heading, so a range in the
+# body still fails.
+endash_body=$(sed '/^[[:space:]0-9.]*References[[:space:]]*$/,$d' <<<"$pdf_text" \
+              | grep -oF '–' | wc -l)
+# Joined into one line first. A page range that wraps prints as "pp. 3473–" at
+# the end of one line and "3487" at the start of the next, and the digit the
+# lookahead needs is on the other side of a newline: the carve-out then misses
+# it and the range reads as a stray dash. Two of the sixteen wrap today, and
+# which two depends on pagination, so the check would move on its own.
+endash_refs=$(sed -n '/^[[:space:]0-9.]*References[[:space:]]*$/,$p' <<<"$pdf_text" \
+              | tr -d '\n' | grep -oP '(?<![0-9])–|–(?![0-9])' | wc -l)
+if [[ "$endash_body" -eq 0 && "$endash_refs" -eq 0 ]]; then
+    pass "no en dash in the rendered text, bar bst-generated page ranges"
+else
+    fail "$endash_body en dash(es) in the body, $endash_refs outside a page range"
+    sed '/^[[:space:]0-9.]*References[[:space:]]*$/,$d' <<<"$pdf_text" \
+        | grep -m3 -oE '.{40}–.{40}' | sed 's/^/        /'
+    note "sources spell it --; a range reads better as \"7 to 85%\" anyway"
+fi
+
+# Arrows. Every one of them stood between two things a preposition joins just as
+# well, which is why none of the seven needed a replacement longer than "to".
+arrows=$(grep -oP '[\x{2190}-\x{21FF}\x{27F0}-\x{27FF}]' <<<"$pdf_text" | wc -l)
+if [[ "$arrows" -eq 0 ]]; then
+    pass "no arrow glyphs in the rendered text"
+else
+    fail "$arrows arrow glyph(s) reached the page"
+    grep -m3 -oP '.{40}[\x{2190}-\x{21FF}\x{27F0}-\x{27FF}].{40}' <<<"$pdf_text" | sed 's/^/        /'
+    note "sources spell it \$\\rightarrow\$; write the relation as words"
 fi
 
 section_sign=$(grep -oF '§' <<<"$pdf_text" | wc -l)

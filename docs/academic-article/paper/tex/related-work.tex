@@ -18,7 +18,7 @@ LADDER \cite{alam2023ladder}, to
 retrieval-augmented generation. TechniqueRAG \cite{lekssays2025techniquerag} pairs off-the-shelf retrievers with an
 instruction-tuned re-ranker and fine-tunes only the generator, motivated by the field's data
 scarcity. ATT\&CK defines over 550 (sub-)techniques while roughly 10,000 annotated examples exist
-publicly. A \emph{separate} group's hierarchical successor, H-TechniqueRAG \preprintcite{morbiato2026hierarchical}, injects the tactic$\rightarrow$technique taxonomy as an inductive bias, filtering at tactic level first to cut the candidate space by 77.5\%.
+publicly. A \emph{separate} group's hierarchical successor, H-TechniqueRAG \preprintcite{morbiato2026hierarchical}, injects the tactic-to-technique taxonomy as an inductive bias, filtering at tactic level first to cut the candidate space by 77.5\%.
 It also reports an F1 gain and a latency reduction over TechniqueRAG. We do not restate those two
 figures. They are unreviewed and self-reported against a baseline that the SoK below finds
 ``largely incomparable'' to its neighbours, so quoting them here would contradict the paragraph
@@ -38,7 +38,7 @@ domain instantiation of Infer-Retrieve-Rank \preprintcite{doosterlinck2024incont
 many-thousand-class label space, reaching state of the art on three benchmarks with tens of
 labelled examples. Ours is stricter than \preprintcite{doosterlinck2024incontext} and than \cite{lekssays2025techniquerag}. In both of those the language model
 still ranks or selects among retrieved candidates, whereas here it never emits an identifier and
-any correction is gated to the provably-safe invalid$\rightarrow$valid case. We do not claim the idea.
+any correction is gated to the provably-safe invalid-to-valid case. We do not claim the idea.
 
 What we contribute is a decomposition of the SoK's insight. \cite{buchel2025sok} reports that embedders lose; we
 measure \emph{where}. Ranking quality and gate quality behave as separable axes here. Dense embeddings
@@ -63,8 +63,8 @@ not a discovery: grammatical error correction has studied over-correction for ye
 evaluates with F0.5 precisely because a false correction costs more than a missed one \cite{ng2014conll,bryant2019bea}, and
 recent work targets the failure directly. Our contribution is the \emph{mechanism} in this setting:
 correct-but-weak and wrong-but-valid identifiers are not separable by an alignment score, so
-the valid$\rightarrow$valid swap cannot be safely tuned at any error rate, which is why the shipped policy is
-restricted to the invalid$\rightarrow$valid case, where zero regression holds by construction rather than by
+the valid-to-valid swap cannot be safely tuned at any error rate, which is why the shipped policy is
+restricted to the invalid-to-valid case, where zero regression holds by construction rather than by
 tuning.
 
 Finally, the failure that motivates removing identifier recall in the first place. Asked for an
@@ -90,7 +90,7 @@ that the cheaper mitigation a practitioner reaches for first does not.
 
 Agentic systems now drive reverse-engineering backends through tool interfaces, and the model
 tier splits sharply by role. Fine-tuned binary specialists are overwhelmingly small and
-open-weight, among them ReCopilot \preprintcite{chen2025recopilot} on Qwen2.5-Coder-7B, LLM4Decompile \cite{tan2024llm4decompile} at 1.3--33B and Nova \cite{jiang2025nova}, while the
+open-weight, among them ReCopilot \preprintcite{chen2025recopilot} on Qwen2.5-Coder-7B, LLM4Decompile \cite{tan2024llm4decompile} at 1.3B to 33B and Nova \cite{jiang2025nova}, while the
 \emph{tool-driving} agents use frontier models. TTPDetect \preprintcite{ttpdetect2026} is the closest system to ours: it
 identifies TTPs in stripped malware binaries using dense plus neural retrieval to narrow
 analysis entry points, then a function-level agent with incremental context retrieval, reporting
@@ -104,7 +104,7 @@ six deterministic detectors, three domain analysts and a corroboration cascade; 
 different system, but ``different'' is not a contribution until the difference is measured.
 
 The one gap we do occupy is tool-catalogue scale. Degradation of tool selection as the catalogue
-grows is documented generally. LongFuncEval \preprintcite{kate2025longfunceval} reports a 7--85\% performance drop as the tool count
+grows is documented generally. LongFuncEval \preprintcite{kate2025longfunceval} reports a 7 to 85\% performance drop as the tool count
 increases, and reducing an edge model's catalogue from 46 to 19 tools cuts execution time by up to 70\% \cite{paramanayakam2025lessismore}, but has not been measured for a reverse-engineering catalogue, where schemas are large
 and tools semantically overlap. Our finding that exposing \textasciitilde201 Ghidra MCP tools ($\approx$22k tokens of
 schema) is infeasible at this model scale, motivating a curated 20-tool allowlist with
@@ -123,7 +123,7 @@ token budget constant and find single agents consistently match or beat multi-ag
 multi-hop reasoning, supported by an information-theoretic argument from the Data Processing
 Inequality. Under a fixed budget with good context utilisation, decomposition introduces
 communication bottlenecks that lose information. Bertalanič and Fortuna \cite{bertalanic2026consensus} reach the same
-conclusion on 7--8B open-weight models, where debate consumed 2.1--3.4$\times$ more tokens for equal or
+conclusion on 7B and 8B open-weight models, where debate consumed 2.1 to 3.4$\times$ more tokens for equal or
 lower accuracy, and name three failure modes, namely sycophantic conformity (modal adoption up to
 85.5\%), contextual fragility, and consensus collapse discarding correct answers already present
 in the generation pool.
@@ -144,9 +144,9 @@ source it was copied from. In a security pipeline the harm is not a wrong answer
 fabricated independent confirmation.
 
 Finally, weighting evidence by source reliability and discounting non-independent sources is
-Dempster--Shafer theory, decades old. Our cascade is an instance of it with hand-chosen constants,
+Dempster-Shafer theory, decades old. Our cascade is an instance of it with hand-chosen constants,
 and we treat that as a limitation: measuring five perturbations of those constants, including
-inverting the most- and least-trusted layers, changed the top-10 ranking on 10.6--27.5\% of
+inverting the most- and least-trusted layers, changed the top-10 ranking on 10.6 to 27.5\% of
 samples and the corroborated set on none, because the corroboration decision is a function
 of layer count alone.
 
@@ -158,8 +158,8 @@ fine-tunes eight open-weight models for x86 reverse engineering explicitly becau
 closed-network facilities'', and validates with a 43-participant user study in which line-level
 comprehension improved significantly (p=0.031) while the correct-solve rate rose from 31\% to 53\%
 without reaching significance (p=0.189). The capability gap is quantified: the UK AI Security
-Institute places open-weight cyber capability 4--7 months behind the closed frontier, narrowing
-from 6--10 months, at roughly 45$\times$ lower cost per task.
+Institute places open-weight cyber capability 4 to 7 months behind the closed frontier, narrowing
+from 6 to 10 months, at roughly 45$\times$ lower cost per task.
 
 Position. We inherit this constraint and cite it; we do not claim it. Our deployment
 contribution is narrower and practitioner-facing: on a hybrid-offload MoE, KV cache costs
@@ -173,7 +173,7 @@ comparable deployment-economics reporting for a complete local security pipeline
 This work's methodological results belong to an established critique tradition rather than
 preceding it. Arp et al.'s \emph{Dos and Don'ts} identified ten pitfalls in ML-for-security;
 Chasing Shadows \cite{evertz2026chasing} is its direct successor, surveying all 72 peer-reviewed
-LLM-security papers from 2023--2024 and finding that every one contains at least one of nine
+LLM-security papers from 2023 and 2024 and finding that every one contains at least one of nine
 pitfalls, with only 15.7\% explicitly discussed. Broader benchmark audits reach the same place
 from the construct-validity direction across 445 LLM benchmarks.
 
@@ -436,7 +436,7 @@ registry is now checked in the opposite direction as well. A quoted value must a
 beside the citation it is declared to come from, so a binding that has drifted fails the build
 rather than reading as verified.
 
-Acting on \cite{ng2014conll,bryant2019bea}--\cite{dev2026judge} now is conservative because each one \emph{demotes} a claim of ours, the safe
+Acting on \cite{ng2014conll,bryant2019bea} through \cite{dev2026judge} now is conservative because each one \emph{demotes} a claim of ours, the safe
 direction. Citing them in a submitted paper on this basis would not be, and the standing rule from
 the 2026-08-08 citation audit applies. A search summary is a lead, not a source. That audit exists
 because one fabricated a claim.

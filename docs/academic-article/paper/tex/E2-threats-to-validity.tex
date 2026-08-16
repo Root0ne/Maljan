@@ -2,7 +2,7 @@
 \label{sec:threats}
 
 We organise this section around the nine pitfalls of \emph{Chasing Shadows} \cite{evertz2026chasing}, which surveyed all 72
-peer-reviewed LLM-security papers of 2023--2024 and found every one exposed to at least one,
+peer-reviewed LLM-security papers of 2023 and 2024 and found every one exposed to at least one,
 with only 15.7\% discussing any \cite{evertz2026chasing}. We add two checks the survey does not have, both of which caught errors
 in this work. Where a pitfall is genuinely closed we say so; where it is not, we say what remains
 rather than what we intend.
@@ -316,7 +316,7 @@ memory was accounted to that scope; the kernel's log named the scope plainly and
 until the third failure. Every fix we made chose \emph{which process} the kernel would kill, and the
 defect was \emph{whose accounting it was killed inside}.
 
-We report this because it is the same error as M1--M4 in a different register: a mechanism that looked
+We report this because it is the same error as M1 through M4 in a different register: a mechanism that looked
 like it was working, an intervention that addressed a real thing at the wrong layer, and a log line
 that had contained the answer for two days. A measurement environment is not a backdrop to the
 measurement, and the discipline that catches this is not cleverness; it is reading the error

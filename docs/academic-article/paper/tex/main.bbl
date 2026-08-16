@@ -136,8 +136,8 @@ K.~Satvat, R.~Gjomemo, V.~N. Venkatakrishnan, {EXTRACTOR}: Extracting attack
 
 \bibitem{li2022attackg}
 Z.~Li, J.~Zeng, Y.~Chen, Z.~Liang, {AttacKG}: Constructing technique knowledge
-  graph from cyber threat intelligence reports, in: Computer Security --
-  ESORICS, 2022, pp. 589--609.
+  graph from cyber threat intelligence reports, in: Computer Security, ESORICS,
+  2022, pp. 589--609.
 \newblock \href {https://doi.org/10.1007/978-3-031-17140-6_29}
   {\path{doi:10.1007/978-3-031-17140-6_29}}.
 
@@ -169,7 +169,7 @@ Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
 
 \bibitem{buchel2025sok}
 M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
-  Automated {TTP} extraction from {CTI} reports -- are we there yet?, in: 34th
+  Automated {TTP} extraction from {CTI} reports, are we there yet?, in: 34th
   USENIX Security Symposium, 2025, pp. 4621--4641.
 
 \bibitem{doosterlinck2024incontext}
@@ -308,7 +308,7 @@ J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
 \bibitem{metz2012baselines}
 J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
   predictive evaluation measure baselines for multi-label learning, in:
-  Advances in Artificial Intelligence -- IBERAMIA, Lecture Notes in Computer
+  Advances in Artificial Intelligence, IBERAMIA, Lecture Notes in Computer
   Science, 2012, pp. 189--198, verified against Crossref 2026-08-16. Crossref
   types LNCS proceedings as book-chapter by convention; the container title is
   the IBERAMIA 2012 proceedings.

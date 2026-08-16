@@ -77,7 +77,7 @@ That is a bound on the pipeline's contribution, not a demonstration that the con
 Why the cohort is \fact{baseline-n} and not \fact{audit-tasks}, and why the reason is not the one we
 first wrote down. The cohort was submitted as one batch and the sandbox reported every task as
 complete. It had not been. Querying each task's timing shows a split with nothing between the modes:
-the \fact{audit-real} tasks whose reports survived ran for \fact{audit-real-min}--\fact{audit-real-max} s, and
+the \fact{audit-real} tasks whose reports survived ran for \fact{audit-real-min} to \fact{audit-real-max} s, and
 the other \fact{audit-instant} ran for under a second, all \fact{audit-reported-but-instant} of them
 still marked \texttt{reported}, none with a report directory. A Windows PE does not detonate in one second.
 The ordering implicates the instrument rather than the samples, real analyses run through one
@@ -683,7 +683,7 @@ attempted and six survived screening.
 \toprule
 excluded & n & why \\
 \midrule
-degenerate decode & \fact{sink-excluded-degenerate} & an arm emitting \fact{degenerate-claims-min}--\fact{degenerate-claims-max} claims across \fact{degenerate-tids-min}--\fact{degenerate-tids-max} technique IDs (ratios \fact{degenerate-ratio-min}--\fact{degenerate-ratio-max}) \\
+degenerate decode & \fact{sink-excluded-degenerate} & an arm emitting \fact{degenerate-claims-min} to \fact{degenerate-claims-max} claims across \fact{degenerate-tids-min} to \fact{degenerate-tids-max} technique IDs, ratios \fact{degenerate-ratio-min} to \fact{degenerate-ratio-max} \\
 unattributable & \fact{sink-excluded-unattributable} & both arms dead, and the host state needed to decide whether the pipeline or the machine failed was never recorded \\
 incomplete & \fact{sink-excluded-incomplete} & an arm exceeded the \setting{630} s bound, a genuine outcome, but it costs the pair \\
 \bottomrule
@@ -716,8 +716,8 @@ rather than repair. The recovered pair contributed a \fact{sink-recovered-pair-d
 Running it, however, surfaced a production defect that the test suite (\fact{test-count} passing) did not: on any binary
 rich enough to exhaust the \fact{react-step-budget}-step ReAct budget, the analyst returned zero techniques, because
 the salvage path received a fresh copy of a budget it was already inside. Fixed and verified on the
-same sample; \fact{m4-fix-before-seconds} s $\rightarrow$ \fact{m4-fix-after-seconds} s,
-\fact{m4-fix-before-tids} $\rightarrow$ \fact{m4-fix-after-tids} technique IDs. The fix is partial. One sample still exceeds
+same sample, from \fact{m4-fix-before-seconds} s to \fact{m4-fix-after-seconds} s and from
+\fact{m4-fix-before-tids} to \fact{m4-fix-after-tids} technique IDs. The fix is partial. One sample still exceeds
 the bound, and the server's own timings show generation varying from \fact{decode-rate-fast} to
 \fact{decode-rate-slow} tokens/s on this
 hybrid recurrent architecture, so a bounded input does not rescue a case where the tokens themselves

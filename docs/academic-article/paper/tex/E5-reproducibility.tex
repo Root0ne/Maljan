@@ -169,7 +169,7 @@ artefact & what it is & committed \\
 \midrule
 \texttt{temporal\_manifest.json} & \fact{drift-n} dated samples, \fact{drift-cohorts} cohorts, \fact{drift-families} families, metadata only, no binaries & yes \\
 \texttt{dynamic\_cohort\_n100.json} & the n=\fact{cohort-n} dynamic cohort: Windows PE only, stratified by year, seed \fact{cohort-seed}, digest recorded & yes \\
-\texttt{\seqsplit{cape\_task\_ledger\_n100.json}} & sha256 $\rightarrow$ CAPE task id for all \fact{cohort-n} submissions & yes \\
+\texttt{\seqsplit{cape\_task\_ledger\_n100.json}} & sha256 to CAPE task id for all \fact{cohort-n} submissions & yes \\
 \texttt{sink\_hint\_frequency.json} & per-sample hint measurement, n=\fact{cohort-n} attempted & yes \\
 \texttt{cape\_baseline.json} & per-sample CAPE-only scores & yes \\
 \texttt{consensus\_ablation.json}, \texttt{frontier\_probe*.json}, \ldots{} & per-sample arms for every ablation, one file per arm and configuration & yes \\
@@ -241,7 +241,7 @@ recorded in the result file, and not acted on. The re-run requesting it returned
 \fact{arm-default-nothink-reasoning} reasoning share against \fact{arm-default-reasoning}
 without it. On DashScope the same request produces \fact{arm-qwen35ba3b-nothink-reasoning}. This
 is the line in this appendix that matters most to anyone comparing arms, because the flag is
-worth \fact{reasoning-flag-worth-low}--\fact{reasoning-flag-worth-high} F1 on the two models where it can be set, and an arm can therefore be labelled
+worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1 on the two models where it can be set, and an arm can therefore be labelled
 matched while running the opposite configuration. \texttt{eval\_parameter\_size\_series.py} selects arms on
 the measured reasoning share for exactly this reason and refuses to correlate when fewer than
 three configuration-matched arms span three parameter counts, which, on these endpoints, is
