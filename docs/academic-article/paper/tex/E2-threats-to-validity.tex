@@ -1,9 +1,9 @@
 \section{Threats to Validity}
 \label{sec:threats}
 
-We organise this section around the nine pitfalls of \emph{Chasing Shadows} {[}9{]}, which surveyed all 72
+We organise this section around the nine pitfalls of \emph{Chasing Shadows} \cite{evertz2026chasing}, which surveyed all 72
 peer-reviewed LLM-security papers of 2023--2024 and found every one exposed to at least one,
-with only 15.7\% discussing any {[}9{]}. We add two checks the survey does not have, both of which caught errors
+with only 15.7\% discussing any \cite{evertz2026chasing}. We add two checks the survey does not have, both of which caught errors
 in this work. Where a pitfall is genuinely closed we say so; where it is not, we say what remains
 rather than what we intend.
 
@@ -205,10 +205,14 @@ samples).
 
 This check is a \textbf{refinement, not a discovery}, and we counter-searched it before claiming
 otherwise: ``distinct inputs should produce distinct outputs'' is an ordinary metamorphic relation
-{[}22{]}, stress-testing a judge's consistency under input variation is established practice {[}23{]}, and
-the genus --- silent failures in
-production LLM agent runtimes, defined as \emph{``a failure whose error signal never reaches a human in
-actionable form''} --- is described with a five-class taxonomy our defects fall into {[}20{]}. What we add
+\cite{li2024metamorphic}, stress-testing a judge's consistency under input variation is established practice \cite{dev2026judge}, and
+the genus --- a failure whose error signal never reaches
+a human in actionable form --- is long established: the majority of network-partition failures in
+cloud systems are silent, and the warnings the rest produce are ``confusing, with no clear mechanism
+for resolution'' \cite{alquraan2018partition}, while a quarter of catastrophic failures in
+distributed systems come from errors that were signalled and then ignored \cite{yuan2014simple}.
+Agent and inference runtimes are now being taxonomised on the same lines
+\cite{xue2025agentbugs,liu2026inference}. What we add
 is the setting: an evaluation pipeline for security research, where the output is not a degraded
 user session but \textbf{a measurement that is wrong and looks right}, together with three mechanisms at
 three integration boundaries and one withdrawn study as the demonstrated cost.

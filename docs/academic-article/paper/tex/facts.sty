@@ -62,5 +62,38 @@
 % become a way of laundering a measurement into a constant.
 \newcommand{\setting}[1]{#1}
 
+% \preprintcite — a citation to work that has not been peer reviewed.
+%
+% Four sources in this paper have no reviewed venue and were kept anyway. Every
+% one of them exists to *weaken* a claim of ours: that silent overruling of a
+% request parameter is a known wart, that the idea our design instantiates is
+% not ours, that the correlation our defective study reproduced was already in
+% the literature. Removing them for want of a venue would quietly convert
+% "this is known, we measured the consequence" into a novelty claim, which is
+% the one direction a paper about citation discipline must not drift.
+%
+% So they stay, and they say what they are. This prints in the body: a reader
+% who declines unreviewed evidence can see exactly which sentence to discount,
+% and the check in tests/evaluation/test_paper_citations.py refuses a citation
+% to an unreviewed entry on a line that does not carry this marker.
+\newcommand{\preprintcite}[1]{\cite{#1}~\textbf{[preprint]}}
+
+% \unresolvedcite — a quoted figure whose source is not verified.
+%
+% The hand-numbered reference list recorded rho=0.85 and its p-value as coming
+% from entry [11]. Entry [11] is a paper about multi-hop reasoning under equal
+% thinking-token budgets; it cannot be the source of a rank correlation between
+% parameter count and ATT&CK-classification F1. Two different sources had been
+% collapsed onto one number, and rebuilding the bibliography as BibTeX is what
+% exposed it — the same number could no longer point at two papers.
+%
+% The figure is kept because this paper reproduces it and the reproduction is a
+% result. The citation is not asserted. This prints in the body rather than
+% hiding in a comment, because a debt that is only in the source is a debt that
+% ships: the numeral checker exempts these two values *only* on a line carrying
+% this marker, so removing the marker without resolving the source fails the
+% build.
+\newcommand{\unresolvedcite}{\textbf{[source unresolved]}}
+
 \makeatother
 \endinput

@@ -1,0 +1,47 @@
+{
+ "schema": "maljan-preprint-status/v1",
+ "note": "Bibliography entries with no peer-reviewed venue. Every entry was checked against arXiv, dblp, Crossref and publisher pages on 2026-08-16. Five that had been recorded as preprints turned out to be published and left this file; three were replaced with peer-reviewed work and left the bibliography. The seven that remain were kept deliberately: each one concedes ground rather than claiming it, so removing it for want of a venue would make the paper appear more original than it is. Every citation to them carries a visible [preprint] marker, enforced by tests/evaluation/test_paper_citations.py.",
+ "rule": "Every entry in refs.bib without a booktitle or journal must appear here. A new preprint added without a status fails tests/evaluation/test_paper_citations.py. Nothing here may name a venue that has not been verified against the publisher: guessing a venue is the failure this paper's citation audit already caught four times.",
+ "verified_offline": false,
+ "entries": {
+  "tran2026single": {
+   "quotes": [
+    "0.7"
+   ],
+   "load_bearing": true,
+   "status": "unresolved",
+   "action": "Kept and marked. Says our null is not the first of its kind. Bertalanic and Fortuna reach the same conclusion in a reviewed venue and now carry the paragraph, but the crossover figure for our own model class has no reviewed equivalent."
+  },
+  "ttpdetect2026": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "unresolved",
+   "action": "Kept and marked. It is the nearest system to ours and the sentence citing it concedes ground rather than claims it; no peer-reviewed system with the same scope was found, and dropping it would let the paper imply it holds that ground itself."
+  },
+  "doosterlinck2024incontext": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "likely-published-unverified",
+   "action": "Infer-Retrieve-Rank is the program our design instantiates, so a reviewed citation would carry weight. Resolve before adding."
+  },
+  "metz2015comparing": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "likely-published-unverified",
+   "action": "Kept and marked. Supports the requirement to compare against a trivial baseline — a requirement this paper obeys and which weakens its own numbers."
+  },
+  "ryan2026attck": {
+   "quotes": [
+    "0.85",
+    "0.014"
+   ],
+   "load_bearing": true,
+   "status": "unresolved",
+   "action": "Identified on 2026-08-16 as the source of the rank correlation the paper had been attributing to a paper about multi-hop reasoning. The full text was read to confirm the figures, which the abstract does not give. Still a preprint; search for a published version before submission."
+  }
+ },
+ "not_papers": {
+  "llamacpp8634": "An issue tracker entry, cited as an artefact rather than as a source. It is evidence that the incompatibility is known, and a reviewed paper would not serve that purpose better.",
+  "vllm11976": "As above."
+ }
+}

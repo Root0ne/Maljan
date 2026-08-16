@@ -177,7 +177,7 @@ constant as an unusually clean null, because a clean null was the result we were
 The most recent (2026-08-14), and the only one whose wrong answer \textbf{agreed with the literature}.
 
 We assembled a parameter-size series to test a published finding that parameter count is the only
-significant predictor of ATT\&CK-classification F1 ($\rho$=0.85 {[}11{]}). The harness read every completed arm
+significant predictor of ATT\&CK-classification F1 ($\rho$=0.85 \preprintcite{ryan2026attck}). The harness read every completed arm
 file, ranked mean F1 against total parameters, and reported \textbf{$\rho$=\fact{superseded-rho}} --- reproducing the prior
 almost exactly, across a \fact{series-param-span}$\times$ span, with the confounds it could not remove printed honestly beneath.
 
@@ -206,12 +206,15 @@ direction the literature predicts, with its limitations already stated. There wa
 to notice. It was caught by reading the arms table under the correlation and asking why one model
 was on it twice --- which is a question no result, however wrong, would have prompted.
 
-\textbf{And the phenomenon is not ours.} \texttt{arXiv:2604.00025} shows that an inference-time output-length
-constraint \emph{reverses} performance hierarchies between large and small models
---- a 28.4-point gap inverted {[}24{]} --- and frames it as a methodological confound requiring protocols that adapt to
-the model rather than a universal one. Our reasoning flag consumes the answer budget, which makes
-the disabled arm a brevity-constrained arm under a different name, and a reversal is a stronger
-result than a spurious correlation. We report M6 as a domain instance of that finding.
+\textbf{And the phenomenon is not ours.} Sun et al.~\cite{sun2025length} show that under a strict
+output-length constraint the ordering of models by capability \emph{does not hold}: inside a
+constrained budget window a smaller model can match or beat a larger one, with the ordinary ordering
+restored once the budget relaxes. They state the same for reasoning modes specifically: under the
+same constraint, reasoning models do not always beat instruction-tuned ones.
+Our reasoning flag consumes the answer budget, which makes the disabled arm a brevity-constrained
+arm under a different name, so M6 is a domain instance of that finding rather than a new phenomenon.
+We claim the local form of the result and not a global reversal, because the local form is what the
+reviewed literature carries.
 
 What we would add is narrower and sits in the remedy rather than the phenomenon: their protocol is
 adapted per model, ours has to be \textbf{verified per arm}, because matching on the requested
@@ -255,7 +258,7 @@ different question three hours earlier.
 
 \textbf{The incompatibility itself is known; the consequence is what we contribute.} That
 OpenAI-compatible servers disagree about token-limit parameters is documented in their own issue
-trackers --- \texttt{llama.cpp} \#8634 {[}25{]} reports generation continuing to the context limit when the
+trackers --- \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634,vllm11976} reports generation continuing to the context limit when the
 cap is not honoured on one of its endpoints. We are not reporting a new integration wart. We are reporting
 what one costs inside a measurement: a documented safety property silently absent for as long as it
 has existed, and half of a study's calls diverted onto a bundle-construction path that skips the
@@ -367,13 +370,18 @@ We now report it beside every batch result: \fact{cardinality-distinct-graphs} d
 sizes across \fact{cardinality-samples} samples.
 
 \textbf{This is a refinement, not a discovery, and we checked before saying otherwise.} ``Distinct inputs
-should produce distinct outputs'' is an ordinary metamorphic relation {[}22{]}; metamorphic testing
+should produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}; metamorphic testing
 exists precisely for programs whose correct output is unknown --- the \emph{``notorious oracle problem''}
 its own survey names. Stress-testing an LLM judge's consistency under input variation is likewise
-established practice {[}23{]}. And
-the genus is described: a longitudinal study of a production LLM agent runtime defines the
-meta-pattern as \emph{``a failure whose error signal never reaches a human in actionable form''} and gives
-a five-class taxonomy {[}20{]} into which all four of our \textbf{boundary} mechanisms fall. M5, M6 and M7 share
+established practice \cite{dev2026judge}. And
+the genus is described, in systems work older than this field. Alquraan et
+al.~\cite{alquraan2018partition} find that the majority of network-partition failures in cloud
+systems are silent and that every warning the rest produced was ``confusing, with no clear mechanism
+for resolution''; Yuan et al.~\cite{yuan2014simple} count a handler that only logs as ignoring the
+error, and attribute a quarter of catastrophic failures to exactly that; Gunawi et
+al.~\cite{gunawi2008eio} measure where the signal is lost, at calls between modules. Bug taxonomies
+for LLM agent frameworks and inference engines now report the same shape
+\cite{xue2025agentbugs,liu2026inference}. All four of our \textbf{boundary} mechanisms fall inside it. M5, M6 and M7 share
 the meta-pattern but not the setting: no server misled us, and no protocol was involved. Two arose
 inside our own analysis code and one inside the production pipeline, and in all three the
 taxonomy's classes --- every one of which describes a call to something else --- do not reach.

@@ -32,9 +32,11 @@ that instinct is exactly wrong. Adding a sixth fixture would have moved the atta
 
 \subsection{Where a measurement's cause is assigned rather than measured}\label{where-a-measurements-cause-is-assigned-rather-than-measured}
 
-The failure taxonomy we counter-searched against organises silent failures by the boundary crossed
-{[}20{]}. Four of our seven crossed one: a sandbox, a decompiler server, an inference endpoint. Three
-crossed none. No server misled us, no protocol was involved, and no network was in the path.
+The literature we counter-searched against locates silent failures at the boundary between
+modules: error codes are dropped at inter-module calls often enough to be measured, at
+13\% of propagation channels in one file-system study \cite{gunawi2008eio}, and a handler that only logs
+is counted as ignoring the error \cite{yuan2014simple}. Four of our seven crossed such a boundary: a
+sandbox, a decompiler server, an inference endpoint. Three crossed none. No server misled us, no protocol was involved, and no network was in the path.
 
 What the seven share is not a boundary but an \textbf{attribution}. In each case a measurement's cause
 was assigned rather than measured. An ablation varied the deterministic reconciliation step and we
@@ -78,7 +80,7 @@ their outputs and not the host state, and they remain unattributable. The rule y
 failure is scoped to that failure.
 
 \textbf{A server that answers is not the same as a server that answered your question.} Four of our
-defects are instances of it, and the class is documented {[}20{]}. Our contribution is the setting and
+defects are instances of it, and the class is documented \cite{yuan2014simple,alquraan2018partition}. Our contribution is the setting and
 the price: in an evaluation pipeline the artefact of such a failure is not a degraded user session
 but a measurement that is wrong and looks right, and the price we paid was a completed \fact{drift-n}-sample
 study that can no longer be asked its question.

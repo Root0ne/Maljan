@@ -41,6 +41,8 @@ _REPO_ROOT = _HERE.parent.parent
 _PAPER = _REPO_ROOT / "docs" / "academic-article" / "paper" / "tex"
 _FACTS = _HERE / "paper_facts.json"
 _QUOTED = _PAPER.parent / "quoted-numbers.json"
+# What the text must carry beside a quoted figure whose source is unverified.
+_UNRESOLVED_MARKER = "\\unresolvedcite"
 
 # Sections whose numbers are the paper's own measurements. `related-work.tex` is
 # not here: its numbers are quoted from cited literature, which no derivation can
@@ -171,7 +173,12 @@ def _quoted_index() -> dict[str, set[str]]:
     blob = json.loads(_QUOTED.read_text())
     out: dict[str, set[str]] = {}
     for rec in blob.get("quoted", []):
-        out.setdefault(str(rec["value"]), set()).add(str(rec["cite"]))
+        # cite=null is a figure whose source was not recovered when the
+        # bibliography was rebuilt. It is exempt only beside the unresolved
+        # marker, so an unverified citation stays visible in the source
+        # instead of becoming a number with a plausible reference next to it.
+        key = str(rec["cite"]) if rec.get("cite") else _UNRESOLVED_MARKER
+        out.setdefault(str(rec["value"]), set()).add(key)
     return out
 
 
@@ -180,9 +187,16 @@ def _offenders(path: Path) -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         cleaned = _strip(raw)
-        # pandoc writes a citation bracket as {[}24{]}; both forms are accepted.
-        cites = set(re.findall(r"\{\[\}(\d+)\{\]\}|\[(\d+)\]", raw))
-        on_line = {a or b for a, b in cites}
+        # Citations are \cite{key} or \cite{key1,key2} since the bibliography
+        # became BibTeX. Keying the exemption on the bib key rather than on a
+        # number is the point of the move: the numbers are BibTeX's now and it
+        # renumbers them, which a hand-maintained registry cannot follow.
+        on_line: set[str] = set()
+        # \preprintcite is \cite plus a visible marker; both carry the source.
+        for group in re.findall(r"\\(?:cite|preprintcite)\{([^}]*)\}", raw):
+            on_line.update(k.strip() for k in group.split(",") if k.strip())
+        if _UNRESOLVED_MARKER in raw:
+            on_line.add(_UNRESOLVED_MARKER)
         for match in _NUMERAL.finditer(cleaned):
             token = match.group(0)
             if token.lower() in _STRUCTURAL:

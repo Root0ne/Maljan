@@ -210,8 +210,9 @@ that all \fact{fixture-clusters} samples moved the same way, which is worth repo
 demonstration of sensitivity.
 
 This was pre-registered as the experiment that would decide the paper's framing. The literature's
-prior ran the same way: two 2026 equal-budget studies find single agents match or beat debate, and
-\texttt{arXiv:2604.02460} §5.3 reports a crossover at $\alpha$=0.7 on our own model class.
+prior ran the same way: Bertalani\v{c} and Fortuna \cite{bertalanic2026consensus} find debate
+consuming more tokens for equal or lower accuracy on open-weight models of our size, and a second
+study reports a crossover at $\alpha$=0.7 on our own model class \preprintcite{tran2026single}.
 
 \subsubsection{The same three arms on real binaries, where the design can
 see}\label{consensus-replication}
@@ -433,7 +434,7 @@ significance.
 
 We report the frontier null because the literature's prior predicts otherwise:
 \texttt{arXiv:2606.18166} found parameter size the \emph{only} statistically significant predictor of
-ATT\&CK-classification F1 ($\rho$=0.85, p=0.014) {[}11{]} on the nearest task. On this task, at this budget, we do
+ATT\&CK-classification F1 ($\rho$=0.85, p=0.014 \preprintcite{ryan2026attck}) on the nearest task. On this task, at this budget, we do
 not reproduce that --- and we cannot test it as a series either: a rank correlation over model size
 needs the arms matched on the flag that is worth more than the size effect, and the only endpoint
 we have above 35B does not permit that match. Two of our arms are configuration-matched and both

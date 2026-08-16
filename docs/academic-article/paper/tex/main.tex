@@ -7,12 +7,16 @@
 % a Unicode minus is a dash-shaped glyph at text metrics and this paper reports
 % several hundred signed numbers.
 %
-% Single column deliberately. The paper carries two dozen wide tables of
-% measurements, which cannot live in a two-column body; venue formatting is a
-% last step and a draft whose tables are readable is worth more than one that
-% looks like a proceedings.
-\documentclass[11pt]{article}
+% Elsevier's elsarticle, in `preprint` — which is single column, and chosen
+% rather than settled for. `5p` and `3p` set two columns for the typeset
+% version; this paper carries two dozen wide tables of measurements that do not
+% survive a 3.5-inch measure, and Elsevier's own guidance is that a submission
+% is prepared as a preprint and typeset by the journal. Switching to `final,5p`
+% later is a one-word change to this line and a rebuild of those tables, which
+% is the journal's job to trigger and not a decision to pre-empt.
+\documentclass[preprint,11pt]{elsarticle}
 
+% elsarticle loads natbib itself and numbers with elsarticle-num below.
 \usepackage{fontspec}
 \setmainfont{TeX Gyre Termes}
 \setmonofont[Scale=0.85]{DejaVu Sans Mono}
@@ -23,6 +27,9 @@
 \usepackage{unicode-math}
 \setmathfont{TeX Gyre Termes Math}
 
+% elsarticle sets its own measure. The tables here were laid out against a
+% wider one, so the margin is kept — narrowing it now would reintroduce the
+% overfull boxes the build refuses, and the journal resets both anyway.
 \usepackage[margin=0.75in]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -72,21 +79,34 @@
 \usepackage{facts}
 \input{facts}
 
+\journal{Computers \& Security}
+
+\begin{document}
+
+\begin{frontmatter}
+
 % Set once the paper was finished, applying the choice recorded in the outline
 % rather than making a new one: the contribution is the discipline, and the
 % negatives are evidence for it rather than the subject.
 \title{What It Takes to Trust a Measurement:\\
 Instrument Failures in an LLM Malware-Analysis Pipeline}
-\author{}
-\date{}
 
-\begin{document}
-\maketitle
+% Deliberately empty. The anonymity gate reads the whole document including the
+% preamble, and elsarticle is happy to typeset a frontmatter with no author
+% block. Names, affiliations and the credit statement go in at submission, in
+% one place.
+\author{}
 
 \begin{abstract}
 \input{abstract}
 \end{abstract}
-\vspace{0.6em}
+
+\begin{keyword}
+LLM agents \sep malware analysis \sep MITRE ATT\&CK \sep
+evaluation methodology \sep clustered inference \sep negative results
+\end{keyword}
+
+\end{frontmatter}
 
 \input{E4-outline}
 \input{related-work}
@@ -100,6 +120,9 @@ Instrument Failures in an LLM Malware-Analysis Pipeline}
 \input{E8-conclusion}
 \input{E9-declarations}
 \input{EA-references}
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
 
 \appendix
 \input{E5-reproducibility}

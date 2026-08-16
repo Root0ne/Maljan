@@ -1,0 +1,296 @@
+\begin{thebibliography}{10}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname href\endcsname\relax
+  \def\href#1#2{#2} \def\path#1{#1}\fi
+
+\bibitem{gunawi2008eio}
+H.~S. Gunawi, C.~Rubio-Gonz{\'a}lez, A.~C. Arpaci-Dusseau, R.~H.
+  Arpaci-Dusseau, B.~Liblit, {EIO}: Error handling is occasionally correct, in:
+  6th USENIX Conference on File and Storage Technologies (FAST), 2008, measures
+  error loss at module boundaries: 1153 of 9022 propagation channels (13\%)
+  drop an error code without handling it, and inter-module calls are a major
+  cause.
+
+\bibitem{yuan2014simple}
+D.~Yuan, Y.~Luo, X.~Zhuang, G.~R. Rodrigues, X.~Zhao, Y.~Zhang, P.~U. Jain,
+  M.~Stumm, Simple testing can prevent most critical failures: An analysis of
+  production failures in distributed data-intensive systems, in: 11th USENIX
+  Symposium on Operating Systems Design and Implementation (OSDI), 2014, an
+  error handler that only logs the error is counted as ignoring it; 25\% of
+  catastrophic failures arise that way, and 92\% from incorrect handling of
+  errors that were explicitly signalled.
+
+\bibitem{alquraan2018partition}
+A.~Alquraan, H.~Takruri, M.~Alfatafta, S.~Al-Kiswany, An analysis of
+  network-partitioning failures in cloud systems, in: 13th USENIX Symposium on
+  Operating Systems Design and Implementation (OSDI), 2018, pp. 51--68, ``The
+  majority of the failures were silent'', and where a warning was returned
+  ``all returned warnings were confusing, with no clear mechanism for
+  resolution''.
+
+\bibitem{xue2025agentbugs}
+J.~Xue, Y.~Zhao, Y.~Wang, J.~Chen, D.~Wang, A characterization study of bugs in
+  {LLM} agent workflow orchestration frameworks, in: 40th IEEE/ACM
+  International Conference on Automated Software Engineering (ASE), Industry
+  Showcase, 2025, pp. 3369--3380, 1026 bugs across LangChain, LlamaIndex and
+  Haystack; nine root causes and six symptom categories.
+\newblock \href {https://doi.org/10.1109/ASE63991.2025.00278}
+  {\path{doi:10.1109/ASE63991.2025.00278}}.
+
+\bibitem{liu2026inference}
+M.~Liu, S.~Zhong, W.~Bi, Y.~Zhang, Z.~Chen, Z.~Chen, X.~Liu, Y.~Ma, A first
+  look at bugs in {LLM} inference engines, ACM Transactions on Software
+  Engineering and Methodology929 bugs across llama.cpp, vLLM and four other
+  engines; the taxonomy carries both ``Incorrect Request Parsing'' as a root
+  cause and ``Silent Error'' as a symptom (2026).
+\newblock \href {https://doi.org/10.1145/3788873} {\path{doi:10.1145/3788873}}.
+
+\bibitem{li2024metamorphic}
+Y.~Li, Z.~Liu, P.-L. Poon, D.~Towey, C.-A. Sun, et~al., Metamorphic relation
+  generation: State of the art and research directions, ACM Transactions on
+  Software Engineering and MethodologyPreprint arXiv:2406.05397 (2024).
+\newblock \href {https://doi.org/10.1145/3708521} {\path{doi:10.1145/3708521}}.
+
+\bibitem{sun2025length}
+Y.~Sun, H.~Wang, J.~Li, J.~Liu, X.~Li, H.~Wen, Y.~Yuan, H.~Zheng, Y.~Liang,
+  Y.~Li, Y.~Liu, An empirical study of {LLM} reasoning ability under strict
+  output length constraint, in: Proceedings of the 2025 Conference on Empirical
+  Methods in Natural Language Processing, 2025, pp. 7652--7671, finding 3:
+  under strict output constraints reasoning performance ``might not scale
+  monotonically with the model size''. Finding 4 independently covers our
+  reasoning-flag confound: reasoning models do not always outperform
+  instruction-tuned ones under the same constraint.
+\newblock \href {https://doi.org/10.18653/v1/2025.emnlp-main.389}
+  {\path{doi:10.18653/v1/2025.emnlp-main.389}}.
+
+\bibitem{mizrahi2024multiprompt}
+M.~Mizrahi, G.~Kaplan, D.~Malkin, R.~Dror, D.~Shahaf, G.~Stanovsky, State of
+  what art? {A} call for multi-prompt {LLM} evaluation, Transactions of the
+  Association for Computational Linguistics 12 (2024) 933--949, 6.5M instances
+  over 20 models and 39 tasks: ``different instruction templates lead to very
+  different performance, both absolute and relative'' --- the relative part is
+  the ranking.
+\newblock \href {https://doi.org/10.1162/tacl_a_00681}
+  {\path{doi:10.1162/tacl_a_00681}}.
+
+\bibitem{xu2013misconfig}
+T.~Xu, J.~Zhang, P.~Huang, J.~Zheng, T.~Sheng, D.~Yuan, Y.~Zhou, S.~Pasupathy,
+  Do not blame users for misconfigurations, in: 24th ACM Symposium on Operating
+  Systems Principles (SOSP), 2013, pp. 244--259, names the failure mode:
+  ``silent overruling refers to the case that the system changes an
+  unacceptable user setting into the default value without notifying the
+  user'', measured across 74 parameters in Squid and Apache.
+\newblock \href {https://doi.org/10.1145/2517349.2522727}
+  {\path{doi:10.1145/2517349.2522727}}.
+
+\bibitem{yu2024maltracker}
+W.~Yu, et~al., Maltracker: A fine-grained {NPM} malware tracker copiloted by
+  {LLM}-enhanced dataset, in: Proceedings of the 33rd ACM SIGSOFT International
+  Symposium on Software Testing and Analysis (ISSTA), 2024.
+\newblock \href {https://doi.org/10.1145/3650212.3680397}
+  {\path{doi:10.1145/3650212.3680397}}.
+
+\bibitem{zhao2025apppoet}
+W.~Zhao, et~al., {AppPoet}: {LLM}-based {Android} malware detection via
+  multi-view prompt engineering, Expert Systems with Applications 262,
+  arXiv:2404.18816 (2025).
+
+\bibitem{rollinson2026samples}
+A.~Rollinson, N.~Polatidis, {LLM}-generated samples for {Android} malware
+  detection, Digital 6~(1) (2026) 5.
+\newblock \href {https://doi.org/10.3390/digital6010005}
+  {\path{doi:10.3390/digital6010005}}.
+
+\bibitem{saha2025malaware}
+S.~Saha, et~al., {MaLAware}: Automating the comprehension of malicious software
+  behaviours using {LLMs}, in: IEEE/ACM International Conference on Mining
+  Software Repositories (MSR), 2025, arXiv:2504.01145.
+
+\bibitem{lekssays2025techniquerag}
+A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
+  augmented generation for adversarial technique annotation in {CTI} text, in:
+  Findings of the Association for Computational Linguistics (ACL), 2025,
+  arXiv:2505.11988.
+
+\bibitem{buchel2025sok}
+M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
+  Automated {TTP} extraction from {CTI} reports --- are we there yet?, in: 34th
+  USENIX Security Symposium, 2025, pp. 4621--4641.
+
+\bibitem{doosterlinck2024incontext}
+K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
+  In-context learning for extreme multi-label classification, pREPRINT --- not
+  peer reviewed. arXiv:2401.12178 (2024).
+
+\bibitem{lange2024annoctr}
+L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
+  entities, tactics, and techniques in cyber threat reports, in: Joint
+  International Conference on Computational Linguistics, Language Resources and
+  Evaluation (LREC-COLING), 2024, arXiv:2404.07765. CC-BY-SA 4.0.
+
+\bibitem{abdallah2026retrievers}
+A.~Abdallah, J.~Holdcroft, M.~Ali, A.~Jatowt, Are {LLM}-based retrievers worth
+  their cost? an empirical study of efficiency, robustness, and reasoning
+  overhead, in: Proceedings of the 49th International ACM SIGIR Conference on
+  Research and Development in Information Retrieval, 2026, arXiv:2604.03676.
+
+\bibitem{ng2014conll}
+H.~T. Ng, et~al., The {CoNLL}-2014 shared task on grammatical error correction,
+  in: Proceedings of the Eighteenth Conference on Computational Natural
+  Language Learning: Shared Task, 2014, cited with the BEA-2019 shared task for
+  the $F_{0.5}$ convention, which weights precision twice recall to penalise
+  over-correction. Re-anchored 2026-08-15: two candidate papers previously
+  listed here were never fetched and are dropped; the convention is documented
+  by the shared tasks themselves.
+
+\bibitem{bryant2019bea}
+C.~Bryant, M.~Felice, {\O}.~E. Andersen, T.~Briscoe, The {BEA}-2019 shared task
+  on grammatical error correction, in: Proceedings of the Fourteenth Workshop
+  on Innovative Use of NLP for Building Educational Applications, 2019.
+
+\bibitem{welleck2019unlikelihood}
+S.~Welleck, I.~Kulikov, S.~Roller, E.~Dinan, K.~Cho, J.~Weston, Neural text
+  generation with unlikelihood training, in: International Conference on
+  Learning Representations (ICLR), 2020, arXiv:1908.04319. Corrected
+  2026-08-15: an earlier draft attributed a single blended account to this
+  paper and to Li et al.\ Welleck et al.\ blame the likelihood objective
+  itself; the training-data account is the other paper's.
+
+\bibitem{li2023repetition}
+H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
+  Repetition in repetition out: Towards understanding neural text degeneration
+  from the data perspective, in: Advances in Neural Information Processing
+  Systems (NeurIPS), 2023, arXiv:2310.10226. Argues that self-reinforcement
+  explanations reduce to the training-data account.
+
+\bibitem{ttpdetect2026}
+Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
+  X.~Zhang, Identifying adversary tactics and techniques in malware binaries
+  with an {LLM} agent, pREPRINT --- not peer reviewed. TTPDetect.
+  arXiv:2602.06325. Kept because it is the nearest system to ours and the
+  sentence citing it concedes ground rather than claims it; dropping it for
+  want of a venue would let this paper imply it holds that ground itself. No
+  peer-reviewed system with the same scope was found (2026).
+
+\bibitem{tran2026single}
+D.~Tran, D.~Kiela, Single-agent {LLMs} outperform multi-agent systems on
+  multi-hop reasoning under equal thinking token budgets, pREPRINT --- not peer
+  reviewed. arXiv:2604.02460. Kept because it says our null is not the first of
+  its kind, and because the crossover figure it reports for our own model class
+  has no reviewed equivalent we could verify. Bertalani{\v c} and Fortuna reach
+  the same conclusion in a reviewed venue (2026).
+
+\bibitem{bertalanic2026consensus}
+B.~Bertalani{\v c}, C.~Fortuna, The cost of consensus: Isolated self-correction
+  prevails over unguided homogeneous multi-agent debate, in: ACM Conference on
+  AI and Agentic Systems, 2026, arXiv:2605.00914.
+\newblock \href {https://doi.org/10.1145/3786335.3813137}
+  {\path{doi:10.1145/3786335.3813137}}.
+
+\bibitem{lea2025rex86}
+D.~Lea, J.~Ghawaly, G.~G. Richard~III, A.~Ali-Gombe, A.~Case, {REx86}: A local
+  large language model for assisting in x86 assembly reverse engineering, in:
+  Annual Computer Security Applications Conference (ACSAC), 2025,
+  arXiv:2510.20975.
+
+\bibitem{evertz2026chasing}
+R.~Evertz, N.~Risse, C.~Neuer, N.~M{\"u}ller, S.~Normann, et~al., Chasing
+  shadows: Pitfalls in {LLM} security research, in: Network and Distributed
+  System Security Symposium (NDSS), 2026, arXiv:2512.09549. Living appendix at
+  llmpitfalls.org.
+
+\bibitem{ng2026evaluating}
+J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
+  explainable malware analysis, in: ACM SecDev, 2026, poster. arXiv:2605.03140.
+
+\bibitem{metz2015comparing}
+J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
+  multi-label classifier performance measures to the ones obtained by a simple
+  multi-label baseline classifier, pREPRINT --- not peer reviewed.
+  arXiv:1503.06952. Kept because it supports the requirement to compare against
+  a trivial baseline, which this paper obeys and which weakens its own numbers;
+  no reviewed equivalent was verified (2015).
+
+\bibitem{lazaridou2021mind}
+A.~Lazaridou, A.~Kuncoro, E.~Gribovskaya, et~al., Mind the gap: Assessing
+  temporal generalization in neural language models, in: Advances in Neural
+  Information Processing Systems (NeurIPS), 2021, arXiv:2102.01951.
+
+\bibitem{oyelayo2026mcp}
+O.~Oyelayo, S.~Abedu, S.~Khatoonabadi, E.~Shihab, Developer challenges in the
+  adoption of model context protocol in {AI} agent development, in: 7th
+  International Workshop on Bots and Agents in Software Engineering (BotSE),
+  co-located with ICSE, 2026, pp. 53--59, bug reports and pull requests on MCP
+  reference servers: data validation and type issues are the second most
+  prevalent class at 13.97\%.
+\newblock \href {https://doi.org/10.1145/3786161.3788462}
+  {\path{doi:10.1145/3786161.3788462}}.
+
+\bibitem{martinlopez2019deps}
+A.~Martin-Lopez, S.~Segura, A.~Ruiz-Cort{\'e}s, A catalogue of inter-parameter
+  dependencies in {RESTful} web {APIs}, in: Service-Oriented Computing (ICSOC),
+  2019, pp. 399--414, across 40 APIs and over 2500 operations, input
+  dependencies are ``the norm, rather than the exception, with 85\% of the
+  reviewed APIs'' having them, and OpenAPI cannot express them.
+\newblock \href {https://doi.org/10.1007/978-3-030-33702-5_31}
+  {\path{doi:10.1007/978-3-030-33702-5_31}}.
+
+\bibitem{dev2026judge}
+S.~Dev, A.~Sloan, J.~Kavner, N.~Kong, M.~Sandler, Judge reliability harness:
+  Stress testing the reliability of {LLM} judges, in: Agents in the Wild:
+  Safety, Security, and Beyond Workshop, International Conference on Learning
+  Representations (ICLR), 2026, arXiv:2603.05399. Corrected 2026-08-15: this
+  paper does not establish the duplicate-item practice we previously cited it
+  for; it perturbs formatting, paraphrase, verbosity and labels. We have no
+  verified source for that practice and no longer assert one, which weakens a
+  demotion of our own detector.
+
+\bibitem{ryan2026attck}
+A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
+  open-source {LLMs} for multi-label {ATT\&CK} technique classification on
+  {CTI} reports, pREPRINT --- not peer reviewed. arXiv:2606.18166. Full text
+  read 2026-08-16 to verify the correlation this paper quotes: ``the Spearman
+  rank correlation confirms a statistically significant relationship between
+  parameter size and $F_1$ scores in this CTI classification task ($\rho$=0.85,
+  p=0.014)''. The abstract states the relationship but not the figures, so the
+  body was read rather than the summary (2026).
+
+\bibitem{snell2025testtime}
+C.~Snell, J.~Lee, K.~Xu, A.~Kumar, Scaling {LLM} test-time compute optimally
+  can be more effective than scaling parameters for reasoning, in:
+  International Conference on Learning Representations (ICLR), 2025, oral. ``In
+  a FLOPs-matched evaluation, we find that on problems where a smaller base
+  model attains somewhat non-trivial success rates, test-time compute can be
+  used to outperform a 14x larger model''.
+
+\bibitem{hassid2024budget}
+M.~Hassid, T.~Remez, J.~Gehring, R.~Schwartz, Y.~Adi, The larger the better?
+  {I}mproved {LLM} code-generation via budget reallocation, in: First
+  Conference on Language Modeling (COLM), 2024, the ranking flips and flips
+  back on an inference-time choice alone: repeated small-model sampling gains
+  up to 15\% with a unit-test oracle, and loses to a single large-model output
+  without one.
+
+\bibitem{jin2024steplength}
+M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
+  reasoning step length on large language models, in: Findings of the
+  Association for Computational Linguistics: ACL, 2024, pp. 1830--1842, cited
+  as the counterweight: lengthening reasoning steps ``considerably enhances
+  LLMs' reasoning abilities''. Read with Sun et al., the effect is task- and
+  budget-dependent rather than monotone in either direction.
+\newblock \href {https://doi.org/10.18653/v1/2024.findings-acl.108}
+  {\path{doi:10.18653/v1/2024.findings-acl.108}}.
+
+\bibitem{llamacpp8634}
+\texttt{max\_tokens} not respected on the non-chat endpoint, pREPRINT --- not
+  peer reviewed. ggml-org/llama.cpp issue \#8634. Search result; the issue has
+  not been read in full. Cited with the vllm issue to demote our own mechanism
+  to a known integration wart, which is the conservative direction (2024).
+
+\bibitem{vllm11976}
+Request for a server-side output cap, pREPRINT --- not peer reviewed.
+  vllm-project/vllm issue \#11976 (2024).
+
+\end{thebibliography}

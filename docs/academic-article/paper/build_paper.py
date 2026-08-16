@@ -174,6 +174,16 @@ def main() -> int:
             print(f"  ... and {len(violations) - 25} more", file=sys.stderr)
         return 2
 
+    # latexmk reruns bibtex when the .aux changes, and editing an entry's text
+    # does not change the .aux — the citation keys are the same. So a corrected
+    # bibliography entry silently kept its old rendering, and the typographic
+    # fix that entry was written for looked like it had not worked. Dropping the
+    # .bbl when the .bib is newer makes the dependency the one a reader would
+    # assume it already was.
+    bbl, bib = TEX / "main.bbl", TEX / "refs.bib"
+    if bib.exists() and bbl.exists() and bib.stat().st_mtime > bbl.stat().st_mtime:
+        bbl.unlink()
+
     proc = subprocess.run(
         ["latexmk", "-xelatex", "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
         cwd=TEX,
@@ -189,7 +199,19 @@ def main() -> int:
             print(f"  {e}", file=sys.stderr)
         return 3
 
-    hard = [ln for ln in log.splitlines() if ln.startswith("!") or "multiply defined" in ln]
+    # A citation that does not resolve prints as [?] and is exactly the failure
+    # \fact{} was built to prevent for numbers: a hole where a reference should
+    # be, in a document nobody rereads end to end. The bibliography became
+    # BibTeX with the Elsevier template, so this is now a thing that can happen.
+    hard = [
+        ln
+        for ln in log.splitlines()
+        if ln.startswith("!")
+        or "multiply defined" in ln
+        or "Citation" in ln
+        and "undefined" in ln
+        or "There were undefined references" in ln
+    ]
     if hard:
         print("BUILD REFUSED — LaTeX reported errors and produced a PDF anyway:", file=sys.stderr)
         for h in hard[:10]:

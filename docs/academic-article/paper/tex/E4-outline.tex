@@ -51,13 +51,23 @@ retained, so whether it was affected cannot be established. We report the withdr
 result.
 
 We do not claim the category, and we counter-searched the newest mechanisms before claiming them
-either. Silent failures in production LLM agent runtimes are already described and taxonomised {[}20{]};
-``distinct inputs should produce distinct outputs'' is an ordinary metamorphic relation {[}22{]}; that an
-inference-time constraint can invert model rankings and confound a comparison is established, with a
-28.4-point reversal, in {[}24{]}; and the token-limit incompatibility between OpenAI-compatible servers
-is documented in their own issue trackers. Every mechanism we report sits inside a published class,
-and one of them --- the configuration difference masquerading as a scaling result --- is a domain
-instance of {[}24{]} rather than a new phenomenon.
+either. Silent failure --- an error that produces wrong behaviour without an actionable signal --- is a
+long-established and taxonomised class in production software
+\cite{gunawi2008eio,yuan2014simple,alquraan2018partition}, and LLM-specific runtimes are now being
+taxonomised along the same lines \cite{xue2025agentbugs,liu2026inference}. ``Distinct inputs should
+produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}. That an
+inference-time constraint can invert model rankings inside a constrained budget regime, and so
+confound a comparison, is established \cite{sun2025length,mizrahi2024multiprompt}. Silently
+overruling a request parameter to a default is a named failure mode with a measured prevalence
+\cite{xu2013misconfig}, and request-parsing defects with silent symptoms are documented in the
+inference engines we use \cite{liu2026inference}.
+
+\textbf{Three of our four boundary mechanisms therefore sit inside a peer-reviewed class. The fourth
+does not, and we say which.} We found no reviewed source establishing that OpenAI-compatible servers
+disagree about \emph{which} token-limit parameter they honour; that specific divergence is recorded
+only in the servers' own issue trackers, which we cite as such rather than as literature. We
+therefore claim no priority for it either: the general failure mode is known, and whether this
+particular instance of it is new is a question we cannot settle from reviewed work.
 
 What we add is the setting and the price: an \textbf{evaluation pipeline for security research}, where
 the artefact is not a degraded user session but a measurement that is wrong and looks right.

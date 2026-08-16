@@ -1,97 +1,82 @@
 {
  "schema": "maljan-quoted-numbers/v1",
  "note": "Numbers this paper quotes from work it cites. No derivation can produce someone else's result, so these are exempt from the hand-typed-numeral rule — but only on a line that also carries the citation. A quoted figure separated from its source is indistinguishable from one of ours.",
- "rule": "The checker exempts a listed value only where the citing marker appears on the same line. Moving the number away from its citation re-arms the check.",
+ "rule": "The checker exempts a listed value only where a \\cite carrying its key appears on the same line. Moving the number away from its citation re-arms the check. A record with cite=null is a quoted figure whose source is not verified: it is exempt only where the text carries the unresolved marker, so the debt cannot be forgotten.",
  "quoted": [
   {
-   "value": "28.4",
-   "cite": "24",
-   "of": "the underperformance of larger models under spontaneous verbosity, in points"
-  },
-  {
-   "value": "7.7",
-   "cite": "24",
-   "of": "the low end of the inversion under brevity constraints"
-  },
-  {
-   "value": "15.9",
-   "cite": "24",
-   "of": "the high end of the inversion under brevity constraints"
-  },
-  {
    "value": "0.85",
-   "cite": "11",
-   "of": "the rank correlation between parameter count and ATT&CK-classification F1"
+   "cite": "ryan2026attck",
+   "of": "the rank correlation between parameter count and ATT&CK-classification F1 (source identified and full text read, 2026-08-16)"
   },
   {
    "value": "0.014",
-   "cite": "11",
-   "of": "its p-value"
-  },
-  {
-   "value": "76",
-   "cite": "21",
-   "of": "the share of sampled tools that wrap successfully"
-  },
-  {
-   "value": "94.2",
-   "cite": "21",
-   "of": "the share after automated repair"
-  },
-  {
-   "value": "22",
-   "cite": "20",
-   "of": "the incidents in the silent-failure taxonomy"
-  },
-  {
-   "value": "8",
-   "cite": "20",
-   "of": "the weeks it covers"
+   "cite": "ryan2026attck",
+   "of": "its p-value (source identified and full text read, 2026-08-16)"
   },
   {
    "value": "72",
-   "cite": "9",
+   "cite": "evertz2026chasing",
    "of": "the peer-reviewed papers surveyed for LLM-security pitfalls"
   },
   {
    "value": "0.7",
-   "cite": "11",
+   "cite": "tran2026single",
    "of": "the degradation level at which the multi-agent crossover appears"
   },
   {
    "value": "2.1",
-   "cite": "10",
+   "cite": "bertalanic2026consensus",
    "of": "the low end of the token multiple multi-agent debate costs"
   },
   {
    "value": "3.4",
-   "cite": "10",
+   "cite": "bertalanic2026consensus",
    "of": "the high end of that multiple"
   },
   {
    "value": "43",
-   "cite": "12",
+   "cite": "lea2025rex86",
    "of": "the participants in the reverse-engineering user study"
   },
   {
    "value": "77.5",
-   "cite": "7",
+   "cite": "lekssays2025techniquerag",
    "of": "the candidate-space reduction from tactic-first filtering"
   },
   {
    "value": "8634",
-   "cite": "25",
+   "cite": "llamacpp8634",
    "of": "the llama.cpp issue number"
   },
   {
    "value": "11976",
-   "cite": "25",
+   "cite": "vllm11976",
    "of": "the vllm issue number"
   },
   {
    "value": "15.7",
-   "cite": "9",
+   "cite": "evertz2026chasing",
    "of": "the share of the surveyed papers that discuss any of the nine pitfalls"
+  },
+  {
+   "value": "13",
+   "cite": "gunawi2008eio",
+   "of": "the share of error-propagation channels that drop an error code without handling it"
+  },
+  {
+   "value": "25",
+   "cite": "yuan2014simple",
+   "of": "the share of catastrophic failures caused by ignoring an explicitly signalled error"
+  },
+  {
+   "value": "13.97",
+   "cite": "oyelayo2026mcp",
+   "of": "data validation and type issues as a share of MCP reference-server defects"
+  },
+  {
+   "value": "85",
+   "cite": "martinlopez2019deps",
+   "of": "the share of reviewed APIs carrying inter-parameter dependencies"
   }
  ]
 }
