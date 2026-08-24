@@ -63,19 +63,40 @@ def gx(v: float) -> float:
     return round(v * SX, 2)
 
 
+# The band frame in grid units. It used to be written in canvas units while the
+# boxes inside it were written on the grid, so the two were never measured
+# against each other and band 8 ran nine units past its own frame unnoticed.
+BAND_L, BAND_R = 13.0, 887.0
+_band_now = [""]
+
+
 def band(key: str, height: float, n: str, title: str) -> float:
     """Place the next band under the previous one. Tops are never hand-written,
     so a band that grows pushes its neighbours down instead of covering them."""
     top = _cursor[0]
     _cursor[0] = top + height + GAP
     BANDS[key] = (top, height, n, title)
-    add(f'<rect class="band" x="16" y="{top}" width="{W - 32}" height="{height}" rx="7"/>')
-    add(f'<text class="bandnum" x="32" y="{top + 21}">{n}</text>')
-    add(f'<text class="bandtitle" x="{32 + 9 * len(n) + 5}" y="{top + 21}">{escape(title)}</text>')
+    _band_now[0] = key
+    add(
+        f'<rect class="band" x="{gx(BAND_L)}" y="{top}" '
+        f'width="{gx(BAND_R - BAND_L)}" height="{height}" rx="7"/>'
+    )
+    add(f'<text class="bandnum" x="{gx(BAND_L + 11)}" y="{top + 21}">{n}</text>')
+    add(
+        f'<text class="bandtitle" x="{gx(BAND_L + 11 + 8 * len(n) + 5)}" '
+        f'y="{top + 21}">{escape(title)}</text>'
+    )
     return top
 
 
 def box(x, y, w, h, fill, edge, dashed=False) -> None:
+    # A box that leaves its band is the one layout error a reader sees and the
+    # author does not, so it stops the build rather than reaching the page.
+    if not (BAND_L <= x and x + w <= BAND_R):
+        raise AssertionError(
+            f"band {_band_now[0]!r}: box spans {x:g}..{x + w:g}, "
+            f"outside the frame {BAND_L:g}..{BAND_R:g}"
+        )
     d = ' stroke-dasharray="5 3"' if dashed else ""
     add(
         f'<rect x="{gx(x)}" y="{y}" width="{gx(w)}" height="{h}" rx="5" '
@@ -128,13 +149,13 @@ def fail(x, y, tag) -> None:
 b = band("intake", 72, "1", "Sample intake")
 box(300, b + 30, 300, 42, DET, DET_EDGE)
 label(450, b + 48, "Windows PE sample")
-label(450, b + 64, "resolved by SHA-256 to a family signature", "sub")
+label(450, b + 64, "Resolved by SHA-256 to a family signature", "sub")
 box(24, b + 30, 256, 42, DET, DET_EDGE, dashed=True)
-label(152, b + 48, "dated cohort", "lbl9")
-label(152, b + 64, "stratified by year, digest recorded", "sub")
+label(152, b + 48, "Dated cohort", "lbl9")
+label(152, b + 64, "Stratified by year, digest recorded", "sub")
 box(620, b + 30, 256, 42, DET, DET_EDGE, dashed=True)
 label(748, b + 48, "MITRE ATT&CK uses set", "lbl9")
-label(748, b + 64, "ground truth, scoring only", "sub")
+label(748, b + 64, "Ground truth, scoring only", "sub")
 
 # --------------------------------------------------- 2. evidence acquisition
 b = band("eviAcq", 154, "2", "Evidence acquisition, over three protocols")
@@ -144,8 +165,8 @@ srv = [
         "Ghidra MCP",
         "HTTP",
         [
-            "headless disassembly",
-            "decompile, imports, strings,",
+            "Headless disassembly",
+            "Decompile, imports, strings,",
             "call graph, function hashes",
             "165 tools advertised, 20 exposed",
         ],
@@ -155,9 +176,9 @@ srv = [
         "CAPEv2 sandbox",
         "MCP",
         [
-            "detonation on one Windows guest",
-            "reverted between analyses",
-            "behavioural JSON, dropped files,",
+            "Detonation on one Windows guest",
+            "Reverted between analyses",
+            "Behavioural JSON, dropped files,",
             "PCAP capture",
         ],
     ),
@@ -165,16 +186,16 @@ srv = [
         470,
         "Network MCP",
         "MCP",
-        ["local PCAP inspection", "pcap summary, DNS, HTTP", "no traffic leaves the host"],
+        ["Local PCAP inspection", "PCAP summary, DNS, HTTP", "No traffic leaves the host"],
     ),
     (
         684,
-        "threat-intel MCP",
+        "Threat-intel MCP",
         "HTTP",
         [
             "VirusTotal, AbuseIPDB, WHOIS",
-            "enrichment only, never scored",
-            "reputation and registration",
+            "Enrichment only, never scored",
+            "Reputation and registration",
         ],
     ),
 ]
@@ -190,28 +211,28 @@ fail(256 + 156, b + 48, "M1")
 # ------------------------------------------------ 3. deterministic layers
 b = band("layer0", 92, "3", "Deterministic evidence layers, Layer 0, no model involved")
 det = [
-    (36, "YARA", "0.90", "signature match"),
-    (176, "tool-artifact", "0.90", "RAT byte markers"),
-    (316, "Sigma", "0.55", "log rules"),
-    (456, "import-capability", "0.35", "PE import sets"),
-    (596, "LOLBin", "0.35", "signed-proxy exec"),
-    (736, "network DGA", "0.20", "domain entropy"),
+    (36, "YARA", "0.90", "Signature match"),
+    (176, "Tool-artifact", "0.90", "RAT byte markers"),
+    (316, "Sigma", "0.55", "Log rules"),
+    (456, "Import-capability", "0.35", "PE import sets"),
+    (596, "LOLBin", "0.35", "Signed-proxy exec"),
+    (736, "Network DGA", "0.20", "Domain entropy"),
 ]
 for x, name, w, note in det:
     box(x, b + 28, 128, 58, DET, DET_EDGE)
     label(x + 64, b + 46, name, "lbl9")
-    label(x + 64, b + 61, f"trust {w}", "tag")
+    label(x + 64, b + 61, f"Trust {w}", "tag")
     label(x + 64, b + 77, note, "sub")
 
 # ----------------------------------------------------------- 4. retrieval
 b = band("retrieval", 92, "4", "Retrieval and priors")
 label(190, b + 21, "Qdrant, BAAI/bge-small-en-v1.5, 384-dim", "tag", "start")
-label(868, b + 21, "into every analyst prompt", "tag", "end")
+label(868, b + 21, "Into every analyst prompt", "tag", "end")
 ret = [
-    (36, "ATT&CK case-prior RAG", ["nearest past cases", "prime the mapping"]),
-    (256, "family-feature RAG", ["family fingerprints", "leakage-free split"]),
-    (476, "function-hash attribution", ["normalised opcode hashes", "matched to a corpus"]),
-    (696, "hybrid ATT&CK index", ["dense ranks, TF-IDF gates", "assigns every identifier"]),
+    (36, "ATT&CK case-prior RAG", ["Nearest past cases", "Prime the mapping"]),
+    (256, "Family-feature RAG", ["Family fingerprints", "Leakage-free split"]),
+    (476, "Function-hash attribution", ["Normalised opcode hashes", "Matched to a corpus"]),
+    (696, "Hybrid ATT&CK index", ["Dense ranks, TF-IDF gates", "Assigns every identifier"]),
 ]
 for x, name, rows in ret:
     box(x, b + 28, 168, 58, STORE, STORE_EDGE)
@@ -223,30 +244,30 @@ for x, name, rows in ret:
 # rows: as a free-floating line it was exactly where the fan-in arrow runs, and
 # a caption crossed by an arrow reads as neither.
 b = band("graph", 206, "5", "Analysis graph, LangGraph StateGraph over one shared state")
-label(868, b + 21, "sequential on one local slot; fan-out from START when multi-slot", "tag", "end")
+label(868, b + 21, "Sequential on one local slot; fan-out from START when multi-slot", "tag", "end")
 AW = 240.0
 ana = [
     (
         42,
-        "static analyst",
-        "domain weight 0.35",
+        "Static analyst",
+        "Domain weight 0.35",
         [
             "ReAct loop over Ghidra MCP",
             "20-tool curated allowlist",
-            "sink-reachability hint injected",
+            "Sink-reachability hint injected",
         ],
     ),
     (
         330,
-        "dynamic analyst",
-        "domain weight 0.45",
+        "Dynamic analyst",
+        "Domain weight 0.45",
         ["ReAct loop over the sandbox", "API calls, injection chains,", "persistence"],
     ),
     (
         618,
-        "network analyst",
-        "domain weight 0.20",
-        ["PCAP or parsed-flow text", "beaconing, DGA, tunnelling"],
+        "Network analyst",
+        "Domain weight 0.20",
+        ["PCAP or parsed-flow text", "Beaconing, DGA, tunnelling"],
     ),
 ]
 for x, name, w, rows in ana:
@@ -257,34 +278,34 @@ for x, name, w, rows in ana:
 fail(42 + AW - 20, b + 52, "M4")
 for x1, x2 in ((282, 328), (570, 616)):
     arrow(x1, b + 74, x2, b + 74)
-    label((x1 + x2) / 2, b + 66, "then", "tag")
+    label((x1 + x2) / 2, b + 66, "Then", "tag")
 
 # The second row is laid out around the gaps its own labels need: 120 units
 # between negotiation and revision for "no consensus", and a return path low
 # enough that its caption clears both corners.
 box(24, b + 136, 154, 46, DET, DET_EDGE, dashed=True)
-label(101, b + 155, "sycophancy detector", "lbl9")
-label(101, b + 171, "an echo of a peer, flagged", "sub")
+label(101, b + 155, "Sycophancy detector", "lbl9")
+label(101, b + 171, "An echo of a peer, flagged", "sub")
 box(250, b + 136, 220, 46, LLM, LLM_EDGE)
-label(360, b + 155, "negotiation")
-label(360, b + 171, "contradictions, dissent, consensus", "sub")
+label(360, b + 155, "Negotiation")
+label(360, b + 171, "Contradictions, dissent, consensus", "sub")
 box(590, b + 136, 220, 46, LLM, LLM_EDGE)
-label(700, b + 155, "revision")
-label(700, b + 171, "re-run an analyst on the dispute", "sub")
+label(700, b + 155, "Revision")
+label(700, b + 171, "Re-run an analyst on the dispute", "sub")
 path(f"M 450 {b + 116} V {b + 126} H 360 V {b + 134}")
 path(f"M 470 {b + 159} H 588")
-label(529, b + 151, "no consensus", "tag")
+label(529, b + 151, "No consensus", "tag")
 path(f"M 700 {b + 182} V {b + 194} H 360 V {b + 184}")
-label(530, b + 190, "loop until consensus or the cap", "tag")
+label(530, b + 190, "Loop until consensus or the cap", "tag")
 
 # -------------------------------------------------------------- 6. cascade
 b = band("cascade", 80, "6", "Corroboration cascade, deterministic")
 box(150, b + 28, 600, 46, DET, DET_EDGE)
-label(450, b + 46, "per-technique weighted confidence over contributing layers")
+label(450, b + 46, "Per-technique weighted confidence over contributing layers")
 label(
     450,
     b + 63,
-    "cross-layer multiplier 1.00, 1.25, 1.50, 1.75, 1.90 at 1 to 5 independent layers",
+    "Cross-layer multiplier 1.00, 1.25, 1.50, 1.75, 1.90 at 1 to 5 independent layers",
     "sub",
 )
 fail(736, b + 40, "M5")
@@ -292,8 +313,8 @@ fail(736, b + 40, "M5")
 # ---------------------------------------------------------------- 7. judge
 b = band("judge", 76, "7", "Verdict")
 box(230, b + 26, 440, 42, LLM, LLM_EDGE)
-label(450, b + 44, "judge, give_verdict")
-label(450, b + 60, "synthesises the analysts' claims and the cascade block into STIX 2.1", "sub")
+label(450, b + 44, "Judge, give_verdict")
+label(450, b + 60, "Synthesises the analysts' claims and the cascade block into STIX 2.1", "sub")
 fail(656, b + 38, "M7")
 
 # ------------- 8. deterministic post-pass, and the artefact it produces
@@ -305,16 +326,16 @@ b = band(
     "post", 94, "8", "Deterministic reconciliation and gating, after the model, and the artefact"
 )
 post = [
-    ("reconciliation step", ["drops unresolvable IDs,", "restores cascade techniques"]),
-    ("invalid-ID filter", ["checked against", "the ATT&CK catalogue"]),
-    ("confidence cap", ["falsification before", "confidence"]),
-    ("STIX integrity pass", ["dangling references,", "malformed objects"]),
-    ("STIX 2.1 bundle", ["attack-patterns and", "relationships"]),
-    ("report", ["HTML, Markdown and", "PDF renderers"]),
+    ("Reconciliation step", ["Drops unresolvable IDs,", "restores the cascade set"]),
+    ("Invalid-ID filter", ["Checked against the", "ATT&CK catalogue"]),
+    ("Confidence cap", ["Falsification before", "confidence"]),
+    ("STIX integrity pass", ["Dangling references,", "malformed objects"]),
+    ("STIX 2.1 bundle", ["Attack-patterns and", "relationships"]),
+    ("Report", ["HTML, Markdown and", "PDF renderers"]),
 ]
-BW, BG = 138.0, 6.4
+BW, BG = 132.0, 12.4
 for i, (name, rows) in enumerate(post):
-    x = 36 + i * (BW + BG)
+    x = 23 + i * (BW + BG)
     box(x, b + 28, BW, 58, DET, DET_EDGE)
     label(x + BW / 2, b + 46, name, "lbl9")
     lines(x + BW / 2, b + 62, rows, "sub", 14.0)
@@ -322,20 +343,20 @@ for i, (name, rows) in enumerate(post):
 # ------------------------------------------------------------ 10. substrate
 b = band("sub", 90, "9", "Substrate")
 box(36, b + 26, 400, 56, SRV, SRV_EDGE)
-label(236, b + 44, "local inference")
+label(236, b + 44, "Local inference")
 lines(
     236,
     b + 60,
     [
         "ik_llama.cpp llama-server, Qwen3.6-35B-A3B at IQ3_K_R4",
-        "one RTX 5060, hybrid MoE offload, 131,072-token context",
+        "One RTX 5060, hybrid MoE offload, 131,072-token context",
     ],
     "sub",
     13.0,
 )
 fail(422, b + 38, "M6")
 box(464, b + 26, 400, 56, SRV, SRV_EDGE, dashed=True)
-label(664, b + 44, "hosted comparison endpoints")
+label(664, b + 44, "Hosted comparison endpoints")
 lines(
     664,
     b + 60,
@@ -372,10 +393,10 @@ for x in (150, 750):
 LEG = _cursor[0] + 8
 add(f'<rect class="band" x="16" y="{LEG - 18}" width="{W - 32}" height="34" rx="7"/>')
 for x, fill, edge, name in [
-    (36, DET, DET_EDGE, "deterministic"),
-    (206, LLM, LLM_EDGE, "language model"),
-    (386, SRV, SRV_EDGE, "another server"),
-    (566, STORE, STORE_EDGE, "retrieval store"),
+    (36, DET, DET_EDGE, "Deterministic"),
+    (206, LLM, LLM_EDGE, "Language model"),
+    (386, SRV, SRV_EDGE, "Another server"),
+    (566, STORE, STORE_EDGE, "Retrieval store"),
 ]:
     add(
         f'<rect x="{gx(x)}" y="{LEG - 8}" width="16" height="11" rx="2" '
@@ -383,7 +404,7 @@ for x, fill, edge, name in [
     )
     label(x + 23, LEG + 2, name, "sub", "start")
 fail(722, LEG - 2, "Mn")
-label(740, LEG + 2, "instrument failure", "sub", "start")
+label(740, LEG + 2, "Instrument failure", "sub", "start")
 
 H = LEG + 28
 

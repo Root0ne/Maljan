@@ -16,196 +16,196 @@
 </style>
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8f8f8f"/></marker></defs>
 <rect width="1098" height="1119.0" fill="#ffffff"/>
-<rect class="band" x="16" y="46.0" width="1066" height="72" rx="7"/>
-<text class="bandnum" x="32" y="67.0">1</text>
-<text class="bandtitle" x="46" y="67.0">Sample intake</text>
+<rect class="band" x="15.86" y="46.0" width="1066.28" height="72" rx="7"/>
+<text class="bandnum" x="29.28" y="67.0">1</text>
+<text class="bandtitle" x="45.14" y="67.0">Sample intake</text>
 <rect x="366.0" y="76.0" width="366.0" height="42" rx="5" fill="#e7ebef" stroke="#78868f"/>
 <text class="lbl" x="549.0" y="94.0" text-anchor="middle">Windows PE sample</text>
-<text class="sub" x="549.0" y="110.0" text-anchor="middle">resolved by SHA-256 to a family signature</text>
+<text class="sub" x="549.0" y="110.0" text-anchor="middle">Resolved by SHA-256 to a family signature</text>
 <rect x="29.28" y="76.0" width="312.32" height="42" rx="5" fill="#e7ebef" stroke="#78868f" stroke-dasharray="5 3"/>
-<text class="lbl9" x="185.44" y="94.0" text-anchor="middle">dated cohort</text>
-<text class="sub" x="185.44" y="110.0" text-anchor="middle">stratified by year, digest recorded</text>
+<text class="lbl9" x="185.44" y="94.0" text-anchor="middle">Dated cohort</text>
+<text class="sub" x="185.44" y="110.0" text-anchor="middle">Stratified by year, digest recorded</text>
 <rect x="756.4" y="76.0" width="312.32" height="42" rx="5" fill="#e7ebef" stroke="#78868f" stroke-dasharray="5 3"/>
 <text class="lbl9" x="912.56" y="94.0" text-anchor="middle">MITRE ATT&amp;CK uses set</text>
-<text class="sub" x="912.56" y="110.0" text-anchor="middle">ground truth, scoring only</text>
-<rect class="band" x="16" y="127.0" width="1066" height="154" rx="7"/>
-<text class="bandnum" x="32" y="148.0">2</text>
-<text class="bandtitle" x="46" y="148.0">Evidence acquisition, over three protocols</text>
+<text class="sub" x="912.56" y="110.0" text-anchor="middle">Ground truth, scoring only</text>
+<rect class="band" x="15.86" y="127.0" width="1066.28" height="154" rx="7"/>
+<text class="bandnum" x="29.28" y="148.0">2</text>
+<text class="bandtitle" x="45.14" y="148.0">Evidence acquisition, over three protocols</text>
 <rect x="51.24" y="159.0" width="212.28" height="116" rx="5" fill="#ebe9f3" stroke="#867ea6"/>
 <text class="lbl9" x="157.38" y="179.0" text-anchor="middle">Ghidra MCP</text>
 <text class="tag" x="157.38" y="194.0" text-anchor="middle">HTTP</text>
-<text class="sub" x="157.38" y="213.0" text-anchor="middle">headless disassembly</text>
-<text class="sub" x="157.38" y="227.0" text-anchor="middle">decompile, imports, strings,</text>
+<text class="sub" x="157.38" y="213.0" text-anchor="middle">Headless disassembly</text>
+<text class="sub" x="157.38" y="227.0" text-anchor="middle">Decompile, imports, strings,</text>
 <text class="sub" x="157.38" y="241.0" text-anchor="middle">call graph, function hashes</text>
 <text class="sub" x="157.38" y="255.0" text-anchor="middle">165 tools advertised, 20 exposed</text>
 <rect x="312.32" y="159.0" width="212.28" height="116" rx="5" fill="#ebe9f3" stroke="#867ea6"/>
 <text class="lbl9" x="418.46" y="179.0" text-anchor="middle">CAPEv2 sandbox</text>
 <text class="tag" x="418.46" y="194.0" text-anchor="middle">MCP</text>
-<text class="sub" x="418.46" y="213.0" text-anchor="middle">detonation on one Windows guest</text>
-<text class="sub" x="418.46" y="227.0" text-anchor="middle">reverted between analyses</text>
-<text class="sub" x="418.46" y="241.0" text-anchor="middle">behavioural JSON, dropped files,</text>
+<text class="sub" x="418.46" y="213.0" text-anchor="middle">Detonation on one Windows guest</text>
+<text class="sub" x="418.46" y="227.0" text-anchor="middle">Reverted between analyses</text>
+<text class="sub" x="418.46" y="241.0" text-anchor="middle">Behavioural JSON, dropped files,</text>
 <text class="sub" x="418.46" y="255.0" text-anchor="middle">PCAP capture</text>
 <rect x="573.4" y="159.0" width="212.28" height="116" rx="5" fill="#ebe9f3" stroke="#867ea6"/>
 <text class="lbl9" x="679.54" y="179.0" text-anchor="middle">Network MCP</text>
 <text class="tag" x="679.54" y="194.0" text-anchor="middle">MCP</text>
-<text class="sub" x="679.54" y="213.0" text-anchor="middle">local PCAP inspection</text>
-<text class="sub" x="679.54" y="227.0" text-anchor="middle">pcap summary, DNS, HTTP</text>
-<text class="sub" x="679.54" y="241.0" text-anchor="middle">no traffic leaves the host</text>
+<text class="sub" x="679.54" y="213.0" text-anchor="middle">Local PCAP inspection</text>
+<text class="sub" x="679.54" y="227.0" text-anchor="middle">PCAP summary, DNS, HTTP</text>
+<text class="sub" x="679.54" y="241.0" text-anchor="middle">No traffic leaves the host</text>
 <rect x="834.48" y="159.0" width="212.28" height="116" rx="5" fill="#ebe9f3" stroke="#867ea6"/>
-<text class="lbl9" x="940.62" y="179.0" text-anchor="middle">threat-intel MCP</text>
+<text class="lbl9" x="940.62" y="179.0" text-anchor="middle">Threat-intel MCP</text>
 <text class="tag" x="940.62" y="194.0" text-anchor="middle">HTTP</text>
 <text class="sub" x="940.62" y="213.0" text-anchor="middle">VirusTotal, AbuseIPDB, WHOIS</text>
-<text class="sub" x="940.62" y="227.0" text-anchor="middle">enrichment only, never scored</text>
-<text class="sub" x="940.62" y="241.0" text-anchor="middle">reputation and registration</text>
+<text class="sub" x="940.62" y="227.0" text-anchor="middle">Enrichment only, never scored</text>
+<text class="sub" x="940.62" y="241.0" text-anchor="middle">Reputation and registration</text>
 <circle class="failmark" cx="241.56" cy="175.0" r="11.5"/>
 <text class="failtxt" x="241.56" y="179.0" text-anchor="middle">M2</text>
 <circle class="failmark" cx="241.56" cy="203.0" r="11.5"/>
 <text class="failtxt" x="241.56" y="207.0" text-anchor="middle">M3</text>
 <circle class="failmark" cx="502.64" cy="175.0" r="11.5"/>
 <text class="failtxt" x="502.64" y="179.0" text-anchor="middle">M1</text>
-<rect class="band" x="16" y="290.0" width="1066" height="92" rx="7"/>
-<text class="bandnum" x="32" y="311.0">3</text>
-<text class="bandtitle" x="46" y="311.0">Deterministic evidence layers, Layer 0, no model involved</text>
+<rect class="band" x="15.86" y="290.0" width="1066.28" height="92" rx="7"/>
+<text class="bandnum" x="29.28" y="311.0">3</text>
+<text class="bandtitle" x="45.14" y="311.0">Deterministic evidence layers, Layer 0, no model involved</text>
 <rect x="43.92" y="318.0" width="156.16" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
 <text class="lbl9" x="122.0" y="336.0" text-anchor="middle">YARA</text>
-<text class="tag" x="122.0" y="351.0" text-anchor="middle">trust 0.90</text>
-<text class="sub" x="122.0" y="367.0" text-anchor="middle">signature match</text>
+<text class="tag" x="122.0" y="351.0" text-anchor="middle">Trust 0.90</text>
+<text class="sub" x="122.0" y="367.0" text-anchor="middle">Signature match</text>
 <rect x="214.72" y="318.0" width="156.16" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="292.8" y="336.0" text-anchor="middle">tool-artifact</text>
-<text class="tag" x="292.8" y="351.0" text-anchor="middle">trust 0.90</text>
+<text class="lbl9" x="292.8" y="336.0" text-anchor="middle">Tool-artifact</text>
+<text class="tag" x="292.8" y="351.0" text-anchor="middle">Trust 0.90</text>
 <text class="sub" x="292.8" y="367.0" text-anchor="middle">RAT byte markers</text>
 <rect x="385.52" y="318.0" width="156.16" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
 <text class="lbl9" x="463.6" y="336.0" text-anchor="middle">Sigma</text>
-<text class="tag" x="463.6" y="351.0" text-anchor="middle">trust 0.55</text>
-<text class="sub" x="463.6" y="367.0" text-anchor="middle">log rules</text>
+<text class="tag" x="463.6" y="351.0" text-anchor="middle">Trust 0.55</text>
+<text class="sub" x="463.6" y="367.0" text-anchor="middle">Log rules</text>
 <rect x="556.32" y="318.0" width="156.16" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="634.4" y="336.0" text-anchor="middle">import-capability</text>
-<text class="tag" x="634.4" y="351.0" text-anchor="middle">trust 0.35</text>
+<text class="lbl9" x="634.4" y="336.0" text-anchor="middle">Import-capability</text>
+<text class="tag" x="634.4" y="351.0" text-anchor="middle">Trust 0.35</text>
 <text class="sub" x="634.4" y="367.0" text-anchor="middle">PE import sets</text>
 <rect x="727.12" y="318.0" width="156.16" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
 <text class="lbl9" x="805.2" y="336.0" text-anchor="middle">LOLBin</text>
-<text class="tag" x="805.2" y="351.0" text-anchor="middle">trust 0.35</text>
-<text class="sub" x="805.2" y="367.0" text-anchor="middle">signed-proxy exec</text>
+<text class="tag" x="805.2" y="351.0" text-anchor="middle">Trust 0.35</text>
+<text class="sub" x="805.2" y="367.0" text-anchor="middle">Signed-proxy exec</text>
 <rect x="897.92" y="318.0" width="156.16" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="976.0" y="336.0" text-anchor="middle">network DGA</text>
-<text class="tag" x="976.0" y="351.0" text-anchor="middle">trust 0.20</text>
-<text class="sub" x="976.0" y="367.0" text-anchor="middle">domain entropy</text>
-<rect class="band" x="16" y="391.0" width="1066" height="92" rx="7"/>
-<text class="bandnum" x="32" y="412.0">4</text>
-<text class="bandtitle" x="46" y="412.0">Retrieval and priors</text>
+<text class="lbl9" x="976.0" y="336.0" text-anchor="middle">Network DGA</text>
+<text class="tag" x="976.0" y="351.0" text-anchor="middle">Trust 0.20</text>
+<text class="sub" x="976.0" y="367.0" text-anchor="middle">Domain entropy</text>
+<rect class="band" x="15.86" y="391.0" width="1066.28" height="92" rx="7"/>
+<text class="bandnum" x="29.28" y="412.0">4</text>
+<text class="bandtitle" x="45.14" y="412.0">Retrieval and priors</text>
 <text class="tag" x="231.8" y="412.0" text-anchor="start">Qdrant, BAAI/bge-small-en-v1.5, 384-dim</text>
-<text class="tag" x="1058.96" y="412.0" text-anchor="end">into every analyst prompt</text>
+<text class="tag" x="1058.96" y="412.0" text-anchor="end">Into every analyst prompt</text>
 <rect x="43.92" y="419.0" width="204.96" height="58" rx="5" fill="#e5eee8" stroke="#749682"/>
 <text class="lbl9" x="146.4" y="437.0" text-anchor="middle">ATT&amp;CK case-prior RAG</text>
-<text class="sub" x="146.4" y="453.0" text-anchor="middle">nearest past cases</text>
-<text class="sub" x="146.4" y="467.0" text-anchor="middle">prime the mapping</text>
+<text class="sub" x="146.4" y="453.0" text-anchor="middle">Nearest past cases</text>
+<text class="sub" x="146.4" y="467.0" text-anchor="middle">Prime the mapping</text>
 <rect x="312.32" y="419.0" width="204.96" height="58" rx="5" fill="#e5eee8" stroke="#749682"/>
-<text class="lbl9" x="414.8" y="437.0" text-anchor="middle">family-feature RAG</text>
-<text class="sub" x="414.8" y="453.0" text-anchor="middle">family fingerprints</text>
-<text class="sub" x="414.8" y="467.0" text-anchor="middle">leakage-free split</text>
+<text class="lbl9" x="414.8" y="437.0" text-anchor="middle">Family-feature RAG</text>
+<text class="sub" x="414.8" y="453.0" text-anchor="middle">Family fingerprints</text>
+<text class="sub" x="414.8" y="467.0" text-anchor="middle">Leakage-free split</text>
 <rect x="580.72" y="419.0" width="204.96" height="58" rx="5" fill="#e5eee8" stroke="#749682"/>
-<text class="lbl9" x="683.2" y="437.0" text-anchor="middle">function-hash attribution</text>
-<text class="sub" x="683.2" y="453.0" text-anchor="middle">normalised opcode hashes</text>
-<text class="sub" x="683.2" y="467.0" text-anchor="middle">matched to a corpus</text>
+<text class="lbl9" x="683.2" y="437.0" text-anchor="middle">Function-hash attribution</text>
+<text class="sub" x="683.2" y="453.0" text-anchor="middle">Normalised opcode hashes</text>
+<text class="sub" x="683.2" y="467.0" text-anchor="middle">Matched to a corpus</text>
 <rect x="849.12" y="419.0" width="204.96" height="58" rx="5" fill="#e5eee8" stroke="#749682"/>
-<text class="lbl9" x="951.6" y="437.0" text-anchor="middle">hybrid ATT&amp;CK index</text>
-<text class="sub" x="951.6" y="453.0" text-anchor="middle">dense ranks, TF-IDF gates</text>
-<text class="sub" x="951.6" y="467.0" text-anchor="middle">assigns every identifier</text>
-<rect class="band" x="16" y="492.0" width="1066" height="206" rx="7"/>
-<text class="bandnum" x="32" y="513.0">5</text>
-<text class="bandtitle" x="46" y="513.0">Analysis graph, LangGraph StateGraph over one shared state</text>
-<text class="tag" x="1058.96" y="513.0" text-anchor="end">sequential on one local slot; fan-out from START when multi-slot</text>
+<text class="lbl9" x="951.6" y="437.0" text-anchor="middle">Hybrid ATT&amp;CK index</text>
+<text class="sub" x="951.6" y="453.0" text-anchor="middle">Dense ranks, TF-IDF gates</text>
+<text class="sub" x="951.6" y="467.0" text-anchor="middle">Assigns every identifier</text>
+<rect class="band" x="15.86" y="492.0" width="1066.28" height="206" rx="7"/>
+<text class="bandnum" x="29.28" y="513.0">5</text>
+<text class="bandtitle" x="45.14" y="513.0">Analysis graph, LangGraph StateGraph over one shared state</text>
+<text class="tag" x="1058.96" y="513.0" text-anchor="end">Sequential on one local slot; fan-out from START when multi-slot</text>
 <rect x="51.24" y="524.0" width="292.8" height="84" rx="5" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="lbl" x="197.64" y="543.0" text-anchor="middle">static analyst</text>
-<text class="tag" x="197.64" y="558.0" text-anchor="middle">domain weight 0.35</text>
+<text class="lbl" x="197.64" y="543.0" text-anchor="middle">Static analyst</text>
+<text class="tag" x="197.64" y="558.0" text-anchor="middle">Domain weight 0.35</text>
 <text class="sub" x="197.64" y="575.0" text-anchor="middle">ReAct loop over Ghidra MCP</text>
 <text class="sub" x="197.64" y="589.0" text-anchor="middle">20-tool curated allowlist</text>
-<text class="sub" x="197.64" y="603.0" text-anchor="middle">sink-reachability hint injected</text>
+<text class="sub" x="197.64" y="603.0" text-anchor="middle">Sink-reachability hint injected</text>
 <rect x="402.6" y="524.0" width="292.8" height="84" rx="5" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="lbl" x="549.0" y="543.0" text-anchor="middle">dynamic analyst</text>
-<text class="tag" x="549.0" y="558.0" text-anchor="middle">domain weight 0.45</text>
+<text class="lbl" x="549.0" y="543.0" text-anchor="middle">Dynamic analyst</text>
+<text class="tag" x="549.0" y="558.0" text-anchor="middle">Domain weight 0.45</text>
 <text class="sub" x="549.0" y="575.0" text-anchor="middle">ReAct loop over the sandbox</text>
 <text class="sub" x="549.0" y="589.0" text-anchor="middle">API calls, injection chains,</text>
 <text class="sub" x="549.0" y="603.0" text-anchor="middle">persistence</text>
 <rect x="753.96" y="524.0" width="292.8" height="84" rx="5" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="lbl" x="900.36" y="543.0" text-anchor="middle">network analyst</text>
-<text class="tag" x="900.36" y="558.0" text-anchor="middle">domain weight 0.20</text>
+<text class="lbl" x="900.36" y="543.0" text-anchor="middle">Network analyst</text>
+<text class="tag" x="900.36" y="558.0" text-anchor="middle">Domain weight 0.20</text>
 <text class="sub" x="900.36" y="575.0" text-anchor="middle">PCAP or parsed-flow text</text>
-<text class="sub" x="900.36" y="589.0" text-anchor="middle">beaconing, DGA, tunnelling</text>
+<text class="sub" x="900.36" y="589.0" text-anchor="middle">Beaconing, DGA, tunnelling</text>
 <circle class="failmark" cx="319.64" cy="544.0" r="11.5"/>
 <text class="failtxt" x="319.64" y="548.0" text-anchor="middle">M4</text>
 <path class="flow" d="M 344.04 566.0 L 400.16 566.0" marker-end="url(#ah)"/>
-<text class="tag" x="372.1" y="558.0" text-anchor="middle">then</text>
+<text class="tag" x="372.1" y="558.0" text-anchor="middle">Then</text>
 <path class="flow" d="M 695.4 566.0 L 751.52 566.0" marker-end="url(#ah)"/>
-<text class="tag" x="723.46" y="558.0" text-anchor="middle">then</text>
+<text class="tag" x="723.46" y="558.0" text-anchor="middle">Then</text>
 <rect x="29.28" y="628.0" width="187.88" height="46" rx="5" fill="#e7ebef" stroke="#78868f" stroke-dasharray="5 3"/>
-<text class="lbl9" x="123.22" y="647.0" text-anchor="middle">sycophancy detector</text>
-<text class="sub" x="123.22" y="663.0" text-anchor="middle">an echo of a peer, flagged</text>
+<text class="lbl9" x="123.22" y="647.0" text-anchor="middle">Sycophancy detector</text>
+<text class="sub" x="123.22" y="663.0" text-anchor="middle">An echo of a peer, flagged</text>
 <rect x="305.0" y="628.0" width="268.4" height="46" rx="5" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="lbl" x="439.2" y="647.0" text-anchor="middle">negotiation</text>
-<text class="sub" x="439.2" y="663.0" text-anchor="middle">contradictions, dissent, consensus</text>
+<text class="lbl" x="439.2" y="647.0" text-anchor="middle">Negotiation</text>
+<text class="sub" x="439.2" y="663.0" text-anchor="middle">Contradictions, dissent, consensus</text>
 <rect x="719.8" y="628.0" width="268.4" height="46" rx="5" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="lbl" x="854.0" y="647.0" text-anchor="middle">revision</text>
-<text class="sub" x="854.0" y="663.0" text-anchor="middle">re-run an analyst on the dispute</text>
+<text class="lbl" x="854.0" y="647.0" text-anchor="middle">Revision</text>
+<text class="sub" x="854.0" y="663.0" text-anchor="middle">Re-run an analyst on the dispute</text>
 <path class="flow" d="M 549.0 608.0 V 618.0 H 439.2 V 626.0" marker-end="url(#ah)"/>
 <path class="flow" d="M 573.4 651.0 H 717.36" marker-end="url(#ah)"/>
-<text class="tag" x="645.38" y="643.0" text-anchor="middle">no consensus</text>
+<text class="tag" x="645.38" y="643.0" text-anchor="middle">No consensus</text>
 <path class="flow" d="M 854.0 674.0 V 686.0 H 439.2 V 676.0" marker-end="url(#ah)"/>
-<text class="tag" x="646.6" y="682.0" text-anchor="middle">loop until consensus or the cap</text>
-<rect class="band" x="16" y="707.0" width="1066" height="80" rx="7"/>
-<text class="bandnum" x="32" y="728.0">6</text>
-<text class="bandtitle" x="46" y="728.0">Corroboration cascade, deterministic</text>
+<text class="tag" x="646.6" y="682.0" text-anchor="middle">Loop until consensus or the cap</text>
+<rect class="band" x="15.86" y="707.0" width="1066.28" height="80" rx="7"/>
+<text class="bandnum" x="29.28" y="728.0">6</text>
+<text class="bandtitle" x="45.14" y="728.0">Corroboration cascade, deterministic</text>
 <rect x="183.0" y="735.0" width="732.0" height="46" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl" x="549.0" y="753.0" text-anchor="middle">per-technique weighted confidence over contributing layers</text>
-<text class="sub" x="549.0" y="770.0" text-anchor="middle">cross-layer multiplier 1.00, 1.25, 1.50, 1.75, 1.90 at 1 to 5 independent layers</text>
+<text class="lbl" x="549.0" y="753.0" text-anchor="middle">Per-technique weighted confidence over contributing layers</text>
+<text class="sub" x="549.0" y="770.0" text-anchor="middle">Cross-layer multiplier 1.00, 1.25, 1.50, 1.75, 1.90 at 1 to 5 independent layers</text>
 <circle class="failmark" cx="897.92" cy="747.0" r="11.5"/>
 <text class="failtxt" x="897.92" y="751.0" text-anchor="middle">M5</text>
-<rect class="band" x="16" y="796.0" width="1066" height="76" rx="7"/>
-<text class="bandnum" x="32" y="817.0">7</text>
-<text class="bandtitle" x="46" y="817.0">Verdict</text>
+<rect class="band" x="15.86" y="796.0" width="1066.28" height="76" rx="7"/>
+<text class="bandnum" x="29.28" y="817.0">7</text>
+<text class="bandtitle" x="45.14" y="817.0">Verdict</text>
 <rect x="280.6" y="822.0" width="536.8" height="42" rx="5" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="lbl" x="549.0" y="840.0" text-anchor="middle">judge, give_verdict</text>
-<text class="sub" x="549.0" y="856.0" text-anchor="middle">synthesises the analysts' claims and the cascade block into STIX 2.1</text>
+<text class="lbl" x="549.0" y="840.0" text-anchor="middle">Judge, give_verdict</text>
+<text class="sub" x="549.0" y="856.0" text-anchor="middle">Synthesises the analysts' claims and the cascade block into STIX 2.1</text>
 <circle class="failmark" cx="800.32" cy="834.0" r="11.5"/>
 <text class="failtxt" x="800.32" y="838.0" text-anchor="middle">M7</text>
-<rect class="band" x="16" y="881.0" width="1066" height="94" rx="7"/>
-<text class="bandnum" x="32" y="902.0">8</text>
-<text class="bandtitle" x="46" y="902.0">Deterministic reconciliation and gating, after the model, and the artefact</text>
-<rect x="43.92" y="909.0" width="168.36" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="128.1" y="927.0" text-anchor="middle">reconciliation step</text>
-<text class="sub" x="128.1" y="943.0" text-anchor="middle">drops unresolvable IDs,</text>
-<text class="sub" x="128.1" y="957.0" text-anchor="middle">restores cascade techniques</text>
-<rect x="220.09" y="909.0" width="168.36" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="304.27" y="927.0" text-anchor="middle">invalid-ID filter</text>
-<text class="sub" x="304.27" y="943.0" text-anchor="middle">checked against</text>
-<text class="sub" x="304.27" y="957.0" text-anchor="middle">the ATT&amp;CK catalogue</text>
-<rect x="396.26" y="909.0" width="168.36" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="480.44" y="927.0" text-anchor="middle">confidence cap</text>
-<text class="sub" x="480.44" y="943.0" text-anchor="middle">falsification before</text>
-<text class="sub" x="480.44" y="957.0" text-anchor="middle">confidence</text>
-<rect x="572.42" y="909.0" width="168.36" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="656.6" y="927.0" text-anchor="middle">STIX integrity pass</text>
-<text class="sub" x="656.6" y="943.0" text-anchor="middle">dangling references,</text>
-<text class="sub" x="656.6" y="957.0" text-anchor="middle">malformed objects</text>
-<rect x="748.59" y="909.0" width="168.36" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="832.77" y="927.0" text-anchor="middle">STIX 2.1 bundle</text>
-<text class="sub" x="832.77" y="943.0" text-anchor="middle">attack-patterns and</text>
-<text class="sub" x="832.77" y="957.0" text-anchor="middle">relationships</text>
-<rect x="924.76" y="909.0" width="168.36" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="1008.94" y="927.0" text-anchor="middle">report</text>
-<text class="sub" x="1008.94" y="943.0" text-anchor="middle">HTML, Markdown and</text>
-<text class="sub" x="1008.94" y="957.0" text-anchor="middle">PDF renderers</text>
-<rect class="band" x="16" y="984.0" width="1066" height="90" rx="7"/>
-<text class="bandnum" x="32" y="1005.0">9</text>
-<text class="bandtitle" x="46" y="1005.0">Substrate</text>
+<rect class="band" x="15.86" y="881.0" width="1066.28" height="94" rx="7"/>
+<text class="bandnum" x="29.28" y="902.0">8</text>
+<text class="bandtitle" x="45.14" y="902.0">Deterministic reconciliation and gating, after the model, and the artefact</text>
+<rect x="28.06" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
+<text class="lbl9" x="108.58" y="927.0" text-anchor="middle">Reconciliation step</text>
+<text class="sub" x="108.58" y="943.0" text-anchor="middle">Drops unresolvable IDs,</text>
+<text class="sub" x="108.58" y="957.0" text-anchor="middle">restores the cascade set</text>
+<rect x="204.23" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
+<text class="lbl9" x="284.75" y="927.0" text-anchor="middle">Invalid-ID filter</text>
+<text class="sub" x="284.75" y="943.0" text-anchor="middle">Checked against the</text>
+<text class="sub" x="284.75" y="957.0" text-anchor="middle">ATT&amp;CK catalogue</text>
+<rect x="380.4" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
+<text class="lbl9" x="460.92" y="927.0" text-anchor="middle">Confidence cap</text>
+<text class="sub" x="460.92" y="943.0" text-anchor="middle">Falsification before</text>
+<text class="sub" x="460.92" y="957.0" text-anchor="middle">confidence</text>
+<rect x="556.56" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
+<text class="lbl9" x="637.08" y="927.0" text-anchor="middle">STIX integrity pass</text>
+<text class="sub" x="637.08" y="943.0" text-anchor="middle">Dangling references,</text>
+<text class="sub" x="637.08" y="957.0" text-anchor="middle">malformed objects</text>
+<rect x="732.73" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
+<text class="lbl9" x="813.25" y="927.0" text-anchor="middle">STIX 2.1 bundle</text>
+<text class="sub" x="813.25" y="943.0" text-anchor="middle">Attack-patterns and</text>
+<text class="sub" x="813.25" y="957.0" text-anchor="middle">relationships</text>
+<rect x="908.9" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
+<text class="lbl9" x="989.42" y="927.0" text-anchor="middle">Report</text>
+<text class="sub" x="989.42" y="943.0" text-anchor="middle">HTML, Markdown and</text>
+<text class="sub" x="989.42" y="957.0" text-anchor="middle">PDF renderers</text>
+<rect class="band" x="15.86" y="984.0" width="1066.28" height="90" rx="7"/>
+<text class="bandnum" x="29.28" y="1005.0">9</text>
+<text class="bandtitle" x="45.14" y="1005.0">Substrate</text>
 <rect x="43.92" y="1010.0" width="488.0" height="56" rx="5" fill="#ebe9f3" stroke="#867ea6"/>
-<text class="lbl" x="287.92" y="1028.0" text-anchor="middle">local inference</text>
+<text class="lbl" x="287.92" y="1028.0" text-anchor="middle">Local inference</text>
 <text class="sub" x="287.92" y="1044.0" text-anchor="middle">ik_llama.cpp llama-server, Qwen3.6-35B-A3B at IQ3_K_R4</text>
-<text class="sub" x="287.92" y="1057.0" text-anchor="middle">one RTX 5060, hybrid MoE offload, 131,072-token context</text>
+<text class="sub" x="287.92" y="1057.0" text-anchor="middle">One RTX 5060, hybrid MoE offload, 131,072-token context</text>
 <circle class="failmark" cx="514.84" cy="1022.0" r="11.5"/>
 <text class="failtxt" x="514.84" y="1026.0" text-anchor="middle">M6</text>
 <rect x="566.08" y="1010.0" width="488.0" height="56" rx="5" fill="#ebe9f3" stroke="#867ea6" stroke-dasharray="5 3"/>
-<text class="lbl" x="810.08" y="1028.0" text-anchor="middle">hosted comparison endpoints</text>
+<text class="lbl" x="810.08" y="1028.0" text-anchor="middle">Hosted comparison endpoints</text>
 <text class="sub" x="810.08" y="1044.0" text-anchor="middle">OpenRouter and DashScope, used only for the measured arms;</text>
 <text class="sub" x="810.08" y="1057.0" text-anchor="middle">never in the production path</text>
 <path class="spine" d="M 549.0 118.0 L 549.0 127.0" marker-end="url(#ah)"/>
@@ -220,14 +220,14 @@
 <path class="flow" d="M 915.0 483.0 L 915.0 492.0" marker-end="url(#ah)"/>
 <rect class="band" x="16" y="1073.0" width="1066" height="34" rx="7"/>
 <rect x="43.92" y="1083.0" width="16" height="11" rx="2" fill="#e7ebef" stroke="#78868f"/>
-<text class="sub" x="71.98" y="1093.0" text-anchor="start">deterministic</text>
+<text class="sub" x="71.98" y="1093.0" text-anchor="start">Deterministic</text>
 <rect x="251.32" y="1083.0" width="16" height="11" rx="2" fill="#f7ecdf" stroke="#b8874f"/>
-<text class="sub" x="279.38" y="1093.0" text-anchor="start">language model</text>
+<text class="sub" x="279.38" y="1093.0" text-anchor="start">Language model</text>
 <rect x="470.92" y="1083.0" width="16" height="11" rx="2" fill="#ebe9f3" stroke="#867ea6"/>
-<text class="sub" x="498.98" y="1093.0" text-anchor="start">another server</text>
+<text class="sub" x="498.98" y="1093.0" text-anchor="start">Another server</text>
 <rect x="690.52" y="1083.0" width="16" height="11" rx="2" fill="#e5eee8" stroke="#749682"/>
-<text class="sub" x="718.58" y="1093.0" text-anchor="start">retrieval store</text>
+<text class="sub" x="718.58" y="1093.0" text-anchor="start">Retrieval store</text>
 <circle class="failmark" cx="880.84" cy="1089.0" r="11.5"/>
 <text class="failtxt" x="880.84" y="1093.0" text-anchor="middle">Mn</text>
-<text class="sub" x="902.8" y="1093.0" text-anchor="start">instrument failure</text>
+<text class="sub" x="902.8" y="1093.0" text-anchor="start">Instrument failure</text>
 </svg>
