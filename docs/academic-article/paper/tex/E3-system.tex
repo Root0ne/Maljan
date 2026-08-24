@@ -9,9 +9,7 @@ every result should be read inside it. The model is a single local mixture-of-ex
 quantised, on one host, with three commercially hosted services used only as comparison endpoints.
 Ground truth is family-level MITRE \texttt{uses}, resolved to a sample through its family signature,
 which is coarse and carries a structural recall ceiling. Only Windows PE is analysed dynamically,
-because the sandbox instance has one analysis machine and no Linux guest. And the contribution
-claimed is the evaluation rather than the architecture: the system is the object under study, not
-the result.
+because the sandbox instance has one analysis machine and no Linux guest.
 
 \subsection{The pipeline under evaluation}\label{the-pipeline-under-evaluation}
 
@@ -32,15 +30,11 @@ topology.
 \label{fig:architecture}
 \end{figure}
 
-Two design choices are stated here because they are not what failed. Tool exposure is not tool
-availability: the reverse-engineering server advertises \textasciitilde165 tools, exposing the full
+Two design choices are not what failed. Tool exposure is not tool availability: the reverse-engineering server advertises \textasciitilde165 tools, exposing the full
 catalogue to a model with roughly 3B active parameters is infeasible because tool selection degrades
 before the context does, and the static analyst is therefore given a curated allowlist of
 \fact{static-curated-functions} tools, with high-value tools invoked deterministically from code. And the
 pipeline degrades rather than fails when a service is absent, so with the sandbox unreachable the
 dynamic path is skipped and the run completes on static evidence, a behaviour pinned by a test. That
 mattered during the study, because the sandbox was reachable from one network only and every
-static-only result reported here was produced by that degradation working as designed. All four
-architectural claims listed in Section~\ref{sec:intro} are measured in Section~\ref{sec:results} and
-every one is negative or near-null; the components are not broken and three of them work well in
-isolation, but they do not move the end-to-end result.
+static-only result reported here was produced by that degradation working as designed.

@@ -10,11 +10,10 @@ firing rate measured before its effect, and with intervals resampled at the leve
 are independent at.
 
 Conceptually, the contribution is a way of reading a component's contribution that does not depend
-on the component working. A no-LLM baseline gives every F1 something to refer to; a firing rate
-decides in advance whether an ablation can say anything; a minimum detectable effect turns a null
-from an assertion of equivalence into a bound; and an output cardinality count asks whether the
-instrument produced N answers or one answer N times. None is expensive and each changed a conclusion
-here.
+on the component working: a baseline to refer an F1 to, a firing rate to decide in advance whether
+an ablation can say anything, a minimum detectable effect to turn a null into a bound, and a count
+of distinct outputs to ask whether the instrument produced N answers or one answer N times. None is
+expensive and each changed a conclusion here.
 
 Four architectural claims motivated the design and none survived measurement. Negotiated consensus
 does not beat a single judge at equal budget, the corroboration cascade never reaches the artefact
@@ -33,12 +32,10 @@ at all, and in each of those a measurement's cause was assigned rather than meas
 
 We are careful about what is new. Silent failure at tool boundaries is documented, the metamorphic
 relation behind the detector is ordinary, and inference-time configuration inverting model rankings
-inside a constrained budget is established. What we add is the setting and the price. In an
-evaluation pipeline the artefact of such a failure is a measurement that is wrong and looks right,
-and the price here was concrete: one completed study withdrawn because its per-sample outputs were
-not retained, then four arms of a later ablation lost the same way one level up, because the rule
-written after the first failure was scoped to that failure and the environment a study runs in is
-also part of the instrument.
+inside a constrained budget is established. What we add is the setting and the price: one completed
+study withdrawn because its per-sample outputs were not retained, then four arms of a later ablation
+lost the same way one level up, because the rule written after the first failure was scoped to that
+failure and the environment a study runs in is also part of the instrument.
 
 The limitations bound the reading directly. This is one pipeline, one 35B model at one quantisation,
 on one machine, evaluated on Windows PE malware against family-level ground truth, and most of its

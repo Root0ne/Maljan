@@ -8,9 +8,8 @@ and the \fact{drift-n} dated samples of the withdrawn drift study were obtained 
 (abuse.ch), \texttt{https://bazaar.abuse.ch}, under terms that permit research redistribution of
 samples but not of the corpus as a package. MABEL, the Malware Analysis Benchmark for AI/ML, was
 mined offline into the family-fingerprint catalogue and the ATT\&CK case corpus with no binaries
-downloaded; Ultimate-RAT-Collection supplied RAT builder and payload binaries for that catalogue and
-for the leakage-free retrieval split; DikeDataset was downloaded and assessed but not catalogued,
-its labels being coarse malice scores with no family or technique annotation. MITRE ATT\&CK
+downloaded, and Ultimate-RAT-Collection supplied RAT builder and payload binaries for that catalogue
+and for the leakage-free retrieval split. MITRE ATT\&CK
 (Enterprise), \texttt{https://attack.mitre.org}, supplies the family-to-technique \texttt{uses}
 relationships used as per-sample ground truth, derived from \texttt{mitre-attack/attack-stix-data}
 under the ATT\&CK Terms of Use.
@@ -24,10 +23,9 @@ of that arrangement rather than claiming it sufficient: the guest reaches the pu
 detonation, because a sample that cannot resolve its command-and-control infrastructure behaves
 differently from one that can and the network evidence channel would otherwise be empty for every
 sample. Live detonation with egress is the standard arrangement for behavioural sandboxing, and it
-is the arrangement whose consequences we report, including that most of the domains every sample
-contacted turn out to be the guest image describing itself. No user study was conducted, no personal
-data was collected, and no human analyst scored any output, that last point being a limitation of
-the evaluation rather than a claim about ethics.
+is the arrangement whose consequences we report. No user study was conducted, no personal data was
+collected, and no human analyst scored any output, that last point being a limitation of the
+evaluation rather than a claim about ethics.
 
 \subsection*{Data availability and reproducibility}\label{data-availability}
 
@@ -37,9 +35,7 @@ The archive holds every per-sample record retained by every study reported here,
 harness wrote, together with the offline re-analysis that recomputes every interval, design effect,
 minimum detectable effect and adjusted p-value from those records and its random seed, the ATT\&CK
 ground-truth fixtures, and the model digest and engine commit needed to reproduce the local arm.
-Every number this paper states about its own results is generated from those records into a macro
-and referenced rather than typed, and a key the document asks for that the derivation cannot produce
-stops the build. Two runs of the offline analysis produce byte-identical output, asserted by a test
+Two runs of the offline analysis produce byte-identical output, asserted by a test
 in the released suite rather than claimed here, and every interval carries the seed, the iteration
 count and the number of clusters it was computed from. The live arms are not bit-reproducible and we
 do not claim they are: decoding is at temperature \fact{decode-temperature} on the local arm and at
@@ -65,12 +61,10 @@ Large language models are the object of study in this work, so the pipeline unde
 built from them and every measurement reported here is a measurement of their behaviour in it.
 Separately, generative AI was used as an authoring and engineering aid, for drafting and revising
 prose, writing evaluation harnesses and their tests, and performing literature searches whose
-results were then verified by fetching each source. That verification is not incidental to this
-disclosure: of the nine citations added by those searches and checked one by one, three said
-something the source did not, one quoted a sentence absent from the paper, one cited a practice the
-source does not describe, and one blended two incompatible published accounts into a single
-attribution. All are corrected in the text and the corrections are recorded, because a search
-summary that reads as a citation is the same class of failure this paper is about. An internal
+results were then verified by fetching each source. Of the nine citations added by those searches and checked
+one by one, six said something
+the source did not, and all six are corrected in the text, because a search summary that reads as a
+citation is the same class of failure this paper is about. An internal
 readability assessment of report narratives was performed with a language model as a development
 aid; its results are deliberately excluded and no LLM scored any result reported here. The authors
 take responsibility for all content, including every number, every citation, and every claim about
@@ -78,7 +72,6 @@ what the measurements support.
 
 \subsection*{Competing interests}\label{competing-interests}
 
-The authors declare no competing financial or non-financial interests. No external funding supported
-this work. All measurements were taken on hardware owned by the authors, except for calls to three
-commercially hosted inference endpoints, which were paid for at their public list prices and whose
-providers had no involvement in, or advance knowledge of, this evaluation.
+The authors declare no competing financial or non-financial interests, and no external funding
+supported this work. The three commercially hosted inference endpoints were paid for at their public
+list prices, and their providers had no involvement in, or advance knowledge of, this evaluation.

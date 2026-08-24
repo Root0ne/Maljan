@@ -7,7 +7,7 @@ through an alias map with a CamelCase-split fallback. It is family-level and unc
 level, so a single binary of a family need not exhibit all the techniques catalogued for that family
 and absolute recall carries a structural ceiling. Absolute F1 values here are therefore not
 comparable to work using per-sample expert labels; the bias is approximately constant across arms,
-which makes within-study contrasts the defensible reading and is exactly why a baseline matters. The
+which makes within-study contrasts the defensible reading. The
 withdrawn temporal-drift study's manifest survives as \fact{drift-n} dated samples over
 \fact{drift-cohorts} cohorts and \fact{drift-families} families, metadata only.
 
@@ -28,8 +28,7 @@ and completes in \textasciitilde5.5 minutes, putting an n=\fact{cohort-n} cohort
 Table~\ref{tab:model} pins the local model and engine. Naming the imatrix calibration dataset
 matters, because two IQ3 quantisations of the same model calibrated differently are not the same
 artefact, and most papers reporting a quantisation level cannot say which calibration produced it.
-The engine commit was reconstructed rather than recorded, and we say so: \texttt{llama-server\
--\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
+The engine commit was reconstructed rather than recorded. \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
 so the commit was recovered from a depth-\setting{1} clone vendored elsewhere in the project and
 proved against an identical \fact{engine-source-files}-file source list with one file differing once
 line endings are normalised.
@@ -183,9 +182,7 @@ declared families, and every null is reported with the minimum detectable effect
 produced it at 80\% power, because a null without its resolution reads either as equivalence or as a
 failed experiment depending on the reader.
 
-Two of these choices were corrections rather than plans. Every interval in an earlier draft
-resampled rows rather than clusters, and correcting that widened the anchor interval
-\fact{baseline-f1-widening}-fold. And an early study ranked prompt structures using a single-run
-parsed-claim count, whose ranking inverted when the decoding budget changed, so the instrument was
-measuring the interaction of structure and budget while being read as measuring structure. A claim
-count from one run is not an instrument, and no result in this paper rests on one.
+Both choices were corrections rather than plans: every interval in an earlier draft resampled rows
+rather than clusters, and an early study ranked prompt structures on a single-run parsed-claim count
+whose ranking inverted when the decoding budget changed. No result in this paper rests on a single
+run.

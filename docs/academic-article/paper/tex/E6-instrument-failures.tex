@@ -1,13 +1,12 @@
 \subsection{Instrument failures}
 \label{sec:failures}
 
-Seven failures of the instrument are reported together because they share a shape a test suite is
-poorly positioned to catch and a results table cannot show: the instrument answered successfully,
-and answered about something else. Table~\ref{tab:failures} lists them with the layer each occurred
-at and what actually found it, and Figure~\ref{fig:architecture} marks each on the topology. The
-first four crossed a boundary with another server. The last three are ours, two in the analysis code
-that produces our results and one in the pipeline that produces the artefact the analyst receives,
-so the shape stops neither at the network boundary nor at the evaluation harness.
+Seven failures of the instrument share a shape: it answered successfully, and answered about
+something else. Table~\ref{tab:failures} lists them with the layer each occurred at and what found
+it, and Figure~\ref{fig:architecture} marks each on the topology. The first four crossed a boundary
+with another server. The last three are ours, two in the analysis code that produces our results and
+one in the pipeline that produces the artefact the analyst receives, so the shape stops neither at
+the network boundary nor at the evaluation harness.
 
 \begin{table}[!htbp]
 \caption{The seven instrument failures, with the layer each occurred at and what found it.}\label{tab:failures}
@@ -183,22 +182,15 @@ appear was the model's; a perfect agreement is the same signal as an identical d
 \end{figure}
 
 Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal while a
-stuck one goes flat, so the diagnosis is in the shape and no ground truth is required. Panel a) of
+stuck one goes flat, so the diagnosis is in the shape. Panel a) of
 Figure~\ref{fig:cardinality} is measured, its staircase's flat treads being genuinely identical
-binaries rather than a fault, and that is the figure we now report beside every batch result. Panel
-b) is a schematic, and the reason is itself the cost of these failures: it depicts M3, the run in
+binaries rather than a fault. Panel b) is a schematic, and the reason is itself the cost of these failures: it depicts M3, the run in
 which \fact{stuck-graph-run} consecutive samples returned a byte-identical
 \fact{stuck-graph-chars}-character call graph, and we cannot plot it because that run predates the
-per-sample retention policy those very failures caused us to adopt. The curve this paper turns on is
-the one we are unable to draw.
+per-sample retention policy those very failures caused us to adopt.
 
 The price is a completed study. A seven-year \fact{drift-n}-sample temporal-drift analysis ran the
 full pipeline per sample against a long-lived server never restarted between samples, which is M2's
 precondition exactly, and whether it was affected cannot be determined because its per-sample
 outputs were not retained. The withdrawal is caused not by the defect but by the defect plus the
 inability to re-ask the question afterwards.
-
-Silent failure at tool boundaries is documented, and Section~\ref{sec:related} places both the
-detector and the genus in the literature that already carries them; what is ours is four mechanisms
-at four distinct integration boundaries, the setting, and a detector run alongside results rather
-than as a test.
