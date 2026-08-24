@@ -11,9 +11,9 @@ which makes within-study contrasts the defensible reading. The
 withdrawn temporal-drift study's manifest survives as \fact{drift-n} dated samples over
 \fact{drift-cohorts} cohorts and \fact{drift-families} families, metadata only.
 
-Three properties of the sandbox bound what can be reproduced. It is CAPE 2.5 with one analysis
-machine and no Linux guest, so an ELF submitted there joins the \fact{cape-backlog} tasks never
-scheduled. Reports are retained for days rather than indefinitely, with
+Three properties of the sandbox bound what can be reproduced. It is CAPE~2.5, the Config and
+Payload Extraction sandbox, with one analysis machine and no Linux guest, so an Executable and Linkable Format binary submitted there joins the
+\fact{cape-backlog} tasks never scheduled. Reports are retained for days rather than indefinitely, with
 \fact{cape-report-retention-sampled} of \fact{cape-report-retention-sampled} sampled older tasks
 reporting no report directory, so the local archive is the only copy and re-submitting the same
 samples is not a reproduction recipe on its own. And the instance rate-limits with a throttle
@@ -25,7 +25,8 @@ and completes in \textasciitilde5.5 minutes, putting an n=\fact{cohort-n} cohort
 
 \subsection{Models, endpoints and serving configuration}\label{models-endpoints-and-serving-configuration}
 
-Table~\ref{tab:model} pins the local model and engine. Naming the imatrix calibration dataset
+Table~\ref{tab:model} identifies the local model and inference engine by Secure Hash Algorithm
+(SHA-256) digest and by source commit. Naming the imatrix calibration dataset
 matters, because two IQ3 quantisations of the same model calibrated differently are not the same
 artefact. The engine commit was reconstructed rather than recorded: \texttt{llama-server\
 -\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
@@ -39,17 +40,17 @@ normalised.
 \begin{tabular}{@{}lp{0.64\linewidth}@{}}
 \toprule
 model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised IQ3\_K\_R4 by Unsloth \\
-GGUF sha256 & \texttt{d0de70ef…c4ea}, computed locally and matching the HuggingFace etag \\
-HF revision & \texttt{cfd350fd…1f0d}, retrieved 2026-05-11 \\
+model file SHA-256 & \texttt{d0de70ef…c4ea}, computed locally and matching the HuggingFace etag \\
+HuggingFace revision & \texttt{cfd350fd…1f0d}, retrieved 2026-05-11 \\
 imatrix calibration & \texttt{\seqsplit{unsloth\_calibration\_Qwen3.6-35B-A3B.txt}}, \setting{510} entries over \setting{76} chunks \\
-architecture & hybrid recurrent (SSM keys + \texttt{\seqsplit{full\_attention\_interval=4}}), from the GGUF metadata \\
+architecture & hybrid recurrent (state-space-model keys + \texttt{\seqsplit{full\_attention\_interval=4}}), from the model file metadata \\
 engine & \texttt{ik\_llama.cpp} at \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}} (\#\fact{engine-commit-pr}) \\
-host & one RTX \fact{host-gpu}, \setting{31}\,GiB RAM, \setting{16} threads \\
+host & one RTX \fact{host-gpu}, \setting{31}\,GiB random-access memory, \setting{16} threads \\
 \midrule
 server growth & \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after one analyst pass, \fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes; anonymous and unreclaimable, so long paired runs restart the server between arms \\
-context & \fact{context-served} of the native \setting{262,144}, \fact{cpu-offload-blocks} blocks on CPU; serving \setting{64}k instead does not lower the peak (\fact{llama-rss-64k-gb} against \fact{llama-rss-growth-gb} GB) \\
+context & \fact{context-served} of the native \setting{262,144}, \fact{cpu-offload-blocks} blocks on the central processing unit; serving \setting{64}k instead does not lower the peak (\fact{llama-rss-64k-gb} against \fact{llama-rss-growth-gb} GB) \\
 generation rate & \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s, because the engine writes and erases a \fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred tokens at \textasciitilde39k context \\
-disassembly container & capped at \fact{ghidra-mem-limit-gb} GB, its JVM \texttt{-Xmx4g} bounding the heap only, measured RSS \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap \\
+disassembly container & capped at \fact{ghidra-mem-limit-gb} GB, its Java virtual machine flag \texttt{-Xmx4g} bounding the heap only, measured resident set size \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -62,8 +63,7 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
 \end{verbatim}
 
 Restarting the server between arms changes no decoding parameter and is therefore
-measurement-neutral. The working set does not fit alongside an interactive session, so arms measured
-under memory pressure are not commensurable with arms that were not.
+measurement-neutral.
 
 Table~\ref{tab:endpoints} lists the endpoints each arm ran against, and one parameter on it decides
 more than the model names do. \texttt{enable\_thinking} is honoured on DashScope and ignored on
@@ -95,7 +95,7 @@ larger, hosted & DashScope & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenpl
 \end{tabular}
 \end{table}
 
-Two serving details are load-bearing for anyone reproducing an arm. The local server's output cap
+Two serving details matter to anyone reproducing an arm. The local server's output cap
 must be sent twice, because \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire as
 \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read, so the cap must also
 travel in \texttt{extra\_body}; measured on this host, \fact{cap-requested} requested yields
@@ -105,7 +105,7 @@ never \texttt{"length"}, so telemetry detecting truncation by finish reason repo
 often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
 requests per day at \fact{openrouter-burst-limit} per minute, and the first attempt exhausted it
 mid-flight with \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning
-HTTP~429. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a
+HTTP~429, the Hypertext Transfer Protocol (HTTP) status for a rate limit. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a
 full-pipeline arm at roughly \fact{requests-per-analysis} model requests per analysis is not
 reachable on that tier at all.
 
@@ -139,36 +139,38 @@ entire output budget thinking and returned no answer, with \fact{arm-qwen35ba3b-
 \fact{arm-qwen35ba3b-n} calls hitting the cap on the second. An unmatched pair therefore does not
 produce a noisy comparison; it produces a comparison of the flag.
 
-Three further rules were adopted after each one caught something, and all three are cheap. Measure a
-mechanism's firing rate before its effect: the confidence cap fires on \fact{cap-rate} of
+Three further rules were adopted after each one caught something, and all three are cheap. The first
+is that a mechanism's firing rate is measured before its effect: the confidence cap fires on \fact{cap-rate} of
 techniques, so an ablation would describe the \fact{cap-rate-complement} where the cap never ran,
 while the sink-reachability hint fires on \fact{hint-rate} of samples and an ablation of it is a
 real statement about the hint. The cap's preconditions explain its rate, since it applies to three
 technique families only when the sole contributing layer is static and
 \fact{cap-gated-yara-only-share} of those claims are YARA-only. An ablation must therefore be
 restricted to the samples where the mechanism fires, because averaging a feature over inputs it
-never touched dilutes a real effect toward zero. Count how many distinct outputs the N inputs
-produced, and report that count as a result column rather than as a test, because the signal exists
+never touched dilutes a real effect toward zero. The second is that the number of distinct outputs
+the N inputs produced is counted and reported as a result column rather than as a test, because the
+signal exists
 only in the batch while each individual response is well-formed; we report
 \fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples}
-samples. And retain per-sample outputs for every study, since aggregates cannot be re-interrogated:
+samples. The third is that per-sample outputs are retained for every study, since aggregates cannot
+be re-interrogated:
 when a defect was found that might have affected a completed \fact{drift-n}-sample study, the
 question could not be asked because only the summary survived. Long-lived servers accumulate state
 that crosses sample boundaries, so the reverse-engineering server is restarted between samples,
 which recovered \fact{switch-recovered} of \fact{switch-attempted} samples previously recorded as
-unmeasurable. Two audits were added for the same reason. Diffing the claim register against the
-evidence log found a claim recorded as novel an hour after our own text called it a replication, and
-counter-searching each novelty claim in an adjacent field's vocabulary demoted five, including the
-one central to this paper; the result of a counter-search is recorded whether or not it demotes
-anything, because a searched absence is only credible if the looking is documented.
+unmeasurable. Two audits were added for the same reason: diffing the claim register against
+the evidence log, and counter-searching each novelty claim in an adjacent field's vocabulary, which
+demoted five including the one central to this paper. A counter-search is recorded whether or not it
+demotes anything, because a searched absence is only credible if the looking is documented.
 
 \subsection{Statistical analysis}\label{statistical-analysis}
 
-Every arm sees the same samples in the same order, differences are computed per sample and then
-aggregated, and 95\% bootstrap confidence intervals are taken over the paired deltas. The
+Every arm is scored on the same samples in the same order, differences are computed per sample and
+then aggregated, and 95\% bootstrap confidence intervals (CIs) are taken over the paired deltas. The
 observations are nested, with many claims from one sample and many samples from one family, so the
-bootstrap resamples whole clusters and the p-value comes from flipping the sign of whole cluster
-means rather than of rows. Two properties of that test are reported with it. With $k$ clusters the
+bootstrap resamples whole clusters, the p-value comes from flipping the sign of whole cluster
+means rather than of rows, and each interval is reported with the intraclass correlation coefficient
+(ICC) of its measure and the effective sample size that implies. Two properties of that test are reported with it. With $k$ clusters the
 two-sided version cannot return a p below $2/2^k$, which at $k$=\setting{5} is
 \fact{fixture-signflip-floor} and puts $\alpha$=0.05 out of reach whatever the effect size; and
 above \setting{20} clusters the $2^k$ assignments are sampled rather than enumerated, at

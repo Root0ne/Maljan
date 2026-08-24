@@ -1,8 +1,8 @@
 \subsection{Discussion}
 \label{sec:discussion}
 
-The most consequential thing we can say about these negative results is that most of them are
-bounds rather than equivalences, and that we did not know this when we first wrote them down. Five
+The most consequential property of these negative results is that most of them are
+bounds rather than equivalences, and that was not evident when they were first written down. Five
 of the studies here run on five fixtures, where the sign-flip floor of
 Section~\ref{sec:method} puts $\alpha$=0.05 out of reach whatever the effect size, and no number of
 extra decoding repeats moves it because repeats add rows inside clusters rather than clusters. The
@@ -18,8 +18,8 @@ The literature we counter-searched against locates silent failures at the bounda
 and four of our seven crossed such a boundary while three crossed none. What the seven share is not
 a boundary but an attribution. An ablation varied the deterministic reconciliation step and we
 attributed the difference to a language model; a rank correlation ordered a reasoning-configuration
-flag and we attributed the ordering to parameter count; a documented output ceiling was renamed
-during serialisation and we attributed boundedness to a component that had never once been bounded.
+flag and we attributed it to parameter count; a renamed output ceiling let us attribute boundedness
+to a component that had never once been bounded.
 In every case the number was real and the arrow pointing to its cause was drawn by us. We offer that
 as a proposal rather than as a taxonomy, since seven cases from one project is not a class, but it
 does suggest a different question to ask of an evaluation than boundary-oriented thinking suggests:
@@ -31,18 +31,19 @@ independent, and nothing in the pipeline, the tests or the review caught it beca
 never in a function.
 
 What a practitioner should take from this is narrow, because it is one pipeline on one machine.
-Measure the firing rate before the effect, since a mechanism engaging on \fact{cap-rate} of its
-inputs produces an ablation whose null describes the cases where it never ran; count the distinct
-outputs, because that needs no ground truth and belongs beside the sample size rather than inside a
-test; and retain per-sample outputs, then ask what else the study is made of. We adopted retention
+The firing rate should be measured before the effect, since a mechanism engaging on \fact{cap-rate}
+of its inputs produces an ablation whose null describes the cases where it never ran; the distinct
+outputs should be counted, because that needs no ground truth and belongs beside the sample size
+rather than inside a test; and per-sample outputs should be retained, along with whatever else the
+study is made of. We adopted retention
 after losing a study to its absence, scoped the rule to the object under study, and the next failure
 was in the environment, where four arms died on host memory and we had their outputs but not the
-host state. The rule you write after a failure is scoped to that failure.
+host state. A rule written after a failure is scoped to that failure.
 
-What we are not in a position to say needs the same precision. We cannot say
-negotiation is worthless in general, because a control that matches the treatment tells us where our
-own gain came from and not where anyone else's must. We cannot say model capacity is not the
-ceiling, only that a larger model did not separate from ours at this design's resolution while
-differing in a configuration flag worth more than any architecture we measured. We cannot say verbal
-confidence is uninformative in general, only that here it is indistinguishable from chance. And we
-cannot say our seven mechanisms generalise. What we can say is what each of them cost.
+What we are not in a position to say needs the same precision. Negotiation is not shown to be
+worthless in general, because a control matching the treatment locates our own gain and not anyone
+else's. Model capacity is not shown to be off the ceiling, only that a larger model did not separate
+from ours at this design's resolution while differing in a configuration flag worth more than any
+architecture we measured. Verbal confidence is not shown to be uninformative in general, only
+indistinguishable from chance here. Nor are our seven mechanisms shown to generalise. What we can
+say is what each of them cost.

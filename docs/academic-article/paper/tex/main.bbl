@@ -390,4 +390,26 @@ M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
 Request for a server-side output cap, {PREPRINT}, not peer reviewed.
   vllm-project/vllm issue \#11976 (2024).
 
+\bibitem{abusech2026bazaar}
+{abuse.ch}, {MalwareBazaar}, Malware sample corpus.
+  \url{https://bazaar.abuse.ch}, cited as the corpus the dynamic cohort was
+  drawn from. Its terms permit research redistribution of individual samples
+  but not of the corpus as a package (2026).
+
+\bibitem{mitre2026attack}
+{The MITRE Corporation}, {MITRE ATT\&CK} enterprise, Knowledge base.
+  \url{https://attack.mitre.org}, the family-to-technique \texttt{uses}
+  relationships used here as per-sample ground truth are derived from the
+  \texttt{mitre-attack/attack-stix-data} distribution, under the {ATT\&CK}
+  Terms of Use (2026).
+
+\bibitem{release2026artefact}
+Replication package: the pipeline, the evaluation harnesses, the per-sample
+  records and the derivation of every number reported, Archived software
+  release under an open licence, {PLACEHOLDER}: the digital object identifier
+  of the archived release is supplied at submission, together with the author
+  block. It names an archived release rather than a development repository,
+  because a repository can be renamed or deleted and a digital object
+  identifier cannot (2026).
+
 \end{thebibliography}

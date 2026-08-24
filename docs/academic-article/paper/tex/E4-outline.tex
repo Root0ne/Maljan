@@ -1,9 +1,9 @@
 \section{Introduction}
 \label{sec:intro}
 
-Mapping malware evidence to MITRE ATT\&CK technique identifiers is a labelling task that large
-language models are now routinely applied to, and the systems that perform it are rarely a model
-alone. A working pipeline wraps the model in deterministic tooling: a sandbox that detonates the
+Mapping malware evidence to the technique identifiers of MITRE ATT\&CK (Adversarial Tactics,
+Techniques and Common Knowledge) is a labelling task that large language models (LLMs) are now
+routinely applied to, and the systems that perform it are rarely a model alone. A working pipeline wraps the model in deterministic tooling: a sandbox that detonates the
 sample, a disassembler that recovers its structure, retrieval indices that supply prior cases, and
 rule engines that assert techniques directly from signatures. The model's contribution is therefore
 a difference against that tooling rather than a score in isolation, and that difference is almost
@@ -25,9 +25,10 @@ written down.
 
 This work reports the evaluation of one such pipeline, built for ATT\&CK mapping over static,
 dynamic and network evidence, and the failures of the instrument that produced that evaluation. The
-system fuses six deterministic evidence layers, three domain analysts running as ReAct loops over
+system fuses six deterministic evidence layers, three domain analysts running as
+reasoning-and-acting (ReAct) loops over
 tool interfaces, an LLM judge, a weighted corroboration cascade, two retrieval tiers and
-deterministic confidence gating; Figure~\ref{fig:architecture} draws it. It was built around four
+deterministic confidence gating; Figure~\ref{fig:architecture} shows it. It was built around four
 architectural claims: that multi-agent consensus over heterogeneous evidence channels beats a single
 reader, that a multi-layer corroboration cascade improves evidence quality, that two-tier
 attribution supplies useful priors, and that falsification before confidence disciplines unsupported

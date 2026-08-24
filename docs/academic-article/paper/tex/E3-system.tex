@@ -3,8 +3,10 @@
 
 \subsection{Scope and assumptions}\label{scope-and-assumptions}
 
-This study evaluates one pipeline that maps evidence about a Windows PE malware sample to MITRE
-ATT\&CK technique identifiers and emits a STIX bundle. The scope is narrow in four respects and
+This study evaluates one pipeline that maps evidence about a Windows Portable Executable (PE)
+malware sample to MITRE
+ATT\&CK technique identifiers and emits a Structured Threat Information Expression (STIX) bundle.
+The scope is narrow in four respects and
 every result should be read inside it. The model is a single local mixture-of-experts deployment,
 quantised, on one host, with three commercially hosted services used only as comparison endpoints.
 Ground truth is family-level MITRE \texttt{uses}, resolved to a sample through its family signature,
@@ -13,7 +15,7 @@ because the sandbox instance has one analysis machine and no Linux guest.
 
 \subsection{The pipeline under evaluation}\label{the-pipeline-under-evaluation}
 
-Figure~\ref{fig:architecture} draws the system. Its organising rule is that the model proposes and
+Figure~\ref{fig:architecture} shows the system. Its organising rule is that the model proposes and
 a deterministic layer disposes: the model describes behaviour and never emits a technique identifier
 or a final set, and every identifier that reaches the analyst has been assigned, gated and
 reconciled by code. That is why the deterministic layer dominating the output is the design working

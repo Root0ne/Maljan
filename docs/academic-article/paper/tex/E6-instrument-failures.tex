@@ -81,7 +81,7 @@ guaranteed subset of every bundle whatever the model produced, so both numbers a
 returned anything else. A second study about to run would have compared a weighted cascade
 against a flat union of the same claims; both arms would have shared one reconciliation set, so it
 would have reported no difference correctly and vacuously, and it was stopped four minutes in by the
-same log line that exposed M5. The tell was
+same log line that exposed M5. The signal was
 in the results the whole time: a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width
 bootstrap interval across \fact{cascade-overlap-pairs} ablated arms at temperature
 \fact{decode-temperature} is not something a language model produces, it is what a constant looks
@@ -102,10 +102,9 @@ arm-selection rule did not exist. The harness had averaged ranks, an exact permu
 common-cell restriction so endpoint availability cannot masquerade as model size; every guard was
 about a way the numbers could mislead and none about whether the rows were comparable in the first
 place. The rule now keys on the measured reasoning share of each arm rather than on the flag
-requested. M5 was caught by a number too clean to believe; M6 produced a number in exactly the range
-a reader would expect, in the direction the literature predicts, with its limitations already
-stated, so there was nothing anomalous to notice and it was caught by asking why one model was on
-the arms table twice.
+requested. M5 was caught by a number too clean to believe; M6 produced one in exactly the range
+a reader would expect, in the direction the literature predicts, so nothing was anomalous to notice
+and it was caught by asking why one model was on the arms table twice.
 
 M7 is in the production pipeline rather than in an evaluation harness, and it removed a guarantee
 the code states in its own comment. The judge is built with an \fact{judge-output-cap}-token output
@@ -115,9 +114,8 @@ vendor's newer spelling when it serialises the request, and the local inference 
 the newer spelling. It accepted the field, ignored it, and decoded without a ceiling: measured on
 one call, a \fact{unbounded-decode-prompt-tokens}-token prompt, \fact{unbounded-decode-tokens} tokens
 generated, still generating at \fact{unbounded-decode-rate} tokens per second when the caller's
-ten-minute wrapper gave up. The consequence is not a slow call. Four of eight fixtures in a separate
-study never returned a verdict, and for each the pipeline emitted a bundle through its text-fallback
-path, which does not run the reconciliation step, so the corroboration cascade contributed nothing.
+ten-minute wrapper gave up. The consequence is not a slow call but the four unreturned verdicts of
+Section~\ref{sec:cascade}, each of which left the pipeline on its text-fallback path.
 It was invisible because the configured value was correct at every level anything reads: the
 container passed it, the model object held it, and it survived every later rebinding. Only the
 serialised request was wrong, and nothing in the system reads the serialised request, so every check
@@ -133,12 +131,11 @@ M2 and M3 require a second case within one server lifetime, and a unit test load
 asserts, and tears down; M1 required a second server, and the behaviour was correct against the only
 one exercised; M4 required an input rich enough to exhaust the step budget, which small fixtures
 never are. Preconditions of that kind are exactly what a fast unit suite is designed to avoid. The
-last three are worse than avoided and are invisible to unit testing in principle, because every unit
-behaved as specified: M5's reconciliation function has unit tests asserting exactly what it does and
-was never wrong, and no test of a component can catch a misattribution made three modules away; M6
-was tested more carefully than anything else in the harness and every guard concerned the wrong
-question; and M7 had nothing left to assert on, since a unit test would check that the output
-ceiling is \fact{judge-output-cap} and it is, at every level the object model exposes.
+last three are invisible to unit testing in principle, because every unit behaved as specified:
+M5's reconciliation function was never wrong and no component test can catch a misattribution made
+three modules away; M6's guards every one concerned the wrong question; and a unit test of M7 would
+check that the output ceiling is \fact{judge-output-cap}, which it is at every level the object
+model exposes.
 
 \subsection{Output cardinality as a detector}\label{sec:detector}
 
@@ -165,13 +162,12 @@ a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width interval across \f
 \end{tabular}
 \end{table}
 
-The generalisation is one line of arithmetic. Before trusting a batch measurement, ask how many
-distinct outputs the N inputs produced; if far fewer than N differ on a dimension that should vary,
+The generalisation is one line of arithmetic. Before a batch measurement is trusted, the number of
+distinct outputs the N inputs produced is counted; if far fewer than N differ on a dimension that should vary,
 such as output length, digest or element count, the instrument is repeating itself, and repetition
 is what stale state looks like from outside. It needs no ground truth and no oracle, and it is reported as a result column
-rather than run as a test because the signal exists only in the batch. M5 extends it where the idea
-is least comfortable, because there the repeated number was our own result and the variation that
-failed to appear was the model's.
+rather than run as a test because the signal exists only in the batch. M5 extends it to our own results, where the repeated
+number was ours and the variation that failed to appear was the model's.
 
 \begin{figure}
 \centering
@@ -180,8 +176,8 @@ failed to appear was the model's.
 \label{fig:cardinality}
 \end{figure}
 
-Plot distinct outputs against inputs processed and a healthy instrument tracks the diagonal while a
-stuck one goes flat, so the diagnosis is in the shape. Panel a) of
+Plotted against inputs processed, distinct outputs track the diagonal for a healthy instrument and
+go flat for a stuck one, so the diagnosis is in the shape. Panel a) of
 Figure~\ref{fig:cardinality} is measured, its staircase's flat treads being genuinely identical
 binaries rather than a fault. Panel b) is a schematic, and the reason is itself the cost of these failures: it depicts M3, the run in
 which \fact{stuck-graph-run} consecutive samples returned a byte-identical

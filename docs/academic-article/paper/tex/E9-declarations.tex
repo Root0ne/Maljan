@@ -5,14 +5,13 @@
 
 Every sample analysed in this work is live Windows PE malware. The \fact{baseline-n}-sample cohort
 and the \fact{drift-n} dated samples of the withdrawn drift study were obtained from MalwareBazaar
-(abuse.ch), \texttt{https://bazaar.abuse.ch}, under terms that permit research redistribution of
+\cite{abusech2026bazaar}, under terms that permit research redistribution of
 samples but not of the corpus as a package. MABEL, the Malware Analysis Benchmark for AI/ML, was
 mined offline into the family-fingerprint catalogue and the ATT\&CK case corpus with no binaries
-downloaded, and Ultimate-RAT-Collection supplied RAT builder and payload binaries for that catalogue
-and for the leakage-free retrieval split. MITRE ATT\&CK
-(Enterprise), \texttt{https://attack.mitre.org}, supplies the family-to-technique \texttt{uses}
-relationships used as per-sample ground truth, derived from \texttt{mitre-attack/attack-stix-data}
-under the ATT\&CK Terms of Use.
+downloaded, and Ultimate-RAT-Collection supplied the remote access trojan builders and payload
+binaries for that catalogue and for the leakage-free retrieval split. The ATT\&CK Enterprise
+knowledge base \cite{mitre2026attack} supplies the family-to-technique \texttt{uses}
+relationships used as per-sample ground truth, under the ATT\&CK Terms of Use.
 
 Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image reverted to a clean
 snapshot between analyses. The sandbox host is reachable from one network segment and from no public
@@ -29,12 +28,14 @@ evaluation rather than a claim about ethics.
 
 \subsection*{Data availability and reproducibility}\label{data-availability}
 
-The complete project is released under an open licence at \archive: the pipeline itself, the
+The complete project is released under an open licence as an archived software release
+\cite{release2026artefact}: the pipeline itself, the
 evaluation harnesses, the derivation of every number in this paper, the per-sample records they read
-and the scripts that build the figures and assemble the document. The archived release is what the
-statements below refer to; the development repository moves, and a claim about an artefact should
-name something that does not.
-The archive holds every per-sample record retained by every study reported here, in the JSON the
+and the scripts that build the figures and assemble the document. That release is what the
+statements below refer to, rather than the development repository, because a repository moves and a
+claim about an artefact should name something that does not.
+The archive holds every per-sample record retained by every study reported here, in the JavaScript
+Object Notation files the
 harness wrote, together with the offline re-analysis that recomputes every interval, design effect,
 minimum detectable effect and adjusted p-value from those records and its random seed, the ATT\&CK
 ground-truth fixtures, and the model digest and engine commit needed to reproduce the local arm.
@@ -58,11 +59,11 @@ account and the withdrawal is reported in the results rather than quietly repair
 the \fact{drift-n} samples survives and is included, so the cohort can be reconstructed even though
 the results cannot.
 
-\subsection*{Use of generative AI}\label{use-of-generative-ai}
+\subsection*{Use of generative artificial intelligence}\label{use-of-generative-ai}
 
 Large language models are the object of study in this work, so the pipeline under evaluation is
 built from them and every measurement reported here is a measurement of their behaviour in it.
-Separately, generative AI was used as an authoring and engineering aid, for drafting and revising
+Separately, generative artificial intelligence was used as an authoring and engineering aid, for drafting and revising
 prose, writing evaluation harnesses and their tests, and performing literature searches whose
 results were then verified by fetching each source. Of the nine citations added by those searches and checked
 one by one, six said something

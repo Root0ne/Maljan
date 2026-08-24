@@ -9,7 +9,7 @@ it, at equal token budget against simpler alternatives, with a noise control, wi
 firing rate measured before its effect, and with intervals resampled at the level the observations
 are independent at.
 
-Conceptually, the contribution is a way of reading a component's contribution that does not depend
+Conceptually, the contribution is a way of reading what a component adds that does not depend
 on the component working: a baseline to refer an F1 to, a firing rate to decide in advance whether
 an ablation can say anything, a minimum detectable effect to turn a null into a bound, and a count
 of distinct outputs to ask whether the instrument produced N answers or one answer N times. None is
@@ -21,17 +21,16 @@ model calls is worth \fact{cape-negotiated-delta} F1 over a single judge and the
 them is worth \fact{cape-mechanism-delta}: the design helps, and not for the reason it was built.
 The other three do not survive. The corroboration cascade never reaches the artefact the analyst
 receives, two-tier attribution fires too rarely to carry the result, and the confidence number every
-deterministic gate consumes is indistinguishable from chance. None of those components is broken and
-each was built for a reason we would give again, but they do not move the end-to-end result. What
-does move it is the layer underneath: the deterministic assigner gives the cleanest identifier gate
+deterministic gate consumes is indistinguishable from chance. What
+does move the end-to-end result is the layer underneath: the deterministic assigner gives the cleanest identifier gate
 of three backends on two external corpora, and when its reconciliation runs the judge contributes no
 technique the cascade did not already hold, while on the path that bypasses it uncorroborated
 identifiers reach the analyst. The finding we did not expect to be the paper is that the instrument was
 repeatedly wrong in ways that looked like data. Seven mechanisms are catalogued with the layer each
-occurred at; four crossed a boundary with another server, each returned a plausible result rather
-than an error, \fact{test-count} passing tests caught none of them, and all four were found instead
-by one arithmetic check on how many distinct outputs the inputs produced. Three crossed no boundary
-at all, and in each of those a measurement's cause was assigned rather than measured.
+occurred at, each returned a plausible result rather than an error, and \fact{test-count} passing
+tests caught none of them. Four crossed a boundary with another server and were found by one
+arithmetic check on how many distinct outputs the inputs produced; in the three that crossed none, a
+measurement's cause was assigned rather than measured.
 
 We are careful about what is new. Silent failure at tool boundaries is documented, the metamorphic
 relation behind the detector is ordinary, and inference-time configuration inverting model rankings
@@ -52,4 +51,4 @@ constraint on this work rather than the method.
 What we do assert is a change of default. In a pipeline assembled from other people's servers the
 correctness of the model is not the binding constraint on the correctness of the result. Long before
 a benchmark score is a claim about a system, it is a claim about an instrument, and a server that
-answers is not the same as a server that answered your question.
+answers is not the same as a server that answered the question it was asked.

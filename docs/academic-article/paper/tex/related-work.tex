@@ -6,10 +6,11 @@ a registry \cite{yu2024maltracker}, detecting Android malware from application f
 \cite{zhao2025apppoet} and from generated training samples \cite{rollinson2026samples}, and
 summarising what a sample does in prose \cite{saha2025malaware}. None produces ATT\&CK technique
 identifiers from a running analysis of a Windows binary. Automated technique extraction has moved
-from supervised classifiers such as TRAM \cite{mitre2023tram}, rcATT \cite{legoy2020rcatt} and
+from supervised classifiers such as the Threat Report ATT\&CK Mapper (TRAM) \cite{mitre2023tram},
+rcATT \cite{legoy2020rcatt} and
 TTPDrill \cite{husari2017ttpdrill}, through neural extractors such as EXTRACTOR
 \cite{satvat2021extractor}, AttacKG \cite{li2022attackg} and LADDER \cite{alam2023ladder}, to
-retrieval-augmented generation. TechniqueRAG \cite{lekssays2025techniquerag} pairs off-the-shelf
+retrieval-augmented generation (RAG). TechniqueRAG \cite{lekssays2025techniquerag} pairs off-the-shelf
 retrievers with an instruction-tuned re-ranker and fine-tunes only the generator, motivated by data
 scarcity: ATT\&CK defines over 550 sub-techniques while roughly 10,000 annotated examples exist
 publicly. A hierarchical successor injects the tactic-to-technique taxonomy as an inductive bias and
@@ -18,16 +19,17 @@ cuts the candidate space by 77.5\% \preprintcite{morbiato2026hierarchical}, and 
 and the MITRE definition. Neither is used here as a comparator, both being unreviewed and
 self-reported against baselines that Büchel et al.'s systematisation calls ``largely incomparable''
 \cite{buchel2025sok}; that survey re-evaluates more than forty systems in one setting, reports a
-ceiling existing approaches have not crossed, and finds traditional NLP approaches outperforming
+ceiling existing approaches have not crossed, and finds traditional natural language processing
+(NLP) approaches outperforming
 embedder-based and generative ones in realistic settings. Our describe-then-map design removes
-technique-ID recall from the model entirely, which is a domain instantiation of Infer-Retrieve-Rank
+technique-identifier recall from the model entirely, which is a domain instantiation of Infer-Retrieve-Rank
 \preprintcite{doosterlinck2024incontext} and is stricter than \cite{lekssays2025techniquerag}, where
 the model still ranks among retrieved candidates. That the retrieval backends are separable on
 ranking and on gating is likewise not ours, Abdallah et al.~\cite{abdallah2026retrievers} treating
 retrieval confidence as a dimension distinct from effectiveness and finding calibration
 ``consistently weak across model families''; Section~\ref{sec:assignment} measures the separation on
-TRAM2 \cite{mitre2023tram} and on the independently annotated AnnoCTR corpus
-\cite{lange2024annoctr}. Two adjacent results have
+TRAM2, the corpus that tool defines \cite{mitre2023tram}, and on the independently annotated AnnoCTR
+corpus \cite{lange2024annoctr}. Two adjacent results have
 prior art we cite rather than compete with: that a false correction costs more than a missed one is
 why grammatical error correction evaluates with F0.5 \cite{ng2014conll,bryant2019bea}, and neural
 text degeneration has competing established accounts locating the cause in the likelihood objective
@@ -37,7 +39,8 @@ Agentic systems now drive reverse-engineering backends through tool interfaces, 
 splits by role: fine-tuned binary specialists are small and open-weight, among them ReCopilot
 \preprintcite{chen2025recopilot}, LLM4Decompile \cite{tan2024llm4decompile} and Nova
 \cite{jiang2025nova}, while tool-driving agents use frontier models. TTPDetect
-\preprintcite{ttpdetect2026} is the closest system to ours, identifying TTPs in stripped malware
+\preprintcite{ttpdetect2026} is the closest system to ours, identifying tactics, techniques and
+procedures in stripped malware
 binaries through retrieval-narrowed entry points and a function-level agent, reporting 93.25\%
 precision and 93.81\% recall at function level and 87.37\% precision on real-world malware; we do
 not claim binary evidence as an input modality, and that ground is theirs. Degradation of tool
@@ -70,7 +73,7 @@ constants, including inverting the most- and least-trusted layers, changed the t
 function of layer count alone.
 
 This work's methodological results belong to an established critique tradition. Arp et al.'s
-\emph{Dos and Don'ts} identified ten pitfalls in ML-for-security, and \emph{Chasing Shadows}
+\emph{Dos and Don'ts} identified ten pitfalls in machine learning for security, and \emph{Chasing Shadows}
 \cite{evertz2026chasing} is its direct successor, surveying all 72 peer-reviewed LLM-security papers
 of 2023 and 2024 and finding every one exposed to at least one of nine pitfalls with only 15.7\%
 explicitly discussed. A published negative RAG result in malware analysis exists by a mechanism
@@ -94,9 +97,11 @@ and for inference engines \cite{liu2026inference}, the latter carrying both inco
 parsing as a root cause and silent error as a symptom; silently overruling a requested parameter
 back to a default is itself a named misconfiguration failure mode with a measured prevalence
 \cite{xu2013misconfig}. Adjacent work reaches the same place from the interface side: mining defects
-in MCP reference servers, Oyelayo et al.~\cite{oyelayo2026mcp} find data validation and type issues
+in Model Context Protocol (MCP) reference servers, Oyelayo et al.~\cite{oyelayo2026mcp} find data
+validation and type issues
 to be the second most prevalent class at 13.97\%, the bucket our null-for-unset-optional defect
-falls into, and input dependencies a machine-readable specification cannot express are ``the norm,
+falls into, and input dependencies that a machine-readable application programming interface (API)
+specification cannot express are ``the norm,
 rather than the exception, with 85\% of the reviewed APIs'' \cite{martinlopez2019deps}. The detector
 is not new either: ``distinct inputs should produce distinct outputs'' is an ordinary metamorphic
 relation, and metamorphic testing exists precisely for programs whose correct output is unknown

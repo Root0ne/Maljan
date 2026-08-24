@@ -667,3 +667,43 @@
   year      = {2025},
   note      = {arXiv:2411.15399. Both quoted figures were confirmed against the full text}
 }
+
+% ---------------------------------------------------------------------------
+% Artefacts cited as objects rather than as evidence: the two data sources the
+% ethics statement names, and the archived release of the code. They are here
+% rather than in the body because a locator belongs in the reference list, and
+% because a reader who wants one of these wants it beside the other sources.
+% ---------------------------------------------------------------------------
+
+@misc{abusech2026bazaar,
+  author       = {{abuse.ch}},
+  title        = {{MalwareBazaar}},
+  year         = {2026},
+  howpublished = {Malware sample corpus. \url{https://bazaar.abuse.ch}},
+  note         = {Cited as the corpus the dynamic cohort was drawn from. Its terms
+            permit research redistribution of individual samples but not of the
+            corpus as a package}
+}
+
+@misc{mitre2026attack,
+  author       = {{The MITRE Corporation}},
+  title        = {{MITRE ATT\&CK} Enterprise},
+  year         = {2026},
+  howpublished = {Knowledge base. \url{https://attack.mitre.org}},
+  note         = {The family-to-technique \texttt{uses} relationships used here as
+            per-sample ground truth are derived from the
+            \texttt{mitre-attack/attack-stix-data} distribution, under the
+            {ATT\&CK} Terms of Use}
+}
+
+@misc{release2026artefact,
+  title        = {Replication package: the pipeline, the evaluation harnesses, the
+                  per-sample records and the derivation of every number reported},
+  year         = {2026},
+  howpublished = {Archived software release under an open licence},
+  note         = {{PLACEHOLDER}: the digital object identifier of the archived release
+            is supplied at submission, together with the author block. It names an
+            archived release rather than a development repository, because a
+            repository can be renamed or deleted and a digital object identifier
+            cannot}
+}
