@@ -15,11 +15,10 @@ another server and three did not is a claim about this topology, and it is
 easier to check on a drawing of the topology than in prose.
 
 Fonts are TeX Gyre Termes and DejaVu Sans Mono, the two the document already
-embeds, so the conformance check that counts font families still sees two.
-Third-party logos are deliberately not used: of the eleven tools named here only
-two ship a mark anywhere in this repository, and fetching the rest would put
-trademarked artwork into a journal submission for no gain in legibility. Each
-tool carries a drawn glyph instead.
+embeds, so the conformance check that counts font families still sees two. There
+are no logos or icons: third-party marks would put trademarked artwork into a
+journal submission, and the drawn glyphs that stood in for them crowded the
+titles they sat beside without telling a reader anything the label did not.
 
 Run:  make paper   (or run this file directly)
 """
@@ -29,7 +28,15 @@ from __future__ import annotations
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-W = 900
+# The layout below is authored on a 900-unit grid, which is the width the boxes
+# were sized against. The canvas is wider than that. In print the figure is
+# bound by height rather than width, so the scale is fixed by the height and
+# roughly a fifth of the width allowance was going unused; stretching the grid
+# horizontally spends it on the gaps between boxes instead, at no cost to the
+# type size, which does not scale with the grid.
+GRID = 900.0
+SX = 1.22
+W = round(GRID * SX)
 OUT = Path(__file__).resolve().parent / "figures"
 
 INK = "#161616"
@@ -51,6 +58,11 @@ GAP = 9.0
 _cursor = [46.0]
 
 
+def gx(v: float) -> float:
+    """Grid x to canvas x."""
+    return round(v * SX, 2)
+
+
 def band(key: str, height: float, n: str, title: str) -> float:
     """Place the next band under the previous one. Tops are never hand-written,
     so a band that grows pushes its neighbours down instead of covering them."""
@@ -65,29 +77,51 @@ def band(key: str, height: float, n: str, title: str) -> float:
 
 def box(x, y, w, h, fill, edge, dashed=False) -> None:
     d = ' stroke-dasharray="5 3"' if dashed else ""
-    add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="5" fill="{fill}" stroke="{edge}"{d}/>')
+    add(
+        f'<rect x="{gx(x)}" y="{y}" width="{gx(w)}" height="{h}" rx="5" '
+        f'fill="{fill}" stroke="{edge}"{d}/>'
+    )
 
 
 def label(x, y, s, cls="lbl", anchor="middle") -> None:
-    add(f'<text class="{cls}" x="{x}" y="{y}" text-anchor="{anchor}">{escape(s)}</text>')
+    add(f'<text class="{cls}" x="{gx(x)}" y="{y}" text-anchor="{anchor}">{escape(s)}</text>')
 
 
-def lines(x, y, rows, cls="sub", dy=14.0) -> None:
+def lines(x, y, rows, cls="sub", dy=15.0) -> None:
     for i, r in enumerate(rows):
         label(x, y + i * dy, r, cls)
 
 
 def arrow(x1, y1, x2, y2, cls="flow") -> None:
-    add(f'<path class="{cls}" d="M {x1} {y1} L {x2} {y2}" marker-end="url(#ah)"/>')
+    add(f'<path class="{cls}" d="M {gx(x1)} {y1} L {gx(x2)} {y2}" marker-end="url(#ah)"/>')
+
+
+def path(d_grid: str, cls="flow") -> None:
+    """A polyline given as (command, value) pairs on the grid. Horizontal
+    coordinates are transformed; vertical ones are not, so a right angle stays
+    one."""
+    out, i = [], 0
+    toks = d_grid.split()
+    while i < len(toks):
+        c = toks[i]
+        if c in ("H",):
+            out.append(f"H {gx(float(toks[i + 1]))}")
+            i += 2
+        elif c in ("V",):
+            out.append(f"V {toks[i + 1]}")
+            i += 2
+        elif c == "M":
+            out.append(f"M {gx(float(toks[i + 1]))} {toks[i + 2]}")
+            i += 3
+        else:
+            raise ValueError(c)
+    add(f'<path class="{cls}" d="{" ".join(out)}" marker-end="url(#ah)"/>')
 
 
 def fail(x, y, tag) -> None:
-    add(f'<circle class="failmark" cx="{x}" cy="{y}" r="11.5"/>')
-    add(f'<text class="failtxt" x="{x}" y="{y + 4}" text-anchor="middle">{tag}</text>')
-
-
-def glyph(x, y, body) -> None:
-    add(f'<g class="ico" transform="translate({x},{y})">{body}</g>')
+    # The marker is a circle on the canvas, so only its centre is transformed.
+    add(f'<circle class="failmark" cx="{gx(x)}" cy="{y}" r="11.5"/>')
+    add(f'<text class="failtxt" x="{gx(x)}" y="{y + 4}" text-anchor="middle">{tag}</text>')
 
 
 # ------------------------------------------------------------ 1. intake
@@ -104,17 +138,9 @@ label(748, b + 64, "ground truth, scoring only", "sub")
 
 # --------------------------------------------------- 2. evidence acquisition
 b = band("eviAcq", 154, "2", "Evidence acquisition, over three protocols")
-CHIP = (
-    '<rect x="0" y="0" width="15" height="11" rx="1.5"/>'
-    '<path d="M-4 3 h4 M-4 8 h4 M15 3 h4 M15 8 h4"/>'
-)
-PLAY = '<rect x="0" y="0" width="17" height="11" rx="1.5"/><path d="M6 3 l5 2.5 l-5 2.5 z"/>'
-WAVE = '<path d="M0 8 q4 -8 8 0 t8 0"/><path d="M0 3.5 q4 -6.5 8 0 t8 0" opacity="0.45"/>'
-SHIELD = '<path d="M8 0 l8 3 v4.5 q0 4.5 -8 6.5 q-8 -2 -8 -6.5 v-4.5 z"/>'
 srv = [
     (
-        36,
-        CHIP,
+        42,
         "Ghidra MCP",
         "HTTP",
         [
@@ -125,8 +151,7 @@ srv = [
         ],
     ),
     (
-        254,
-        PLAY,
+        256,
         "CAPEv2 sandbox",
         "MCP",
         [
@@ -137,15 +162,13 @@ srv = [
         ],
     ),
     (
-        472,
-        WAVE,
+        470,
         "Network MCP",
         "MCP",
         ["local PCAP inspection", "pcap summary, DNS, HTTP", "no traffic leaves the host"],
     ),
     (
-        690,
-        SHIELD,
+        684,
         "threat-intel MCP",
         "HTTP",
         [
@@ -155,18 +178,14 @@ srv = [
         ],
     ),
 ]
-for x, ico, name, proto, rows in srv:
-    box(x, b + 26, 174, 122, SRV, SRV_EDGE)
-    # The glyph sits in the corner rather than beside the title, so the text can
-    # be centred on the box itself: centring it around the glyph instead pushed
-    # the widest line four units past the right edge.
-    glyph(x + 11, b + 36, ico)
-    label(x + 87, b + 47, name, "lbl9", "middle")
-    label(x + 87, b + 62, proto, "tag")
-    lines(x + 87, b + 80, rows, "sub", 13.0)
-fail(36 + 160, b + 38, "M2")
-fail(36 + 160, b + 64, "M3")
-fail(254 + 160, b + 38, "M1")
+for x, name, proto, rows in srv:
+    box(x, b + 32, 174, 116, SRV, SRV_EDGE)
+    label(x + 87, b + 52, name, "lbl9", "middle")
+    label(x + 87, b + 67, proto, "tag")
+    lines(x + 87, b + 86, rows, "sub", 14.0)
+fail(42 + 156, b + 48, "M2")
+fail(42 + 156, b + 76, "M3")
+fail(256 + 156, b + 48, "M1")
 
 # ------------------------------------------------ 3. deterministic layers
 b = band("layer0", 92, "3", "Deterministic evidence layers, Layer 0, no model involved")
@@ -197,13 +216,18 @@ ret = [
 for x, name, rows in ret:
     box(x, b + 28, 168, 58, STORE, STORE_EDGE)
     label(x + 84, b + 46, name, "lbl9")
-    lines(x + 84, b + 62, rows, "sub", 13.0)
+    lines(x + 84, b + 62, rows, "sub", 14.0)
 
 # ------------------------------------------------------- 5. analysis graph
-b = band("graph", 214, "5", "Analysis graph, LangGraph StateGraph over one shared state")
+# The scheduling note rides on the band title rather than sitting between the
+# rows: as a free-floating line it was exactly where the fan-in arrow runs, and
+# a caption crossed by an arrow reads as neither.
+b = band("graph", 206, "5", "Analysis graph, LangGraph StateGraph over one shared state")
+label(868, b + 21, "sequential on one local slot; fan-out from START when multi-slot", "tag", "end")
+AW = 240.0
 ana = [
     (
-        52,
+        42,
         "static analyst",
         "domain weight 0.35",
         [
@@ -213,49 +237,45 @@ ana = [
         ],
     ),
     (
-        322,
+        330,
         "dynamic analyst",
         "domain weight 0.45",
         ["ReAct loop over the sandbox", "API calls, injection chains,", "persistence"],
     ),
     (
-        592,
+        618,
         "network analyst",
         "domain weight 0.20",
         ["PCAP or parsed-flow text", "beaconing, DGA, tunnelling"],
     ),
 ]
 for x, name, w, rows in ana:
-    box(x, b + 28, 232, 86, LLM, LLM_EDGE)
-    label(x + 116, b + 47, name)
-    label(x + 116, b + 62, w, "tag")
-    lines(x + 116, b + 79, rows, "sub", 13.0)
-fail(52 + 218, b + 40, "M4")
-arrow(284, b + 71, 320, b + 71)
-arrow(554, b + 71, 590, b + 71)
-label(302, b + 63, "then", "tag")
-label(572, b + 63, "then", "tag")
-label(
-    450,
-    b + 130,
-    "sequential on one local slot; fan-out from START when the endpoint is multi-slot",
-    "note",
-)
-box(232, b + 144, 200, 44, LLM, LLM_EDGE)
-label(332, b + 162, "negotiation")
-label(332, b + 178, "contradictions, dissent, consensus", "sub")
-box(482, b + 144, 200, 44, LLM, LLM_EDGE)
-label(582, b + 162, "revision")
-label(582, b + 178, "re-run an analyst on the dispute", "sub")
-arrow(332, b + 116, 332, b + 142)
-add(f'<path class="flow" d="M 432 {b + 160} H 480" marker-end="url(#ah)"/>')
-label(456, b + 150, "no consensus", "tag")
-# the loop returns underneath the two nodes, so nothing crosses the note above
-add(f'<path class="flow" d="M 582 {b + 188} V {b + 205} H 352 V {b + 190}" marker-end="url(#ah)"/>')
-label(467, b + 201, "loop until consensus or the cap", "tag")
-box(700, b + 144, 164, 44, DET, DET_EDGE, dashed=True)
-label(782, b + 162, "sycophancy detector", "lbl9")
-label(782, b + 178, "an echo of a peer, flagged", "sub")
+    box(x, b + 32, AW, 84, LLM, LLM_EDGE)
+    label(x + AW / 2, b + 51, name)
+    label(x + AW / 2, b + 66, w, "tag")
+    lines(x + AW / 2, b + 83, rows, "sub", 14.0)
+fail(42 + AW - 20, b + 52, "M4")
+for x1, x2 in ((282, 328), (570, 616)):
+    arrow(x1, b + 74, x2, b + 74)
+    label((x1 + x2) / 2, b + 66, "then", "tag")
+
+# The second row is laid out around the gaps its own labels need: 120 units
+# between negotiation and revision for "no consensus", and a return path low
+# enough that its caption clears both corners.
+box(24, b + 136, 154, 46, DET, DET_EDGE, dashed=True)
+label(101, b + 155, "sycophancy detector", "lbl9")
+label(101, b + 171, "an echo of a peer, flagged", "sub")
+box(250, b + 136, 220, 46, LLM, LLM_EDGE)
+label(360, b + 155, "negotiation")
+label(360, b + 171, "contradictions, dissent, consensus", "sub")
+box(590, b + 136, 220, 46, LLM, LLM_EDGE)
+label(700, b + 155, "revision")
+label(700, b + 171, "re-run an analyst on the dispute", "sub")
+path(f"M 450 {b + 116} V {b + 126} H 360 V {b + 134}")
+path(f"M 470 {b + 159} H 588")
+label(529, b + 151, "no consensus", "tag")
+path(f"M 700 {b + 182} V {b + 194} H 360 V {b + 184}")
+label(530, b + 190, "loop until consensus or the cap", "tag")
 
 # -------------------------------------------------------------- 6. cascade
 b = band("cascade", 80, "6", "Corroboration cascade, deterministic")
@@ -297,7 +317,7 @@ for i, (name, rows) in enumerate(post):
     x = 36 + i * (BW + BG)
     box(x, b + 28, BW, 58, DET, DET_EDGE)
     label(x + BW / 2, b + 46, name, "lbl9")
-    lines(x + BW / 2, b + 62, rows, "sub", 13.0)
+    lines(x + BW / 2, b + 62, rows, "sub", 14.0)
 
 # ------------------------------------------------------------ 10. substrate
 b = band("sub", 90, "9", "Substrate")
@@ -358,7 +378,8 @@ for x, fill, edge, name in [
     (566, STORE, STORE_EDGE, "retrieval store"),
 ]:
     add(
-        f'<rect x="{x}" y="{LEG - 8}" width="16" height="11" rx="2" fill="{fill}" stroke="{edge}"/>'
+        f'<rect x="{gx(x)}" y="{LEG - 8}" width="16" height="11" rx="2" '
+        f'fill="{fill}" stroke="{edge}"/>'
     )
     label(x + 23, LEG + 2, name, "sub", "start")
 fail(722, LEG - 2, "Mn")
@@ -368,20 +389,18 @@ H = LEG + 28
 
 STYLE = f"""
   text {{ font-family: 'TeX Gyre Termes', 'Nimbus Roman', 'Times New Roman', serif; fill: {INK}; }}
-  .lbl  {{ font-size: 16px; }}
-  .lbl9 {{ font-size: 14.5px; }}
-  .sub  {{ font-size: 12.5px; fill: #3a3a3a; }}
-  .note {{ font-size: 12.5px; fill: #3a3a3a; font-style: italic; }}
-  .tag  {{ font-family: 'DejaVu Sans Mono', monospace; font-size: 10.5px; fill: #575757; }}
+  .lbl  {{ font-size: 17.5px; }}
+  .lbl9 {{ font-size: 15.5px; }}
+  .sub  {{ font-size: 13.5px; fill: #3a3a3a; }}
+  .tag  {{ font-family: 'DejaVu Sans Mono', monospace; font-size: 11.5px; fill: #575757; }}
   .band {{ fill: {BAND}; stroke: #e0e0e0; stroke-width: 1; }}
-  .bandnum   {{ font-family: 'DejaVu Sans Mono', monospace; font-size: 12.5px; fill: #757575; }}
-  .bandtitle {{ font-size: 14px; fill: #464646; }}
+  .bandnum   {{ font-family: 'DejaVu Sans Mono', monospace; font-size: 13.5px; fill: #757575; }}
+  .bandtitle {{ font-size: 15px; fill: #464646; }}
   rect  {{ stroke-width: 1.1; }}
   .flow  {{ fill: none; stroke: {RULE}; stroke-width: 1.3; }}
   .spine {{ fill: none; stroke: {RULE}; stroke-width: 1.9; }}
-  .ico   {{ fill: none; stroke: {INK}; stroke-width: 1.25; }}
   .failmark {{ fill: #ffffff; stroke: {FAIL}; stroke-width: 1.6; }}
-  .failtxt  {{ font-family: 'DejaVu Sans Mono', monospace; font-size: 10.5px; fill: {FAIL}; }}
+  .failtxt  {{ font-family: 'DejaVu Sans Mono', monospace; font-size: 11px; fill: {FAIL}; }}
 """
 
 svg = (
