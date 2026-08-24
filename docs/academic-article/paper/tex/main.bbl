@@ -138,17 +138,17 @@ K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
   peer reviewed. arXiv:2401.12178, v1 only, no Comments and no journal
   reference (2024).
 
-\bibitem{lange2024annoctr}
-L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
-  entities, tactics, and techniques in cyber threat reports, in: Joint
-  International Conference on Computational Linguistics, Language Resources and
-  Evaluation (LREC-COLING), 2024, arXiv:2404.07765. CC-BY-SA 4.0.
-
 \bibitem{abdallah2026retrievers}
 A.~Abdallah, J.~Holdcroft, M.~Ali, A.~Jatowt, Are {LLM}-based retrievers worth
   their cost? an empirical study of efficiency, robustness, and reasoning
   overhead, in: Proceedings of the 49th International ACM SIGIR Conference on
   Research and Development in Information Retrieval, 2026, arXiv:2604.03676.
+
+\bibitem{lange2024annoctr}
+L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
+  entities, tactics, and techniques in cyber threat reports, in: Joint
+  International Conference on Computational Linguistics, Language Resources and
+  Evaluation (LREC-COLING), 2024, arXiv:2404.07765. CC-BY-SA 4.0.
 
 \bibitem{ng2014conll}
 H.~T. Ng, et~al., The {CoNLL}-2014 shared task on grammatical error correction,
@@ -219,6 +219,12 @@ V.~Paramanayakam, A.~Karatzas, I.~Anagnostopoulos, D.~Stamoulis, Less is more:
   Automation and Test in Europe Conference (DATE), 2025, arXiv:2411.15399. Both
   quoted figures were confirmed against the full text.
 
+\bibitem{lea2025rex86}
+D.~Lea, J.~Ghawaly, G.~G. Richard~III, A.~Ali-Gombe, A.~Case, {REx86}: A local
+  large language model for assisting in x86 assembly reverse engineering, in:
+  Annual Computer Security Applications Conference (ACSAC), 2025,
+  arXiv:2510.20975.
+
 \bibitem{li2025phishdebate}
 W.~Li, S.~Manickam, Y.-w. Chong, S.~Karuppayah, {PhishDebate}: An {LLM}-based
   multi-agent framework for phishing website detection, in: IEEE International
@@ -241,12 +247,6 @@ B.~Bertalani{\v c}, C.~Fortuna, The cost of consensus: Isolated self-correction
   AI and Agentic Systems, 2026, arXiv:2605.00914.
 \newblock \href {https://doi.org/10.1145/3786335.3813137}
   {\path{doi:10.1145/3786335.3813137}}.
-
-\bibitem{lea2025rex86}
-D.~Lea, J.~Ghawaly, G.~G. Richard~III, A.~Ali-Gombe, A.~Case, {REx86}: A local
-  large language model for assisting in x86 assembly reverse engineering, in:
-  Annual Computer Security Applications Conference (ACSAC), 2025,
-  arXiv:2510.20975.
 
 \bibitem{evertz2026chasing}
 R.~Evertz, N.~Risse, C.~Neuer, N.~M{\"u}ller, S.~Normann, et~al., Chasing

@@ -154,4 +154,5 @@ paper-check:
 
 paper: facts
 	.venv/bin/python tests/evaluation/make_paper_figures.py
+	.venv/bin/python docs/academic-article/paper/make_architecture_figure.py
 	.venv/bin/python docs/academic-article/paper/build_paper.py

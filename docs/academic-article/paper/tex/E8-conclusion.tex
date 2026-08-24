@@ -4,18 +4,17 @@
 This work addressed two barriers to trusting a measurement of an LLM malware-analysis pipeline: that
 such pipelines are rarely scored against the deterministic tooling they are built on, and that the
 instrument producing the score is itself a distributed system whose failures do not announce
-themselves. We built a multi-agent pipeline mapping malware evidence to ATT\&CK techniques and then
-spent longer measuring it than building it, at equal token budget against simpler alternatives, with
-a stochastic-noise control, with each mechanism's firing rate measured before its effect, and with
-intervals resampled at the level the observations are independent at.
+themselves. We built such a pipeline and then spent longer measuring it than building
+it, at equal token budget against simpler alternatives, with a noise control, with each mechanism's
+firing rate measured before its effect, and with intervals resampled at the level the observations
+are independent at.
 
 Conceptually, the contribution is a way of reading a component's contribution that does not depend
-on the component working. A no-LLM baseline gives every F1 in the paper something to refer to; a
-firing rate decides in advance whether an ablation of a mechanism can say anything at all; a minimum
-detectable effect turns a null from an assertion of equivalence into a bound; and an output
-cardinality count, reported beside a batch result rather than run as a test, asks whether the
-instrument produced N answers or one answer N times. None of these is expensive and each of them
-changed a conclusion here.
+on the component working. A no-LLM baseline gives every F1 something to refer to; a firing rate
+decides in advance whether an ablation can say anything; a minimum detectable effect turns a null
+from an assertion of equivalence into a bound; and an output cardinality count asks whether the
+instrument produced N answers or one answer N times. None is expensive and each changed a conclusion
+here.
 
 Four architectural claims motivated the design and none survived measurement. Negotiated consensus
 does not beat a single judge at equal budget, the corroboration cascade never reaches the artefact
@@ -33,24 +32,22 @@ by one arithmetic check on how many distinct outputs the inputs produced. Three 
 at all, and in each of those a measurement's cause was assigned rather than measured.
 
 We are careful about what is new. Silent failure at tool boundaries is documented, the metamorphic
-relation behind the detector is ordinary, the genus has a published taxonomy, and inference-time
-configuration inverting model rankings inside a constrained budget is established. What we add is
-the setting and the price. In an evaluation pipeline the artefact of such a failure is not a
-degraded user session but a measurement that is wrong and looks right, and the price here was
-concrete: one completed study withdrawn because its per-sample outputs were not retained and the
-question can no longer be asked of it, then four arms of a later ablation lost the same way one
-level up, because the rule written after the first failure was scoped to that failure and the
-environment a study runs in is also part of the instrument.
+relation behind the detector is ordinary, and inference-time configuration inverting model rankings
+inside a constrained budget is established. What we add is the setting and the price. In an
+evaluation pipeline the artefact of such a failure is a measurement that is wrong and looks right,
+and the price here was concrete: one completed study withdrawn because its per-sample outputs were
+not retained, then four arms of a later ablation lost the same way one level up, because the rule
+written after the first failure was scoped to that failure and the environment a study runs in is
+also part of the instrument.
 
 The limitations bound the reading directly. This is one pipeline, one 35B model at one quantisation,
 on one machine, evaluated on Windows PE malware against family-level ground truth, and most of its
 nulls are bounds set by a five-cluster corpus rather than equivalences. Future work follows from
-each: re-running the withdrawn temporal-drift study under the corrected instrument, extending the
-judge intercept from four calls to the full cohort, running the parameter-size series on endpoints
-that honour the reasoning flag so that scale and configuration can be separated, and testing the
-output-cardinality check prospectively rather than retrospectively by reporting it beside every
-batch and counting how often it is first to a defect. Each of those needs a host the model server
-does not fill on its own, which is the binding constraint on this work rather than the method.
+each: re-running the withdrawn drift study under the corrected instrument, extending the judge
+intercept from four calls to the full cohort, running the parameter-size series on endpoints that
+honour the reasoning flag, and testing the output-cardinality check prospectively rather than
+retrospectively. Each needs a host the model server does not fill on its own, which is the binding
+constraint on this work rather than the method.
 
 What we do assert is a change of default. In a pipeline assembled from other people's servers the
 correctness of the model is not the binding constraint on the correctness of the result. Long before

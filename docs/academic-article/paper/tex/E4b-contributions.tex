@@ -1,17 +1,15 @@
 \subsection{Motivation and contributions}
 \label{sec:contributions}
 
-Two observations motivated the work reported here. First, the components of an LLM analysis pipeline
-are ordinarily justified by the mechanism they implement rather than by a measurement, and a
-mechanism that is sound in isolation can contribute nothing once wired to real inputs; establishing
-which of the two holds requires an equal-budget comparison against a simpler alternative and a
-baseline that contains no language model at all. Second, such a comparison is only as trustworthy as
-the instrument that produces it, and in a pipeline assembled from several servers the instrument
-fails in a way that does not announce itself. Both observations were reached the expensive way,
-after four architectural claims returned nulls and seven measurements turned out to have been wrong.
-
-The contributions are therefore organised around the evaluation rather than around the architecture,
-and each is a measurement or a mechanism rather than a proposal.
+Two observations motivated this work. First, the components of an LLM analysis pipeline are
+ordinarily justified by the mechanism they implement rather than by a measurement, and a mechanism
+sound in isolation can contribute nothing once wired to real inputs; establishing which holds
+requires an equal-budget comparison against a simpler alternative and a baseline containing no
+language model at all. Second, such a comparison is only as trustworthy as the instrument that
+produces it, and in a pipeline assembled from several servers the instrument fails in a way that
+does not announce itself. Both were reached the expensive way. The contributions are therefore
+organised around the evaluation rather than the architecture, and each is a measurement or a
+mechanism rather than a proposal.
 
 \emph{(i) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} The sandbox
 the pipeline is built on maps its own signature hits to technique identifiers deterministically, and
@@ -36,8 +34,8 @@ enough to separate the arms was available, the finding is sharper than a null: o
 Each produced a plausible result rather than an error, and \fact{test-count} passing tests caught
 none. Four crossed a boundary with another server and fall inside a described class of silent
 failure; three crossed no boundary at all and share a different shape, in which a measurement's
-cause was assigned rather than measured. We report the price alongside the mechanisms: one completed
-study withdrawn, and four arms of a later ablation unattributable.
+cause was assigned rather than measured. The price is reported alongside: one completed study
+withdrawn, four arms of a later ablation unattributable.
 
 \emph{(iv) An output-cardinality check, reported beside every batch result rather than written as a
 test.} Counting how many distinct outputs N inputs produced found every one of the boundary
@@ -47,6 +45,5 @@ is why it belongs in a results table and not in a unit suite.
 \emph{(v) An arm-selection rule keyed on measured rather than requested configuration.} One provider
 accepts the parameter that would match two arms and does not act on it, so an arm can be labelled
 matched while running the opposite configuration. On the two models where the flag can be set it is
-worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, the only effect in
-this paper that exceeds its own design's minimum detectable effect, and larger than any architecture
-or parameter count we measured.
+worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, larger than any
+architecture or parameter count we measured.

@@ -4,57 +4,43 @@
 \subsection{Scope and assumptions}\label{scope-and-assumptions}
 
 This study evaluates one pipeline that maps evidence about a Windows PE malware sample to MITRE
-ATT\&CK technique identifiers and emits a STIX bundle. The scope is deliberately narrow in four
-respects, and every result should be read inside it. The model is a single local mixture-of-experts
-deployment, quantised, on one host; the comparison endpoints are three commercially hosted
-inference services. Ground truth is family-level MITRE \texttt{uses}, resolved to a sample through
-its family signature, which is coarse and carries a structural recall ceiling. Only Windows PE is
-analysed dynamically, because the sandbox instance has one analysis machine and no Linux guest. And
-the contribution claimed is the evaluation rather than the architecture: the system is the object
-under study, not the result.
-
-Two design choices are stated here because they are not what failed. Tool exposure is not tool
-availability. The reverse-engineering server advertises \textasciitilde165 tools, exposing the full
-catalogue to a model with roughly 3B active parameters is infeasible because tool selection degrades
-before the context does, and the static analyst is therefore given a curated
-\fact{static-curated-functions}, with high-value tools invoked deterministically from code. And the
-pipeline degrades rather than fails when a service is absent, so with the sandbox unreachable the
-dynamic path is skipped and the run completes on static evidence, a behaviour pinned by a test. That
-mattered during the study, because the sandbox was reachable from one network only and every
-static-only result reported here was produced by that degradation working as designed.
+ATT\&CK technique identifiers and emits a STIX bundle. The scope is narrow in four respects and
+every result should be read inside it. The model is a single local mixture-of-experts deployment,
+quantised, on one host, with three commercially hosted services used only as comparison endpoints.
+Ground truth is family-level MITRE \texttt{uses}, resolved to a sample through its family signature,
+which is coarse and carries a structural recall ceiling. Only Windows PE is analysed dynamically,
+because the sandbox instance has one analysis machine and no Linux guest. And the contribution
+claimed is the evaluation rather than the architecture: the system is the object under study, not
+the result.
 
 \subsection{The pipeline under evaluation}\label{the-pipeline-under-evaluation}
 
-Six deterministic evidence layers assert techniques directly from signatures, rules and artefacts.
-Three analysts then run as ReAct loops over heterogeneous evidence channels, a judge synthesises a
-verdict and emits the bundle, and a deterministic layer adjudicates between them.
-Table~\ref{tab:system} lists each component with what it was measured to contribute.
+Figure~\ref{fig:architecture} draws the system. Six deterministic evidence layers assert techniques
+directly from signatures, rules and byte markers, with no model involved. Three analysts then run as
+ReAct loops over heterogeneous evidence channels, each bound to one tool server; a negotiation node
+tests for consensus and routes disputes to a revision pass; a judge synthesises a verdict and emits
+STIX~2.1; and a deterministic reconciliation and gating stage adjudicates between the judge's bundle
+and the corroboration cascade before the analyst sees anything. The seven instrument failures of
+Section~\ref{sec:failures} are marked on the figure at the boundary each occurred at, because the
+claim that four crossed a boundary with another server and three did not is a claim about this
+topology.
 
-\begin{table}[!htbp]
-\caption{The pipeline's components and what each contributes, as built and as measured.}\label{tab:system}
-\centering\small
-\begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{0.20\linewidth}
-  >{\raggedright\arraybackslash}p{0.34\linewidth}
-  >{\raggedright\arraybackslash}p{0.38\linewidth}@{}}
-\toprule
-component & what it does & measured contribution \\
-\midrule
-static analyst & ReAct loop over a headless reverse-engineering server, \fact{static-curated-functions} tools from a curated allowlist & operational; its salvage path was defective \\
-dynamic analyst & ReAct loop over a CAPEv2 sandbox via MCP & operational; Windows PE only on our instance \\
-network analyst & local PCAP analysis over the sandbox's capture & operational; two-thirds of its domains are the analysis VM describing itself \\
-judge & synthesises a verdict and emits STIX & contributes no technique the cascade did not already hold \\
-corroboration cascade & weights layers, marks a technique corroborated at $\ge$\setting{2} contributing layers & never reaches the artefact (\fact{cascade-overlap-changed}/\fact{cascade-overlap-arms}) \\
-reconciliation step & drops unresolvable attack-patterns, restores every cascade technique the judge omitted & makes the cascade's set a subset of every emitted bundle \\
-confidence gating & caps confidence for unsupported obfuscation and injection claims & fires on \fact{cap-rate} of techniques \\
-case-prior RAG & retrieves similar past cases to prime mapping & loses to a label-frequency prior in production \\
-family-feature RAG & retrieves family fingerprints & \fact{family-delta-f1} F1 end to end \\
-opcode-hash attribution & normalised function hashes matched against a corpus & fires on \fact{hash-fired} of \fact{hash-total} samples \\
-sink-reachability hint & ranks functions reachable to sensitive APIs, injected as prompt steering & fires on \fact{hint-rate}; $\Delta$techniqueIDs \fact{sink-delta-tids} \fact{sink-ci-tids} \\
-\bottomrule
-\end{tabular}
-\end{table}
+\begin{figure}[p]
+\centering
+\makebox[\linewidth][c]{\includegraphics[width=1.3\linewidth,height=0.87\textheight,keepaspectratio,alt={The pipeline in nine bands, from sample intake through evidence acquisition over four tool servers, six deterministic evidence layers, four retrieval stores, the LangGraph analysis graph of three analysts with a negotiation and revision loop, the corroboration cascade, the judge, deterministic reconciliation and gating with the STIX bundle and report, and the local and hosted inference substrate. Seven instrument failures are marked at the boundaries they occurred at.}]{figures/fig5-architecture.pdf}}
+\caption{The pipeline under evaluation, with each of the seven instrument failures of Section~\ref{sec:failures} marked at the boundary it occurred at. Trust weights and cross-layer multipliers are the shipped constants.}
+\label{fig:architecture}
+\end{figure}
 
-All four architectural claims listed in Section~\ref{sec:intro} are measured in
-Section~\ref{sec:results} and every one is negative or near-null. The components are not broken and
-three of them work well in isolation; they do not move the end-to-end result.
+Two design choices are stated here because they are not what failed. Tool exposure is not tool
+availability: the reverse-engineering server advertises \textasciitilde165 tools, exposing the full
+catalogue to a model with roughly 3B active parameters is infeasible because tool selection degrades
+before the context does, and the static analyst is therefore given a curated allowlist of
+\fact{static-curated-functions} tools, with high-value tools invoked deterministically from code. And the
+pipeline degrades rather than fails when a service is absent, so with the sandbox unreachable the
+dynamic path is skipped and the run completes on static evidence, a behaviour pinned by a test. That
+mattered during the study, because the sandbox was reachable from one network only and every
+static-only result reported here was produced by that degradation working as designed. All four
+architectural claims listed in Section~\ref{sec:intro} are measured in Section~\ref{sec:results} and
+every one is negative or near-null; the components are not broken and three of them work well in
+isolation, but they do not move the end-to-end result.

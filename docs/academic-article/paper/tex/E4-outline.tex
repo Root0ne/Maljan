@@ -6,58 +6,47 @@ language models are now routinely applied to, and the systems that perform it ar
 alone. A working pipeline wraps the model in deterministic tooling: a sandbox that detonates the
 sample, a disassembler that recovers its structure, retrieval indices that supply prior cases, and
 rule engines that assert techniques directly from signatures. The model's contribution is therefore
-a difference against that tooling rather than a score in isolation. That difference is almost never
-reported. Büchel et al.'s systematisation re-evaluates more than forty technique-extraction systems
-in one setting and finds them ``largely incomparable'', because each uses its own ontology and its
-own inaccessible dataset \cite{buchel2025sok}. An F1 value read against no baseline refers to
-nothing, and the baseline that matters for an LLM pipeline is the deterministic engine it was built
-on top of.
+a difference against that tooling rather than a score in isolation, and that difference is almost
+never reported. Büchel et al.'s systematisation re-evaluates more than forty technique-extraction
+systems in one setting and finds them ``largely incomparable'', because each uses its own ontology
+and its own inaccessible dataset \cite{buchel2025sok}. An F1 value read against no baseline refers
+to nothing, and the baseline that matters for an LLM pipeline is the deterministic engine it was
+built on top of.
 
-A second barrier is that such a pipeline is itself a distributed system, and its evaluation
-inherits every property of one. Ours calls a reverse-engineering server for disassembly, a sandbox
-for detonation, a vector store for retrieval and a model server for inference, over three protocols.
-Each of those boundaries is a place where a request can succeed and still not mean what the caller
-assumed, and the resulting error is not visible as an error. Silent failure of this kind is a
-long-established class in production software \cite{gunawi2008eio,yuan2014simple,alquraan2018partition},
-and it is now being catalogued for LLM orchestration frameworks and inference engines as well
-\cite{xue2025agentbugs,liu2026inference}. What changes in an evaluation setting is the artefact. The
-product of a silent failure is not a degraded user session that someone reports; it is a measurement
-that is wrong, looks right, and is written down.
+A second barrier is that such a pipeline is itself a distributed system, and its evaluation inherits
+every property of one. Each boundary between the pipeline and a server it depends on is a place
+where a request can succeed and still not mean what the caller assumed, and the resulting error is
+not visible as an error. Silent failure of this kind is a long-established class in production
+software \cite{gunawi2008eio,yuan2014simple,alquraan2018partition} and is now being catalogued for
+LLM orchestration frameworks and inference engines as well \cite{xue2025agentbugs,liu2026inference}.
+What changes in an evaluation setting is the artefact. The product of a silent failure is not a
+degraded user session that someone reports; it is a measurement that is wrong, looks right, and is
+written down.
 
 This work reports the evaluation of one such pipeline, built for ATT\&CK mapping over static,
 dynamic and network evidence, and the failures of the instrument that produced that evaluation. The
 system fuses six deterministic evidence layers, three domain analysts running as ReAct loops over
 tool interfaces, an LLM judge, a weighted corroboration cascade, two retrieval tiers and
-deterministic confidence gating. It was built around four architectural claims: that multi-agent
-consensus over heterogeneous evidence channels beats a single reader, that a multi-layer
-corroboration cascade improves evidence quality, that two-tier attribution supplies useful priors,
-and that falsification before confidence disciplines unsupported claims. Each claim was measured at
-an equal total token budget against a simpler alternative, with a stochastic-noise control, with the
-firing rate of each mechanism measured before its effect, and with intervals resampled at the level
-the observations are independent at.
+deterministic confidence gating; Figure~\ref{fig:architecture} draws it. It was built around four
+architectural claims: that multi-agent consensus over heterogeneous evidence channels beats a single
+reader, that a multi-layer corroboration cascade improves evidence quality, that two-tier
+attribution supplies useful priors, and that falsification before confidence disciplines unsupported
+claims. Each claim was measured at an equal total token budget against a simpler alternative, with a
+stochastic-noise control, with the firing rate of each mechanism measured before its effect, and
+with intervals resampled at the level the observations are independent at.
 
 All four claims returned a negative or a near-null result, and the study that established this was
 itself wrong several times over. Seven defects in the instrument produced plausible results rather
 than errors, and a suite of \fact{test-count} passing tests caught none of them. Four crossed a
-boundary with another server: an optional argument the agent never supplied arrived as an explicit
-null and disabled every tool on one interface; a program reported as loaded never became the one
-under analysis; a refused load returned HTTP 200 with an error in the body; and two independently
-correct bounds composed into a path that returned nothing. The other three crossed no boundary at
-all and are described in Section~\ref{sec:contributions}.
-The largest of the seven is this paper's own statistics: every interval in an earlier draft
-resampled rows when the observations were clustered, and correcting that widened the anchor interval
-\fact{baseline-f1-widening}-fold and turned two claims of equivalence into bounds.
+boundary with another server; the other three crossed no boundary at all and share a different
+shape, in which a measurement's cause was assigned rather than measured. The largest of the seven is
+this paper's own statistics: every interval in an earlier draft resampled rows when the observations
+were clustered, and correcting that widened the anchor interval \fact{baseline-f1-widening}-fold and
+turned two claims of equivalence into bounds. The price of those defects is reported rather than
+hypothesised, one completed \fact{drift-n}-sample study having been withdrawn and four arms of a
+later ablation left unattributable.
 
-The price of those defects is reported rather than hypothesised. One completed
-\fact{drift-n}-sample temporal-drift study is withdrawn from this paper because it met the
-precondition for one of the defects and its per-sample outputs had not been retained, so whether it
-was affected can no longer be established. Four arms of a later ablation are unattributable for the
-same reason one level up, the environment a measurement ran in having gone unrecorded where the
-measurement itself was kept.
-
-The remainder of the paper is organised as follows. Section~\ref{sec:related} places the work in the
-technique-extraction, agentic-analysis and evaluation-methodology literature and states the
-contributions. Section~\ref{sec:method} describes the pipeline, the corpora, the serving
-configuration and the measurement design. Section~\ref{sec:results} reports the measurements, the
-seven instrument failures, the detector that found most of them, and the limitations.
+Section~\ref{sec:related} places the work and states the contributions,
+Section~\ref{sec:method} describes the pipeline and the measurement design,
+Section~\ref{sec:results} reports the measurements and the failures, and
 Section~\ref{sec:conclusion} concludes.

@@ -8,15 +8,14 @@ cluster permutation test cannot return a value below \fact{fixture-signflip-floo
 measured on that corpus can reach $\alpha$=0.05 whatever its effect size. That is a property of the
 design rather than of the data, and no number of extra decoding repeats moves it, because repeats
 add rows inside clusters and rows inside clusters are not what the test counts. Multiplicity
-correction is therefore beside the point there: Benjamini-Hochberg over two declared families finds
-nothing to correct, because there was nothing at $\alpha$=0.05 to begin with. The practical
-consequence is that a null has to be reported with its resolution. The frontier comparison could
-detect \fact{mde-frontier-local} F1 at 80\% power and returned \fact{frontier-local-delta}; both
-facts are true and only the pair of them is informative, since the second alone reads as equivalence
-and the first alone reads as a failed experiment. It also changes what the cheap fix is. The
-instinct on seeing an underpowered paired design is to add repeats, because repeats are cheap and
-samples are expensive, and on clustered data that instinct is exactly wrong: a sixth fixture would
-have halved the attainable p, while a sixth repeat on five fixtures moves it not at all.
+correction is therefore beside the point there. The practical consequence is that a null has to be
+reported with its resolution: the frontier comparison could detect \fact{mde-frontier-local} F1 at
+80\% power and returned \fact{frontier-local-delta}, and only the pair of those facts is
+informative, since the second alone reads as equivalence and the first alone as a failed experiment.
+It also changes what the cheap fix is. The instinct on seeing an underpowered paired design is to
+add repeats, because repeats are cheap and samples are expensive, and on clustered data that
+instinct is exactly wrong: a sixth fixture would have halved the attainable p, while a sixth repeat
+on five fixtures moves it not at all.
 
 The literature we counter-searched against locates silent failures at the boundary between modules,
 and four of our seven crossed such a boundary while three crossed none. What the seven share is not
@@ -34,30 +33,25 @@ attributed its width to sampling variation among independent observations, the o
 independent, and nothing in the pipeline, the tests or the review caught it because the defect was
 never in a function.
 
-We are wary of drawing implementation advice from one pipeline on one machine, so what follows is
-narrow. Measure the firing rate before the effect, because a mechanism that engages on
-\fact{cap-rate} of its inputs produces an ablation whose null describes the cases where it never
-ran; this is the cheapest practice in the paper and it changed which experiments were worth running
-rather than merely how they were reported. Count the distinct outputs, because that needs no ground
-truth and no oracle and belongs beside the sample size in a report rather than inside a test. And
-retain per-sample outputs, then ask what else the study is made of: we adopted retention after
-losing a study to its absence, the rule was scoped to the object under study, and the next failure
+What a practitioner should take from this is narrow, because it is one pipeline on one machine.
+Measure the firing rate before the effect, since a mechanism engaging on \fact{cap-rate} of its
+inputs produces an ablation whose null describes the cases where it never ran; count the distinct
+outputs, because that needs no ground truth and belongs beside the sample size rather than inside a
+test; and retain per-sample outputs, then ask what else the study is made of. We adopted retention
+after losing a study to its absence, scoped the rule to the object under study, and the next failure
 was in the environment, where four arms died on host memory and we had their outputs but not the
 host state. The rule you write after a failure is scoped to that failure.
 
-What we are not in a position to say is worth stating with the same precision. We can say something
-narrower than that multi-agent decomposition does not help and sharper than the fixture null: on
-\fact{cape-consensus-families} real samples it does help, by \fact{cape-negotiated-delta} F1 over a
-single judge, and a noise control helps by the same \fact{cape-noise-delta}, with the two separated
-by \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so the decomposition
-into several calls is worth something here and the negotiation between them is not. We cannot say
-that negotiation is worthless in general, because a control that matches the treatment tells us
-where our gain came from and not where anyone else's must. We cannot say that model capacity is not
-the ceiling; we can say that a \fact{param-ratio}$\times$ larger model did not separate from ours at
-a resolution of \fact{mde-frontier-local} F1, that the two arms differed in a configuration flag
-worth more than any architectural effect we measured, and that the endpoint would not let us remove
-the difference. We cannot say that verbal confidence is uninformative in general; we can say that in
-this pipeline it ranks correct claims above incorrect ones at AUC \fact{confidence-auc} with an
-interval containing chance, so the deterministic gates keyed to that number are keyed to something
-we cannot distinguish from noise. And we cannot say that our seven mechanisms generalise. What we
-can say is what each of them cost.
+What we are not in a position to say is worth stating with the same precision. On
+\fact{cape-consensus-families} real samples multi-agent decomposition does help, by
+\fact{cape-negotiated-delta} F1 over a single judge, and a noise control helps by the same
+\fact{cape-noise-delta}, with the two separated by \fact{cape-mechanism-delta} at a resolution of
+\fact{mde-cape-mechanism}; so the decomposition into several calls is worth something here and the
+negotiation between them is not. We cannot say negotiation is worthless in general, because a
+control that matches the treatment tells us where our gain came from and not where anyone else's
+must. We cannot say model capacity is not the ceiling; we can say a \fact{param-ratio}$\times$ larger
+model did not separate from ours at a resolution of \fact{mde-frontier-local} F1 and that the two
+arms differed in a configuration flag worth more than any architectural effect we measured. We
+cannot say verbal confidence is uninformative in general; we can say that here it ranks correct
+claims above incorrect ones at AUC \fact{confidence-auc} with an interval containing chance. And we
+cannot say our seven mechanisms generalise. What we can say is what each of them cost.

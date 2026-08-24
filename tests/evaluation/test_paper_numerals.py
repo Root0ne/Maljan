@@ -110,8 +110,11 @@ _NOT_A_MEASUREMENT = (
     re.compile(r"\bIQ\d\w*"),
     # Algorithm and hardware names that carry a digit.
     re.compile(r"\bSHA-?\d+\b|\bRTX\s*\d+\b|\bIQ\d\w*\b|\bq\d_\d\b"),
-    # Protocol and status constants.
-    re.compile(r"\bHTTP\s+\d{3}\b"),
+    # Protocol and status constants. The separator may be a tie: `HTTP~200` is
+    # the correct spelling, since a status code orphaned at a line start reads
+    # as a bare number both to a reader and to this check, and writing the tie
+    # is what stops the reflow that produced two false positives here.
+    re.compile(r"\bHTTP[~\s]+\d{3}\b"),
     re.compile(r"\bport\s+\d+\b", re.I),
     # Inline maths carrying a symbolic exponent is a formula, not a
     # measurement: $2/2^k$ is the sign-flip floor as an expression, and the 2s
@@ -127,7 +130,7 @@ _NOT_A_MEASUREMENT = (
     # Versions, named rather than pattern-matched: a bare `\d+\.\d+` rule would
     # exempt every decimal in the paper, which is most of what this checks.
     re.compile(
-        r"\b(?:CAPE|Ghidra|Python|ATT&CK|Sigma|MABEL|CUDA|version)\s+v?\d+(?:\.\d+)+",
+        r"\b(?:CAPE|Ghidra|Python|ATT&CK|Sigma|MABEL|CUDA|STIX|version)[~\s]+v?\d+(?:\.\d+)+",
         re.I,
     ),
 )

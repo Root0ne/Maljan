@@ -68,6 +68,11 @@ dev = [
     # (collect_temporal_manifest.py --download); MalwareBazaar ships WinZip-AES
     # archives the stdlib zipfile cannot decrypt.
     "pyzipper>=0.3.6",
+    # SVG to PDF for the architecture figure. The figure is authored as SVG so
+    # it can be edited, and the document needs PDF; cairosvg renders it with the
+    # two font families the document already embeds, which is what keeps the
+    # conformance check that counts families at two.
+    "cairosvg>=2.9.0",
     "ruff>=0.15.9",
     "stix2-validator>=3.3.1",
 ]
