@@ -59,12 +59,21 @@ _SECTIONS = (
     "E7-methodology.tex",
     "E8-conclusion.tex",
     "E9-declarations.tex",
+    "EA-prompts.tex",
 )
 
+# Regions where a digit is not a measurement. Verbatim is a transcript. A
+# display equation is a definition: the 2s in `p = 2/2^k` are the arithmetic of
+# the sign-flip test, not a result of it, and the same is true of an exponent or
+# a bound written into a formula. The constants such an equation *quotes* are a
+# different matter and are not exempted here -- they come in through \fact{},
+# derived from the module that defines them, so an equation cannot state a
+# weight the code no longer uses.
 _FENCED = re.compile(
     r"\\begin\{verbatim\}.*?\\end\{verbatim\}"
     r"|\\begin\{Shaded\}.*?\\end\{Shaded\}"
-    r"|\\begin\{Highlighting\}.*?\\end\{Highlighting\}",
+    r"|\\begin\{Highlighting\}.*?\\end\{Highlighting\}"
+    r"|\\begin\{equation\*?\}.*?\\end\{equation\*?\}",
     re.S,
 )
 _INLINE_CODE = re.compile(r"\\texttt\{(?:[^{}]|\{[^{}]*\})*\}")
@@ -257,8 +266,8 @@ def _offenders(path: Path) -> list[tuple[int, str]]:
     return out
 
 
-_VERBATIM_OPEN = re.compile(r"\\begin\{(verbatim|Shaded|Highlighting|lstlisting)\}")
-_VERBATIM_CLOSE = re.compile(r"\\end\{(verbatim|Shaded|Highlighting|lstlisting)\}")
+_VERBATIM_OPEN = re.compile(r"\\begin\{(verbatim|Shaded|Highlighting|lstlisting|equation\*?)\}")
+_VERBATIM_CLOSE = re.compile(r"\\end\{(verbatim|Shaded|Highlighting|lstlisting|equation\*?)\}")
 
 
 def _fenced_line_numbers(path: Path) -> set[int]:

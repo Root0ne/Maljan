@@ -30,8 +30,7 @@ M7 & a documented output ceiling was renamed during serialisation to a key the s
 \end{tabular}
 \end{table}
 
-M2 is the mechanism the others are read against, because the response contained the correct program
-name. The server maintains a separate notion of the current program and \texttt{load\_program} sets
+M2 is the mechanism the others are read against: the response contained the correct program name. The server maintains a separate notion of the current program and \texttt{load\_program} sets
 it only when nothing is current yet:
 
 \begin{verbatim}
@@ -55,10 +54,9 @@ A fifth case at the same boundary was caught before it produced data, and that d
 argument of this paper. A request for a report the sandbox has since deleted is answered with HTTP~200 and a \fact{deleted-report-body-bytes}-byte body reading
 \texttt{\{"error":true,"error\_value":"Reports\ directory\ does\ not\ exist"\}}, on
 fifty-six of one hundred tasks. A fetcher trusting the status code would have written those bodies
-into the archive under the filename of the sample they were supposed to describe, and the three
-studies reading that archive would each have scored them; it did not, because the fetcher verifies
-the report's own \texttt{target.file.sha256} against the identifier it asked for before writing
-anything, a check that exists only because M3 taught us the shape and that cost four lines. We first
+into the archive under the filename of the sample they were meant to describe; it did not, because
+it verifies the report's own \texttt{target.file.sha256} against the identifier it asked for before
+writing, a four-line check that exists only because M3 taught us the shape. We first
 recorded the consequence as a retention limit, that the reports had existed and expired. That was
 wrong. Asking the sandbox how long each analysis had taken produced a split with nothing between the
 modes: the \fact{audit-real} tasks whose reports survived ran \fact{audit-real-min} to
@@ -187,5 +185,5 @@ per-sample retention policy those very failures caused us to adopt.
 The price is a completed study. A seven-year \fact{drift-n}-sample temporal-drift analysis ran the
 full pipeline per sample against a long-lived server never restarted between samples, which is M2's
 precondition exactly, and whether it was affected cannot be determined because its per-sample
-outputs were not retained. The withdrawal is caused not by the defect but by the defect plus the
-inability to re-ask the question afterwards.
+outputs were not retained. The withdrawal is caused by the defect plus the inability to
+re-ask the question afterwards.

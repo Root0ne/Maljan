@@ -72,7 +72,7 @@ cohort, on two public corpora neither of which is the ATT\&CK text the index is 
 (Table~\ref{tab:mapping}).
 
 \begin{table}[!htbp]
-\caption{The technique assigner on two external corpora: TRAM2 \cite{mitre2023tram}, sentence classification, and AnnoCTR \cite{lange2024annoctr}, expert entity linking in running report prose. MRR is the mean reciprocal rank of the correct technique. Gate separation is the mean score of the chosen top-1 when correct minus when wrong, so a larger value means the absolute threshold can better refuse a wrong pick.}\label{tab:mapping}
+\caption{The technique assigner on two external corpora: TRAM2 \cite{mitre2023tram}, sentence classification, and AnnoCTR \cite{lange2024annoctr}, expert entity linking in running report prose. MRR is the mean reciprocal rank of the correct technique; gate separation is Equation~\eqref{eq:gate}.}\label{tab:mapping}
 \centering\small
 \begin{tabular}{@{}lrrrrrr@{}}
 \toprule
@@ -87,6 +87,12 @@ hybrid & \fact{mapping-tram2-hybrid-top3} & \fact{mapping-tram2-hybrid-mrr} & \f
 \end{tabular}
 \end{table}
 
+Gate quality is the margin the absolute threshold has to work with, the mean retrieval score of
+the top-ranked technique when it is the right one less that score when it is not:
+\begin{equation}\label{eq:gate}
+g = \operatorname{mean}\bigl(s_1 \mid \text{correct}\bigr)
+  - \operatorname{mean}\bigl(s_1 \mid \text{wrong}\bigr)
+\end{equation}
 Ranking quality and gate quality are separable axes and no backend wins both. The semantic index
 ranks better on both corpora, \fact{mapping-tram2-semantic-top3} against
 \fact{mapping-tram2-tfidf-top3} top-3 on TRAM2 and \fact{mapping-annoctr-semantic-top3} against
@@ -97,7 +103,7 @@ gates cleanly, scoring near zero for unrelated evidence. Composing the per-axis 
 semantic index's ranking and produces the cleanest gate of the three on both corpora,
 \fact{mapping-tram2-hybrid-gate} and \fact{mapping-annoctr-hybrid-gate}. That composition is the
 shipped default, and the gate is what makes the assigner safe to leave authoritative: an identifier
-it cannot align is refused rather than guessed.
+it cannot align is refused, not guessed.
 
 All three orderings replicate across the two corpora, which is the claim. Absolute accuracy does not
 and is not compared: entity linking in unconstrained prose over a
@@ -206,8 +212,7 @@ graphics processing unit, better on \fact{frontier-local-better} and worse on \f
 that is coarser than every architectural effect reported here. It is confounded as well: the local
 arm runs with its reasoning stream disabled, necessarily, because the local server otherwise returns
 an empty answer, while the frontier arm spent \fact{arm-default-reasoning} of its budget reasoning,
-and re-running it with the parameter set returned \fact{arm-default-nothink-reasoning} reasoning
-because the provider accepted the parameter and ignored it. The arm was not a collapsed one, having
+and re-running it with the parameter set returned \fact{arm-default-nothink-reasoning}. The arm was not a collapsed one, having
 parsed \fact{arm-default-n} of \fact{arm-default-n} calls with no refusals and
 \fact{arm-default-hit-cap} hitting the output cap; an earlier version of it reported
 \fact{superseded-frontier-f1} at n=\fact{superseded-frontier-n} and suggested a lead that did not
@@ -388,9 +393,8 @@ missed, for the reason M5 gives.
 That leaves two pipelines the evidence cannot tell apart: a judge whose output is unusable and
 wholly replaced, and one that reproduces the cascade's set exactly. Intercepting the reconciliation
 step and recording what the model produced before the deterministic set was merged in settles it
-(Table~\ref{tab:judge}): three of the four calls produced nothing nameable, the fourth named twelve
-techniques every one of which was already in the cascade, and three quarters of the model's own
-attack-patterns asserted a behaviour it could not map to a technique. The bundle carries the judge's name and the
+(Table~\ref{tab:judge}): three of the four calls produced nothing nameable, and the fourth named
+only techniques the cascade already held. The bundle carries the judge's name and the
 cascade's contents.
 
 \begin{table}[!htbp]

@@ -5,9 +5,8 @@ This work addressed two barriers to trusting a measurement of an LLM malware-ana
 such pipelines are rarely scored against the deterministic tooling they are built on, and that the
 instrument producing the score is itself a distributed system whose failures do not announce
 themselves. We built such a pipeline and then spent longer measuring it than building
-it, at equal token budget against simpler alternatives, with a noise control, with each mechanism's
-firing rate measured before its effect, and with intervals resampled at the level the observations
-are independent at.
+it, at equal token budget against simpler alternatives, with a noise control and with intervals
+resampled at the level the observations are independent at.
 
 Conceptually, the contribution is a way of reading what a component adds that does not depend
 on the component working: a baseline to refer an F1 to, a firing rate to decide in advance whether

@@ -133,8 +133,10 @@
 % what was being measured. The topic is what the model adds to a task whose
 % other machinery is deterministic, and that is now the whole title. The terms
 % it cannot carry at this length, multi-agent and negative results, are in the
-% keywords instead.
-\title{Measuring What an LLM Adds to Malware-to-ATT\&CK Technique Mapping}
+% keywords instead. Sentence case rather than title case, which is Elsevier's
+% house style and the style of the journal's own recent papers; the title-case
+% rule that says otherwise is IEEE's, and this is not an IEEE submission.
+\title{Measuring what an LLM adds to malware-to-ATT\&CK technique mapping}
 
 \author[firat]{D\"uzg\"un K\"u\c{c}\"uk\corref{cor}}
 \ead{dzgnkucuk@gmail.com}
@@ -176,6 +178,14 @@ negative results
 \input{E2-threats-to-validity}
 \input{E8-conclusion}
 \input{E9-declarations}
+
+% Appendices sit after the declarations and before the bibliography, which is
+% where the journal prints them. The material here is procedure rather than
+% result: it is what a reader needs in order to judge a measurement of a model,
+% and it is the one thing the repository cannot substitute for, because a claim
+% about what the model was asked has to be checkable beside the claim.
+\appendix
+\input{EA-prompts}
 
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}

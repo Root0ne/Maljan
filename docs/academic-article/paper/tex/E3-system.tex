@@ -30,6 +30,19 @@ Section~\ref{sec:failures} are marked on the figure at the boundary each occurre
 claim that four crossed a boundary with another server and three did not is a claim about this
 topology.
 
+The cascade scores a technique $t$ by weighting each contributing layer's confidence by how far
+that layer is trusted, then lifting the result by how many layers agree:
+\begin{equation}\label{eq:cascade}
+s(t) = \min\!\left(
+  \frac{\sum_{d \in D(t)} w_d\, c_d(t)}{\sum_{d \in D(t)} w_d}\; m\bigl(|D(t)|\bigr),\; 1
+\right)
+\end{equation}
+$D(t)$ are the domains claiming $t$ and $c_d(t)$ is domain $d$'s confidence for it, a mean over a
+model's claims and a maximum over a rule's. The trust weights $w$ run from
+\fact{cascade-weight-yara} for YARA to \fact{cascade-weight-network} for network evidence, and
+the corroboration multiplier $m$ rises from \fact{cascade-mult-1} at one contributing layer to
+\fact{cascade-mult-max} at \fact{cascade-weight-layers}.
+
 \begin{figure}[p]
 \centering
 \makebox[\linewidth][c]{\includegraphics[width=1.5\linewidth,height=0.93\textheight,keepaspectratio,alt={The pipeline in nine bands, from sample intake through evidence acquisition over four tool servers, six deterministic evidence layers, four retrieval stores, the LangGraph analysis graph of three analysts with a negotiation and revision loop, the corroboration cascade, the judge, deterministic reconciliation and gating with the STIX bundle and report, and the local and hosted inference substrate. Seven instrument failures are marked at the boundaries they occurred at.}]{figures/fig5-architecture.pdf}}

@@ -31,8 +31,7 @@ matters, because two IQ3 quantisations of the same model calibrated differently 
 artefact. The engine commit was reconstructed rather than recorded: \texttt{llama-server\
 -\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
 so the commit was recovered from a vendored depth-\setting{1} clone and proved against an identical
-\fact{engine-source-files}-file source list with one file differing once line endings are
-normalised.
+\fact{engine-source-files}-file source list, one file differing only in line endings.
 
 \begin{table}[!htbp]
 \caption{The local model and inference engine, pinned by digest and commit, and the four measured host properties that bound what can be reproduced on it.}\label{tab:model}
@@ -171,14 +170,18 @@ observations are nested, with many claims from one sample and many samples from 
 bootstrap resamples whole clusters, the p-value comes from flipping the sign of whole cluster
 means rather than of rows, and each interval is reported with the intraclass correlation coefficient
 (ICC) of its measure and the effective sample size that implies. Two properties of that test are reported with it. With $k$ clusters the
-two-sided version cannot return a p below $2/2^k$, which at $k$=\setting{5} is
+two-sided version cannot return a p below
+\begin{equation}\label{eq:floor}
+p_{\min} = 2 \big/ 2^{k}
+\end{equation}
+which at $k$=\setting{5} is
 \fact{fixture-signflip-floor} and puts $\alpha$=0.05 out of reach whatever the effect size; and
 above \setting{20} clusters the $2^k$ assignments are sampled rather than enumerated, at
 \fact{stats-iters} draws with the observed assignment counted in its own reference set, so the
 smallest p that route can return is one over the draws rather than zero. Each reported p names which
-route produced it. The two properties pull in opposite directions, because raising the cluster count
-lifts the floor and is also what makes enumeration stop being possible; that is why the consensus
-arms were re-run one sample per family. Multiplicity is controlled with Benjamini-Hochberg over two
+route produced it. The two properties pull in opposite directions: raising the cluster count lifts
+the floor and is what makes enumeration stop being possible, which is why the consensus arms were
+re-run one sample per family. Multiplicity is controlled with Benjamini-Hochberg over two
 declared families, and every null is reported with the minimum detectable effect of the design that
 produced it at 80\% power, because a null without its resolution reads either as equivalence or as a
 failed experiment depending on the reader.

@@ -41,16 +41,14 @@ overrun a \setting{600}\,s ceiling and return an empty bundle
 \fact{empty-bundles-local}/\fact{empty-bundles-pairs} times.
 
 P8 is the pitfall this work is most exposed to and the one where the evidence has moved. A
-\fact{frontier-params-b}B reasoning model has now run to completion on the same fixtures, repeats,
-prompt and token budget and did not separate from the local model (Section~\ref{sec:scale}); a
+\fact{frontier-params-b}B reasoning model has now run to completion against the local model and did
+not separate from it (Section~\ref{sec:scale}); a
 \fact{series-param-span}$\times$ parameter advantage producing no measurable difference is evidence
 against the pitfall's usual worry rather than merely an absence of evidence for it. That null is
 confounded by the reasoning flag, which cannot be removed on that endpoint and is worth
 \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1 on two separate models.
-Quantisation is no longer unmeasured under P8 either, the vendor's full-precision hosting of the same weights scoring
-\fact{quantisation-delta} F1 against our 3-bit deployment at n=\fact{quantisation-pairs}, an interval
-containing zero and a point estimate pointing away from the direction the threat assumes; two
-serving stacks differ alongside the precision, so this bounds the deployment rather than
+Quantisation is no longer unmeasured under P8 either (Section~\ref{sec:scale}), though two serving
+stacks differ alongside the precision, so the bound is on the deployment rather than on
 quantisation alone. What P8 cannot close is the size series, for a measured rather than a budgetary
 reason: testing a parameter-size trend needs three arms at three sizes matched on the flag that
 outweighs size, the one endpoint honouring the flag hosts the 35B model we already run, and the one
@@ -60,10 +58,8 @@ reports its version as \texttt{unknown} and the engine commit was reconstructed 
 (Section~\ref{models-endpoints-and-serving-configuration}); build provenance must be captured at
 build time, and ours was not.
 
-Two checks the survey does not include, both described in
-Section~\ref{sec:method}, caught errors one level below what the nine pitfalls address.
-
-A scored component deriving its output from the same source as the labels is scoring a tautology, so
+Two checks the survey does not include, both described in Section~\ref{sec:method}, caught errors
+one level below what the nine pitfalls address. A scored component deriving its output from the same source as the labels is scoring a tautology, so
 this was tested component by component rather than assumed. Ground truth is the MITRE
 \texttt{malware uses attack-pattern} relationship set, so it comes from nothing this project
 produces. The Sigma layer reads its identifier from each rule's own \texttt{attack.tNNNN} tag, and
@@ -104,8 +100,8 @@ paired ablation the swap file was exhausted and the model server had \fact{llama
 its own address space paged out; an arm then exceeded a \fact{salvage-budget-seconds}-second budget
 on a prompt trimmed to \fact{static-max-chars} characters. Whether that arm failed because of the
 pipeline or because of the host cannot be determined, because we recorded the pipeline's outputs and
-not the host's state, so the affected arms are reported as \texttt{unattributable} rather than as
-failures and the ablation as incomplete rather than as a null. Wall-clock bounds are therefore
+not the host's state, so the affected arms are reported as \texttt{unattributable} and the
+ablation as incomplete rather than as a null. Wall-clock bounds are therefore
 host-dependent measurements presented as system properties, so any result here that turns
 on a timeout is a statement about this pipeline on this machine under whatever load it had; and the
 screen we added can only be applied forward, since arms already collected without host state cannot

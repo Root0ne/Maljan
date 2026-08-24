@@ -34,6 +34,7 @@ Run:  .venv/bin/python tests/evaluation/paper_facts.py
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
@@ -1231,6 +1232,58 @@ def provenance_facts() -> dict[str, Any]:
     return out
 
 
+def cascade_constants_facts() -> dict[str, Any]:
+    """The corroboration cascade's constants, read out of the shipped module.
+
+    The paper states the cascade's scoring rule as a numbered equation, and an
+    equation whose constants are typed beside it is a numbered way to go stale:
+    change ``LAYER_WEIGHTS`` and the paper keeps printing what the weights used
+    to be, with nothing to notice. The values are therefore parsed from
+    ``ttp_cascade.py`` itself, so the equation is regenerated from the code it
+    describes and a weight that moves takes the build with it.
+
+    Parsed rather than imported. Importing would drag the package's logger and
+    schema modules into a derivation that needs two dictionaries, and would make
+    the paper's numbers depend on the package being installed; ``ast`` reads the
+    file that ships.
+    """
+    src = _REPO_ROOT / "src" / "maljan" / "analysis" / "ttp_cascade.py"
+    if not src.exists():
+        raise FactError(f"{src} is gone; the cascade equation has nothing to derive from")
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+
+    wanted = {"LAYER_WEIGHTS", "CROSS_LAYER_MULTIPLIERS", "DEFAULT_LAYER_WEIGHT"}
+    found: dict[str, Any] = {}
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target = node.target.id
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name):
+                target = node.targets[0].id
+        if target in wanted and node.value is not None:
+            found[target] = ast.literal_eval(node.value)
+
+    missing = wanted - set(found)
+    if missing:
+        raise FactError(f"ttp_cascade.py no longer defines {sorted(missing)}")
+
+    weights, mult = found["LAYER_WEIGHTS"], found["CROSS_LAYER_MULTIPLIERS"]
+    if sorted(mult) != list(range(1, len(mult) + 1)):
+        raise FactError(f"the multiplier table is no longer keyed 1..n: {sorted(mult)}")
+
+    out: dict[str, Any] = {
+        f"cascade_weight_{name}": f"{value:.2f}" for name, value in weights.items()
+    }
+    out["cascade_weight_default"] = f"{found['DEFAULT_LAYER_WEIGHT']:.2f}"
+    out["cascade_weight_layers"] = len(weights)
+    for layers, m in sorted(mult.items()):
+        out[f"cascade_mult_{layers}"] = f"{m:.2f}"
+    out["cascade_mult_max"] = f"{max(mult.values()):.2f}"
+    out["cascade_mult_span"] = f"{min(mult)} to {max(mult)}"
+    return out
+
+
 BUILDERS = (
     baseline_facts,
     consensus_facts,
@@ -1260,6 +1313,7 @@ BUILDERS = (
     power_facts,
     multiplicity_facts,
     provenance_facts,
+    cascade_constants_facts,
 )
 
 
