@@ -34,7 +34,7 @@
    "quotes": [],
    "load_bearing": false,
    "status": "unresolved",
-   "action": "Checked 2026-08-16 and it is genuinely unpublished: arXiv:2401.12178, v1 only, no Comments and no journal reference. It had been carried as 'likely-published-unverified' on no evidence beyond how well known Infer-Retrieve-Rank is, which is the reasoning this paper exists to distrust. Kept and marked: it is the program our design instantiates, so dropping it would let us appear to claim the idea."
+   "action": "Checked 2026-08-16 and it is genuinely unpublished: arXiv:2401.12178, v1 only, no Comments and no journal reference. It had been carried as 'likely-published-unverified' on no evidence beyond how well known Infer-Retrieve-Rank is, which is the reasoning this paper exists to distrust. Kept and marked: it is the program our design instantiates, so dropping it would let us appear to claim the idea. Re-checked on 2026-08-25: still no venue, and Crossref's nearest match resolves to ICXML, a different paper. Its arXiv DOI is now in the entry."
   },
   "metz2015comparing": {
    "quotes": [],
@@ -48,7 +48,7 @@
    ],
    "load_bearing": true,
    "status": "unresolved",
-   "action": "Identified on 2026-08-16 as the real source of the 77.5% candidate-space reduction, which the registry had credited to lekssays2025techniquerag and the body had left to an unnamed 'hierarchical successor'. It is a different group's follow-up, not the same authors. Three checks return no venue: the arXiv abs page carries no Comments and no Journal ref at v1, DBLP lists it only as CoRR abs/2604.14166 under 'Informal and Other Publication', and Crossref has no proceedings or journal record for the title. Its F1 and latency gains over TechniqueRAG were deliberately not quoted. Search for a published version before submission.",
+   "action": "Identified on 2026-08-16 as the real source of the 77.5% candidate-space reduction, which the registry had credited to lekssays2025techniquerag and the body had left to an unnamed 'hierarchical successor'. It is a different group's follow-up, not the same authors. Three checks return no venue: the arXiv abs page carries no Comments and no Journal ref at v1, DBLP lists it only as CoRR abs/2604.14166 under 'Informal and Other Publication', and Crossref has no proceedings or journal record for the title. Its F1 and latency gains over TechniqueRAG were deliberately not quoted. Search for a published version before submission. Searched again on 2026-08-25 during the DOI audit, and the search itself is worth recording: Crossref's best match for its title was 10.18653/v1/2025.findings-acl.1076 at 0.85 title similarity, which resolves to TechniqueRAG, the paper this one is a follow-up to and whose title differs by one word. That DOI now sits on lekssays2025techniquerag where it belongs. Any threshold-only match would have published a wrong DOI here, which is the second time this exact pair has produced a misattribution; see doi-status.json.",
    "quotes_declined": [
     "3.8",
     "62.4"

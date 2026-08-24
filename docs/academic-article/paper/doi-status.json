@@ -1,0 +1,340 @@
+{
+ "schema": "maljan-doi-status/v1",
+ "note": "Whether each bibliography entry has a DOI, and where a null came from. An empty doi field cannot distinguish 'no DOI exists' from 'nobody looked', and those are different states in the same way quotes_declined distinguishes a figure we chose not to quote from one we never saw. Every entry here was resolved on 2026-08-25.",
+ "method": "Crossref query.bibliographic per title, then the candidate DOI resolved and its registered title compared with ours. A high similarity score was not sufficient on its own: the first trial query returned a book chapter on sampling heterogeneous materials for a paper about file-system error handling, and one candidate at 0.85 similarity turned out to belong to a different paper whose title differs by one word.",
+ "rule": "Every entry in refs.bib either carries a doi field or appears here with a reason. Enforced by tests/evaluation/test_paper_citations.py.",
+ "entries": {
+  "abdallah2026retrievers": {
+   "doi": "10.1145/3805712.3808566",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "abusech2026bazaar": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "A live sample corpus, not a registered work."
+  },
+  "alam2023ladder": {
+   "doi": "10.1145/3607199.3607208",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "alquraan2018partition": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "USENIX OSDI proceedings carry no DOI."
+  },
+  "bertalanic2026consensus": {
+   "doi": "10.1145/3786335.3813137",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "bryant2019bea": {
+   "doi": "10.18653/v1/w19-4406",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "buchel2025sok": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "USENIX Security proceedings carry no DOI."
+  },
+  "chen2025recopilot": {
+   "doi": "10.48550/arXiv.2505.16366",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "cheng2026ttprint": {
+   "doi": "10.48550/arXiv.2605.25836",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "dev2026judge": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "An ICLR workshop paper; the workshop track registers no DOI."
+  },
+  "doosterlinck2024incontext": {
+   "doi": "10.48550/arXiv.2401.12178",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry",
+   "refused_candidate": "Crossref's best match resolved to 'ICXML: An In-Context Learning Framework for Zero-Shot Extreme Multi-Label Classification', a different paper. Refused."
+  },
+  "evertz2026chasing": {
+   "doi": "10.14722/ndss.2026.241749",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "gunawi2008eio": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "USENIX FAST proceedings carry no DOI; USENIX does not register them."
+  },
+  "hassid2024budget": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "COLM registers no DOI for its proceedings."
+  },
+  "husari2017ttpdrill": {
+   "doi": "10.1145/3134600.3134646",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "jiang2025nova": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "ICLR publishes through OpenReview, which registers no DOI."
+  },
+  "jin2024steplength": {
+   "doi": "10.18653/v1/2024.findings-acl.108",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "kate2025longfunceval": {
+   "doi": "10.48550/arXiv.2505.10570",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "kumaran2026confidence": {
+   "doi": "10.48550/arXiv.2606.29490",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "lange2024annoctr": {
+   "doi": "10.63317/4esp6coivous",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "lazaridou2021mind": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "NeurIPS 2021. Searched by exact title on 2026-08-25 and Crossref returned three unrelated works; no DOI exists for this paper."
+  },
+  "lea2025rex86": {
+   "doi": "10.1109/acsac67867.2025.00024",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "legoy2020rcatt": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "1st CTI Symposium, which registers no DOI. A Crossref search returned 'Automated discovery and mapping ATT&CK tactics and techniques for unstructured text', a different paper in Computers & Security, and it was refused."
+  },
+  "lekssays2025techniquerag": {
+   "doi": "10.18653/v1/2025.findings-acl.1076",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "li2022attackg": {
+   "doi": "10.1007/978-3-031-17140-6_29",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "li2023repetition": {
+   "doi": "10.52202/075280-3187",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "li2024metamorphic": {
+   "doi": "10.1145/3708521",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "li2025phishdebate": {
+   "doi": "10.1109/BigData66926.2025.11401440",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "liu2026inference": {
+   "doi": "10.1145/3788873",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "llamacpp8634": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "A GitHub issue. Issue trackers are not registered with a DOI agency."
+  },
+  "martinlopez2019deps": {
+   "doi": "10.1007/978-3-030-33702-5_31",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "metz2012baselines": {
+   "doi": "10.1007/978-3-642-34654-5_20",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "metz2015comparing": {
+   "doi": "10.48550/arXiv.1503.06952",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "mitre2023tram": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "Open-source software with no registered DOI and no preferred citation."
+  },
+  "mitre2026attack": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "A live knowledge base, not a registered work."
+  },
+  "mizrahi2024multiprompt": {
+   "doi": "10.1162/tacl_a_00681",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "morbiato2026hierarchical": {
+   "doi": "10.48550/arXiv.2604.14166",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry",
+   "refused_candidate": "Crossref's best match was 10.18653/v1/2025.findings-acl.1076 at Jaccard 0.85, and resolving it returned TechniqueRAG, which is lekssays2025techniquerag and now carries that DOI. The two titles differ by one word. This is the misattribution shape the paper's own citation audit has caught before, and it would have been accepted by any similarity threshold that did not also resolve the candidate and read the title back."
+  },
+  "ng2014conll": {
+   "doi": "10.3115/v1/w14-1701",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "ng2026evaluating": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "ACM SecDev poster. ACM does register DOIs, so this was searched by exact title on 2026-08-25 rather than assumed; Crossref returned three unrelated works."
+  },
+  "oyelayo2026mcp": {
+   "doi": "10.1145/3786161.3788462",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "paramanayakam2025lessismore": {
+   "doi": "10.23919/date64628.2025.10992798",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "release2026artefact": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "A source repository. It carries a URL rather than a DOI."
+  },
+  "rollinson2026samples": {
+   "doi": "10.3390/digital6010005",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "ryan2026attck": {
+   "doi": "10.48550/arXiv.2606.18166",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "saha2025malaware": {
+   "doi": "10.1109/msr66628.2025.00037",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "satvat2021extractor": {
+   "doi": "10.1109/eurosp51992.2021.00046",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "snell2025testtime": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "ICLR publishes through OpenReview, which registers no DOI."
+  },
+  "sun2025length": {
+   "doi": "10.18653/v1/2025.emnlp-main.389",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "tan2024llm4decompile": {
+   "doi": "10.18653/v1/2024.emnlp-main.203",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "tran2026single": {
+   "doi": "10.48550/arXiv.2604.02460",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "ttpdetect2026": {
+   "doi": "10.48550/arXiv.2602.06325",
+   "checked": "2026-08-25",
+   "source": "arxiv",
+   "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
+  },
+  "vllm11976": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "A GitHub issue. Issue trackers are not registered with a DOI agency."
+  },
+  "welleck2019unlikelihood": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "ICLR 2020, OpenReview, no DOI. A Crossref search returned 'Diverse Keyphrase Generation with Neural Unlikelihood Training', a different paper, and it was refused."
+  },
+  "xu2013misconfig": {
+   "doi": "10.1145/2517349.2522727",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "xue2025agentbugs": {
+   "doi": "10.1109/ASE63991.2025.00278",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "yu2024maltracker": {
+   "doi": "10.1145/3650212.3680397",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  },
+  "yuan2014simple": {
+   "doi": null,
+   "checked": "2026-08-25",
+   "reason": "USENIX OSDI proceedings carry no DOI."
+  },
+  "zhao2025apppoet": {
+   "doi": "10.1016/j.eswa.2024.125546",
+   "checked": "2026-08-25",
+   "source": "crossref",
+   "verified": "resolved the DOI and compared the registered title with ours"
+  }
+ }
+}

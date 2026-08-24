@@ -63,6 +63,8 @@ W.~Yu, et~al., Maltracker: A fine-grained {NPM} malware tracker copiloted by
 W.~Zhao, et~al., {AppPoet}: {LLM}-based {Android} malware detection via
   multi-view prompt engineering, Expert Systems with Applications 262,
   arXiv:2404.18816 (2025).
+\newblock \href {https://doi.org/10.1016/j.eswa.2024.125546}
+  {\path{doi:10.1016/j.eswa.2024.125546}}.
 
 \bibitem{rollinson2026samples}
 A.~Rollinson, N.~Polatidis, {LLM}-generated samples for {Android} malware
@@ -74,6 +76,8 @@ A.~Rollinson, N.~Polatidis, {LLM}-generated samples for {Android} malware
 S.~Saha, et~al., {MaLAware}: Automating the comprehension of malicious software
   behaviours using {LLMs}, in: IEEE/ACM International Conference on Mining
   Software Repositories (MSR), 2025, arXiv:2504.01145.
+\newblock \href {https://doi.org/10.1109/msr66628.2025.00037}
+  {\path{doi:10.1109/msr66628.2025.00037}}.
 
 \bibitem{mitre2023tram}
 {Center for Threat-Informed Defense}, {TRAM}: Threat report {ATT\&CK} mapper,
@@ -99,6 +103,8 @@ G.~Husari, E.~Al-Shaer, M.~Ahmed, B.~Chu, X.~Niu, {TTPDrill}: Automatic and
 K.~Satvat, R.~Gjomemo, V.~N. Venkatakrishnan, {EXTRACTOR}: Extracting attack
   behavior from threat reports, in: IEEE European Symposium on Security and
   Privacy (EuroS\&P), 2021, pp. 598--615.
+\newblock \href {https://doi.org/10.1109/eurosp51992.2021.00046}
+  {\path{doi:10.1109/eurosp51992.2021.00046}}.
 
 \bibitem{li2022attackg}
 Z.~Li, J.~Zeng, Y.~Chen, Z.~Liang, {AttacKG}: Constructing technique knowledge
@@ -112,17 +118,23 @@ M.~T. Alam, D.~Bhusal, Y.~Park, N.~Rastogi, Looking beyond {IoCs}:
   Automatically extracting attack patterns from external {CTI}, in: 26th
   International Symposium on Research in Attacks, Intrusions and Defenses
   (RAID), 2023, pp. 92--108, the {LADDER} framework.
+\newblock \href {https://doi.org/10.1145/3607199.3607208}
+  {\path{doi:10.1145/3607199.3607208}}.
 
 \bibitem{lekssays2025techniquerag}
 A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
   augmented generation for adversarial technique annotation in {CTI} text, in:
   Findings of the Association for Computational Linguistics (ACL), 2025,
   arXiv:2505.11988.
+\newblock \href {https://doi.org/10.18653/v1/2025.findings-acl.1076}
+  {\path{doi:10.18653/v1/2025.findings-acl.1076}}.
 
 \bibitem{morbiato2026hierarchical}
 F.~Morbiato, M.~Keller, P.~Nair, L.~Romano, Hierarchical retrieval augmented
   generation for adversarial technique annotation in cyber threat intelligence
   text, {PREPRINT}, not peer reviewed. arXiv:2604.14166 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2604.14166}
+  {\path{doi:10.48550/arXiv.2604.14166}}.
 
 \bibitem{cheng2026ttprint}
 Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
@@ -131,24 +143,32 @@ Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
   in as many words. Kept because its evidence-grounding requirement is the
   design constraint our own gate obeys, so dropping it would let us appear to
   have set that bar ourselves (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2605.25836}
+  {\path{doi:10.48550/arXiv.2605.25836}}.
 
 \bibitem{doosterlinck2024incontext}
 K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
   In-context learning for extreme multi-label classification, {PREPRINT}, not
   peer reviewed. arXiv:2401.12178, v1 only, no Comments and no journal
   reference (2024).
+\newblock \href {https://doi.org/10.48550/arXiv.2401.12178}
+  {\path{doi:10.48550/arXiv.2401.12178}}.
 
 \bibitem{abdallah2026retrievers}
 A.~Abdallah, J.~Holdcroft, M.~Ali, A.~Jatowt, Are {LLM}-based retrievers worth
   their cost? an empirical study of efficiency, robustness, and reasoning
   overhead, in: Proceedings of the 49th International ACM SIGIR Conference on
   Research and Development in Information Retrieval, 2026, arXiv:2604.03676.
+\newblock \href {https://doi.org/10.1145/3805712.3808566}
+  {\path{doi:10.1145/3805712.3808566}}.
 
 \bibitem{lange2024annoctr}
 L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
   entities, tactics, and techniques in cyber threat reports, in: Joint
   International Conference on Computational Linguistics, Language Resources and
   Evaluation (LREC-COLING), 2024, arXiv:2404.07765. CC-BY-SA 4.0.
+\newblock \href {https://doi.org/10.63317/4esp6coivous}
+  {\path{doi:10.63317/4esp6coivous}}.
 
 \bibitem{ng2014conll}
 H.~T. Ng, et~al., The {CoNLL}-2014 shared task on grammatical error correction,
@@ -156,11 +176,15 @@ H.~T. Ng, et~al., The {CoNLL}-2014 shared task on grammatical error correction,
   Language Learning: Shared Task, 2014, cited with the BEA-2019 shared task for
   the $F_{0.5}$ convention, which weights precision twice recall to penalise
   over-correction. The convention is documented by the shared tasks themselves.
+\newblock \href {https://doi.org/10.3115/v1/w14-1701}
+  {\path{doi:10.3115/v1/w14-1701}}.
 
 \bibitem{bryant2019bea}
 C.~Bryant, M.~Felice, {\O}.~E. Andersen, T.~Briscoe, The {BEA}-2019 shared task
   on grammatical error correction, in: Proceedings of the Fourteenth Workshop
   on Innovative Use of NLP for Building Educational Applications, 2019.
+\newblock \href {https://doi.org/10.18653/v1/w19-4406}
+  {\path{doi:10.18653/v1/w19-4406}}.
 
 \bibitem{welleck2019unlikelihood}
 S.~Welleck, I.~Kulikov, S.~Roller, E.~Dinan, K.~Cho, J.~Weston, Neural text
@@ -175,6 +199,8 @@ H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
   from the data perspective, in: Advances in Neural Information Processing
   Systems (NeurIPS), 2023, arXiv:2310.10226. Argues that self-reinforcement
   explanations reduce to the training-data account.
+\newblock \href {https://doi.org/10.52202/075280-3187}
+  {\path{doi:10.52202/075280-3187}}.
 
 \bibitem{chen2025recopilot}
 G.~Chen, H.~Sun, D.~Liu, Z.~Wang, Q.~Wang, B.~Yin, L.~Liu, L.~Ying,
@@ -182,6 +208,8 @@ G.~Chen, H.~Sun, D.~Liu, Z.~Wang, Q.~Wang, B.~Yin, L.~Liu, L.~Ying,
   peer reviewed. arXiv:2505.16366, v1 only, no Comments and no journal
   reference. Cited only as one of the open-weight binary specialists that
   establish the model-tier split (2025).
+\newblock \href {https://doi.org/10.48550/arXiv.2505.16366}
+  {\path{doi:10.48550/arXiv.2505.16366}}.
 
 \bibitem{tan2024llm4decompile}
 H.~Tan, Q.~Luo, J.~Li, Y.~Zhang, {LLM4Decompile}: Decompiling binary code with
@@ -204,6 +232,8 @@ Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
   sentence citing it concedes ground rather than claims it; dropping it for
   want of a venue would let this paper imply it holds that ground itself. No
   peer-reviewed system with the same scope was found (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2602.06325}
+  {\path{doi:10.48550/arXiv.2602.06325}}.
 
 \bibitem{kate2025longfunceval}
 K.~Kate, T.~Pedapati, K.~Basu, Y.~Rizk, V.~Chenthamarakshan, S.~Chaudhury,
@@ -212,18 +242,24 @@ K.~Kate, T.~Pedapati, K.~Basu, Y.~Rizk, V.~Chenthamarakshan, S.~Chaudhury,
   arXiv:2505.10570, v1 only, no Comments and no journal reference. Kept because
   it says the tool-catalogue degradation we report is already documented in
   general, which is the direction that costs us (2025).
+\newblock \href {https://doi.org/10.48550/arXiv.2505.10570}
+  {\path{doi:10.48550/arXiv.2505.10570}}.
 
 \bibitem{paramanayakam2025lessismore}
 V.~Paramanayakam, A.~Karatzas, I.~Anagnostopoulos, D.~Stamoulis, Less is more:
   Optimizing function calling for {LLM} execution on edge devices, in: Design,
   Automation and Test in Europe Conference (DATE), 2025, arXiv:2411.15399. Both
   quoted figures were confirmed against the full text.
+\newblock \href {https://doi.org/10.23919/date64628.2025.10992798}
+  {\path{doi:10.23919/date64628.2025.10992798}}.
 
 \bibitem{lea2025rex86}
 D.~Lea, J.~Ghawaly, G.~G. Richard~III, A.~Ali-Gombe, A.~Case, {REx86}: A local
   large language model for assisting in x86 assembly reverse engineering, in:
   Annual Computer Security Applications Conference (ACSAC), 2025,
   arXiv:2510.20975.
+\newblock \href {https://doi.org/10.1109/acsac67867.2025.00024}
+  {\path{doi:10.1109/acsac67867.2025.00024}}.
 
 \bibitem{li2025phishdebate}
 W.~Li, S.~Manickam, Y.-w. Chong, S.~Karuppayah, {PhishDebate}: An {LLM}-based
@@ -240,6 +276,8 @@ D.~Tran, D.~Kiela, Single-agent {LLMs} outperform multi-agent systems on
   its kind, and because the crossover figure it reports for our own model class
   has no reviewed equivalent we could verify. Bertalani{\v c} and Fortuna reach
   the same conclusion in a reviewed venue (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2604.02460}
+  {\path{doi:10.48550/arXiv.2604.02460}}.
 
 \bibitem{bertalanic2026consensus}
 B.~Bertalani{\v c}, C.~Fortuna, The cost of consensus: Isolated self-correction
@@ -253,6 +291,8 @@ R.~Evertz, N.~Risse, C.~Neuer, N.~M{\"u}ller, S.~Normann, et~al., Chasing
   shadows: Pitfalls in {LLM} security research, in: Network and Distributed
   System Security Symposium (NDSS), 2026, arXiv:2512.09549. Living appendix at
   llmpitfalls.org.
+\newblock \href {https://doi.org/10.14722/ndss.2026.241749}
+  {\path{doi:10.14722/ndss.2026.241749}}.
 
 \bibitem{ng2026evaluating}
 J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
@@ -274,6 +314,8 @@ J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
   arXiv:1503.06952, v1 only, no venue. Kept for its systematic-review finding
   rather than for the requirement itself, which now rests on the reviewed
   IBERAMIA 2012 paper by the same group (2015).
+\newblock \href {https://doi.org/10.48550/arXiv.1503.06952}
+  {\path{doi:10.48550/arXiv.1503.06952}}.
 
 \bibitem{lazaridou2021mind}
 A.~Lazaridou, A.~Kuncoro, E.~Gribovskaya, et~al., Mind the gap: Assessing
@@ -331,6 +373,8 @@ A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
   correlation confirms a statistically significant relationship between
   parameter size and $F_1$ scores in this CTI classification task ($\rho$=0.85,
   p=0.014)'' (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2606.18166}
+  {\path{doi:10.48550/arXiv.2606.18166}}.
 
 \bibitem{sun2025length}
 Y.~Sun, H.~Wang, J.~Li, J.~Liu, X.~Li, H.~Wen, Y.~Yuan, H.~Zheng, Y.~Liang,
@@ -399,6 +443,8 @@ D.~Kumaran, Reported confidence in {LLMs} tracks commitment more than
   {DOI} beyond the arXiv one. Eight models over two classes, with the contrast
   that carries the claim being verbal confidence against calibrated token
   log-probabilities (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2606.29490}
+  {\path{doi:10.48550/arXiv.2606.29490}}.
 
 \bibitem{abusech2026bazaar}
 {abuse.ch}, {MalwareBazaar}, Malware sample corpus.

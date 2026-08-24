@@ -188,6 +188,56 @@ def test_every_entry_has_the_fields_a_reader_needs(field: str) -> None:
     assert not thin, f"{len(thin)} entry(ies) with no {field}: " + ", ".join(thin)
 
 
+_DOI_STATUS = _PAPER / "doi-status.json"
+_DOI = re.compile(r"^\s*doi\s*=\s*\{([^}]*)\}", re.M)
+
+
+def test_every_entry_either_carries_a_doi_or_says_why_not() -> None:
+    """An empty ``doi`` field is two different states and looks like one.
+
+    Elsevier asks for a DOI wherever one exists, and eighteen of these entries
+    genuinely have none: USENIX, ICLR and COLM register no DOI for their
+    proceedings, and a GitHub issue is not a registered work. The remaining
+    forty do. A bibliography with a mixture of the two, and nothing recording
+    which is which, cannot tell a reader — or a later pass — whether an absence
+    was established or merely never looked into.
+
+    So the registry is required to account for every entry, and this test is the
+    thing that stops it drifting out of step with the bibliography it describes.
+    Both directions fail: an entry with no DOI and no reason, and a reason
+    written for an entry that has since acquired one.
+    """
+    status = json.loads(_DOI_STATUS.read_text(encoding="utf-8"))["entries"]
+    entries = _entries()
+
+    unlisted = sorted(set(entries) - set(status))
+    assert not unlisted, f"{len(unlisted)} entry(ies) absent from doi-status.json: " + ", ".join(
+        unlisted
+    )
+    stale = sorted(set(status) - set(entries))
+    assert not stale, (
+        f"{len(stale)} entry(ies) in doi-status.json that the bibliography no longer has: "
+        + ", ".join(stale)
+    )
+
+    disagree: list[str] = []
+    for key, body in entries.items():
+        m = _DOI.search(body)
+        recorded = status[key].get("doi")
+        if m and not recorded:
+            disagree.append(f"{key}: refs.bib has {m.group(1)}, the registry says none")
+        elif not m and recorded:
+            disagree.append(f"{key}: the registry claims {recorded}, refs.bib has no doi field")
+        elif m and recorded and m.group(1).strip() != recorded.strip():
+            disagree.append(f"{key}: {m.group(1)} in refs.bib against {recorded} recorded")
+        elif not m and not str(status[key].get("reason", "")).strip():
+            disagree.append(f"{key}: no doi and no reason for its absence")
+    assert not disagree, (
+        f"{len(disagree)} entry(ies) where the bibliography and the DOI registry disagree: "
+        + "; ".join(disagree[:8])
+    )
+
+
 def test_an_unreviewed_source_is_never_cited_without_saying_so() -> None:
     r"""Every citation to a preprint carries the visible marker.
 
