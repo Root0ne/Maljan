@@ -27,11 +27,11 @@ and completes in \textasciitilde5.5 minutes, putting an n=\fact{cohort-n} cohort
 
 Table~\ref{tab:model} pins the local model and engine. Naming the imatrix calibration dataset
 matters, because two IQ3 quantisations of the same model calibrated differently are not the same
-artefact, and most papers reporting a quantisation level cannot say which calibration produced it.
-The engine commit was reconstructed rather than recorded. \texttt{llama-server\ -\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
-so the commit was recovered from a depth-\setting{1} clone vendored elsewhere in the project and
-proved against an identical \fact{engine-source-files}-file source list with one file differing once
-line endings are normalised.
+artefact. The engine commit was reconstructed rather than recorded: \texttt{llama-server\
+-\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
+so the commit was recovered from a vendored depth-\setting{1} clone and proved against an identical
+\fact{engine-source-files}-file source list with one file differing once line endings are
+normalised.
 
 \begin{table}[!htbp]
 \caption{The local model and inference engine, pinned by digest and commit, and the four measured host properties that bound what can be reproduced on it.}\label{tab:model}
@@ -103,11 +103,11 @@ travel in \texttt{extra\_body}; measured on this host, \fact{cap-requested} requ
 both. And that server truncates silently, returning \texttt{finish\_reason:\ "stop"} at the cap and
 never \texttt{"length"}, so telemetry detecting truncation by finish reason reports zero however
 often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
-requests per day at \fact{openrouter-burst-limit} per minute; the first attempt exhausted the daily
-quota mid-flight, \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning
-HTTP~429, and the estimate it produced pointed the wrong way. One call per sample over a
-\fact{baseline-n}-sample cohort is two days at that rate, and a full-pipeline arm at roughly
-\fact{requests-per-analysis} model requests per analysis is not reachable on that tier at all.
+requests per day at \fact{openrouter-burst-limit} per minute, and the first attempt exhausted it
+mid-flight with \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning
+HTTP~429. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a
+full-pipeline arm at roughly \fact{requests-per-analysis} model requests per analysis is not
+reachable on that tier at all.
 
 \subsection{Experimental design}\label{experimental-design}
 
@@ -156,12 +156,11 @@ when a defect was found that might have affected a completed \fact{drift-n}-samp
 question could not be asked because only the summary survived. Long-lived servers accumulate state
 that crosses sample boundaries, so the reverse-engineering server is restarted between samples,
 which recovered \fact{switch-recovered} of \fact{switch-attempted} samples previously recorded as
-unmeasurable. Two audits were added for the same reason and both caught real errors. Diffing the claim register
-against the evidence log found a claim recorded as novel an hour after our own text called it a
-replication, plus three ledger rows carrying superseded figures. Counter-searching each novelty
-claim in an adjacent field's vocabulary demoted five claims, including the one central to this
-paper, and its result is recorded whether or not it demotes anything, because a searched absence is
-only credible if the looking is documented.
+unmeasurable. Two audits were added for the same reason. Diffing the claim register against the
+evidence log found a claim recorded as novel an hour after our own text called it a replication, and
+counter-searching each novelty claim in an adjacent field's vocabulary demoted five, including the
+one central to this paper; the result of a counter-search is recorded whether or not it demotes
+anything, because a searched absence is only credible if the looking is documented.
 
 \subsection{Statistical analysis}\label{statistical-analysis}
 

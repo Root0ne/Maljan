@@ -15,15 +15,18 @@ an ablation can say anything, a minimum detectable effect to turn a null into a 
 of distinct outputs to ask whether the instrument produced N answers or one answer N times. None is
 expensive and each changed a conclusion here.
 
-Four architectural claims motivated the design and none survived measurement. Negotiated consensus
-does not beat a single judge at equal budget, the corroboration cascade never reaches the artefact
-the analyst receives, two-tier attribution fires too rarely to carry the result, and the confidence
-number every deterministic gate consumes is indistinguishable from chance. Where a corpus large
-enough to produce a significant answer was available, the finding is sharper than a null: the
-decomposition into several calls is worth \fact{cape-negotiated-delta} F1 and the negotiation
-between them is worth nothing. None of those components is broken and each was built for a reason we
-would give again, but they do not move the end-to-end result, and we report that rather than a
-tuning opportunity. The finding we did not expect to be the paper is that the instrument was
+Four architectural claims motivated the design and one of them survives in part. Where a corpus
+large enough to produce a significant answer was available, decomposing the analysis into several
+model calls is worth \fact{cape-negotiated-delta} F1 over a single judge and the negotiation between
+them is worth \fact{cape-mechanism-delta}: the design helps, and not for the reason it was built.
+The other three do not survive. The corroboration cascade never reaches the artefact the analyst
+receives, two-tier attribution fires too rarely to carry the result, and the confidence number every
+deterministic gate consumes is indistinguishable from chance. None of those components is broken and
+each was built for a reason we would give again, but they do not move the end-to-end result. What
+does move it is the layer underneath: the deterministic assigner gives the cleanest identifier gate
+of three backends on two external corpora, and when its reconciliation runs the judge contributes no
+technique the cascade did not already hold, while on the path that bypasses it uncorroborated
+identifiers reach the analyst. The finding we did not expect to be the paper is that the instrument was
 repeatedly wrong in ways that looked like data. Seven mechanisms are catalogued with the layer each
 occurred at; four crossed a boundary with another server, each returned a plausible result rather
 than an error, \fact{test-count} passing tests caught none of them, and all four were found instead

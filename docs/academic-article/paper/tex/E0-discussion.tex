@@ -1,15 +1,12 @@
 \subsection{Discussion}
 \label{sec:discussion}
 
-The most consequential thing we can say about these negative results is that most of them are bounds
-rather than equivalences, and that we did not know this when we first wrote them down. Five of the
-studies reported here run on a corpus of five fixtures, and at five clusters the exact two-sided
-cluster permutation test cannot return a value below \fact{fixture-signflip-floor}, so no comparison
-measured on that corpus can reach $\alpha$=0.05 whatever its effect size. That is a property of the
-design rather than of the data, and no number of extra decoding repeats moves it, because repeats
-add rows inside clusters and rows inside clusters are not what the test counts. Multiplicity
-correction is therefore beside the point there. The practical consequence is that a null has to be
-reported with its resolution: the frontier comparison could detect \fact{mde-frontier-local} F1 at
+The most consequential thing we can say about these negative results is that most of them are
+bounds rather than equivalences, and that we did not know this when we first wrote them down. Five
+of the studies here run on five fixtures, where the sign-flip floor of
+Section~\ref{sec:method} puts $\alpha$=0.05 out of reach whatever the effect size, and no number of
+extra decoding repeats moves it because repeats add rows inside clusters rather than clusters. The
+practical consequence is that a null has to be reported with its resolution: the frontier comparison could detect \fact{mde-frontier-local} F1 at
 80\% power and returned \fact{frontier-local-delta}, and only the pair of those facts is
 informative, since the second alone reads as equivalence and the first alone as a failed experiment.
 It also changes what the cheap fix is. The instinct on seeing an underpowered paired design is to

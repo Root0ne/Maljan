@@ -756,6 +756,62 @@ def retrieval_scores_facts() -> dict[str, Any]:
     }
 
 
+def technique_mapping_facts() -> dict[str, Any]:
+    """The deterministic technique assigner, scored on two public corpora.
+
+    Both corpora are external and neither is the ATT&CK descriptions the index
+    is built from, which is the whole point: scoring a retrieval index against
+    the text it indexes measures nothing. TRAM2 is sentence classification and
+    AnnoCTR is entity linking in running report prose, by different annotators
+    over different documents, so absolute accuracy is not comparable across the
+    two and is not compared here. What is compared is the ordering of the three
+    backends on each axis, which is the claim.
+    """
+    d = load("annoctr_mapping.json")
+    a, t2 = d["annoctr"], d["tram2_reference"]
+    rep = d["replication"]
+    if not (
+        rep["ranking_order_holds"] and rep["gate_order_holds"] and rep["hybrid_wins_both_axes"]
+    ):
+        raise FactError("annoctr_mapping.json no longer records the replication it is cited for")
+    out: dict[str, Any] = {
+        "mapping_tram2_n": f"{4913:,}",
+        "mapping_annoctr_n": f"{int(a['tfidf']['n']):,}",
+        "mapping_annoctr_dropped": str(d["corpus"]["labels_outside_our_attck_bundle"]),
+    }
+    for backend in ("tfidf", "semantic", "hybrid"):
+        out[f"mapping_tram2_{backend}_top3"] = f"{t2[backend]['top3']:.3f}"
+        out[f"mapping_tram2_{backend}_mrr"] = f"{t2[backend]['mrr']:.3f}"
+        out[f"mapping_tram2_{backend}_gate"] = signed(t2[backend]["gate_separation"], 3)
+        out[f"mapping_annoctr_{backend}_top3"] = f"{a[backend]['top3']:.3f}"
+        out[f"mapping_annoctr_{backend}_mrr"] = f"{a[backend]['mrr']:.3f}"
+        out[f"mapping_annoctr_{backend}_gate"] = signed(a[backend]["gate_separation"], 3)
+    return out
+
+
+def stix_conformance_facts() -> dict[str, Any]:
+    """Output conformance, measured with someone else's instrument.
+
+    The pass this project wrote checks empty patterns, duplicate
+    attack-patterns and dangling references. The standard validator checks the
+    specification, which is a different set, and the gap between the two is the
+    reason for reporting the second rather than the first.
+    """
+    d = load("stix_integrity.json")
+    emitter = d["current_emitter"]["validator"]
+    real, inj = d["real_bundles"], d["injected_defects"]
+    return {
+        "stix_validator": d["instrument"].split(",")[0],
+        "stix_emitter_errors": str(emitter["n_errors"]),
+        "stix_emitter_ref_warnings": str(emitter["n_ref_warnings"]),
+        "stix_archived_bundles": str(real["n"]),
+        "stix_archived_clean": str(real["clean_with_pass"]),
+        "stix_injected_bundles": str(inj["n"]),
+        "stix_injected_clean_after_repair": str(inj["clean_after_repair"]),
+        "stix_objects_preserved": str(inj["objects_preserved_vs_rejection"]),
+    }
+
+
 def layer0_excluded_facts() -> dict[str, Any]:
     """The two Layer-0 sources that were offered evidence and declined it.
 
@@ -1195,6 +1251,8 @@ BUILDERS = (
     case_corpus_facts,
     retrieval_scores_facts,
     layer0_excluded_facts,
+    technique_mapping_facts,
+    stix_conformance_facts,
     model_size_facts,
     cascade_jaccard_facts,
     drift_facts,

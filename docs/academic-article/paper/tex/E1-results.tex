@@ -63,6 +63,63 @@ a no-LLM baseline near \fact{baseline-f1} beneath treatment arms near \fact{cons
 reads as a large pipeline win, and it is not one. Panel b) is the comparison that can be made, and
 its three intervals overlap.
 
+\subsection{What the deterministic layer contributes}\label{sec:assignment}
+
+The pipeline never asks the model for a technique identifier. The analyst describes behaviour and a
+retrieval index over the official ATT\&CK corpus assigns the identifier, which removes ID recall
+from a model that does not have the taxonomy memorised and cannot be made to by prompting. That
+assignment is the one component measured against external ground truth rather than against our own
+cohort, on two public corpora neither of which is the ATT\&CK text the index is built from
+(Table~\ref{tab:mapping}).
+
+\begin{table}[!htbp]
+\caption{The technique assigner on two external corpora: TRAM2 \cite{mitre2023tram}, sentence classification, and AnnoCTR \cite{lange2024annoctr}, expert entity linking in running report prose. Gate separation is the mean score of the chosen top-1 when correct minus when wrong, so a larger value means the absolute threshold can better refuse a wrong pick.}\label{tab:mapping}
+\centering\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{TRAM2, n=\fact{mapping-tram2-n}} & \multicolumn{3}{c}{AnnoCTR, n=\fact{mapping-annoctr-n}} \\
+\cmidrule(lr){2-4}\cmidrule(l){5-7}
+backend & top-3 & MRR & gate & top-3 & MRR & gate \\
+\midrule
+lexical & \fact{mapping-tram2-tfidf-top3} & \fact{mapping-tram2-tfidf-mrr} & \fact{mapping-tram2-tfidf-gate} & \fact{mapping-annoctr-tfidf-top3} & \fact{mapping-annoctr-tfidf-mrr} & \fact{mapping-annoctr-tfidf-gate} \\
+semantic & \fact{mapping-tram2-semantic-top3} & \fact{mapping-tram2-semantic-mrr} & \fact{mapping-tram2-semantic-gate} & \fact{mapping-annoctr-semantic-top3} & \fact{mapping-annoctr-semantic-mrr} & \fact{mapping-annoctr-semantic-gate} \\
+hybrid & \fact{mapping-tram2-hybrid-top3} & \fact{mapping-tram2-hybrid-mrr} & \fact{mapping-tram2-hybrid-gate} & \fact{mapping-annoctr-hybrid-top3} & \fact{mapping-annoctr-hybrid-mrr} & \fact{mapping-annoctr-hybrid-gate} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ranking quality and gate quality are separable axes and no backend wins both. The semantic index
+ranks better on both corpora, \fact{mapping-tram2-semantic-top3} against
+\fact{mapping-tram2-tfidf-top3} top-3 on TRAM2 and \fact{mapping-annoctr-semantic-top3} against
+\fact{mapping-annoctr-tfidf-top3} on AnnoCTR, while its scores barely separate a correct pick from a
+wrong one, at gate \fact{mapping-tram2-semantic-gate} and \fact{mapping-annoctr-semantic-gate},
+because everything it retrieves sits near the same similarity. The lexical index ranks worse and
+gates cleanly, scoring near zero for unrelated evidence. Composing the per-axis winners matches the
+semantic index's ranking and produces the cleanest gate of the three on both corpora,
+\fact{mapping-tram2-hybrid-gate} and \fact{mapping-annoctr-hybrid-gate}. That composition is the
+shipped default, and the gate is what makes the assigner safe to leave authoritative: an identifier
+it cannot align is refused rather than guessed.
+
+All three orderings replicate across the two corpora, which is the claim. Absolute accuracy does not
+and is not compared: entity linking in unconstrained prose over a
+\fact{attck-catalogue-size}-technique space is harder than sentence classification, and
+\fact{mapping-annoctr-dropped} AnnoCTR labels fall outside our ATT\&CK bundle. The direction is not
+ours either. Büchel et al.~\cite{buchel2025sok} report that traditional NLP approaches outperform
+embedder-based ones in realistic settings, a stronger and earlier form of the gating half; what this
+adds is that the two axes come apart, and that composing them beats choosing between them.
+
+That layer also emits the artefact, and its conformance is measured with a standard external
+validator rather than with the integrity pass this project wrote itself. The
+\fact{stix-validator} finds \fact{stix-emitter-errors} errors and
+\fact{stix-emitter-ref-warnings} referential warnings in a bundle built from the production models.
+Two defects the integrity pass had no opinion about were found that way: every object lacked the
+\texttt{spec\_version} property STIX~2.1 requires on each SDO rather than on the bundle, so no
+bundle the project had emitted was identifiable as STIX~2.1, and \texttt{null} and empty-array
+properties were serialised as present, which the specification forbids. Both are fixed. The repair
+pass is not what makes a bundle conform: across \fact{stix-injected-bundles} bundles with injected
+defects it recovers \fact{stix-injected-clean-after-repair} to validator-clean, and what it does do
+is preserve \fact{stix-objects-preserved} objects that rejection would discard.
+
 \subsection{Multi-agent consensus at equal budget}\label{sec:consensus}
 
 Three arms at an equal total token budget, including a stochastic-noise control in which one analyst
@@ -307,9 +364,9 @@ rescue a case where the tokens are eight times slower than assumed.
 \subsection{The corroboration cascade does not reach the verdict}\label{sec:cascade}
 
 The multi-layer corroboration set is the design's central claim about evidence quality. We remove
-one Layer-0 source at a time and compare the bundle the analyst receives against the bundle produced
-with all of them, under two conditions differing in one respect: whether the removed source solely
-owned its techniques. Under \emph{disjoint}, where its techniques disappear because nothing else
+one Layer-0 source at a time and compare the bundle the analyst receives against the one produced
+with all of them, under two conditions differing in whether the removed source solely owned its
+techniques. Under \emph{disjoint}, where its techniques disappear because nothing else
 claims them, the verdict changes in \fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms}
 arms at Jaccard \fact{cascade-disjoint-jaccard} {[}\fact{cascade-disjoint-jaccard-min},
 \fact{cascade-disjoint-jaccard-max}{]}. Under \emph{overlap}, where the techniques survive under a

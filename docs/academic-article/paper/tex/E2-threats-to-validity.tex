@@ -53,16 +53,15 @@ containing zero and a point estimate pointing away from the direction the threat
 serving stacks differ alongside the precision, so this bounds the deployment rather than
 quantisation alone. What P8 cannot close is the size series, for a measured rather than a budgetary
 reason: testing a parameter-size trend needs three arms at three sizes matched on the flag that
-outweighs size, the one endpoint honouring the flag hosts the same 35B model we already run, and the
-one above 35B does not. Coverage also remains, the second model having been measured on five
-synthetic fixtures rather than on the malware cohort. P9 is \texttt{PARTIAL} because the running binary
+outweighs size, the one endpoint honouring the flag hosts the 35B model we already run, and the one
+above 35B does not. Coverage also remains, the second model having been measured on fixtures rather
+than on the malware cohort. P9 is \texttt{PARTIAL} because the running binary
 reports its version as \texttt{unknown} and the engine commit was reconstructed rather than recorded
 (Section~\ref{models-endpoints-and-serving-configuration}); build provenance must be captured at
 build time, and ours was not.
 
-Two checks the survey does not include are described in Section~\ref{sec:method}: diffing the claim
-register against the evidence log, which caught errors one level below what the nine pitfalls
-address, and the output-cardinality check of Section~\ref{sec:detector}.
+Two checks the survey does not include, both described in
+Section~\ref{sec:method}, caught errors one level below what the nine pitfalls address.
 
 A scored component deriving its output from the same source as the labels is scoring a tautology, so
 this was tested component by component rather than assumed. Ground truth is the MITRE

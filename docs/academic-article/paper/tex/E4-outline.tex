@@ -35,9 +35,16 @@ claims. Each claim was measured at an equal total token budget against a simpler
 stochastic-noise control, with the firing rate of each mechanism measured before its effect, and
 with intervals resampled at the level the observations are independent at.
 
-All four claims returned a negative or a near-null result, and the study that established this was
-itself wrong several times over. Seven defects in the instrument produced plausible results rather
-than errors, and a suite of \fact{test-count} passing tests caught none of them. The largest is this
-paper's own statistics: every interval in an earlier draft resampled rows when the observations were
-clustered, and correcting that widened the anchor interval \fact{baseline-f1-widening}-fold and
-turned two claims of equivalence into bounds.
+One of those four survives in part and three do not. Decomposing the analysis into several model
+calls is worth \fact{cape-negotiated-delta} F1 over a single judge, but the negotiation the design
+was built around accounts for \fact{cape-mechanism-delta} of it, so what pays is the calls rather
+than the argument between them. The cascade, the attribution tier and the confidence gate each
+return a negative or a near-null result. Alongside them the deterministic technique assigner, the
+one component measured against external ground truth rather than our own cohort, gives the cleanest
+identifier gate of its three candidate backends on both corpora it was tested on.
+
+The study that established all of this was itself wrong several times over. Seven defects in the
+instrument produced plausible results rather than errors, and a suite of \fact{test-count} passing
+tests caught none of them. The largest is this paper's own statistics: every interval in an earlier
+draft resampled rows when the observations were clustered, and correcting that widened the anchor
+interval \fact{baseline-f1-widening}-fold and turned two claims of equivalence into bounds.

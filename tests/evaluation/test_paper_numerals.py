@@ -93,6 +93,10 @@ _LATEX_DIMS = re.compile(
     # hand made a column width read as an unregistered measurement.
     r"|[\d.]+\\(?:linewidth|columnwidth|textwidth|hsize)\b"
     r"|\\(?:multicolumn|arraystretch|columnwidth|linewidth)\{?\d*"
+    # `\cmidrule(lr){2-4}` names the columns a rule spans. The digits are
+    # column indices in a table's own coordinate system, not a result, and a
+    # table with a spanning header cannot be written without them.
+    r"|\\cmidrule(?:\([lr]+\))?\{\d+-\d+\}"
 )
 
 # Forms that contain a numeral without stating a result. Each is a name, a

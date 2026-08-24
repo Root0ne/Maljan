@@ -13,8 +13,13 @@ because the sandbox instance has one analysis machine and no Linux guest.
 
 \subsection{The pipeline under evaluation}\label{the-pipeline-under-evaluation}
 
-Figure~\ref{fig:architecture} draws the system. Six deterministic evidence layers assert techniques
-directly from signatures, rules and byte markers, with no model involved. Three analysts then run as
+Figure~\ref{fig:architecture} draws the system. Its organising rule is that the model proposes and
+a deterministic layer disposes: the model describes behaviour and never emits a technique identifier
+or a final set, and every identifier that reaches the analyst has been assigned, gated and
+reconciled by code. That is why the deterministic layer dominating the output is the design working
+rather than a component failing, and why what has to be measured is what the model adds on top of
+it. Six deterministic evidence layers assert techniques directly from signatures, rules and byte
+markers, with no model involved. Three analysts then run as
 ReAct loops over heterogeneous evidence channels, each bound to one tool server; a negotiation node
 tests for consensus and routes disputes to a revision pass; a judge synthesises a verdict and emits
 STIX~2.1; and a deterministic reconciliation and gating stage adjudicates between the judge's bundle

@@ -1,18 +1,18 @@
-Multi-agent LLM pipelines map malware evidence to MITRE ATT\&CK techniques, and their components are
-rarely measured against the deterministic tooling they are built on. This study evaluates one such
-pipeline and reports both its measurements and the failures of the instrument that produced them. A no-LLM baseline, the sandbox's own signature mapping, reaches F1
-\fact{baseline-f1} \fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the
-\fact{h2h-n} of those where both arms ran, scored per sample against the same ground truth by the
-same code, the full pipeline reaches \fact{h2h-dynamic-f1} against that baseline's
-\fact{h2h-cape-f1}, paired \fact{h2h-delta} \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. On \fact{cape-consensus-families} real samples, one per family, negotiated
-multi-agent consensus beats a single judge by \fact{cape-negotiated-delta} F1
-\fact{cape-negotiated-ci}, and so does a stochastic-noise control, by \fact{cape-noise-delta}; the
-two differ by \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so what
-helps is the calls the arms share, not the negotiation. Verbal confidence, which
-every deterministic gate consumes, ranks correct claims above incorrect ones at AUC
-\fact{confidence-auc}, on an interval containing chance. Seven defects in our own instrument
-produced plausible results rather than errors and \fact{test-count} passing tests caught none: four
-crossed a boundary with another server, and three share a different shape, a measurement's cause
-assigned rather than measured. The largest is this paper's own statistics, every interval having
-resampled rows when the observations were clustered, whose correction widened the anchor interval
-\fact{baseline-f1-widening}-fold and turned two equivalence claims into bounds.
+An LLM pipeline for mapping malware evidence to MITRE ATT\&CK techniques is mostly not the model: it
+wraps one in a sandbox, a disassembler, retrieval indices and rule engines, so what the model
+contributes is a difference against that tooling rather than a score. This study measures that
+difference component by component, and reports the failures of the instrument that produced the
+measurements. Three findings are positive. Decomposing the analysis into several
+model calls is worth \fact{cape-negotiated-delta} F1 over a single judge on
+\fact{cape-consensus-families} real samples \fact{cape-negotiated-ci}; a deterministic technique
+assigner whose ranking and gating backends are composed rather than chosen between gives the
+cleanest identifier gate on two external corpora; and a decoding-configuration flag is worth
+\fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, more than any architecture or
+parameter count we measured. Four are negative or bounded. The negotiation the multi-agent design was
+built for contributes \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so
+the gain is the calls and not the argument; against the sandbox it is built on the full pipeline is
+\fact{h2h-delta} F1 \fact{h2h-ci} at a resolution of \fact{h2h-mde}; three retrieval components are
+near-inert end to end; and verbal confidence, which every deterministic gate consumes, discriminates
+at AUC \fact{confidence-auc}, on an interval containing chance. Seven defects in our own instrument produced plausible results rather than errors and
+\fact{test-count} passing tests caught none, the largest being that every interval in an earlier
+draft resampled rows when the observations were clustered.

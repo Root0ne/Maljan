@@ -25,8 +25,9 @@ technique-ID recall from the model entirely, which is a domain instantiation of 
 the model still ranks among retrieved candidates. That the retrieval backends are separable on
 ranking and on gating is likewise not ours, Abdallah et al.~\cite{abdallah2026retrievers} treating
 retrieval confidence as a dimension distinct from effectiveness and finding calibration
-``consistently weak across model families''; we measure the separation on TRAM2 at N=4,913
-\cite{mitre2023tram} and on the independently annotated AnnoCTR corpus \cite{lange2024annoctr}. Two adjacent results have
+``consistently weak across model families''; Section~\ref{sec:assignment} measures the separation on
+TRAM2 \cite{mitre2023tram} and on the independently annotated AnnoCTR corpus
+\cite{lange2024annoctr}. Two adjacent results have
 prior art we cite rather than compete with: that a false correction costs more than a missed one is
 why grammatical error correction evaluates with F0.5 \cite{ng2014conll,bryant2019bea}, and neural
 text degeneration has competing established accounts locating the cause in the likelihood objective

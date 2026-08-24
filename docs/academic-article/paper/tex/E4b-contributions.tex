@@ -1,17 +1,31 @@
 \subsection{Motivation and contributions}
 \label{sec:contributions}
 
-Two observations motivated this work. First, the components of an LLM analysis pipeline are
-ordinarily justified by the mechanism they implement rather than by a measurement, and a mechanism
-sound in isolation can contribute nothing once wired to real inputs; establishing which holds
-requires an equal-budget comparison against a simpler alternative and a baseline containing no
-language model at all. Second, such a comparison is only as trustworthy as the instrument that
-produces it, and in a pipeline assembled from several servers the instrument fails in a way that
-does not announce itself. Both were reached the expensive way. The contributions are therefore
-organised around the evaluation rather than the architecture, and each is a measurement or a
-mechanism rather than a proposal.
+Two observations motivated this work. First, a component of an LLM analysis pipeline is ordinarily
+justified by the mechanism it implements rather than by a measurement, and a mechanism sound in
+isolation can contribute nothing once wired to real inputs; establishing which holds needs an
+equal-budget comparison against a simpler alternative and a baseline containing no language model at
+all. Second, such a comparison is only as trustworthy as the instrument producing it, and in a
+pipeline assembled from several servers that instrument fails without announcing itself. The
+contributions are therefore organised around the evaluation rather than the architecture, and each
+is a measurement or a mechanism rather than a proposal.
 
-\emph{(i) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} The sandbox
+\emph{(i) A deterministic technique assigner, measured on two external corpora.} The model never
+emits a technique identifier; a retrieval index assigns it. Ranking quality and gate quality turn
+out to be separable axes on which no single backend wins, and composing the per-axis winners gives
+the cleanest identifier gate of the three on both TRAM2 and AnnoCTR, with all three orderings
+replicating across corpora annotated by different people for different tasks
+(Section~\ref{sec:assignment}).
+
+\emph{(ii) What decomposition is worth, and what it is not worth.} On
+\fact{cape-consensus-families} real samples, decomposing the analysis into several model calls beats
+a single judge by \fact{cape-negotiated-delta} F1 \fact{cape-negotiated-ci}. A stochastic-noise
+control gains the same \fact{cape-noise-delta}, and the contrast that isolates the negotiation
+returns \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so what pays is
+the calls the arms share rather than the argument between them. This is the difference between
+knowing that a design works and knowing why.
+
+\emph{(iii) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} The sandbox
 the pipeline is built on maps its own signature hits to technique identifiers deterministically, and
 scored per sample against family-level MITRE ground truth it reaches F1 \fact{baseline-f1}
 \fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the samples where both arms ran, the
@@ -19,31 +33,20 @@ full pipeline is \fact{h2h-delta} F1 above it \fact{h2h-ci}, at a resolution of 
 is the comparison without which every F1 in this literature, including our own earlier ones, refers
 to nothing.
 
-\emph{(ii) Four architectural negatives, each reported with the resolution of the design that
-produced it.} Multi-agent consensus at equal token budget, a weighted corroboration cascade,
-two-tier attribution and a deterministic confidence gate were each measured, and each returned a
-negative or a near-null result. A null without its minimum detectable effect is unreadable, so every
-one is stated with the effect its design could have detected at 80\% power. Where a corpus large
-enough to separate the arms was available, the finding is sharper than a null: on
-\fact{cape-consensus-families} real samples the decomposition into several calls is worth
-\fact{cape-negotiated-delta} F1 over a single judge, a stochastic-noise control is worth
-\fact{cape-noise-delta}, and the two differ by \fact{cape-mechanism-delta} at a resolution of
-\fact{mde-cape-mechanism}. What helps is the calls the arms share, not the negotiation between them.
+\emph{(iv) Three architectural claims that did not survive, each with the resolution of the design
+that tested it.} A weighted corroboration cascade, two-tier attribution and a deterministic
+confidence gate were each measured and each returned a negative or a near-null result. A null
+without its minimum detectable effect is unreadable, so every one is stated with the effect its
+design could have detected at 80\% power. The configuration axis is where the effects are: a
+decoding flag is worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, more
+than any architecture or parameter count we measured, and an arm can be labelled matched while
+running the opposite configuration because one provider accepts the parameter without acting on it.
 
-\emph{(iii) Seven instrument failures, with the layer each occurred at and what actually found it.}
+\emph{(v) Seven instrument failures, with the layer each occurred at and what actually found it.}
 Each produced a plausible result rather than an error, and \fact{test-count} passing tests caught
 none. Four crossed a boundary with another server and fall inside a described class of silent
 failure; three crossed no boundary at all and share a different shape, in which a measurement's
-cause was assigned rather than measured. The price is reported alongside: one completed study
+cause was assigned rather than measured. What found four of them was one line of arithmetic, how
+many distinct outputs N inputs produced, which needs no ground truth and is reported beside every
+batch result rather than written as a test. The price is reported alongside: one completed study
 withdrawn, four arms of a later ablation unattributable.
-
-\emph{(iv) An output-cardinality check, reported beside every batch result rather than written as a
-test.} Counting how many distinct outputs N inputs produced found every one of the boundary
-failures, needs no ground truth and no oracle, and costs one line. It works only on a batch, which
-is why it belongs in a results table and not in a unit suite.
-
-\emph{(v) An arm-selection rule keyed on measured rather than requested configuration.} One provider
-accepts the parameter that would match two arms and does not act on it, so an arm can be labelled
-matched while running the opposite configuration. On the two models where the flag can be set it is
-worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, larger than any
-architecture or parameter count we measured.
