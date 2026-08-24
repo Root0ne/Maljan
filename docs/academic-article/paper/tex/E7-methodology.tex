@@ -1,160 +1,218 @@
-\section{Measurement Methodology}
-\label{sec:method}
+\subsection{Samples, ground truth and the sandbox}\label{samples-ground-truth-and-the-sandbox}
 
-\subsection{Terms}\label{terms}
+The dynamic cohort is n=\fact{cohort-n} Windows PE samples from MalwareBazaar, stratified by year at
+seed \fact{cohort-seed} with its digest recorded, of which \fact{baseline-n} produced a usable
+sandbox report. Ground truth resolves a MalwareBazaar family signature to an in-repo MITRE
+\texttt{uses} fixture through an explicit alias map with a CamelCase-split fallback. It is
+family-level and uncurated at technique level, so a single binary of a family need not exhibit all
+the techniques catalogued for that family and absolute recall carries a structural ceiling. Absolute
+F1 values here are therefore not comparable to work using per-sample expert labels; the bias is
+approximately constant across arms, which makes within-study contrasts the defensible reading and is
+exactly why a baseline matters. The withdrawn temporal-drift study's manifest survives as
+\fact{drift-n} dated samples over \fact{drift-cohorts} cohorts and \fact{drift-families} families,
+metadata only, so that cohort can be reconstructed even though its results cannot.
 
-Four words are used in one sense throughout and are worth fixing before the
-measurements, because two of them name things this paper spends a figure keeping
-apart.
+Three properties of the sandbox bound what can be reproduced. It is CAPE 2.5 at a private address
+with one analysis machine and no Linux guest, so an ELF submitted there joins the
+\fact{cape-backlog} tasks that are never scheduled. Reports are retained for days rather than
+indefinitely: sampled across the full task-id range, \fact{cape-report-retention-sampled} of
+\fact{cape-report-retention-sampled} older tasks return \texttt{"Reports\ directory\ does\ not\
+exist"}, so the local archive of fetched reports is the only copy and re-submitting the same samples
+is not a reproduction recipe on its own. And the instance rate-limits with a throttle response
+byte-identical to its auth refusal, \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases, so a
+harness reading that string as a capability verdict will mis-classify a throttle as a missing
+permission, as ours did briefly. A new Windows submission is scheduled in \textasciitilde1 second
+and completes in \textasciitilde5.5 minutes, which puts an n=\fact{cohort-n} cohort at roughly
+\fact{cohort-sandbox-hours} hours of sandbox time.
 
-An arm is one condition of one experiment. A configuration under which
-every input is scored, so that two arms differ in the one thing being tested. A
-run is an execution of a harness, which may produce several arms and may
-be interrupted and resumed.
+\subsection{Models, endpoints and serving configuration}\label{models-endpoints-and-serving-configuration}
 
-A sample is a real malware binary from the dated cohort, scored against
-its family's MITRE \texttt{uses} set. A fixture is one of the five
-synthesised inputs used by the equal-budget arms, whose evidence is generated
-from its own technique list and which therefore has a ceiling a real sample does
-not. They are different populations with different ground truth, they are never
-pooled, and where both appear in one figure they appear on separate axes.
+Table~\ref{tab:model} pins the local model and engine. Naming the imatrix calibration dataset
+matters, because two IQ3 quantisations of the same model calibrated differently are not the same
+artefact, and most papers reporting a quantisation level cannot say which calibration produced it.
 
-The reconciliation step is the deterministic post-processing that
-compares the judge's bundle against the corroboration cascade's set and restores
-what the judge omitted. It is named here because the paper's central architectural
-finding is about what it does, and an earlier draft gave it three different names.
+\begin{table}[!htbp]
+\caption{The local model and inference engine, pinned by digest and commit.}\label{tab:model}
+\centering\small
+\begin{tabular}{@{}lp{0.65\linewidth}@{}}
+\toprule
+model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised IQ3\_K\_R4 by Unsloth \\
+GGUF sha256 & \texttt{d0de70ef…c4ea}, computed locally and matching the HuggingFace etag \\
+HF revision & \texttt{cfd350fd…1f0d}, retrieved 2026-05-11 \\
+imatrix calibration & \texttt{\seqsplit{unsloth\_calibration\_Qwen3.6-35B-A3B.txt}}, \setting{510} entries over \setting{76} chunks \\
+architecture & hybrid recurrent (SSM keys + \texttt{\seqsplit{full\_attention\_interval=4}}), from the GGUF metadata \\
+engine & \texttt{ik\_llama.cpp} at \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}} (\#\fact{engine-commit-pr}) \\
+host & one RTX \fact{host-gpu}, \setting{31}\,GiB RAM, \setting{16} threads \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\subsection{Equal budgets, with a noise control}\label{equal-budgets-with-a-noise-control}
+The engine commit was reconstructed rather than recorded, and we say so rather than presenting the
+identifier as though it had been captured at build time: \texttt{llama-server\ -\/-version} prints
+\texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout, so the commit was
+recovered from a depth-\setting{1} clone vendored elsewhere in the project and proved against an
+identical \fact{engine-source-files}-file source list with exactly one file differing once line
+endings are normalised. The server is launched as
 
-Arms are compared at an equal total token budget. A multi-agent arm that makes N calls receives
-B/N per call against a single arm's one call of B, so a win cannot come from spending more. The
-design follows Bertalanič \& Fortuna, including a stochastic-noise control in which one analyst
-receives evidence irrelevant to the sample.
+\begin{verbatim}
+llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
+  -c 131072 -t 16 -fa on -ctk q8_0 -ctv q8_0 -ngl 999 \
+  -ot "blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU" \
+  --context-shift on --jinja --host 0.0.0.0 --port 8080
+\end{verbatim}
 
-The control is not decoration. It establishes that the harness can detect a difference. In our
-consensus study the noise arm separated (\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1}) while the
-treatment did not, which distinguishes ``no effect'' from ``no sensitivity''.
+serving \fact{context-served} of the model's native \setting{262,144}, with
+\fact{cpu-offload-blocks} blocks on CPU. Four measured properties of that host bound what can be
+reproduced on it. \texttt{llama-server} grows with cumulative requests and does not plateau, from
+\fact{llama-rss-fresh-gb} GB fresh to \fact{llama-rss-growth-gb} GB after a single analyst pass and
+\fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes of multi-arm load;
+the growth is anonymous and unreclaimable, so long paired runs restart the server between arms,
+which changes no decoding parameter and is therefore measurement-neutral. Serving at \setting{64}k
+instead of \setting{131}k does not lower the peak, at \fact{llama-rss-64k-gb} against
+\fact{llama-rss-growth-gb} GB, because the baseline is CPU-resident expert weights. Generation
+varies from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s across requests,
+because on this hybrid recurrent architecture the engine writes and erases a
+\fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred tokens at
+\textasciitilde39k tokens of context, so long-context calls fall off a cliff rather than slowing in
+proportion. And the disassembly container is capped at \fact{ghidra-mem-limit-gb} GB, its JVM
+\texttt{-Xmx4g} bounding the heap only, with measured RSS reaching \fact{ghidra-rss-gb} GB against
+that nominal \fact{ghidra-jvm-heap-gb} GB cap. The working set does not fit alongside an interactive
+session, which is a reproducibility fact rather than an operational one, and arms measured under
+memory pressure are not commensurable with arms that were not.
 
-For reasoning models the budget must cover reasoning. Our frontier endpoint reports reasoning
-tokens separately from content, and \fact{arm-default-reasoning} of its output was reasoning across \fact{arm-default-n} real prompts
-(\fact{reasoning-share-one-token} on a one-token answer). Capping content alone would have granted it roughly twice the generation for the
-same nominal budget.
+\begin{table}[!htbp]
+\caption{The inference endpoints each arm ran against, with the configuration measured rather than the configuration requested.}\label{tab:endpoints}
+\centering\small
+\begin{tabular}{@{}
+  >{\raggedright\arraybackslash}p{0.15\linewidth}
+  >{\raggedright\arraybackslash}p{0.18\linewidth}
+  >{\raggedright\arraybackslash}p{0.27\linewidth}
+  >{\raggedright\arraybackslash}p{0.15\linewidth}r@{}}
+\toprule
+arm & endpoint & model & reasoning & n \\
+\midrule
+local baseline & \texttt{ik\_llama.cpp}, this host & Qwen3.6-35B-A3B (IQ3\_K\_R4) & off & \fact{arm-default-n} \\
+frontier & OpenRouter & \texttt{\seqsplit{nvidia/nemotron-3-super-120b-a12b:free}} & on, not controllable & \fact{arm-default-n} $\times$\setting{2} \\
+same weights, hosted & DashScope & \texttt{\seqsplit{qwen3.6-35b-a3b}} & off & \fact{arm-qwen35ba3b-nothink-n} \\
+same weights, hosted & DashScope & \texttt{\seqsplit{qwen3.6-35b-a3b}} & on & \fact{arm-qwen35ba3b-n} \\
+larger, hosted & DashScope & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenplus-n} each \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-And the arms must be on the same side of the reasoning switch, which is a stronger requirement
-than it sounds. We measured this flag on two models at \fact{arm-default-n} calls each: enabling it moved F1 by
-\fact{reasoning-flag-third-delta-2dp} on one and \fact{reasoning-flag-vendor35b-delta-2dp} on the other, in both cases because the model spent its entire output
-budget thinking and returned no answer; \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls hit the cap on the second model, and one
-answered. That is the only effect in this paper that exceeds its own design's
-minimum detectable effect, so an unmatched
-pair does not produce a noisy comparison; it produces a comparison of the flag. Two further
-cautions follow from what it took to hold this constant. The flag cannot be read from the request:
-one of our providers accepts the parameter and ignores it, returning the same reasoning share
-with and without it, so matching must be verified against the measured reasoning share of the
-completed arm. And it cannot be assumed uniform across a series. When we ranked arms by parameter
-count without checking, the ranking recovered the published scaling correlation ($\rho$=\fact{superseded-rho}) from an
-axis on which one point was a disabled model rather than a small one.
+Table~\ref{tab:endpoints} lists the endpoints each arm ran against, and one parameter on it
+decides more than the model names do. \texttt{enable\_thinking} is
+honoured on DashScope and ignored on OpenRouter, not rejected but accepted, recorded in the result
+file, and not acted on: the re-run requesting it returned a \fact{arm-default-nothink-reasoning}
+reasoning share against \fact{arm-default-reasoning} without it, while on DashScope the same request
+produces \fact{arm-qwen35ba3b-nothink-reasoning}. The flag is worth
+\fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1 on the two models where it
+can be set, so an arm can be labelled matched while running the opposite configuration, and arm
+selection therefore keys on the measured reasoning share of a completed arm rather than on the flag
+requested. Two further serving details are load-bearing for anyone reproducing an arm. The local
+server's output cap must be sent twice, because \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire
+as \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read, so the cap must also
+travel in \texttt{extra\_body} as \texttt{max\_tokens} and \texttt{n\_predict}; measured on this
+host, \fact{cap-requested} requested yields \fact{cap-ignored-tokens} generated with the renamed
+field alone and \fact{cap-honoured-tokens} with both. And that server truncates silently, returning
+\texttt{finish\_reason:\ "stop"} at the cap and never \texttt{"length"}, so telemetry detecting
+truncation by finish reason reports zero however often the cap binds; compare the generated-token
+count against the cap requested instead. The frontier arm ran on a free tier allowing
+\fact{openrouter-daily-limit} requests per day at \fact{openrouter-burst-limit} per minute. The
+first attempt exhausted the daily quota mid-flight, \fact{quota-calls-landed} calls landing and
+\fact{quota-calls-refused} returning HTTP 429, and the estimate it produced was not merely
+imprecise but pointed the wrong way. The quota governs what a cohort-scale frontier arm costs in
+wall-clock rather than in money: one call per
+sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a full-pipeline arm at
+roughly \fact{requests-per-analysis} model requests per analysis is not reachable on that tier at
+all.
 
-\subsection{Paired designs, bootstrap intervals, and never a single run}\label{paired-designs-bootstrap-intervals-and-never-a-single-run}
+\subsection{Experimental design}\label{experimental-design}
 
-Every arm sees the same samples in the same order; differences are computed per sample and then
-aggregated, with 95\% bootstrap confidence intervals over the paired deltas.
+Four terms are used in one sense throughout. An \emph{arm} is one condition of one experiment, a
+configuration under which every input is scored, so that two arms differ in the one thing being
+tested. A \emph{sample} is a real malware binary from the dated cohort, scored against its family's
+MITRE \texttt{uses} set. A \emph{fixture} is one of the five synthesised inputs used by the
+equal-budget arms, whose evidence is generated from its own technique list and which therefore has a
+ceiling a real sample does not; samples and fixtures are different populations with different ground
+truth, they are never pooled, and where both appear in one figure they appear on separate axes. The
+\emph{reconciliation step} is the deterministic pass that compares the judge's bundle against the
+corroboration cascade's set and restores what the judge omitted.
 
-Resampled at the cluster, and tested at the cluster. The observations are nested, with many claims from one sample and many samples from one family, so the bootstrap resamples whole clusters
-and the p-value comes from flipping the sign of whole cluster means rather than of rows. Two
-properties of that test have to be reported with it. The first is its floor. With $k$ clusters the
+Arms are compared at an equal total token budget: a multi-agent arm making N calls receives B/N per
+call against a single arm's one call of B, so a win cannot come from spending more. The design
+follows Bertalanič and Fortuna \cite{bertalanic2026consensus}, including a stochastic-noise control
+in which one analyst receives evidence irrelevant to the sample. That control establishes that the
+harness can detect a difference at all: in the fixture consensus study the noise arm separated
+(\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1})
+while the treatment did not, which distinguishes no effect from no sensitivity. For reasoning models
+the budget must cover reasoning, because our frontier endpoint spent \fact{arm-default-reasoning} of
+its output on reasoning across \fact{arm-default-n} real prompts and
+\fact{reasoning-share-one-token} on a one-token answer, so capping content alone would have granted
+it roughly twice the generation for the same nominal budget. Arms must also sit on the same side of
+the reasoning switch. Measured on two models at \fact{arm-default-n} calls each, enabling the flag
+moved F1 by \fact{reasoning-flag-third-delta-2dp} on one and
+\fact{reasoning-flag-vendor35b-delta-2dp} on the other, in both cases because the model spent its
+entire output budget thinking and returned no answer, with \fact{arm-qwen35ba3b-hit-cap} of
+\fact{arm-qwen35ba3b-n} calls hitting the cap on the second. An unmatched pair therefore does not
+produce a noisy comparison; it produces a comparison of the flag.
+
+Three further rules were adopted after each one caught something, and all three are cheap. The
+first is to measure a mechanism's firing rate before its effect. The confidence cap fires on
+\fact{cap-rate} of techniques, so an ablation of it would describe the
+\fact{cap-rate-complement} where the cap never ran, while the sink-reachability hint fires on
+\fact{hint-rate} of samples and an ablation of it is a real statement about the hint; the cap's own
+preconditions explain its rate, since it applies to three technique families only when the sole
+contributing layer is static and \fact{cap-gated-yara-only-share} of those claims are YARA-only.
+A corollary is that an ablation must be restricted to the samples where the mechanism fires and must
+report the remainder separately, because averaging a feature over inputs it never touched dilutes a
+real effect toward zero. The second rule is to count how many distinct outputs the N inputs
+produced, and to report that count as a result column rather than run it as a test, because the
+signal exists only in the batch while each individual response is well-formed and plausible; we
+report \fact{cardinality-distinct-graphs} distinct call-graph sizes across
+\fact{cardinality-samples} samples. The third is to retain per-sample outputs for every study, since
+aggregates cannot be re-interrogated: when a defect was found that might have affected a completed
+\fact{drift-n}-sample study, the question could not be asked because only the summary survived.
+
+Shared, long-lived servers accumulate state that crosses sample boundaries, so the
+reverse-engineering server is restarted between samples; in our sweeps that recovered
+\fact{switch-recovered} of \fact{switch-attempted} samples previously recorded as unmeasurable,
+the failures belonging to the state each sample inherited from its predecessor rather than to the
+samples themselves. Two audits were added for the same reason and both caught real errors. Diffing
+the claim register against the evidence log found a claim recorded as novel one hour after our own
+text called it a replication, an audit row mis-attributing a model caveat to a server-free harness,
+and three ledger rows carrying superseded figures. Counter-searching each novelty claim in an
+adjacent field's vocabulary demoted five claims, including the one central to this paper, and
+produced two rules of its own: a search summary is a lead and not a source, one having asserted
+prior art that neither candidate paper contained when fetched; and the result of a counter-search is
+recorded whether or not it demotes anything, because a searched absence is only credible if the
+looking is documented. Taken together these practices cost a measurement before every ablation,
+\textasciitilde660 MB of retained sandbox reports for one cohort, \textasciitilde20 seconds of
+restart per sample, and one line of arithmetic per batch.
+
+\subsection{Statistical analysis}\label{statistical-analysis}
+
+Every arm sees the same samples in the same order, differences are computed per sample and then
+aggregated, and 95\% bootstrap confidence intervals are taken over the paired deltas. The
+observations are nested, with many claims from one sample and many samples from one family, so the
+bootstrap resamples whole clusters and the p-value comes from flipping the sign of whole cluster
+means rather than of rows. Two properties of that test are reported with it. With $k$ clusters the
 two-sided version cannot return a p below $2/2^k$, which at $k$=\setting{5} is
-\fact{fixture-signflip-floor} and puts $\alpha$=0.05 out of reach whatever the effect. The second is
-that above \setting{20} clusters the $2^k$ assignments are sampled rather than enumerated, at
+\fact{fixture-signflip-floor} and puts $\alpha$=0.05 out of reach whatever the effect size; and
+above \setting{20} clusters the $2^k$ assignments are sampled rather than enumerated, at
 \fact{stats-iters} draws with the observed assignment counted in its own reference set, so the
 smallest p that route can return is one over the draws rather than zero. Each reported p names which
-route produced it.
+route produced it. The two properties pull in opposite directions, because raising the cluster count
+lifts the floor and is also what makes enumeration stop being possible; that is why the consensus
+arms were re-run one sample per family. Multiplicity is controlled with Benjamini-Hochberg over two
+declared families, and every null is reported with the minimum detectable effect of the design that
+produced it at 80\% power, because a null without its resolution reads either as equivalence or as a
+failed experiment depending on the reader.
 
-We record this because the two properties pull opposite ways and the design has to answer both.
-Raising the cluster count is what lifts the floor, it is the whole reason the consensus arms were
-re-run one sample per family (Section~\ref{consensus-replication}), and it is also what makes
-enumeration stop being possible. A design improved on one axis broke the estimator on the other, and
-the first version of that estimator responded by returning no test at all.
-
-The motivating failure is specific. An early study ranked prompt structures using a single-run
-parsed-claim count, and the ranking inverted when the decoding budget changed. The instrument
-was measuring the interaction of structure and budget while being read as measuring structure. A
-claim count from one run is not an instrument, and we now say so where that result is cited.
-
-\subsection{Firing rate before effect}\label{firing-rate-before-effect}
-
-Before ablating a mechanism, measure how often it engages. The rule came from two cases that look
-identical in a results table and are not. The confidence cap fires on \fact{cap-rate} of techniques,
-so an ablation of it would say nothing, its null describing the \fact{cap-rate-complement} where the
-cap never ran; the sink-reachability hint fires on \fact{hint-rate} of samples, so an ablation of it
-is a real statement about the hint. Table~\ref{tab:firing} reports the measured rates. The cap's own
-preconditions explain its rate, since it applies to three technique families only when the sole
-contributing layer is static and \fact{cap-gated-yara-only-share} of those claims are YARA-only, so
-no static claim exists for it to discipline. Reporting the rate is more informative than ablating
-it, and cheaper.
-
-A corollary. An ablation must be restricted to the samples where the mechanism fires and must report
-the remainder separately, because averaging a feature over inputs it never touched dilutes a real
-effect toward zero and manufactures a null.
-
-\subsection{Output cardinality, reported beside every batch}\label{output-cardinality-reported-beside-every-batch}
-
-Count how many distinct outputs the N inputs produced. If far fewer than N differ on a dimension
-that should vary, the instrument is repeating itself. The four \emph{boundary} defects in Section~\ref{sec:failures} were found
-this way and none by a \fact{test-count}-test suite. The three that are ours rather than a server's were not:
-their outputs do vary, and what found them was a number too clean to believe, an arms table read
-under a correlation, and a study that recorded which failure branch each call took.
-
-It is reported as a result column, not run as a test, because the signal exists only in the batch.
-Each individual response was well-formed and plausible. We report
-\fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples}
-samples.
-
-\subsection{Per-sample outputs are retained for every study}\label{per-sample-outputs-are-retained-for-every-study}
-
-Aggregates cannot be re-interrogated. When a defect was found that \emph{might} have affected a completed
-\fact{drift-n}-sample study, the question could not be asked, because only the summary survived, and the study
-is withdrawn as a direct consequence.
-
-The policy is therefore not ``keep the numbers'' but keep enough to re-ask a question that has not
-been thought of yet: per-sample predictions, the resolved ground truth, timings, and the identifier
-of every external task the run depended on.
-
-\subsection{Fresh server state per sample}\label{fresh-server-state-per-sample}
-
-Shared, long-lived servers accumulate state that crosses sample boundaries. In our sweeps, restarting
-the reverse-engineering server between samples recovered \fact{switch-recovered} of \fact{switch-attempted} samples previously recorded as
-unmeasurable; the failures belonged to the state each sample inherited from its predecessor, not
-to the samples themselves. A read timeout leaves the JVM mid-analysis and every subsequent load is
-refused; without restarts, one slow sample silently invalidates the window that follows it.
-
-The same applies to the model server: it grows with cumulative requests and does not plateau
-(\fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after one pass), so long paired runs restart it between arms. At temperature
-\setting{0} this is measurement-neutral.
-
-\subsection{Two audits that cost minutes and caught real errors}\label{two-audits-that-cost-minutes-and-caught-real-errors}
-
-Diff the claim register against the evidence log. Both documents are maintained; that is exactly
-what allows them to diverge. Applied twice here, it found a claim recorded as novel one hour after
-our own text called it a replication, an audit row mis-attributing a model caveat to a server-free
-harness, and three ledger rows still carrying superseded figures.
-
-Counter-search each novelty claim in an adjacent field's vocabulary. A claim of novelty is a
-\emph{searched absence}, and searching in one's own field's words finds nothing by construction. Five
-claims were demoted this way, including the one central to this paper, when the silent-failure genus
-turned out to be already taxonomised. Two rules came out of doing it. The first is that a search
-summary is a lead and not a source; one asserted prior art that neither candidate paper contained
-when fetched, and citing it would have put a fabricated reference in the ledger. The second is that
-the result of a counter-search is recorded whether or not it demotes anything, because ``we looked
-and found nothing'' is only credible if the looking is documented.
-
-\subsection{What this costs}\label{what-this-costs}
-
-These practices are cheap individually and expensive together, and the expense is honest to report.
-The firing-rate rule adds a measurement before every ablation. Per-sample retention adds storage
-(\textasciitilde660 MB of sandbox reports for one cohort). Fresh state per sample adds \textasciitilde20 seconds of restart to
-every sample. Output cardinality adds one line.
-
-Against that: one withdrawn study, seven defects that produced plausible wrong data, and three
-retrieval components that would have been reported as working had they only been tested in
-isolation. On this project the practices repaid the time they cost, on this project, which is the only
-argument for them we can make from a single system.
+Two of these choices were corrections rather than plans, and both are stated as such. Every interval
+in an earlier draft resampled rows rather than clusters, and correcting that widened the anchor
+interval \fact{baseline-f1-widening}-fold. And an early study ranked prompt structures using a
+single-run parsed-claim count, whose ranking inverted when the decoding budget changed, so the
+instrument was measuring the interaction of structure and budget while being read as measuring
+structure. A claim count from one run is not an instrument, and no result in this paper rests on
+one.

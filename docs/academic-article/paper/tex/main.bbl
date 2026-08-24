@@ -5,6 +5,11 @@
 \expandafter\ifx\csname href\endcsname\relax
   \def\href#1#2{#2} \def\path#1{#1}\fi
 
+\bibitem{buchel2025sok}
+M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
+  Automated {TTP} extraction from {CTI} reports, are we there yet?, in: 34th
+  USENIX Security Symposium, 2025, pp. 4621--4641.
+
 \bibitem{gunawi2008eio}
 H.~S. Gunawi, C.~Rubio-Gonz{\'a}lez, A.~C. Arpaci-Dusseau, R.~H.
   Arpaci-Dusseau, B.~Liblit, {EIO}: Error handling is occasionally correct, in:
@@ -46,44 +51,6 @@ M.~Liu, S.~Zhong, W.~Bi, Y.~Zhang, Z.~Chen, Z.~Chen, X.~Liu, Y.~Ma, A first
   engines; the taxonomy carries both ``Incorrect Request Parsing'' as a root
   cause and ``Silent Error'' as a symptom (2026).
 \newblock \href {https://doi.org/10.1145/3788873} {\path{doi:10.1145/3788873}}.
-
-\bibitem{li2024metamorphic}
-Y.~Li, Z.~Liu, P.-L. Poon, D.~Towey, C.-A. Sun, et~al., Metamorphic relation
-  generation: State of the art and research directions, ACM Transactions on
-  Software Engineering and MethodologyPreprint arXiv:2406.05397 (2024).
-\newblock \href {https://doi.org/10.1145/3708521} {\path{doi:10.1145/3708521}}.
-
-\bibitem{sun2025length}
-Y.~Sun, H.~Wang, J.~Li, J.~Liu, X.~Li, H.~Wen, Y.~Yuan, H.~Zheng, Y.~Liang,
-  Y.~Li, Y.~Liu, An empirical study of {LLM} reasoning ability under strict
-  output length constraint, in: Proceedings of the 2025 Conference on Empirical
-  Methods in Natural Language Processing, 2025, pp. 7652--7671, finding 3:
-  under strict output constraints reasoning performance ``might not scale
-  monotonically with the model size''. Finding 4 independently covers our
-  reasoning-flag confound: reasoning models do not always outperform
-  instruction-tuned ones under the same constraint.
-\newblock \href {https://doi.org/10.18653/v1/2025.emnlp-main.389}
-  {\path{doi:10.18653/v1/2025.emnlp-main.389}}.
-
-\bibitem{mizrahi2024multiprompt}
-M.~Mizrahi, G.~Kaplan, D.~Malkin, R.~Dror, D.~Shahaf, G.~Stanovsky, State of
-  what art? {A} call for multi-prompt {LLM} evaluation, Transactions of the
-  Association for Computational Linguistics 12 (2024) 933--949, 6.5M instances
-  over 20 models and 39 tasks: ``different instruction templates lead to very
-  different performance, both absolute and relative'', and the relative part is
-  the ranking.
-\newblock \href {https://doi.org/10.1162/tacl_a_00681}
-  {\path{doi:10.1162/tacl_a_00681}}.
-
-\bibitem{xu2013misconfig}
-T.~Xu, J.~Zhang, P.~Huang, J.~Zheng, T.~Sheng, D.~Yuan, Y.~Zhou, S.~Pasupathy,
-  Do not blame users for misconfigurations, in: 24th ACM Symposium on Operating
-  Systems Principles (SOSP), 2013, pp. 244--259, names the failure mode:
-  ``silent overruling refers to the case that the system changes an
-  unacceptable user setting into the default value without notifying the
-  user'', measured across 74 parameters in Squid and Apache.
-\newblock \href {https://doi.org/10.1145/2517349.2522727}
-  {\path{doi:10.1145/2517349.2522727}}.
 
 \bibitem{yu2024maltracker}
 W.~Yu, et~al., Maltracker: A fine-grained {NPM} malware tracker copiloted by
@@ -164,11 +131,6 @@ Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
   in as many words. Kept because its evidence-grounding requirement is the
   design constraint our own gate obeys, so dropping it would let us appear to
   have set that bar ourselves (2026).
-
-\bibitem{buchel2025sok}
-M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
-  Automated {TTP} extraction from {CTI} reports, are we there yet?, in: 34th
-  USENIX Security Symposium, 2025, pp. 4621--4641.
 
 \bibitem{doosterlinck2024incontext}
 K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
@@ -318,6 +280,16 @@ A.~Lazaridou, A.~Kuncoro, E.~Gribovskaya, et~al., Mind the gap: Assessing
   temporal generalization in neural language models, in: Advances in Neural
   Information Processing Systems (NeurIPS), 2021, arXiv:2102.01951.
 
+\bibitem{xu2013misconfig}
+T.~Xu, J.~Zhang, P.~Huang, J.~Zheng, T.~Sheng, D.~Yuan, Y.~Zhou, S.~Pasupathy,
+  Do not blame users for misconfigurations, in: 24th ACM Symposium on Operating
+  Systems Principles (SOSP), 2013, pp. 244--259, names the failure mode:
+  ``silent overruling refers to the case that the system changes an
+  unacceptable user setting into the default value without notifying the
+  user'', measured across 74 parameters in Squid and Apache.
+\newblock \href {https://doi.org/10.1145/2517349.2522727}
+  {\path{doi:10.1145/2517349.2522727}}.
+
 \bibitem{oyelayo2026mcp}
 O.~Oyelayo, S.~Abedu, S.~Khatoonabadi, E.~Shihab, Developer challenges in the
   adoption of model context protocol in {AI} agent development, in: 7th
@@ -337,6 +309,12 @@ A.~Martin-Lopez, S.~Segura, A.~Ruiz-Cort{\'e}s, A catalogue of inter-parameter
 \newblock \href {https://doi.org/10.1007/978-3-030-33702-5_31}
   {\path{doi:10.1007/978-3-030-33702-5_31}}.
 
+\bibitem{li2024metamorphic}
+Y.~Li, Z.~Liu, P.-L. Poon, D.~Towey, C.-A. Sun, et~al., Metamorphic relation
+  generation: State of the art and research directions, ACM Transactions on
+  Software Engineering and MethodologyPreprint arXiv:2406.05397 (2024).
+\newblock \href {https://doi.org/10.1145/3708521} {\path{doi:10.1145/3708521}}.
+
 \bibitem{dev2026judge}
 S.~Dev, A.~Sloan, J.~Kavner, N.~Kong, M.~Sandler, Judge reliability harness:
   Stress testing the reliability of {LLM} judges, in: Agents in the Wild:
@@ -353,6 +331,28 @@ A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
   correlation confirms a statistically significant relationship between
   parameter size and $F_1$ scores in this CTI classification task ($\rho$=0.85,
   p=0.014)'' (2026).
+
+\bibitem{sun2025length}
+Y.~Sun, H.~Wang, J.~Li, J.~Liu, X.~Li, H.~Wen, Y.~Yuan, H.~Zheng, Y.~Liang,
+  Y.~Li, Y.~Liu, An empirical study of {LLM} reasoning ability under strict
+  output length constraint, in: Proceedings of the 2025 Conference on Empirical
+  Methods in Natural Language Processing, 2025, pp. 7652--7671, finding 3:
+  under strict output constraints reasoning performance ``might not scale
+  monotonically with the model size''. Finding 4 independently covers our
+  reasoning-flag confound: reasoning models do not always outperform
+  instruction-tuned ones under the same constraint.
+\newblock \href {https://doi.org/10.18653/v1/2025.emnlp-main.389}
+  {\path{doi:10.18653/v1/2025.emnlp-main.389}}.
+
+\bibitem{mizrahi2024multiprompt}
+M.~Mizrahi, G.~Kaplan, D.~Malkin, R.~Dror, D.~Shahaf, G.~Stanovsky, State of
+  what art? {A} call for multi-prompt {LLM} evaluation, Transactions of the
+  Association for Computational Linguistics 12 (2024) 933--949, 6.5M instances
+  over 20 models and 39 tasks: ``different instruction templates lead to very
+  different performance, both absolute and relative'', and the relative part is
+  the ranking.
+\newblock \href {https://doi.org/10.1162/tacl_a_00681}
+  {\path{doi:10.1162/tacl_a_00681}}.
 
 \bibitem{snell2025testtime}
 C.~Snell, J.~Lee, K.~Xu, A.~Kumar, Scaling {LLM} test-time compute optimally

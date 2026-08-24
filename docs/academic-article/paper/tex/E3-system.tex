@@ -1,67 +1,60 @@
-\section{The System, Briefly}
-\label{sec:system}
+\section{Materials and methods}
+\label{sec:method}
 
-\subsection{Shape}\label{shape}
+\subsection{Scope and assumptions}\label{scope-and-assumptions}
 
-The pipeline maps evidence about a malware sample to MITRE ATT\&CK technique IDs and emits a STIX
-bundle. Three analysts run over heterogeneous evidence channels, a judge synthesises a verdict, and
-a deterministic layer adjudicates between them.
+This study evaluates one pipeline that maps evidence about a Windows PE malware sample to MITRE
+ATT\&CK technique identifiers and emits a STIX bundle. The scope is deliberately narrow in four
+respects, and every result should be read inside it. The model is a single local mixture-of-experts
+deployment, quantised, on one host; the comparison endpoints are three commercially hosted
+inference services. Ground truth is family-level MITRE \texttt{uses}, resolved to a sample through
+its family signature, which is coarse and carries a structural recall ceiling. Only Windows PE is
+analysed dynamically, because the sandbox instance has one analysis machine and no Linux guest. And
+the contribution claimed is the evaluation rather than the architecture: the system is the object
+under study, not the result.
+
+Two design choices are stated here because they are not what failed. Tool exposure is not tool
+availability. The reverse-engineering server advertises \textasciitilde165 tools, exposing the full
+catalogue to a model with roughly 3B active parameters is infeasible because tool selection degrades
+before the context does, and the static analyst is therefore given a curated
+\fact{static-curated-functions}, with high-value tools invoked deterministically from code. And the
+pipeline degrades rather than fails when a service is absent, so with the sandbox unreachable the
+dynamic path is skipped and the run completes on static evidence, a behaviour pinned by a test. That
+mattered during the study, because the sandbox was reachable from one network only and every
+static-only result reported here was produced by that degradation working as designed.
+
+\subsection{The pipeline under evaluation}\label{the-pipeline-under-evaluation}
+
+Six deterministic evidence layers assert techniques directly from signatures, rules and artefacts.
+Three analysts then run as ReAct loops over heterogeneous evidence channels, a judge synthesises a
+verdict and emits the bundle, and a deterministic layer adjudicates between them.
+Table~\ref{tab:system} lists each component with what it was measured to contribute.
 
 \begin{table}[!htbp]
-\caption{The pipeline's components and what each contributes, as built.}\label{tab:system}
+\caption{The pipeline's components and what each contributes, as built and as measured.}\label{tab:system}
 \centering\small
 \begin{tabular}{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep - 2pt) * \real{0.3333}}@{}}
+  >{\raggedright\arraybackslash}p{0.20\linewidth}
+  >{\raggedright\arraybackslash}p{0.34\linewidth}
+  >{\raggedright\arraybackslash}p{0.38\linewidth}@{}}
 \toprule
-component & what it does & verdict \\
+component & what it does & measured contribution \\
 \midrule
-static analyst & ReAct loop over a headless reverse-engineering server (decompilation, imports, strings, call graph), \fact{static-curated-functions} tools from a curated allowlist & operational; its salvage path was defective (Section~\ref{sec:failures}) \\
-dynamic analyst & ReAct loop over a CAPEv2 sandbox via MCP & operational; only Windows PE is analysable on our instance \\
-network analyst & local PCAP analysis over the sandbox's capture & operational; depends on the sandbox indirectly \\
-judge & synthesises a verdict and emits STIX & operational \\
-corroboration cascade & weights layers, marks a technique corroborated when $\ge$\setting{2} layers contribute & measured: never reaches the artefact (\fact{cascade-overlap-changed}/\fact{cascade-overlap-arms}); a reconciliation step restores every cascade technique the judge omits, and across \fact{judge-mechanism-arms} arms the judge added none of its own \\
-confidence gating & caps confidence for unsupported obfuscation/injection claims & measured: fires on \fact{cap-rate} of techniques \\
-case-prior RAG & retrieves similar past cases to prime mapping & measured: loses to a label-frequency prior in production \\
-family-feature RAG & retrieves family fingerprints & measured: \fact{family-delta-f1} F1 end to end \\
-opcode-hash attribution & normalised function hashes matched against a corpus & measured: fires on \fact{hash-fired} of \fact{hash-total} samples \\
-sink-reachability hint & ranks functions reachable to sensitive APIs, injected as prompt steering & fires on \fact{hint-rate}; measured: $\Delta$techniqueIDs \fact{sink-delta-tids}, CI \fact{sink-ci-tids} \\
+static analyst & ReAct loop over a headless reverse-engineering server, \fact{static-curated-functions} tools from a curated allowlist & operational; its salvage path was defective \\
+dynamic analyst & ReAct loop over a CAPEv2 sandbox via MCP & operational; Windows PE only on our instance \\
+network analyst & local PCAP analysis over the sandbox's capture & operational; two-thirds of its domains are the analysis VM describing itself \\
+judge & synthesises a verdict and emits STIX & contributes no technique the cascade did not already hold \\
+corroboration cascade & weights layers, marks a technique corroborated at $\ge$\setting{2} contributing layers & never reaches the artefact (\fact{cascade-overlap-changed}/\fact{cascade-overlap-arms}) \\
+reconciliation step & drops unresolvable attack-patterns, restores every cascade technique the judge omitted & makes the cascade's set a subset of every emitted bundle \\
+confidence gating & caps confidence for unsupported obfuscation and injection claims & fires on \fact{cap-rate} of techniques \\
+case-prior RAG & retrieves similar past cases to prime mapping & loses to a label-frequency prior in production \\
+family-feature RAG & retrieves family fingerprints & \fact{family-delta-f1} F1 end to end \\
+opcode-hash attribution & normalised function hashes matched against a corpus & fires on \fact{hash-fired} of \fact{hash-total} samples \\
+sink-reachability hint & ranks functions reachable to sensitive APIs, injected as prompt steering & fires on \fact{hint-rate}; $\Delta$techniqueIDs \fact{sink-delta-tids} \fact{sink-ci-tids} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Whether each contributes anything measurable is the subject of Section~\ref{sec:results}.
-
-Two design choices matter here because they are \emph{not} what failed. Tool exposure is not tool
-availability: the reverse-engineering server advertises \textasciitilde165 tools, exposing the full
-catalogue to a 3B-active-parameter MoE is infeasible because the model's tool selection degrades
-before the context does, and the analyst is therefore given a curated
-\fact{static-curated-functions}. And the pipeline degrades rather than fails when a service is
-absent, so with the sandbox unreachable the dynamic path is skipped and the run completes on static
-evidence, which is pinned by a test. That mattered during the study, because the sandbox was
-reachable from one network only and every static-only result here was produced by that degradation
-working as designed.
-
-\subsection{What runs it}\label{what-runs-it}
-
-The system runs one local model,  Qwen3.6-35B-A3B at IQ3\_K\_R4, served by ik\_llama.cpp on a single RTX 5060 host with
-hybrid MoE offload . Alongside it run a headless reverse-engineering container, a Qdrant vector store, and a
-CAPEv2 sandbox on a separate machine. Exact identifiers are in the reproducibility appendix, and
-their limits are not incidental: the model server's memory grows with cumulative requests, generation
-rate varies eightfold with context length on this architecture, and the sandbox retains its reports
-for days. Each of those shaped an experiment reported here.
-
-\subsection{Why the system is not the contribution}\label{why-the-system-is-not-the-contribution}
-
-The architecture was built around four claims: multi-agent consensus over heterogeneous channels, a
-multi-layer corroboration cascade, two-tier attribution, and falsification-before-confidence. All
-four are now measured and every one is negative or near-null, with none left pending sandbox access.
-The components are not broken, three work well in isolation, and they were built for sound reasons;
-they simply do not move the end-to-end result, and we could not have known that without measuring
-each mechanism's firing rate before its effect.
-
-That outcome is the reason this paper is about measurement. A system whose parts individually
-justify themselves and collectively change nothing is an ordinary result, and reporting it requires
-only honesty. What required method was discovering that seven of those measurements had been wrong
-in the first place.
+All four architectural claims listed in Section~\ref{sec:intro} are measured in
+Section~\ref{sec:results} and every one is negative or near-null. The components are not broken and
+three of them work well in isolation; they do not move the end-to-end result.

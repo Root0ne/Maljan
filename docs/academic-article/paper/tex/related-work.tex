@@ -1,290 +1,174 @@
-\section{Background and Related Work}
+\subsection{Related work}
 \label{sec:related}
-
-\subsection{Mapping evidence to ATT\&CK}\label{mapping-evidence-to-attck}
 
 Language models are already applied across the malware task surface, tracking malicious packages in
 a registry \cite{yu2024maltracker}, detecting Android malware from application features
 \cite{zhao2025apppoet} and from generated training samples \cite{rollinson2026samples}, and
 summarising what a sample does in prose \cite{saha2025malaware}. None produces ATT\&CK technique
-identifiers from a running analysis of a Windows binary, which is the task this pipeline attempts
-and the reason the work below is the nearer comparison.
-
+identifiers from a running analysis of a Windows binary, which is the task this pipeline attempts.
 Automated technique extraction has moved from supervised classifiers such as TRAM
 \cite{mitre2023tram}, rcATT \cite{legoy2020rcatt} and TTPDrill \cite{husari2017ttpdrill}, through
 neural extractors such as EXTRACTOR \cite{satvat2021extractor}, AttacKG \cite{li2022attackg} and
 LADDER \cite{alam2023ladder}, to retrieval-augmented generation. TechniqueRAG
 \cite{lekssays2025techniquerag} pairs off-the-shelf retrievers with an instruction-tuned re-ranker
-and fine-tunes only the generator, motivated by the field's data scarcity, since ATT\&CK defines
-over 550 sub-techniques while roughly 10,000 annotated examples exist publicly. A \emph{separate}
-group's hierarchical successor, H-TechniqueRAG \preprintcite{morbiato2026hierarchical}, injects the
-tactic-to-technique taxonomy as an inductive bias and cuts the candidate space by 77.5\%. Its F1 and
-latency gains over TechniqueRAG are not restated here, being unreviewed and self-reported against a
-baseline the SoK below calls ``largely incomparable''. TTPrint \preprintcite{cheng2026ttprint}
-decomposes reports into atomic behaviours and keeps only candidates supported by both a localised
-evidence span and the MITRE definition. Büchel et al.'s SoK \cite{buchel2025sok} re-evaluates 40+
-systems in a unified setting and reports a ceiling existing approaches have not crossed, that
-systems are ``largely incomparable'' because they use custom ontologies and inaccessible datasets,
-and, counterintuitively, that traditional NLP approaches outperform embedder-based and generative
-ones in realistic settings.
+and fine-tunes only the generator, motivated by data scarcity: ATT\&CK defines over 550
+sub-techniques while roughly 10,000 annotated examples exist publicly. A separate group's
+hierarchical successor injects the tactic-to-technique taxonomy as an inductive bias and cuts the
+candidate space by 77.5\% \preprintcite{morbiato2026hierarchical}, and TTPrint
+\preprintcite{cheng2026ttprint} keeps only candidates supported by both a localised evidence span
+and the MITRE definition. Neither result is restated here as a comparator, both being unreviewed and
+self-reported against baselines that Büchel et al.'s systematisation calls ``largely incomparable''
+\cite{buchel2025sok}; that survey re-evaluates more than forty systems in a unified setting, reports
+a ceiling existing approaches have not crossed, and finds that traditional NLP approaches outperform
+embedder-based and generative ones in realistic settings.
 
-Our describe-then-map design removes technique-ID recall from the model entirely, so the analyst
-describes behaviour and a deterministic index assigns the identifier. This is a domain instantiation
-of Infer-Retrieve-Rank \preprintcite{doosterlinck2024incontext}, which established the general
-program of multi-step interaction decoupling inference from assignment over a many-thousand-class
-label space, and we do not claim the idea. Ours is stricter than that and than
-\cite{lekssays2025techniquerag}, where the model still ranks or selects among retrieved candidates.
-Here it never emits an identifier and any correction is gated to the provably-safe
-invalid-to-valid case.
-
-What we add is a decomposition of the SoK's insight. It reports that embedders lose and we measure
-\emph{where}, on TRAM2 \cite{mitre2023tram} at N=4,913 and on the independently annotated AnnoCTR
-corpus \cite{lange2024annoctr}. Ranking quality and gate quality behave as separable axes. Dense
-embeddings rank better while their scores barely separate a correct pick from a wrong one, a lexical
-index ranks worse while gating cleanly, and composing the per-axis winners beats either pure backend
-on both. The separation itself is not ours and an earlier draft of this section claimed it was.
-Abdallah et al.~\cite{abdallah2026retrievers} treat retrieval confidence as a dimension explicitly
-distinct from effectiveness, find calibration ``consistently weak across model families'' and
-conclude that raw scores are ``unreliable for downstream routing without additional calibration''.
-What remains ours is the inversion, that in this task the \emph{lexical} backend is the better gate
-while the \emph{semantic} one is the better ranker, and we found that neither asserted nor excluded
-elsewhere.
-
-Two further results have prior art we cite rather than compete with. Auto-correcting valid but
-weakly-aligned identifiers damages 38\% of already-correct labels to recover 21\% of wrong ones, and
-the asymmetry is not a discovery, since grammatical error correction evaluates with F0.5 precisely
-because a false correction costs more than a missed one \cite{ng2014conll,bryant2019bea}. Our
-contribution is the \emph{mechanism}, that correct-but-weak and wrong-but-valid identifiers are not
-separable by an alignment score, so the valid-to-valid swap cannot be safely tuned at any error rate
-and the shipped policy is restricted to the invalid-to-valid case, where zero regression holds by
-construction rather than by tuning. Separately, asked for an identifier it does not know, the model
-enters a degenerate loop, and neural text degeneration has competing established accounts, one
-locating the cause in the likelihood objective itself and a later data-side analysis finding a
-strong correlation with repetition already present in the training data
-\cite{welleck2019unlikelihood,li2023repetition}. The engine-level detail we can add is that the
-server honours \texttt{repeat\_penalty} while silently ignoring three sibling parameters, which
-converts a tight loop into a slower enumeration without fixing it. What we contribute is the
-consequence, measured in Section~\ref{what-the-ablations-cost-and-what-that-revealed}, where the
-budget is exhausted inside an operational deadline and empty bundles fall from 6/17 to 1/17. That is
-degeneration as a failure to \emph{deliver} rather than a failure of prose.
-
-\subsection{LLM agents over binaries}\label{llm-agents-over-binaries}
+Our describe-then-map design removes technique-ID recall from the model entirely: the analyst
+describes behaviour and a deterministic index assigns the identifier, which is a domain
+instantiation of Infer-Retrieve-Rank \preprintcite{doosterlinck2024incontext} and is stricter than
+\cite{lekssays2025techniquerag}, where the model still ranks among retrieved candidates. What we add
+is a decomposition of the systematisation's insight. It reports that embedders lose; we measure
+where, on TRAM2 \cite{mitre2023tram} at N=4,913 and on the independently annotated AnnoCTR corpus
+\cite{lange2024annoctr}. Ranking quality and gate quality behave as separable axes: dense embeddings
+rank better while their scores barely separate a correct pick from a wrong one, a lexical index
+ranks worse while gating cleanly, and composing the per-axis winners beats either pure backend. The
+separability itself is not ours, Abdallah et al.~\cite{abdallah2026retrievers} treating retrieval
+confidence as a dimension distinct from effectiveness and finding calibration ``consistently weak
+across model families''; what remains ours is the inversion, that here the lexical backend is the
+better gate while the semantic one is the better ranker. Two further results have prior art we cite
+rather than compete with. Auto-correcting valid but weakly-aligned identifiers damages 38\% of
+already-correct labels to recover 21\% of wrong ones, and that asymmetry is not a discovery, since
+grammatical error correction evaluates with F0.5 precisely because a false correction costs more
+than a missed one \cite{ng2014conll,bryant2019bea}; our contribution is the mechanism, that
+correct-but-weak and wrong-but-valid identifiers are not separable by an alignment score, so the
+shipped policy is restricted to the invalid-to-valid case where zero regression holds by
+construction. Separately, asked for an identifier it does not know, the model enters a degenerate
+loop, and neural text degeneration has competing established accounts locating the cause in the
+likelihood objective and in training-data repetition respectively
+\cite{welleck2019unlikelihood,li2023repetition}; what we add is the engine-level consequence, that
+the server honours \texttt{repeat\_penalty} while silently ignoring three sibling parameters, which
+converts a tight loop into a slower enumeration and exhausts a budget inside an operational
+deadline.
 
 Agentic systems now drive reverse-engineering backends through tool interfaces, and the model tier
-splits sharply by role. Fine-tuned binary specialists are overwhelmingly small and open-weight,
-among them ReCopilot \preprintcite{chen2025recopilot} on Qwen2.5-Coder-7B, LLM4Decompile
-\cite{tan2024llm4decompile} at 1.3B to 33B and Nova \cite{jiang2025nova}, while the
-\emph{tool-driving} agents use frontier models. TTPDetect \preprintcite{ttpdetect2026} is the
-closest system to ours, identifying TTPs in stripped malware binaries through dense plus neural
-retrieval to narrow analysis entry points and then a function-level agent with incremental context
-retrieval, reporting 93.25\% precision and 93.81\% recall at function level and 87.37\% precision on
-real-world malware. We do not claim binary evidence as an input modality; that ground is theirs.
-Two differences remain and only one is currently defensible. Our pipeline runs on a local MoE with
-roughly 3B active parameters rather than a cloud model, which is a deployment claim addressed in
-Section~\ref{what-runs-it}, and it fuses six deterministic detectors, three domain analysts and a
-corroboration cascade rather than reasoning at function level, which is a different system but not
-a contribution until the difference is measured.
+splits sharply by role: fine-tuned binary specialists are small and open-weight, among them
+ReCopilot \preprintcite{chen2025recopilot}, LLM4Decompile \cite{tan2024llm4decompile} and Nova
+\cite{jiang2025nova}, while tool-driving agents use frontier models. TTPDetect
+\preprintcite{ttpdetect2026} is the closest system to ours, identifying TTPs in stripped malware
+binaries through retrieval-narrowed entry points and a function-level agent, reporting 93.25\%
+precision and 93.81\% recall at function level and 87.37\% precision on real-world malware. We do
+not claim binary evidence as an input modality; that ground is theirs. The one gap we occupy is
+tool-catalogue scale. Degradation of tool selection as a catalogue grows is documented generally,
+with LongFuncEval reporting a 7 to 85\% performance drop as tool count increases
+\preprintcite{kate2025longfunceval} and a cut from 46 to 19 tools saving up to 70\% of execution
+time on an edge model \cite{paramanayakam2025lessismore}, but not for a reverse-engineering
+catalogue whose schemas are large and whose tools semantically overlap. That exposing roughly 201
+tools, about 22k tokens of schema, is infeasible at this model scale is the domain instance, and it
+is a single feasibility point rather than a degradation curve.
 
-The one gap we do occupy is tool-catalogue scale. Degradation of tool selection as the catalogue
-grows is documented generally, with LongFuncEval \preprintcite{kate2025longfunceval} reporting a 7
-to 85\% performance drop as tool count increases and a cut from 46 to 19 tools saving up to 70\% of
-execution time on an edge model \cite{paramanayakam2025lessismore}, but it has not been measured for
-a reverse-engineering catalogue where schemas are large and tools semantically overlap. Our finding
-that exposing roughly 201 Ghidra MCP tools, about 22k tokens of schema, is infeasible at this model
-scale, which motivates a curated 20-tool allowlist with high-value tools invoked deterministically
-from code, is the domain instance. It is a single feasibility point rather than a degradation curve.
-
-\subsection{Multi-agent consensus}\label{multi-agent-consensus}
-
-Multi-agent debate has become a standard pattern, including in security, where PhishDebate
-\cite{li2025phishdebate} assigns four specialised agents to distinct views of a webpage under a
-moderator and judge and reports 98.2\% recall. Two 2026 results change how such claims must be read.
-Holding the reasoning token budget constant, Tran and Kiela \preprintcite{tran2026single} find
-single agents consistently match or beat multi-agent systems on multi-hop reasoning, supported by an
-information-theoretic argument from the Data Processing Inequality, because decomposition under a
-fixed budget introduces communication bottlenecks that lose information. Bertalanič and Fortuna
+Multi-agent debate is a standard pattern, including in security, where PhishDebate
+\cite{li2025phishdebate} assigns four specialised agents to distinct views of a webpage and reports
+98.2\% recall. Two recent results change how such claims must be read. Holding the reasoning token
+budget constant, Tran and Kiela find single agents consistently match or beat multi-agent systems on
+multi-hop reasoning, with an information-theoretic argument from the Data Processing Inequality and
+a crossover appearing only at degradation 0.7 \preprintcite{tran2026single}. Bertalanič and Fortuna
 \cite{bertalanic2026consensus} reach the same conclusion on 7B and 8B open-weight models, where
 debate consumed 2.1 to 3.4$\times$ more tokens for equal or lower accuracy, and name three failure
-modes, namely sycophantic conformity with modal adoption up to 85.5\%, contextual fragility, and
-consensus collapse discarding correct answers already present in the generation pool.
-
-We do not claim that multi-agent analysis beats a single agent, and we report the equal-budget
-comparison rather than assuming it. Both papers scope their negatives to \emph{homogeneous} agents
-decomposing a \emph{single} context and both name the exception, degraded or noisy context, which is
-the regime a 600-import binary plus a sandbox report plus network capture occupies. Whether
-heterogeneous evidence-channel decomposition survives the control that homogeneous debate fails is
-the question our ablation asks.
-
-Our contribution here is a failure mode adjacent to \cite{bertalanic2026consensus}'s. Sycophantic
-conformity arises from majority pressure among agents holding the same information; we observed an
-analyst whose evidence channel was empty paraphrasing its peers, and because the echo returned
-tagged with that analyst's own domain, the corroboration counter read it as independent
-confirmation, promoting a single-source finding to \emph{corroborated} and weighting it above the
-source it was copied from. In a security pipeline the harm is not a wrong answer but a fabricated
-independent confirmation. Finally, weighting evidence by source reliability and discounting
-non-independent sources is Dempster-Shafer theory, decades old, and our cascade is an instance of it
-with hand-chosen constants, which we treat as a limitation. Measuring five perturbations of those
-constants, including inverting the most- and least-trusted layers, changed the top-10 ranking on
-10.6 to 27.5\% of samples and the corroborated set on none, because the corroboration decision is a
-function of layer count alone.
-
-\subsection{Local deployment}\label{local-deployment}
+modes: sycophantic conformity, contextual fragility, and consensus collapse discarding correct
+answers already in the pool. Both papers scope their negatives to homogeneous agents decomposing a
+single context, and both name degraded or noisy context as the exception, which is the regime a
+600-import binary plus a sandbox report plus a network capture occupies. Whether heterogeneous
+evidence-channel decomposition survives the control that homogeneous debate fails is the question
+our equal-budget ablation asks. Our contribution here is a failure mode adjacent to sycophantic
+conformity: an analyst whose evidence channel was empty paraphrased its peers, and because the echo
+returned tagged with that analyst's own domain, the corroboration counter read it as independent
+confirmation and promoted a single-source finding. In a security pipeline the harm is not a wrong
+answer but a fabricated independent confirmation. Weighting evidence by source reliability and
+discounting non-independent sources is Dempster-Shafer theory, decades old, and our cascade is an
+instance of it with hand-chosen constants, which we treat as a limitation. Measuring five
+perturbations of those constants, including inverting the most- and least-trusted layers, changed
+the top-10 ranking on 10.6 to 27.5\% of samples and the corroborated set on none, because the
+corroboration decision is a function of layer count alone.
 
 Confidentiality-driven local deployment is established rather than novel. REx86 \cite{lea2025rex86}
-fine-tunes eight open-weight models for x86 reverse engineering explicitly because ``cloud-hosted,
-closed-weight models pose privacy and security risks and cannot be used in closed-network
-facilities'', and validates with a 43-participant user study in which line-level comprehension
-improved significantly at p=0.031 while the correct-solve rate rose from 31\% to 53\% without
-reaching significance at p=0.189. The capability gap is quantified: the UK AI Security Institute
-places open-weight cyber capability 4 to 7 months behind the closed frontier, narrowing from 6 to 10
-months, at roughly 45$\times$ lower cost per task.
+fine-tunes eight open-weight models for x86 reverse engineering explicitly because
+``cloud-hosted, closed-weight models pose privacy and security risks and cannot be used in
+closed-network facilities'', validating with a 43-participant user study, and the capability gap is
+quantified elsewhere at 4 to 7 months behind the closed frontier at roughly 45$\times$ lower cost
+per task. We inherit that constraint and cite it. Our deployment contribution is narrower and
+practitioner-facing: on a hybrid-offload MoE the KV cache costs about 10.85 KiB/token and context
+length barely moves system RAM because the cost is the offloaded weights, a closed-form estimate
+over-predicted KV by roughly 4$\times$ and was overturned by measurement, and speculative decoding
+gave no throughput gain on this architecture.
 
-We inherit this constraint and cite it rather than claiming it. Our deployment contribution is
-narrower and practitioner-facing. On a hybrid-offload MoE the KV cache costs about 10.85 KiB/token
-and context length barely moves system RAM because the cost is the offloaded weights, a closed-form
-estimate over-predicted KV by roughly 4$\times$ and was overturned by measurement, and speculative
-decoding gave no throughput gain on this architecture. We found no comparable deployment-economics
-reporting for a complete local security pipeline.
-
-\subsection{Evaluation practice}\label{evaluation-practice}
-
-This work's methodological results belong to an established critique tradition rather than preceding
-it. Arp et al.'s \emph{Dos and Don'ts} identified ten pitfalls in ML-for-security, and Chasing
-Shadows \cite{evertz2026chasing} is its direct successor, surveying all 72 peer-reviewed
-LLM-security papers from 2023 and 2024 and finding that every one contains at least one of nine
-pitfalls, with only 15.7\% explicitly discussed. Broader benchmark audits reach the same place from
-the construct-validity direction across 445 LLM benchmarks. Our instrument-validity finding, that a
-single-run parsed-claim count produced contradictory rankings of the same arms across decoding
-budgets, is a worked example inside that category rather than a new observation. So is our narrative
-result. That template-based generation favours faithfulness while neural generation favours fluency
-is textbook data-to-text, and what differs is the mechanism, because in our paired comparison both
-arms were perfectly faithful, with zero hallucinated techniques and precision 1.0, so the entire F1
-deficit came from coverage. The model did not invent; it omitted.
-
-Two evaluation results appear to be unoccupied. First, a case-prior retriever that is genuinely good
-in its own vocabulary at F1 0.620 against a 0.424 label-frequency prior but scores 0.111 against
-that prior's 0.123 when queried the way production queries it, because query and corpus share only
-their boilerplate. Dense retrieval being the standard remedy for vocabulary mismatch makes this a
-failure of the remedy, visible only in the retriever's score distribution while top-k accuracy
-stayed healthy. A published negative RAG result in malware analysis exists by a different mechanism,
-retrieved context diluting a signal-extraction task \cite{ng2026evaluating}; the requirement to
-compare against a trivial label-only baseline is long established \cite{metz2012baselines}; and a
-systematic review by the same group found a considerable share of published multi-label results to
-be no better than that baseline, with no explanation offered \preprintcite{metz2015comparing}.
-Second, an advisory prompt hint whose measurable effect was completion under an operational time
-budget rather than mapping accuracy. We found no work measuring generation completion as a channel
-through which prompt changes act.
-
-Finally, temporal stability, where the axis matters more than the result. Performance falls as
-evaluation moves away from the training period and scale does not close the gap
-\cite{lazaridou2021mind}, but that work varies the distance between training time and test time
-while ours fixes the model and varies the era of the input binary, which is concept drift in the
-malware-detection sense applied to an LLM analyst. We find no LLM-based equivalent on that axis, and
-we no longer have a result to report on it. Our n=210 drift study is withdrawn because it drove the
-full pipeline per sample against a long-lived shared Ghidra server that was never restarted, which
-is the precondition for the stale-program defect described in Section~\ref{sec:failures}, and its
-per-sample outputs were not retained, so whether it was affected cannot be determined after the
-fact. What survives is the framing, and a re-run under the corrected instrument is required before
-any bound is claimed.
-
-\subsection{Silent failure at tool boundaries}\label{silent-failure-at-tool-boundaries}
+This work's methodological results belong to an established critique tradition. Arp et al.'s
+\emph{Dos and Don'ts} identified ten pitfalls in ML-for-security, and \emph{Chasing Shadows}
+\cite{evertz2026chasing} is its direct successor, surveying all 72 peer-reviewed LLM-security papers
+of 2023 and 2024 and finding every one exposed to at least one of nine pitfalls with only 15.7\%
+explicitly discussed. Our instrument-validity finding, that a single-run parsed-claim count produced
+contradictory rankings of the same arms across decoding budgets, is a worked example inside that
+category rather than a new observation. Two evaluation results appear to be unoccupied. The first is
+a case-prior retriever that is genuinely good in its own vocabulary and scores below a
+label-frequency prior when queried the way production queries it, because query and corpus share
+only their boilerplate; dense retrieval being the standard remedy for vocabulary mismatch makes this
+a failure of the remedy, visible only in the score distribution while top-k accuracy stayed healthy.
+A published negative RAG result in malware analysis exists by a different mechanism, retrieved
+context diluting a signal-extraction task \cite{ng2026evaluating}; comparison against a trivial
+label-only baseline is long established \cite{metz2012baselines}; and a systematic review by the
+same group found a considerable share of published multi-label results to be no better than that
+baseline \preprintcite{metz2015comparing}. The second is an advisory prompt hint whose measurable
+effect was completion under an operational time budget rather than mapping accuracy, and we found no
+work measuring generation completion as a channel through which prompt changes act. On temporal
+stability the axis matters more than the result: performance falls as evaluation moves away from the
+training period and scale does not close the gap \cite{lazaridou2021mind}, but that work varies the
+distance between training and test time while ours fixes the model and varies the era of the input
+binary. We no longer have a result on that axis, for the reason given in
+Section~\ref{sec:limitations}.
 
 The paper's methodological spine belongs to an area that already exists, and locating it there
-precisely matters more than claiming the ground. The genus is described and the description is older
-than this field. Gunawi et al.~\cite{gunawi2008eio} measured where an error signal is lost, finding
-that 13\% of propagation channels drop an error code without handling it and that calls between
-modules are a major cause. Yuan et al.~\cite{yuan2014simple} ruled that a handler which only logs is
-a handler that ignores, and attributed 25\% of catastrophic failures to errors that were explicitly
-signalled and then ignored. Alquraan et al.~\cite{alquraan2018partition} found the majority of
-network-partition failures in cloud systems to be silent, with every warning the rest produced
-``confusing, with no clear mechanism for resolution'', which is the meta-pattern our defects share,
-stated in an operating-systems venue a decade before the runtime we built.
+matters more than claiming it. Gunawi et al.~\cite{gunawi2008eio} measured where an error signal is
+lost, finding that 13\% of propagation channels drop an error code without handling it and that
+calls between modules are a major cause. Yuan et al.~\cite{yuan2014simple} ruled that a handler
+which only logs is a handler that ignores, and attributed 25\% of catastrophic failures to errors
+that were explicitly signalled and then ignored. Alquraan et al.~\cite{alquraan2018partition} found
+the majority of network-partition failures in cloud systems to be silent, with every warning the
+rest produced ``confusing, with no clear mechanism for resolution''. Our boundary defects sit inside
+that description without strain, and the LLM-specific instance of the same shape is now being
+catalogued too, in bug taxonomies for agent orchestration frameworks \cite{xue2025agentbugs} and for
+inference engines \cite{liu2026inference}, the latter carrying both incorrect request parsing as a
+root cause and silent error as a symptom; silently overruling a requested parameter back to a
+default is itself a named misconfiguration failure mode with a measured prevalence
+\cite{xu2013misconfig}. Adjacent work reaches the same place from the interface
+side: mining defects in MCP reference servers, Oyelayo et al.~\cite{oyelayo2026mcp} find data
+validation and type issues to be the second most prevalent class at 13.97\%, the bucket our
+null-for-unset-optional defect falls into, and input dependencies that a machine-readable
+specification cannot express are ``the norm, rather than the exception, with 85\% of the reviewed
+APIs'' carrying them \cite{martinlopez2019deps}. The detector is not new either: ``distinct inputs
+should produce distinct outputs'' is an ordinary metamorphic relation, and metamorphic testing
+exists precisely for programs whose correct output is unknown \cite{li2024metamorphic};
+stress-testing an LLM judge's consistency under input variation is likewise established
+\cite{dev2026judge}. The newest of our mechanisms is a domain instance rather than a discovery.
+Building a parameter-size series, we produced a rank correlation of \fact{superseded-rho} between
+model size and F1, reproducing the $\rho$=0.85 at p=0.014 that the nearest prior work reports
+\preprintcite{ryan2026attck}, from an axis on which the low-scoring row was a model disabled by a
+configuration flag rather than limited by its size. That phenomenon is established: under strict
+output-length constraints performance ``might not scale monotonically with the model size''
+\cite{sun2025length}, across 6.5M instances inference-time configuration moves performance ``both
+absolute and relative'' \cite{mizrahi2024multiprompt}, extra test-time compute lets a smaller model
+overtake a much larger one \cite{snell2025testtime,hassid2024budget}, and lengthening reasoning
+steps improves accuracy \cite{jin2024steplength}. What we would add sits in the remedy rather than
+the phenomenon: their protocol is adapted per model, ours has to be verified per arm, because one of
+our providers accepts the parameter that would match two arms and does not act on it. The same is
+true one layer down, where OpenAI-compatible servers disagree about which token-limit parameter they
+honour, documented in their own issue trackers as \texttt{llama.cpp} \#8634
+\preprintcite{llamacpp8634} and \texttt{vLLM} \#11976 \preprintcite{vllm11976}.
 
-Our three boundary defects sit inside that description without strain. An unset optional argument
-sent as \texttt{null} and a \texttt{load\_program} that does not change what the server is looking
-at are design-assumption mismatches, and a refused load answering HTTP 200 is error swallowing in
-the sense Yuan et al.~define. The LLM-specific instance of the same shape is now being catalogued
-too, in bug taxonomies for agent orchestration frameworks \cite{xue2025agentbugs} and for the
-inference engines we run on \cite{liu2026inference}, the latter carrying both \emph{incorrect
-request parsing} as a root cause and \emph{silent error} as a symptom. Adjacent work reaches the
-same place from the interface side. Mining defects in MCP reference servers, Oyelayo et
-al.~\cite{oyelayo2026mcp} find data validation and type issues to be the second most prevalent class
-at 13.97\%, the bucket our null-for-unset-optional bug falls into, and input dependencies that a
-machine-readable specification cannot express are ``the norm, rather than the exception, with 85\%
-of the reviewed APIs'' carrying them \cite{martinlopez2019deps}. The detector is not new either.
-``Distinct inputs should produce distinct outputs'' is an ordinary metamorphic relation, and
-metamorphic testing exists precisely for programs whose correct output is unknown
-\cite{li2024metamorphic}, the ``notorious oracle problem'' its own survey names. Stress-testing an
-LLM judge's consistency under input variation is likewise established, and \cite{dev2026judge}
-perturbs formatting, paraphrase, verbosity and ground-truth labels to measure how the judgment
-moves.
-
-The newest of our mechanisms is a domain instance rather than a discovery. Building a parameter-size
-series, we produced a rank correlation of +0.866 between model size and F1, reproducing the
-$\rho$=0.85 the nearest prior work reports \preprintcite{ryan2026attck}, from an axis on which the
-low-scoring row was a model disabled by a configuration flag rather than limited by its size. That
-phenomenon is established, though more narrowly than we first wrote it: under strict output-length
-constraints performance ``might not scale monotonically with the model size''
-\cite{sun2025length}, an inversion local to the budget regime rather than a global reversal, and the
-same source reaches our confound independently, since reasoning models do not always beat
-instruction-tuned ones under that constraint and a reasoning flag consumes the answer budget. The
-general form is better established still. Across 6.5M instances inference-time configuration moves
-performance ``both absolute and relative'' \cite{mizrahi2024multiprompt}, the relative half being
-the ranking a single-configuration comparison silently fixes, and extra test-time compute lets a
-smaller model overtake a much larger one \cite{snell2025testtime,hassid2024budget}, while
-lengthening reasoning steps improves accuracy \cite{jin2024steplength}. Read together the effect is
-task- and budget-dependent rather than monotone in either direction, which is our argument rather
-than an objection to it.
-
-What we would add sits in the remedy rather than the phenomenon. Their protocol is adapted per
-model; ours has to be verified per arm, because one of our providers accepts the parameter that
-would match two arms and does not act on it, so selection has to key on the \emph{measured}
-reasoning share of a completed arm rather than on the flag requested. The same is true one layer
-down, where OpenAI-compatible servers disagree about which token-limit parameter they honour,
-documented in their own issue trackers \preprintcite{llamacpp8634,vllm11976}. So what we add is
-narrow: three instances of the described genus drawn from an evaluation pipeline for security
-research, where the consequence is a measurement that is wrong and looks right rather than a bad
-answer to a user; the output-cardinality check reported \emph{alongside} the result rather than run
-as a test; and a demonstrated cost, one study withdrawn because the question can no longer be asked
-of it. The taxonomies report incidents, and we report what an incident of this class does to a
-result already written down. One further observation is offered as a proposal and developed in
-Section~\ref{where-a-measurements-cause-is-assigned-rather-than-measured}: those taxonomies are
-organised by the boundary crossed, three of our seven mechanisms crossed none, and the principle
-covering both is not the boundary but the attribution.
-
-\subsection{Scope of every empirical statement above}\label{scope-of-every-empirical-statement-above}
-
-Each of our results cited in this section was produced on one model on one machine, Qwen3.6-35B-A3B
-at IQ3\_K\_R4 quantisation served by ik\_llama.cpp \texttt{llama-server} on a single RTX 5060 host
-with 31 GiB of RAM, with the exact model revision, GGUF digest and engine commit recorded in the
-reproducibility appendix. Where a statement concerns retrieval or the deterministic cascade rather
-than generation, no model was involved at all and the binding limit is the index and the corpus
-instead; those are marked at the point of claim.
-
-We state this here rather than only in Threats to Validity because \cite{evertz2026chasing}'s
-surrogate fallacy is the pitfall this work is most exposed to, and because the nearest external
-evidence sharpens it. In an ATT\&CK-classification study across models, parameter size was the only
-statistically significant predictor of F1, at $\rho$=0.85 and p=0.014 \preprintcite{ryan2026attck},
-while prompt strategy, chain-of-thought and temperature were not. Single-model findings are
-therefore exactly the kind that should not be read as properties of an architecture. Where a result
-is a \emph{negative} obtained under a configuration favourable to the alternative, it travels
-further than a positive, and we say which is which at each claim.
-
-\subsection{Reference note}\label{reference-note}
-
-Verification status is recorded per entry in the bibliography rather than asserted in aggregate. An
-entry read only as an abstract says so, and the three that had been cited for something the source
-does not say carry the correction. Twelve systems were named in this section with no record of their
-own, cited through the verified sources that discuss them, which is a polite way of saying the paper
-asserted twelve attributions it had not checked, in a section whose subject is unchecked
-attribution. Each now carries its own entry. Eight sources remain unreviewed and are marked
-[preprint] at every use; each exists to concede ground rather than claim it, and removing them for
-want of a venue would have made this paper appear more original than it is.
-
-Two quoted figures had been attributed to papers that do not report them, and the pair has a shape
-worth naming because it is the one this paper's own machinery was blind to. Neither number was
-invented and both are real figures from real papers. What went wrong was the binding, a value
-recorded against a key that never reported it, and a checker asking only whether a number is
-registered cannot see that. The registry is now checked in the opposite direction as well. A quoted
-value must appear in the text beside the citation it is declared to come from, so a binding that has
-drifted fails the build rather than reading as verified.
+Every result of ours cited above was produced on one model on one machine, Qwen3.6-35B-A3B at
+IQ3\_K\_R4 quantisation served by \texttt{ik\_llama.cpp} on a single RTX 5060 host with 31 GiB of
+RAM. Where a statement concerns retrieval or the deterministic cascade rather than generation, no
+model was involved and the binding limit is the index and the corpus instead. We state this here
+because the surrogate fallacy is the pitfall this work is most exposed to, and because parameter
+size was the only statistically significant predictor of F1 in the nearest external study
+\preprintcite{ryan2026attck}, which makes single-model findings exactly the kind that should not be
+read as properties of an architecture. Where a result is a negative obtained under a configuration
+favourable to the alternative, it travels further than a positive, and we say which is which at each
+claim.

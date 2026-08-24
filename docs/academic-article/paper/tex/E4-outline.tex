@@ -1,86 +1,63 @@
 \section{Introduction}
+\label{sec:intro}
 
-Three claims organise this paper.
+Mapping malware evidence to MITRE ATT\&CK technique identifiers is a labelling task that large
+language models are now routinely applied to, and the systems that perform it are rarely a model
+alone. A working pipeline wraps the model in deterministic tooling: a sandbox that detonates the
+sample, a disassembler that recovers its structure, retrieval indices that supply prior cases, and
+rule engines that assert techniques directly from signatures. The model's contribution is therefore
+a difference against that tooling rather than a score in isolation. That difference is almost never
+reported. Büchel et al.'s systematisation re-evaluates more than forty technique-extraction systems
+in one setting and finds them ``largely incomparable'', because each uses its own ontology and its
+own inaccessible dataset \cite{buchel2025sok}. An F1 value read against no baseline refers to
+nothing, and the baseline that matters for an LLM pipeline is the deterministic engine it was built
+on top of.
 
-First: the architecture we built did not survive its own evaluation. The system is a multi-agent
-pipeline over static, dynamic and network evidence, with a corroboration cascade, two retrieval
-tiers, and deterministic confidence gating. Each component was motivated by a plausible mechanism.
-Measured at equal token budget against simpler alternatives, the multi-agent design does not beat a
-single judge; the corroboration set never changes a verdict; the confidence number the gates consume
-discriminates at AUC \fact{confidence-auc}; and all three retrieval components are near-inert end to end despite
-working in isolation. We report these as results rather than as tuning opportunities.
+A second barrier is that such a pipeline is itself a distributed system, and its evaluation
+inherits every property of one. Ours calls a reverse-engineering server for disassembly, a sandbox
+for detonation, a vector store for retrieval and a model server for inference, over three protocols.
+Each of those boundaries is a place where a request can succeed and still not mean what the caller
+assumed, and the resulting error is not visible as an error. Silent failure of this kind is a
+long-established class in production software \cite{gunawi2008eio,yuan2014simple,alquraan2018partition},
+and it is now being catalogued for LLM orchestration frameworks and inference engines as well
+\cite{xue2025agentbugs,liu2026inference}. What changes in an evaluation setting is the artefact. The
+product of a silent failure is not a degraded user session that someone reports; it is a measurement
+that is wrong, looks right, and is written down.
 
-Second. Those nulls are only interpretable because we measured whether each mechanism fired. A
-deterministic confidence cap that fires on \fact{cap-rate} of techniques produces an ablation whose null
-result says nothing about the cap. A priority hint that fires on \fact{hint-rate} of samples produces one that
-does. We adopted firing rate before effect as a rule after the first case, and it changed which
-experiments were worth running.
+This work reports the evaluation of one such pipeline, built for ATT\&CK mapping over static,
+dynamic and network evidence, and the failures of the instrument that produced that evaluation. The
+system fuses six deterministic evidence layers, three domain analysts running as ReAct loops over
+tool interfaces, an LLM judge, a weighted corroboration cascade, two retrieval tiers and
+deterministic confidence gating. It was built around four architectural claims: that multi-agent
+consensus over heterogeneous evidence channels beats a single reader, that a multi-layer
+corroboration cascade improves evidence quality, that two-tier attribution supplies useful priors,
+and that falsification before confidence disciplines unsupported claims. Each claim was measured at
+an equal total token budget against a simpler alternative, with a stochastic-noise control, with the
+firing rate of each mechanism measured before its effect, and with intervals resampled at the level
+the observations are independent at.
 
-Third, and the reason for the paper's title. The instrument was repeatedly wrong in ways that
-looked like data. Over one week we found four defects at the boundaries between the pipeline and
-the servers it depends on. In each case a server answered successfully and answered about something
-else: an argument the agent never supplied arrived as an explicit \texttt{null}; a program reported as
-loaded, by name, never became the one being analysed; a refused load returned HTTP 200 with an
-error in the body; and two bounds designed to protect the analyst composed into a path that
-returned nothing at all. None was caught by \fact{test-count} passing tests, because each needs a \emph{second} case
-in one server lifetime, and a unit test writes one.
+All four claims returned a negative or a near-null result, and the study that established this was
+itself wrong several times over. Seven defects in the instrument produced plausible results rather
+than errors, and a suite of \fact{test-count} passing tests caught none of them. Four crossed a
+boundary with another server: an optional argument the agent never supplied arrived as an explicit
+null and disabled every tool on one interface; a program reported as loaded never became the one
+under analysis; a refused load returned HTTP 200 with an error in the body; and two independently
+correct bounds composed into a path that returned nothing. The other three crossed no boundary at
+all and are described in Section~\ref{sec:contributions}.
+The largest of the seven is this paper's own statistics: every interval in an earlier draft
+resampled rows when the observations were clustered, and correcting that widened the anchor interval
+\fact{baseline-f1-widening}-fold and turned two claims of equivalence into bounds.
 
-Every one of those four was caught the same way. A number repeated where variation was expected.
-A hint of exactly \fact{hint-chars-repeated} characters for two unrelated binaries; call graphs identical to the
-character for samples of \fact{call-graph-sample-sizes}; \fact{stuck-graph-run} consecutive samples at \fact{stuck-graph-chars} characters. The check
-costs one line, needs no ground truth, and we now report it beside every batch result.
+The price of those defects is reported rather than hypothesised. One completed
+\fact{drift-n}-sample temporal-drift study is withdrawn from this paper because it met the
+precondition for one of the defects and its per-sample outputs had not been retained, so whether it
+was affected can no longer be established. Four arms of a later ablation are unattributable for the
+same reason one level up, the environment a measurement ran in having gone unrecorded where the
+measurement itself was kept.
 
-Then three more, and none of them was at a boundary. An ablation varied a deterministic
-reconciliation step and we attributed its output to a language model. A rank correlation over model
-size ranked a reasoning-configuration flag instead and recovered the published scaling coefficient
-almost exactly, agreeing with the literature, which is the direction a result is least likely to be
-questioned. And a documented output ceiling on the judge was renamed by our client library during
-serialisation to a key the inference server does not read, so a component we describe as bounded had
-never once been bounded. The detector above does not find these, because their outputs \emph{do}
-vary; two were caught by a number too clean to believe and one by a study that recorded which
-failure branch each call took. Each had passing unit tests over the exact function concerned,
-because the defect was never in a function but in which measurement was attributed to which cause,
-or in which representation of a value crossed a boundary.
-
-We report them because the correction is part of the result. Two published findings of ours were
-withdrawn or rewritten on their account, a third was one report away from being published as a
-scaling law, and a completed \fact{drift-n}-sample study is withdrawn from this paper because it met
-the precondition for one of the defects and its per-sample outputs were not retained, so whether it
-was affected cannot be established.
-
-We do not claim the category, and we counter-searched the newest mechanisms before claiming them.
-Silent failure, an error that produces wrong behaviour without an actionable signal, is a
-long-established and taxonomised class in production software
-\cite{gunawi2008eio,yuan2014simple,alquraan2018partition}, LLM-specific runtimes are now being
-taxonomised along the same lines \cite{xue2025agentbugs,liu2026inference}, ``distinct inputs should
-produce distinct outputs'' is an ordinary metamorphic relation \cite{li2024metamorphic}, an
-inference-time constraint inverting model rankings inside a constrained budget is established
-\cite{sun2025length,mizrahi2024multiprompt}, and silently overruling a request parameter to a
-default is a named failure mode with a measured prevalence \cite{xu2013misconfig}. Three of our four
-boundary mechanisms therefore sit inside a peer-reviewed class. The fourth does not, and we say
-which: we found no reviewed source establishing that OpenAI-compatible servers disagree about
-\emph{which} token-limit parameter they honour, so we claim no priority for it either.
-
-What we add is the setting and the price. An evaluation pipeline for security research, where the
-artefact is not a degraded user session but a measurement that is wrong and looks right.
-
-Contributions. Each maps to one section, and each is a measurement or a mechanism rather than a proposal.
-
-We report a no-LLM baseline for LLM-based ATT\&CK mapping, and the full pipeline scored against it
-on the same samples and the same ground truth, the comparison without which every F1 in this
-literature, including our own earlier ones, refers to nothing (Section~\ref{the-baseline-first}). We report four measured
-architectural negatives, multi-agent consensus at equal budget, a corroboration cascade, two-tier
-attribution and a confidence gate, each with the minimum detectable effect of the design that
-produced it, because a null without its resolution is unreadable (Section~\ref{multi-agent-consensus-does-not-pay-for-itself-at-equal-budget} to Section~\ref{confidence-is-nearly-a-constant}). We
-report seven instrument failures that produced plausible results rather than errors, with the layer
-each occurred at and what actually found it; four crossed a boundary with another server, and three
-were inside our own code and share a different shape (Section~\ref{sec:failures}).
-
-Two things follow from those failures. One is a one-line detector, how many distinct outputs did N
-inputs produce, which found all four boundary failures, needs no ground truth, and is reported
-beside every batch result rather than written as a test (Section~\ref{what-did-find-them-output-cardinality}). The other is a selection
-rule that follows from a provider accepting a parameter and not acting on it, namely that arms must
-be matched on their \emph{measured} configuration rather than their requested one (Section~\ref{m6-a-configuration-difference-wearing-a-parameter-count}).
-The price is demonstrated rather than hypothesised. One completed \fact{drift-n}-sample study is
-withdrawn because its question can no longer be asked of it, and four arms of a later ablation are
-unattributable for the same reason one level up (Section~\ref{what-it-cost}).
+The remainder of the paper is organised as follows. Section~\ref{sec:related} places the work in the
+technique-extraction, agentic-analysis and evaluation-methodology literature and states the
+contributions. Section~\ref{sec:method} describes the pipeline, the corpora, the serving
+configuration and the measurement design. Section~\ref{sec:results} reports the measurements, the
+seven instrument failures, the detector that found most of them, and the limitations.
+Section~\ref{sec:conclusion} concludes.

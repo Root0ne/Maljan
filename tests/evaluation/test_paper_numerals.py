@@ -54,7 +54,7 @@ _SECTIONS = (
     "E2-threats-to-validity.tex",
     "E3-system.tex",
     "E4-outline.tex",
-    "E5-reproducibility.tex",
+    "E4b-contributions.tex",
     "E6-instrument-failures.tex",
     "E7-methodology.tex",
     "E8-conclusion.tex",
