@@ -4,6 +4,13 @@
  "rule": "Every entry in refs.bib without a booktitle or journal must appear here. A new preprint added without a status fails tests/evaluation/test_paper_citations.py. Nothing here may name a venue that has not been verified against the publisher: guessing a venue is the failure this paper's citation audit already caught five times.",
  "quotes_declined": "An optional list of figures the source reports that the paper chose NOT to quote. It exists because 'we did not cite this number' and 'we never saw this number' are different states, and only the first is a decision. Recording it stops a later pass from helpfully adding the figure back.",
  "verified_offline": false,
+ "venue_recheck": {
+  "date": "2026-08-24",
+  "what": "Every entry in `entries` re-checked for a published version, this time with network access, which the original 2026-08-16 audit did not have. Two independent sources per check: the arXiv export API for arxiv:journal_ref, arxiv:doi and arxiv:comment, and DBLP for the four load-bearing entries.",
+  "result": "All ten are still unpublished. The arXiv API returns no journal_ref and no doi for any of the ten. DBLP returns a CoRR 'Informal and Other Publications' record and nothing else for tran2026single, ryan2026attck and morbiato2026hierarchical, and returns no record at all for ttpdetect2026.",
+  "limit": "arXiv's journal_ref is author-supplied, so its absence is evidence rather than proof; DBLP indexes venues rather than publishing them. Neither is a publisher-side check, which is why verified_offline stays false. A Crossref query per title is the step that would change it, and it would also mean editing the assertion in test_paper_citations.py that pins the flag.",
+  "repeat_before": "submission, because these are all 2025 and 2026 preprints and four of them carry numbers this paper quotes"
+ },
  "entries": {
   "tran2026single": {
    "quotes": [
