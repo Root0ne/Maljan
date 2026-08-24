@@ -1,15 +1,14 @@
 Multi-agent LLM pipelines map malware evidence to MITRE ATT\&CK techniques, and their components are
 rarely measured against the deterministic tooling they are built on. This study evaluates one such
-pipeline end to end and reports both the measurements and the failures of the instrument that
-produced them. A no-LLM baseline, the sandbox's own signature mapping, reaches F1
-\fact{baseline-f1} \fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. Scored per sample on
-the same binaries and ground truth, the full pipeline reaches \fact{h2h-dynamic-f1} against
-\fact{h2h-cape-f1} for that baseline, paired \fact{h2h-delta} \fact{h2h-ci}, at a resolution of
-\fact{h2h-mde}. On \fact{cape-consensus-families} real samples, one per family, negotiated
+pipeline and reports both its measurements and the failures of the instrument that produced them. A no-LLM baseline, the sandbox's own signature mapping, reaches F1
+\fact{baseline-f1} \fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the
+\fact{h2h-n} of those where both arms ran, scored per sample against the same ground truth by the
+same code, the full pipeline reaches \fact{h2h-dynamic-f1} against that baseline's
+\fact{h2h-cape-f1}, paired \fact{h2h-delta} \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. On \fact{cape-consensus-families} real samples, one per family, negotiated
 multi-agent consensus beats a single judge by \fact{cape-negotiated-delta} F1
 \fact{cape-negotiated-ci}, and so does a stochastic-noise control, by \fact{cape-noise-delta}; the
 two differ by \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so what
-helps is the calls the arms share rather than the negotiation between them. Verbal confidence, which
+helps is the calls the arms share, not the negotiation. Verbal confidence, which
 every deterministic gate consumes, ranks correct claims above incorrect ones at AUC
 \fact{confidence-auc}, on an interval containing chance. Seven defects in our own instrument
 produced plausible results rather than errors and \fact{test-count} passing tests caught none: four
