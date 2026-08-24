@@ -27,34 +27,34 @@ Warning--empty pages in snell2025testtime
 Warning--empty pages in hassid2024budget
 You've used 58 entries,
             2952 wiz_defined-function locations,
-            984 strings with 25100 characters,
-and the built_in function-call counts, 19987 in all, are:
-= -- 1779
-> -- 820
+            985 strings with 25083 characters,
+and the built_in function-call counts, 20039 in all, are:
+= -- 1785
+> -- 826
 < -- 15
-+ -- 312
-- -- 254
-* -- 1241
-:= -- 2556
++ -- 314
+- -- 256
+* -- 1245
+:= -- 2568
 add.period$ -- 75
 call.type$ -- 58
-change.case$ -- 95
+change.case$ -- 96
 chr.to.int$ -- 0
 cite$ -- 80
-duplicate$ -- 743
-empty$ -- 2378
-format.name$ -- 305
-if$ -- 5328
+duplicate$ -- 744
+empty$ -- 2379
+format.name$ -- 308
+if$ -- 5338
 int.to.chr$ -- 0
 int.to.str$ -- 58
 missing$ -- 42
 newline$ -- 199
-num.names$ -- 55
+num.names$ -- 56
 pop$ -- 511
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 0
-skip$ -- 1494
+skip$ -- 1495
 stack$ -- 0
 substring$ -- 635
 swap$ -- 196
@@ -63,7 +63,7 @@ text.prefix$ -- 0
 top$ -- 0
 type$ -- 0
 warning$ -- 22
-while$ -- 103
+while$ -- 104
 width$ -- 60
-write$ -- 557
+write$ -- 558
 (There were 22 warnings)

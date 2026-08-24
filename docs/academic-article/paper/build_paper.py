@@ -46,8 +46,15 @@ TEX = HERE / "tex"
 REPO = HERE.parent.parent.parent
 EVAL = REPO / "tests" / "evaluation"
 
-# The name that must never reach the paper, in any casing.
+# The name that must never reach a LaTeX source, in any casing. This was an
+# anonymity rule while the author block was empty; the authors are named now and
+# the rule outlives the reason, because the paper calls the object of study "the
+# pipeline" from the abstract to the conclusion and never brands it. The
+# repository is named after the system, so the bibliography entry carrying its
+# address is the one permitted occurrence -- and it is checked below rather than
+# left to the accident that this scan reads .tex and the bibliography is .bib.
 FORBIDDEN = re.compile(r"maljan", re.IGNORECASE)
+NAME_ENTRY = "release2026artefact"
 
 # Mathematical symbols must already be maths by the time they reach the source.
 SYMBOLS = "−×≥≤≫≪≈≠±→Δρασβμ…"
@@ -114,6 +121,36 @@ def check_anonymity(name: str, tex: str) -> list[str]:
     return [f"{name}: {m.group(0)!r} at offset {m.start()}" for m in FORBIDDEN.finditer(tex)]
 
 
+def check_the_name_sits_only_in_its_own_entry() -> list[str]:
+    """The exception to the name rule, checked as an exception.
+
+    A rule with a tolerated exception is not a rule: the address could migrate
+    into a second entry, or the entry it belongs to could lose it, and neither
+    would fail anything. So the name is permitted inside the body of one
+    bibliography entry and refused everywhere else in the file, and the entry is
+    required to still carry it.
+    """
+    bib = TEX / "refs.bib"
+    if not bib.exists():
+        return []
+    text = bib.read_text()
+    entry = re.search(r"@\w+\{" + NAME_ENTRY + r",(.*?)\n\}", text, re.S)
+    if entry is None:
+        return (
+            [f"refs.bib: the name is present but {NAME_ENTRY} is not"]
+            if FORBIDDEN.search(text)
+            else []
+        )
+    hits = list(FORBIDDEN.finditer(text))
+    if not hits:
+        return [f"refs.bib: {NAME_ENTRY} no longer carries the address it exists to carry"]
+    return [
+        f"refs.bib: {m.group(0)!r} at offset {m.start()}, outside {NAME_ENTRY}"
+        for m in hits
+        if not entry.start(1) <= m.start() < entry.end(1)
+    ]
+
+
 def check_no_alignment_in_a_macro() -> list[str]:
     r"""A fact whose value contains ``&`` cannot be a table row.
 
@@ -164,6 +201,7 @@ def main() -> int:
     if FACTS_TEX.exists():
         violations += check_anonymity("facts.tex", FACTS_TEX.read_text())
     violations += check_facts_referenced()
+    violations += check_the_name_sits_only_in_its_own_entry()
     violations += check_no_alignment_in_a_macro()
 
     if violations:

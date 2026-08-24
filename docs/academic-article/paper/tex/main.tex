@@ -112,13 +112,13 @@
 \usepackage{facts}
 \input{facts}
 
-% Where the archive lives is a bibliography entry (release2026artefact) and not
-% a macro here, because the body carries no locators at all: every address in
-% this paper is in the reference list, which is where a reader looks for one.
-% The entry is a placeholder for the same reason the author block is empty --
-% the repository is named after the system and the anonymity gate refuses that
-% string -- and it names an archived release rather than a repository, because a
-% repository can be renamed or deleted and a digital object identifier cannot.
+% Where the code lives is a bibliography entry (release2026artefact) and not a
+% macro here, because the body carries no locators at all: every address in this
+% paper is in the reference list, which is where a reader looks for one. That
+% entry is also the only place the system's name appears. The paper calls the
+% object of study "the pipeline" throughout and never brands it; the repository
+% is named after it, so the entry carrying the address is a stated exception,
+% checked by build_paper.py and by check_paper.sh rather than tolerated.
 
 \journal{Computers \& Security}
 
@@ -136,11 +136,16 @@
 % keywords instead.
 \title{Measuring What an LLM Adds to Malware-to-ATT\&CK Technique Mapping}
 
-% Deliberately empty. The anonymity gate reads the whole document including the
-% preamble, and elsarticle is happy to typeset a frontmatter with no author
-% block. Names, affiliations and the credit statement go in at submission, in
-% one place.
-\author{}
+\author[firat]{D\"uzg\"un K\"u\c{c}\"uk\corref{cor}}
+\ead{dzgnkucuk@gmail.com}
+\author[firat]{Fatih Ertam}
+
+\affiliation[firat]{organization={Department of Digital Forensics
+  Engineering, Faculty of Technology, F\i rat University},
+  city={Elaz\i \u g},
+  country={T\"urkiye}}
+
+\cortext[cor]{Corresponding author.}
 
 \begin{abstract}
 \input{abstract}

@@ -258,13 +258,78 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 7. Anonymity, over the whole assembled document rather than section by section
+# 6b. Highlights: Elsevier's limits, and the numbers they quote
 # --------------------------------------------------------------------------
-if grep -qir 'maljan' "$BUILD"/*.tex; then
+# Highlights ship as a separate file and never reach the PDF, so nothing else in
+# this script would ever look at them. Three to five bullets, 85 characters each,
+# and every number in one has to be a number the paper derives -- a highlight
+# that rounds differently from the table it summarises is a hand-typed numeral
+# with a shorter line length.
+"$PY" - <<'HIGHLIGHTS'
+import json
+import re
+import sys
+from pathlib import Path
+
+src = Path("docs/academic-article/paper/highlights.md")
+if not src.exists():
+    print("no highlights file")
+    sys.exit(1)
+body = src.read_text().split("## Measuring", 1)[-1].split("## Where", 1)[0]
+bullets = [m for m in re.finditer(r"^- (.*?) \[(\d+)\]$", body, re.M)]
+facts = {str(v).strip().lstrip("+") for v in json.loads(
+    Path("tests/evaluation/paper_facts.json").read_text()).values()}
+bad = []
+if not 3 <= len(bullets) <= 5:
+    bad.append(f"{len(bullets)} bullets, Elsevier wants 3 to 5")
+for m in bullets:
+    text, claimed = m.group(1), int(m.group(2))
+    if len(text) > 85:
+        bad.append(f"{len(text)} chars: {text[:50]}...")
+    if len(text) != claimed:
+        bad.append(f"claims {claimed} chars and is {len(text)}: {text[:40]}...")
+    for num in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\d,]|\.\d)", text):
+        if not any(f.startswith(num) or num.startswith(f.rstrip("0")) for f in facts):
+            bad.append(f"{num!r} is in a highlight and is not a derived value")
+for b in bad:
+    print(b)
+sys.exit(1 if bad else 0)
+HIGHLIGHTS
+if [[ $? -eq 0 ]]; then
+    pass "highlights: 3-5 bullets, each within 85 characters, every number derived"
+else
+    fail "the highlights do not meet Elsevier's limits or quote a number the paper does not"
+fi
+
+# --------------------------------------------------------------------------
+# 7. The system name, permitted in exactly one place
+# --------------------------------------------------------------------------
+# This was an anonymity check while the author block was empty. The authors are
+# named now, so blind review is no longer the reason -- but the rule outlives it,
+# because the paper calls the object of study "the pipeline" from the abstract to
+# the conclusion and never brands it, and that is a decision about how the paper
+# reads. The repository is named after the system, so the one reference entry
+# carrying its address is the single permitted occurrence. Two checks, because a
+# rule with an exception needs the exception checked and not merely tolerated:
+# the name may not reach a LaTeX source at all, and on the page it may appear
+# only after the References heading.
+name_tex=$(grep -oihr 'maljan' "$BUILD"/*.tex | wc -l)
+name_body=$(sed '/^[[:space:]0-9.]*References[[:space:]]*$/,$d' <<<"$pdf_text" \
+            | grep -oi 'maljan' | wc -l)
+name_refs=$(sed -n '/^[[:space:]0-9.]*References[[:space:]]*$/,$p' <<<"$pdf_text" \
+            | grep -oi 'maljan' | wc -l)
+if [[ "$name_tex" -ne 0 ]]; then
     fail "the system name reached a LaTeX source"
     grep -oihrm3 'maljan' "$BUILD"/*.tex | sed 's/^/        /'
+elif [[ "$name_body" -ne 0 ]]; then
+    fail "$name_body use(s) of the system name in the body; it belongs to the repository entry"
+    sed '/^[[:space:]0-9.]*References[[:space:]]*$/,$d' <<<"$pdf_text" \
+        | grep -m3 -oiE '.{40}maljan.{40}' | sed 's/^/        /'
+elif [[ "$name_refs" -eq 0 ]]; then
+    fail "the repository entry no longer carries the address it exists to carry"
+    note "release2026artefact in refs.bib should hold the repository URL"
 else
-    pass "anonymity clean across the whole document, title and preamble included"
+    pass "the system name appears only in the reference list, at $name_refs use(s)"
 fi
 
 # --------------------------------------------------------------------------

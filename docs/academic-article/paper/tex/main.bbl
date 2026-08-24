@@ -414,12 +414,12 @@ D.~Kumaran, Reported confidence in {LLMs} tracks commitment more than
   Terms of Use (2026).
 
 \bibitem{release2026artefact}
-Replication package: the pipeline, the evaluation harnesses, the per-sample
-  records and the derivation of every number reported, Archived software
-  release under an open licence, {PLACEHOLDER}: the digital object identifier
-  of the archived release is supplied at submission, together with the author
-  block. It names an archived release rather than a development repository,
-  because a repository can be renamed or deleted and a digital object
-  identifier cannot (2026).
+D.~K\"u\c{c}\"uk, F.~Ertam, Replication package: the pipeline, the evaluation
+  harnesses, the per-sample records and the derivation of every number
+  reported, Source repository, under an open licence.
+  \url{https://github.com/Root0ne/Maljan}, the repository is the only place the
+  system carries a name. The paper does not: it calls the object of study the
+  pipeline throughout, and a check refuses that name anywhere but this entry
+  (2026).
 
 \end{thebibliography}
