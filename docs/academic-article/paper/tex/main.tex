@@ -112,20 +112,29 @@
 \usepackage{facts}
 \input{facts}
 
+% Where the archive lives, defined once. It is a placeholder for the same
+% reason the author block is empty: the repository is named after the system,
+% the anonymity gate refuses that string anywhere in the sources, and a URL is
+% exactly where it would come back in. Set this at submission, to the DOI of an
+% archived release rather than to a bare repository URL, because a repository
+% can be renamed or deleted and a DOI cannot.
+\newcommand{\archive}{\texttt{[archived release DOI, supplied at submission]}}
+
 \journal{Computers \& Security}
 
 \begin{document}
 
 \begin{frontmatter}
 
-% The title names the measurement rather than the failure. The earlier one led
-% with instrument failures, which is one of five contributions and not the one a
-% reader needs first; it also carried none of the terms someone would search on,
-% and it promised a general account of trusting measurements that one pipeline
-% cannot deliver. The counts are load-bearing: four claims and seven mechanisms
-% is what the paper has, and a title that says so cannot overclaim.
-\title{Four Architectural Claims and Seven Instrument Failures:\\
-Measuring a Multi-Agent LLM Pipeline for MITRE ATT\&CK Technique Mapping}
+% The title is the question the paper asks, in the words the paper asks it in.
+% Two earlier versions failed differently: the first led with instrument
+% failures, one contribution of five, and the second counted the claims and the
+% mechanisms in front of the topic, so a reader met the findings before learning
+% what was being measured. The topic is what the model adds to a task whose
+% other machinery is deterministic, and that is now the whole title. The terms
+% it cannot carry at this length, multi-agent and negative results, are in the
+% keywords instead.
+\title{Measuring What an LLM Adds to Malware-to-ATT\&CK Technique Mapping}
 
 % Deliberately empty. The anonymity gate reads the whole document including the
 % preamble, and elsarticle is happy to typeset a frontmatter with no author
@@ -138,9 +147,9 @@ Measuring a Multi-Agent LLM Pipeline for MITRE ATT\&CK Technique Mapping}
 \end{abstract}
 
 \begin{keyword}
-LLM agents \sep malware analysis \sep MITRE ATT\&CK \sep
-evaluation methodology \sep measurement validity \sep silent failure \sep
-clustered inference \sep negative results
+LLM agents \sep multi-agent systems \sep malware analysis \sep
+MITRE ATT\&CK \sep evaluation methodology \sep silent failure \sep
+negative results
 \end{keyword}
 
 \end{frontmatter}
