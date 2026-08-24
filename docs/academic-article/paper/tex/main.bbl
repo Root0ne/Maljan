@@ -390,6 +390,16 @@ M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
 Request for a server-side output cap, {PREPRINT}, not peer reviewed.
   vllm-project/vllm issue \#11976 (2024).
 
+\bibitem{kumaran2026confidence}
+D.~Kumaran, Reported confidence in {LLMs} tracks commitment more than
+  correctness, {PREPRINT}, not peer reviewed. arXiv:2606.29490, submitted
+  2026-06-28 and revised 2026-08-24. Verified against the arXiv listing and the
+  export API on 2026-08-24: a single author rather than the ``et al.'' an
+  internal note had recorded, no Comments field, no journal reference and no
+  {DOI} beyond the arXiv one. Eight models over two classes, with the contrast
+  that carries the claim being verbal confidence against calibrated token
+  log-probabilities (2026).
+
 \bibitem{abusech2026bazaar}
 {abuse.ch}, {MalwareBazaar}, Malware sample corpus.
   \url{https://bazaar.abuse.ch}, cited as the corpus the dynamic cohort was

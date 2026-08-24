@@ -68,6 +68,15 @@
    "status": "unresolved",
    "action": "Kept and marked. Says the tool-catalogue degradation we report is already documented in general, which is the direction that costs us. arXiv:2505.10570 v1, no Comments and no journal reference. The 7-85% range it reports is quoted; both endpoints are too generic to bind in quoted-numbers.json, so the binding rests on the marked citation alone."
   },
+  "kumaran2026confidence": {
+   "quotes": [],
+   "load_bearing": false,
+   "status": "unresolved",
+   "action": "Verified 2026-08-24 against the arXiv abstract page and the export API, because until then it was not a citation at all: the body named the bare identifier arXiv:2606.29490 in running text and the bibliography did not contain it. Two things the internal notes had wrong are corrected here. It is a single author, Dharshan Kumaran, not 'Kumaran et al.' as findings-log.md recorded. And the export API returns no arxiv:comment, no arxiv:journal_ref and no arxiv:doi, so it is genuinely unpublished; submitted 2026-06-28, revised 2026-08-24. Kept and marked: the sentence citing it concedes ground rather than claiming it, saying our confidence result matches an existing finding, so dropping it for want of a venue would let the paper appear to have found this first. No figure is quoted from it. Search for a published version before submission.",
+   "quotes_declined": [
+    "8"
+   ]
+  },
   "chen2025recopilot": {
    "quotes": [],
    "load_bearing": false,

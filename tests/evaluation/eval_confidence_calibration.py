@@ -1,6 +1,6 @@
 """B2 — does the confidence number this system runs on predict correctness?
 
-`arXiv:2606.29490` (Kumaran et al.) finds that an LLM's **verbally reported**
+`arXiv:2606.29490` (Kumaran) finds that an LLM's **verbally reported**
 confidence tracks its *readiness to commit*, not whether it is right, while
 calibrated log-probabilities do track correctness. That is not an abstract worry
 here: `ClaimEvidence.confidence` is a self-reported number, every ISR claim

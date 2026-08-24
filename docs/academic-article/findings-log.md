@@ -1176,7 +1176,7 @@ this review it did, until corrected.
 ### 3.8 The confidence number the cascade runs on is nearly a constant — `EXPERIMENTAL` / `NEGATIVE`
 
 - **Why this matters more than a calibration curve.** `ClaimEvidence.confidence` is a self-reported
-  number on every ISR claim, and the cascade consumes it. `arXiv:2606.29490` (Kumaran et al.)
+  number on every ISR claim, and the cascade consumes it. `arXiv:2606.29490` (Kumaran)
   found verbal confidence tracks an LLM's *readiness to commit* rather than correctness — but Q1's
   full-text read established their suite is MCQ and open-ended QA with **no structured or
   evidence-cited outputs**. This is the extension to exactly that: claims that must cite an
