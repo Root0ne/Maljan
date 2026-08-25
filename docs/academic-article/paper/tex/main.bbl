@@ -424,16 +424,6 @@ M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
 \newblock \href {https://doi.org/10.18653/v1/2024.findings-acl.108}
   {\path{doi:10.18653/v1/2024.findings-acl.108}}.
 
-\bibitem{llamacpp8634}
-\texttt{max\_tokens} not respected on the non-chat endpoint, {PREPRINT}, not
-  peer reviewed. ggml-org/llama.cpp issue \#8634. Search result; the issue has
-  not been read in full. Cited with the vllm issue to demote our own mechanism
-  to a known integration wart, which is the conservative direction (2024).
-
-\bibitem{vllm11976}
-Request for a server-side output cap, {PREPRINT}, not peer reviewed.
-  vllm-project/vllm issue \#11976 (2024).
-
 \bibitem{kumaran2026confidence}
 D.~Kumaran, Reported confidence in {LLMs} tracks commitment more than
   correctness, {PREPRINT}, not peer reviewed. arXiv:2606.29490, submitted
@@ -445,6 +435,16 @@ D.~Kumaran, Reported confidence in {LLMs} tracks commitment more than
   log-probabilities (2026).
 \newblock \href {https://doi.org/10.48550/arXiv.2606.29490}
   {\path{doi:10.48550/arXiv.2606.29490}}.
+
+\bibitem{llamacpp8634}
+\texttt{max\_tokens} not respected on the non-chat endpoint, {PREPRINT}, not
+  peer reviewed. ggml-org/llama.cpp issue \#8634. Search result; the issue has
+  not been read in full. Cited with the vllm issue to demote our own mechanism
+  to a known integration wart, which is the conservative direction (2024).
+
+\bibitem{vllm11976}
+Request for a server-side output cap, {PREPRINT}, not peer reviewed.
+  vllm-project/vllm issue \#11976 (2024).
 
 \bibitem{abusech2026bazaar}
 {abuse.ch}, {MalwareBazaar}, Malware sample corpus.

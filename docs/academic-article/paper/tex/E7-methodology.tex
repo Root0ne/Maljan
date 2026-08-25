@@ -3,7 +3,7 @@
 The dynamic cohort is n=\fact{cohort-n} Windows PE samples from MalwareBazaar, stratified by year at
 seed \fact{cohort-seed} with its digest recorded, of which \fact{baseline-n} produced a usable
 sandbox report. Ground truth resolves a family signature to an in-repo MITRE \texttt{uses} fixture
-through an alias map with a CamelCase-split fallback. It is uncurated at technique level, so a
+through an alias map. It is uncurated at technique level, so a
 single binary of a family need not exhibit all the techniques catalogued for it. Absolute F1 values
 here are therefore not comparable to work using per-sample expert labels; the bias is approximately constant across arms,
 which makes within-study contrasts the defensible reading. The
@@ -11,26 +11,22 @@ withdrawn temporal-drift study's manifest survives as \fact{drift-n} dated sampl
 \fact{drift-cohorts} cohorts and \fact{drift-families} families, metadata only.
 
 Three properties of the sandbox bound what can be reproduced. It is CAPE~2.5, the Config and Payload Extraction sandbox, with one analysis machine and no Linux
-guest. An Executable and Linkable Format binary submitted there therefore joins the
-\fact{cape-backlog} tasks that are never scheduled. Reports are retained for days rather than indefinitely, with
+guest. An Executable and Linkable Format binary submitted there therefore joins a backlog that is never
+scheduled. Reports are retained for days rather than indefinitely, with
 \fact{cape-report-retention-sampled} of \fact{cape-report-retention-sampled} sampled older tasks
 reporting no report directory, so the local archive is the only copy and re-submitting the same
-samples is not a reproduction recipe on its own. And the instance rate-limits with a throttle response that is byte-identical to its refusal of an
-unauthorised request: \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases. A harness that
-reads that string as a verdict on its own permissions will therefore mistake a throttle for a
-missing one, as ours did briefly. A new submission is scheduled in \textasciitilde1 second
-and completes in \textasciitilde5.5 minutes, putting an n=\fact{cohort-n} cohort at roughly
-\fact{cohort-sandbox-hours} hours of sandbox time.
+samples is not a reproduction recipe on its own. And the instance rate-limits with a throttle response byte-identical to its refusal of an
+unauthorised request, so a harness that reads that response as a verdict on its own permissions
+mistakes a throttle for a missing permission, as ours did briefly.
 
 \subsection{Models, endpoints and serving configuration}\label{models-endpoints-and-serving-configuration}
 
 Table~\ref{tab:model} identifies the local model and inference engine by Secure Hash Algorithm
 (SHA-256) digest and by source commit. Naming the imatrix calibration dataset
 matters, because two IQ3 quantisations of the same model calibrated differently are not the same
-artefact. The engine commit was reconstructed rather than recorded: \texttt{llama-server\
--\/-version} prints \texttt{version:\ 0\ (unknown)} on a build tree that was never a git checkout,
-so the commit was recovered from a vendored depth-\setting{1} clone and proved against an identical
-\fact{engine-source-files}-file source list, one file differing only in line endings.
+artefact. The engine commit was reconstructed rather than recorded: the running binary reports no
+version, on a build tree that was never a git checkout, so the commit was recovered from a vendored
+clone and proved against an identical source list.
 
 \begin{table}[!htbp]
 \caption{The local model and inference engine, pinned by digest and commit, and the four measured host properties that bound what can be reproduced on it.}\label{tab:model}
@@ -40,15 +36,17 @@ so the commit was recovered from a vendored depth-\setting{1} clone and proved a
 model & \texttt{Qwen/Qwen3.6-35B-A3B}, quantised IQ3\_K\_R4 by Unsloth \\
 model file SHA-256 & \texttt{d0de70ef…c4ea}, computed locally and matching the HuggingFace etag \\
 HuggingFace revision & \texttt{cfd350fd…1f0d}, retrieved 2026-05-11 \\
-imatrix calibration & \texttt{\seqsplit{unsloth\_calibration\_Qwen3.6-35B-A3B.txt}}, \setting{510} entries over \setting{76} chunks \\
-architecture & hybrid recurrent (state-space-model keys + \texttt{\seqsplit{full\_attention\_interval=4}}), from the model file metadata \\
-engine & \texttt{ik\_llama.cpp} at \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}} carrying pull request \#\fact{engine-commit-pr} \\
+imatrix calibration & \texttt{\seqsplit{unsloth\_calibration\_Qwen3.6-35B-A3B.txt}} \\ architecture
+& hybrid recurrent, from the model file metadata \\ engine & \texttt{ik\_llama.cpp} at
+\texttt{eb570eb9…d26de} \\
 host & one RTX \fact{host-gpu}, \setting{31}\,GiB random-access memory, \setting{16} threads \\
 \midrule
 server growth & \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after one analyst pass, \fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes; anonymous and unreclaimable, so long paired runs restart the server between arms \\
 context & \fact{context-served} of the native \setting{262,144}, \fact{cpu-offload-blocks} blocks on the central processing unit; serving \setting{64}k instead does not lower the peak (\fact{llama-rss-64k-gb} against \fact{llama-rss-growth-gb} GB) \\
-generation rate & \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s, because the engine writes and erases a \fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred tokens at \textasciitilde39k context \\
-disassembly container & capped at \fact{ghidra-mem-limit-gb} GB, its Java virtual machine flag \texttt{-Xmx4g} bounding the heap only, measured resident set size \fact{ghidra-rss-gb} GB against that nominal \fact{ghidra-jvm-heap-gb} GB cap \\
+generation rate & \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s, because the engine writes and erases a \fact{recurrent-checkpoint-mib} MiB recurrent-state checkpoint every few hundred tokens \\
+disassembly container & capped at \fact{ghidra-mem-limit-gb} GB, its Java virtual machine flag
+bounding the heap only, measured resident set size \fact{ghidra-rss-gb} GB against that nominal
+\fact{ghidra-jvm-heap-gb} GB cap \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -96,9 +94,8 @@ Two serving details matter to anyone reproducing an arm. The local server's outp
 twice, in \texttt{max\_tokens} and again in \texttt{extra\_body}, because the client library renames
 it on the wire to a spelling \texttt{ik\_llama.cpp} does not read (Section~\ref{sec:failures}).
 Measured on this host, \fact{cap-requested} requested yields \fact{cap-ignored-tokens} generated
-with the renamed field alone, and \fact{cap-honoured-tokens} with both. And that server truncates silently, returning \texttt{finish\_reason:\ "stop"} at the cap and
-never \texttt{"length"}, so telemetry detecting truncation by finish reason reports zero however
-often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
+with the renamed field alone, and \fact{cap-honoured-tokens} with both. And that server truncates silently, reporting the same finish reason at the cap as on a completed
+answer, so telemetry detecting truncation by finish reason reports zero however often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
 requests per day at \fact{openrouter-burst-limit} per minute, and the first attempt exhausted it
 mid-flight, \fact{quota-calls-refused} of its calls returning HTTP~429, the Hypertext Transfer
 Protocol (HTTP) status for a rate limit. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a

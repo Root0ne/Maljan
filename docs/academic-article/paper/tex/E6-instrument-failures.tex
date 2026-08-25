@@ -45,17 +45,15 @@ From the second sample of a container's lifetime onwards, the decompilation, the
 strings, the call graph and the function hashes all described the first binary while the report
 named the current one. M1 and M3 are the same shape at neighbouring layers. M1 survived to first contact because the
 reverse-engineering server declares no optional parameter with a typed default, and it was the only
-server that client had ever talked to. M3 is error swallowing in the ordinary sense:
-\texttt{raise\_for\_status()} sees nothing wrong in a body reading \texttt{\{"error":\ "Failed\ to\
-load\ program\ from:\ ..."\}}. M4 composed two bounds each
+server that client had ever talked to. M3 is error swallowing in the ordinary sense: \texttt{raise\_for\_status()} sees nothing wrong in a
+body that says the load failed. M4 composed two bounds each
 correct alone, exceeding the step budget guaranteeing an attempt at the salvage and the salvage
 receiving a fresh copy of the full time budget.
 
-A fifth case at the same boundary was caught before it produced data. A request for a report the sandbox has since deleted is answered with HTTP~200 and a \fact{deleted-report-body-bytes}-byte body reading
-\texttt{\{"error":true,"error\_value":"Reports\ directory\ does\ not\ exist"\}}, on
-fifty-six of one hundred tasks. A fetcher that trusted the status code would have written those bodies into the archive, under the
-filename of the sample they were meant to describe. Ours did not. It verifies the report's own
-\texttt{target.file.sha256} against the identifier it asked for before writing, a four-line check
+A fifth case at the same boundary was caught before it produced data. A request for a report the sandbox has since deleted is answered with HTTP~200 and a short body
+saying the reports directory does not exist, on fifty-six of one hundred tasks. A fetcher that trusted the status code would have written those bodies into the archive, under the
+filename of the sample they were meant to describe. Ours did not. It verifies the report's own digest against the identifier it asked for before writing, a four-line
+check
 that exists only because M3 taught us the shape. We first
 recorded the consequence as a retention limit, that the reports had existed and expired. That was
 wrong. Asking the sandbox how long each analysis had taken produced a split with nothing between the modes.
@@ -110,10 +108,9 @@ the code states in its own comment. The judge is built with an \fact{judge-outpu
 ceiling, and the line that builds it says why: to bound the verdict generation so a degenerate
 decode cannot consume the full wall-clock timeout. The client library renames that parameter to the
 vendor's newer spelling when it serialises the request, and the local inference server does not read
-the newer spelling. It accepted the field, ignored it, and decoded without a ceiling: measured on
-one call, a \fact{unbounded-decode-prompt-tokens}-token prompt, \fact{unbounded-decode-tokens} tokens
-generated, still generating at \fact{unbounded-decode-rate} tokens per second when the caller's
-ten-minute wrapper gave up. The consequence is not a slow call but the four unreturned verdicts of
+the newer spelling. It accepted the field, ignored it, and decoded without a ceiling: measured on one call,
+\fact{unbounded-decode-tokens} tokens generated and still going when the caller's ten-minute wrapper
+gave up. The consequence is not a slow call but the four unreturned verdicts of
 Section~\ref{sec:cascade}, each of which left the pipeline on its text-fallback path.
 It was invisible because the configured value was correct at every level anything reads: the
 container passed it, the model object held it, and it survived every later rebinding. Only the

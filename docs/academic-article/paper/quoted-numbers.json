@@ -39,16 +39,6 @@
    "of": "the candidate-space reduction from tactic-first filtering (reattributed 2026-08-16: recorded against lekssays2025techniquerag, whose abstract does not contain it; the abstract of the H-TechniqueRAG follow-up states it)"
   },
   {
-   "value": "8634",
-   "cite": "llamacpp8634",
-   "of": "the llama.cpp issue number"
-  },
-  {
-   "value": "11976",
-   "cite": "vllm11976",
-   "of": "the vllm issue number"
-  },
-  {
    "value": "15.7",
    "cite": "evertz2026chasing",
    "of": "the share of the surveyed papers that discuss any of the nine pitfalls"

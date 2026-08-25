@@ -60,8 +60,8 @@ Two checks the survey does not include, both described in Section~\ref{sec:metho
 one level below what the nine pitfalls address. A scored component deriving its output from the same source as the labels is scoring a tautology, so
 this was tested component by component rather than assumed. Ground truth is the MITRE
 \texttt{malware uses attack-pattern} relationship set, so it comes from nothing this project
-produces. The Sigma layer reads its identifier from each rule's own \texttt{attack.tNNNN} tag, and
-those rules are community-authored, so Sigma shares ATT\&CK's vocabulary with the labels and not
+produces. The Sigma layer reads its identifier from each rule's own ATT\&CK tag, and those rules are
+community-authored, so Sigma shares ATT\&CK's vocabulary with the labels and not
 their source. The sandbox baseline, which would have mattered most, takes its identifiers from class
 attributes hand-written in each signature module and consults no family attribution anywhere, which
 is what makes it a valid baseline rather than a second view of the answer. And the retrieval corpora

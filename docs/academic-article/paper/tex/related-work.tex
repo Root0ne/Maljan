@@ -107,11 +107,8 @@ established. Under strict output-length constraints, performance ``might not sca
 with the model size'' \cite{sun2025length}. Across 6.5M instances, inference-time configuration
 moves performance ``both absolute and relative'' \cite{mizrahi2024multiprompt}. Extra test-time
 compute lets a smaller model overtake a much larger one
-\cite{snell2025testtime,hassid2024budget}, and lengthening reasoning
-steps improves accuracy \cite{jin2024steplength}. The same disagreement exists one layer down, where
-OpenAI-compatible servers differ over which token-limit parameter they honour, reported as issue
-\#8634 against \texttt{llama.cpp} \preprintcite{llamacpp8634} and issue \#11976 against
-\texttt{vLLM} \preprintcite{vllm11976}.
+\cite{snell2025testtime,hassid2024budget}, and lengthening reasoning steps improves accuracy
+\cite{jin2024steplength}.
 
 Every result of ours cited above was produced on one model on one machine, except where a statement
 concerns retrieval or the deterministic cascade and no model was involved at all.
