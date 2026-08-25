@@ -24,11 +24,9 @@ degraded user session that someone reports; it is a measurement that is wrong, l
 written down.
 
 This work reports the evaluation of one such pipeline, built for ATT\&CK mapping over static,
-dynamic and network evidence, and the failures of the instrument that produced that evaluation. The
-system fuses six deterministic evidence layers, three domain analysts running as
-reasoning-and-acting (ReAct) loops over
-tool interfaces, an LLM judge, a weighted corroboration cascade, two retrieval tiers and
-deterministic confidence gating; Figure~\ref{fig:architecture} shows it. It was built around four
+dynamic and network evidence, and the failures of the instrument that produced that evaluation.
+Figure~\ref{fig:architecture} shows the system and Section~\ref{the-pipeline-under-evaluation}
+describes it. It was built around four
 architectural claims: that multi-agent consensus over heterogeneous evidence channels beats a single
 reader, that a multi-layer corroboration cascade improves evidence quality, that two-tier
 attribution supplies useful priors, and that falsification before confidence disciplines unsupported
@@ -36,11 +34,9 @@ claims. Each claim was measured under the design of Section~\ref{sec:method}: an
 a simpler alternative, a stochastic-noise control, and intervals resampled at the level the
 observations are independent at.
 
-One of those four survives in part and three do not, and the component that carries the end-to-end
-result is the deterministic layer beneath all four. Section~\ref{sec:contributions} states each
+One of those four survives in part and three do not. Section~\ref{sec:contributions} states each
 finding with the effect the design that tested it could have detected.
 
 The study that established all of this was itself wrong several times over. Seven defects in the
 instrument produced plausible results rather than errors, and \fact{test-count} passing tests caught
-none of them. The largest was this paper's own statistics: correcting it widened the anchor interval
-\fact{baseline-f1-widening}-fold and turned two claims of equivalence into bounds.
+none of them.

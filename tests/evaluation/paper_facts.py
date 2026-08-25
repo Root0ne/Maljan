@@ -1232,6 +1232,36 @@ def provenance_facts() -> dict[str, Any]:
     return out
 
 
+def weight_sensitivity_facts() -> dict[str, Any]:
+    """How far the cascade's hand-chosen trust weights reach.
+
+    This result was stated in the related-work section as a range typed by hand,
+    which is the one body file the numerals gate exempts — its numbers are
+    quoted from cited literature, and ours had been parked among them. The range
+    it stated, 10.6 to 27.5%, is a superseded cohort's; the record says 12.4 to
+    28.9%. So the number went stale in the only place nothing was watching, which
+    is the drift this module exists to make impossible.
+    """
+    d = load("weight_sensitivity_six.json")
+    if d.get("schema") != "weight-sensitivity-six/v1":
+        raise FactError(f"weight_sensitivity_six.json has schema {d.get('schema')!r}")
+    perts = d["perturbations"]
+    if not perts:
+        raise FactError("weight_sensitivity_six.json lists no perturbations")
+    moved = {k: v["fraction_corroborated_changed"] for k, v in perts.items()}
+    # The claim is that the corroborated set does not move at all. If one ever
+    # does, the sentence is false and the build has to stop rather than round it.
+    if any(moved.values()):
+        raise FactError(f"a perturbation moved the corroborated set: {moved}")
+    top = [v["fraction_top_n_changed"] for v in perts.values()]
+    return {
+        "weight_perturbations": str(len(perts)),
+        "weight_sensitivity_n": str(d["n_samples"]),
+        "weight_topn_changed_min": pct(min(top)),
+        "weight_topn_changed_max": pct(max(top)),
+    }
+
+
 def cascade_constants_facts() -> dict[str, Any]:
     """The corroboration cascade's constants, read out of the shipped module.
 
@@ -1313,6 +1343,7 @@ BUILDERS = (
     power_facts,
     multiplicity_facts,
     provenance_facts,
+    weight_sensitivity_facts,
     cascade_constants_facts,
 )
 

@@ -44,16 +44,13 @@ identifies tactics, techniques and procedures in stripped malware binaries, usin
 retrieval-narrowed entry points and a function-level agent. We do
 not claim binary evidence as an input modality; that ground is theirs. Tool selection is known to degrade as the catalogue grows.
 LongFuncEval reports a 7 to 85\% performance drop as the tool count rises
-\preprintcite{kate2025longfunceval}, and cutting a catalogue from 46 to 19
-tools saves up to 70\% of execution time \cite{paramanayakam2025lessismore}. Neither result covers a
-reverse-engineering catalogue whose tools overlap in what they do. Running the model locally for confidentiality is likewise
-established. REx86 \cite{lea2025rex86} fine-tunes eight open-weight models for x86 reverse
-engineering, validated with a 43-participant user study, because ``cloud-hosted, closed-weight
-models pose privacy and security risks and cannot be used in closed-network facilities''.
+\preprintcite{kate2025longfunceval}, and narrowing a catalogue recovers execution time \cite{paramanayakam2025lessismore}. Neither result
+covers a reverse-engineering catalogue whose tools overlap in what they do. Running the model locally for confidentiality is likewise
+established. REx86 \cite{lea2025rex86} fine-tunes eight open-weight models for x86 reverse engineering because
+``cloud-hosted, closed-weight models pose privacy and security risks and cannot be used in
+closed-network facilities''.
 
-Multi-agent debate is a standard pattern, including in security. PhishDebate
-\cite{li2025phishdebate} assigns four specialised agents to distinct views of a webpage and reports
-98.2\% recall. Two recent results change how such claims must be read. Holding the reasoning token
+Multi-agent debate is a standard pattern, including in security. PhishDebate \cite{li2025phishdebate} assigns four specialised agents to distinct views of a webpage. Two recent results change how such claims must be read. Holding the reasoning token
 budget constant, Tran and Kiela find single agents consistently match or beat multi-agent systems on
 multi-hop reasoning, with an argument from the Data Processing Inequality and a crossover appearing
 only at degradation 0.7 \preprintcite{tran2026single}. Bertalanič and Fortuna
@@ -65,10 +62,8 @@ context as the exception. That exception is our setting: a 600-import binary, a 
 network capture are three different channels rather than one context divided. Our equal-budget
 ablation asks whether splitting by channel survives a control that splitting by context does not. Weighting evidence by how far its source is trusted, and
 discounting sources that are not independent, is Dempster-Shafer theory and is decades old. Our
-cascade is an instance of it with hand-chosen constants. We perturbed those constants five ways,
-including inverting the most- and least-trusted layers: the top-10 ranking changed on
-10.6 to 27.5\% of samples and the corroborated set changed on none. The corroborated set does not
-move because it depends on how many layers agree, not on how far each is trusted.
+cascade is an instance of it with hand-chosen constants, and Section~\ref{sec:cascade} measures how
+far those constants reach.
 
 This work's methodological results belong to an established critique tradition. Arp et al.'s
 \emph{Dos and Don'ts} identified ten pitfalls in machine learning for security. Its direct
@@ -119,6 +114,4 @@ OpenAI-compatible servers differ over which token-limit parameter they honour, d
 \preprintcite{vllm11976}.
 
 Every result of ours cited above was produced on one model on one machine, except where a statement
-concerns retrieval or the deterministic cascade and no model was involved at all. That matters here
-because parameter size was the only statistically significant predictor of F1 in the nearest
-external study \preprintcite{ryan2026attck}.
+concerns retrieval or the deterministic cascade and no model was involved at all.

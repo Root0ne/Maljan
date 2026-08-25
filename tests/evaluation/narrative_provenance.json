@@ -77,15 +77,6 @@
    "provenance": "configuration-constant",
    "note": "Not an observation but a setting, and readable from the source. Registered here rather than derived because a fact builder that reads a settings default would report what the code says rather than what the server received, which is the entire defect."
   },
-  "paged_out_working_set": {
-   "value": "2.3 GB",
-   "claim": "of the model server's own address space paged out when the host exhausted its swap file",
-   "observed": "2026-08-12",
-   "record_ref": "eval_sink_hint_ablation.py and analyse_sink_hint_ablation.py module docstrings; findings-log.md §3.26",
-   "artifact": null,
-   "provenance": "unretained-session",
-   "note": "Per-sample host state was not retained. This is the gap §4.5 reports against itself: the retention rule was written about the object under study, and the environment the study runs in is also part of the instrument."
-  },
   "halted_arms": {
    "value": "10 of 24",
    "claim": "where the first attempt at the paired ablation stopped when the host exhausted its swap file",
@@ -285,7 +276,7 @@
    "value": "162",
    "claim": "the fastest generation rate observed across requests, tokens per second",
    "observed": "2026-08-12",
-   "record_ref": "E5 §The host",
+   "record_ref": "E5 §The host; docs/academic-article/findings-log.md, the M4 entry",
    "artifact": null,
    "provenance": "unretained-session"
   },
@@ -293,7 +284,7 @@
    "value": "20",
    "claim": "the slowest, on the same host and model",
    "observed": "2026-08-12",
-   "record_ref": "E5 §The host",
+   "record_ref": "E5 §The host; docs/academic-article/findings-log.md, the M4 entry",
    "artifact": null,
    "provenance": "unretained-session"
   },
@@ -492,10 +483,10 @@
    "value": "2.3",
    "claim": "how much of the model server's address space was on disk when a paired study ran without headroom",
    "observed": "2026-08-11",
-   "record_ref": "docs/academic-article/findings-log.md, the memory-pressure entry; logs/night-guard.log",
+   "record_ref": "docs/academic-article/findings-log.md, the memory-pressure entry; logs/night-guard.log; eval_sink_hint_ablation.py and analyse_sink_hint_ablation.py module docstrings; findings-log.md §3.26",
    "artifact": null,
    "provenance": "unretained-session",
-   "note": "Read from the process's own VmSwap during the run. Nothing sampled it on a schedule, so there is no series to recompute from — the number is the one reading that was taken, and the reason the appendix tells a reader to leave the headroom."
+   "note": "Read from the process's own VmSwap during the run. Nothing sampled it on a schedule, so there is no series to recompute from — the number is the one reading that was taken, and the reason the appendix tells a reader to leave the headroom. Per-sample host state was not retained, which is the gap the limitations report against themselves: the retention rule was written about the object under study, and the environment the study runs in is also part of the instrument."
   },
   "empty_bundles_local": {
    "value": "6",
@@ -626,22 +617,6 @@
   "m4_fix_after_tids": {
    "value": "5",
    "claim": "and after",
-   "observed": "2026-08-12",
-   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
-   "artifact": null,
-   "provenance": "unretained-session"
-  },
-  "decode_rate_fast": {
-   "value": "162",
-   "claim": "the fastest generation rate the server reported on this sample, tokens/s",
-   "observed": "2026-08-12",
-   "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
-   "artifact": null,
-   "provenance": "unretained-session"
-  },
-  "decode_rate_slow": {
-   "value": "20",
-   "claim": "and the slowest, on the same hybrid recurrent architecture",
    "observed": "2026-08-12",
    "record_ref": "docs/academic-article/findings-log.md, the M4 entry",
    "artifact": null,

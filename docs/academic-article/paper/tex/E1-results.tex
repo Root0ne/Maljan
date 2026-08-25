@@ -54,13 +54,12 @@ reported them complete, the fifth boundary case of Section~\ref{sec:failures}.
 \label{fig:arms}
 \end{figure}
 
-Figure~\ref{fig:arms} shows those three arms, and their intervals overlap. The equal-budget arms of Section~\ref{sec:consensus} are a different population, and
-Figure~\ref{fig:fixture-arms} draws them on a separate axis for that reason. They run on
-\fact{fixture-clusters} synthesised fixtures scored against per-sample truth, and no baseline is
-definable for those at all: a regular expression over the dictionary that generated the evidence
-scores \fact{fixture-extractor-f1} on all \fact{fixture-extractor-n} of them by construction. Drawn together on one scale, a no-LLM baseline
-near \fact{baseline-f1} beneath arms near \fact{consensus-single-f1} reads as a large gain for the
-pipeline, and it is not one.
+The three arms' intervals overlap (Figure~\ref{fig:arms}). For the equal-budget arms of
+Section~\ref{sec:consensus} no baseline is definable at all: a regular expression over the
+dictionary that generated their evidence scores \fact{fixture-extractor-f1} on all
+\fact{fixture-extractor-n} fixtures by construction, which is why those arms are drawn on their own
+axis. Put on one scale with these, a no-LLM baseline near \fact{baseline-f1} beneath arms near
+\fact{consensus-single-f1} would read as a large gain for the pipeline, and it is not one.
 
 \subsection{The deterministic technique assigner}\label{sec:assignment}
 
@@ -94,14 +93,11 @@ g = \operatorname{mean}\bigl(s_1 \mid \text{correct}\bigr)
   - \operatorname{mean}\bigl(s_1 \mid \text{wrong}\bigr)
 \end{equation}
 Ranking quality and gate quality are separable axes and no backend wins both. The semantic index
-ranks better on both corpora, \fact{mapping-tram2-semantic-top3} against
-\fact{mapping-tram2-tfidf-top3} top-3 on TRAM2 and \fact{mapping-annoctr-semantic-top3} against
-\fact{mapping-annoctr-tfidf-top3} on AnnoCTR, while its scores barely separate a correct pick from a
-wrong one, at gate \fact{mapping-tram2-semantic-gate} and \fact{mapping-annoctr-semantic-gate},
+ranks better on both corpora while its scores barely separate a correct pick from a wrong one,
 because everything it retrieves sits near the same similarity. The lexical index ranks worse and
 gates cleanly, scoring near zero for unrelated evidence. Composing the per-axis winners matches the
-semantic index's ranking and produces the cleanest gate of the three on both corpora,
-\fact{mapping-tram2-hybrid-gate} and \fact{mapping-annoctr-hybrid-gate}. That composition is the
+semantic index's ranking and produces the cleanest gate of the three on both corpora. That
+composition is the
 shipped default, and the gate is what makes the assigner safe to leave authoritative: an identifier
 it cannot align is refused, not guessed.
 
@@ -127,10 +123,9 @@ is preserve \fact{stix-objects-preserved} objects that rejection would discard.
 
 \subsection{Multi-agent consensus at equal budget}\label{sec:consensus}
 
-Three arms at an equal total token budget, including a stochastic-noise control in which one analyst
-receives irrelevant evidence, run first on the fixtures and then again on real binaries one per
-family so that every cluster holds a single observation (Table~\ref{tab:results-3},
-Figure~\ref{fig:fixture-arms}).
+Three arms at the equal budget of Section~\ref{experimental-design} run first on the fixtures and
+then again on real binaries, one per family so that every cluster holds a single observation
+(Table~\ref{tab:results-3}, Figure~\ref{fig:fixture-arms}).
 
 \begin{figure}
 \centering
@@ -163,9 +158,8 @@ On the fixtures neither contrast is readable. The negotiated arm returns \fact{c
 \fact{consensus-token-ratio}$\times$ the tokens. That is two orders of magnitude below the design's
 \fact{mde-consensus-negotiated}. The noise control moves \fact{consensus-noise-delta},
 \fact{consensus-noise-ci}, with all \fact{fixture-clusters} samples in the same direction, also
-below its own \fact{mde-consensus-noise}. Its exact permutation test returns p =
-\fact{consensus-noise-p-exact}, which is the smallest value available: at \fact{fixture-clusters}
-clusters the two-sided sign-flip test floors at \fact{fixture-signflip-floor}. An earlier draft read that
+below its own \fact{mde-consensus-noise}. Its exact permutation test returns p = \fact{consensus-noise-p-exact}, the floor of
+Equation~\eqref{eq:floor} at \fact{fixture-clusters} clusters. An earlier draft read that
 separation as proof of sensitivity; what it shows is that all samples moved the same way.
 
 The real-sample replication is where the design can see, the sign-flip floor at
@@ -190,9 +184,9 @@ binaries; it can rank the arms the other way round.
 
 \subsection{Model scale, quantisation and the reasoning flag}\label{sec:scale}
 
-Table~\ref{tab:results-4} reports the local model against a \fact{param-ratio}$\times$ larger
-frontier model on the same fixtures at the same \fact{consensus-budget}-token output budget, and
-against the same weights hosted at full precision with and without the reasoning flag.
+Table~\ref{tab:results-4} reports three comparisons at the same \fact{consensus-budget}-token output
+budget: a \fact{param-ratio}$\times$ larger frontier model, and the same weights hosted at full
+precision with and without the reasoning flag.
 
 \begin{table}[!htbp]
 \caption{Model scale, quantisation and the reasoning flag, all paired against the local arm on the same \fact{fixture-clusters} fixtures and repeats. The local arm is Qwen3.6-35B-A3B at IQ3\_K\_R4, the frontier arm Nemotron-3-Super-120B-A12B, and the vendor-hosted arms the same Qwen weights at full precision.}\label{tab:results-4}
@@ -244,8 +238,7 @@ parameter count. Two qualifications belong with it.
 The comparisons are post-hoc, run after the confound was discovered, and corrected as a family of
 \fact{family-posthoc-m} their q-values are \fact{reasoning-flag-vendor35b-q-exact} and
 \fact{reasoning-flag-third-q-exact}; and like every comparison on this corpus they sit at the exact
-test's floor of \fact{fixture-signflip-floor}. On its shortest answer the frontier arm spent
-\fact{reasoning-one-token-thinking} of \fact{reasoning-one-token-output} output tokens thinking.
+test's floor of \fact{fixture-signflip-floor}.
 
 \subsection{Retrieval, confidence and firing rate before effect}\label{sec:mechanisms}
 
@@ -311,8 +304,10 @@ distinguish from noise.
 Whether any of these mechanisms can be ablated at all depends on how often it engages, which
 Table~\ref{tab:firing} and Figure~\ref{fig:firing} report. Three of the four mechanisms the
 architecture was built around engage on almost nothing, so an ablation of any would return a null
-describing the cases where the mechanism never ran. Only the sink-reachability hint clears a rate at
-which an ablation carries information, which is why it is the one we ablated.
+describing the cases where the mechanism never ran. The cap's preconditions explain its rate: it
+applies to three technique families only when the sole contributing layer is static, and
+\fact{cap-gated-yara-only-share} of those claims are YARA-only. Only the sink-reachability hint
+clears a rate at which an ablation carries information, which is why it is the one we ablated.
 
 \begin{table}[!htbp]
 \caption{Firing rate before effect, and the one ablation it justified. Units differ per row of the lower block and are named in the row.}\label{tab:firing}
@@ -350,11 +345,9 @@ lost to degenerate decode, where an arm emitted \fact{degenerate-claims-min} to
 with the host state never recorded. And \fact{sink-excluded-incomplete} were incomplete at the
 \setting{630}\,s bound, which is a genuine outcome that still costs the pair. A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation here can detect. Quoting
 \fact{sink-delta-tids} \fact{sink-ci-tids} without it would claim a precision the instrument does
-not have. The unattributable pairs are this paper's own retention rule turned against it. The run halted at
-\fact{halted-arms} arms, which died under host memory pressure with \fact{paged-out-working-set} of
-the model server's address space paged out. Section~\ref{sec:limitations} reports that as a threat
-in its own right. We had retained per-sample
-outputs; what went unrecorded was the environment. Two further arms carried a
+not have. The unattributable pairs are this paper's own retention rule turned against it: we had retained
+per-sample outputs, and what went unrecorded was the host state the arms died under
+(Section~\ref{sec:limitations}). Two further arms carried a
 \texttt{Connection\ error} from a restart race, meaning the measurement never happened, and were
 re-run, contributing a \fact{sink-recovered-pair-delta} against the hint; a third was the timeout,
 which is an outcome, and deleting an outcome one dislikes is selection rather than repair.
@@ -363,15 +356,14 @@ Running the ablation also surfaced M4 of Section~\ref{sec:failures}, a productio
 \fact{test-count} passing tests did not: on any binary rich enough to exhaust the
 \fact{react-step-budget}-step ReAct budget the analyst returned zero techniques. The fix was verified on the same sample, which went from \fact{m4-fix-before-seconds}\,s to
 \fact{m4-fix-after-seconds}\,s and from \fact{m4-fix-before-tids} to \fact{m4-fix-after-tids}
-technique identifiers. It is partial. One sample still exceeds the bound, and generation on this
-hybrid recurrent architecture varies from \fact{decode-rate-fast} to \fact{decode-rate-slow}
-tokens/s, so bounding the input does not rescue a case where the tokens arrive eight times slower
-than assumed.
+technique identifiers. It is partial. One sample still exceeds the bound, and generation on this hybrid recurrent
+architecture varies from \fact{generation-rate-high} to \fact{generation-rate-low} tokens/s
+(Table~\ref{tab:model}), so bounding the input does not rescue a case where the tokens arrive eight
+times slower than the budget assumed.
 
 \subsection{The reach of the corroboration cascade}\label{sec:cascade}
 
-The multi-layer corroboration set is the design's central claim about evidence quality. We remove
-one Layer-0 source at a time and compare the bundle the analyst receives against the one produced
+We remove one Layer-0 source at a time and compare the bundle the analyst receives against the one produced
 with all of them, under two conditions differing in whether the removed source solely owned its
 techniques. Under \emph{disjoint}, where its techniques disappear because nothing else
 claims them, the verdict changes in \fact{cascade-disjoint-changed} of \fact{cascade-disjoint-arms}
@@ -379,9 +371,13 @@ arms at Jaccard \fact{cascade-disjoint-jaccard} {[}\fact{cascade-disjoint-jaccar
 \fact{cascade-disjoint-jaccard-max}{]}. Under \emph{overlap}, where the techniques survive under a
 partner source but their corroboration changes, it changes in \fact{cascade-overlap-changed} of
 \fact{cascade-overlap-arms} at Jaccard \fact{cascade-overlap-jaccard}
-{[}\fact{cascade-overlap-jaccard-min}, \fact{cascade-overlap-jaccard-max}{]}. Removing a technique
-removes it from the bundle; destroying the cross-domain agreement behind it, which is what the
-cascade exists to compute, leaves the bundle byte-identical.
+{[}\fact{cascade-overlap-jaccard-min}, \fact{cascade-overlap-jaccard-max}{]}. Removing a technique removes it from the bundle; destroying the cross-domain agreement behind it,
+which is what the cascade exists to compute, leaves the bundle byte-identical. Perturbing the trust
+weights reaches no further. Across \fact{weight-perturbations} perturbations on
+\fact{weight-sensitivity-n} samples, one of which inverts the most- and least-trusted layers, the
+top-10 ranking changed on \fact{weight-topn-changed-min} to \fact{weight-topn-changed-max} of
+samples and the corroborated set changed on none, because corroboration depends on how many layers
+agree rather than on how far each is trusted.
 
 The reason is not the one we first wrote, and the correction is M5 of Section~\ref{sec:failures}.
 The reconciliation step does two things. It drops every \texttt{attack-pattern} whose technique
@@ -393,8 +389,27 @@ the cascade did not already hold: it emits attack-patterns, but never one that i
 conditions therefore follow from set arithmetic rather than from restraint. The Jaccard value was the signal we
 missed, for the reason M5 gives.
 
-That leaves two pipelines the evidence cannot tell apart: a judge whose output is unusable and
-wholly replaced, and one that reproduces the cascade's set exactly. Intercepting the reconciliation
+This ablation replaces an earlier version that reported the verdict unchanged in
+\fact{weights-unchanged-superseded} of \fact{weights-arms-superseded} cases. That version carried
+two defects. The sources it varied excluded the Sigma layer, which fires on \fact{sigma-fires} of
+\fact{sigma-fires-of} samples at weight \fact{sigma-weight}, above every static layer it did vary.
+And at five techniques over six sources, the round-robin assignment left one source with nothing to
+remove, so its arm matched the baseline by arithmetic rather than by result. The re-run uses fixtures of
+\fact{weights-fixture-tids-min} to \fact{weights-fixture-tids-max} techniques so every source carries
+at least three claims, includes Sigma, and adds a corroborated pair that does not involve YARA; the
+null survives at \fact{cascade-overlap-arms} arms rather than \fact{weights-arms-superseded}. One
+pre-registered prediction resolved in both directions: removing the tool-artifact layer should
+change nothing, because it emits on YARA's cascade domain and cannot contribute corroboration, and
+under overlap that is right at \fact{cascade-overlap-fixtures-changed} of
+\fact{cascade-overlap-fixtures} while under disjoint it is wrong at
+\fact{cascade-disjoint-fixtures-changed} of \fact{cascade-disjoint-fixtures}, because there the
+source solely owns its techniques. The prediction holds precisely where corroboration is the only
+thing varying.
+
+\subsection{What the judge contributes}\label{sec:judge}
+
+The set arithmetic leaves two pipelines the evidence cannot tell apart: a judge whose output is
+unusable and wholly replaced, and one that reproduces the cascade's set exactly. Intercepting the reconciliation
 step and recording what the model produced before the deterministic set was merged in settles it
 (Table~\ref{tab:judge}): three of the four calls produced nothing nameable, and the fourth named
 only techniques the cascade already held. The bundle carries the judge's name and the
@@ -461,20 +476,3 @@ works, and more influence on the path where it fails: \fact{judge-capped-own-ids
 \fact{judge-capped-bundle} techniques when reconciliation runs, against \fact{fallback-only-capped}
 of \fact{fallback-bundle-total} when it does not. The architecture suppresses the model's
 contribution precisely when the model is functioning, and admits it precisely when it is not.
-
-This replaces an earlier version that reported the verdict unchanged in
-\fact{weights-unchanged-superseded} of \fact{weights-arms-superseded} cases. That version carried
-two defects. The sources it varied excluded the Sigma layer, which fires on \fact{sigma-fires} of
-\fact{sigma-fires-of} samples at weight \fact{sigma-weight}, above every static layer it did vary.
-And at five techniques over six sources, the round-robin assignment left one source with nothing to
-remove, so its arm matched the baseline by arithmetic rather than by result. The re-run uses fixtures of
-\fact{weights-fixture-tids-min} to \fact{weights-fixture-tids-max} techniques so every source carries
-at least three claims, includes Sigma, and adds a corroborated pair that does not involve YARA; the
-null survives at \fact{cascade-overlap-arms} arms rather than \fact{weights-arms-superseded}. One
-pre-registered prediction resolved in both directions: removing the tool-artifact layer should
-change nothing, because it emits on YARA's cascade domain and cannot contribute corroboration, and
-under overlap that is right at \fact{cascade-overlap-fixtures-changed} of
-\fact{cascade-overlap-fixtures} while under disjoint it is wrong at
-\fact{cascade-disjoint-fixtures-changed} of \fact{cascade-disjoint-fixtures}, because there the
-source solely owns its techniques. The prediction holds precisely where corroboration is the only
-thing varying.

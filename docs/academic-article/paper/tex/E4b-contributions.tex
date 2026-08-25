@@ -1,16 +1,14 @@
 \subsection{Motivation and contributions}
 \label{sec:contributions}
 
-Two observations motivated this work. First, a component of an LLM analysis pipeline is ordinarily justified by the mechanism it
-implements rather than by a measurement. A mechanism that is sound in isolation can contribute
-nothing once wired to real inputs. Establishing which of the two holds needs an equal-budget
-comparison against a simpler alternative, and a baseline containing no language model at all. Second, such a comparison is only as trustworthy as the instrument producing it, and in a
-pipeline assembled from several servers that instrument fails without announcing itself. The
-contributions are therefore organised around the evaluation rather than the architecture, and each
-is a measurement or a mechanism rather than a proposal.
+A component of an LLM analysis pipeline is ordinarily justified by the mechanism it implements
+rather than by a measurement, and a mechanism that is sound in isolation can contribute nothing once
+wired to real inputs. Establishing which of the two holds needs an equal-budget comparison against a
+simpler alternative, and a baseline containing no language model at all. The contributions are
+therefore organised around the evaluation rather than the architecture, and each is a measurement or
+a mechanism rather than a proposal.
 
-\emph{(i) A deterministic technique assigner, measured on two external corpora.} The model never
-emits a technique identifier; a retrieval index assigns it. Ranking quality and gate quality turn
+\emph{(i) A deterministic technique assigner, measured on two external corpora.} Ranking quality and gate quality turn
 out to be separable axes on which no single backend wins, and composing the per-axis winners gives
 the cleanest identifier gate of the three on both TRAM2 and AnnoCTR, with all three orderings
 replicating across corpora annotated by different people for different tasks
@@ -18,27 +16,23 @@ replicating across corpora annotated by different people for different tasks
 
 \emph{(ii) What decomposition is worth, and what it is not worth.} On
 \fact{cape-consensus-families} real samples, decomposing the analysis into several model calls beats
-a single judge by \fact{cape-negotiated-delta} F1 \fact{cape-negotiated-ci}. A stochastic-noise
-control gains the same \fact{cape-noise-delta}, and the contrast that isolates the negotiation
-returns \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so what pays is
-the calls the arms share rather than the argument between them. This is the difference between
-knowing that a design works and knowing why.
+a single judge by \fact{cape-negotiated-delta} F1. A stochastic-noise control gains the same
+\fact{cape-noise-delta}, and the contrast that isolates the negotiation returns
+\fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so what pays is the calls
+the arms share rather than the argument between them.
 
-\emph{(iii) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} The sandbox
-the pipeline is built on maps its own signature hits to technique identifiers deterministically, and
-scored per sample against family-level MITRE ground truth it reaches F1 \fact{baseline-f1}
+\emph{(iii) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} Scored per sample against family-level MITRE ground truth, the signature engine beneath the pipeline
+reaches F1 \fact{baseline-f1}
 \fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the samples where both arms ran, the full pipeline is \fact{h2h-delta} F1 above it \fact{h2h-ci},
 at a resolution of \fact{h2h-mde}.
 
 \emph{(iv) Three architectural claims that did not survive, each with the resolution of the design
 that tested it.} A weighted corroboration cascade, two-tier attribution and a deterministic
-confidence gate were each measured, and each returned a negative or a near-null result. A null without its minimum detectable effect is unreadable, so every one is stated with the effect
-its design could have detected at 80\% power. The configuration axis is where the effects are. A
-decoding flag is worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, more
-than any architecture or parameter count we measured. An arm can also be labelled matched while
-running the opposite configuration, because one provider accepts the parameter without acting on it.
+confidence gate were each measured, and each returned a negative or a near-null result, stated with
+the effect its design could have detected (Section~\ref{statistical-analysis}). The configuration
+axis is where the effects are: a decoding flag outweighs every architecture and every parameter
+count we measured, and an arm can be labelled matched while running the opposite configuration,
+because one provider accepts the parameter without acting on it.
 
 \emph{(v) Seven instrument failures, with the layer each occurred at and what actually found it.}
-Four crossed a boundary with another server and fall inside a described class of silent failure.
-Three crossed no boundary at all, and share a different shape: a measurement's cause was assigned
-rather than measured.
+Each is a case where a measurement's cause was assigned rather than measured.

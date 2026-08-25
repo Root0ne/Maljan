@@ -3,9 +3,9 @@
 
 This section is organised around the nine pitfalls of \emph{Chasing Shadows}
 \cite{evertz2026chasing}, with two checks added that the survey does not have and that both caught
-errors here. It begins with damage rather than with hazards: one study is withdrawn, the
-\fact{drift-n}-sample temporal-drift analysis of Section~\ref{sec:detector}, which was completed and
-had entered our claim ledger as a novel result, and it is not restated anywhere in this paper.
+errors here. It begins with damage rather than with hazards. The withdrawn drift study of
+Section~\ref{sec:detector} had entered our claim ledger as a novel result, and it is not restated
+anywhere in this paper.
 Table~\ref{tab:pitfalls} gives our exposure to each pitfall with the basis for the verdict.
 
 \begin{table}[!htbp]
@@ -44,9 +44,8 @@ P8 is the pitfall this work is most exposed to and the one where the evidence ha
 \fact{frontier-params-b}B reasoning model has now run to completion against the local model and did
 not separate from it (Section~\ref{sec:scale}); a
 \fact{series-param-span}$\times$ parameter advantage producing no measurable difference is evidence
-against the pitfall's usual worry rather than merely an absence of evidence for it. That null is
-confounded by the reasoning flag, which cannot be removed on that endpoint and is worth
-\fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1 on two separate models.
+against the pitfall's usual worry rather than merely an absence of evidence for it. That null is confounded by the reasoning flag, which cannot be removed on that endpoint and
+outweighs the size difference it is confounded with (Section~\ref{sec:scale}).
 Quantisation is no longer unmeasured under P8 either (Section~\ref{sec:scale}). Two serving stacks
 differ alongside the precision, so the bound is on the deployment rather than on quantisation alone. What P8 cannot close is the size series, and the reason is measured rather than budgetary. Testing a
 parameter-size trend needs three arms at three sizes, all on the same side of the flag that
@@ -101,9 +100,8 @@ pipeline or because of the host cannot be determined, because we recorded the pi
 not the host's state, so the affected arms are reported as \texttt{unattributable} and the
 ablation as incomplete rather than as a null. A wall-clock bound is therefore a host-dependent measurement presented as a system property. Any
 result here that turns on a timeout is a statement about this pipeline, on this machine, under
-whatever load it had at the time. The screen we added can only be applied forward: arms already
-collected without host state cannot be re-screened. That is the same structural problem that
-withdrew the drift study, appearing in a new variable.
+whatever load it had at the time. The screen we added can only be applied forward: arms already collected without host state cannot be
+re-screened.
 
 Three objections remain that the work does not close. The first is that the judge findings rest on
 four calls, the intercept requiring a live judge call per observation. On the working path the finding is deductive rather than statistical. The reconciliation step
@@ -116,9 +114,8 @@ settle it is the same intercept over the \fact{baseline-n}-sample cohort. The se
 already had reason to distrust. The prospective test would report output cardinality beside every
 batch for a year and count how often it is first to a defect. That is the experiment, and we have
 not run it. The third is
-that seven defects in one's own code is a post-mortem rather than a result. We claim the setting and
-the price rather than the category, every mechanism having been counter-searched in an adjacent
-field's vocabulary by a search that demoted more than it confirmed.
+that seven defects in one's own code is a post-mortem rather than a result. We claim the setting and the price rather than the category, every mechanism having been
+counter-searched in an adjacent field's vocabulary (Section~\ref{experimental-design}).
 
 All three are blocked by the same thing, a host on which the model server does not fit alongside
 anything else, so a long run walks the host into its own memory guard. Cycling the server from the

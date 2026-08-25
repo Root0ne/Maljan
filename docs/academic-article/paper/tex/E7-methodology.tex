@@ -3,10 +3,9 @@
 The dynamic cohort is n=\fact{cohort-n} Windows PE samples from MalwareBazaar, stratified by year at
 seed \fact{cohort-seed} with its digest recorded, of which \fact{baseline-n} produced a usable
 sandbox report. Ground truth resolves a family signature to an in-repo MITRE \texttt{uses} fixture
-through an alias map with a CamelCase-split fallback. It is family-level and uncurated at technique
-level, so a single binary of a family need not exhibit all the techniques catalogued for that family
-and absolute recall carries a structural ceiling. Absolute F1 values here are therefore not
-comparable to work using per-sample expert labels; the bias is approximately constant across arms,
+through an alias map with a CamelCase-split fallback. It is uncurated at technique level, so a
+single binary of a family need not exhibit all the techniques catalogued for it. Absolute F1 values
+here are therefore not comparable to work using per-sample expert labels; the bias is approximately constant across arms,
 which makes within-study contrasts the defensible reading. The
 withdrawn temporal-drift study's manifest survives as \fact{drift-n} dated samples over
 \fact{drift-cohorts} cohorts and \fact{drift-families} families, metadata only.
@@ -67,12 +66,11 @@ measurement-neutral.
 Table~\ref{tab:endpoints} lists the endpoints each arm ran against. One parameter on it decides more
 than the model names do. \texttt{enable\_thinking} is honoured on DashScope and ignored on
 OpenRouter. Ignored is the exact word: the request is accepted, the value is recorded in the result
-file, and nothing acts on it. Re-running that arm with the flag set returned a
-\fact{arm-default-nothink-reasoning} reasoning share, against \fact{arm-default-reasoning} without
-it, while the same request on DashScope produces \fact{arm-qwen35ba3b-nothink-reasoning}. The flag is worth \fact{reasoning-flag-worth-low} to
-\fact{reasoning-flag-worth-high} F1 on the two models where it can be set, so an arm can be labelled
-matched while running the opposite configuration, and arm selection therefore keys on the measured
-reasoning share of a completed arm rather than on the flag requested.
+file, and nothing acts on it, so the arm that asked for reasoning and the arm that did not spend the
+same share of their output on it (Section~\ref{sec:scale}). The flag outweighs the differences the
+arms were built to compare, so an arm can be labelled matched while running the opposite
+configuration, and arm selection therefore keys on the measured reasoning share of a completed arm
+rather than on the flag requested.
 
 \begin{table}[!htbp]
 \caption{The inference endpoints each arm ran against, with the configuration measured rather than the configuration requested.}\label{tab:endpoints}
@@ -94,16 +92,16 @@ larger, hosted & DashScope & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenpl
 \end{tabular}
 \end{table}
 
-Two serving details matter to anyone reproducing an arm. The local server's output cap must be sent twice. \texttt{ChatOpenAI(max\_tokens=N)} reaches the
-wire as \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read, so the cap
-must also travel in \texttt{extra\_body}. Measured on this host, \fact{cap-requested} requested
-yields \fact{cap-ignored-tokens} generated with the renamed field alone, and
-\fact{cap-honoured-tokens} with both. And that server truncates silently, returning \texttt{finish\_reason:\ "stop"} at the cap and
+Two serving details matter to anyone reproducing an arm. The local server's output cap must be sent
+twice, in \texttt{max\_tokens} and again in \texttt{extra\_body}, because the client library renames
+it on the wire to a spelling \texttt{ik\_llama.cpp} does not read (Section~\ref{sec:failures}).
+Measured on this host, \fact{cap-requested} requested yields \fact{cap-ignored-tokens} generated
+with the renamed field alone, and \fact{cap-honoured-tokens} with both. And that server truncates silently, returning \texttt{finish\_reason:\ "stop"} at the cap and
 never \texttt{"length"}, so telemetry detecting truncation by finish reason reports zero however
 often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
 requests per day at \fact{openrouter-burst-limit} per minute, and the first attempt exhausted it
-mid-flight with \fact{quota-calls-landed} calls landing and \fact{quota-calls-refused} returning
-HTTP~429, the Hypertext Transfer Protocol (HTTP) status for a rate limit. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a
+mid-flight, \fact{quota-calls-refused} of its calls returning HTTP~429, the Hypertext Transfer
+Protocol (HTTP) status for a rate limit. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a
 full-pipeline arm at roughly \fact{requests-per-analysis} model requests per analysis is not
 reachable on that tier at all.
 
@@ -122,32 +120,22 @@ corroboration cascade's set and restores what the judge omitted.
 Arms are compared at an equal total token budget: a multi-agent arm making N calls receives B/N per
 call against a single arm's one call of B, so a win cannot come from spending more. The design
 follows Bertalanič and Fortuna \cite{bertalanic2026consensus}, including a stochastic-noise control
-in which one analyst receives evidence irrelevant to the sample. That control establishes that the
-harness can detect a difference at all: in the fixture consensus study the noise arm separated
-(\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1})
-while the treatment did not, which distinguishes no effect from no sensitivity. For a reasoning model the budget must cover the reasoning as well. Our frontier endpoint spent
+in which one analyst receives evidence irrelevant to the sample. That control is what distinguishes
+no effect from no sensitivity: an arm fed evidence about the wrong sample should separate, and a
+design in which it does not cannot be read as having found nothing. For a reasoning model the budget must cover the reasoning as well. Our frontier endpoint spent
 \fact{arm-default-reasoning} of its output on reasoning across \fact{arm-default-n} real prompts,
-and \fact{reasoning-share-one-token} on a one-token answer. Capping the answer alone would have
-granted it roughly twice the generation for the same nominal budget. Arms must also sit on the same side of the reasoning switch. Measured on two models at
-\fact{arm-default-n} calls each, enabling the flag moved F1 by \fact{reasoning-flag-third-delta-2dp}
-on one and \fact{reasoning-flag-vendor35b-delta-2dp} on the other. The cause is the same in both:
-the model spends its entire output budget thinking and returns no answer. On the second,
-\fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls hit the cap. An unmatched pair therefore does not
-produce a noisy comparison; it produces a comparison of the flag.
+and \fact{reasoning-share-one-token} on a one-token answer, so capping the answer alone would have
+granted it roughly twice the generation for the same nominal budget. Arms must also sit on the same
+side of the reasoning switch, because a model that spends its whole output budget thinking returns
+no answer at all: an unmatched pair does not produce a noisy comparison, it produces a comparison of
+the flag (Section~\ref{sec:scale}).
 
-Three further rules were adopted after each one caught something, and all three are cheap. The first is that a mechanism's firing rate is measured before its effect. The confidence cap fires
-on \fact{cap-rate} of techniques, so an ablation of it would mostly describe the
-\fact{cap-rate-complement} where it never ran. The sink-reachability hint fires on \fact{hint-rate}
-of samples, so an ablation of that one does say something about the hint. The cap's preconditions explain its rate, since it applies to three
-technique families only when the sole contributing layer is static and
-\fact{cap-gated-yara-only-share} of those claims are YARA-only. An ablation must therefore be
-restricted to the samples where the mechanism fires, because averaging a feature over inputs it
-never touched dilutes a real effect toward zero. The second is that the number of distinct outputs
-the N inputs produced is counted and reported as a result column rather than as a test, because the
-signal exists
-only in the batch while each individual response is well-formed; we report
-\fact{cardinality-distinct-graphs} distinct call-graph sizes across \fact{cardinality-samples}
-samples. The third is that per-sample outputs are retained for every study, since aggregates cannot
+Three further rules were adopted after each one caught something, and all three are cheap. The first is that a mechanism's firing rate is measured before its effect, because averaging a
+feature over inputs it never touched dilutes a real effect toward zero: an ablation has to be
+restricted to the samples where the mechanism fires, and a mechanism that fires on almost nothing
+cannot be ablated at all (Section~\ref{sec:mechanisms}). The second is that the number of distinct
+outputs the N inputs produced is counted and reported beside the sample size rather than asserted in
+a test (Section~\ref{sec:detector}). The third is that per-sample outputs are retained for every study, since aggregates cannot
 be re-interrogated:
 when a defect was found that might have affected a completed \fact{drift-n}-sample study, the
 question could not be asked because only the summary survived. Long-lived servers accumulate state

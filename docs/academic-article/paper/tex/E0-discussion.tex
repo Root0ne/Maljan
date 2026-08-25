@@ -6,9 +6,9 @@ bounds rather than equivalences, and that was not evident when they were first w
 of the studies here run on five fixtures, where the sign-flip floor of
 Equation~\eqref{eq:floor} puts $\alpha$=0.05 out of reach whatever the effect size, and no number of
 extra decoding repeats moves it because repeats add rows inside clusters rather than clusters. The
-practical consequence is that a null has to be reported with its resolution: the frontier comparison could detect \fact{mde-frontier-local} F1 at
-80\% power and returned \fact{frontier-local-delta}, and only the pair of those facts is
-informative, since the second alone reads as equivalence and the first alone as a failed experiment.
+practical consequence is that a null has to be reported with its resolution: the frontier comparison
+could detect \fact{mde-frontier-local} F1 at 80\% power and returned \fact{frontier-local-delta},
+and only the pair of those facts is informative.
 It also changes what the cheap fix is. On seeing an underpowered paired design, the instinct is to
 add repeats, because repeats are cheap and samples are expensive. On clustered data that instinct is
 exactly wrong. A sixth fixture would have halved the attainable p; a sixth repeat on five fixtures
@@ -30,13 +30,9 @@ tests or the review caught it, because the defect was never in a function.
 
 What a practitioner should take from this is narrow, because it is one pipeline on one machine.
 The firing rate should be measured before the effect, since a mechanism engaging on \fact{cap-rate}
-of its inputs produces an ablation whose null describes the cases where it never ran. The distinct
-outputs should be counted: that needs no ground truth, and it belongs beside the sample size rather
-than inside a test. And per-sample outputs should be retained, along with whatever else the study is
-made of. We adopted retention
-after losing a study to its absence, scoped the rule to the object under study, and the next failure
-was in the environment, where four arms died on host memory and we had their outputs but not the
-host state. A rule written after a failure is scoped to that failure.
+of its inputs produces an ablation whose null describes the cases where it never ran. The distinct outputs should be counted, which costs one line and needs no ground truth. And per-sample outputs should be retained, along with whatever else the study is made of. We scoped
+that rule to the object under study, and the next failure was in the environment. A rule written
+after a failure is scoped to that failure.
 
 What we are not in a position to say needs the same precision. Negotiation is not shown to be
 worthless in general, because a control matching the treatment locates our own gain and not anyone

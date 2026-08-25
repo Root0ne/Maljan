@@ -6,7 +6,7 @@
 This study evaluates one pipeline that maps evidence about a Windows Portable Executable (PE)
 malware sample to MITRE
 ATT\&CK technique identifiers and emits a Structured Threat Information Expression (STIX) bundle.
-The scope is narrow in four respects and
+The scope is narrow in three respects and
 every result should be read inside it. The model is a single local mixture-of-experts deployment,
 quantised, on one host, with three commercially hosted services used only as comparison endpoints.
 Ground truth is family-level MITRE \texttt{uses}, resolved to a sample through its family signature,
@@ -25,10 +25,7 @@ markers, with no model involved. Three analysts then run as ReAct loops, each bo
 evidence. A negotiation node tests for consensus and routes disputes to a revision pass. A judge
 then synthesises a verdict and emits STIX~2.1. Finally, a deterministic reconciliation and gating
 stage adjudicates between the judge's bundle and the corroboration cascade, before the analyst sees
-anything. The seven instrument failures of
-Section~\ref{sec:failures} are marked on the figure at the boundary each occurred at, because the
-claim that four crossed a boundary with another server and three did not is a claim about this
-topology.
+anything.
 
 The cascade scores a technique $t$ by weighting each contributing layer's confidence by how far
 that layer is trusted, then lifting the result by how many layers agree:
@@ -50,10 +47,10 @@ the corroboration multiplier $m$ rises from \fact{cascade-mult-1} at one contrib
 \label{fig:architecture}
 \end{figure}
 
-Two design choices are not what failed. Tool exposure is not tool availability. The reverse-engineering server advertises \textasciitilde165
-tools, and exposing the full catalogue to a model with roughly 3B active parameters is infeasible,
-because tool selection degrades before the context does. The static analyst is therefore given a
-curated allowlist of \fact{static-curated-functions} tools, and the high-value tools are invoked
+Two design choices are not what failed. Tool exposure is not tool availability: exposing a full
+reverse-engineering catalogue to a model with roughly 3B active parameters is infeasible, because
+tool selection degrades before the context does. The static analyst is therefore given a curated
+allowlist of \fact{static-curated-functions} tools, and the high-value tools are invoked
 deterministically from code. And the
 pipeline degrades rather than fails when a service is absent, so with the sandbox unreachable the
 dynamic path is skipped and the run completes on static evidence, a behaviour pinned by a test. That
