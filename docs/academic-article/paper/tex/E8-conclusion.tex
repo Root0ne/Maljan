@@ -15,8 +15,9 @@ expensive and each changed a conclusion here.
 
 Four architectural claims motivated the design and one of them survives in part. Where a corpus
 large enough to produce a significant answer was available, decomposing the analysis into several
-model calls is worth \fact{cape-negotiated-delta} F1 over a single judge and the negotiation between
-them is worth \fact{cape-mechanism-delta}: the design helps, and not for the reason it was built.
+model calls scores \fact{cape-negotiated-delta} F1 above a single judge, at
+\fact{cape-consensus-negotiated-ratio} times its output, while the negotiation between them returns
+\fact{cape-mechanism-delta} at matched calls: the design helps, and not for the reason it was built.
 The other three do not survive. The corroboration cascade never reaches the artefact the analyst
 receives, two-tier attribution fires too rarely to carry the result, and the confidence number every
 deterministic gate consumes is indistinguishable from chance. What does move the end-to-end result is the layer underneath. The deterministic assigner gives the

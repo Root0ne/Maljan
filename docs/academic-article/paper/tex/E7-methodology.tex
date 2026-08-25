@@ -114,8 +114,14 @@ never drawn on one axis. The
 \emph{reconciliation step} is the deterministic pass that compares the judge's bundle against the
 corroboration cascade's set and restores what the judge omitted.
 
-Arms are compared at an equal total token budget: a multi-agent arm making N calls receives B/N per
-call against a single arm's one call of B, so a win cannot come from spending more. The design
+Arms are capped at an equal total token budget: a multi-agent arm making N calls receives B/N per
+call against a single arm's one call of B. That cap is a ceiling rather than an allocation, and the
+single arm does not spend its own, so the measured output is \fact{consensus-token-ratio}$\times$
+the single arm's on the fixtures and \fact{cape-consensus-negotiated-ratio}$\times$ on the real
+samples. The arms are matched on what they were allowed rather than on what they used. A contrast
+against the single arm therefore cannot separate the decomposition from the generation the extra
+calls bring, and only the contrast between the two multi-agent arms, which make the same number of
+calls, isolates a mechanism. The design
 follows Bertalanič and Fortuna \cite{bertalanic2026consensus}, including a stochastic-noise control
 in which one analyst receives evidence irrelevant to the sample. That control is what distinguishes
 no effect from no sensitivity: an arm fed evidence about the wrong sample should separate, and a
@@ -159,8 +165,8 @@ At $k$=\setting{5} that is \fact{fixture-signflip-floor}, which puts $\alpha$=0.
 whatever the effect size. Above \setting{20} clusters the $2^k$ assignments are sampled rather than
 enumerated, at \fact{stats-iters} draws, with the observed assignment counted in its own reference
 set. The smallest p that route can return is therefore one over the draws rather than zero. Each reported p names which
-route produced it. The two properties pull in opposite directions: raising the cluster count lifts
-the floor and is what makes enumeration stop being possible, which is why the consensus arms were
+route produced it. The two properties pull in opposite directions: raising the cluster count lowers the floor and is
+what makes enumeration stop being possible, which is why the consensus arms were
 re-run one sample per family. Multiplicity is controlled with Benjamini-Hochberg over two
 declared families, and every null is reported with the minimum detectable effect of the design that
 produced it at 80\% power, because a null without its resolution reads either as equivalence or as a

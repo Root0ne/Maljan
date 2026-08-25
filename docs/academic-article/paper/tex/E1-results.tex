@@ -172,9 +172,12 @@ is \fact{cape-noise-delta}, \fact{cape-noise-ci}, q = \fact{cape-noise-q-exact}.
 \fact{mde-cape-mechanism} F1. The effect the negotiation would have to carry is the \fact{cape-negotiated-delta} its neighbours
 show, which is above that resolution. If the negotiation were doing the work, this design would have
 seen it. What separates the multi-agent arms from the single judge is therefore what they share:
-\fact{cape-consensus-negotiated-calls} model calls instead of \fact{cape-consensus-single-calls}.
-Spending more calls on a sample helps; making them argue does not, at this budget, on this corpus,
-with this model.
+\fact{cape-consensus-negotiated-calls} model calls instead of \fact{cape-consensus-single-calls},
+and with them \fact{cape-consensus-negotiated-ratio}$\times$ the output tokens. Spending more on a
+sample helps and making the calls argue does not, at this cap, on this corpus, with this model. What
+this design cannot do is separate the decomposition from the generation those extra calls bring,
+because only the two multi-agent arms are matched on calls; the contrast that is matched is the one
+returning \fact{cape-mechanism-delta}.
 
 The two corpora gave opposite signs. On fixtures the noise control ran \fact{consensus-noise-delta} against the single judge and
 was worse on every sample; on real binaries it runs \fact{cape-noise-delta} and is better, at the
@@ -224,8 +227,10 @@ n=\fact{quantisation-pairs}, admitting a penalty of up to \fact{quantisation-wor
 minimum detectable effect of \fact{mde-quantisation}, so 3-bit quantisation is not demonstrably this
 pipeline's handicap rather than not one.
 
-The third comparison returns the largest effect measured anywhere in this paper. The reasoning flag replicates on two endpoints. On the model we host it is worth
-\fact{reasoning-flag-vendor35b-delta} paired (\fact{reasoning-flag-vendor35b-ci}), with
+The third comparison returns the largest effect measured anywhere in this paper, and its sign is the
+one that has to be stated carefully: what gains is turning the reasoning flag off. It replicates on
+two endpoints. On the model we host, disabling it gains \fact{reasoning-flag-vendor35b-delta} paired
+(\fact{reasoning-flag-vendor35b-ci}), with
 \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls exhausting the output budget on
 reasoning. On a third endpoint, enabling it spent \fact{arm-qwenplus-reasoning} of every call's
 budget thinking and scored \fact{arm-qwenplus-f1} across \fact{arm-qwenplus-n} calls, against
@@ -342,8 +347,8 @@ lost to degenerate decode, where an arm emitted \fact{degenerate-claims-min} to
 \fact{degenerate-claims-max} claims across only \fact{degenerate-tids-min} to
 \fact{degenerate-tids-max} technique identifiers, at ratios \fact{degenerate-ratio-min} to
 \fact{degenerate-ratio-max}. \fact{sink-excluded-unattributable} were unattributable, both arms dead
-with the host state never recorded. And \fact{sink-excluded-incomplete} were incomplete at the
-\setting{630}\,s bound, which is a genuine outcome that still costs the pair. A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation here can detect. Quoting
+with the host state never recorded. The last was incomplete at the \setting{630}\,s bound, which is a genuine outcome that still costs
+the pair. A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation here can detect. Quoting
 \fact{sink-delta-tids} \fact{sink-ci-tids} without it would claim a precision the instrument does
 not have. The unattributable pairs are this paper's own retention rule turned against it: we had retained
 per-sample outputs, and what went unrecorded was the host state the arms died under

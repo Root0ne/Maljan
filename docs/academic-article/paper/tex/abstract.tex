@@ -2,11 +2,11 @@ A large language model (LLM) pipeline for mapping malware evidence to MITRE ATT\
 Tactics, Techniques and Common Knowledge) techniques is mostly not the model. It wraps one in a
 sandbox, a disassembler, retrieval indices and rule engines. What the model contributes is therefore
 a difference against that tooling, not a score. This study measures that difference component by
-component. Three findings are positive. Splitting the analysis across several model calls is worth
-\fact{cape-negotiated-delta} F1 over a single judge on \fact{cape-consensus-families} real samples
-\fact{cape-negotiated-ci}. A deterministic technique assigner that composes its ranking and gating
+component. Three findings are positive. Splitting the analysis across several model calls scores \fact{cape-negotiated-delta} F1 above a
+single judge on \fact{cape-consensus-families} real samples \fact{cape-negotiated-ci}, at
+\fact{cape-consensus-negotiated-ratio} times its output. A deterministic technique assigner that composes its ranking and gating
 backends, rather than choosing between them, gives the cleanest identifier gate on two external
-corpora. And one decoding flag is worth \fact{reasoning-flag-worth-low} to
+corpora. And turning one decoding flag off gains \fact{reasoning-flag-worth-low} to
 \fact{reasoning-flag-worth-high} F1, more than any architecture or parameter count we measured. Four
 findings are negative or bounded. The negotiation the design was built for contributes
 \fact{cape-mechanism-delta}, at a resolution of \fact{mde-cape-mechanism}: what pays is the extra

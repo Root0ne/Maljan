@@ -279,6 +279,14 @@ body = src.read_text().split("## Measuring", 1)[-1].split("## Where", 1)[0]
 bullets = [m for m in re.finditer(r"^- (.*?) \[(\d+)\]$", body, re.M)]
 facts = {str(v).strip().lstrip("+") for v in json.loads(
     Path("tests/evaluation/paper_facts.json").read_text()).values()}
+def _num(s):
+    try:
+        return float(s.replace(",", "").rstrip("%").lstrip("+"))
+    except ValueError:
+        return None
+
+
+numeric = [n for n in (_num(f) for f in facts) if n is not None]
 bad = []
 if not 3 <= len(bullets) <= 5:
     bad.append(f"{len(bullets)} bullets, Elsevier wants 3 to 5")
@@ -288,8 +296,14 @@ for m in bullets:
         bad.append(f"{len(text)} chars: {text[:50]}...")
     if len(text) != claimed:
         bad.append(f"claims {claimed} chars and is {len(text)}: {text[:40]}...")
+    # Compare numerically at the highlight's own precision. The rule used to be
+    # a prefix match in either direction, which let "2,744" through on the
+    # strength of a fact reading "2" while the suite stood at 2,746 -- a gate
+    # that reported a check it was not performing.
     for num in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\d,]|\.\d)", text):
-        if not any(f.startswith(num) or num.startswith(f.rstrip("0")) for f in facts):
+        want = float(num.replace(",", ""))
+        dp = len(num.split(".")[1]) if "." in num else 0
+        if not any(round(f, dp) == want for f in numeric):
             bad.append(f"{num!r} is in a highlight and is not a derived value")
 for b in bad:
     print(b)
