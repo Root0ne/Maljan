@@ -1,43 +1,31 @@
 \subsection{Discussion}
 \label{sec:discussion}
 
-The most consequential property of these negative results is that most of them are
-bounds rather than equivalences, and that was not evident when they were first written down. Five
-of the studies here run on five fixtures, where the sign-flip floor of
-Equation~\eqref{eq:floor} puts $\alpha$=0.05 out of reach whatever the effect size, and no number of
-extra decoding repeats moves it because repeats add rows inside clusters rather than clusters. The
-practical consequence is that a null has to be reported with its resolution: the frontier comparison
-could detect \fact{mde-frontier-local} F1 at 80\% power and returned \fact{frontier-local-delta},
-and only the pair of those facts is informative.
-It also changes what the cheap fix is. On seeing an underpowered paired design, the instinct is to
-add repeats, because repeats are cheap and samples are expensive. On clustered data that instinct is
-exactly wrong. A sixth fixture would have halved the attainable p; a sixth repeat on five fixtures
-moves it not at all.
+Most of these negative results are bounds rather than equivalences, which was not evident when they
+were first written down. Five of the studies run on five fixtures, where the sign-flip floor of
+Equation~\eqref{eq:floor} puts $\alpha$=0.05 out of reach whatever the effect size, which is why
+every null here is reported beside the effect its design could have detected. It also changes what
+the cheap fix is. On seeing an underpowered paired design the
+instinct is to add repeats, because repeats are cheap and samples are expensive; on clustered data
+that instinct is exactly wrong. A sixth fixture would have halved the attainable p, and a sixth
+repeat on five fixtures moves it not at all.
 
 The literature we counter-searched against locates silent failures at the boundary between modules,
 and four of our seven crossed such a boundary while three crossed none. What the seven share is not
-a boundary but an attribution. An ablation varied the deterministic reconciliation step and we
-attributed the difference to a language model; a rank correlation ordered a reasoning-configuration
-flag and we attributed it to parameter count; a renamed output ceiling let us attribute boundedness
-to a component that had never once been bounded.
-In every case the number was real and the arrow pointing to its cause was drawn by us. We offer that as a proposal rather than as a taxonomy, since seven cases from one project is not a
-class. It does suggest a different question to ask of an evaluation than boundary-oriented thinking
-suggests. Not: did any component fail silently. Instead, for each number about to be reported: was
-its cause measured, or assigned? The clustered-inference correction of Section~\ref{sec:method} is that question turned on ourselves,
-and answered badly. Every interval in an earlier draft attributed its width to sampling variation
-among independent observations. The observations were not independent. Nothing in the pipeline, the
-tests or the review caught it, because the defect was never in a function.
-
-What a practitioner should take from this is narrow, because it is one pipeline on one machine.
-The firing rate should be measured before the effect, since a mechanism engaging on \fact{cap-rate}
-of its inputs produces an ablation whose null describes the cases where it never ran. The distinct outputs should be counted, which costs one line and needs no ground truth. And per-sample outputs should be retained, along with whatever else the study is made of. We scoped
-that rule to the object under study, and the next failure was in the environment. A rule written
-after a failure is scoped to that failure.
+a boundary but an attribution: an ablation varied a deterministic reconciliation step and we
+attributed the difference to a language model, a rank correlation ordered a configuration flag and
+we attributed it to parameter count, and a renamed output ceiling let us attribute boundedness to a
+component that had never once been bounded. In every case the number was real and the arrow pointing
+to its cause was drawn by us. Seven cases from one project is not a class, so we offer this as a
+proposal rather than a taxonomy, but it suggests a different question from the one
+boundary-oriented thinking asks. Not whether a component failed silently; instead, for each number
+about to be reported, whether its cause was measured or assigned. The clustered-inference correction
+of Section~\ref{sec:method} is that question turned on ourselves and answered badly: every interval
+in an earlier draft attributed its width to sampling variation among independent observations, the
+observations were not independent, and nothing in the pipeline, the tests or the review caught it,
+because the defect was never in a function.
 
 What we are not in a position to say needs the same precision. Negotiation is not shown to be
-worthless in general, because a control matching the treatment locates our own gain and not anyone
-else's. Model capacity is not shown to be off the ceiling, only that a larger model did not separate
-from ours at this design's resolution while differing in a configuration flag worth more than any
-architecture we measured. Verbal confidence is not shown to be uninformative in general, only
-indistinguishable from chance here. Nor are our seven mechanisms shown to generalise. What we can
-say is what each of them cost.
+worthless, model capacity is not shown to be off the ceiling, and verbal confidence is not shown to
+be uninformative; each holds only at this design's resolution, on this corpus. Nor are our seven
+mechanisms shown to generalise. What we can say is what each of them cost.
