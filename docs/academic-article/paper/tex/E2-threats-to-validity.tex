@@ -56,20 +56,14 @@ version as \texttt{unknown} and the engine commit was reconstructed rather than 
 build time, and ours was not.
 
 Two checks the survey does not include, both described in Section~\ref{sec:method}, caught errors
-one level below what the nine pitfalls address. A scored component deriving its output from the same
-source as the labels is scoring a tautology, so this was tested component by component. Ground truth
-is the MITRE \texttt{malware uses attack-pattern} relationship set, which comes from nothing this
-project produces; the Sigma layer reads its identifier from each rule's own community-authored
-ATT\&CK tag, so it shares ATT\&CK's vocabulary with the labels and not their source; and the sandbox
-baseline, which would have mattered most, takes its identifiers from class attributes hand-written
-in each signature module and consults no family attribution, which is what makes it a baseline
-rather than a second view of the answer. The retrieval corpora do not overlap the evaluation
-cohorts, checked by digest: of the \fact{case-corpus-n} cases in the ATT\&CK case corpus, none
-shares a SHA-256 digest with the \fact{cohort-n}-sample dynamic cohort or the \fact{drift-n}-sample
-drift manifest. Two construct problems survive and both are ours: the case corpus is labelled with
-the technique identifiers the pipeline itself previously attributed, which is why that number is
-relabelled as self-consistency in Section~\ref{sec:mechanisms}, and the catalogue defining valid
-identifiers is the same file that bounds the label universe.
+one level below what the nine pitfalls address: a component scored against labels drawn from its own
+source is scoring a tautology, and a retrieval corpus overlapping an evaluation cohort is scoring
+its own training set. Neither was assumed. Both were tested component by component, and the working
+is in the released artefact \citep{release2026artefact}. Two construct problems survive and both
+are ours: the ATT\&CK case corpus is labelled with the technique identifiers the pipeline itself
+previously attributed, which is why that number is relabelled as self-consistency in
+Section~\ref{sec:mechanisms}, and the catalogue defining valid identifiers is the same file that
+bounds the label universe.
 
 Any claim about what the sandbox contributes has to survive one measurement of what the sandbox
 reports. Across the \fact{evidence-reports} archived analyses there are
@@ -103,21 +97,12 @@ result that turns on a timeout is a statement about this pipeline on this machin
 load it had. The screen we added applies forward only: arms already collected without host state
 cannot be re-screened.
 
-Three objections remain that the work does not close. The first is that the judge findings rest on
-four calls, the intercept requiring a live judge call per observation. On the working path the
-finding is deductive rather than statistical: the reconciliation step restores the cascade's set by
-construction, and the \fact{judge-mechanism-arms}-arm mechanism check confirms the bundle equals
-that set on every arm, with the judge contributing one identifier of its own on
-\fact{judge-mechanism-added} of \fact{judge-mechanism-samples} samples, an upper bound of
-\fact{judge-mechanism-upper-bound} on the per-sample rate. On the failing path it is an existence
-claim, demonstrated on four calls against an uncapped control whose raw text provably contains no
-identifiers. Neither is a rate, and what would settle it is the same intercept over the
-\fact{baseline-n}-sample cohort. The second is that the detector's own evidence is retrospective: it
-found four defects on batches we already had reason to distrust, and the prospective test, reporting
-output cardinality beside every batch for a year and counting how often it is first to a defect, we
-have not run. The third is that seven defects in one's own code is a post-mortem rather than a
-result; we claim the setting and the price rather than the category, every mechanism having been
-counter-searched in an adjacent field's vocabulary (Section~\ref{experimental-design}).
+Three objections remain that the work does not close, and are argued in the artefact
+\citep{release2026artefact}: the judge findings rest on four calls rather than a rate, the
+detector's own evidence is retrospective, and seven defects in one's own code is a post-mortem
+rather than a result. We claim the setting and the price rather than the category, every mechanism
+having been counter-searched in an adjacent field's vocabulary
+(Section~\ref{experimental-design}).
 
 All three are blocked by the same thing, a host on which the model server does not fit alongside
 anything else, so a long run walks the host into its own memory guard. Cycling the server from the

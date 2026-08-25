@@ -5,35 +5,33 @@ A component of an LLM analysis pipeline is ordinarily justified by the mechanism
 rather than by a measurement, and a mechanism that is sound in isolation can contribute nothing once
 wired to real inputs. Establishing which of the two holds needs an equal-budget comparison against a
 simpler alternative, and a baseline containing no language model at all. The contributions are
-therefore organised around the evaluation rather than the architecture, and each is a measurement or
-a mechanism rather than a proposal.
+therefore organised around the evaluation rather than the architecture, and each is a measurement
+rather than a proposal.
 
-\emph{(i) A deterministic technique assigner, measured on two external corpora.} Ranking quality and gate quality turn
-out to be separable axes on which no single backend wins, and composing the per-axis winners gives
-the cleanest identifier gate of the three on both TRAM2 and AnnoCTR, with all three orderings
+\emph{(i) A deterministic technique assigner, measured on two external corpora.} Ranking quality and
+gate quality are separable axes on which no single backend wins, and composing the per-axis winners
+gives the cleanest identifier gate of the three on both TRAM2 and AnnoCTR, with all three orderings
 replicating across corpora annotated by different people for different tasks
 (Section~\ref{sec:assignment}).
 
 \emph{(ii) What decomposition is worth, and what it is not worth.} On
 \fact{cape-consensus-families} real samples, decomposing the analysis into several model calls beats
 a single judge by \fact{cape-negotiated-delta} F1 at \fact{cape-consensus-negotiated-ratio} times
-its output. A stochastic-noise control gains the same
-\fact{cape-noise-delta}, and the contrast that isolates the negotiation returns
-\fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so what pays is the calls
-the arms share rather than the argument between them.
+its output, while the contrast that isolates the negotiation returns \fact{cape-mechanism-delta} at
+matched calls: what pays is the calls, not the argument between them.
 
-\emph{(iii) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} Scored per sample against family-level MITRE ground truth, the signature engine beneath the pipeline
-reaches F1 \fact{baseline-f1}
-\fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the samples where both arms ran, the full pipeline is \fact{h2h-delta} F1 above it \fact{h2h-ci},
-at a resolution of \fact{h2h-mde}.
+\emph{(iii) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} Scored per
+sample against family-level MITRE ground truth, the signature engine beneath the pipeline reaches F1
+\fact{baseline-f1} \fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples, and on the samples
+where both arms ran the full pipeline is \fact{h2h-delta} F1 above it at a resolution of
+\fact{h2h-mde}.
 
 \emph{(iv) Three architectural claims that did not survive, each with the resolution of the design
 that tested it.} A weighted corroboration cascade, two-tier attribution and a deterministic
-confidence gate were each measured, and each returned a negative or a near-null result, stated with
-the effect its design could have detected (Section~\ref{statistical-analysis}). The configuration
-axis is where the effects are: a decoding flag outweighs every architecture and every parameter
-count we measured, and an arm can be labelled matched while running the opposite configuration,
-because one provider accepts the parameter without acting on it.
+confidence gate each returned a negative or near-null result, stated with the effect its design
+could have detected (Section~\ref{statistical-analysis}). The configuration axis is where the
+effects are: a decoding flag outweighs every architecture and every parameter count we measured, and
+an arm can be labelled matched while running the opposite configuration.
 
 \emph{(v) Seven instrument failures, with the layer each occurred at and what actually found it.}
 Each is a case where a measurement's cause was assigned rather than measured.

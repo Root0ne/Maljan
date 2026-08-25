@@ -3,21 +3,19 @@
 The dynamic cohort is n=\fact{cohort-n} Windows PE samples from MalwareBazaar, stratified by year at
 seed \fact{cohort-seed} with its digest recorded, of which \fact{baseline-n} produced a usable
 sandbox report. Ground truth resolves a family signature to an in-repo MITRE \texttt{uses} fixture
-through an alias map. It is uncurated at technique level, so a
-single binary of a family need not exhibit all the techniques catalogued for it. Absolute F1 values
-here are therefore not comparable to work using per-sample expert labels; the bias is approximately constant across arms,
-which makes within-study contrasts the defensible reading. The
-withdrawn temporal-drift study's manifest survives as \fact{drift-n} dated samples over
-\fact{drift-cohorts} cohorts and \fact{drift-families} families, metadata only.
-
-Three properties of the sandbox bound what can be reproduced. It is CAPE~2.5, the Config and Payload Extraction sandbox, with one analysis machine and no Linux
-guest. An Executable and Linkable Format binary submitted there therefore joins a backlog that is never
-scheduled. Reports are retained for days rather than indefinitely, with
-\fact{cape-report-retention-sampled} of \fact{cape-report-retention-sampled} sampled older tasks
-reporting no report directory, so the local archive is the only copy and re-submitting the same
-samples is not a reproduction recipe on its own. And the instance rate-limits with a throttle response byte-identical to its refusal of an
-unauthorised request, so a harness that reads that response as a verdict on its own permissions
-mistakes a throttle for a missing permission, as ours did briefly.
+through an alias map, and is uncurated at technique level, so a single binary of a family need not
+exhibit all the techniques catalogued for it: absolute F1 values here are not comparable to work
+using per-sample expert labels, and the bias being approximately constant across arms is what makes
+within-study contrasts the defensible reading. The withdrawn temporal-drift study's manifest
+survives as \fact{drift-n} dated samples over \fact{drift-cohorts} cohorts and \fact{drift-families}
+families, metadata only. Three properties of the sandbox bound what can be reproduced. It is
+CAPE~2.5, the Config and Payload Extraction sandbox, with one analysis machine and no Linux guest,
+so an Executable and Linkable Format binary submitted there joins a backlog that is never scheduled.
+Reports are retained for days rather than indefinitely, \fact{cape-report-retention-sampled} of
+\fact{cape-report-retention-sampled} sampled older tasks reporting no report directory, so the local
+archive is the only copy. And the instance rate-limits with a throttle response byte-identical to
+its refusal of an unauthorised request, so a harness reading that response as a verdict on its own
+permissions mistakes a throttle for a missing permission, as ours did briefly.
 
 \subsection{Models, endpoints and serving configuration}\label{models-endpoints-and-serving-configuration}
 
@@ -92,14 +90,13 @@ arm is \fact{arm-default-n} calls rather than the \fact{baseline-n}-sample cohor
 \subsection{Experimental design}\label{experimental-design}
 
 Four terms are used in one sense throughout. An \emph{arm} is one condition of one experiment, a
-configuration under which every input is scored, so that two arms differ in the one thing being
-tested. A \emph{sample} is a real malware binary from the dated cohort, scored against its family's
-MITRE \texttt{uses} set. A \emph{fixture} is one of the five synthesised inputs used by the equal-budget arms. Its evidence
-is generated from its own technique list, so it has a ceiling a real sample does not. Samples and
-fixtures are different populations with different ground truth. They are never pooled, and they are
-never drawn on one axis. The
-\emph{reconciliation step} is the deterministic pass that compares the judge's bundle against the
-corroboration cascade's set and restores what the judge omitted.
+configuration under which every input is scored, so two arms differ in the one thing being tested. A
+\emph{sample} is a real malware binary from the dated cohort, scored against its family's MITRE
+\texttt{uses} set. A \emph{fixture} is one of the five synthesised inputs used by the equal-budget
+arms, its evidence generated from its own technique list, so it has a ceiling a real sample does
+not; samples and fixtures are different populations with different ground truth, never pooled and
+never drawn on one axis. The \emph{reconciliation step} is the deterministic pass that compares the
+judge's bundle against the corroboration cascade's set and restores what the judge omitted.
 
 Arms are capped at an equal total token budget: a multi-agent arm making N calls receives B/N per
 call against a single arm's one call of B. That cap is a ceiling rather than an allocation, and the
@@ -138,12 +135,12 @@ demotes anything, because a searched absence is only credible if the looking is 
 
 \subsection{Statistical analysis}\label{statistical-analysis}
 
-Every arm is scored on the same samples in the same order. Differences are computed per sample and
-then aggregated, and 95\% bootstrap confidence intervals (CIs) are taken over the paired deltas. The
-observations are nested: many claims come from one sample, and many samples from one family. The
-bootstrap therefore resamples whole clusters rather than rows, and the p-value comes from flipping
-the sign of whole cluster means. Each interval is reported with the intraclass correlation
-coefficient (ICC) of its measure and the effective sample size that implies. Two properties of that test are reported with it. With $k$ clusters the
+Every arm is scored on the same samples in the same order, differences are computed per sample and
+aggregated, and 95\% bootstrap confidence intervals (CIs) are taken over the paired deltas. The
+observations are nested, many claims coming from one sample and many samples from one family, so the
+bootstrap resamples whole clusters rather than rows and the p-value comes from flipping the sign of
+whole cluster means. Each interval carries the intraclass correlation coefficient (ICC) of its
+measure and the effective sample size that implies. Two properties of that test are reported with it. With $k$ clusters the
 two-sided version cannot return a p below
 \begin{equation}\label{eq:floor}
 p_{\min} = 2 \big/ 2^{k}
