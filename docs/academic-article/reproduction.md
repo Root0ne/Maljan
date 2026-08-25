@@ -1,6 +1,6 @@
 # Serving configuration, verbatim
 
-Supplement to *Measuring what an LLM adds to malware-to-ATT&CK technique mapping*.
+Supplement to *What a language model adds to deterministic malware analysis, and what it takes to measure it*.
 Section 2.4 of the paper names the model, the engine and the host in two tables and
 states the two serving details that decide whether an arm reproduces. This is the
 part a reproducer runs.

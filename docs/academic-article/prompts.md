@@ -1,6 +1,6 @@
 # The prompts and the output contract
 
-Supplement to *Measuring what an LLM adds to malware-to-ATT&CK technique mapping*.
+Supplement to *What a language model adds to deterministic malware analysis, and what it takes to measure it*.
 This was Appendix A of the manuscript and was moved here so the paper carries only
 what its claims rest on. Nothing was cut in the move.
 

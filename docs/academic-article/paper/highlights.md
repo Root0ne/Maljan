@@ -9,7 +9,7 @@ Every number here is one the paper derives; none is rounded differently than the
 body rounds it, because a highlight that disagrees with the table it summarises
 is the same defect as a hand-typed numeral.
 
-## Measuring what an LLM adds to malware-to-ATT&CK technique mapping
+## What a language model adds to deterministic malware analysis, and what it takes to measure it
 
 - Four calls beat one judge by 0.054 F1 at 2.76x output; arguing adds nothing. [76]
 - Turning one decoding flag off outweighs any architecture or size measured. [74]

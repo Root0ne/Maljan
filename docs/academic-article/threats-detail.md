@@ -1,6 +1,6 @@
 # Construct validity, and the objections the work does not close
 
-Supplement to *Measuring what an LLM adds to malware-to-ATT&CK technique mapping*. Section 3.11 of the paper states both in summary; the working is here. Numbers shown as `…` in this file are derived in `tests/evaluation/paper_facts.py` and printed in the paper.
+Supplement to *What a language model adds to deterministic malware analysis, and what it takes to measure it*. Section 3.11 of the paper states both in summary; the working is here. Numbers shown as `…` in this file are derived in `tests/evaluation/paper_facts.py` and printed in the paper.
 
 ## The two checks the pitfall survey does not include
 

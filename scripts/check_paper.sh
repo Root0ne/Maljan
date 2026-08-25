@@ -275,7 +275,11 @@ src = Path("docs/academic-article/paper/highlights.md")
 if not src.exists():
     print("no highlights file")
     sys.exit(1)
-body = src.read_text().split("## Measuring", 1)[-1].split("## Where", 1)[0]
+# The bullets are whatever sits between the title heading and the
+# provenance table, found by position rather than by the first word of a
+# title that changes.
+raw = src.read_text()
+body = raw.split("\n## ", 2)[1].split("## Where", 1)[0]
 bullets = [m for m in re.finditer(r"^- (.*?) \[(\d+)\]$", body, re.M)]
 facts = {str(v).strip().lstrip("+") for v in json.loads(
     Path("tests/evaluation/paper_facts.json").read_text()).values()}
