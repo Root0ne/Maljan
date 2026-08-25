@@ -482,6 +482,22 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# 7c. No unresolved citation marker reached the artefact
+# --------------------------------------------------------------------------
+# `\citet` needs author data that a numeric bibliography style does not emit,
+# so under elsarticle-num it prints "(author?) [1]". Twelve of those shipped
+# through every other check here on 2026-08-25, because each one is a
+# well-formed citation that resolves to the right entry and says the wrong
+# thing. natbib and BibTeX both mark what they could not resolve; nothing was
+# reading the mark.
+unresolved=$(grep -oE '\(author\?\)|\?\?' <<<"$pdf_text" | wc -l)
+if [[ "$unresolved" -eq 0 ]]; then
+    pass "no unresolved citation or cross-reference marker in the rendered text"
+else
+    fail "$unresolved unresolved marker(s) in the rendered text"
+    note "(author?) means \\citet against a numeric style; ?? means a missing label"
+fi
+
 # 8. The unreviewed sources declare themselves in the document a reader gets
 # --------------------------------------------------------------------------
 # The tests check that every citation to an unreviewed source carries the

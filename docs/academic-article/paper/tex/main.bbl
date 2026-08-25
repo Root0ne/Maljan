@@ -1,578 +1,390 @@
-\begin{thebibliography}{57}
-\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
-\providecommand{\url}[1]{\texttt{#1}}
-\providecommand{\href}[2]{#2}
-\providecommand{\path}[1]{#1}
-\providecommand{\DOIprefix}{doi:}
-\providecommand{\ArXivprefix}{arXiv:}
-\providecommand{\URLprefix}{URL: }
-\providecommand{\Pubmedprefix}{pmid:}
-\providecommand{\doi}[1]{\href{http://dx.doi.org/#1}{\path{#1}}}
-\providecommand{\Pubmed}[1]{\href{pmid:#1}{\path{#1}}}
-\providecommand{\bibinfo}[2]{#2}
-\ifx\xfnm\relax \def\xfnm[#1]{\unskip,\space#1}\fi
-%Type = Inproceedings
-\bibitem[{Abdallah et~al.(2026)Abdallah, Holdcroft, Ali and
-  Jatowt}]{abdallah2026retrievers}
-\bibinfo{author}{Abdallah, A.}, \bibinfo{author}{Holdcroft, J.},
-  \bibinfo{author}{Ali, M.}, \bibinfo{author}{Jatowt, A.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Are {LLM}-based retrievers worth their cost? an
-  empirical study of efficiency, robustness, and reasoning overhead}, in:
-  \bibinfo{booktitle}{Proceedings of the 49th International ACM SIGIR
-  Conference on Research and Development in Information Retrieval}.
-\newblock \DOIprefix\doi{10.1145/3805712.3808566}.
-  \bibinfo{note}{arXiv:2604.03676}.
-%Type = Misc
-\bibitem[{{abuse.ch}(2026)}]{abusech2026bazaar}
-\bibinfo{author}{{abuse.ch}}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{{MalwareBazaar}}.
-\newblock \bibinfo{howpublished}{Malware sample corpus.
-  \url{https://bazaar.abuse.ch}}.
-\newblock \bibinfo{note}{Cited as the corpus the dynamic cohort was drawn from.
-  Its terms permit research redistribution of individual samples but not of the
-  corpus as a package}.
-%Type = Inproceedings
-\bibitem[{Alam et~al.(2023)Alam, Bhusal, Park and Rastogi}]{alam2023ladder}
-\bibinfo{author}{Alam, M.T.}, \bibinfo{author}{Bhusal, D.},
-  \bibinfo{author}{Park, Y.}, \bibinfo{author}{Rastogi, N.},
-  \bibinfo{year}{2023}.
-\newblock \bibinfo{title}{Looking beyond {IoCs}: Automatically extracting
-  attack patterns from external {CTI}}, in: \bibinfo{booktitle}{26th
-  International Symposium on Research in Attacks, Intrusions and Defenses
-  (RAID)}, pp. \bibinfo{pages}{92--108}.
-\newblock \DOIprefix\doi{10.1145/3607199.3607208}.
-%Type = Inproceedings
-\bibitem[{Alquraan et~al.(2018)Alquraan, Takruri, Alfatafta and
-  Al-Kiswany}]{alquraan2018partition}
-\bibinfo{author}{Alquraan, A.}, \bibinfo{author}{Takruri, H.},
-  \bibinfo{author}{Alfatafta, M.}, \bibinfo{author}{Al-Kiswany, S.},
-  \bibinfo{year}{2018}.
-\newblock \bibinfo{title}{An analysis of network-partitioning failures in cloud
-  systems}, in: \bibinfo{booktitle}{13th USENIX Symposium on Operating Systems
-  Design and Implementation (OSDI)}, pp. \bibinfo{pages}{51--68}.
-%Type = Inproceedings
-\bibitem[{Bertalani{\v c} and Fortuna(2026)}]{bertalanic2026consensus}
-\bibinfo{author}{Bertalani{\v c}, B.}, \bibinfo{author}{Fortuna, C.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{The cost of consensus: Isolated self-correction
-  prevails over unguided homogeneous multi-agent debate}, in:
-  \bibinfo{booktitle}{ACM Conference on AI and Agentic Systems}.
-\newblock \DOIprefix\doi{10.1145/3786335.3813137}.
-  \bibinfo{note}{arXiv:2605.00914}.
-%Type = Inproceedings
-\bibitem[{Bryant et~al.(2019)Bryant, Felice, Andersen and
-  Briscoe}]{bryant2019bea}
-\bibinfo{author}{Bryant, C.}, \bibinfo{author}{Felice, M.},
-  \bibinfo{author}{Andersen, {\O}.E.}, \bibinfo{author}{Briscoe, T.},
-  \bibinfo{year}{2019}.
-\newblock \bibinfo{title}{The {BEA}-2019 shared task on grammatical error
-  correction}, in: \bibinfo{booktitle}{Proceedings of the Fourteenth Workshop
-  on Innovative Use of NLP for Building Educational Applications}.
-\newblock \DOIprefix\doi{10.18653/v1/w19-4406}.
-%Type = Inproceedings
-\bibitem[{B{\"u}chel et~al.(2025)B{\"u}chel, Paladini, Longari, Carminati,
-  Zanero et~al.}]{buchel2025sok}
-\bibinfo{author}{B{\"u}chel, M.}, \bibinfo{author}{Paladini, T.},
-  \bibinfo{author}{Longari, S.}, \bibinfo{author}{Carminati, M.},
-  \bibinfo{author}{Zanero, S.}, et~al., \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{SoK}: Automated {TTP} extraction from {CTI} reports,
-  are we there yet?}, in: \bibinfo{booktitle}{34th USENIX Security Symposium},
-  pp. \bibinfo{pages}{4621--4641}.
-%Type = Misc
-\bibitem[{{Center for Threat-Informed Defense}(2023)}]{mitre2023tram}
-\bibinfo{author}{{Center for Threat-Informed Defense}}, \bibinfo{year}{2023}.
-\newblock \bibinfo{title}{{TRAM}: Threat report {ATT\&CK} mapper}.
-\newblock \bibinfo{howpublished}{Open-source software, MITRE Engenuity}.
-\newblock \bibinfo{note}{Not a paper and cited as the artefact it is; the
-  repository names no preferred citation}.
-%Type = Misc
-\bibitem[{Chen et~al.(2025)Chen, Sun, Liu, Wang, Wang, Yin, Liu and
-  Ying}]{chen2025recopilot}
-\bibinfo{author}{Chen, G.}, \bibinfo{author}{Sun, H.}, \bibinfo{author}{Liu,
-  D.}, \bibinfo{author}{Wang, Z.}, \bibinfo{author}{Wang, Q.},
-  \bibinfo{author}{Yin, B.}, \bibinfo{author}{Liu, L.}, \bibinfo{author}{Ying,
-  L.}, \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{ReCopilot}: Reverse engineering copilot in binary
-  analysis}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2505.16366}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2505.16366}.
-%Type = Misc
-\bibitem[{Cheng et~al.(2026)Cheng, Li, Basuki, Cui, Ding and
-  Gao}]{cheng2026ttprint}
-\bibinfo{author}{Cheng, Y.}, \bibinfo{author}{Li, C.}, \bibinfo{author}{Basuki,
-  R.S.P.}, \bibinfo{author}{Cui, Q.}, \bibinfo{author}{Ding, W.},
-  \bibinfo{author}{Gao, P.}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{{TTPrint}: Evidence-grounded {TTP} extraction via
-  diverge-then-converge verification}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2605.25836}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2605.25836}.
-%Type = Inproceedings
-\bibitem[{Dev et~al.(2026)Dev, Sloan, Kavner, Kong and Sandler}]{dev2026judge}
-\bibinfo{author}{Dev, S.}, \bibinfo{author}{Sloan, A.},
-  \bibinfo{author}{Kavner, J.}, \bibinfo{author}{Kong, N.},
-  \bibinfo{author}{Sandler, M.}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Judge reliability harness: Stress testing the
-  reliability of {LLM} judges}, in: \bibinfo{booktitle}{Agents in the Wild:
-  Safety, Security, and Beyond Workshop, International Conference on Learning
-  Representations (ICLR)}.
-\newblock \bibinfo{note}{ArXiv:2603.05399}.
-%Type = Misc
-\bibitem[{D'Oosterlinck et~al.(2024)D'Oosterlinck, Khattab, Remy, Demeester,
-  Develder and Potts}]{doosterlinck2024incontext}
-\bibinfo{author}{D'Oosterlinck, K.}, \bibinfo{author}{Khattab, O.},
-  \bibinfo{author}{Remy, F.}, \bibinfo{author}{Demeester, T.},
-  \bibinfo{author}{Develder, C.}, \bibinfo{author}{Potts, C.},
-  \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{In-context learning for extreme multi-label
-  classification}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2401.12178}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2401.12178}.
-%Type = Inproceedings
-\bibitem[{Evertz et~al.(2026)Evertz, Risse, Neuer, M{\"u}ller, Normann
-  et~al.}]{evertz2026chasing}
-\bibinfo{author}{Evertz, R.}, \bibinfo{author}{Risse, N.},
-  \bibinfo{author}{Neuer, C.}, \bibinfo{author}{M{\"u}ller, N.},
-  \bibinfo{author}{Normann, S.}, et~al., \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Chasing shadows: Pitfalls in {LLM} security
-  research}, in: \bibinfo{booktitle}{Network and Distributed System Security
-  Symposium (NDSS)}.
-\newblock \DOIprefix\doi{10.14722/ndss.2026.241749}.
-  \bibinfo{note}{arXiv:2512.09549}.
-%Type = Misc
-\bibitem[{{ggml-org/llama.cpp}(2024)}]{llamacpp8634}
-\bibinfo{author}{{ggml-org/llama.cpp}}, \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{\texttt{max\_tokens} not respected on the non-chat
-  endpoint}.
-\newblock \bibinfo{note}{{PREPRINT}, not peer reviewed. ggml-org/llama.cpp
-  issue \#8634}.
-%Type = Inproceedings
-\bibitem[{Gunawi et~al.(2008)Gunawi, Rubio-Gonz{\'a}lez, Arpaci-Dusseau,
-  Arpaci-Dusseau and Liblit}]{gunawi2008eio}
-\bibinfo{author}{Gunawi, H.S.}, \bibinfo{author}{Rubio-Gonz{\'a}lez, C.},
-  \bibinfo{author}{Arpaci-Dusseau, A.C.}, \bibinfo{author}{Arpaci-Dusseau,
-  R.H.}, \bibinfo{author}{Liblit, B.}, \bibinfo{year}{2008}.
-\newblock \bibinfo{title}{{EIO}: Error handling is occasionally correct}, in:
-  \bibinfo{booktitle}{6th USENIX Conference on File and Storage Technologies
-  (FAST)}.
-%Type = Inproceedings
-\bibitem[{Hassid et~al.(2024)Hassid, Remez, Gehring, Schwartz and
-  Adi}]{hassid2024budget}
-\bibinfo{author}{Hassid, M.}, \bibinfo{author}{Remez, T.},
-  \bibinfo{author}{Gehring, J.}, \bibinfo{author}{Schwartz, R.},
-  \bibinfo{author}{Adi, Y.}, \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{The larger the better? {I}mproved {LLM}
-  code-generation via budget reallocation}, in: \bibinfo{booktitle}{First
-  Conference on Language Modeling (COLM)}.
-%Type = Inproceedings
-\bibitem[{Husari et~al.(2017)Husari, Al-Shaer, Ahmed, Chu and
-  Niu}]{husari2017ttpdrill}
-\bibinfo{author}{Husari, G.}, \bibinfo{author}{Al-Shaer, E.},
-  \bibinfo{author}{Ahmed, M.}, \bibinfo{author}{Chu, B.}, \bibinfo{author}{Niu,
-  X.}, \bibinfo{year}{2017}.
-\newblock \bibinfo{title}{{TTPDrill}: Automatic and accurate extraction of
-  threat actions from unstructured text of {CTI} sources}, in:
-  \bibinfo{booktitle}{Proceedings of the 33rd Annual Computer Security
-  Applications Conference (ACSAC)}, pp. \bibinfo{pages}{103--115}.
-\newblock \DOIprefix\doi{10.1145/3134600.3134646}.
-%Type = Inproceedings
-\bibitem[{Jiang et~al.(2025)Jiang, Wang, Liu, Xu, Tan, Zhang and
-  Babkin}]{jiang2025nova}
-\bibinfo{author}{Jiang, N.}, \bibinfo{author}{Wang, C.}, \bibinfo{author}{Liu,
-  K.}, \bibinfo{author}{Xu, X.}, \bibinfo{author}{Tan, L.},
-  \bibinfo{author}{Zhang, X.}, \bibinfo{author}{Babkin, P.},
-  \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{Nova}: Generative language models for assembly code
-  with hierarchical attention and contrastive learning}, in:
-  \bibinfo{booktitle}{International Conference on Learning Representations
-  (ICLR)}.
-\newblock \bibinfo{note}{Poster. arXiv:2311.13721}.
-%Type = Inproceedings
-\bibitem[{Jin et~al.(2024)Jin, Yu, Shu, Zhao, Hua, Meng, Zhang and
-  Du}]{jin2024steplength}
-\bibinfo{author}{Jin, M.}, \bibinfo{author}{Yu, Q.}, \bibinfo{author}{Shu, D.},
-  \bibinfo{author}{Zhao, H.}, \bibinfo{author}{Hua, W.}, \bibinfo{author}{Meng,
-  Y.}, \bibinfo{author}{Zhang, Y.}, \bibinfo{author}{Du, M.},
-  \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{The impact of reasoning step length on large language
-  models}, in: \bibinfo{booktitle}{Findings of the Association for
-  Computational Linguistics: ACL}, pp. \bibinfo{pages}{1830--1842}.
-\newblock \DOIprefix\doi{10.18653/v1/2024.findings-acl.108}.
-%Type = Misc
-\bibitem[{Kate et~al.(2025)Kate, Pedapati, Basu, Rizk, Chenthamarakshan,
-  Chaudhury, Agarwal and Abdelaziz}]{kate2025longfunceval}
-\bibinfo{author}{Kate, K.}, \bibinfo{author}{Pedapati, T.},
-  \bibinfo{author}{Basu, K.}, \bibinfo{author}{Rizk, Y.},
-  \bibinfo{author}{Chenthamarakshan, V.}, \bibinfo{author}{Chaudhury, S.},
-  \bibinfo{author}{Agarwal, M.}, \bibinfo{author}{Abdelaziz, I.},
-  \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{LongFuncEval}: Measuring the effectiveness of long
-  context models for function calling}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2505.10570}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2505.10570}.
-%Type = Misc
-\bibitem[{K\"u\c{c}\"uk and Ertam(2026)}]{release2026artefact}
-\bibinfo{author}{K\"u\c{c}\"uk, D.}, \bibinfo{author}{Ertam, F.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Replication package: the pipeline, the evaluation
-  harnesses, the per-sample records and the derivation of every number
-  reported}.
-\newblock \bibinfo{howpublished}{Source repository, under an open licence.
-  \url{https://github.com/Root0ne/Maljan}}.
-%Type = Misc
-\bibitem[{Kumaran(2026)}]{kumaran2026confidence}
-\bibinfo{author}{Kumaran, D.}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Reported confidence in {LLMs} tracks commitment more
-  than correctness}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2606.29490}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2606.29490}.
-%Type = Inproceedings
-\bibitem[{Lange et~al.(2024)Lange, Adel et~al.}]{lange2024annoctr}
-\bibinfo{author}{Lange, L.}, \bibinfo{author}{Adel, H.}, et~al.,
-  \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{{AnnoCTR}: A dataset for detecting and linking
-  entities, tactics, and techniques in cyber threat reports}, in:
-  \bibinfo{booktitle}{Joint International Conference on Computational
-  Linguistics, Language Resources and Evaluation (LREC-COLING)}.
-\newblock \DOIprefix\doi{10.63317/4esp6coivous}.
-  \bibinfo{note}{arXiv:2404.07765. CC-BY-SA 4.0}.
-%Type = Inproceedings
-\bibitem[{Lazaridou et~al.(2021)Lazaridou, Kuncoro, Gribovskaya
-  et~al.}]{lazaridou2021mind}
-\bibinfo{author}{Lazaridou, A.}, \bibinfo{author}{Kuncoro, A.},
-  \bibinfo{author}{Gribovskaya, E.}, et~al., \bibinfo{year}{2021}.
-\newblock \bibinfo{title}{Mind the gap: Assessing temporal generalization in
-  neural language models}, in: \bibinfo{booktitle}{Advances in Neural
-  Information Processing Systems (NeurIPS)}.
-\newblock \bibinfo{note}{ArXiv:2102.01951}.
-%Type = Inproceedings
-\bibitem[{Lea et~al.(2025)Lea, Ghawaly, Richard~III, Ali-Gombe and
-  Case}]{lea2025rex86}
-\bibinfo{author}{Lea, D.}, \bibinfo{author}{Ghawaly, J.},
-  \bibinfo{author}{Richard~III, G.G.}, \bibinfo{author}{Ali-Gombe, A.},
-  \bibinfo{author}{Case, A.}, \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{REx86}: A local large language model for assisting
-  in x86 assembly reverse engineering}, in: \bibinfo{booktitle}{Annual Computer
-  Security Applications Conference (ACSAC)}.
-\newblock \DOIprefix\doi{10.1109/acsac67867.2025.00024}.
-  \bibinfo{note}{arXiv:2510.20975}.
-%Type = Inproceedings
-\bibitem[{Legoy et~al.(2020)Legoy, Caselli, Seifert and Peter}]{legoy2020rcatt}
-\bibinfo{author}{Legoy, V.}, \bibinfo{author}{Caselli, M.},
-  \bibinfo{author}{Seifert, C.}, \bibinfo{author}{Peter, A.},
-  \bibinfo{year}{2020}.
-\newblock \bibinfo{title}{Automated retrieval of {ATT\&CK} tactics and
-  techniques for cyber threat reports}, in: \bibinfo{booktitle}{1st Cyber
-  Threat Intelligence Symposium (CTI)}.
-\newblock \bibinfo{note}{ArXiv:2004.14322. Recorded as a conference
-  contribution by the University of Twente research portal; not indexed under
-  this title in dblp}.
-%Type = Inproceedings
-\bibitem[{Lekssays et~al.(2025)Lekssays, Shukla, Sencar and
-  Parvez}]{lekssays2025techniquerag}
-\bibinfo{author}{Lekssays, A.}, \bibinfo{author}{Shukla, U.},
-  \bibinfo{author}{Sencar, H.T.}, \bibinfo{author}{Parvez, M.},
-  \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{TechniqueRAG}: Retrieval augmented generation for
-  adversarial technique annotation in {CTI} text}, in:
-  \bibinfo{booktitle}{Findings of the Association for Computational Linguistics
-  (ACL)}.
-\newblock \DOIprefix\doi{10.18653/v1/2025.findings-acl.1076}.
-  \bibinfo{note}{arXiv:2505.11988}.
-%Type = Inproceedings
-\bibitem[{Li et~al.(2023)Li, Lan, Fu, Cai, Liu, Collier, Watanabe and
-  Su}]{li2023repetition}
-\bibinfo{author}{Li, H.}, \bibinfo{author}{Lan, T.}, \bibinfo{author}{Fu, Z.},
-  \bibinfo{author}{Cai, D.}, \bibinfo{author}{Liu, L.},
-  \bibinfo{author}{Collier, N.}, \bibinfo{author}{Watanabe, T.},
-  \bibinfo{author}{Su, Y.}, \bibinfo{year}{2023}.
-\newblock \bibinfo{title}{Repetition in repetition out: Towards understanding
-  neural text degeneration from the data perspective}, in:
-  \bibinfo{booktitle}{Advances in Neural Information Processing Systems
-  (NeurIPS)}.
-\newblock \DOIprefix\doi{10.52202/075280-3187}.
-  \bibinfo{note}{arXiv:2310.10226}.
-%Type = Inproceedings
-\bibitem[{Li et~al.(2025)Li, Manickam, Chong and
-  Karuppayah}]{li2025phishdebate}
-\bibinfo{author}{Li, W.}, \bibinfo{author}{Manickam, S.},
-  \bibinfo{author}{Chong, Y.w.}, \bibinfo{author}{Karuppayah, S.},
-  \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{PhishDebate}: An {LLM}-based multi-agent framework
-  for phishing website detection}, in: \bibinfo{booktitle}{IEEE International
-  Conference on Big Data (BigData)}, pp. \bibinfo{pages}{6606--6615}.
-\newblock \DOIprefix\doi{10.1109/BigData66926.2025.11401440}.
-  \bibinfo{note}{arXiv:2506.15656}.
-%Type = Article
-\bibitem[{Li et~al.(2024)Li, Liu, Poon, Towey, Sun et~al.}]{li2024metamorphic}
-\bibinfo{author}{Li, Y.}, \bibinfo{author}{Liu, Z.}, \bibinfo{author}{Poon,
-  P.L.}, \bibinfo{author}{Towey, D.}, \bibinfo{author}{Sun, C.A.}, et~al.,
-  \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{Metamorphic relation generation: State of the art and
-  research directions}.
-\newblock \bibinfo{journal}{ACM Transactions on Software Engineering and
-  Methodology} \DOIprefix\doi{10.1145/3708521}.
-  \bibinfo{note}{arXiv:2406.05397}.
-%Type = Inproceedings
-\bibitem[{Li et~al.(2022)Li, Zeng, Chen and Liang}]{li2022attackg}
-\bibinfo{author}{Li, Z.}, \bibinfo{author}{Zeng, J.}, \bibinfo{author}{Chen,
-  Y.}, \bibinfo{author}{Liang, Z.}, \bibinfo{year}{2022}.
-\newblock \bibinfo{title}{{AttacKG}: Constructing technique knowledge graph
-  from cyber threat intelligence reports}, in: \bibinfo{booktitle}{Computer
-  Security, ESORICS}, pp. \bibinfo{pages}{589--609}.
-\newblock \DOIprefix\doi{10.1007/978-3-031-17140-6_29}.
-%Type = Article
-\bibitem[{Liu et~al.(2026)Liu, Zhong, Bi, Zhang, Chen, Chen, Liu and
-  Ma}]{liu2026inference}
-\bibinfo{author}{Liu, M.}, \bibinfo{author}{Zhong, S.}, \bibinfo{author}{Bi,
-  W.}, \bibinfo{author}{Zhang, Y.}, \bibinfo{author}{Chen, Z.},
-  \bibinfo{author}{Chen, Z.}, \bibinfo{author}{Liu, X.}, \bibinfo{author}{Ma,
-  Y.}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{A first look at bugs in {LLM} inference engines}.
-\newblock \bibinfo{journal}{ACM Transactions on Software Engineering and
-  Methodology} \DOIprefix\doi{10.1145/3788873}.
-%Type = Inproceedings
-\bibitem[{Martin-Lopez et~al.(2019)Martin-Lopez, Segura and
-  Ruiz-Cort{\'e}s}]{martinlopez2019deps}
-\bibinfo{author}{Martin-Lopez, A.}, \bibinfo{author}{Segura, S.},
-  \bibinfo{author}{Ruiz-Cort{\'e}s, A.}, \bibinfo{year}{2019}.
-\newblock \bibinfo{title}{A catalogue of inter-parameter dependencies in
-  {RESTful} web {APIs}}, in: \bibinfo{booktitle}{Service-Oriented Computing
-  (ICSOC)}, pp. \bibinfo{pages}{399--414}.
-\newblock \DOIprefix\doi{10.1007/978-3-030-33702-5_31}.
-%Type = Inproceedings
-\bibitem[{Metz et~al.(2012)Metz, de~Abreu, Cherman and
-  Monard}]{metz2012baselines}
-\bibinfo{author}{Metz, J.}, \bibinfo{author}{de~Abreu, L.F.D.},
-  \bibinfo{author}{Cherman, E.A.}, \bibinfo{author}{Monard, M.C.},
-  \bibinfo{year}{2012}.
-\newblock \bibinfo{title}{On the estimation of predictive evaluation measure
-  baselines for multi-label learning}, in: \bibinfo{booktitle}{Advances in
-  Artificial Intelligence, IBERAMIA}, pp. \bibinfo{pages}{189--198}.
-\newblock \DOIprefix\doi{10.1007/978-3-642-34654-5_20}.
-%Type = Misc
-\bibitem[{Metz et~al.(2015)Metz, Spola{\^o}r, Cherman and
-  Monard}]{metz2015comparing}
-\bibinfo{author}{Metz, J.}, \bibinfo{author}{Spola{\^o}r, N.},
-  \bibinfo{author}{Cherman, E.A.}, \bibinfo{author}{Monard, M.C.},
-  \bibinfo{year}{2015}.
-\newblock \bibinfo{title}{Comparing published multi-label classifier
-  performance measures to the ones obtained by a simple multi-label baseline
-  classifier}.
-\newblock \DOIprefix\doi{10.48550/arXiv.1503.06952}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:1503.06952}.
-%Type = Article
-\bibitem[{Mizrahi et~al.(2024)Mizrahi, Kaplan, Malkin, Dror, Shahaf and
-  Stanovsky}]{mizrahi2024multiprompt}
-\bibinfo{author}{Mizrahi, M.}, \bibinfo{author}{Kaplan, G.},
-  \bibinfo{author}{Malkin, D.}, \bibinfo{author}{Dror, R.},
-  \bibinfo{author}{Shahaf, D.}, \bibinfo{author}{Stanovsky, G.},
-  \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{State of what art? {A} call for multi-prompt {LLM}
-  evaluation}.
-\newblock \bibinfo{journal}{Transactions of the Association for Computational
-  Linguistics} \bibinfo{volume}{12}, \bibinfo{pages}{933--949}.
-\newblock \DOIprefix\doi{10.1162/tacl_a_00681}.
-%Type = Misc
-\bibitem[{Morbiato et~al.(2026)Morbiato, Keller, Nair and
-  Romano}]{morbiato2026hierarchical}
-\bibinfo{author}{Morbiato, F.}, \bibinfo{author}{Keller, M.},
-  \bibinfo{author}{Nair, P.}, \bibinfo{author}{Romano, L.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Hierarchical retrieval augmented generation for
-  adversarial technique annotation in cyber threat intelligence text}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2604.14166}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2604.14166}.
-%Type = Inproceedings
-\bibitem[{Ng et~al.(2014)}]{ng2014conll}
-\bibinfo{author}{Ng, H.T.}, et~al., \bibinfo{year}{2014}.
-\newblock \bibinfo{title}{The {CoNLL}-2014 shared task on grammatical error
-  correction}, in: \bibinfo{booktitle}{Proceedings of the Eighteenth Conference
-  on Computational Natural Language Learning: Shared Task}.
-\newblock \DOIprefix\doi{10.3115/v1/w14-1701}.
-%Type = Inproceedings
-\bibitem[{Ng and Milani~Fard(2026)}]{ng2026evaluating}
-\bibinfo{author}{Ng, J.}, \bibinfo{author}{Milani~Fard, A.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Evaluating retrieval-augmented generation for
-  explainable malware analysis}, in: \bibinfo{booktitle}{ACM SecDev}.
-\newblock \bibinfo{note}{Poster. arXiv:2605.03140}.
-%Type = Inproceedings
-\bibitem[{Oyelayo et~al.(2026)Oyelayo, Abedu, Khatoonabadi and
-  Shihab}]{oyelayo2026mcp}
-\bibinfo{author}{Oyelayo, O.}, \bibinfo{author}{Abedu, S.},
-  \bibinfo{author}{Khatoonabadi, S.}, \bibinfo{author}{Shihab, E.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Developer challenges in the adoption of model context
-  protocol in {AI} agent development}, in: \bibinfo{booktitle}{7th
-  International Workshop on Bots and Agents in Software Engineering (BotSE),
-  co-located with ICSE}, pp. \bibinfo{pages}{53--59}.
-\newblock \DOIprefix\doi{10.1145/3786161.3788462}.
-%Type = Inproceedings
-\bibitem[{Paramanayakam et~al.(2025)Paramanayakam, Karatzas, Anagnostopoulos
-  and Stamoulis}]{paramanayakam2025lessismore}
-\bibinfo{author}{Paramanayakam, V.}, \bibinfo{author}{Karatzas, A.},
-  \bibinfo{author}{Anagnostopoulos, I.}, \bibinfo{author}{Stamoulis, D.},
-  \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{Less is more: Optimizing function calling for {LLM}
-  execution on edge devices}, in: \bibinfo{booktitle}{Design, Automation and
-  Test in Europe Conference (DATE)}.
-\newblock \DOIprefix\doi{10.23919/date64628.2025.10992798}.
-  \bibinfo{note}{arXiv:2411.15399}.
-%Type = Article
-\bibitem[{Rollinson and Polatidis(2026)}]{rollinson2026samples}
-\bibinfo{author}{Rollinson, A.}, \bibinfo{author}{Polatidis, N.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{{LLM}-generated samples for {Android} malware
-  detection}.
-\newblock \bibinfo{journal}{Digital} \bibinfo{volume}{6}, \bibinfo{pages}{5}.
-\newblock \DOIprefix\doi{10.3390/digital6010005}.
-%Type = Misc
-\bibitem[{Ryan et~al.(2026)Ryan, Noor, Erfan, Mitra, Mittal and
-  Rahman}]{ryan2026attck}
-\bibinfo{author}{Ryan, A.}, \bibinfo{author}{Noor, S.S.},
-  \bibinfo{author}{Erfan, M.}, \bibinfo{author}{Mitra, S.},
-  \bibinfo{author}{Mittal, S.}, \bibinfo{author}{Rahman, M.R.},
-  \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Evaluating open-source {LLMs} for multi-label
-  {ATT\&CK} technique classification on {CTI} reports}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2606.18166}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2606.18166}.
-%Type = Inproceedings
-\bibitem[{Saha et~al.(2025)}]{saha2025malaware}
-\bibinfo{author}{Saha, S.}, et~al., \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{MaLAware}: Automating the comprehension of malicious
-  software behaviours using {LLMs}}, in: \bibinfo{booktitle}{IEEE/ACM
-  International Conference on Mining Software Repositories (MSR)}.
-\newblock \DOIprefix\doi{10.1109/msr66628.2025.00037}.
-  \bibinfo{note}{arXiv:2504.01145}.
-%Type = Inproceedings
-\bibitem[{Satvat et~al.(2021)Satvat, Gjomemo and
-  Venkatakrishnan}]{satvat2021extractor}
-\bibinfo{author}{Satvat, K.}, \bibinfo{author}{Gjomemo, R.},
-  \bibinfo{author}{Venkatakrishnan, V.N.}, \bibinfo{year}{2021}.
-\newblock \bibinfo{title}{{EXTRACTOR}: Extracting attack behavior from threat
-  reports}, in: \bibinfo{booktitle}{IEEE European Symposium on Security and
-  Privacy (EuroS\&P)}, pp. \bibinfo{pages}{598--615}.
-\newblock \DOIprefix\doi{10.1109/eurosp51992.2021.00046}.
-%Type = Inproceedings
-\bibitem[{Snell et~al.(2025)Snell, Lee, Xu and Kumar}]{snell2025testtime}
-\bibinfo{author}{Snell, C.}, \bibinfo{author}{Lee, J.}, \bibinfo{author}{Xu,
-  K.}, \bibinfo{author}{Kumar, A.}, \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{Scaling {LLM} test-time compute optimally can be more
-  effective than scaling parameters for reasoning}, in:
-  \bibinfo{booktitle}{International Conference on Learning Representations
-  (ICLR)}.
-\newblock \bibinfo{note}{Oral}.
-%Type = Inproceedings
-\bibitem[{Sun et~al.(2025)Sun, Wang, Li, Liu, Li, Wen, Yuan, Zheng, Liang, Li
-  and Liu}]{sun2025length}
-\bibinfo{author}{Sun, Y.}, \bibinfo{author}{Wang, H.}, \bibinfo{author}{Li,
-  J.}, \bibinfo{author}{Liu, J.}, \bibinfo{author}{Li, X.},
-  \bibinfo{author}{Wen, H.}, \bibinfo{author}{Yuan, Y.},
-  \bibinfo{author}{Zheng, H.}, \bibinfo{author}{Liang, Y.},
-  \bibinfo{author}{Li, Y.}, \bibinfo{author}{Liu, Y.}, \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{An empirical study of {LLM} reasoning ability under
-  strict output length constraint}, in: \bibinfo{booktitle}{Proceedings of the
-  2025 Conference on Empirical Methods in Natural Language Processing}, pp.
-  \bibinfo{pages}{7652--7671}.
-\newblock \DOIprefix\doi{10.18653/v1/2025.emnlp-main.389}.
-%Type = Inproceedings
-\bibitem[{Tan et~al.(2024)Tan, Luo, Li and Zhang}]{tan2024llm4decompile}
-\bibinfo{author}{Tan, H.}, \bibinfo{author}{Luo, Q.}, \bibinfo{author}{Li, J.},
-  \bibinfo{author}{Zhang, Y.}, \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{{LLM4Decompile}: Decompiling binary code with large
-  language models}, in: \bibinfo{booktitle}{Proceedings of the 2024 Conference
-  on Empirical Methods in Natural Language Processing (EMNLP)}, pp.
-  \bibinfo{pages}{3473--3487}.
-\newblock \DOIprefix\doi{10.18653/v1/2024.emnlp-main.203}.
-%Type = Misc
-\bibitem[{{The MITRE Corporation}(2026)}]{mitre2026attack}
-\bibinfo{author}{{The MITRE Corporation}}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{{MITRE ATT\&CK} enterprise}.
-\newblock \bibinfo{howpublished}{Knowledge base.
-  \url{https://attack.mitre.org}}.
-\newblock \bibinfo{note}{The family-to-technique \texttt{uses} relationships
-  used here as per-sample ground truth are derived from the
-  \texttt{mitre-attack/attack-stix-data} distribution, under the {ATT\&CK}
-  Terms of Use}.
-%Type = Misc
-\bibitem[{Tran and Kiela(2026)}]{tran2026single}
-\bibinfo{author}{Tran, D.}, \bibinfo{author}{Kiela, D.}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Single-agent {LLMs} outperform multi-agent systems on
-  multi-hop reasoning under equal thinking token budgets}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2604.02460}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2604.02460}.
-%Type = Inproceedings
-\bibitem[{Welleck et~al.(2020)Welleck, Kulikov, Roller, Dinan, Cho and
-  Weston}]{welleck2019unlikelihood}
-\bibinfo{author}{Welleck, S.}, \bibinfo{author}{Kulikov, I.},
-  \bibinfo{author}{Roller, S.}, \bibinfo{author}{Dinan, E.},
-  \bibinfo{author}{Cho, K.}, \bibinfo{author}{Weston, J.},
-  \bibinfo{year}{2020}.
-\newblock \bibinfo{title}{Neural text generation with unlikelihood training},
-  in: \bibinfo{booktitle}{International Conference on Learning Representations
-  (ICLR)}.
-\newblock \bibinfo{note}{ArXiv:1908.04319}.
-%Type = Inproceedings
-\bibitem[{Xu et~al.(2013)Xu, Zhang, Huang, Zheng, Sheng, Yuan, Zhou and
-  Pasupathy}]{xu2013misconfig}
-\bibinfo{author}{Xu, T.}, \bibinfo{author}{Zhang, J.}, \bibinfo{author}{Huang,
-  P.}, \bibinfo{author}{Zheng, J.}, \bibinfo{author}{Sheng, T.},
-  \bibinfo{author}{Yuan, D.}, \bibinfo{author}{Zhou, Y.},
-  \bibinfo{author}{Pasupathy, S.}, \bibinfo{year}{2013}.
-\newblock \bibinfo{title}{Do not blame users for misconfigurations}, in:
-  \bibinfo{booktitle}{24th ACM Symposium on Operating Systems Principles
-  (SOSP)}, pp. \bibinfo{pages}{244--259}.
-\newblock \DOIprefix\doi{10.1145/2517349.2522727}.
-%Type = Misc
-\bibitem[{Xuan et~al.(2026)Xuan, Xu, Zheng, Tan, Guo, Zhang, Yu, Wang and
-  Zhang}]{ttpdetect2026}
-\bibinfo{author}{Xuan, Z.}, \bibinfo{author}{Xu, X.}, \bibinfo{author}{Zheng,
-  M.}, \bibinfo{author}{Tan, L.Z.H.}, \bibinfo{author}{Guo, J.},
-  \bibinfo{author}{Zhang, T.}, \bibinfo{author}{Yu, L.}, \bibinfo{author}{Wang,
-  C.}, \bibinfo{author}{Zhang, X.}, \bibinfo{year}{2026}.
-\newblock \bibinfo{title}{Identifying adversary tactics and techniques in
-  malware binaries with an {LLM} agent}.
-\newblock \DOIprefix\doi{10.48550/arXiv.2602.06325}. \bibinfo{note}{{PREPRINT},
-  not peer reviewed. arXiv:2602.06325}.
-%Type = Inproceedings
-\bibitem[{Xue et~al.(2025)Xue, Zhao, Wang, Chen and Wang}]{xue2025agentbugs}
-\bibinfo{author}{Xue, J.}, \bibinfo{author}{Zhao, Y.}, \bibinfo{author}{Wang,
-  Y.}, \bibinfo{author}{Chen, J.}, \bibinfo{author}{Wang, D.},
-  \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{A characterization study of bugs in {LLM} agent
-  workflow orchestration frameworks}, in: \bibinfo{booktitle}{40th IEEE/ACM
+\begin{thebibliography}{10}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname href\endcsname\relax
+  \def\href#1#2{#2} \def\path#1{#1}\fi
+
+\bibitem{buchel2025sok}
+M.~B{\"u}chel, T.~Paladini, S.~Longari, M.~Carminati, S.~Zanero, et~al., {SoK}:
+  Automated {TTP} extraction from {CTI} reports, are we there yet?, in: 34th
+  USENIX Security Symposium, 2025, pp. 4621--4641.
+
+\bibitem{gunawi2008eio}
+H.~S. Gunawi, C.~Rubio-Gonz{\'a}lez, A.~C. Arpaci-Dusseau, R.~H.
+  Arpaci-Dusseau, B.~Liblit, {EIO}: Error handling is occasionally correct, in:
+  6th USENIX Conference on File and Storage Technologies (FAST), 2008.
+
+\bibitem{yuan2014simple}
+D.~Yuan, Y.~Luo, X.~Zhuang, G.~R. Rodrigues, X.~Zhao, Y.~Zhang, P.~U. Jain,
+  M.~Stumm, Simple testing can prevent most critical failures: An analysis of
+  production failures in distributed data-intensive systems, in: 11th USENIX
+  Symposium on Operating Systems Design and Implementation (OSDI), 2014.
+
+\bibitem{alquraan2018partition}
+A.~Alquraan, H.~Takruri, M.~Alfatafta, S.~Al-Kiswany, An analysis of
+  network-partitioning failures in cloud systems, in: 13th USENIX Symposium on
+  Operating Systems Design and Implementation (OSDI), 2018, pp. 51--68.
+
+\bibitem{xue2025agentbugs}
+J.~Xue, Y.~Zhao, Y.~Wang, J.~Chen, D.~Wang, A characterization study of bugs in
+  {LLM} agent workflow orchestration frameworks, in: 40th IEEE/ACM
   International Conference on Automated Software Engineering (ASE), Industry
-  Showcase}, pp. \bibinfo{pages}{3369--3380}.
-\newblock \DOIprefix\doi{10.1109/ASE63991.2025.00278}.
-%Type = Inproceedings
-\bibitem[{Yu et~al.(2024)}]{yu2024maltracker}
-\bibinfo{author}{Yu, W.}, et~al., \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{Maltracker: A fine-grained {NPM} malware tracker
-  copiloted by {LLM}-enhanced dataset}, in: \bibinfo{booktitle}{Proceedings of
-  the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis
-  (ISSTA)}.
-\newblock \DOIprefix\doi{10.1145/3650212.3680397}.
-%Type = Inproceedings
-\bibitem[{Yuan et~al.(2014)Yuan, Luo, Zhuang, Rodrigues, Zhao, Zhang, Jain and
-  Stumm}]{yuan2014simple}
-\bibinfo{author}{Yuan, D.}, \bibinfo{author}{Luo, Y.}, \bibinfo{author}{Zhuang,
-  X.}, \bibinfo{author}{Rodrigues, G.R.}, \bibinfo{author}{Zhao, X.},
-  \bibinfo{author}{Zhang, Y.}, \bibinfo{author}{Jain, P.U.},
-  \bibinfo{author}{Stumm, M.}, \bibinfo{year}{2014}.
-\newblock \bibinfo{title}{Simple testing can prevent most critical failures: An
-  analysis of production failures in distributed data-intensive systems}, in:
-  \bibinfo{booktitle}{11th USENIX Symposium on Operating Systems Design and
-  Implementation (OSDI)}.
-%Type = Article
-\bibitem[{Zhao et~al.(2025)}]{zhao2025apppoet}
-\bibinfo{author}{Zhao, W.}, et~al., \bibinfo{year}{2025}.
-\newblock \bibinfo{title}{{AppPoet}: {LLM}-based {Android} malware detection
-  via multi-view prompt engineering}.
-\newblock \bibinfo{journal}{Expert Systems with Applications}
-  \bibinfo{volume}{262}.
-\newblock \DOIprefix\doi{10.1016/j.eswa.2024.125546}.
-  \bibinfo{note}{arXiv:2404.18816}.
+  Showcase, 2025, pp. 3369--3380.
+\newblock \href {https://doi.org/10.1109/ASE63991.2025.00278}
+  {\path{doi:10.1109/ASE63991.2025.00278}}.
+
+\bibitem{liu2026inference}
+M.~Liu, S.~Zhong, W.~Bi, Y.~Zhang, Z.~Chen, Z.~Chen, X.~Liu, Y.~Ma, A first
+  look at bugs in {LLM} inference engines, ACM Transactions on Software
+  Engineering and Methodology (2026).
+\newblock \href {https://doi.org/10.1145/3788873} {\path{doi:10.1145/3788873}}.
+
+\bibitem{yu2024maltracker}
+W.~Yu, et~al., Maltracker: A fine-grained {NPM} malware tracker copiloted by
+  {LLM}-enhanced dataset, in: Proceedings of the 33rd ACM SIGSOFT International
+  Symposium on Software Testing and Analysis (ISSTA), 2024.
+\newblock \href {https://doi.org/10.1145/3650212.3680397}
+  {\path{doi:10.1145/3650212.3680397}}.
+
+\bibitem{zhao2025apppoet}
+W.~Zhao, et~al., {AppPoet}: {LLM}-based {Android} malware detection via
+  multi-view prompt engineering, Expert Systems with Applications 262,
+  arXiv:2404.18816 (2025).
+\newblock \href {https://doi.org/10.1016/j.eswa.2024.125546}
+  {\path{doi:10.1016/j.eswa.2024.125546}}.
+
+\bibitem{rollinson2026samples}
+A.~Rollinson, N.~Polatidis, {LLM}-generated samples for {Android} malware
+  detection, Digital 6~(1) (2026) 5.
+\newblock \href {https://doi.org/10.3390/digital6010005}
+  {\path{doi:10.3390/digital6010005}}.
+
+\bibitem{saha2025malaware}
+S.~Saha, et~al., {MaLAware}: Automating the comprehension of malicious software
+  behaviours using {LLMs}, in: IEEE/ACM International Conference on Mining
+  Software Repositories (MSR), 2025, arXiv:2504.01145.
+\newblock \href {https://doi.org/10.1109/msr66628.2025.00037}
+  {\path{doi:10.1109/msr66628.2025.00037}}.
+
+\bibitem{mitre2023tram}
+{Center for Threat-Informed Defense}, {TRAM}: Threat report {ATT\&CK} mapper,
+  Open-source software, MITRE Engenuity, not a paper and cited as the artefact
+  it is; the repository names no preferred citation (2023).
+
+\bibitem{legoy2020rcatt}
+V.~Legoy, M.~Caselli, C.~Seifert, A.~Peter, Automated retrieval of {ATT\&CK}
+  tactics and techniques for cyber threat reports, in: 1st Cyber Threat
+  Intelligence Symposium (CTI), 2020, arXiv:2004.14322. Recorded as a
+  conference contribution by the University of Twente research portal; not
+  indexed under this title in dblp.
+
+\bibitem{husari2017ttpdrill}
+G.~Husari, E.~Al-Shaer, M.~Ahmed, B.~Chu, X.~Niu, {TTPDrill}: Automatic and
+  accurate extraction of threat actions from unstructured text of {CTI}
+  sources, in: Proceedings of the 33rd Annual Computer Security Applications
+  Conference (ACSAC), 2017, pp. 103--115.
+\newblock \href {https://doi.org/10.1145/3134600.3134646}
+  {\path{doi:10.1145/3134600.3134646}}.
+
+\bibitem{satvat2021extractor}
+K.~Satvat, R.~Gjomemo, V.~N. Venkatakrishnan, {EXTRACTOR}: Extracting attack
+  behavior from threat reports, in: IEEE European Symposium on Security and
+  Privacy (EuroS\&P), 2021, pp. 598--615.
+\newblock \href {https://doi.org/10.1109/eurosp51992.2021.00046}
+  {\path{doi:10.1109/eurosp51992.2021.00046}}.
+
+\bibitem{li2022attackg}
+Z.~Li, J.~Zeng, Y.~Chen, Z.~Liang, {AttacKG}: Constructing technique knowledge
+  graph from cyber threat intelligence reports, in: Computer Security, ESORICS,
+  2022, pp. 589--609.
+\newblock \href {https://doi.org/10.1007/978-3-031-17140-6_29}
+  {\path{doi:10.1007/978-3-031-17140-6_29}}.
+
+\bibitem{alam2023ladder}
+M.~T. Alam, D.~Bhusal, Y.~Park, N.~Rastogi, Looking beyond {IoCs}:
+  Automatically extracting attack patterns from external {CTI}, in: 26th
+  International Symposium on Research in Attacks, Intrusions and Defenses
+  (RAID), 2023, pp. 92--108.
+\newblock \href {https://doi.org/10.1145/3607199.3607208}
+  {\path{doi:10.1145/3607199.3607208}}.
+
+\bibitem{lekssays2025techniquerag}
+A.~Lekssays, U.~Shukla, H.~T. Sencar, M.~Parvez, {TechniqueRAG}: Retrieval
+  augmented generation for adversarial technique annotation in {CTI} text, in:
+  Findings of the Association for Computational Linguistics (ACL), 2025,
+  arXiv:2505.11988.
+\newblock \href {https://doi.org/10.18653/v1/2025.findings-acl.1076}
+  {\path{doi:10.18653/v1/2025.findings-acl.1076}}.
+
+\bibitem{morbiato2026hierarchical}
+F.~Morbiato, M.~Keller, P.~Nair, L.~Romano, Hierarchical retrieval augmented
+  generation for adversarial technique annotation in cyber threat intelligence
+  text, {PREPRINT}, not peer reviewed. arXiv:2604.14166 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2604.14166}
+  {\path{doi:10.48550/arXiv.2604.14166}}.
+
+\bibitem{cheng2026ttprint}
+Y.~Cheng, C.~Li, R.~S.~P. Basuki, Q.~Cui, W.~Ding, P.~Gao, {TTPrint}:
+  Evidence-grounded {TTP} extraction via diverge-then-converge verification,
+  {PREPRINT}, not peer reviewed. arXiv:2605.25836 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2605.25836}
+  {\path{doi:10.48550/arXiv.2605.25836}}.
+
+\bibitem{doosterlinck2024incontext}
+K.~D'Oosterlinck, O.~Khattab, F.~Remy, T.~Demeester, C.~Develder, C.~Potts,
+  In-context learning for extreme multi-label classification, {PREPRINT}, not
+  peer reviewed. arXiv:2401.12178 (2024).
+\newblock \href {https://doi.org/10.48550/arXiv.2401.12178}
+  {\path{doi:10.48550/arXiv.2401.12178}}.
+
+\bibitem{abdallah2026retrievers}
+A.~Abdallah, J.~Holdcroft, M.~Ali, A.~Jatowt, Are {LLM}-based retrievers worth
+  their cost? an empirical study of efficiency, robustness, and reasoning
+  overhead, in: Proceedings of the 49th International ACM SIGIR Conference on
+  Research and Development in Information Retrieval, 2026, arXiv:2604.03676.
+\newblock \href {https://doi.org/10.1145/3805712.3808566}
+  {\path{doi:10.1145/3805712.3808566}}.
+
+\bibitem{lange2024annoctr}
+L.~Lange, H.~Adel, et~al., {AnnoCTR}: A dataset for detecting and linking
+  entities, tactics, and techniques in cyber threat reports, in: Joint
+  International Conference on Computational Linguistics, Language Resources and
+  Evaluation (LREC-COLING), 2024, arXiv:2404.07765. CC-BY-SA 4.0.
+\newblock \href {https://doi.org/10.63317/4esp6coivous}
+  {\path{doi:10.63317/4esp6coivous}}.
+
+\bibitem{ng2014conll}
+H.~T. Ng, et~al., The {CoNLL}-2014 shared task on grammatical error correction,
+  in: Proceedings of the Eighteenth Conference on Computational Natural
+  Language Learning: Shared Task, 2014.
+\newblock \href {https://doi.org/10.3115/v1/w14-1701}
+  {\path{doi:10.3115/v1/w14-1701}}.
+
+\bibitem{bryant2019bea}
+C.~Bryant, M.~Felice, {\O}.~E. Andersen, T.~Briscoe, The {BEA}-2019 shared task
+  on grammatical error correction, in: Proceedings of the Fourteenth Workshop
+  on Innovative Use of NLP for Building Educational Applications, 2019.
+\newblock \href {https://doi.org/10.18653/v1/w19-4406}
+  {\path{doi:10.18653/v1/w19-4406}}.
+
+\bibitem{welleck2019unlikelihood}
+S.~Welleck, I.~Kulikov, S.~Roller, E.~Dinan, K.~Cho, J.~Weston, Neural text
+  generation with unlikelihood training, in: International Conference on
+  Learning Representations (ICLR), 2020, arXiv:1908.04319.
+
+\bibitem{li2023repetition}
+H.~Li, T.~Lan, Z.~Fu, D.~Cai, L.~Liu, N.~Collier, T.~Watanabe, Y.~Su,
+  Repetition in repetition out: Towards understanding neural text degeneration
+  from the data perspective, in: Advances in Neural Information Processing
+  Systems (NeurIPS), 2023, arXiv:2310.10226.
+\newblock \href {https://doi.org/10.52202/075280-3187}
+  {\path{doi:10.52202/075280-3187}}.
+
+\bibitem{chen2025recopilot}
+G.~Chen, H.~Sun, D.~Liu, Z.~Wang, Q.~Wang, B.~Yin, L.~Liu, L.~Ying,
+  {ReCopilot}: Reverse engineering copilot in binary analysis, {PREPRINT}, not
+  peer reviewed. arXiv:2505.16366 (2025).
+\newblock \href {https://doi.org/10.48550/arXiv.2505.16366}
+  {\path{doi:10.48550/arXiv.2505.16366}}.
+
+\bibitem{tan2024llm4decompile}
+H.~Tan, Q.~Luo, J.~Li, Y.~Zhang, {LLM4Decompile}: Decompiling binary code with
+  large language models, in: Proceedings of the 2024 Conference on Empirical
+  Methods in Natural Language Processing (EMNLP), 2024, pp. 3473--3487.
+\newblock \href {https://doi.org/10.18653/v1/2024.emnlp-main.203}
+  {\path{doi:10.18653/v1/2024.emnlp-main.203}}.
+
+\bibitem{jiang2025nova}
+N.~Jiang, C.~Wang, K.~Liu, X.~Xu, L.~Tan, X.~Zhang, P.~Babkin, {Nova}:
+  Generative language models for assembly code with hierarchical attention and
+  contrastive learning, in: International Conference on Learning
+  Representations (ICLR), 2025, poster. arXiv:2311.13721.
+
+\bibitem{ttpdetect2026}
+Z.~Xuan, X.~Xu, M.~Zheng, L.~Z.-H. Tan, J.~Guo, T.~Zhang, L.~Yu, C.~Wang,
+  X.~Zhang, Identifying adversary tactics and techniques in malware binaries
+  with an {LLM} agent, {PREPRINT}, not peer reviewed. arXiv:2602.06325 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2602.06325}
+  {\path{doi:10.48550/arXiv.2602.06325}}.
+
+\bibitem{kate2025longfunceval}
+K.~Kate, T.~Pedapati, K.~Basu, Y.~Rizk, V.~Chenthamarakshan, S.~Chaudhury,
+  M.~Agarwal, I.~Abdelaziz, {LongFuncEval}: Measuring the effectiveness of long
+  context models for function calling, {PREPRINT}, not peer reviewed.
+  arXiv:2505.10570 (2025).
+\newblock \href {https://doi.org/10.48550/arXiv.2505.10570}
+  {\path{doi:10.48550/arXiv.2505.10570}}.
+
+\bibitem{paramanayakam2025lessismore}
+V.~Paramanayakam, A.~Karatzas, I.~Anagnostopoulos, D.~Stamoulis, Less is more:
+  Optimizing function calling for {LLM} execution on edge devices, in: Design,
+  Automation and Test in Europe Conference (DATE), 2025, arXiv:2411.15399.
+\newblock \href {https://doi.org/10.23919/date64628.2025.10992798}
+  {\path{doi:10.23919/date64628.2025.10992798}}.
+
+\bibitem{lea2025rex86}
+D.~Lea, J.~Ghawaly, G.~G. Richard~III, A.~Ali-Gombe, A.~Case, {REx86}: A local
+  large language model for assisting in x86 assembly reverse engineering, in:
+  Annual Computer Security Applications Conference (ACSAC), 2025,
+  arXiv:2510.20975.
+\newblock \href {https://doi.org/10.1109/acsac67867.2025.00024}
+  {\path{doi:10.1109/acsac67867.2025.00024}}.
+
+\bibitem{li2025phishdebate}
+W.~Li, S.~Manickam, Y.-w. Chong, S.~Karuppayah, {PhishDebate}: An {LLM}-based
+  multi-agent framework for phishing website detection, in: IEEE International
+  Conference on Big Data (BigData), 2025, pp. 6606--6615, arXiv:2506.15656.
+\newblock \href {https://doi.org/10.1109/BigData66926.2025.11401440}
+  {\path{doi:10.1109/BigData66926.2025.11401440}}.
+
+\bibitem{tran2026single}
+D.~Tran, D.~Kiela, Single-agent {LLMs} outperform multi-agent systems on
+  multi-hop reasoning under equal thinking token budgets, {PREPRINT}, not peer
+  reviewed. arXiv:2604.02460 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2604.02460}
+  {\path{doi:10.48550/arXiv.2604.02460}}.
+
+\bibitem{bertalanic2026consensus}
+B.~Bertalani{\v c}, C.~Fortuna, The cost of consensus: Isolated self-correction
+  prevails over unguided homogeneous multi-agent debate, in: ACM Conference on
+  AI and Agentic Systems, 2026, arXiv:2605.00914.
+\newblock \href {https://doi.org/10.1145/3786335.3813137}
+  {\path{doi:10.1145/3786335.3813137}}.
+
+\bibitem{evertz2026chasing}
+R.~Evertz, N.~Risse, C.~Neuer, N.~M{\"u}ller, S.~Normann, et~al., Chasing
+  shadows: Pitfalls in {LLM} security research, in: Network and Distributed
+  System Security Symposium (NDSS), 2026, arXiv:2512.09549.
+\newblock \href {https://doi.org/10.14722/ndss.2026.241749}
+  {\path{doi:10.14722/ndss.2026.241749}}.
+
+\bibitem{ng2026evaluating}
+J.~Ng, A.~Milani~Fard, Evaluating retrieval-augmented generation for
+  explainable malware analysis, in: ACM SecDev, 2026, poster. arXiv:2605.03140.
+
+\bibitem{metz2012baselines}
+J.~Metz, L.~F.~D. de~Abreu, E.~A. Cherman, M.~C. Monard, On the estimation of
+  predictive evaluation measure baselines for multi-label learning, in:
+  Advances in Artificial Intelligence, IBERAMIA, Lecture Notes in Computer
+  Science, 2012, pp. 189--198.
+\newblock \href {https://doi.org/10.1007/978-3-642-34654-5_20}
+  {\path{doi:10.1007/978-3-642-34654-5_20}}.
+
+\bibitem{metz2015comparing}
+J.~Metz, N.~Spola{\^o}r, E.~A. Cherman, M.~C. Monard, Comparing published
+  multi-label classifier performance measures to the ones obtained by a simple
+  multi-label baseline classifier, {PREPRINT}, not peer reviewed.
+  arXiv:1503.06952 (2015).
+\newblock \href {https://doi.org/10.48550/arXiv.1503.06952}
+  {\path{doi:10.48550/arXiv.1503.06952}}.
+
+\bibitem{lazaridou2021mind}
+A.~Lazaridou, A.~Kuncoro, E.~Gribovskaya, et~al., Mind the gap: Assessing
+  temporal generalization in neural language models, in: Advances in Neural
+  Information Processing Systems (NeurIPS), 2021, arXiv:2102.01951.
+
+\bibitem{xu2013misconfig}
+T.~Xu, J.~Zhang, P.~Huang, J.~Zheng, T.~Sheng, D.~Yuan, Y.~Zhou, S.~Pasupathy,
+  Do not blame users for misconfigurations, in: 24th ACM Symposium on Operating
+  Systems Principles (SOSP), 2013, pp. 244--259.
+\newblock \href {https://doi.org/10.1145/2517349.2522727}
+  {\path{doi:10.1145/2517349.2522727}}.
+
+\bibitem{oyelayo2026mcp}
+O.~Oyelayo, S.~Abedu, S.~Khatoonabadi, E.~Shihab, Developer challenges in the
+  adoption of model context protocol in {AI} agent development, in: 7th
+  International Workshop on Bots and Agents in Software Engineering (BotSE),
+  co-located with ICSE, 2026, pp. 53--59.
+\newblock \href {https://doi.org/10.1145/3786161.3788462}
+  {\path{doi:10.1145/3786161.3788462}}.
+
+\bibitem{martinlopez2019deps}
+A.~Martin-Lopez, S.~Segura, A.~Ruiz-Cort{\'e}s, A catalogue of inter-parameter
+  dependencies in {RESTful} web {APIs}, in: Service-Oriented Computing (ICSOC),
+  2019, pp. 399--414.
+\newblock \href {https://doi.org/10.1007/978-3-030-33702-5_31}
+  {\path{doi:10.1007/978-3-030-33702-5_31}}.
+
+\bibitem{li2024metamorphic}
+Y.~Li, Z.~Liu, P.-L. Poon, D.~Towey, C.-A. Sun, et~al., Metamorphic relation
+  generation: State of the art and research directions, ACM Transactions on
+  Software Engineering and MethodologyArXiv:2406.05397 (2024).
+\newblock \href {https://doi.org/10.1145/3708521} {\path{doi:10.1145/3708521}}.
+
+\bibitem{dev2026judge}
+S.~Dev, A.~Sloan, J.~Kavner, N.~Kong, M.~Sandler, Judge reliability harness:
+  Stress testing the reliability of {LLM} judges, in: Agents in the Wild:
+  Safety, Security, and Beyond Workshop, International Conference on Learning
+  Representations (ICLR), 2026, arXiv:2603.05399.
+
+\bibitem{ryan2026attck}
+A.~Ryan, S.~S. Noor, M.~Erfan, S.~Mitra, S.~Mittal, M.~R. Rahman, Evaluating
+  open-source {LLMs} for multi-label {ATT\&CK} technique classification on
+  {CTI} reports, {PREPRINT}, not peer reviewed. arXiv:2606.18166 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2606.18166}
+  {\path{doi:10.48550/arXiv.2606.18166}}.
+
+\bibitem{sun2025length}
+Y.~Sun, H.~Wang, J.~Li, J.~Liu, X.~Li, H.~Wen, Y.~Yuan, H.~Zheng, Y.~Liang,
+  Y.~Li, Y.~Liu, An empirical study of {LLM} reasoning ability under strict
+  output length constraint, in: Proceedings of the 2025 Conference on Empirical
+  Methods in Natural Language Processing, 2025, pp. 7652--7671.
+\newblock \href {https://doi.org/10.18653/v1/2025.emnlp-main.389}
+  {\path{doi:10.18653/v1/2025.emnlp-main.389}}.
+
+\bibitem{mizrahi2024multiprompt}
+M.~Mizrahi, G.~Kaplan, D.~Malkin, R.~Dror, D.~Shahaf, G.~Stanovsky, State of
+  what art? {A} call for multi-prompt {LLM} evaluation, Transactions of the
+  Association for Computational Linguistics 12 (2024) 933--949.
+\newblock \href {https://doi.org/10.1162/tacl_a_00681}
+  {\path{doi:10.1162/tacl_a_00681}}.
+
+\bibitem{snell2025testtime}
+C.~Snell, J.~Lee, K.~Xu, A.~Kumar, Scaling {LLM} test-time compute optimally
+  can be more effective than scaling parameters for reasoning, in:
+  International Conference on Learning Representations (ICLR), 2025, oral.
+
+\bibitem{hassid2024budget}
+M.~Hassid, T.~Remez, J.~Gehring, R.~Schwartz, Y.~Adi, The larger the better?
+  {I}mproved {LLM} code-generation via budget reallocation, in: First
+  Conference on Language Modeling (COLM), 2024.
+
+\bibitem{jin2024steplength}
+M.~Jin, Q.~Yu, D.~Shu, H.~Zhao, W.~Hua, Y.~Meng, Y.~Zhang, M.~Du, The impact of
+  reasoning step length on large language models, in: Findings of the
+  Association for Computational Linguistics: ACL, 2024, pp. 1830--1842.
+\newblock \href {https://doi.org/10.18653/v1/2024.findings-acl.108}
+  {\path{doi:10.18653/v1/2024.findings-acl.108}}.
+
+\bibitem{release2026artefact}
+D.~K\"u\c{c}\"uk, F.~Ertam, Replication package: the pipeline, the evaluation
+  harnesses, the per-sample records and the derivation of every number
+  reported, Source repository, under an open licence.
+  \url{https://github.com/Root0ne/Maljan} (2026).
+
+\bibitem{kumaran2026confidence}
+D.~Kumaran, Reported confidence in {LLMs} tracks commitment more than
+  correctness, {PREPRINT}, not peer reviewed. arXiv:2606.29490 (2026).
+\newblock \href {https://doi.org/10.48550/arXiv.2606.29490}
+  {\path{doi:10.48550/arXiv.2606.29490}}.
+
+\bibitem{llamacpp8634}
+{ggml-org/llama.cpp}, \texttt{max\_tokens} not respected on the non-chat
+  endpoint, {PREPRINT}, not peer reviewed. ggml-org/llama.cpp issue \#8634
+  (2024).
+
+\bibitem{abusech2026bazaar}
+{abuse.ch}, {MalwareBazaar}, Malware sample corpus.
+  \url{https://bazaar.abuse.ch}, cited as the corpus the dynamic cohort was
+  drawn from. Its terms permit research redistribution of individual samples
+  but not of the corpus as a package (2026).
+
+\bibitem{mitre2026attack}
+{The MITRE Corporation}, {MITRE ATT\&CK} enterprise, Knowledge base.
+  \url{https://attack.mitre.org}, the family-to-technique \texttt{uses}
+  relationships used here as per-sample ground truth are derived from the
+  \texttt{mitre-attack/attack-stix-data} distribution, under the {ATT\&CK}
+  Terms of Use (2026).
 
 \end{thebibliography}

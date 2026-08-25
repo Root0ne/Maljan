@@ -14,12 +14,17 @@
 % is prepared as a preprint and typeset by the journal. Switching to `final,5p`
 % later is a one-word change to this line and a rebuild of those tables, which
 % is the journal's job to trigger and not a decision to pre-empt.
-\documentclass[authoryear,preprint,11pt,a4paper]{elsarticle}
+\documentclass[preprint,11pt,a4paper]{elsarticle}
 
-% elsarticle loads natbib itself. Computers & Security asks for author-year
-% citations with an alphabetical reference list, which is the `authoryear'
-% option above and elsarticle-harv below; this used to be elsarticle-num,
-% which is the house style of a different set of Elsevier journals.
+% elsarticle loads natbib itself and numbers with elsarticle-num below.
+%
+% Read the journal's examples, not its rule paragraph. The Guide for Authors
+% carries Elsevier's generic "author's name and year of publication" text, and
+% every journal-specific example printed underneath it is Vancouver: surname
+% then unpunctuated initials, no parenthetical year, "J Sci Commun
+% 2020;163:51-9", journal titles abbreviated per the LTWA, six authors then et
+% al. This paper was switched to authoryear on the strength of that paragraph
+% and switched back on the strength of the examples.
 \usepackage{fontspec}
 \setmainfont{TeX Gyre Termes}
 \setmonofont[Scale=0.85]{DejaVu Sans Mono}
@@ -191,7 +196,7 @@ negative results
 % and it is the one thing the repository cannot substitute for, because a claim
 % about what the model was asked has to be checkable beside the claim.
 
-\bibliographystyle{elsarticle-harv}
+\bibliographystyle{elsarticle-num}
 \bibliography{refs}
 
 \end{document}

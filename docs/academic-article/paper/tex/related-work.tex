@@ -15,13 +15,13 @@ sub-techniques against roughly 10,000 public annotated examples. A hierarchical 
 candidate space by 77.5\% \preprintcite{morbiato2026hierarchical}, and TTPrint
 \preprintcite{cheng2026ttprint} keeps only candidates supported by both an evidence span and the
 MITRE definition. Neither is a comparator here: both are unreviewed, and both report against
-baselines that \citet{buchel2025sok} call ``largely incomparable'' in a survey re-evaluating more
+baselines that B\"uchel et al.~\cite{buchel2025sok} call ``largely incomparable'' in a survey re-evaluating more
 than forty systems, which also finds traditional natural language processing (NLP) approaches
 outperforming embedder-based and generative ones. Our describe-then-map design removes
 technique-identifier recall from the model entirely, a domain instantiation of Infer-Retrieve-Rank
-\preprintcite{doosterlinck2024incontext} stricter than \citet{lekssays2025techniquerag}, where the
+\preprintcite{doosterlinck2024incontext} stricter than TechniqueRAG \cite{lekssays2025techniquerag}, where the
 model still ranks among retrieved candidates. That a retrieval backend can rank well and gate badly
-is likewise not ours: \citet{abdallah2026retrievers} treat retrieval confidence as distinct from
+is likewise not ours: Abdallah et al.~\cite{abdallah2026retrievers} treat retrieval confidence as distinct from
 effectiveness and find calibration ``consistently weak across model families''.
 Section~\ref{sec:assignment} measures that separation on TRAM2 \citep{mitre2023tram} and on the
 independently annotated AnnoCTR corpus \citep{lange2024annoctr}. Two further results we rely on have
@@ -48,7 +48,7 @@ Multi-agent debate is a standard pattern, including in security \citep{li2025phi
 recent results change how such claims must be read. Holding the reasoning budget constant, Tran and
 Kiela find single agents match or beat multi-agent systems on multi-hop reasoning, with a crossover
 appearing only at degradation 0.7 \preprintcite{tran2026single}, and
-\citet{bertalanic2026consensus} reach the same conclusion on 7B and 8B open-weight models, where
+Bertalani\v{c} and Fortuna~\cite{bertalanic2026consensus} reach the same conclusion on 7B and 8B open-weight models, where
 debate consumed 2.1 to 3.4$\times$ more tokens for equal or lower accuracy. Both scope their
 negatives to homogeneous agents splitting one context, and both name degraded or noisy context as
 the exception. That exception is our setting: a 600-import binary, a sandbox report and a network
@@ -72,16 +72,16 @@ close the gap \citep{lazaridou2021mind}. That work varies the gap between traini
 ours fixed the model and varied the era of the input binary, and we no longer have a result on that
 axis (Section~\ref{sec:limitations}).
 
-The paper's methodological spine belongs to an area that already exists. \citet{gunawi2008eio}
+The paper's methodological spine belongs to an area that already exists. Gunawi et al.~\cite{gunawi2008eio}
 measured where an error signal is lost, finding 13\% of propagation channels drop an error code
-without handling it; \citet{yuan2014simple} attributed 25\% of catastrophic failures to errors
-explicitly signalled and then ignored; and \citet{alquraan2018partition} found the majority of
+without handling it; Yuan et al.~\cite{yuan2014simple} attributed 25\% of catastrophic failures to errors
+explicitly signalled and then ignored; and Alquraan et al.~\cite{alquraan2018partition} found the majority of
 network-partition failures in cloud systems to be silent. The LLM-specific instance is now
 catalogued in bug taxonomies for agent orchestration frameworks \citep{xue2025agentbugs} and
 inference engines \citep{liu2026inference}, the second naming both incorrect request parsing as a
 cause and silent error as a symptom. Overruling a requested parameter back to a default without
 saying so is itself a named misconfiguration failure mode \citep{xu2013misconfig}. Mining Model
-Context Protocol (MCP) reference servers, \citet{oyelayo2026mcp} find data validation and type
+Context Protocol (MCP) reference servers, Oyelayo et al.~\cite{oyelayo2026mcp} find data validation and type
 issues to be the second most prevalent defect class at 13.97\%, which is the class our own first
 defect falls into; a related constraint is that an application programming interface (API)
 specification cannot express every dependency between its inputs, such dependencies being ``the
