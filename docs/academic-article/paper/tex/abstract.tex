@@ -3,12 +3,12 @@ sandbox, a disassembler, retrieval indices and rule engines. What the model cont
 difference against that tooling rather than a score, and reading one needs four cheap checks: a baseline to refer an F1 to, a firing rate before any
 ablation, a minimum detectable effect beside every null, and a count of distinct outputs. We apply
 them component by component. Three findings are positive. Splitting the analysis across several model calls scores
-\fact{cape-negotiated-delta} F1 above a single judge on \fact{cape-consensus-families} real samples,
-at \fact{cape-consensus-negotiated-ratio}$\times$ the output. A technique assigner composing its ranking and gating backends, rather than choosing between them,
+\fact{cape-negotiated-delta} F1 above a single judge on \fact{cape-consensus-families} real samples, one per family, at
+\fact{cape-consensus-negotiated-ratio}$\times$ the output. A technique assigner composing its ranking and gating backends, rather than choosing between them,
 gives the cleanest gate on two external corpora. And turning one decoding flag off gains \fact{reasoning-flag-worth-low} to
-\fact{reasoning-flag-worth-high} F1, more than any architecture or size we measured. Four
+\fact{reasoning-flag-worth-high} F1, more than any architecture or size measured. Four
 are negative or bounded. The negotiation it was built for contributes \fact{cape-mechanism-delta} at a resolution of
-\fact{mde-cape-mechanism}: what pays is the calls, not the argument between them. Against that
+\fact{mde-cape-mechanism}: what pays is the calls, not the argument. Against that
 sandbox the full pipeline is \fact{h2h-delta} F1, at a resolution of \fact{h2h-mde}. Three retrieval components move nothing end to end. And the confidence every gate consumes separates correct from incorrect claims at an area under the
 curve of \fact{confidence-auc}, on an interval containing chance. The fourth check found four of
 seven defects in our own instrument, each returning a plausible result rather than an error.
