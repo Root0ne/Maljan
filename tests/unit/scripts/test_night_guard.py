@@ -105,11 +105,36 @@ def holder(tmp_path: Path):
 
 
 def test_a_job_holding_the_memory_is_still_killed(tmp_path: Path, holder) -> None:
-    """The guard's whole purpose, and the pid file has no trailing newline."""
+    """The guard's whole purpose, and the pid file has no trailing newline.
+
+    The floor is set from a live ``MemAvailable`` reading and the guard takes
+    its own a moment later, so the two can disagree by whatever else the machine
+    is doing. At a 150 MB margin against a 300 MB holder that window was small
+    enough to lose: on a host whose free memory swings by gigabytes, the floor
+    was sometimes already clear by the time the guard looked, the guard
+    correctly declined to kill anything, and the test read that as the guard
+    failing. It was assuming a shared global was a constant, which is the
+    mistake this project's own paper is about.
+
+    Two changes. The margin is most of what the holder holds rather than half of
+    it, so ordinary jitter cannot clear the floor; and a run where the guard
+    reports no shortfall at all is the premise failing rather than the guard
+    failing, so it is retried once from a fresh reading before that is called a
+    defect.
+    """
     proc, pid_file = holder
-    # A floor 150 MB above the current reading: less than the job holds, so
-    # killing it clears the floor and the guard should judge it worthwhile.
-    log = _run_guard(tmp_path, kill_mb=_available_mb() + 150, pid_file=pid_file)
+    for attempt in range(2):
+        # Read as late as possible: this is the window the race lives in.
+        log = _run_guard(tmp_path, kill_mb=_available_mb() + 250, pid_file=pid_file)
+        if "LOW" in log or "SIGTERM" in log:
+            break
+        if attempt == 0:
+            (tmp_path / "night-guard.log").unlink(missing_ok=True)
+    else:
+        pytest.fail(
+            "the guard saw no shortfall on two consecutive runs, so the floor was "
+            f"already clear both times and the premise never held. Log:\n{log}"
+        )
 
     assert f"SIGTERM -> {proc.pid}" in log, (
         f"the guard did not stop a job that was holding more than the shortfall. Log:\n{log}"

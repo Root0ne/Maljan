@@ -284,15 +284,15 @@ opcode-hash attribution & n/a, never fires & \fact{hash-fired} of \fact{hash-tot
 \end{tabular}
 \end{table}
 
-The first row's isolation figure is not accuracy: the leave-one-out corpus is labelled with the
-pipeline's own prior attributions. It is kept because a frequency prior scored the same way reaches
-\fact{case-prior-self-frequency-f1}, and because the production column beside it is scored against
-MITRE ground truth. The three fail for three different reasons. The first fails on
-vocabulary mismatch between query and corpus, visible only in the score distribution while top-k
-accuracy stayed healthy. The second is simply small. The third fails twice over: its corpus holds
-\fact{hash-corpus-samples} samples under \fact{hash-corpus-labels} generic labels, and the
-\setting{8}-instruction floor that correctly excludes thunks leaves \fact{hash-starved} of
-\fact{hash-total} real samples with one hashable function or none.
+The first row's isolation figure is not accuracy, the leave-one-out corpus being labelled with the
+pipeline's own prior attributions; it is kept because a frequency prior scored the same way reaches
+\fact{case-prior-self-frequency-f1} and the production column beside it is scored against MITRE
+ground truth. The three fail differently. The first fails on vocabulary mismatch between query and
+corpus, visible only in the score distribution while top-k accuracy stayed healthy; the second is
+simply small; the third fails twice over, its corpus holding \fact{hash-corpus-samples} samples
+under \fact{hash-corpus-labels} generic labels while the \setting{8}-instruction floor that
+correctly excludes thunks leaves \fact{hash-starved} of \fact{hash-total} real samples with one
+hashable function or none.
 
 Verbal confidence, which the cascade and every deterministic gate consume, discriminates correct
 from incorrect claims at an area under the curve of \fact{confidence-auc}, near chance, concentrated on
@@ -302,12 +302,12 @@ from incorrect claims at an area under the curve of \fact{confidence-auc}, near 
 individually, with the pooled figure carried by the one reaching
 \fact{confidence-best-cluster-auc}. Figure~\ref{fig:confidence} shows why:
 \fact{confidence-modal-count} of the \fact{confidence-n} claims carry confidence exactly
-\setting{1.0}, so the score has almost no ordering to contribute. The estimate is rank-based with ties averaged. Sorting the tied claims arbitrarily returns
-\fact{confidence-auc-naive-legacy} instead, a difference that is entirely an artefact of how
-\fact{confidence-modal-share} of the data is handled. This matches Kumaran's finding
-\preprintcite{kumaran2026confidence} that verbal confidence measures willingness to commit rather
-than correctness, so every deterministic gate keyed to that number is keyed to something we cannot
-distinguish from noise.
+\setting{1.0}, so the score has almost no ordering to contribute. The estimate is rank-based with
+ties averaged, and sorting them arbitrarily returns \fact{confidence-auc-naive-legacy} instead, a
+difference entirely an artefact of how \fact{confidence-modal-share} of the data is handled. This
+matches \citet{kumaran2026confidence}~[preprint]: verbal confidence measures willingness to commit
+rather than correctness, so every deterministic gate keyed to that number is keyed to something we
+cannot distinguish from noise.
 
 \begin{figure}
 \centering
@@ -359,15 +359,15 @@ worse on \fact{sink-worse} and tied on \fact{sink-tied}, with per-pair deltas of
 \fact{sink-pair-deltas}, large in both directions and cancelling. This is the fourth architectural
 claim to end in a null and the last one we were in a position to test.
 
-That null is constrained by a second result: half the experiment was not scoreable. Twelve pairs were attempted and \fact{sink-pairs} survived. \fact{sink-excluded-degenerate} were
-lost to degenerate decode, where an arm emitted \fact{degenerate-claims-min} to
-\fact{degenerate-claims-max} claims across only \fact{degenerate-tids-min} to
-\fact{degenerate-tids-max} technique identifiers, at ratios \fact{degenerate-ratio-min} to
-\fact{degenerate-ratio-max}. \fact{sink-excluded-unattributable} were unattributable, both arms dead
-with the host state never recorded. The last was incomplete at the \setting{630}\,s bound, which is a genuine outcome that still costs
-the pair. A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation here can detect. Quoting
-\fact{sink-delta-tids} \fact{sink-ci-tids} without it would claim a precision the instrument does
-not have. The unattributable pairs are this paper's own retention rule turned against it: we had retained
+That null is constrained by a second result: half the experiment was not scoreable. Twelve pairs
+were attempted and \fact{sink-pairs} survived. \fact{sink-excluded-degenerate} were lost to
+degenerate decode, an arm emitting \fact{degenerate-claims-min} to \fact{degenerate-claims-max}
+claims across only \fact{degenerate-tids-min} to \fact{degenerate-tids-max} technique identifiers;
+\fact{sink-excluded-unattributable} were unattributable, both arms dead with the host state never
+recorded; and the last was incomplete at the \setting{630}\,s bound, a genuine outcome that still
+costs the pair. A \fact{sink-pair-loss-rate} pair-loss rate bounds what any ablation here can
+detect, and quoting \fact{sink-delta-tids} \fact{sink-ci-tids} without it would claim a precision
+the instrument does not have. The unattributable pairs are this paper's own retention rule turned against it: we had retained
 per-sample outputs, and what went unrecorded was the host state the arms died under
 (Section~\ref{sec:limitations}). Two further arms carried a
 \texttt{Connection\ error} from a restart race, meaning the measurement never happened, and were
@@ -462,12 +462,11 @@ such call measured at \fact{unbounded-decode-tokens} generated tokens and still 
 
 Repeating the study with the cap fixed turns the pair into a controlled experiment, and the result
 inverts this section's own conclusion. With the ceiling binding, the same four fixtures fail and the
-same four succeed. The judge's share of the bundle is \fact{judge-capped-share} in both conditions,
-and every number on the reconciled path is identical. Only the way the failure arrives changes:
-\fact{judge-output-cap} tokens of unparseable output in three and a half minutes, instead of a
-ten-minute timeout. The artefact does not. The fallback builder scrapes ATT\&CK identifiers from the evidence claims and from the model's own
-raw response. In the uncapped condition that response is the literal string \texttt{{[}TIMEOUT{]}}
-and contains no identifiers. The fallback bundle was therefore exactly the evidence-derived set,
+same four succeed, the judge's share of the bundle is \fact{judge-capped-share} in both conditions,
+and every number on the reconciled path is identical. Only the way the failure arrives changes. The
+artefact does not. The fallback builder scraped ATT\&CK identifiers from the evidence claims and
+from the model's own raw response; in the uncapped condition that response is the literal string
+\texttt{{[}TIMEOUT{]}} and contains none, so the bundle was exactly the evidence-derived set,
 identical to the cascade set on all four calls. In the capped condition it is
 \fact{fallback-decode-chars-min} to \fact{fallback-decode-chars-max} characters of degenerate decode
 (Table~\ref{tab:fallback}).

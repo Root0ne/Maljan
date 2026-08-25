@@ -3,10 +3,9 @@
 
 Seven failures of the instrument share a shape: it answered successfully, and answered about
 something else. Table~\ref{tab:failures} lists them and Figure~\ref{fig:architecture} marks each on
-the topology. The first four crossed a boundary
-with another server. The last three are ours, two in the analysis code that produces our results and
-one in the pipeline that produces the artefact the analyst receives, so the shape stops neither at
-the network boundary nor at the evaluation harness.
+the topology. The first four crossed a boundary with another server. The last three are ours, two in
+the analysis code that produces our results and one in the pipeline that produces the artefact the
+analyst receives, so the shape stops neither at the network boundary nor at the evaluation harness.
 
 \begin{table}[!htbp]
 \caption{The seven instrument failures, with the layer each occurred at and what found it.}\label{tab:failures}
@@ -43,93 +42,78 @@ call graph    -> A's graph, byte-identical, for every sample
 
 From the second sample of a container's lifetime onwards, the decompilation, the imports, the
 strings, the call graph and the function hashes all described the first binary while the report
-named the current one. M1 and M3 are the same shape at neighbouring layers. M1 survived to first contact because the
-reverse-engineering server declares no optional parameter with a typed default, and it was the only
-server that client had ever talked to. M3 is error swallowing in the ordinary sense: \texttt{raise\_for\_status()} sees nothing wrong in a
-body that says the load failed. M4 composed two bounds each
-correct alone, exceeding the step budget guaranteeing an attempt at the salvage and the salvage
-receiving a fresh copy of the full time budget.
+named the current one. M1 and M3 are the same shape at neighbouring layers: M1 survived to first
+contact because the reverse-engineering server declares no optional parameter with a typed default
+and was the only server that client had talked to, and M3 is error swallowing in the ordinary sense,
+\texttt{raise\_for\_status()} seeing nothing wrong in a body that says the load failed. M4 composed
+two bounds each correct alone.
 
-A fifth case at the same boundary was caught before it produced data. A request for a report the sandbox has since deleted is answered with HTTP~200 and a short body
-saying the reports directory does not exist, on fifty-six of one hundred tasks. A fetcher that trusted the status code would have written those bodies into the archive, under the
-filename of the sample they were meant to describe. Ours did not. It verifies the report's own digest against the identifier it asked for before writing, a four-line
-check
-that exists only because M3 taught us the shape. We first
-recorded the consequence as a retention limit, that the reports had existed and expired. That was
-wrong. Asking the sandbox how long each analysis had taken produced a split with nothing between the modes.
-The \fact{audit-real} tasks whose reports survived ran \fact{audit-real-min} to
-\fact{audit-real-max}\,s. The other \fact{audit-instant} ran under a second, all
-\fact{audit-reported-but-instant} of them still marked \texttt{reported}. That accounts for
-\fact{audit-timed} of the \fact{audit-tasks}; the last returned no duration at all. A Windows PE does not detonate in
-one second. Nothing had expired; nothing had happened, and the instrument said otherwise.
-Re-submitting the tasks that had not run produced full-length analyses two days later on the same
-instance. That recovered \fact{audit-recovered} of them and put the cohort at \fact{baseline-n}. The
-remaining \fact{audit-lost} produced no report on either attempt, and not one of them reported a
-failure: all \fact{audit-lost-still-reporting-success} are still marked \texttt{reported} at zero
-seconds. A
-completion status is a statement about a queue rather than about an analysis, and it is exactly as
-trustworthy as an HTTP~200; the retrieval path now refuses any task under \setting{60}\,s.
+A fifth case at the same boundary was caught before it produced data, and it is why the cohort is
+\fact{baseline-n}. A request for a report the sandbox has since deleted is answered with HTTP~200
+and a short body saying the reports directory does not exist. A fetcher trusting the status code
+would have written those bodies into the archive under the filename of the sample they were meant to
+describe; ours verifies the report's own digest against the identifier it asked for before writing,
+a four-line check that exists only because M3 taught us the shape. We first recorded the consequence
+as a retention limit, that the reports had existed and expired, and that was wrong. Asking the
+sandbox how long each analysis had taken produced a split with nothing between the modes: the
+\fact{audit-real} tasks whose reports survived ran \fact{audit-real-min} to \fact{audit-real-max}\,s,
+and the other \fact{audit-instant} ran under a second, all \fact{audit-reported-but-instant} of them
+still marked \texttt{reported}. That accounts for \fact{audit-timed} of the \fact{audit-tasks}; the
+last returned no duration at all. A Windows PE does not detonate in one second. Nothing had expired;
+nothing had happened, and the instrument said otherwise. Re-submitting recovered
+\fact{audit-recovered} of them, and the remaining \fact{audit-lost} produced no report on either
+attempt, all \fact{audit-lost-still-reporting-success} still marked \texttt{reported} at zero
+seconds. A completion status is a statement about a queue rather than about an analysis, and is
+exactly as trustworthy as an HTTP~200; the retrieval path now refuses any task under \setting{60}\,s.
 
 The last three crossed no boundary. M5 is the only one that reached a results table. We ablated the
 corroboration cascade and wrote the two conditions of Section~\ref{sec:cascade} up as a finding
-about the judge, that it attends to the list of claimed techniques and ignores the evidence-quality
-apparatus above it. The judge was not involved: the reconciliation step makes the cascade's set a
-guaranteed subset of every bundle whatever the model produced, so both numbers are necessities of an
-\texttt{if} statement rather than measurements of restraint, and the experiment could not have
-returned anything else. A second study about to run would have compared a weighted cascade
-against a flat union of the same claims; both arms would have shared one reconciliation set, so it
-would have reported no difference correctly and vacuously, and it was stopped four minutes in by the
-same log line that exposed M5. The signal was in the results the whole time. A Jaccard of \fact{cascade-overlap-jaccard}, with a
-zero-width bootstrap interval across \fact{cascade-overlap-pairs} ablated arms at temperature
-\fact{decode-temperature}, is not something a language model produces. It is what a constant looks
-like. We read it as an unusually clean null, because a clean null was the result we were prepared to
-find.
+about the judge, when the reconciliation step makes the cascade's set a guaranteed subset of every
+bundle whatever the model produced, so both numbers are necessities of an \texttt{if} statement and
+the experiment could not have returned anything else. A second study about to run would have
+compared a weighted cascade against a flat union of the same claims, sharing one reconciliation set,
+and was stopped four minutes in by the log line that exposed M5. The signal was in the results the
+whole time: a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width bootstrap interval across
+\fact{cascade-overlap-pairs} ablated arms at temperature \fact{decode-temperature} is not something
+a language model produces. It is what a constant looks like. We read it as an unusually clean null,
+because a clean null was the result we were prepared to find.
 
-M6 is the only one whose wrong answer agreed with the literature. Assembling a parameter-size series
-to test the published finding that parameter count predicts ATT\&CK-classification F1, the harness
-ranked mean F1 against total parameters across a \fact{series-param-span}$\times$ span and reported
-$\rho$=\fact{superseded-rho}, reproducing the prior almost exactly, with the confounds it could not
-remove printed honestly beneath. The five rows were three models. One appeared twice, because it had been run in two configurations,
-and that was not a labelling detail. The same weights score \fact{arm-qwen35ba3b-nothink-f1} with
-the reasoning stream disabled and \fact{arm-qwen35ba3b-f1} with it enabled, because
-\fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls then spend their whole output budget
-reasoning and never answer. The enabled row sat at the small end of the parameter axis, which is
-where it set the sign of the correlation. The failure is not the duplicate rows but that the
-arm-selection rule did not exist. The harness had averaged ranks, an exact permutation p, and a
-common-cell restriction so endpoint availability cannot masquerade as model size; every guard was
-about a way the numbers could mislead and none about whether the rows were comparable in the first
-place. The rule now keys on the measured reasoning share of each arm rather than on the flag
-requested. M5 was caught by a number too clean to believe; M6 produced one in exactly the range
-a reader would expect, in the direction the literature predicts, so nothing was anomalous to notice
-and it was caught by asking why one model was on the arms table twice.
+M6 is the only one whose wrong answer agreed with the literature. Assembling a parameter-size
+series, the harness ranked mean F1 against total parameters across a \fact{series-param-span}$\times$
+span and reported $\rho$=\fact{superseded-rho}, reproducing the prior almost exactly, with the
+confounds it could not remove printed honestly beneath. The five rows were three models: one
+appeared twice because it had been run in two configurations, and the same weights score
+\fact{arm-qwen35ba3b-nothink-f1} with the reasoning stream disabled and \fact{arm-qwen35ba3b-f1}
+with it enabled, because \fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls then spend
+their whole output budget reasoning and never answer. The enabled row sat at the small end of the
+parameter axis, which is where it set the sign of the correlation. The failure is not the duplicate
+rows but that the arm-selection rule did not exist: the harness had averaged ranks, an exact
+permutation p and a common-cell restriction, every guard about a way the numbers could mislead and
+none about whether the rows were comparable. M5 was caught by a number too clean to believe; M6
+produced one in exactly the range a reader would expect, so nothing was anomalous to notice, and it
+was caught by asking why one model was on the arms table twice.
 
-M7 is in the production pipeline rather than in an evaluation harness, and it removed a guarantee
-the code states in its own comment. The judge is built with an \fact{judge-output-cap}-token output
-ceiling, and the line that builds it says why: to bound the verdict generation so a degenerate
-decode cannot consume the full wall-clock timeout. The client library renames that parameter to the
-vendor's newer spelling when it serialises the request, and the local inference server does not read
-the newer spelling. It accepted the field, ignored it, and decoded without a ceiling: measured on one call,
-\fact{unbounded-decode-tokens} tokens generated and still going when the caller's ten-minute wrapper
-gave up. The consequence is not a slow call but the four unreturned verdicts of
-Section~\ref{sec:cascade}, each of which left the pipeline on its text-fallback path.
-It was invisible because the configured value was correct at every level anything reads: the
-container passed it, the model object held it, and it survived every later rebinding. Only the
-serialised request was wrong, and nothing in the system reads the serialised request, so every check
-anyone would think to perform would have confirmed the property that did not hold. What found it was
-a study measuring something else, which recorded which branch each failed call took rather than only
-that it failed; four calls named the timeout branch, which prompted the question of why a
-temperature-zero model would need ten minutes. The incompatibility itself is known, reported against \texttt{llama.cpp} in its own issue tracker
+M7 is in the production pipeline and removed a guarantee the code states in its own comment. The
+judge is built with an \fact{judge-output-cap}-token output ceiling to bound verdict generation, the
+client library renames that parameter to the vendor's newer spelling when it serialises the request,
+and the local server does not read the newer spelling: it accepted the field, ignored it, and
+decoded without a ceiling, \fact{unbounded-decode-tokens} tokens generated and still going when the
+caller's ten-minute wrapper gave up. The consequence is the four unreturned verdicts of
+Section~\ref{sec:judge}. It was invisible because the configured value was correct at every level
+anything reads, and only the serialised request was wrong, which nothing in the system reads. What
+found it was a study measuring something else, which recorded which branch each failed call took.
+The incompatibility is known, reported against \texttt{llama.cpp} in its own issue tracker
 \preprintcite{llamacpp8634}; what one costs inside a measurement is the part we report.
 
 That \fact{test-count} tests passed throughout is a fact about test shape rather than test quality.
-M2 and M3 need a second case within one server lifetime, and a unit test loads one program, asserts,
-and tears down. M1 needed a second server, and the behaviour was correct against the only one
-exercised. M4 needed an input rich enough to exhaust the step budget, which a small fixture never
-is. Preconditions of that kind are exactly what a fast unit suite is designed to avoid. The last three are invisible to unit testing in principle, because every unit behaved as specified.
-M5's reconciliation function was never wrong, and no test of one component can catch a
-misattribution made three modules away. Every one of M6's guards concerned the wrong question. And a
-unit test of M7 would check that the output ceiling is \fact{judge-output-cap}, which it is, at
-every level the object model exposes.
+M2 and M3 need a second case within one server lifetime, and a unit test loads one program, asserts
+and tears down; M1 needed a second server; M4 needed an input rich enough to exhaust the step
+budget. Preconditions of that kind are what a fast unit suite is designed to avoid. The last three
+are invisible to unit testing in principle, because every unit behaved as specified: M5's
+reconciliation function was never wrong and no test of one component catches a misattribution made
+three modules away, every one of M6's guards concerned the wrong question, and a unit test of M7
+would check that the ceiling is \fact{judge-output-cap}, which it is, at every level the object
+model exposes.
 
 \subsection{Output cardinality as a detector}\label{sec:detector}
 
@@ -156,11 +140,12 @@ a Jaccard of \fact{cascade-overlap-jaccard} with a zero-width interval across \f
 \end{tabular}
 \end{table}
 
-The generalisation is one line of arithmetic. Before a batch measurement is trusted, count how many distinct outputs the N inputs produced. Pick a
-dimension that should vary, such as output length, digest or element count. If far fewer than N of
-them differ, the instrument is repeating itself, and repetition is what stale state looks like from
-outside. It needs no ground truth, and it is reported as a result column rather than run as a test, because
-the signal exists only in the batch. M5 extends it to our own results.
+The generalisation is one line of arithmetic. Before a batch measurement is trusted, count how many
+distinct outputs the N inputs produced, on a dimension that should vary, such as output length,
+digest or element count. If far fewer than N of them differ, the instrument is repeating itself, and
+repetition is what stale state looks like from outside. Plotted against inputs processed, distinct
+outputs track the diagonal for a healthy instrument and go flat for a stuck one, so the diagnosis is
+in the shape (Figure~\ref{fig:cardinality}). M5 extends it to our own results.
 
 \begin{figure}
 \centering
@@ -169,16 +154,8 @@ the signal exists only in the batch. M5 extends it to our own results.
 \label{fig:cardinality}
 \end{figure}
 
-Plotted against inputs processed, distinct outputs track the diagonal for a healthy instrument and
-go flat for a stuck one, so the diagnosis is in the shape. Panel a) of
-Figure~\ref{fig:cardinality} is measured, its staircase's flat treads being genuinely identical
-binaries rather than a fault. Panel b) is a schematic, and the reason is itself the cost of these failures: it depicts M3, the run in
-which \fact{stuck-graph-run} consecutive samples returned a byte-identical
-\fact{stuck-graph-chars}-character call graph, and we cannot plot it because that run predates the
-per-sample retention policy those very failures caused us to adopt.
-
 The price is a completed study. A seven-year \fact{drift-n}-sample temporal-drift analysis ran the
 full pipeline per sample against a long-lived server never restarted between samples, which is M2's
 precondition exactly, and whether it was affected cannot be determined because its per-sample
-outputs were not retained. The withdrawal is caused by the defect plus the inability to
-re-ask the question afterwards.
+outputs were not retained. The withdrawal is caused by the defect plus the inability to re-ask the
+question afterwards.
