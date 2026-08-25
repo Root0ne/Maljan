@@ -383,6 +383,16 @@ def suite_facts() -> dict[str, Any]:
         capture_output=True,
         text=True,
     )
+    # A red run still prints a passing count, and this used to return it. The
+    # paper's sentence would then have read "2,745 passing tests caught none of
+    # them" -- a smaller, quieter number produced by a broken suite rather than
+    # by a smaller one. The count is only meaningful from a green run.
+    if proc.returncode != 0:
+        failed = [ln for ln in proc.stdout.splitlines() if ln.startswith(("FAILED", "ERROR"))]
+        raise FactError(
+            f"the suite did not pass (pytest exit {proc.returncode}); the paper cannot "
+            "state a passing-test count from it: " + ("; ".join(failed[:5]) or "see make test")
+        )
     for line in reversed(proc.stdout.splitlines()):
         m = _PASSED.search(line)
         if m:
@@ -1232,6 +1242,45 @@ def provenance_facts() -> dict[str, Any]:
     return out
 
 
+def paired_selection_facts() -> dict[str, Any]:
+    """What the paired cohort selected for, beyond completing both arms.
+
+    The head-to-head block is 13 of the 97 samples, and the paper reported the
+    count without asking what the other 84 had in common. They are not a random
+    subsample: completion required the dynamic arm to finish inside its
+    wall-clock bound, and the samples that did are the older ones.
+
+    Reported as the two medians and the years that contribute nothing, because
+    both are forced by the data. An earlier version of this took the run of
+    years below the first empty one, which on this cohort is every year the
+    paired block has, and printed "13 of the 13" -- a window wide enough to
+    contain its own answer.
+    """
+    per_sample = load("cape_baseline.json")["per_sample"]
+    paired = {r["sha256"] for r in load("dynamic_vs_static.json")["per_pair"]}
+    if not paired <= {r["sha256"] for r in per_sample}:
+        raise FactError("a paired sample is not in the baseline cohort")
+
+    def median_year(rows: list[dict[str, Any]]) -> str:
+        years = sorted(int(r["year"]) for r in rows)
+        return str(years[len(years) // 2])
+
+    in_paired = [r for r in per_sample if r["sha256"] in paired]
+    absent = sorted({r["year"] for r in per_sample} - {r["year"] for r in in_paired})
+    if not absent:
+        raise FactError("every cohort year is represented; the selection claim no longer holds")
+    n_absent = sum(1 for r in per_sample if r["year"] in absent)
+
+    return {
+        "h2h_paired_median_year": median_year(in_paired),
+        "h2h_cohort_median_year": median_year(per_sample),
+        "h2h_unpaired_recent_n": str(n_absent),
+        "h2h_unpaired_recent_years": (
+            absent[0] if len(absent) == 1 else " and ".join((absent[0], absent[-1]))
+        ),
+    }
+
+
 def weight_sensitivity_facts() -> dict[str, Any]:
     """How far the cascade's hand-chosen trust weights reach.
 
@@ -1343,6 +1392,7 @@ BUILDERS = (
     power_facts,
     multiplicity_facts,
     provenance_facts,
+    paired_selection_facts,
     weight_sensitivity_facts,
     cascade_constants_facts,
 )

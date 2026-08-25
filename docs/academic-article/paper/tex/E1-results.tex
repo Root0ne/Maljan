@@ -43,9 +43,17 @@ they are built on top of: 95\% cluster CI \fact{h2h-ci}, exact cluster sign-flip
 \fact{h2h-p-exact}, better on \fact{h2h-better} of \fact{h2h-n}. The samples differ individually in both directions, so the system is not reproducing
 the sandbox's answers but reaching different answers of the same quality. At \fact{h2h-families}
 families the design could detect \fact{h2h-mde} F1 and did not, which bounds the pipeline's
-contribution rather than showing it is zero. The cohort is \fact{baseline-n} rather than
-\fact{audit-tasks} because \fact{audit-instant} of the submitted batch never ran while the sandbox
-reported them complete, the fifth boundary case of Section~\ref{sec:failures}.
+contribution rather than showing it is zero. The cohort is \fact{baseline-n} rather than \fact{audit-tasks} because \fact{audit-instant} of the
+submitted batch never ran while the sandbox reported them complete, the fifth boundary case of
+Section~\ref{sec:failures}. That paired block is not a random subsample of the \fact{baseline-n},
+and the bound that produced it selects. Completion required the dynamic arm to finish inside its wall-clock ceiling, and the samples that
+did are the older ones: the paired block's median year is \fact{h2h-paired-median-year} against the
+cohort's \fact{h2h-cohort-median-year}, and the \fact{h2h-unpaired-recent-n} samples dated
+\fact{h2h-unpaired-recent-years} contribute none. The comparison therefore covers
+\fact{h2h-families} of the \fact{baseline-families} families and the early end of the cohort, and
+\fact{h2h-delta} is a statement about that subpopulation rather than about the cohort. What the
+ceiling selects for beyond age is not measured, and the temporal study that could have said was
+withdrawn.
 
 \begin{figure}
 \centering
