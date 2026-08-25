@@ -23,9 +23,13 @@ rather than a component failing, and why what has to be measured is what the mod
 it. Six deterministic evidence layers assert techniques directly from signatures, rules and byte
 markers, with no model involved. Three analysts then run as ReAct loops, each bound to one tool server and reading one channel of
 evidence. A negotiation node tests for consensus and routes disputes to a revision pass. A judge
-then synthesises a verdict and emits STIX~2.1. Finally, a deterministic reconciliation and gating
-stage adjudicates between the judge's bundle and the corroboration cascade, before the analyst sees
-anything.
+then synthesises a verdict and emits STIX~2.1. Finally, a deterministic reconciliation and gating stage adjudicates between the judge's bundle and
+the corroboration cascade, before the analyst sees anything. The prompts and the block format an
+analyst answers in are in the released artefact \cite{release2026artefact}. The rule the three share
+is the pipeline's grounding constraint: every claim must cite a concrete artefact, a function name,
+an API call or a resolved domain, and a claim may carry a confidence above \setting{0.8} only after
+a falsification check the model is told to run. That is the discipline whose output
+Section~\ref{sec:mechanisms} finds near chance.
 
 The cascade scores a technique $t$ by weighting each contributing layer's confidence by how far
 that layer is trusted, then lifting the result by how many layers agree:

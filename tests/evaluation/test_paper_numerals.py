@@ -59,7 +59,6 @@ _SECTIONS = (
     "E7-methodology.tex",
     "E8-conclusion.tex",
     "E9-declarations.tex",
-    "EA-prompts.tex",
 )
 
 # Regions where a digit is not a measurement. Verbatim is a transcript. A

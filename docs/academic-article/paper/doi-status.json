@@ -297,11 +297,6 @@
    "source": "arxiv",
    "verified": "arXiv registers a DOI for every submission; the identifier is in the entry"
   },
-  "vllm11976": {
-   "doi": null,
-   "checked": "2026-08-25",
-   "reason": "A GitHub issue. Issue trackers are not registered with a DOI agency."
-  },
   "welleck2019unlikelihood": {
    "doi": null,
    "checked": "2026-08-25",
