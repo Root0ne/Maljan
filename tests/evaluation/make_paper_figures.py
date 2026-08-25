@@ -428,6 +428,10 @@ def fig_arms():
         )
     )
 
+    n_fixtures = len(
+        {c for key in ("single", "negotiated", "noise") for c in clusters.get(key, [])}
+    )
+
     h2h = cluster["head_to_head"]
     real_entries = [
         ("pipeline, with sandbox report", h2h["dynamic_f1"], ACCENT),
@@ -435,16 +439,7 @@ def fig_arms():
         ("no-LLM baseline (sandbox signatures)", h2h["cape_f1"], WARN),
     ]
 
-    # Stacked, not side by side. Two panels across a 4.8-inch measure left each
-    # one about an inch of plotting area once the row names were drawn, and the
-    # intervals were squeezed into a strip narrower than the labels beside them.
-    # The figure is not short of height, so the panels take a row each and the
-    # full width, which is three times the plot area for the same page space.
-    fig, (left, right) = plt.subplots(
-        2, 1, figsize=(5.3, 3.9), gridspec_kw={"height_ratios": [1.25, 1.0]}
-    )
-
-    def draw(ax, rows, xlim, title, bottom_panel=False):
+    def draw(ax, rows, xlim, title, bottom_panel=True):
         # The value column gets a third of the axes and the data gets the rest.
         # Two earlier versions failed the same way: drawn from each interval's
         # upper edge, the label ran past the right spine and, in the left panel,
@@ -499,50 +494,50 @@ def fig_arms():
         ax.set_axisbelow(True)
         return [r[3] for r in rows], labels
 
-    drawn = {}
-    drawn["left"] = draw(
-        left,
-        fixture_entries,
-        (0.20, None),
-        "5 synthesised fixtures, no baseline definable",
-    )
-    drawn["right"] = draw(
-        right,
+    def one(rows, lo_x, title, stem):
+        # Height from the row count, so three rows do not get the spacing four
+        # need. The rows carry the reading, and stretching three of them over an
+        # inch of empty each says there is more here than there is.
+        fig, ax = plt.subplots(figsize=(5.3, 0.40 * len(rows) + 1.05))
+        his, texts = draw(ax, rows, (lo_x, None), title)
+        # Fit after the layout, not during it. Measured before tight_layout(),
+        # the extents belong to axes that are about to be resized.
+        fig.tight_layout()
+        x = reserve_label_column(ax, his, texts)
+        for txt in texts:
+            txt.set_x(x)
+        save(fig, stem)
+
+    one(
         [
             (label, blob["mean"], blob["interval"]["lo"], blob["interval"]["hi"], h2h["n"], colour)
             for label, blob, colour in real_entries
         ],
-        (0.02, None),
+        0.02,
         f"{h2h['n']} real samples, {h2h['k']} families",
-        bottom_panel=True,
+        "fig3-arms-against-baseline",
     )
-    # Fit after the layout, not during it. Measured before tight_layout(), the
-    # extents belong to axes that are about to be resized, and the labels
-    # overflowed again at a slightly different place. Changing the limits does
-    # not move the axes, so one pass here is final.
-    fig.tight_layout()
-    for ax, (his, texts) in ((left, drawn["left"]), (right, drawn["right"])):
-        x = reserve_label_column(ax, his, texts)
-        for txt in texts:
-            txt.set_x(x)
-    panel_labels(left, right)
-    save(fig, "fig3-arms-against-baseline")
+    one(
+        fixture_entries,
+        0.20,
+        f"{n_fixtures} synthesised fixtures, no baseline definable",
+        "fig6-equal-budget-arms",
+    )
 
 
 # --------------------------------------------------------------------------
-# Figure 4 — firing rate decides whether an ablation can be read at all
+# Figure 4 -- firing rate decides whether an ablation can be read at all
 # --------------------------------------------------------------------------
 
 
 def _cascade_arms_varied() -> int:
     """How many ablation arms the cascade study actually varied.
 
-    Hard-coded as 15 until 2026-08-15, which was the *superseded* first pass. The
-    re-run varies 32 arms and the Results text says so in the same paragraph that
-    the figure sits beside — "the null survives all of it, at 32 arms rather than
-    15". The figure was plotting the study the text had already retired, which is
-    precisely the drift this module exists to prevent, so it is derived rather
-    than written down.
+    Hard-coded as 15 until 2026-08-15, which was the *superseded* first pass.
+    The re-run varies 32 arms and the Results text says so in the same paragraph
+    that the figure sits beside. The figure was plotting the study the text had
+    already retired, which is precisely the drift this module exists to prevent,
+    so it is derived rather than written down.
     """
     rows = load("layer0_verdict_v2_overlap.json")["arms"]
     base = {(r["sample_id"], r["repeat"]): r["technique_ids"] for r in rows if r["arm"] == "all"}

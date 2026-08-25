@@ -48,19 +48,19 @@ reported them complete, the fifth boundary case of Section~\ref{sec:failures}.
 
 \begin{figure}
 \centering
-\pandocbounded{\includegraphics[keepaspectratio,alt={Figure 1: every measured arm on one F1 axis. Panel a) is the synthesised fixtures, panel b) the real-sample population where pipeline and baseline are comparable.}]{figures/fig3-arms-against-baseline.pdf}}
-\caption{Every measured arm on one F1 axis. a) the synthesised fixtures, b) the real-sample population. Points are means over per-sample F1, bars are 95\% intervals resampling the cluster the observations are independent at.}
+\pandocbounded{\includegraphics[keepaspectratio,alt={The three arms of the real-sample population on one F1 axis: the pipeline with the sandbox report, the pipeline on static evidence only, and the no-LLM baseline. All three intervals overlap.}]{figures/fig3-arms-against-baseline.pdf}}
+\caption{The one population where the pipeline and the baseline can be compared. Points are means over per-sample F1, bars are 95\% intervals resampling the cluster the observations are independent at.}
 \label{fig:arms}
 \end{figure}
 
-The two panels of Figure~\ref{fig:arms} do not share an axis. Panel a)'s arms run on
-\fact{fixture-clusters} synthesised fixtures scored against per-sample truth while the baseline runs
-on real binaries scored against family-level truth, and no baseline is definable there at all since
-a regular expression over the dictionary that generated the evidence scores
-\fact{fixture-extractor-f1} on all \fact{fixture-extractor-n} of them by construction. On one scale
-a no-LLM baseline near \fact{baseline-f1} beneath treatment arms near \fact{consensus-single-f1}
-reads as a large gain for the pipeline, and it is not one. Panel b) is the comparison that can be made, and
-its three intervals overlap.
+Figure~\ref{fig:arms} shows those three arms, and their intervals overlap. The equal-budget arms of
+Section~\ref{sec:consensus} are a different population and are drawn on a separate axis in
+Figure~\ref{fig:fixture-arms}, deliberately: they run on \fact{fixture-clusters} synthesised
+fixtures scored against per-sample truth, for which no baseline is definable at all, since a regular
+expression over the dictionary that generated the evidence scores \fact{fixture-extractor-f1} on all
+\fact{fixture-extractor-n} of them by construction. Drawn together on one scale, a no-LLM baseline
+near \fact{baseline-f1} beneath arms near \fact{consensus-single-f1} reads as a large gain for the
+pipeline, and it is not one.
 
 \subsection{The deterministic technique assigner}\label{sec:assignment}
 
@@ -129,7 +129,15 @@ is preserve \fact{stix-objects-preserved} objects that rejection would discard.
 
 Three arms at an equal total token budget, including a stochastic-noise control in which one analyst
 receives irrelevant evidence, run first on the fixtures and then again on real binaries one per
-family so that every cluster holds a single observation (Table~\ref{tab:results-3}).
+family so that every cluster holds a single observation (Table~\ref{tab:results-3},
+Figure~\ref{fig:fixture-arms}).
+
+\begin{figure}
+\centering
+\pandocbounded{\includegraphics[keepaspectratio,alt={The four fixture arms on one F1 axis: the single judge, negotiated multi-agent consensus, the stochastic-noise control, and the 120B reasoning model. Their intervals overlap one another.}]{figures/fig6-equal-budget-arms.pdf}}
+\caption{The equal-budget arms and the frontier comparison of Section~\ref{sec:scale}, on the fixture corpus. This axis is not the axis of Figure~\ref{fig:arms}: the two are different populations with different ground truth, and the fixture corpus has a ceiling a real sample does not.}
+\label{fig:fixture-arms}
+\end{figure}
 
 \begin{table}[!htbp]
 \caption{The equal-budget consensus arms, on synthesised fixtures and on real binaries. The real-sample block is scored against the same family-level ground truth as Table~\ref{tab:results-1}; the fixture block is not comparable to it.}\label{tab:results-3}
