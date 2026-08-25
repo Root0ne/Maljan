@@ -37,6 +37,8 @@ import numpy as np  # noqa: E402
 if str(Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from matplotlib.transforms import blended_transform_factory as blended  # noqa: E402
+
 from tests.evaluation import stats  # noqa: E402
 
 _HERE = Path(__file__).resolve().parent
@@ -71,8 +73,13 @@ plt.rcParams.update(
         "axes.edgecolor": INK,
         "axes.labelcolor": INK,
         "axes.linewidth": 0.7,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
+        # All four spines. Two of them were off, which is a common plotting
+        # default and the wrong one here: an open axes lets a label drawn past
+        # the last data point wander into whatever is beside it, and in a
+        # two-panel figure that is the next panel. A frame makes the boundary
+        # visible while the placement rules below keep anything from crossing it.
+        "axes.spines.top": True,
+        "axes.spines.right": True,
         "xtick.color": INK,
         "ytick.color": INK,
         "text.color": INK,
@@ -106,7 +113,7 @@ def bootstrap_ci(
     return (interval.lo, interval.hi)
 
 
-def panel_labels(*axes, y: float = -0.30):
+def panel_labels(*axes, y: float = -0.015):
     """Stamp a), b), ... under each panel of a multi-panel figure.
 
     House style names panels in the caption, so the panels have to carry the
@@ -114,18 +121,72 @@ def panel_labels(*axes, y: float = -0.30):
     the plot in the PNG, in the alt text's description, and anywhere the figure
     is reused outside the paper. Placed below the axes so nothing is drawn over
     the data.
+
+    Placed at one height for the whole figure rather than at a fixed offset
+    under each axes. The offset version drifted apart the moment two panels had
+    different heights, which happens as soon as one of them is square: the ROC
+    panel sets an equal aspect, its axes shrinks vertically, and its label sat
+    half an inch above its neighbour's.
     """
+    axes = [ax for ax in axes if ax is not None]
+    if not axes:
+        return
+    fig = axes[0].figure
+    fig.canvas.draw()
+    # Below everything the axes draws, not below the axes. Offsetting from the
+    # frame put the letter on top of the x-label, because the label is outside
+    # the frame and its height depends on how many lines the tick labels take.
+    # The tight bbox already knows where the drawn content ends.
+    inv = fig.transFigure.inverted()
+    bottom = min(
+        inv.transform((0, ax.get_tightbbox(fig.canvas.get_renderer()).y0))[1] for ax in axes
+    )
     for ax, letter in zip(axes, "abcdefgh", strict=False):
-        ax.text(
-            0.0,
-            y,
+        fig.text(
+            ax.get_position().x0,
+            bottom + y,
             f"{letter})",
-            transform=ax.transAxes,
             ha="left",
             va="top",
             fontsize=9,
             color=INK,
         )
+
+
+def reserve_label_column(ax, labels, texts, gap: float = 0.05, margin: float = 0.04):
+    # gap is the clearance between the widest interval's cap and the label
+    # column; at 0.02 those two touched on whichever row happened to be widest.
+    """Set the x-limits so a right-hand label column fits, and return its x.
+
+    Three earlier attempts all put the text outside the frame, and each failed
+    for its own reason. Anchoring the label to each interval's upper edge let a
+    wide interval push it out. Right-aligning it against the frame put it under
+    the widest interval instead. Reserving a guessed third of the axes was not
+    enough for "0.414 (n=25)" at 7pt. Measuring the rendered extent looked
+    right and was not, because ``savefig`` runs the layout again with
+    ``bbox_inches="tight"`` and the display mapping the measurement came from
+    no longer exists at save time.
+
+    What is stable across that is physical size: an axes keeps its width in
+    inches, and so does a string at a given point size. So the column is sized
+    in inches and converted to a fraction of the axes, once, after the layout is
+    final.
+    """
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    widest_in = (
+        max((txt.get_window_extent(renderer=renderer).width for txt in texts), default=0.0)
+        / fig.dpi
+    )
+    axes_in = ax.get_position().width * fig.get_figwidth()
+    frac = min(0.55, widest_in / max(axes_in, 1e-6))
+
+    lo = ax.get_xlim()[0]
+    widest_data = max(labels)
+    span = (widest_data - lo) / max(1e-6, 1.0 - frac - gap - margin)
+    ax.set_xlim(lo, lo + span)
+    return widest_data + span * gap
 
 
 def save(fig, stem: str):
@@ -194,7 +255,7 @@ def fig_cardinality():
     ax2.set_title("schematic: a stuck instrument", fontsize=8.5, loc="left", pad=6)
     ax2.text(
         0.5,
-        -0.30,
+        -0.22,
         "drawn, not measured; that run predates per-sample retention,\n"
         "which is why its sizes cannot be plotted here",
         transform=ax2.transAxes,
@@ -205,7 +266,11 @@ def fig_cardinality():
         style="italic",
     )
 
-    panel_labels(ax, ax2, y=-0.48)
+    # No explicit offset any more: panel_labels measures the drawn content, and
+    # the caveat above is a child of ax2, so its tight bbox already includes it.
+    # The old -0.48 was an axes fraction and is a figure fraction now, which put
+    # the letters most of a page below the plots.
+    panel_labels(ax, ax2)
     save(fig, "fig1-output-cardinality")
 
 
@@ -234,7 +299,7 @@ def fig_confidence():
     tpr, fpr = np.array(tpr), np.array(fpr)
     auc = float(np.trapezoid(tpr, fpr))
 
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5.3, 2.9), width_ratios=[1, 1.1])
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5.6, 2.9), width_ratios=[1, 1.1])
 
     ax.plot([0, 1], [0, 1], color=LIGHT, lw=1.0, ls="--")
     ax.plot(fpr, tpr, color=WARN, lw=1.7)
@@ -243,7 +308,16 @@ def fig_confidence():
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_aspect("equal")
-    ax.set_title(f"AUC {auc:.3f}  (n={len(rows)} claims)", fontsize=8.5, loc="left", pad=6)
+    # Spelled out rather than "AUC". The paper defines an abbreviation where a
+    # reader first meets it and uses this one twice, so it spells it out in both
+    # places; a figure carrying the short form would be the one undefined
+    # abbreviation in the document.
+    ax.set_title(
+        f"area under the curve {auc:.3f}  (n={len(rows)} claims)",
+        fontsize=8.5,
+        loc="left",
+        pad=6,
+    )
     ax.text(
         0.52,
         0.16,
@@ -261,15 +335,18 @@ def fig_confidence():
     ax2.set_xlabel("verbal confidence emitted")
     ax2.set_ylabel("claims")
     ax2.set_title(
-        f"{len(vals)} distinct values; {top * 100:.0f}% of claims share one",
+        f"{len(vals)} distinct values; {top * 100:.0f}% share one",
         fontsize=8.5,
         loc="left",
         pad=6,
     )
     for v, c in zip(vals, counts, strict=False):
         ax2.text(f"{v:g}", c + max(counts) * 0.015, str(int(c)), ha="center", fontsize=7, color=INK)
-    ax2.set_ylim(0, max(counts) * 1.15)
+    ax2.set_ylim(0, max(counts) * 1.22)
 
+    # The right panel's y-label sat against the left panel's right spine, which
+    # only became visible when that spine did.
+    fig.tight_layout(w_pad=2.0)
     panel_labels(ax, ax2)
     save(fig, "fig2-confidence-discrimination")
     return auc
@@ -340,13 +417,50 @@ def fig_arms():
     )
 
     def draw(ax, rows, xlim, title):
+        # The value column gets a third of the axes and the data gets the rest.
+        # Two earlier versions failed the same way: drawn from each interval's
+        # upper edge, the label ran past the right spine and, in the left panel,
+        # printed through the right panel's tick labels -- "0.416 (n=25)" over
+        # "no-LLM baseline (sandbox signatures)". Right-aligning it against the
+        # frame instead put it underneath the widest interval. Neither is a
+        # placement problem; both are the same missing decision, which is that a
+        # label column needs room reserved rather than borrowed from whatever
+        # happens to be beside it.
+        lo_x = xlim[0]
+        widest = max(r[3] for r in rows)
+        xlim = (lo_x, widest + (widest - lo_x) * 0.05)
         ys = list(range(len(rows)))[::-1]
+        labels = []
+        # n is a property of the panel whenever it is the same on every row, and
+        # repeating it four times cost the plot a third of its width: the label
+        # column is sized by the widest string in it, and "0.414 (n=25)" is
+        # twice "0.414". It moves to the title when it is constant and stays on
+        # the row when it is not, because a panel where it differs is a panel
+        # where the reader needs it.
+        ns = {r[4] for r in rows}
+        shared_n = ns.pop() if len(ns) == 1 else None
+        if shared_n is not None:
+            title = f"{title}, n={shared_n}"
         for y, (_label, mean, lo, hi, n, colour) in zip(ys, rows, strict=False):
             ax.plot([lo, hi], [y, y], color=colour, lw=1.5, solid_capstyle="butt")
             for edge in (lo, hi):
                 ax.plot([edge, edge], [y - 0.13, y + 0.13], color=colour, lw=1.1)
             ax.plot([mean], [y], "o", color=colour, ms=4.6, zorder=4)
-            ax.text(hi + 0.012, y, f"{mean:.3f} (n={n})", va="center", fontsize=7, color=INK)
+            text = f"{mean:.3f}" if shared_n is not None else f"{mean:.3f} (n={n})"
+            # A white ground under the value, so the x-grid does not run through
+            # it. The grid is a reading aid for the bars and has no business in
+            # the label column.
+            labels.append(
+                ax.text(
+                    0,
+                    y,
+                    text,
+                    va="center",
+                    fontsize=7,
+                    color=INK,
+                    bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.0},
+                )
+            )
         ax.set_yticks(ys)
         ax.set_yticklabels([r[0] for r in rows], fontsize=7.5)
         ax.set_xlim(*xlim)
@@ -354,23 +468,33 @@ def fig_arms():
         ax.set_title(title, fontsize=8.5, loc="left", color=INK)
         ax.grid(axis="x", color=LIGHT, lw=0.5)
         ax.set_axisbelow(True)
+        return [r[3] for r in rows], labels
 
-    draw(
+    drawn = {}
+    drawn["left"] = draw(
         left,
         fixture_entries,
-        (0.20, 0.72),
-        "5 synthesised fixtures, no baseline is definable",
+        (0.20, None),
+        "5 synthesised fixtures, no baseline definable",
     )
-    draw(
+    drawn["right"] = draw(
         right,
         [
             (label, blob["mean"], blob["interval"]["lo"], blob["interval"]["hi"], h2h["n"], colour)
             for label, blob, colour in real_entries
         ],
-        (0.02, 0.26),
-        f"{h2h['n']} real samples, {h2h['k']} families, one population",
+        (0.02, None),
+        f"{h2h['n']} real samples, {h2h['k']} families",
     )
+    # Fit after the layout, not during it. Measured before tight_layout(), the
+    # extents belong to axes that are about to be resized, and the labels
+    # overflowed again at a slightly different place. Changing the limits does
+    # not move the axes, so one pass here is final.
     fig.tight_layout()
+    for ax, (his, texts) in ((left, drawn["left"]), (right, drawn["right"])):
+        x = reserve_label_column(ax, his, texts)
+        for txt in texts:
+            txt.set_x(x)
     panel_labels(left, right)
     save(fig, "fig3-arms-against-baseline")
 
@@ -402,9 +526,24 @@ def fig_firing():
     n_fired = sum(1 for v in ok if v.get("hint_nonempty"))
     hint_rate = n_fired / max(1, len(ok))
 
+    # Every count derived. Two of these four notes were written out by hand,
+    # which is the same defect _cascade_arms_varied() was written to fix and had
+    # been left in the two rows beside it: a hand-typed "0 of 18 samples" states
+    # a cohort size the probe no longer has to agree with.
+    hashed = load("function_hash_attribution_probe.json")["results"]
+    hash_fired = sum(1 for v in hashed.values() if v.get("matches"))
+
     items = [
-        ("opcode-hash attribution tier", 0.0, "0 of 18 samples"),
-        ("confidence cap", cap["capped_share_of_all_techniques"], "11 of 1,348 techniques"),
+        (
+            "opcode-hash attribution tier",
+            hash_fired / max(1, len(hashed)),
+            f"{hash_fired} of {len(hashed)} samples",
+        ),
+        (
+            "confidence cap",
+            cap["capped_share_of_all_techniques"],
+            f"{cap['capped']} of {cap['techniques_total']:,} techniques",
+        ),
         (
             "corroboration cascade\n(verdict changed)",
             0.0,
@@ -413,24 +552,39 @@ def fig_firing():
         (
             "sink-reachability hint",
             hint_rate,
-            f"{sum(1 for v in ok if v.get('hint_nonempty'))} of {len(ok)} samples",
+            f"{n_fired} of {len(ok)} samples",
         ),
     ]
     items.sort(key=lambda t: t[1])
 
     fig, ax = plt.subplots(figsize=(5.3, 2.5))
     ys = list(range(len(items)))
+    # The rate sits beside its bar and the count sits in a column against the
+    # frame. They used to be one string starting at the bar's end, so a row at
+    # 0.00% printed its count straight through the 10% threshold line the figure
+    # exists to draw, and the widest count ran past the right spine.
     for y, (_label, rate, note) in zip(ys, items, strict=False):
         readable = rate > 0.10
         colour = ACCENT if readable else WARN
         ax.barh(y, max(rate, 0.0), color=colour, height=0.46)
         ax.text(
-            max(rate, 0) + 0.012,
+            max(rate, 0) + 0.010,
             y,
-            f"{rate * 100:.2f}%   {note}",
+            f"{rate * 100:.2f}%",
             va="center",
             fontsize=7.5,
             color=INK,
+        )
+        ax.text(
+            0.985,
+            y,
+            note,
+            transform=blended(ax.transAxes, ax.transData),
+            va="center",
+            ha="right",
+            fontsize=7.5,
+            color=MUTE,
+            bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.0},
         )
 
     ax.axvline(0.10, color=MUTE, lw=0.8, ls="--")

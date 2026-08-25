@@ -108,7 +108,19 @@ def label(x, y, s, cls="lbl", anchor="middle") -> None:
     add(f'<text class="{cls}" x="{gx(x)}" y="{y}" text-anchor="{anchor}">{escape(s)}</text>')
 
 
-def lines(x, y, rows, cls="sub", dy=15.0) -> None:
+def lines(x, y, rows, cls="sub", dy=15.0, bottom=None) -> None:
+    # Same rule as box(): a line that leaves its box is a layout error the
+    # reader sees and the author does not. Adding a third line to a two-line box
+    # in band 8 printed "the cascade set" through the box's own bottom edge, and
+    # nothing failed. `bottom` is the box's lower edge; 4 leaves room for a
+    # descender.
+    if bottom is not None:
+        last = y + (len(rows) - 1) * dy
+        if last > bottom - 4:
+            raise AssertionError(
+                f"band {_band_now[0]!r}: {len(rows)} body lines reach {last:g}, "
+                f"past the box bottom at {bottom:g} -- shorten the text or the box"
+            )
     for i, r in enumerate(rows):
         label(x, y + i * dy, r, cls)
 
@@ -203,7 +215,7 @@ for x, name, proto, rows in srv:
     box(x, b + 32, 174, 116, SRV, SRV_EDGE)
     label(x + 87, b + 52, name, "lbl9", "middle")
     label(x + 87, b + 67, proto, "tag")
-    lines(x + 87, b + 86, rows, "sub", 14.0)
+    lines(x + 87, b + 86, rows, "sub", 14.0, bottom=b + 32 + 116)
 fail(42 + 156, b + 48, "M2")
 fail(42 + 156, b + 76, "M3")
 fail(256 + 156, b + 48, "M1")
@@ -237,7 +249,7 @@ ret = [
 for x, name, rows in ret:
     box(x, b + 28, 168, 58, STORE, STORE_EDGE)
     label(x + 84, b + 46, name, "lbl9")
-    lines(x + 84, b + 62, rows, "sub", 14.0)
+    lines(x + 84, b + 62, rows, "sub", 14.0, bottom=b + 28 + 58)
 
 # ------------------------------------------------------- 5. analysis graph
 # The scheduling note rides on the band title rather than sitting between the
@@ -274,7 +286,7 @@ for x, name, w, rows in ana:
     box(x, b + 32, AW, 84, LLM, LLM_EDGE)
     label(x + AW / 2, b + 51, name)
     label(x + AW / 2, b + 66, w, "tag")
-    lines(x + AW / 2, b + 83, rows, "sub", 14.0)
+    lines(x + AW / 2, b + 83, rows, "sub", 14.0, bottom=b + 32 + 84)
 fail(42 + AW - 20, b + 52, "M4")
 for x1, x2 in ((282, 328), (570, 616)):
     arrow(x1, b + 74, x2, b + 74)
@@ -326,8 +338,12 @@ b = band(
     "post", 94, "8", "Deterministic reconciliation and gating, after the model, and the artefact"
 )
 post = [
-    ("Reconciliation step", ["Drops unresolvable IDs,", "restores the cascade set"]),
-    ("Invalid-ID filter", ["Checked against the", "ATT&CK catalogue"]),
+    # "identifier" rather than "ID", to match the body. The paper expands every
+    # abbreviation where a reader first meets it and uses "identifier" in full
+    # throughout; a figure keeping the short form would carry the document's
+    # only undefined one.
+    ("Reconciliation step", ["Drops what cannot resolve,", "restores the cascade set"]),
+    ("Invalid-identifier filter", ["Checked against the", "ATT&CK catalogue"]),
     ("Confidence cap", ["Falsification before", "confidence"]),
     ("STIX integrity pass", ["Dangling references,", "malformed objects"]),
     ("STIX 2.1 bundle", ["Attack-patterns and", "relationships"]),
@@ -338,7 +354,7 @@ for i, (name, rows) in enumerate(post):
     x = 23 + i * (BW + BG)
     box(x, b + 28, BW, 58, DET, DET_EDGE)
     label(x + BW / 2, b + 46, name, "lbl9")
-    lines(x + BW / 2, b + 62, rows, "sub", 14.0)
+    lines(x + BW / 2, b + 62, rows, "sub", 14.0, bottom=b + 28 + 58)
 
 # ------------------------------------------------------------ 10. substrate
 b = band("sub", 90, "9", "Substrate")

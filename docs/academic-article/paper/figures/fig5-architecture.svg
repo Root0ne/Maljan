@@ -173,10 +173,10 @@
 <text class="bandtitle" x="45.14" y="902.0">Deterministic reconciliation and gating, after the model, and the artefact</text>
 <rect x="28.06" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
 <text class="lbl9" x="108.58" y="927.0" text-anchor="middle">Reconciliation step</text>
-<text class="sub" x="108.58" y="943.0" text-anchor="middle">Drops unresolvable IDs,</text>
+<text class="sub" x="108.58" y="943.0" text-anchor="middle">Drops what cannot resolve,</text>
 <text class="sub" x="108.58" y="957.0" text-anchor="middle">restores the cascade set</text>
 <rect x="204.23" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
-<text class="lbl9" x="284.75" y="927.0" text-anchor="middle">Invalid-ID filter</text>
+<text class="lbl9" x="284.75" y="927.0" text-anchor="middle">Invalid-identifier filter</text>
 <text class="sub" x="284.75" y="943.0" text-anchor="middle">Checked against the</text>
 <text class="sub" x="284.75" y="957.0" text-anchor="middle">ATT&amp;CK catalogue</text>
 <rect x="380.4" y="909.0" width="161.04" height="58" rx="5" fill="#e7ebef" stroke="#78868f"/>
