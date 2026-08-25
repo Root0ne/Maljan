@@ -162,7 +162,20 @@ class Indicator(STIXObject):
 
 
 class Malware(STIXObject):
-    """STIX 2.1 Malware representation."""
+    """STIX 2.1 Malware representation.
+
+    The three ``x_maljan_`` properties are declared rather than passed through.
+    Pydantic ignores keys a model does not declare, so the judge's fallback
+    builder had been setting ``x_maljan_fallback_reasoning`` on this object for
+    debug consumers, its own comment said so, and the property reached no
+    consumer at all: it was dropped at validation, before any dump. That is the
+    same shape as the renamed output ceiling of Section 3.8 -- a guarantee
+    stated where nothing reads it -- so the fields are on the model now, where
+    the serialiser can see them.
+
+    ``None`` keeps them out of the bundle entirely, which is what STIX requires
+    of an absent property.
+    """
 
     type: Literal["malware"] = "malware"
     id: str = Field(default_factory=lambda: f"malware--{_generate_uuid()}")
@@ -170,6 +183,9 @@ class Malware(STIXObject):
     description: str | None = None
     is_family: bool = False
     malware_types: list[str] = Field(default_factory=list)
+    x_maljan_fallback_reasoning: str | None = None
+    x_maljan_degraded_path: bool | None = None
+    x_maljan_model_only_technique_ids: list[str] | None = None
 
 
 class Relationship(STIXObject):

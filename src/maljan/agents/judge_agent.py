@@ -820,16 +820,32 @@ class JudgeAgent:
             len(text),
         )
 
-        # Gather any valid technique IDs from the raw text and ISR claims
+        # Fail closed. This used to union two sets and emit them as one: the
+        # technique identifiers the analysts had claimed against cited evidence,
+        # and any identifier matching the pattern anywhere in the model's raw
+        # response. Both became attack-patterns in the same bundle, with nothing
+        # to tell them apart -- so on the path where the judge had failed, the
+        # model had more influence over what reached an analyst than on the path
+        # where it worked. Identifiers scraped from the raw text are real ATT&CK
+        # identifiers no evidence source claimed, which is exactly what a schema
+        # check cannot catch. They are recorded for audit and are not emitted.
         import re
 
         _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
-        tids = set(_VALID_TID_RE.findall(text))
+        tids: set[str] = set()
         if isr_reports:
             for isr in isr_reports.values():
                 for claim in isr.claims:
                     if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
                         tids.add(claim.technique_id)
+        model_only = sorted(set(_VALID_TID_RE.findall(text)) - tids)
+        if model_only:
+            self.logger.warning(
+                "Fallback Bundle: %d technique identifier(s) appeared in the model's raw "
+                "response and in no evidence claim; recorded, not emitted: %s",
+                len(model_only),
+                ", ".join(model_only),
+            )
 
         malware_id = f"malware--{uuid.uuid4()}"
         # Don't bake the raw fallback text (which may contain ``[TIMEOUT]``
@@ -853,8 +869,14 @@ class JudgeAgent:
                     f"Verdict: {decision} (judge fallback; subject to cross-layer review)"
                 ),
                 "x_maljan_fallback_reasoning": text_snippet,
+                "x_maljan_degraded_path": True,
             },
         ]
+        # Only when non-empty: the STIX validator refuses a property serialised
+        # as null or as an empty array, which is one of the two conformance
+        # defects an external validator found in this emitter.
+        if model_only:
+            objects[0]["x_maljan_model_only_technique_ids"] = model_only
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"

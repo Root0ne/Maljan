@@ -235,3 +235,87 @@ class TestJudgeAgentExtractConfidence:
 
     def test_returns_none_when_not_found(self) -> None:
         assert JudgeAgent._extract_confidence_from_text("No score mentioned here.") is None
+
+
+class TestFallbackBundleFailsClosed:
+    """The degraded path must emit less than the working one, not more.
+
+    The fallback builder used to union two sets of technique identifiers: the
+    ones analysts had claimed against cited evidence, and every identifier
+    matching ``T\\d{4}`` anywhere in the model's raw response. Both were emitted
+    as ``attack-pattern`` objects in one bundle. The scraped ones are real
+    ATT&CK identifiers that no evidence source claimed, so a schema check passes
+    them and an analyst cannot tell them from techniques three layers agreed on.
+
+    These tests exist because that guarantee was stated in a comment and pinned
+    by nothing.
+    """
+
+    @pytest.fixture
+    def judge(self) -> JudgeAgent:
+        return JudgeAgent(llm=MagicMock())
+
+    @staticmethod
+    def _isr(*technique_ids: str):
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        return {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim=f"claim for {tid}",
+                        evidence_ref="import table @ 0x401000",
+                        confidence=0.9,
+                        technique_id=tid,
+                    )
+                    for tid in technique_ids
+                ],
+            )
+        }
+
+    @staticmethod
+    def _emitted(bundle) -> set[str]:
+        return {
+            o["name"] for o in bundle.model_dump()["objects"] if o.get("type") == "attack-pattern"
+        }
+
+    def test_an_identifier_only_the_model_named_is_not_emitted(self, judge) -> None:
+        bundle = judge._fallback_bundle_from_text(
+            "The sample performs T1055.001 and also T1486.",
+            {},
+            self._isr("T1055.001"),
+        )
+        assert self._emitted(bundle) == {"T1055.001"}, (
+            "T1486 was named by the model and by no evidence claim; the degraded "
+            "path must not put it in front of an analyst"
+        )
+
+    def test_the_evidence_claims_still_reach_the_bundle(self, judge) -> None:
+        bundle = judge._fallback_bundle_from_text("[TIMEOUT]", {}, self._isr("T1055.001", "T1027"))
+        assert self._emitted(bundle) == {"T1055.001", "T1027"}
+
+    def test_what_was_dropped_is_recorded_rather_than_discarded(self, judge) -> None:
+        malware = next(
+            o
+            for o in judge._fallback_bundle_from_text(
+                "T1486 and T1490 look likely.", {}, self._isr("T1055.001")
+            ).model_dump()["objects"]
+            if o["type"] == "malware"
+        )
+        assert malware["x_maljan_model_only_technique_ids"] == ["T1486", "T1490"]
+        assert malware["x_maljan_degraded_path"] is True
+
+    def test_no_empty_custom_property_when_nothing_was_dropped(self, judge) -> None:
+        malware = next(
+            o
+            for o in judge._fallback_bundle_from_text(
+                "T1055.001 only.", {}, self._isr("T1055.001")
+            ).model_dump()["objects"]
+            if o["type"] == "malware"
+        )
+        assert "x_maljan_model_only_technique_ids" not in malware, (
+            "an empty array serialised as present is one of the two conformance "
+            "defects an external validator found in this emitter"
+        )
