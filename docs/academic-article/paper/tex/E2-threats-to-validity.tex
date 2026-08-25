@@ -30,91 +30,93 @@ P9 model ambiguity & \texttt{PARTIAL} & model and engine are pinned by digest, r
 \bottomrule
 \end{tabular}
 \end{table}
-
-Three of the nine need more than a row. On P6, truncation enters through chunking at function
+Three of the nine need more than a row. Truncation (P6) enters through chunking at function
 boundaries, a per-call evidence cap, a \fact{react-step-budget}-step ReAct budget, an
 \fact{judge-output-cap}-token verdict cap and a \setting{400}-char hint cap, and that enumeration
-was itself incomplete: a \fact{graph-edge-cap}-edge cap on the call-graph fetch was discovered only
-while instrumenting a different measurement and silently truncates \fact{graph-edge-cap-hit} of
+was itself incomplete: a \fact{graph-edge-cap}-edge cap on the call-graph fetch was found only while
+instrumenting a different measurement, and silently truncates \fact{graph-edge-cap-hit} of
 \fact{hint-total} samples. Bounds also compose, as M4 shows, and removing a hint made the judge
 overrun a \setting{600}\,s ceiling and return an empty bundle
 \fact{empty-bundles-local}/\fact{empty-bundles-pairs} times.
 
 P8 is the pitfall this work is most exposed to and the one where the evidence has moved. A
-\fact{frontier-params-b}B reasoning model has now run to completion against the local model and did
-not separate from it (Section~\ref{sec:scale}); a
+\fact{frontier-params-b}B reasoning model ran to completion against the local model and did not
+separate from it, and quantisation is no longer unmeasured either (Section~\ref{sec:scale}): a
 \fact{series-param-span}$\times$ parameter advantage producing no measurable difference is evidence
-against the pitfall's usual worry rather than merely an absence of evidence for it. That null is confounded by the reasoning flag, which cannot be removed on that endpoint and
-outweighs the size difference it is confounded with (Section~\ref{sec:scale}).
-Quantisation is no longer unmeasured under P8 either (Section~\ref{sec:scale}). Two serving stacks
-differ alongside the precision, so the bound is on the deployment rather than on quantisation alone. What P8 cannot close is the size series, and the reason is measured rather than budgetary. Testing a
-parameter-size trend needs three arms at three sizes, all on the same side of the flag that
-outweighs size. The one endpoint that honours that flag hosts the 35B model we already run, and the
-one above 35B does not honour it. Coverage also remains, the second model having been measured on fixtures rather
-than on the malware cohort. P9 is \texttt{PARTIAL} because the running binary
-reports its version as \texttt{unknown} and the engine commit was reconstructed rather than recorded
-(Section~\ref{models-endpoints-and-serving-configuration}); build provenance must be captured at
+against the pitfall's usual worry rather than an absence of evidence for it. Both bounds are
+confounded, the null by a reasoning flag that cannot be removed on that endpoint and outweighs the
+size difference, the quantisation figure by two serving stacks that differ alongside the precision.
+What P8 cannot close is the size series, for a measured rather than a budgetary reason: a
+parameter-size trend needs three arms at three sizes on the same side of the flag that outweighs
+size, the one endpoint honouring that flag hosts the 35B model we already run, and the one above 35B
+does not honour it. Coverage remains as well, the second model having been measured on fixtures
+rather than on the malware cohort. P9 is \texttt{PARTIAL} because the running binary reports its
+version as \texttt{unknown} and the engine commit was reconstructed rather than recorded
+(Section~\ref{models-endpoints-and-serving-configuration}): build provenance must be captured at
 build time, and ours was not.
 
 Two checks the survey does not include, both described in Section~\ref{sec:method}, caught errors
-one level below what the nine pitfalls address. A scored component deriving its output from the same source as the labels is scoring a tautology, so
-this was tested component by component rather than assumed. Ground truth is the MITRE
-\texttt{malware uses attack-pattern} relationship set, so it comes from nothing this project
-produces. The Sigma layer reads its identifier from each rule's own ATT\&CK tag, and those rules are
-community-authored, so Sigma shares ATT\&CK's vocabulary with the labels and not
-their source. The sandbox baseline, which would have mattered most, takes its identifiers from class
-attributes hand-written in each signature module and consults no family attribution anywhere, which
-is what makes it a valid baseline rather than a second view of the answer. And the retrieval corpora
-do not overlap the evaluation cohorts, checked by digest: of the \fact{case-corpus-n} cases in the
-ATT\&CK case corpus, none shares a SHA-256 digest with the \fact{cohort-n}-sample dynamic cohort or the
-\fact{drift-n}-sample drift manifest. Two construct problems survive and both are ours. The case
-corpus is labelled with the technique identifiers the pipeline itself previously attributed, which
-is why that number is relabelled as self-consistency in Section~\ref{sec:mechanisms}; and the
-catalogue defining valid technique identifiers is the same file that bounds the label universe.
+one level below what the nine pitfalls address. A scored component deriving its output from the same
+source as the labels is scoring a tautology, so this was tested component by component. Ground truth
+is the MITRE \texttt{malware uses attack-pattern} relationship set, which comes from nothing this
+project produces; the Sigma layer reads its identifier from each rule's own community-authored
+ATT\&CK tag, so it shares ATT\&CK's vocabulary with the labels and not their source; and the sandbox
+baseline, which would have mattered most, takes its identifiers from class attributes hand-written
+in each signature module and consults no family attribution, which is what makes it a baseline
+rather than a second view of the answer. The retrieval corpora do not overlap the evaluation
+cohorts, checked by digest: of the \fact{case-corpus-n} cases in the ATT\&CK case corpus, none
+shares a SHA-256 digest with the \fact{cohort-n}-sample dynamic cohort or the \fact{drift-n}-sample
+drift manifest. Two construct problems survive and both are ours: the case corpus is labelled with
+the technique identifiers the pipeline itself previously attributed, which is why that number is
+relabelled as self-consistency in Section~\ref{sec:mechanisms}, and the catalogue defining valid
+identifiers is the same file that bounds the label universe.
 
 Any claim about what the sandbox contributes has to survive one measurement of what the sandbox
-reports. Across the \fact{evidence-reports} archived analyses there are \fact{network-domains-distinct}
-distinct network domains, and \fact{network-domains-ubiquitous} of them appear in every single
-sample. Those are the analysis virtual machine's own vendor telemetry, present whatever was
-detonated. Per sample, between \fact{network-ubiquitous-min} and \fact{network-ubiquitous-max} of the observed
-domains appear in every sample, median \fact{network-ubiquitous-median}. Two-thirds of the network
-evidence in a dynamic arm is therefore the instrument describing itself, and an effect attributed to
-malware behaviour may be partly an effect of that machine's idle traffic. The same measurement bounds two Layer-0 sources from the other direction. The living-off-the-land
-binary and domain generation algorithm layers produced a claim on none of the
+reports. Across the \fact{evidence-reports} archived analyses there are
+\fact{network-domains-distinct} distinct network domains, of which
+\fact{network-domains-ubiquitous} appear in every sample: the analysis virtual machine's own vendor
+telemetry, present whatever was detonated. Per sample that share runs from
+\fact{network-ubiquitous-min} to \fact{network-ubiquitous-max}, median
+\fact{network-ubiquitous-median}. Two-thirds of the network evidence in a dynamic arm is therefore
+the instrument describing itself, and an effect attributed to malware behaviour may be partly that
+machine's idle traffic. The same measurement bounds two Layer-0 sources from the other side: the
+living-off-the-land binary and domain generation algorithm layers produced a claim on none of the
 \fact{layer0-declined-of} reports archived when that ablation ran, while being fed a median of
 \fact{layer0-declined-median-calls} recorded API calls and \fact{layer0-declined-domains} domains
-respectively. Neither therefore appears as an arm in the cascade ablation. An earlier version of
-this measurement on the \fact{ubiquity-interim-reports} analyses that survived before the cohort was
-recovered gave \fact{ubiquity-interim-domains} domains with \fact{ubiquity-interim-ubiquitous}
+respectively, so neither appears as an arm in the cascade ablation. An earlier version of this
+measurement, on the \fact{ubiquity-interim-reports} analyses that survived before the cohort was
+recovered, gave \fact{ubiquity-interim-domains} domains with \fact{ubiquity-interim-ubiquitous}
 ubiquitous at a median share of \fact{ubiquity-interim-median}: more than doubling the cohort moved
-the figure by three points and left the conclusion where it was.
+the figure by three points.
 
-The machine a measurement runs on is part of the instrument, which is a threat we did not anticipate
-and met late. The working set does not fit a \fact{host-ram-gib} GiB host alongside an interactive
-session, with the model server holding \textasciitilde16 GB, the analysis worker
-\textasciitilde8 GB and the disassembly container up to \fact{ghidra-mem-limit-gb} GB. During a
-paired ablation the swap file was exhausted and the model server had \fact{llama-paged-out-gb} GB of
-its own address space paged out; an arm then exceeded a \fact{salvage-budget-seconds}-second budget
-on a prompt trimmed to \fact{static-max-chars} characters. Whether that arm failed because of the
-pipeline or because of the host cannot be determined, because we recorded the pipeline's outputs and
-not the host's state, so the affected arms are reported as \texttt{unattributable} and the
-ablation as incomplete rather than as a null. A wall-clock bound is therefore a host-dependent measurement presented as a system property. Any
-result here that turns on a timeout is a statement about this pipeline, on this machine, under
-whatever load it had at the time. The screen we added can only be applied forward: arms already collected without host state cannot be
-re-screened.
+The machine a measurement runs on is part of the instrument, a threat we did not anticipate and met
+late. The working set does not fit a \fact{host-ram-gib} GiB host alongside an interactive session,
+with the model server holding \textasciitilde16 GB, the analysis worker \textasciitilde8 GB and the
+disassembly container up to \fact{ghidra-mem-limit-gb} GB. During a paired ablation the swap file
+was exhausted and the model server had \fact{llama-paged-out-gb} GB of its own address space paged
+out; an arm then exceeded a \fact{salvage-budget-seconds}-second budget on a prompt trimmed to
+\fact{static-max-chars} characters. Whether it failed because of the pipeline or because of the host
+cannot be determined, because we recorded the pipeline's outputs and not the host's state, so those
+arms are reported as \texttt{unattributable} and the ablation as incomplete rather than as a null. A
+wall-clock bound is therefore a host-dependent measurement presented as a system property, and any
+result that turns on a timeout is a statement about this pipeline on this machine under whatever
+load it had. The screen we added applies forward only: arms already collected without host state
+cannot be re-screened.
 
 Three objections remain that the work does not close. The first is that the judge findings rest on
-four calls, the intercept requiring a live judge call per observation. On the working path the finding is deductive rather than statistical. The reconciliation step
-restores the cascade's set by construction, and the \fact{judge-mechanism-arms}-arm mechanism check
-confirms that the bundle equals the cascade set on every arm. The judge contributed one identifier
-of its own on \fact{judge-mechanism-added} of \fact{judge-mechanism-samples} samples, an upper bound
-of \fact{judge-mechanism-upper-bound} on the per-sample rate. On the failing path it is an existence claim, demonstrated on four calls against an
-uncapped control whose raw text provably contains no identifiers. Neither is a rate, and what would
-settle it is the same intercept over the \fact{baseline-n}-sample cohort. The second is that the detector's own evidence is retrospective: it found four defects on batches we
-already had reason to distrust. The prospective test would report output cardinality beside every
-batch for a year and count how often it is first to a defect. That is the experiment, and we have
-not run it. The third is
-that seven defects in one's own code is a post-mortem rather than a result. We claim the setting and the price rather than the category, every mechanism having been
+four calls, the intercept requiring a live judge call per observation. On the working path the
+finding is deductive rather than statistical: the reconciliation step restores the cascade's set by
+construction, and the \fact{judge-mechanism-arms}-arm mechanism check confirms the bundle equals
+that set on every arm, with the judge contributing one identifier of its own on
+\fact{judge-mechanism-added} of \fact{judge-mechanism-samples} samples, an upper bound of
+\fact{judge-mechanism-upper-bound} on the per-sample rate. On the failing path it is an existence
+claim, demonstrated on four calls against an uncapped control whose raw text provably contains no
+identifiers. Neither is a rate, and what would settle it is the same intercept over the
+\fact{baseline-n}-sample cohort. The second is that the detector's own evidence is retrospective: it
+found four defects on batches we already had reason to distrust, and the prospective test, reporting
+output cardinality beside every batch for a year and counting how often it is first to a defect, we
+have not run. The third is that seven defects in one's own code is a post-mortem rather than a
+result; we claim the setting and the price rather than the category, every mechanism having been
 counter-searched in an adjacent field's vocabulary (Section~\ref{experimental-design}).
 
 All three are blocked by the same thing, a host on which the model server does not fit alongside
