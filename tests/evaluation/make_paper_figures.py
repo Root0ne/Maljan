@@ -138,13 +138,39 @@ def panel_labels(*axes, y: float = -0.015):
     # the frame and its height depends on how many lines the tick labels take.
     # The tight bbox already knows where the drawn content ends.
     inv = fig.transFigure.inverted()
-    bottom = min(
-        inv.transform((0, ax.get_tightbbox(fig.canvas.get_renderer()).y0))[1] for ax in axes
-    )
-    for ax, letter in zip(axes, "abcdefgh", strict=False):
+    renderer = fig.canvas.get_renderer()
+    bottoms = [inv.transform((0, ax.get_tightbbox(renderer).y0))[1] for ax in axes]
+
+    # Panels side by side share a baseline so their letters line up; panels
+    # stacked in a column each need their own, or both letters land on the same
+    # point and one hides the other. Which it is comes from the geometry rather
+    # than from an argument the caller has to remember: axes in one row have
+    # overlapping vertical extents.
+    rows: list[list[int]] = []
+    for i, ax in enumerate(axes):
+        pos = ax.get_position()
+        for row in rows:
+            other = axes[row[0]].get_position()
+            if pos.y0 < other.y1 and other.y0 < pos.y1:
+                row.append(i)
+                break
+        else:
+            rows.append([i])
+    baseline = {i: min(bottoms[j] for j in row) for row in rows for i in row}
+
+    for i, (ax, letter) in enumerate(zip(axes, "abcdefgh", strict=False)):
+        if len(rows) > 1:
+            # Stacked panels have no room beneath them: the gap between two rows
+            # belongs to the lower panel's title, and a letter placed there sits
+            # on it. The left margin at the panel's own top is empty, because
+            # the title starts where the axes does and the axes starts after the
+            # row names.
+            top = inv.transform((0, ax.get_tightbbox(renderer).y1))[1]
+            fig.text(0.005, top, f"{letter})", ha="left", va="top", fontsize=9, color=INK)
+            continue
         fig.text(
             ax.get_position().x0,
-            bottom + y,
+            baseline[i] + y,
             f"{letter})",
             ha="left",
             va="top",
@@ -252,18 +278,15 @@ def fig_cardinality():
     ax2.set_xlabel("samples processed")
     ax2.set_xlim(0, n)
     ax2.set_ylim(0, n)
-    ax2.set_title("schematic: a stuck instrument", fontsize=8.5, loc="left", pad=6)
-    ax2.text(
-        0.5,
-        -0.22,
-        "drawn, not measured; that run predates per-sample retention,\n"
-        "which is why its sizes cannot be plotted here",
-        transform=ax2.transAxes,
-        ha="center",
-        va="top",
-        fontsize=7,
-        color=MUTE,
-        style="italic",
+    # The caveat is part of what this panel is, so it goes in the panel's name.
+    # It used to be a line of italics floating below the axes, attached to
+    # nothing a reader could see, and the caption says why the run cannot be
+    # plotted.
+    ax2.set_title(
+        "schematic: a stuck instrument, drawn not measured",
+        fontsize=8.5,
+        loc="left",
+        pad=6,
     )
 
     # No explicit offset any more: panel_labels measures the drawn content, and
@@ -412,11 +435,16 @@ def fig_arms():
         ("no-LLM baseline (sandbox signatures)", h2h["cape_f1"], WARN),
     ]
 
+    # Stacked, not side by side. Two panels across a 4.8-inch measure left each
+    # one about an inch of plotting area once the row names were drawn, and the
+    # intervals were squeezed into a strip narrower than the labels beside them.
+    # The figure is not short of height, so the panels take a row each and the
+    # full width, which is three times the plot area for the same page space.
     fig, (left, right) = plt.subplots(
-        1, 2, figsize=(5.3, 2.5), gridspec_kw={"width_ratios": [1.05, 1.0]}
+        2, 1, figsize=(5.3, 3.9), gridspec_kw={"height_ratios": [1.25, 1.0]}
     )
 
-    def draw(ax, rows, xlim, title):
+    def draw(ax, rows, xlim, title, bottom_panel=False):
         # The value column gets a third of the axes and the data gets the rest.
         # Two earlier versions failed the same way: drawn from each interval's
         # upper edge, the label ran past the right spine and, in the left panel,
@@ -464,7 +492,8 @@ def fig_arms():
         ax.set_yticks(ys)
         ax.set_yticklabels([r[0] for r in rows], fontsize=7.5)
         ax.set_xlim(*xlim)
-        ax.set_xlabel("F1 (mean, 95% cluster interval)", fontsize=8)
+        if bottom_panel:
+            ax.set_xlabel("F1 (mean, 95% cluster interval)", fontsize=8)
         ax.set_title(title, fontsize=8.5, loc="left", color=INK)
         ax.grid(axis="x", color=LIGHT, lw=0.5)
         ax.set_axisbelow(True)
@@ -485,6 +514,7 @@ def fig_arms():
         ],
         (0.02, None),
         f"{h2h['n']} real samples, {h2h['k']} families",
+        bottom_panel=True,
     )
     # Fit after the layout, not during it. Measured before tight_layout(), the
     # extents belong to axes that are about to be resized, and the labels
