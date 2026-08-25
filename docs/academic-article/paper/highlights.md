@@ -15,7 +15,7 @@ is the same defect as a hand-typed numeral.
 - Turning one decoding flag off outweighs any architecture or size measured. [74]
 - Composing ranking and gating backends beats choosing, on two external corpora. [78]
 - The full pipeline sits 0.003 F1 from the no-LLM sandbox it is built on. [71]
-- Seven instrument defects returned plausible results; 2,745 tests caught none. [77]
+- Seven instrument defects returned plausible results; 2,716 tests caught none. [77]
 
 ## Where each comes from
 
@@ -25,7 +25,7 @@ is the same defect as a hand-typed numeral.
 | 2 | 3.4, Table 6 | `reasoning-flag-worth-low` 0.34 to `reasoning-flag-worth-high` 0.45 |
 | 3 | 3.2, Table 4 | `mapping-tram2-hybrid-gate`, `mapping-annoctr-hybrid-gate` |
 | 4 | 3.1, Table 3 | `h2h-delta` +0.0030, at a resolution of `h2h-mde` 0.085 |
-| 5 | 3.8, Table 11 | `test-count` 2,745 |
+| 5 | 3.8, Table 11 | `test-count` 2,716 |
 
 Bullet 4 states a difference the design could not resolve, and says so in the
 paper. It is here rather than a larger-sounding line because the comparison it

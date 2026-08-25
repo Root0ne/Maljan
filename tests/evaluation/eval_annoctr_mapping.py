@@ -195,10 +195,19 @@ def main() -> int:
 
     # §1.5.1's TRAM2 numbers, for the only comparison that matters: does the ordering
     # hold on a corpus with a different register and different annotators?
+    # Read, not transcribed. These three rows were a literal in this file, and
+    # the paper printed them as TRAM2's result: a re-run of that corpus would
+    # have moved the record and left this copy standing.
+    tram2_artefact = Path(__file__).resolve().parent / "technique_mapping.json"
+    if not tram2_artefact.exists():
+        print(
+            f"ERROR: {tram2_artefact.name} not found; run eval_technique_mapping.py first",
+            file=sys.stderr,
+        )
+        return 2
     tram2 = {
-        "tfidf": {"top1": 0.205, "top3": 0.329, "mrr": 0.274, "gate_separation": 0.085},
-        "semantic": {"top1": 0.230, "top3": 0.392, "mrr": 0.319, "gate_separation": 0.019},
-        "hybrid": {"top1": 0.230, "top3": 0.392, "mrr": 0.319, "gate_separation": 0.115},
+        backend: {k: v for k, v in row.items() if not k.startswith("gate_scores_")}
+        for backend, row in json.loads(tram2_artefact.read_text(encoding="utf-8"))["tram2"].items()
     }
 
     result = {

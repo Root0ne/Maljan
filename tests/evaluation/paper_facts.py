@@ -377,8 +377,25 @@ def suite_facts() -> dict[str, Any]:
     Runs the same command ``make test`` does, so the number in the paper and the
     number in the gate cannot disagree. Costs about a minute.
     """
+    # The paper's own gates are excluded, for two reasons that point the same
+    # way. They test the manuscript rather than the pipeline, so none of them
+    # could have caught any of the seven -- counting them inflates the number in
+    # the direction that flatters the suite, which is the error this function's
+    # first version already made once. And they read ``facts.tex``, which this
+    # run is about to rewrite, so during a run that changes a fact they are
+    # stale by construction and cannot pass. ``make paper-check`` runs them
+    # afterwards, against the artefact they are about.
     proc = subprocess.run(
-        [".venv/bin/python", "-m", "pytest", "tests/", "-q"],
+        [
+            ".venv/bin/python",
+            "-m",
+            "pytest",
+            "tests/",
+            "-q",
+            "--ignore=tests/evaluation/test_paper_numerals.py",
+            "--ignore=tests/evaluation/test_paper_citations.py",
+            "--ignore=tests/evaluation/test_paper_terminology.py",
+        ],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -780,13 +797,20 @@ def technique_mapping_facts() -> dict[str, Any]:
     """
     d = load("annoctr_mapping.json")
     a, t2 = d["annoctr"], d["tram2_reference"]
+    # TRAM2's own record, for the sample size and to prove the reference block
+    # in annoctr_mapping.json is a copy of it rather than a literal that drifted.
+    tram2_rec = load("technique_mapping.json")
+    if tram2_rec["tram2"]["hybrid"]["top3"] != t2["hybrid"]["top3"]:
+        raise FactError(
+            "annoctr_mapping.json's TRAM2 reference disagrees with technique_mapping.json"
+        )
     rep = d["replication"]
     if not (
         rep["ranking_order_holds"] and rep["gate_order_holds"] and rep["hybrid_wins_both_axes"]
     ):
         raise FactError("annoctr_mapping.json no longer records the replication it is cited for")
     out: dict[str, Any] = {
-        "mapping_tram2_n": f"{4913:,}",
+        "mapping_tram2_n": f"{int(tram2_rec['corpus']['pairs_scored']):,}",
         "mapping_annoctr_n": f"{int(a['tfidf']['n']):,}",
         "mapping_annoctr_dropped": str(d["corpus"]["labels_outside_our_attck_bundle"]),
     }
@@ -797,6 +821,16 @@ def technique_mapping_facts() -> dict[str, Any]:
         out[f"mapping_annoctr_{backend}_top3"] = f"{a[backend]['top3']:.3f}"
         out[f"mapping_annoctr_{backend}_mrr"] = f"{a[backend]['mrr']:.3f}"
         out[f"mapping_annoctr_{backend}_gate"] = signed(a[backend]["gate_separation"], 3)
+        # Scale-free, so the three backends can actually be compared. Gate
+        # separation is a difference of means on scales that differ by a factor
+        # of three between these backends.
+        for corpus, row in (("tram2", tram2_rec["tram2"][backend]), ("annoctr", a[backend])):
+            auroc = row.get("gate_auroc")
+            if auroc is None:
+                raise FactError(f"{corpus}/{backend} has no gate AUROC; re-run the evaluation")
+            out[f"mapping_{corpus}_{backend}_auroc"] = f"{auroc:.3f}"
+            # The scale the separation is measured on, which is why it needs one.
+            out[f"mapping_{corpus}_{backend}_correct"] = f"{row['mean_correct_score']:.3f}"
     return out
 
 

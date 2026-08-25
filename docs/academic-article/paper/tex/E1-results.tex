@@ -79,17 +79,18 @@ cohort, on two public corpora neither of which is the ATT\&CK text the index is 
 (Table~\ref{tab:mapping}).
 
 \begin{table}[!htbp]
-\caption{The technique assigner on two external corpora: TRAM2 \cite{mitre2023tram}, sentence classification, and AnnoCTR \cite{lange2024annoctr}, expert entity linking in running report prose. MRR is the mean reciprocal rank of the correct technique; gate separation is Equation~\eqref{eq:gate}.}\label{tab:mapping}
+\caption{The technique assigner on two external corpora: TRAM2 \cite{mitre2023tram}, sentence classification, and AnnoCTR \cite{lange2024annoctr}, expert entity linking in running report prose. MRR is the mean reciprocal rank of the correct technique, gate separation is
+Equation~\eqref{eq:gate}, and AUROC is how often a correct top-1 outscores a wrong one.}\label{tab:mapping}
 \centering\small
-\begin{tabular}{@{}lrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
-& \multicolumn{3}{c}{TRAM2, n=\fact{mapping-tram2-n}} & \multicolumn{3}{c}{AnnoCTR, n=\fact{mapping-annoctr-n}} \\
-\cmidrule(lr){2-4}\cmidrule(l){5-7}
-backend & top-3 & MRR & gate & top-3 & MRR & gate \\
+& \multicolumn{4}{c}{TRAM2, n=\fact{mapping-tram2-n}} & \multicolumn{4}{c}{AnnoCTR, n=\fact{mapping-annoctr-n}} \\
+\cmidrule(lr){2-5}\cmidrule(l){6-9}
+backend & top-3 & MRR & gate & AUROC & top-3 & MRR & gate & AUROC \\
 \midrule
-lexical & \fact{mapping-tram2-tfidf-top3} & \fact{mapping-tram2-tfidf-mrr} & \fact{mapping-tram2-tfidf-gate} & \fact{mapping-annoctr-tfidf-top3} & \fact{mapping-annoctr-tfidf-mrr} & \fact{mapping-annoctr-tfidf-gate} \\
-semantic & \fact{mapping-tram2-semantic-top3} & \fact{mapping-tram2-semantic-mrr} & \fact{mapping-tram2-semantic-gate} & \fact{mapping-annoctr-semantic-top3} & \fact{mapping-annoctr-semantic-mrr} & \fact{mapping-annoctr-semantic-gate} \\
-hybrid & \fact{mapping-tram2-hybrid-top3} & \fact{mapping-tram2-hybrid-mrr} & \fact{mapping-tram2-hybrid-gate} & \fact{mapping-annoctr-hybrid-top3} & \fact{mapping-annoctr-hybrid-mrr} & \fact{mapping-annoctr-hybrid-gate} \\
+lexical & \fact{mapping-tram2-tfidf-top3} & \fact{mapping-tram2-tfidf-mrr} & \fact{mapping-tram2-tfidf-gate} & \fact{mapping-tram2-tfidf-auroc} & \fact{mapping-annoctr-tfidf-top3} & \fact{mapping-annoctr-tfidf-mrr} & \fact{mapping-annoctr-tfidf-gate} & \fact{mapping-annoctr-tfidf-auroc} \\
+semantic & \fact{mapping-tram2-semantic-top3} & \fact{mapping-tram2-semantic-mrr} & \fact{mapping-tram2-semantic-gate} & \fact{mapping-tram2-semantic-auroc} & \fact{mapping-annoctr-semantic-top3} & \fact{mapping-annoctr-semantic-mrr} & \fact{mapping-annoctr-semantic-gate} & \fact{mapping-annoctr-semantic-auroc} \\
+hybrid & \fact{mapping-tram2-hybrid-top3} & \fact{mapping-tram2-hybrid-mrr} & \fact{mapping-tram2-hybrid-gate} & \fact{mapping-tram2-hybrid-auroc} & \fact{mapping-annoctr-hybrid-top3} & \fact{mapping-annoctr-hybrid-mrr} & \fact{mapping-annoctr-hybrid-gate} & \fact{mapping-annoctr-hybrid-auroc} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -104,8 +105,14 @@ Ranking quality and gate quality are separable axes and no backend wins both. Th
 ranks better on both corpora while its scores barely separate a correct pick from a wrong one,
 because everything it retrieves sits near the same similarity. The lexical index ranks worse and
 gates cleanly, scoring near zero for unrelated evidence. Composing the per-axis winners matches the
-semantic index's ranking and produces the cleanest gate of the three on both corpora. That
-composition is the
+semantic index's ranking and produces the cleanest gate of the three on both corpora. Gate
+separation is a difference of means, so it compares backends only where their scores share a scale,
+and these do not: a correct pick scores \fact{mapping-annoctr-semantic-correct} under the semantic
+index and \fact{mapping-annoctr-hybrid-correct} under the composition. The area under the receiver
+operating characteristic asks the scale-free question instead, how often a correct top-1 outscores a
+wrong one, and returns the same ordering on both corpora. That question could not be put to the
+first version of this evaluation, which averaged the per-item scores and kept only the means; they
+are retained now. That composition is the
 shipped default, and the gate is what makes the assigner safe to leave authoritative: an identifier
 it cannot align is refused, not guessed.
 
@@ -247,11 +254,13 @@ F1, \fact{reasoning-flag-third-ci}. The flag is the
 only effect in this paper that exceeds its own design's minimum detectable effect, at
 \fact{mde-reasoning-flag-vendor35b} here and \fact{mde-reasoning-flag-third} on the third endpoint:
 the largest effect measured on any arm is a configuration flag, not an architecture and not a
-parameter count. Two qualifications belong with it.
-The comparisons are post-hoc, run after the confound was discovered, and corrected as a family of
-\fact{family-posthoc-m} their q-values are \fact{reasoning-flag-vendor35b-q-exact} and
-\fact{reasoning-flag-third-q-exact}; and like every comparison on this corpus they sit at the exact
-test's floor of \fact{fixture-signflip-floor}.
+parameter count. The result is exploratory rather than confirmatory, and nothing here should be read as a test of a
+declared hypothesis. No prediction about the flag existed before the confound was found; the
+comparisons were run afterwards, and corrected as a family of \fact{family-posthoc-m} their q-values
+are \fact{reasoning-flag-vendor35b-q-exact} and \fact{reasoning-flag-third-q-exact}, neither of
+which clears $\alpha$=0.05. Like every comparison on this corpus they also sit at the exact test's floor of
+\fact{fixture-signflip-floor}. What carries the finding is the size of the effect against the
+design's resolution, not its q-value.
 
 \subsection{Retrieval, confidence and firing rate before effect}\label{sec:mechanisms}
 
@@ -489,3 +498,10 @@ works, and more influence on the path where it fails: \fact{judge-capped-own-ids
 \fact{judge-capped-bundle} techniques when reconciliation runs, against \fact{fallback-only-capped}
 of \fact{fallback-bundle-total} when it does not. The architecture suppresses the model's
 contribution precisely when the model is functioning, and admits it precisely when it is not.
+
+That path is a fail-open one and it is now closed. The fallback builder no longer promotes an identifier
+that appears in the model's raw response and in no evidence claim; it records what it declined and
+emits only what an analyst claimed against a cited artefact, so the degraded path emits less than
+the working one rather than more. The measurement above describes the pipeline as it ran, and is
+reported as measured for the same reason the other repairs in this paper are: a fix applied before
+the number is taken is a number about the fix.

@@ -18,13 +18,20 @@ Run:  uv run python tests/evaluation/eval_technique_mapping.py [--limit N]
 This is a measurement tool, not a pytest test (filename intentionally not test_*).
 """
 
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import sys
 import urllib.request
 from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+for _p in (_HERE.parents[1], _HERE.parents[1] / "src", _HERE):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from maljan.memory import embeddings
 from maljan.memory.attck_index import ATTCKIndex
@@ -99,6 +106,18 @@ def _evaluate(
         if label in ranked:
             rr_sum += 1.0 / (ranked.index(label) + 1)
     n = len(pairs)
+    # Gate separation is a difference of means, so it is only comparable across
+    # backends whose scores live on the same scale, and these do not: the
+    # semantic index puts a correct pick near 0.75 and the hybrid near 0.27.
+    # AUROC asks the scale-free question instead -- how often does a correct
+    # top-1 outscore a wrong one -- and the per-item scores are kept so it can
+    # be asked again without re-running the corpus. They were being averaged and
+    # discarded, which is this project's own retention rule broken in the
+    # evaluation that measures its retrieval.
+    from stats import roc_auc
+
+    scores = correct_scores + wrong_top1_scores
+    labels = [1] * len(correct_scores) + [0] * len(wrong_top1_scores)
     return {
         "n": float(n),
         "top1": top1 / n,
@@ -110,6 +129,9 @@ def _evaluate(
         "mean_wrong_top1_score": (sum(wrong_top1_scores) / len(wrong_top1_scores))
         if wrong_top1_scores
         else 0.0,
+        "gate_auroc": roc_auc(scores, labels),
+        "gate_scores_correct": [round(s, 6) for s in correct_scores],
+        "gate_scores_wrong": [round(s, 6) for s in wrong_top1_scores],
     }
 
 
@@ -194,6 +216,29 @@ def main() -> None:
         print(f"\nWrote {out}", flush=True)
     except OSError:
         pass
+
+    # The paper's TRAM2 column used to come from a literal typed into
+    # eval_annoctr_mapping.py, so a re-run could move the corpus and leave the
+    # paper printing the old numbers with nothing to notice. It reads this now.
+    artefact = _OUTPUT_DIR / "technique_mapping.json"
+    artefact.write_text(
+        json.dumps(
+            {
+                "schema": "maljan-technique-mapping/v1",
+                "corpus": {"name": "TRAM2 single_label", "pairs_scored": int(tf["n"])},
+                "embedding_backend": _embedding_backend_note(),
+                "tram2": {
+                    "tfidf": {**tf, "gate_separation": _sep(tf)},
+                    "semantic": {**se, "gate_separation": _sep(se)},
+                    "hybrid": {**hy, "gate_separation": _sep(hy)},
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"Wrote {artefact}", flush=True)
 
 
 if __name__ == "__main__":
