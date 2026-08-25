@@ -7,9 +7,9 @@ routinely applied to, and the systems that perform it are rarely a model alone. 
 sample, a disassembler that recovers its structure, retrieval indices that supply prior cases, and
 rule engines that assert techniques directly from signatures. The model's contribution is therefore
 a difference against that tooling rather than a score in isolation, and that difference is almost
-never reported. Büchel et al.'s systematisation re-evaluates more than forty technique-extraction
-systems in one setting and finds them ``largely incomparable'', because each uses its own ontology
-and its own inaccessible dataset \cite{buchel2025sok}. An F1 value read against no baseline refers
+never reported. \citet{buchel2025sok} re-evaluate more than forty technique-extraction systems in
+one setting and find them ``largely incomparable'', because each uses its own ontology and its own
+inaccessible dataset. An F1 value read against no baseline refers
 to nothing, and the baseline that matters for an LLM pipeline is the deterministic engine it was
 built on top of.
 
@@ -17,8 +17,8 @@ A second barrier is that such a pipeline is itself a distributed system, and its
 every property of one. Each boundary between the pipeline and a server it depends on is a place
 where a request can succeed and still not mean what the caller assumed, and the resulting error is
 not visible as an error. Silent failure of this kind is a long-established class in production
-software \cite{gunawi2008eio,yuan2014simple,alquraan2018partition} and is now being catalogued for
-LLM orchestration frameworks and inference engines as well \cite{xue2025agentbugs,liu2026inference}.
+software \citep{gunawi2008eio,yuan2014simple,alquraan2018partition} and is now being catalogued for
+LLM orchestration frameworks and inference engines as well \citep{xue2025agentbugs,liu2026inference}.
 What changes in an evaluation setting is the artefact. The product of a silent failure is not a
 degraded user session that someone reports; it is a measurement that is wrong, looks right, and is
 written down.

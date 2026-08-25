@@ -48,7 +48,10 @@ def _entries() -> dict[str, str]:
     return {m.group(2): m.group(3) for m in _ENTRY.finditer(_BIB.read_text(encoding="utf-8"))}
 
 
-_ANY_CITE = re.compile(r"\\(cite|preprintcite)\{([^}]*)\}")
+# ``citep``/``citet`` as well as ``cite``: the journal asks for author-year
+# citations, so the sources moved to natbib's parenthetical and textual forms
+# and a pattern anchored on ``cite{`` stopped seeing any of them.
+_ANY_CITE = re.compile(r"\\(preprintcite|cite[pt]?|citealp)\{([^}]*)\}")
 
 
 def _cites() -> list[tuple[str, str, str]]:

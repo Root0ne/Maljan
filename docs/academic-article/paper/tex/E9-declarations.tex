@@ -17,12 +17,12 @@ editing).
 
 Every sample analysed in this work is live Windows PE malware. The \fact{baseline-n}-sample cohort
 and the \fact{drift-n} dated samples of the withdrawn drift study were obtained from MalwareBazaar
-\cite{abusech2026bazaar}, under terms that permit research redistribution of
+\citep{abusech2026bazaar}, under terms that permit research redistribution of
 samples but not of the corpus as a package. MABEL, the Malware Analysis Benchmark for AI/ML, was
 mined offline into the family-fingerprint catalogue and the ATT\&CK case corpus with no binaries
 downloaded, and Ultimate-RAT-Collection supplied the remote access trojan builders and payload
 binaries for that catalogue and for the leakage-free retrieval split. The ATT\&CK Enterprise
-knowledge base \cite{mitre2026attack} supplies the family-to-technique \texttt{uses}
+knowledge base \citep{mitre2026attack} supplies the family-to-technique \texttt{uses}
 relationships used as per-sample ground truth, under the ATT\&CK Terms of Use.
 
 Detonation happens only inside a CAPE sandbox on a dedicated Windows guest image reverted to a clean
@@ -41,7 +41,7 @@ evaluation rather than a claim about ethics.
 \subsection*{Data availability and reproducibility}\label{data-availability}
 
 The complete project is released under an open licence as an archived software release
-\cite{release2026artefact}: the pipeline itself, the
+\citep{release2026artefact}: the pipeline itself, the
 evaluation harnesses, the derivation of every number in this paper, the per-sample records they read
 and the scripts that build the figures and assemble the document. That release is what the
 statements below refer to, rather than the development repository, because a repository moves and a

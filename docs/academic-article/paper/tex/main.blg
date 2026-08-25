@@ -1,69 +1,71 @@
 This is BibTeX, Version 0.99d (TeX Live 2025/Debian)
 Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: main.aux
-The style file: elsarticle-num.bst
+The style file: elsarticle-harv.bst
 Database file #1: refs.bib
+Warning--to sort, need author or key in llamacpp8634
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Warning--empty pages in abdallah2026retrievers
+Warning--empty pages in bertalanic2026consensus
+Warning--empty pages in bryant2019bea
+Warning--empty pages in dev2026judge
+Warning--empty pages in evertz2026chasing
 Warning--empty pages in gunawi2008eio
-Warning--empty pages in yuan2014simple
-Warning--empty pages in yu2024maltracker
-Warning--empty pages in saha2025malaware
+Warning--empty pages in hassid2024budget
+Warning--empty pages in jiang2025nova
+Warning--empty pages in lange2024annoctr
+Warning--empty pages in lazaridou2021mind
+Warning--empty pages in lea2025rex86
 Warning--empty pages in legoy2020rcatt
 Warning--empty pages in lekssays2025techniquerag
-Warning--empty pages in abdallah2026retrievers
-Warning--empty pages in lange2024annoctr
-Warning--empty pages in ng2014conll
-Warning--empty pages in bryant2019bea
-Warning--empty pages in welleck2019unlikelihood
 Warning--empty pages in li2023repetition
-Warning--empty pages in jiang2025nova
-Warning--empty pages in paramanayakam2025lessismore
-Warning--empty pages in lea2025rex86
-Warning--empty pages in bertalanic2026consensus
-Warning--empty pages in evertz2026chasing
+Warning--empty pages in ng2014conll
 Warning--empty pages in ng2026evaluating
-Warning--empty pages in lazaridou2021mind
-Warning--empty pages in dev2026judge
+Warning--empty pages in paramanayakam2025lessismore
+Warning--empty pages in saha2025malaware
 Warning--empty pages in snell2025testtime
-Warning--empty pages in hassid2024budget
+Warning--empty pages in welleck2019unlikelihood
+Warning--empty pages in yu2024maltracker
+Warning--empty pages in yuan2014simple
 You've used 57 entries,
-            2952 wiz_defined-function locations,
-            989 strings with 20111 characters,
-and the built_in function-call counts, 20206 in all, are:
-= -- 1802
-> -- 825
-< -- 15
-+ -- 313
-- -- 256
-* -- 1348
-:= -- 2588
-add.period$ -- 97
+            2990 wiz_defined-function locations,
+            947 strings with 20115 characters,
+and the built_in function-call counts, 42869 in all, are:
+= -- 3214
+> -- 2160
+< -- 28
++ -- 845
+- -- 768
+* -- 4863
+:= -- 6226
+add.period$ -- 172
 call.type$ -- 57
-change.case$ -- 79
-chr.to.int$ -- 0
-cite$ -- 79
-duplicate$ -- 721
-empty$ -- 2383
-format.name$ -- 308
-if$ -- 5350
-int.to.chr$ -- 0
-int.to.str$ -- 57
-missing$ -- 42
-newline$ -- 219
-num.names$ -- 56
-pop$ -- 493
+change.case$ -- 554
+chr.to.int$ -- 57
+cite$ -- 82
+duplicate$ -- 3117
+empty$ -- 2753
+format.name$ -- 942
+if$ -- 7973
+int.to.chr$ -- 1
+int.to.str$ -- 1
+missing$ -- 615
+newline$ -- 301
+num.names$ -- 224
+pop$ -- 1172
 preamble$ -- 1
-purify$ -- 0
+purify$ -- 475
 quote$ -- 0
-skip$ -- 1494
+skip$ -- 1094
 stack$ -- 0
-substring$ -- 601
-swap$ -- 241
+substring$ -- 1250
+swap$ -- 2322
 text.length$ -- 15
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 0
-warning$ -- 22
-while$ -- 104
-width$ -- 59
-write$ -- 581
-(There were 22 warnings)
+type$ -- 513
+warning$ -- 23
+while$ -- 216
+width$ -- 0
+write$ -- 835
+(There were 23 warnings)

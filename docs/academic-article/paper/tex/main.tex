@@ -14,9 +14,12 @@
 % is prepared as a preprint and typeset by the journal. Switching to `final,5p`
 % later is a one-word change to this line and a rebuild of those tables, which
 % is the journal's job to trigger and not a decision to pre-empt.
-\documentclass[preprint,11pt,a4paper]{elsarticle}
+\documentclass[authoryear,preprint,11pt,a4paper]{elsarticle}
 
-% elsarticle loads natbib itself and numbers with elsarticle-num below.
+% elsarticle loads natbib itself. Computers & Security asks for author-year
+% citations with an alphabetical reference list, which is the `authoryear'
+% option above and elsarticle-harv below; this used to be elsarticle-num,
+% which is the house style of a different set of Elsevier journals.
 \usepackage{fontspec}
 \setmainfont{TeX Gyre Termes}
 \setmonofont[Scale=0.85]{DejaVu Sans Mono}
@@ -188,7 +191,7 @@ negative results
 % and it is the one thing the repository cannot substitute for, because a claim
 % about what the model was asked has to be checkable beside the claim.
 
-\bibliographystyle{elsarticle-num}
+\bibliographystyle{elsarticle-harv}
 \bibliography{refs}
 
 \end{document}

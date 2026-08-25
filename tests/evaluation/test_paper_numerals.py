@@ -251,7 +251,7 @@ def _offenders(path: Path) -> list[tuple[int, str]]:
         # renumbers them, which a hand-maintained registry cannot follow.
         on_line: set[str] = set()
         # \preprintcite is \cite plus a visible marker; both carry the source.
-        for group in re.findall(r"\\(?:cite|preprintcite)\{([^}]*)\}", raw):
+        for group in re.findall(r"\\(?:preprintcite|cite[pt]?|citealp)\{([^}]*)\}", raw):
             on_line.update(k.strip() for k in group.split(",") if k.strip())
         if _UNRESOLVED_MARKER in raw:
             on_line.add(_UNRESOLVED_MARKER)
@@ -402,7 +402,7 @@ def test_every_registered_quote_sits_beside_the_source_it_is_declared_to_come_fr
                     break
                 continue
             cited: set[str] = set()
-            for group in re.findall(r"\\(?:cite|preprintcite)\{([^}]*)\}", sentence):
+            for group in re.findall(r"\\(?:preprintcite|cite[pt]?|citealp)\{([^}]*)\}", sentence):
                 cited.update(k.strip() for k in group.split(",") if k.strip())
             if key in cited:
                 found = True

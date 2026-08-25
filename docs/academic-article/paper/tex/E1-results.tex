@@ -79,7 +79,7 @@ cohort, on two public corpora neither of which is the ATT\&CK text the index is 
 (Table~\ref{tab:mapping}).
 
 \begin{table}[!htbp]
-\caption{The technique assigner on two external corpora: TRAM2 \cite{mitre2023tram}, sentence classification, and AnnoCTR \cite{lange2024annoctr}, expert entity linking in running report prose. MRR is the mean reciprocal rank of the correct technique, gate separation is
+\caption{The technique assigner on two external corpora: TRAM2 \citep{mitre2023tram}, sentence classification, and AnnoCTR \citep{lange2024annoctr}, expert entity linking in running report prose. MRR is the mean reciprocal rank of the correct technique, gate separation is
 Equation~\eqref{eq:gate}, and AUROC is how often a correct top-1 outscores a wrong one.}\label{tab:mapping}
 \centering\small
 \begin{tabular}{@{}lrrrrrrrr@{}}
@@ -119,7 +119,7 @@ it cannot align is refused, not guessed.
 All three orderings replicate across the two corpora. Absolute accuracy does not
 and is not compared: entity linking in unconstrained prose over a
 \fact{attck-catalogue-size}-technique space is harder than sentence classification, and
-\fact{mapping-annoctr-dropped} AnnoCTR labels fall outside our ATT\&CK bundle. The direction is not ours either. Büchel et al.~\cite{buchel2025sok} report the same ordering in a
+\fact{mapping-annoctr-dropped} AnnoCTR labels fall outside our ATT\&CK bundle. The direction is not ours either. \citet{buchel2025sok} report the same ordering in a
 stronger and earlier form. What this adds is that the two axes come apart, and that composing them
 beats choosing between them.
 
