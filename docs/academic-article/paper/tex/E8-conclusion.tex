@@ -8,10 +8,11 @@ themselves. We built such a pipeline and then spent longer measuring it than bui
 it, at equal token budget against simpler alternatives, with a noise control and with intervals
 resampled at the level the observations are independent at.
 
-Conceptually, the contribution is a way of reading what a component adds that does not depend
-on the component working: a baseline to refer an F1 to, a firing rate to decide in advance whether
-an ablation can say anything, a minimum detectable effect to turn a null into a bound, and a count
-of distinct outputs to ask whether the instrument produced N answers or one answer N times. None is
+Conceptually, the contribution is a way of reading what a component adds that does not depend on the
+component working. It has four parts: a baseline to refer an F1 to, a firing rate to decide in
+advance whether an ablation can say anything, a minimum detectable effect to turn a null into a
+bound, and a count of distinct outputs to ask whether the instrument produced N answers or one
+answer N times. None is
 expensive and each changed a conclusion here.
 
 Four architectural claims motivated the design and one of them survives in part. Where a corpus
@@ -20,23 +21,19 @@ model calls is worth \fact{cape-negotiated-delta} F1 over a single judge and the
 them is worth \fact{cape-mechanism-delta}: the design helps, and not for the reason it was built.
 The other three do not survive. The corroboration cascade never reaches the artefact the analyst
 receives, two-tier attribution fires too rarely to carry the result, and the confidence number every
-deterministic gate consumes is indistinguishable from chance. What
-does move the end-to-end result is the layer underneath: the deterministic assigner gives the cleanest identifier gate
-of three backends on two external corpora, and when its reconciliation runs the judge contributes no
-technique the cascade did not already hold, while on the path that bypasses it uncorroborated
-identifiers reach the analyst. The finding we did not expect to be the paper is that the instrument was
-repeatedly wrong in ways that looked like data. Seven mechanisms are catalogued with the layer each
-occurred at, each returned a plausible result rather than an error, and \fact{test-count} passing
-tests caught none of them. Four crossed a boundary with another server and were found by one
-arithmetic check on how many distinct outputs the inputs produced; in the three that crossed none, a
-measurement's cause was assigned rather than measured.
+deterministic gate consumes is indistinguishable from chance. What does move the end-to-end result is the layer underneath. The deterministic assigner gives the
+cleanest identifier gate of three backends on two external corpora. When its reconciliation runs,
+the judge contributes no technique the cascade did not already hold; on the path that bypasses it,
+uncorroborated identifiers reach the analyst. The finding we did not expect to be the paper is that the instrument was
+repeatedly wrong in ways that looked like data. Seven mechanisms are catalogued with the layer each occurred at. Four of them were found by one
+arithmetic check: how many distinct outputs the inputs produced.
 
 We are careful about what is new. Silent failure at tool boundaries is documented, the metamorphic
 relation behind the detector is ordinary, and inference-time configuration inverting model rankings
-inside a constrained budget is established. What we add is the setting and the price: one completed
-study withdrawn because its per-sample outputs were not retained, then four arms of a later ablation
-lost the same way one level up, because the rule written after the first failure was scoped to that
-failure and the environment a study runs in is also part of the instrument.
+inside a constrained budget is established. What we add is the setting and the price. One completed study was withdrawn because its per-sample
+outputs were not retained. Four arms of a later ablation were then lost the same way, one level up:
+the rule written after the first failure was scoped to that failure, and the environment a study
+runs in is part of the instrument too.
 
 The limitations bound the reading directly. This is one pipeline, one 35B model at one quantisation,
 on one machine, evaluated on Windows PE malware against family-level ground truth, and most of its

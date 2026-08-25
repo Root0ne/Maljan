@@ -11,15 +11,15 @@ which makes within-study contrasts the defensible reading. The
 withdrawn temporal-drift study's manifest survives as \fact{drift-n} dated samples over
 \fact{drift-cohorts} cohorts and \fact{drift-families} families, metadata only.
 
-Three properties of the sandbox bound what can be reproduced. It is CAPE~2.5, the Config and
-Payload Extraction sandbox, with one analysis machine and no Linux guest, so an Executable and Linkable Format binary submitted there joins the
-\fact{cape-backlog} tasks never scheduled. Reports are retained for days rather than indefinitely, with
+Three properties of the sandbox bound what can be reproduced. It is CAPE~2.5, the Config and Payload Extraction sandbox, with one analysis machine and no Linux
+guest. An Executable and Linkable Format binary submitted there therefore joins the
+\fact{cape-backlog} tasks that are never scheduled. Reports are retained for days rather than indefinitely, with
 \fact{cape-report-retention-sampled} of \fact{cape-report-retention-sampled} sampled older tasks
 reporting no report directory, so the local archive is the only copy and re-submitting the same
-samples is not a reproduction recipe on its own. And the instance rate-limits with a throttle
-response byte-identical to its auth refusal, \texttt{\{"error":\ true,\ "message":\ ""\}} in both
-cases, so a harness reading that string as a capability verdict will mis-classify a throttle as a
-missing permission, as ours did briefly. A new submission is scheduled in \textasciitilde1 second
+samples is not a reproduction recipe on its own. And the instance rate-limits with a throttle response that is byte-identical to its refusal of an
+unauthorised request: \texttt{\{"error":\ true,\ "message":\ ""\}} in both cases. A harness that
+reads that string as a verdict on its own permissions will therefore mistake a throttle for a
+missing one, as ours did briefly. A new submission is scheduled in \textasciitilde1 second
 and completes in \textasciitilde5.5 minutes, putting an n=\fact{cohort-n} cohort at roughly
 \fact{cohort-sandbox-hours} hours of sandbox time.
 
@@ -64,12 +64,12 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
 Restarting the server between arms changes no decoding parameter and is therefore
 measurement-neutral.
 
-Table~\ref{tab:endpoints} lists the endpoints each arm ran against, and one parameter on it decides
-more than the model names do. \texttt{enable\_thinking} is honoured on DashScope and ignored on
-OpenRouter, not rejected but accepted, recorded in the result file, and not acted on: the re-run
-requesting it returned a \fact{arm-default-nothink-reasoning} reasoning share against
-\fact{arm-default-reasoning} without it, while on DashScope the same request produces
-\fact{arm-qwen35ba3b-nothink-reasoning}. The flag is worth \fact{reasoning-flag-worth-low} to
+Table~\ref{tab:endpoints} lists the endpoints each arm ran against. One parameter on it decides more
+than the model names do. \texttt{enable\_thinking} is honoured on DashScope and ignored on
+OpenRouter. Ignored is the exact word: the request is accepted, the value is recorded in the result
+file, and nothing acts on it. Re-running that arm with the flag set returned a
+\fact{arm-default-nothink-reasoning} reasoning share, against \fact{arm-default-reasoning} without
+it, while the same request on DashScope produces \fact{arm-qwen35ba3b-nothink-reasoning}. The flag is worth \fact{reasoning-flag-worth-low} to
 \fact{reasoning-flag-worth-high} F1 on the two models where it can be set, so an arm can be labelled
 matched while running the opposite configuration, and arm selection therefore keys on the measured
 reasoning share of a completed arm rather than on the flag requested.
@@ -94,12 +94,11 @@ larger, hosted & DashScope & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenpl
 \end{tabular}
 \end{table}
 
-Two serving details matter to anyone reproducing an arm. The local server's output cap
-must be sent twice, because \texttt{ChatOpenAI(max\_tokens=N)} reaches the wire as
-\texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read, so the cap must also
-travel in \texttt{extra\_body}; measured on this host, \fact{cap-requested} requested yields
-\fact{cap-ignored-tokens} generated with the renamed field alone and \fact{cap-honoured-tokens} with
-both. And that server truncates silently, returning \texttt{finish\_reason:\ "stop"} at the cap and
+Two serving details matter to anyone reproducing an arm. The local server's output cap must be sent twice. \texttt{ChatOpenAI(max\_tokens=N)} reaches the
+wire as \texttt{max\_completion\_tokens}, which \texttt{ik\_llama.cpp} does not read, so the cap
+must also travel in \texttt{extra\_body}. Measured on this host, \fact{cap-requested} requested
+yields \fact{cap-ignored-tokens} generated with the renamed field alone, and
+\fact{cap-honoured-tokens} with both. And that server truncates silently, returning \texttt{finish\_reason:\ "stop"} at the cap and
 never \texttt{"length"}, so telemetry detecting truncation by finish reason reports zero however
 often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
 requests per day at \fact{openrouter-burst-limit} per minute, and the first attempt exhausted it
@@ -113,10 +112,10 @@ reachable on that tier at all.
 Four terms are used in one sense throughout. An \emph{arm} is one condition of one experiment, a
 configuration under which every input is scored, so that two arms differ in the one thing being
 tested. A \emph{sample} is a real malware binary from the dated cohort, scored against its family's
-MITRE \texttt{uses} set. A \emph{fixture} is one of the five synthesised inputs used by the
-equal-budget arms, whose evidence is generated from its own technique list and which therefore has a
-ceiling a real sample does not; samples and fixtures are different populations with different ground
-truth, they are never pooled, and where both appear in one figure they appear on separate axes. The
+MITRE \texttt{uses} set. A \emph{fixture} is one of the five synthesised inputs used by the equal-budget arms. Its evidence
+is generated from its own technique list, so it has a ceiling a real sample does not. Samples and
+fixtures are different populations with different ground truth. They are never pooled, and they are
+never drawn on one axis. The
 \emph{reconciliation step} is the deterministic pass that compares the judge's bundle against the
 corroboration cascade's set and restores what the judge omitted.
 
@@ -126,23 +125,20 @@ follows Bertalanič and Fortuna \cite{bertalanic2026consensus}, including a stoc
 in which one analyst receives evidence irrelevant to the sample. That control establishes that the
 harness can detect a difference at all: in the fixture consensus study the noise arm separated
 (\fact{consensus-noise-f1} against \fact{consensus-negotiated-f1} and \fact{consensus-single-f1})
-while the treatment did not, which distinguishes no effect from no sensitivity. For reasoning models
-the budget must cover reasoning, because our frontier endpoint spent \fact{arm-default-reasoning} of
-its output on reasoning across \fact{arm-default-n} real prompts and
-\fact{reasoning-share-one-token} on a one-token answer, so capping content alone would have granted
-it roughly twice the generation for the same nominal budget. Arms must also sit on the same side of
-the reasoning switch: measured on two models at \fact{arm-default-n} calls each, enabling the flag
-moved F1 by \fact{reasoning-flag-third-delta-2dp} on one and
-\fact{reasoning-flag-vendor35b-delta-2dp} on the other, in both cases because the model spent its
-entire output budget thinking and returned no answer, with \fact{arm-qwen35ba3b-hit-cap} of
-\fact{arm-qwen35ba3b-n} calls hitting the cap on the second. An unmatched pair therefore does not
+while the treatment did not, which distinguishes no effect from no sensitivity. For a reasoning model the budget must cover the reasoning as well. Our frontier endpoint spent
+\fact{arm-default-reasoning} of its output on reasoning across \fact{arm-default-n} real prompts,
+and \fact{reasoning-share-one-token} on a one-token answer. Capping the answer alone would have
+granted it roughly twice the generation for the same nominal budget. Arms must also sit on the same side of the reasoning switch. Measured on two models at
+\fact{arm-default-n} calls each, enabling the flag moved F1 by \fact{reasoning-flag-third-delta-2dp}
+on one and \fact{reasoning-flag-vendor35b-delta-2dp} on the other. The cause is the same in both:
+the model spends its entire output budget thinking and returns no answer. On the second,
+\fact{arm-qwen35ba3b-hit-cap} of \fact{arm-qwen35ba3b-n} calls hit the cap. An unmatched pair therefore does not
 produce a noisy comparison; it produces a comparison of the flag.
 
-Three further rules were adopted after each one caught something, and all three are cheap. The first
-is that a mechanism's firing rate is measured before its effect: the confidence cap fires on \fact{cap-rate} of
-techniques, so an ablation would describe the \fact{cap-rate-complement} where the cap never ran,
-while the sink-reachability hint fires on \fact{hint-rate} of samples and an ablation of it is a
-real statement about the hint. The cap's preconditions explain its rate, since it applies to three
+Three further rules were adopted after each one caught something, and all three are cheap. The first is that a mechanism's firing rate is measured before its effect. The confidence cap fires
+on \fact{cap-rate} of techniques, so an ablation of it would mostly describe the
+\fact{cap-rate-complement} where it never ran. The sink-reachability hint fires on \fact{hint-rate}
+of samples, so an ablation of that one does say something about the hint. The cap's preconditions explain its rate, since it applies to three
 technique families only when the sole contributing layer is static and
 \fact{cap-gated-yara-only-share} of those claims are YARA-only. An ablation must therefore be
 restricted to the samples where the mechanism fires, because averaging a feature over inputs it
@@ -164,21 +160,20 @@ demotes anything, because a searched absence is only credible if the looking is 
 
 \subsection{Statistical analysis}\label{statistical-analysis}
 
-Every arm is scored on the same samples in the same order, differences are computed per sample and
+Every arm is scored on the same samples in the same order. Differences are computed per sample and
 then aggregated, and 95\% bootstrap confidence intervals (CIs) are taken over the paired deltas. The
-observations are nested, with many claims from one sample and many samples from one family, so the
-bootstrap resamples whole clusters, the p-value comes from flipping the sign of whole cluster
-means rather than of rows, and each interval is reported with the intraclass correlation coefficient
-(ICC) of its measure and the effective sample size that implies. Two properties of that test are reported with it. With $k$ clusters the
+observations are nested: many claims come from one sample, and many samples from one family. The
+bootstrap therefore resamples whole clusters rather than rows, and the p-value comes from flipping
+the sign of whole cluster means. Each interval is reported with the intraclass correlation
+coefficient (ICC) of its measure and the effective sample size that implies. Two properties of that test are reported with it. With $k$ clusters the
 two-sided version cannot return a p below
 \begin{equation}\label{eq:floor}
 p_{\min} = 2 \big/ 2^{k}
 \end{equation}
-which at $k$=\setting{5} is
-\fact{fixture-signflip-floor} and puts $\alpha$=0.05 out of reach whatever the effect size; and
-above \setting{20} clusters the $2^k$ assignments are sampled rather than enumerated, at
-\fact{stats-iters} draws with the observed assignment counted in its own reference set, so the
-smallest p that route can return is one over the draws rather than zero. Each reported p names which
+At $k$=\setting{5} that is \fact{fixture-signflip-floor}, which puts $\alpha$=0.05 out of reach
+whatever the effect size. Above \setting{20} clusters the $2^k$ assignments are sampled rather than
+enumerated, at \fact{stats-iters} draws, with the observed assignment counted in its own reference
+set. The smallest p that route can return is therefore one over the draws rather than zero. Each reported p names which
 route produced it. The two properties pull in opposite directions: raising the cluster count lifts
 the floor and is what makes enumeration stop being possible, which is why the consensus arms were
 re-run one sample per family. Multiplicity is controlled with Benjamini-Hochberg over two

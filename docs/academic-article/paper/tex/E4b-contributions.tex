@@ -1,11 +1,10 @@
 \subsection{Motivation and contributions}
 \label{sec:contributions}
 
-Two observations motivated this work. First, a component of an LLM analysis pipeline is ordinarily
-justified by the mechanism it implements rather than by a measurement, and a mechanism sound in
-isolation can contribute nothing once wired to real inputs; establishing which holds needs an
-equal-budget comparison against a simpler alternative and a baseline containing no language model at
-all. Second, such a comparison is only as trustworthy as the instrument producing it, and in a
+Two observations motivated this work. First, a component of an LLM analysis pipeline is ordinarily justified by the mechanism it
+implements rather than by a measurement. A mechanism that is sound in isolation can contribute
+nothing once wired to real inputs. Establishing which of the two holds needs an equal-budget
+comparison against a simpler alternative, and a baseline containing no language model at all. Second, such a comparison is only as trustworthy as the instrument producing it, and in a
 pipeline assembled from several servers that instrument fails without announcing itself. The
 contributions are therefore organised around the evaluation rather than the architecture, and each
 is a measurement or a mechanism rather than a proposal.
@@ -28,23 +27,18 @@ knowing that a design works and knowing why.
 \emph{(iii) A no-LLM baseline for ATT\&CK mapping, and the pipeline scored against it.} The sandbox
 the pipeline is built on maps its own signature hits to technique identifiers deterministically, and
 scored per sample against family-level MITRE ground truth it reaches F1 \fact{baseline-f1}
-\fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the samples where both arms ran, the
-full pipeline is \fact{h2h-delta} F1 above it \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. This
-is the comparison without which every F1 in this literature, including our own earlier ones, refers
-to nothing.
+\fact{baseline-f1-cluster-ci} on \fact{baseline-n} samples. On the samples where both arms ran, the full pipeline is \fact{h2h-delta} F1 above it \fact{h2h-ci},
+at a resolution of \fact{h2h-mde}.
 
 \emph{(iv) Three architectural claims that did not survive, each with the resolution of the design
 that tested it.} A weighted corroboration cascade, two-tier attribution and a deterministic
-confidence gate were each measured and each returned a negative or a near-null result. A null
-without its minimum detectable effect is unreadable, so every one is stated with the effect its
-design could have detected at 80\% power. The configuration axis is where the effects are: a
+confidence gate were each measured, and each returned a negative or a near-null result. A null without its minimum detectable effect is unreadable, so every one is stated with the effect
+its design could have detected at 80\% power. The configuration axis is where the effects are. A
 decoding flag is worth \fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, more
-than any architecture or parameter count we measured, and an arm can be labelled matched while
-running the opposite configuration because one provider accepts the parameter without acting on it.
+than any architecture or parameter count we measured. An arm can also be labelled matched while
+running the opposite configuration, because one provider accepts the parameter without acting on it.
 
 \emph{(v) Seven instrument failures, with the layer each occurred at and what actually found it.}
-Each produced a plausible result rather than an error, and \fact{test-count} passing tests caught
-none. Four crossed a boundary with another server and fall inside a described class of silent
-failure; three crossed no boundary at all and share a different shape, in which a measurement's
-cause was assigned rather than measured. What found four of them was one line of arithmetic: how
-many distinct outputs N inputs produced.
+Four crossed a boundary with another server and fall inside a described class of silent failure.
+Three crossed no boundary at all, and share a different shape: a measurement's cause was assigned
+rather than measured.

@@ -9,10 +9,10 @@ extra decoding repeats moves it because repeats add rows inside clusters rather 
 practical consequence is that a null has to be reported with its resolution: the frontier comparison could detect \fact{mde-frontier-local} F1 at
 80\% power and returned \fact{frontier-local-delta}, and only the pair of those facts is
 informative, since the second alone reads as equivalence and the first alone as a failed experiment.
-It also changes what the cheap fix is. The instinct on seeing an underpowered paired design is to
-add repeats, because repeats are cheap and samples are expensive, and on clustered data that
-instinct is exactly wrong: a sixth fixture would have halved the attainable p, while a sixth repeat
-on five fixtures moves it not at all.
+It also changes what the cheap fix is. On seeing an underpowered paired design, the instinct is to
+add repeats, because repeats are cheap and samples are expensive. On clustered data that instinct is
+exactly wrong. A sixth fixture would have halved the attainable p; a sixth repeat on five fixtures
+moves it not at all.
 
 The literature we counter-searched against locates silent failures at the boundary between modules,
 and four of our seven crossed such a boundary while three crossed none. What the seven share is not
@@ -20,22 +20,20 @@ a boundary but an attribution. An ablation varied the deterministic reconciliati
 attributed the difference to a language model; a rank correlation ordered a reasoning-configuration
 flag and we attributed it to parameter count; a renamed output ceiling let us attribute boundedness
 to a component that had never once been bounded.
-In every case the number was real and the arrow pointing to its cause was drawn by us. We offer that
-as a proposal rather than as a taxonomy, since seven cases from one project is not a class, but it
-does suggest a different question to ask of an evaluation than boundary-oriented thinking suggests:
-not whether any component failed silently, but, for each number about to be reported, whether its
-cause was measured or assigned. The clustered-inference correction of Section~\ref{sec:method} is
-that question turned on ourselves and answered badly, since every interval in an earlier draft
-attributed its width to sampling variation among independent observations, the observations were not
-independent, and nothing in the pipeline, the tests or the review caught it because the defect was
-never in a function.
+In every case the number was real and the arrow pointing to its cause was drawn by us. We offer that as a proposal rather than as a taxonomy, since seven cases from one project is not a
+class. It does suggest a different question to ask of an evaluation than boundary-oriented thinking
+suggests. Not: did any component fail silently. Instead, for each number about to be reported: was
+its cause measured, or assigned? The clustered-inference correction of Section~\ref{sec:method} is that question turned on ourselves,
+and answered badly. Every interval in an earlier draft attributed its width to sampling variation
+among independent observations. The observations were not independent. Nothing in the pipeline, the
+tests or the review caught it, because the defect was never in a function.
 
 What a practitioner should take from this is narrow, because it is one pipeline on one machine.
 The firing rate should be measured before the effect, since a mechanism engaging on \fact{cap-rate}
-of its inputs produces an ablation whose null describes the cases where it never ran; the distinct
-outputs should be counted, because that needs no ground truth and belongs beside the sample size
-rather than inside a test; and per-sample outputs should be retained, along with whatever else the
-study is made of. We adopted retention
+of its inputs produces an ablation whose null describes the cases where it never ran. The distinct
+outputs should be counted: that needs no ground truth, and it belongs beside the sample size rather
+than inside a test. And per-sample outputs should be retained, along with whatever else the study is
+made of. We adopted retention
 after losing a study to its absence, scoped the rule to the object under study, and the next failure
 was in the environment, where four arms died on host memory and we had their outputs but not the
 host state. A rule written after a failure is scoped to that failure.

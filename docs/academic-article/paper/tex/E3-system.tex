@@ -21,11 +21,11 @@ or a final set, and every identifier that reaches the analyst has been assigned,
 reconciled by code. That is why the deterministic layer dominating the output is the design working
 rather than a component failing, and why what has to be measured is what the model adds on top of
 it. Six deterministic evidence layers assert techniques directly from signatures, rules and byte
-markers, with no model involved. Three analysts then run as
-ReAct loops over heterogeneous evidence channels, each bound to one tool server; a negotiation node
-tests for consensus and routes disputes to a revision pass; a judge synthesises a verdict and emits
-STIX~2.1; and a deterministic reconciliation and gating stage adjudicates between the judge's bundle
-and the corroboration cascade before the analyst sees anything. The seven instrument failures of
+markers, with no model involved. Three analysts then run as ReAct loops, each bound to one tool server and reading one channel of
+evidence. A negotiation node tests for consensus and routes disputes to a revision pass. A judge
+then synthesises a verdict and emits STIX~2.1. Finally, a deterministic reconciliation and gating
+stage adjudicates between the judge's bundle and the corroboration cascade, before the analyst sees
+anything. The seven instrument failures of
 Section~\ref{sec:failures} are marked on the figure at the boundary each occurred at, because the
 claim that four crossed a boundary with another server and three did not is a claim about this
 topology.
@@ -50,10 +50,11 @@ the corroboration multiplier $m$ rises from \fact{cascade-mult-1} at one contrib
 \label{fig:architecture}
 \end{figure}
 
-Two design choices are not what failed. Tool exposure is not tool availability: the reverse-engineering server advertises \textasciitilde165 tools, exposing the full
-catalogue to a model with roughly 3B active parameters is infeasible because tool selection degrades
-before the context does, and the static analyst is therefore given a curated allowlist of
-\fact{static-curated-functions} tools, with high-value tools invoked deterministically from code. And the
+Two design choices are not what failed. Tool exposure is not tool availability. The reverse-engineering server advertises \textasciitilde165
+tools, and exposing the full catalogue to a model with roughly 3B active parameters is infeasible,
+because tool selection degrades before the context does. The static analyst is therefore given a
+curated allowlist of \fact{static-curated-functions} tools, and the high-value tools are invoked
+deterministically from code. And the
 pipeline degrades rather than fails when a service is absent, so with the sandbox unreachable the
 dynamic path is skipped and the run completes on static evidence, a behaviour pinned by a test. That
 mattered during the study, because the sandbox was reachable from one network only and every

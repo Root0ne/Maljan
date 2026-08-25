@@ -11,49 +11,47 @@ rcATT \cite{legoy2020rcatt} and
 TTPDrill \cite{husari2017ttpdrill}, through neural extractors such as EXTRACTOR
 \cite{satvat2021extractor}, AttacKG \cite{li2022attackg} and LADDER \cite{alam2023ladder}, to
 retrieval-augmented generation (RAG). TechniqueRAG \cite{lekssays2025techniquerag} pairs off-the-shelf
-retrievers with an instruction-tuned re-ranker and fine-tunes only the generator, motivated by data
-scarcity: ATT\&CK defines over 550 sub-techniques while roughly 10,000 annotated examples exist
+retrievers with an instruction-tuned re-ranker and fine-tunes only the generator. The reason is data
+scarcity: ATT\&CK defines over 550 sub-techniques, and roughly 10,000 annotated examples exist
 publicly. A hierarchical successor injects the tactic-to-technique taxonomy as an inductive bias and
 cuts the candidate space by 77.5\% \preprintcite{morbiato2026hierarchical}, and TTPrint
 \preprintcite{cheng2026ttprint} keeps only candidates supported by both a localised evidence span
-and the MITRE definition. Neither is used here as a comparator, both being unreviewed and
-self-reported against baselines that Büchel et al.'s systematisation calls ``largely incomparable''
-\cite{buchel2025sok}; that survey re-evaluates more than forty systems in one setting, reports a
-ceiling existing approaches have not crossed, and finds traditional natural language processing
-(NLP) approaches outperforming
-embedder-based and generative ones in realistic settings. Our describe-then-map design removes
+and the MITRE definition. Neither is used here as a comparator. Both are unreviewed, and both report
+against baselines that Büchel et al.'s systematisation calls ``largely incomparable''
+\cite{buchel2025sok}. That survey re-evaluates more than forty systems in one setting. It reports a
+ceiling existing approaches have not crossed, and finds that traditional natural language processing
+(NLP) approaches outperform embedder-based and generative ones in realistic settings. Our describe-then-map design removes
 technique-identifier recall from the model entirely, which is a domain instantiation of Infer-Retrieve-Rank
 \preprintcite{doosterlinck2024incontext} and is stricter than \cite{lekssays2025techniquerag}, where
-the model still ranks among retrieved candidates. That the retrieval backends are separable on
-ranking and on gating is likewise not ours, Abdallah et al.~\cite{abdallah2026retrievers} treating
-retrieval confidence as a dimension distinct from effectiveness and finding calibration
-``consistently weak across model families''; Section~\ref{sec:assignment} measures the separation on
+the model still ranks among retrieved candidates. The idea that a retrieval backend can be good at ranking
+and bad at gating is likewise not ours. Abdallah et al.~\cite{abdallah2026retrievers} treat
+retrieval confidence as a dimension distinct from effectiveness, and find calibration
+``consistently weak across model families''. Section~\ref{sec:assignment} measures that separation on
 TRAM2, the corpus that tool defines \cite{mitre2023tram}, and on the independently annotated AnnoCTR
-corpus \cite{lange2024annoctr}. Two adjacent results have
-prior art we cite rather than compete with: that a false correction costs more than a missed one is
-why grammatical error correction evaluates with F0.5 \cite{ng2014conll,bryant2019bea}, and neural
-text degeneration has competing established accounts locating the cause in the likelihood objective
-and in training-data repetition \cite{welleck2019unlikelihood,li2023repetition}.
+corpus \cite{lange2024annoctr}. Two further results we rely on have
+prior art we cite rather than compete with. That a false correction costs more than a missed one is
+why grammatical error correction evaluates with F0.5 \cite{ng2014conll,bryant2019bea}. And neural
+text degeneration already has two competing accounts, one locating the cause in the likelihood
+objective and one in training-data repetition \cite{welleck2019unlikelihood,li2023repetition}.
 
-Agentic systems now drive reverse-engineering backends through tool interfaces, and the model tier
-splits by role: fine-tuned binary specialists are small and open-weight, among them ReCopilot
+Agentic systems now drive reverse-engineering backends through tool interfaces, and the models
+split by role. The binary specialists are small, open-weight and fine-tuned, among them ReCopilot
 \preprintcite{chen2025recopilot}, LLM4Decompile \cite{tan2024llm4decompile} and Nova
-\cite{jiang2025nova}, while tool-driving agents use frontier models. TTPDetect
-\preprintcite{ttpdetect2026} is the closest system to ours, identifying tactics, techniques and
-procedures in stripped malware
-binaries through retrieval-narrowed entry points and a function-level agent, reporting 93.25\%
-precision and 93.81\% recall at function level and 87.37\% precision on real-world malware; we do
-not claim binary evidence as an input modality, and that ground is theirs. Degradation of tool
-selection as a catalogue grows is documented generally, with LongFuncEval reporting a 7 to 85\%
-performance drop as tool count increases \preprintcite{kate2025longfunceval} and a cut from 46 to 19
-tools saving up to 70\% of execution time \cite{paramanayakam2025lessismore}, but not for a
-reverse-engineering catalogue whose tools semantically overlap. Confidentiality-driven local
-deployment is likewise established: REx86 \cite{lea2025rex86} fine-tunes eight open-weight models
-for x86 reverse engineering because ``cloud-hosted, closed-weight models pose privacy and security
-risks and cannot be used in closed-network facilities'', validating with a 43-participant user
-study.
+\cite{jiang2025nova}. The models that drive the tools are frontier models. TTPDetect
+\preprintcite{ttpdetect2026} is the closest system to ours, and reports 93.25\%
+precision and 93.81\% recall at function level and 87.37\% precision on real-world malware. It
+identifies tactics, techniques and procedures in stripped malware binaries, using
+retrieval-narrowed entry points and a function-level agent. We do
+not claim binary evidence as an input modality; that ground is theirs. Tool selection is known to degrade as the catalogue grows.
+LongFuncEval reports a 7 to 85\% performance drop as the tool count rises
+\preprintcite{kate2025longfunceval}, and cutting a catalogue from 46 to 19
+tools saves up to 70\% of execution time \cite{paramanayakam2025lessismore}. Neither result covers a
+reverse-engineering catalogue whose tools overlap in what they do. Running the model locally for confidentiality is likewise
+established. REx86 \cite{lea2025rex86} fine-tunes eight open-weight models for x86 reverse
+engineering, validated with a 43-participant user study, because ``cloud-hosted, closed-weight
+models pose privacy and security risks and cannot be used in closed-network facilities''.
 
-Multi-agent debate is a standard pattern, including in security, where PhishDebate
+Multi-agent debate is a standard pattern, including in security. PhishDebate
 \cite{li2025phishdebate} assigns four specialised agents to distinct views of a webpage and reports
 98.2\% recall. Two recent results change how such claims must be read. Holding the reasoning token
 budget constant, Tran and Kiela find single agents consistently match or beat multi-agent systems on
@@ -62,28 +60,29 @@ only at degradation 0.7 \preprintcite{tran2026single}. Bertalanič and Fortuna
 \cite{bertalanic2026consensus} reach the same conclusion on 7B and 8B open-weight models, where
 debate consumed 2.1 to 3.4$\times$ more tokens for equal or lower accuracy, and name sycophantic
 conformity, contextual fragility and consensus collapse as its failure modes. Both scope their
-negatives to homogeneous agents decomposing a single context and both name degraded or noisy context
-as the exception, which is the regime a 600-import binary plus a sandbox report plus a network
-capture occupies; whether heterogeneous evidence-channel decomposition survives a control that
-homogeneous debate fails is the question our equal-budget ablation asks. Weighting evidence by source
-reliability and discounting non-independent sources is Dempster-Shafer theory, decades old, and our
-cascade is an instance of it with hand-chosen constants; measuring five perturbations of those
-constants, including inverting the most- and least-trusted layers, changed the top-10 ranking on
-10.6 to 27.5\% of samples and the corroborated set on none, because the corroboration decision is a
-function of layer count alone.
+negatives to homogeneous agents splitting up a single context, and both name degraded or noisy
+context as the exception. That exception is our setting: a 600-import binary, a sandbox report and a
+network capture are three different channels rather than one context divided. Our equal-budget
+ablation asks whether splitting by channel survives a control that splitting by context does not. Weighting evidence by how far its source is trusted, and
+discounting sources that are not independent, is Dempster-Shafer theory and is decades old. Our
+cascade is an instance of it with hand-chosen constants. We perturbed those constants five ways,
+including inverting the most- and least-trusted layers: the top-10 ranking changed on
+10.6 to 27.5\% of samples and the corroborated set changed on none. The corroborated set does not
+move because it depends on how many layers agree, not on how far each is trusted.
 
 This work's methodological results belong to an established critique tradition. Arp et al.'s
-\emph{Dos and Don'ts} identified ten pitfalls in machine learning for security, and \emph{Chasing Shadows}
-\cite{evertz2026chasing} is its direct successor, surveying all 72 peer-reviewed LLM-security papers
-of 2023 and 2024 and finding every one exposed to at least one of nine pitfalls with only 15.7\%
-explicitly discussed. A published negative RAG result in malware analysis exists by a mechanism
-different from ours, retrieved context diluting a signal-extraction task \cite{ng2026evaluating};
-comparison against a trivial label-only baseline is long established \cite{metz2012baselines}; and a
-systematic review by the same group found a considerable share of published multi-label results no
-better than that baseline \preprintcite{metz2015comparing}. On temporal stability the axis matters
-more than the result: performance falls as evaluation moves away from the training period and scale
-does not close the gap \cite{lazaridou2021mind}, but that work varies the distance between training
-and test time while ours fixes the model and varies the era of the input binary. We no longer have a
+\emph{Dos and Don'ts} identified ten pitfalls in machine learning for security. Its direct
+successor, \emph{Chasing Shadows} \cite{evertz2026chasing}, surveys all 72 peer-reviewed
+LLM-security papers of 2023 and 2024, and finds every one exposed to at least one of nine pitfalls,
+with only 15.7\% discussing any of them. A negative RAG result in malware analysis is already published, by a
+different mechanism from ours: retrieved context dilutes a signal-extraction task
+\cite{ng2026evaluating}. Comparing against a trivial label-only baseline is long established
+\cite{metz2012baselines}, and a systematic review by the same group found a considerable share of
+published multi-label results no better than that baseline \preprintcite{metz2015comparing}. On
+temporal stability, the axis matters more than the result. Performance falls as evaluation moves
+away from the training period, and scale does not close the gap \cite{lazaridou2021mind}. That work
+varies the gap between training and test time; ours fixes the model and varies the era of the input
+binary instead. We no longer have a
 result on that axis, for the reason given in Section~\ref{sec:limitations}.
 
 The paper's methodological spine belongs to an area that already exists. Gunawi et
@@ -93,27 +92,27 @@ handler which only logs is a handler that ignores, and attributed 25\% of catast
 errors explicitly signalled and then ignored. Alquraan et al.~\cite{alquraan2018partition} found the
 majority of network-partition failures in cloud systems to be silent. The LLM-specific instance is
 now being catalogued, in bug taxonomies for agent orchestration frameworks \cite{xue2025agentbugs}
-and for inference engines \cite{liu2026inference}, the latter carrying both incorrect request
-parsing as a root cause and silent error as a symptom; silently overruling a requested parameter
-back to a default is itself a named misconfiguration failure mode with a measured prevalence
-\cite{xu2013misconfig}. Adjacent work reaches the same place from the interface side: mining defects
+and for inference engines \cite{liu2026inference}. The second of those names both a cause,
+incorrect request parsing, and a symptom, silent error. Overruling a requested parameter back to a
+default without saying so is itself a named misconfiguration failure mode, with a measured
+prevalence \cite{xu2013misconfig}. Adjacent work reaches the same place from the interface side. Mining defects
 in Model Context Protocol (MCP) reference servers, Oyelayo et al.~\cite{oyelayo2026mcp} find data
-validation and type issues
-to be the second most prevalent class at 13.97\%, the bucket our null-for-unset-optional defect
-falls into, and input dependencies that a machine-readable application programming interface (API)
-specification cannot express are ``the norm,
-rather than the exception, with 85\% of the reviewed APIs'' \cite{martinlopez2019deps}. The detector
-is not new either: ``distinct inputs should produce distinct outputs'' is an ordinary metamorphic
-relation, and metamorphic testing exists precisely for programs whose correct output is unknown
-\cite{li2024metamorphic}; stress-testing an LLM judge's consistency under input variation is
-likewise established \cite{dev2026judge}. Nor is the newest of our mechanisms: our own parameter-size
+validation and type issues to be the second most prevalent class, at 13.97\%. That is the class our
+own first defect falls into. A related constraint is that a machine-readable application programming
+interface (API) specification cannot express every dependency between its inputs; such dependencies
+are ``the norm, rather than the exception, with 85\% of the reviewed APIs''
+\cite{martinlopez2019deps}. The detector is not new either. ``Distinct inputs should produce
+distinct outputs'' is an ordinary metamorphic relation, and metamorphic testing exists precisely for
+programs whose correct output is unknown \cite{li2024metamorphic}. Stress-testing an LLM judge's
+consistency under input variation is likewise established \cite{dev2026judge}. Nor is the newest of our mechanisms. Our own parameter-size
 series reproduced the $\rho$=0.85 at p=0.014 the nearest prior work reports
-\preprintcite{ryan2026attck}, from an axis on which the low-scoring row was a model disabled by a
-configuration flag rather than limited by its size. That phenomenon is established: under strict
-output-length constraints performance ``might not scale monotonically with the model size''
-\cite{sun2025length}, across 6.5M instances inference-time configuration moves performance ``both
-absolute and relative'' \cite{mizrahi2024multiprompt}, extra test-time compute lets a smaller model
-overtake a much larger one \cite{snell2025testtime,hassid2024budget}, and lengthening reasoning
+\preprintcite{ryan2026attck}, but on an axis whose low-scoring row was a model disabled by a
+configuration flag rather than limited by its size. That a setting can outweigh model size is
+established. Under strict output-length constraints, performance ``might not scale monotonically
+with the model size'' \cite{sun2025length}. Across 6.5M instances, inference-time configuration
+moves performance ``both absolute and relative'' \cite{mizrahi2024multiprompt}. Extra test-time
+compute lets a smaller model overtake a much larger one
+\cite{snell2025testtime,hassid2024budget}, and lengthening reasoning
 steps improves accuracy \cite{jin2024steplength}. The same disagreement exists one layer down, where
 OpenAI-compatible servers differ over which token-limit parameter they honour, documented as
 \texttt{llama.cpp} \#8634 \preprintcite{llamacpp8634} and \texttt{vLLM} \#11976

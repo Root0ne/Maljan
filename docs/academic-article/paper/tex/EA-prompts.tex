@@ -11,11 +11,11 @@ specific prompt.
 
 Each analyst receives one system prompt with the same five parts, and the parts are the same
 length in each: a role and an evidence rule, a tool workflow, a set of conditional tools, a
-verification discipline, and a set of standing cautions. The evidence rule is identical across
-the three and is the pipeline's grounding constraint: for every claim the model makes it must
-cite a concrete artefact, which for the static analyst is a function name, a string offset, an
-import or a hex pattern, for the dynamic analyst an API call or a registry write from the sandbox
-report, and for the network analyst a flow or a resolved domain. What differs between the three
+verification discipline, and a set of standing cautions. The evidence rule is identical across the three, and it is the pipeline's grounding constraint: for
+every claim it makes, the model must cite a concrete artefact. For the static analyst that is a
+function name, a string offset, an import or a hex pattern. For the dynamic analyst it is an API
+call or a registry write from the sandbox report. For the network analyst it is a flow or a resolved
+domain. What differs between the three
 is the tool server each is bound to, the evidence type it reads, and the technique families its
 role paragraph names.
 
@@ -44,13 +44,10 @@ disambiguation when a hash-resolution tool returns colliding candidates, and one
 particular obfuscation technique on the evidence of dynamic import resolution alone. Neither
 bears on a measurement reported here, and both are in the release.
 
-The rules are worth reading against the result. They ask the model to earn a number above
-\setting{0.8} by running a check, and to cap itself at \setting{0.7} when it cannot. The number
-they produce is the one every deterministic gate downstream consumes, and
-Section~\ref{sec:mechanisms} finds it near chance, with \fact{confidence-modal-count} of
-\fact{confidence-n} claims arriving at exactly \setting{1.0}. Whether the discipline is not
-followed, or is followed and does not separate correct claims from wrong ones, this design cannot
-distinguish.
+The rules ask the model to earn a number above \setting{0.8} by running a check, and to cap itself
+at \setting{0.7} when it cannot. That number is what every deterministic gate downstream consumes,
+and Section~\ref{sec:mechanisms} finds it near chance. Whether the discipline is not followed, or is
+followed and does not separate correct claims from wrong ones, this design cannot distinguish.
 
 \subsection{The output contract}\label{prompt-schema}
 

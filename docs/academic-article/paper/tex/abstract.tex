@@ -1,20 +1,18 @@
 A large language model (LLM) pipeline for mapping malware evidence to MITRE ATT\&CK (Adversarial
-Tactics, Techniques and Common Knowledge) techniques is mostly not the model: it
-wraps one in a sandbox, a disassembler, retrieval indices and rule engines, so what the model
-contributes is a difference against that tooling, not a score. This study measures that
-difference component by component, and reports the failures of the instrument that produced them.
-Three findings are positive. Decomposing the analysis into several
-model calls is worth \fact{cape-negotiated-delta} F1 over a single judge on
-\fact{cape-consensus-families} real samples \fact{cape-negotiated-ci}; a deterministic technique
-assigner composing rather than choosing between its ranking and gating backends gives the
-cleanest identifier gate on two external corpora; and a decoding-configuration flag is worth
-\fact{reasoning-flag-worth-low} to \fact{reasoning-flag-worth-high} F1, more than any architecture or
-parameter count we measured. Four are negative or bounded. The negotiation the design was
-built for contributes \fact{cape-mechanism-delta} at a resolution of \fact{mde-cape-mechanism}, so
-the gain is the calls, not the argument; against the sandbox it is built on the full pipeline is
-\fact{h2h-delta} F1 \fact{h2h-ci} at a resolution of \fact{h2h-mde}; three retrieval components are
-near-inert end to end; and verbal confidence, which every deterministic gate consumes, discriminates
-at an area under the curve of \fact{confidence-auc}, on an interval containing chance. Seven defects
-in our own instrument produced plausible results rather than errors and
-\fact{test-count} passing tests caught none, the largest being that every interval in an earlier
-draft resampled rows from clustered observations.
+Tactics, Techniques and Common Knowledge) techniques is mostly not the model. It wraps one in a
+sandbox, a disassembler, retrieval indices and rule engines. What the model contributes is therefore
+a difference against that tooling, not a score. This study measures that difference component by
+component. Three findings are positive. Splitting the analysis across several model calls is worth
+\fact{cape-negotiated-delta} F1 over a single judge on \fact{cape-consensus-families} real samples
+\fact{cape-negotiated-ci}. A deterministic technique assigner that composes its ranking and gating
+backends, rather than choosing between them, gives the cleanest identifier gate on two external
+corpora. And one decoding flag is worth \fact{reasoning-flag-worth-low} to
+\fact{reasoning-flag-worth-high} F1, more than any architecture or parameter count we measured. Four
+findings are negative or bounded. The negotiation the design was built for contributes
+\fact{cape-mechanism-delta}, at a resolution of \fact{mde-cape-mechanism}: what pays is the extra
+calls, not the argument between them. Against the sandbox it is built on, the full pipeline is
+\fact{h2h-delta} F1 \fact{h2h-ci}, at a resolution of \fact{h2h-mde}. Three retrieval components move
+nothing end to end. And the confidence the model reports, which every deterministic gate consumes,
+separates correct claims from wrong ones at an area under the curve of \fact{confidence-auc}, on an
+interval containing chance. The paper also reports seven defects in its own instrument, each of
+which returned a plausible result rather than an error.
