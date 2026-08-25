@@ -40,13 +40,15 @@ evaluation rather than a claim about ethics.
 
 \subsection*{Data availability and reproducibility}\label{data-availability}
 
-The complete project is released under an open licence as an archived software release
+The complete project is released under an open licence as a source repository
 \citep{release2026artefact}: the pipeline itself, the
 evaluation harnesses, the derivation of every number in this paper, the per-sample records they read
-and the scripts that build the figures and assemble the document. That release is what the
-statements below refer to, rather than the development repository, because a repository moves and a
-claim about an artefact should name something that does not.
-The archive holds every per-sample record retained by every study reported here, in the JavaScript
+and the scripts that build the figures and assemble the document. It is a repository rather than an
+archive, so it moves, and the statements below describe the state it carries at submission. What
+does not move is the derivation: every number printed here is regenerated from those retained
+records by the build that assembles the document, so a reader who runs it against a later state of
+the repository gets the numbers that state supports rather than the ones we read off ours.
+It holds every per-sample record retained by every study reported here, in the JavaScript
 Object Notation files the
 harness wrote, together with the offline re-analysis that recomputes every interval, design effect,
 minimum detectable effect and adjusted p-value from those records and its random seed, the ATT\&CK
@@ -60,9 +62,9 @@ and does not act on it, so anyone re-running them should expect the numbers to m
 the intervals accordingly.
 
 Four things are withheld. Malware binaries are not released and are obtainable from the sources
-named above by the SHA-256 digests in the archive. Sandbox reports are not released in full because
+named above by the SHA-256 digests in the repository. Sandbox reports are not released in full because
 they embed strings and memory contents from the samples. The sandbox host's address appears nowhere
-in the archive. And one dataset used for retrieval-corpus construction is redistributed by its
+in it. And one dataset used for retrieval-corpus construction is redistributed by its
 authors under terms that do not permit our redistribution, so it is referenced rather than included.
 One thing is not available at all: the \fact{drift-n}-sample temporal-drift study's per-sample
 outputs do not exist, having been written to a path that was valid on the machine the harness was
