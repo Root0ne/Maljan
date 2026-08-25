@@ -125,6 +125,11 @@ docs/academic-article/paper/tex/*.toc
 docs/academic-article/paper/tex/*.fls
 docs/academic-article/paper/tex/*.xdv
 docs/academic-article/paper/tex/*.fdb_latexmk
+docs/academic-article/paper/tex/*.blg
+docs/academic-article/paper/tex/*.spl
+# submission bundle: a rebuildable view of files already tracked above
+# (make_submission.py assembles it for Editorial Manager)
+docs/academic-article/paper/submission/
 docs/academic-article/paper/tex/.facts-inputs.sha256
 1-s2.0-S0921889026003003-main.pdf
 makale_yazim.md
