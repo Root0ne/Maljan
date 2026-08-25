@@ -3,7 +3,6 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: main.aux
 The style file: elsarticle-harv.bst
 Database file #1: refs.bib
-Warning--to sort, need author or key in llamacpp8634
 Reallocated singl_function (elt_size=4) to 100 items from 50.
 Warning--empty pages in abdallah2026retrievers
 Warning--empty pages in bertalanic2026consensus
@@ -29,43 +28,43 @@ Warning--empty pages in yu2024maltracker
 Warning--empty pages in yuan2014simple
 You've used 57 entries,
             2990 wiz_defined-function locations,
-            947 strings with 20115 characters,
-and the built_in function-call counts, 42869 in all, are:
-= -- 3214
-> -- 2160
-< -- 28
-+ -- 845
-- -- 768
-* -- 4863
-:= -- 6226
+            948 strings with 20135 characters,
+and the built_in function-call counts, 42946 in all, are:
+= -- 3217
+> -- 2170
+< -- 29
++ -- 848
+- -- 771
+* -- 4868
+:= -- 6253
 add.period$ -- 172
 call.type$ -- 57
-change.case$ -- 554
+change.case$ -- 555
 chr.to.int$ -- 57
-cite$ -- 82
-duplicate$ -- 3117
-empty$ -- 2753
-format.name$ -- 942
-if$ -- 7973
+cite$ -- 79
+duplicate$ -- 3121
+empty$ -- 2751
+format.name$ -- 946
+if$ -- 7981
 int.to.chr$ -- 1
 int.to.str$ -- 1
-missing$ -- 615
+missing$ -- 617
 newline$ -- 301
-num.names$ -- 224
+num.names$ -- 228
 pop$ -- 1172
 preamble$ -- 1
-purify$ -- 475
+purify$ -- 476
 quote$ -- 0
 skip$ -- 1094
 stack$ -- 0
-substring$ -- 1250
-swap$ -- 2322
+substring$ -- 1248
+swap$ -- 2327
 text.length$ -- 15
 text.prefix$ -- 0
 top$ -- 0
 type$ -- 513
-warning$ -- 23
-while$ -- 216
+warning$ -- 22
+while$ -- 219
 width$ -- 0
-write$ -- 835
-(There were 23 warnings)
+write$ -- 836
+(There were 22 warnings)

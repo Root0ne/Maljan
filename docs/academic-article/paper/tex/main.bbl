@@ -11,13 +11,6 @@
 \providecommand{\Pubmed}[1]{\href{pmid:#1}{\path{#1}}}
 \providecommand{\bibinfo}[2]{#2}
 \ifx\xfnm\relax \def\xfnm[#1]{\unskip,\space#1}\fi
-%Type = Misc
-\bibitem[{lla(2024)}]{llamacpp8634}
-, \bibinfo{year}{2024}.
-\newblock \bibinfo{title}{\texttt{max\_tokens} not respected on the non-chat
-  endpoint}.
-\newblock \bibinfo{note}{{PREPRINT}, not peer reviewed. ggml-org/llama.cpp
-  issue \#8634}.
 %Type = Inproceedings
 \bibitem[{Abdallah et~al.(2026)Abdallah, Holdcroft, Ali and
   Jatowt}]{abdallah2026retrievers}
@@ -146,6 +139,13 @@
   Symposium (NDSS)}.
 \newblock \DOIprefix\doi{10.14722/ndss.2026.241749}.
   \bibinfo{note}{arXiv:2512.09549}.
+%Type = Misc
+\bibitem[{{ggml-org/llama.cpp}(2024)}]{llamacpp8634}
+\bibinfo{author}{{ggml-org/llama.cpp}}, \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{\texttt{max\_tokens} not respected on the non-chat
+  endpoint}.
+\newblock \bibinfo{note}{{PREPRINT}, not peer reviewed. ggml-org/llama.cpp
+  issue \#8634}.
 %Type = Inproceedings
 \bibitem[{Gunawi et~al.(2008)Gunawi, Rubio-Gonz{\'a}lez, Arpaci-Dusseau,
   Arpaci-Dusseau and Liblit}]{gunawi2008eio}
