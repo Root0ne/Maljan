@@ -4,43 +4,37 @@
 This work addressed two barriers to trusting a measurement of an LLM malware-analysis pipeline: that
 such pipelines are rarely scored against the deterministic tooling they are built on, and that the
 instrument producing the score is itself a distributed system whose failures do not announce
-themselves. We built such a pipeline and then spent longer measuring it than building it.
+themselves. The contribution is a way of reading what a component adds that does not depend on the
+component working, in four parts: a baseline to refer an F1 to, a firing rate to decide in advance
+whether an ablation can say anything, a minimum detectable effect to turn a null into a bound, and a
+count of distinct outputs to ask whether the instrument produced N answers or one answer N times.
+None is expensive and each changed a conclusion here.
 
-Conceptually, the contribution is a way of reading what a component adds that does not depend on the
-component working. It has four parts: a baseline to refer an F1 to, a firing rate to decide in
-advance whether an ablation can say anything, a minimum detectable effect to turn a null into a
-bound, and a count of distinct outputs to ask whether the instrument produced N answers or one
-answer N times. None is
-expensive and each changed a conclusion here.
-
-Four architectural claims motivated the design and one of them survives in part. Where a corpus
-large enough to produce a significant answer was available, decomposing the analysis into several
-model calls scores \fact{cape-negotiated-delta} F1 above a single judge, at
+Four architectural claims motivated the design and one survives in part. Where a corpus large enough
+to produce a significant answer was available, decomposing the analysis into several model calls
+scores \fact{cape-negotiated-delta} F1 above a single judge at
 \fact{cape-consensus-negotiated-ratio} times its output, while the negotiation between them returns
-\fact{cape-mechanism-delta} at matched calls: the design helps, and not for the reason it was built.
-The other three do not survive. The corroboration cascade never reaches the artefact the analyst
-receives, two-tier attribution fires too rarely to carry the result, and the confidence number every
-deterministic gate consumes is indistinguishable from chance. What does move the end-to-end result is the layer underneath. The deterministic assigner gives the
-cleanest identifier gate of three backends on two external corpora. When its reconciliation runs,
-the judge contributes no technique the cascade did not already hold; on the path that bypasses it,
-uncorroborated identifiers reach the analyst. The finding we did not expect to be the paper is that the instrument was
-repeatedly wrong in ways that looked like data. Seven mechanisms are catalogued with the layer each occurred at, four of them found by that same
-count of distinct outputs.
+\fact{cape-mechanism-delta} at matched calls. The design helps, though not for the reason it was built. The corroboration cascade never reaches the artefact the analyst receives, two-tier attribution
+fires too rarely to carry the result, and the confidence number every deterministic gate consumes is
+indistinguishable from chance. What moves the end-to-end result is the layer underneath, where the
+deterministic assigner gives the cleanest identifier gate of three backends on two external corpora.
+The finding we did not expect to be the paper is that the instrument was repeatedly wrong in ways
+that looked like data: seven mechanisms are catalogued with the layer each occurred at, four of them
+found by that same count of distinct outputs.
 
 We are careful about what is new. Silent failure at tool boundaries is documented, the metamorphic
 relation behind the detector is ordinary, and inference-time configuration inverting model rankings
-inside a constrained budget is established. What we add is the setting and the price. One completed study was withdrawn because its per-sample
-outputs were not retained. Four arms of a later ablation were then lost the same way, one level up:
-the rule written after the first failure was scoped to that failure, and the environment a study
-runs in is part of the instrument too.
+inside a constrained budget is established. What we add is the setting and the price: one completed
+study was withdrawn because its per-sample outputs were not retained, and four arms of a later
+ablation were then lost the same way, one level up, because the rule written after the first failure
+was scoped to that failure.
 
-The limitations bound the reading directly. This is one pipeline, one 35B model at one quantisation,
-on one machine, evaluated on Windows PE malware against family-level ground truth, and most of its
-nulls are bounds set by a five-cluster corpus rather than equivalences. Future work follows from
-each: re-running the withdrawn drift study under the corrected instrument, extending the judge
-intercept from four calls to the full cohort, running the parameter-size series on endpoints that
-honour the reasoning flag, and testing the output-cardinality check prospectively rather than
-retrospectively. Each needs a host the model server does not fill on its own, which is the binding
+This is one pipeline, one 35B model at one quantisation, on one machine, evaluated on Windows PE
+malware against family-level ground truth, and most of its nulls are bounds set by a five-cluster
+corpus. Future work follows from each: the withdrawn drift study re-run under the corrected
+instrument, the judge intercept extended from four calls to the full cohort, the parameter-size
+series on endpoints that honour the reasoning flag, and the output-cardinality check tested
+prospectively. Each needs a host the model server does not fill on its own, which is the binding
 constraint on this work rather than the method.
 
 What we do assert is a change of default. In a pipeline assembled from other people's servers the

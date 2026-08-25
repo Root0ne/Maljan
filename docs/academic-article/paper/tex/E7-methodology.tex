@@ -51,16 +51,6 @@ bounding the heap only, measured resident set size \fact{ghidra-rss-gb} GB again
 \end{tabular}
 \end{table}
 
-\begin{verbatim}
-llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf \
-  -c 131072 -t 16 -fa on -ctk q8_0 -ctv q8_0 -ngl 999 \
-  -ot "blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU" \
-  --context-shift on --jinja --host 0.0.0.0 --port 8080
-\end{verbatim}
-
-Restarting the server between arms changes no decoding parameter and is therefore
-measurement-neutral.
-
 Table~\ref{tab:endpoints} lists the endpoints each arm ran against. One parameter on it decides more
 than the model names do. \texttt{enable\_thinking} is honoured on DashScope and ignored on
 OpenRouter. Ignored is the exact word: the request is accepted, the value is recorded in the result
@@ -90,17 +80,14 @@ larger, hosted & DashScope & \texttt{qwen3.6-plus} & off / on & \fact{arm-qwenpl
 \end{tabular}
 \end{table}
 
-Two serving details matter to anyone reproducing an arm. The local server's output cap must be sent
-twice, in \texttt{max\_tokens} and again in \texttt{extra\_body}, because the client library renames
-it on the wire to a spelling \texttt{ik\_llama.cpp} does not read (Section~\ref{sec:failures}).
-Measured on this host, \fact{cap-requested} requested yields \fact{cap-ignored-tokens} generated
-with the renamed field alone, and \fact{cap-honoured-tokens} with both. And that server truncates silently, reporting the same finish reason at the cap as on a completed
-answer, so telemetry detecting truncation by finish reason reports zero however often the cap binds. The frontier arm ran on a free tier allowing \fact{openrouter-daily-limit}
-requests per day at \fact{openrouter-burst-limit} per minute, and the first attempt exhausted it
-mid-flight, \fact{quota-calls-refused} of its calls returning HTTP~429, the Hypertext Transfer
-Protocol (HTTP) status for a rate limit. One call per sample over a \fact{baseline-n}-sample cohort is two days at that rate, and a
-full-pipeline arm at roughly \fact{requests-per-analysis} model requests per analysis is not
-reachable on that tier at all.
+Two serving details decide whether an arm reproduces, and the invocation itself is in the released
+artefact \citep{release2026artefact}. The local server's output cap must be sent twice, because the
+client library renames it on the wire to a spelling \texttt{ik\_llama.cpp} does not read
+(Section~\ref{sec:failures}); and that server truncates silently, reporting the same finish reason
+at the cap as on a completed answer, so telemetry keyed to the finish reason reports no truncation
+however often the cap binds. The frontier arm ran on a rate-limited free tier whose exhaustion
+returned HTTP~429, the Hypertext Transfer Protocol (HTTP) status for a rate limit, which is why that
+arm is \fact{arm-default-n} calls rather than the \fact{baseline-n}-sample cohort.
 
 \subsection{Experimental design}\label{experimental-design}
 
