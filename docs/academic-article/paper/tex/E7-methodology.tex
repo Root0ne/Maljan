@@ -42,7 +42,7 @@ model file SHA-256 & \texttt{d0de70ef…c4ea}, computed locally and matching the
 HuggingFace revision & \texttt{cfd350fd…1f0d}, retrieved 2026-05-11 \\
 imatrix calibration & \texttt{\seqsplit{unsloth\_calibration\_Qwen3.6-35B-A3B.txt}}, \setting{510} entries over \setting{76} chunks \\
 architecture & hybrid recurrent (state-space-model keys + \texttt{\seqsplit{full\_attention\_interval=4}}), from the model file metadata \\
-engine & \texttt{ik\_llama.cpp} at \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}} (\#\fact{engine-commit-pr}) \\
+engine & \texttt{ik\_llama.cpp} at \texttt{\seqsplit{eb570eb96689c235933b813693ca28ab9d3d26de}} carrying pull request \#\fact{engine-commit-pr} \\
 host & one RTX \fact{host-gpu}, \setting{31}\,GiB random-access memory, \setting{16} threads \\
 \midrule
 server growth & \fact{llama-rss-fresh-gb} GB fresh, \fact{llama-rss-growth-gb} GB after one analyst pass, \fact{llama-rss-sustained-gb} GB after \fact{llama-rss-sustained-minutes} minutes; anonymous and unreclaimable, so long paired runs restart the server between arms \\
