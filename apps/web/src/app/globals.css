@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+/* ── GTI-Inspired Design Tokens ─────────────────────── */
+:root {
+  --bg-deep: #0d1117;
+  --bg-surface: #161b22;
+  --bg-elevated: #1c2333;
+  --bg-active: #21262d;
+  --bg-hover: #1c2333;
+  /* Warmer, marginally-elevated panel for long narrative reading (the
+     executive-summary pane). Keeps the cool data surfaces unchanged while
+     giving prose a calmer, lower-halation backdrop — R2's "warmer/dimmer
+     reading surface" recommendation, scoped to narrative-only. */
+  --bg-reading: #1b1c21;
+
+  --border: #30363d;
+  --border-light: #21262d;
+
+  /* Solid-hex text ramp, validated and refined against four external
+     typography/contrast research reports (docs/font/). Solid hex (not alpha)
+     keeps subpixel rendering crisp and contrast deterministic across every
+     surface. Contrast vs --bg-deep (#0d1117):
+       primary   ~13.9:1 (AAA)  — confirmed correct by 3/4 reports
+       secondary  ~7.3:1 (AAA)  — confirmed correct by 3/4 reports
+       muted      ~6.4:1        — RAISED from #757f8a: the old value passed
+                                  on the canvas but fell to ~3.7:1 on the
+                                  lighter surfaces (#1c2333 / #21262d),
+                                  failing AA there. #8d97a3 clears AA on all
+                                  four surfaces (~4.95:1 on the lightest).
+       tertiary   ~4.9:1 (AA)   — least-important metadata on dark surfaces.
+       disabled   ~3.1:1        — disabled / placeholder only (non-essential).
+     Greys are kept cool/low-chroma to harmonise with the blue-tinted canvas;
+     primary stays off-white (never #fff) to avoid halation. */
+  --text-primary: #e6edf3;
+  --text-secondary: #9aa4af;
+  --text-muted: #8d97a3;
+  --text-tertiary: #768491;
+  --text-disabled: #5a6571;
+
+  /* Semantic palette shifted to GitHub-dark "light" variants. The previous
+     (darker, more saturated) set "vibrated" against the near-black canvas and
+     fatigued the eye on long text runs (reports 3 & 4). These lighter tints
+     read calmer as text and in /10 fills while still clearly distinct. All
+     pass AA as text on every surface. NOTE: --accent (button fills with white
+     text) is intentionally NOT brightened — see below. */
+  --status-red: #ff7b72;
+  --status-orange: #ffa657;
+  --status-green: #7ee787;
+  --status-blue: #79c0ff;
+  --status-purple: #d2a8ff;
+
+  --accent: #4493f8;
+  --accent-hover: #388bfd;
+  /* Brighter blue (~7:1) for small inline link text, where the fill-tuned
+     --accent (#4493f8, ~6:1) is a touch low. Recommended by 3/4 reports. */
+  --accent-strong: #58a6ff;
+
+  --sidebar-width: 48px;
+  --sidebar-expanded: 220px;
+  --header-height: 48px;
+}
+
+/* ── Tailwind v4 Theme Extension ────────────────────── */
+@theme inline {
+  --color-bg-deep: var(--bg-deep);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-active: var(--bg-active);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-reading: var(--bg-reading);
+
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-disabled: var(--text-disabled);
+
+  --color-status-red: var(--status-red);
+  --color-status-orange: var(--status-orange);
+  --color-status-green: var(--status-green);
+  --color-status-blue: var(--status-blue);
+  --color-status-purple: var(--status-purple);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-strong: var(--accent-strong);
+
+  /* next/font exposes Inter / JetBrains Mono through these CSS variables
+     (set on <html> by layout.tsx). Reference the variable FIRST so the
+     self-hosted webfont is always preferred, then the plain family name,
+     then a high-quality native stack so the pre-swap / no-webfont render
+     still looks close (SF on Apple, Segoe on Windows). */
+  --font-sans: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Density-first scale aligned with the research (GitHub Primer / IBM Carbon
+     "productive" / Linear): 13px data/body, 14px forms/prose. The dominant
+     workhorse `text-xs` is bumped 12px -> 13px — the single biggest comfort
+     lever — at a ~1.38 line-height that keeps dense tables tight. `text-sm`
+     (14px, forms/prose) keeps its more generous line-height; body(13)/form(14)
+     are used in separate contexts so the 1px gap is fine. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.375rem;
+
+  /* Mid scale completed with intentional, graduated negative tracking — the
+     "tok" look scales with size (body -1.1% -> display -3%) — and tighter
+     leading on the larger steps. `text-lg` deliberately carries NO
+     letter-spacing token: it is shared by the brand wordmark (positive
+     `tracking-wide`) and by <h1> page titles (which already get -3% from the
+     @layer base rule below), so baking a value here would fight both. */
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-base--letter-spacing: -0.014em;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.625rem;
+  --text-xl--letter-spacing: -0.02em;
+
+  /* Large display text (dashboard stat numbers, big values) reads as one
+     tight optical unit with stronger negative tracking — the core of the
+     "tok" Apple/Airbnb look. -3% sits in the recommended -2%..-4% band for
+     display sizes. (No text-2xl uppercase labels exist, so this never
+     collides with the positive tracking-wider micro-labels.) */
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-2xl--letter-spacing: -0.03em;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.125rem;
+  --text-3xl--letter-spacing: -0.03em;
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+  --text-4xl--letter-spacing: -0.032em;
+}
+
+/* ── Base Styles ────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  /* Crisper, more even glyph rendering for Inter on both platforms. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  /* Ligatures + contextual alternates, plus Inter glyph-disambiguation
+     character variants: cv05 = tailed l, cv08 = serifed uppercase I,
+     cv09 = flat-top 3, and `case` = case-sensitive forms that re-center
+     brackets / braces / hyphens / colons to cap height for our many uppercase
+     tracking-wider labels. Together they stop l / I / 1 / 3 / 0 from colliding
+     in hashes, IPs and IOCs. Harmless no-ops on builds lacking the tables (the
+     self-hosted InterVariable carries the full set). R3's `ss02`
+     "Disambiguation" set reaches the same goal as one bundle; we take the
+     granular cv05/cv08/cv09 route so each glyph fix stays explicit. Every
+     report flagged glyph disambiguation as essential for a security tool. */
+  font-feature-settings: "liga" 1, "calt" 1, "cv05" 1, "cv08" 1, "cv09" 1, "case" 1;
+  /* Tabular figures align columns of scores / counts / hashes and stop the
+     "number jitter" on live-updating data; slashed-zero keeps 0 distinct
+     from O everywhere. This is a data tool, so both are global defaults. */
+  font-variant-numeric: tabular-nums slashed-zero;
+  /* Negative tracking pulls text into a single optical unit (the Apple /
+     Airbnb / Linear "tok" look). Body sits at a mild -0.011em; headings and
+     large display text go further (-2%..-3%, below). Small uppercase labels
+     keep POSITIVE tracking via the `tracking-wider` utility, which overrides
+     this — negative tracking on small caps would hurt legibility. */
+  letter-spacing: -0.011em;
+  min-height: 100vh;
+}
+
+/* Headings read tighter the larger they get (Apple/Airbnb/Linear-style
+   graduated negative tracking, -2%..-3%). Scoped to @layer base so the
+   positive `tracking-wider` utility still wins on uppercase section labels
+   (which are frequently <h2> here) — negative tracking would cramp small
+   all-caps. Normal-case headings (h1 sample name, h3 modal titles) get the
+   tightening. */
+@layer base {
+  h1 { letter-spacing: -0.03em; }
+  h2 { letter-spacing: -0.025em; }
+  h3 { letter-spacing: -0.02em; }
+}
+
+/* Monospaced / numeric content: tabular figures + slashed zero for hash and
+   IOC integrity; ligatures OFF so operators like -> != == stay literal,
+   character-by-character, inside rules and indicators. */
+code, kbd, samp, pre, .font-mono {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "liga" 0, "calt" 0, "zero" 1;
+}
+
+/* ── De-emphasis tiers (tertiary / disabled) ────────────────────────────
+   The tertiary and disabled tokens existed but nothing used them. Placeholders
+   are hints, not content, so they sit one step below the muted label tier
+   (tertiary, still AA at ~4.9:1). Disabled form controls use the SOLID disabled
+   hex rather than opacity — opacity on text can switch off ClearType subpixel
+   AA on Windows (reports §5.1), so a solid color keeps disabled text crisp. */
+::placeholder {
+  color: var(--text-tertiary);
+  opacity: 1; /* Firefox dims placeholders by default; we set color explicitly. */
+}
+input:disabled,
+textarea:disabled,
+select:disabled {
+  color: var(--text-disabled);
+  -webkit-text-fill-color: var(--text-disabled);
+}
+
+/* ── Scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Focus ──────────────────────────────────────────── */
+*:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Selection ──────────────────────────────────────── */
+::selection {
+  background: rgba(68, 147, 248, 0.3);
+}
+
+/* ── User contrast preference ───────────────────────────────────────────
+   Honour the OS "increase contrast" setting (a real, user-selectable contrast
+   control with nothing to persist). Every text tier lifts toward the bright
+   end of the safe band; primary jumps to #f0f6fc — R4's brighter value, kept
+   in reserve for exactly this mode so the default stays at the lower-halation
+   #e6edf3. Because the tokens are referenced via var() at use time, every
+   Tailwind text utility picks these up automatically. */
+@media (prefers-contrast: more) {
+  :root {
+    --text-primary: #f0f6fc;
+    --text-secondary: #c9d1d9;
+    --text-muted: #b1bac4;
+    --text-tertiary: #9aa4af;
+    --text-disabled: #768491;
+    --accent-strong: #79c0ff;
+  }
+}
+
+/* ── Table ──────────────────────────────────────────── */
+table {
+  border-collapse: collapse;
+}

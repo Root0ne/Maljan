@@ -1,0 +1,201 @@
+{
+  "schema": "maljan-tool-artifacts/v1",
+  "version": "1.0",
+  "_note": "Byte markers for offensive tooling and commodity RATs. Authored from public tool documentation and open reporting. Every entry needs min_hits distinct markers to fire: any single one of these strings can appear in a detection signature, an EDR agent, or a blue-team utility, so a one-hit rule would flag the defenders' own tools. Confidence stays under the real-YARA band (0.90) because these are unanchored strings rather than structural rules.",
+  "artifacts": [
+    {
+      "name": "Cobalt Strike",
+      "family": "CobaltStrike",
+      "kind": "c2_framework",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": [
+        "beacon.x64.dll",
+        "beacon.dll",
+        "ReflectiveLoader",
+        "%s as %s\\%s: %d",
+        "beacon.http.get",
+        "beacon.stage.transform",
+        "malleable"
+      ]
+    },
+    {
+      "name": "Metasploit Meterpreter",
+      "family": "Meterpreter",
+      "kind": "c2_framework",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": [
+        "metsrv.x86.dll",
+        "metsrv.x64.dll",
+        "meterpreter",
+        "ext_server_stdapi",
+        "ReflectiveLoader",
+        "stdapi_sys_process_execute"
+      ]
+    },
+    {
+      "name": "Sliver",
+      "family": "Sliver",
+      "kind": "c2_framework",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": [
+        "github.com/bishopfox/sliver",
+        "sliverpb",
+        "sliver.pb.go",
+        "SliverRPC",
+        "implant/sliver"
+      ]
+    },
+    {
+      "name": "Havoc",
+      "family": "Havoc",
+      "kind": "c2_framework",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": [
+        "Havoc Demon",
+        "havoc.yaotl",
+        "DemonInit",
+        "KaynLdr",
+        "Demon.x64.bin"
+      ]
+    },
+    {
+      "name": "Covenant Grunt",
+      "family": "Covenant",
+      "kind": "c2_framework",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.52,
+      "confidence_max": 0.72,
+      "patterns": ["GruntHTTP", "GruntStager", "Covenant.Core", "GruntSMB"]
+    },
+    {
+      "name": "Mimikatz",
+      "family": "Mimikatz",
+      "kind": "credential_tool",
+      "technique_ids": ["T1003.001"],
+      "min_hits": 2,
+      "confidence_base": 0.58,
+      "confidence_max": 0.75,
+      "patterns": [
+        "mimikatz",
+        "sekurlsa::logonpasswords",
+        "gentilkiwi",
+        "kuhl_m_sekurlsa",
+        "privilege::debug",
+        "lsadump::sam",
+        "mimidrv"
+      ]
+    },
+    {
+      "name": "Rubeus",
+      "family": "Rubeus",
+      "kind": "credential_tool",
+      "technique_ids": ["T1558.003"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.72,
+      "patterns": [
+        "Rubeus.exe",
+        "Rubeus.Domain",
+        "asktgt",
+        "kerberoast",
+        "Rubeus.Commands"
+      ]
+    },
+    {
+      "name": "SharpHound",
+      "family": "SharpHound",
+      "kind": "discovery_tool",
+      "technique_ids": ["T1087.002"],
+      "min_hits": 2,
+      "confidence_base": 0.52,
+      "confidence_max": 0.70,
+      "patterns": [
+        "SharpHound",
+        "BloodHound",
+        "Sharphound.Enumeration",
+        "SharpHoundCommon",
+        "computers.json"
+      ]
+    },
+    {
+      "name": "Seatbelt",
+      "family": "Seatbelt",
+      "kind": "discovery_tool",
+      "technique_ids": ["T1082"],
+      "min_hits": 2,
+      "confidence_base": 0.50,
+      "confidence_max": 0.68,
+      "patterns": ["Seatbelt", "Seatbelt.Commands", "SeatbeltCommand", "Seatbelt.exe"]
+    },
+    {
+      "name": "PsExec",
+      "family": "PsExec",
+      "kind": "lateral_movement_tool",
+      "technique_ids": ["T1569.002"],
+      "min_hits": 2,
+      "confidence_base": 0.48,
+      "confidence_max": 0.66,
+      "patterns": ["PSEXESVC", "psexesvc.exe", "Sysinternals PsExec", "\\\\.\\pipe\\psexesvc"]
+    },
+    {
+      "name": "Donut Loader",
+      "family": "DonutLoader",
+      "kind": "loader",
+      "technique_ids": ["T1620"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.72,
+      "patterns": ["DONUT_INSTANCE", "DONUT_CONFIG", "DONUT_MODULE", "TheDonutLoader"]
+    },
+    {
+      "name": "AsyncRAT / Quasar",
+      "family": "AsyncRAT",
+      "kind": "rat",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": [
+        "AsyncRAT",
+        "Quasar RAT",
+        "Quasar.Client",
+        "AsyncClient",
+        "Client.Handle_Packet",
+        "Pastebin"
+      ]
+    },
+    {
+      "name": "Remcos RAT",
+      "family": "RemcosRAT",
+      "kind": "rat",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": ["Remcos", "Remcos_Mutex_Inj", "remcos_", "Breaking-Security.Net"]
+    },
+    {
+      "name": "njRAT",
+      "family": "njrat",
+      "kind": "rat",
+      "technique_ids": ["T1071.001"],
+      "min_hits": 2,
+      "confidence_base": 0.55,
+      "confidence_max": 0.75,
+      "patterns": ["njRAT", "njq8", "Bladabindi", "netsh firewall add allowedprogram"]
+    }
+  ]
+}

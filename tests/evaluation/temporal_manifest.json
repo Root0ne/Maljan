@@ -1,0 +1,1514 @@
+{
+  "schema": "maljan-temporal-manifest/v1",
+  "source": "api",
+  "scope": [
+    "windows",
+    "linux"
+  ],
+  "file_types": [
+    "dll",
+    "elf",
+    "exe",
+    "so",
+    "sys"
+  ],
+  "per_cohort_target": 30,
+  "ground_truth_status": "uncurated",
+  "note": "Metadata only; binaries NOT included. The 'signature' is a weak family label \u2014 technique-level ground truth must be curated before this feeds eval_temporal_drift.py. Download binaries separately into an isolated env.",
+  "counts": {
+    "2020": 30,
+    "2021": 30,
+    "2022": 30,
+    "2023": 30,
+    "2024": 30,
+    "2025": 30,
+    "2026": 30
+  },
+  "total": 210,
+  "cohorts": {
+    "2020": [
+      {
+        "sha256": "007257bf103de1173f536937eae72ea3f6f99c8e6a6599d657b70b63b763c184",
+        "first_seen": "2020-11-11 11:32:03",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "08cb598a06ac7af5e79b41b4ce3bd4b2d6c37c1cbaa7c3e1e785f3038e08da3a",
+        "first_seen": "2020-11-11 11:27:26",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d",
+        "first_seen": "2020-11-17 11:33:27",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc",
+        "first_seen": "2020-06-29 07:11:36",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab",
+        "first_seen": "2020-06-25 12:57:24",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535",
+        "first_seen": "2020-12-24 03:32:26",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Emotet"
+      },
+      {
+        "sha256": "37289955e43235c56374e1cee02a98bd78d1448f02377caa92255c87a9df014e",
+        "first_seen": "2020-11-10 11:21:26",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "40bcf1b92cac08e72eb025659bb892a41926ebd655f448ff5544ece312986987",
+        "first_seen": "2020-06-11 11:14:14",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "4af88f5467e746369b32d26fbd469e25c3867b138d9ac3126c6874f642590596",
+        "first_seen": "2020-06-10 12:27:15",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "52b6f57b2e7a9fc832227cc0ae02794e506358a295dadcf75387755a1b84b1ea",
+        "first_seen": "2020-06-17 09:19:16",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "5a8239ffd5e37023816296c83bf64261d7461cc373669a881a1b2284d767d1ed",
+        "first_seen": "2020-11-10 10:53:29",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "64dddbb15d568f1eb31c8e6b41ab7d2c9207ee990c98751151c75f320bf04efa",
+        "first_seen": "2020-11-08 14:24:08",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "6cdd8396703edddaf4a0273aaa07ba21b015f94bebc1f9cba18e891dee562637",
+        "first_seen": "2020-11-11 11:05:54",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "763c01498701ee85f3a9663053e10739c7b4ede30659d2ddbc3109a66fc434e2",
+        "first_seen": "2020-11-09 21:50:43",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "7e2bc1dc1e6350f7e622d47697f088b4ae00799a9f61246312932851a0d9bece",
+        "first_seen": "2020-11-10 11:20:25",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "83cf1604ba4a10f1d20e4a20884a00ea7c0b57b2353930b0e2f9c2bda71ade99",
+        "first_seen": "2020-11-09 21:39:47",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "8cd7d6ad6c2ef4704a7b4e090c31e43fb32ed02ca81007c190dbb4938c9e526d",
+        "first_seen": "2020-10-25 18:11:50",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "964e7b311e933799477fd793aa4e7721af35fe5c494fd9d995a6a620b162e516",
+        "first_seen": "2020-07-07 09:49:09",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "9d0a5b6d215e8b25ebd13b8a3833040284d73a13381ed263ed313fffe3ab4377",
+        "first_seen": "2020-10-27 14:33:54",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "a3a2849495ec0b496a9270954ba4754d37c3ffba42890de7dc91318adc4dfd25",
+        "first_seen": "2020-11-11 11:29:30",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "aad35a5504c45513c4dd2488a13848d3ddbad34e0ebca7dbce4949d4b17651a2",
+        "first_seen": "2020-11-15 23:12:08",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "b906fffb5dfe57a4a0704e2a89803ce0af2f9e6dc16338fab258051f1c8c4c0e",
+        "first_seen": "2020-11-17 12:27:51",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "c3e21f7b2bfc3da5e77b37f6556fb985e4402551bac45636a7488664e67d477f",
+        "first_seen": "2020-10-27 14:55:59",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Hancitor"
+      },
+      {
+        "sha256": "cb4e4d28e4ae4e4acaffb8087e80d9163089be1d1f08837e23d665e65d8f30fa",
+        "first_seen": "2020-11-05 18:45:59",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "d06be7bd36b4cdd6ac12e3c7fb675515cd33ae9ea75a26e7dc7fc3a7db14caff",
+        "first_seen": "2020-07-13 11:09:16",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "da0a4e16ef4baf46f27e666e9b4547cdf17eafad3caa235df6c29a52d3da8d0a",
+        "first_seen": "2020-11-12 14:27:48",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "e0e2e3150774826aca0cb107291a48451907c32a7f5de02c409757a7a2def2c6",
+        "first_seen": "2020-11-07 17:08:35",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "e8d4ad02e8811033f3ce05547774f6e9650ee66cf3f9221df656b326b8bd039d",
+        "first_seen": "2020-11-12 14:14:38",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "ee3f6c3fe59b1f5925699e91f49ea5439c0daae112173a303d2c25dd36a42b35",
+        "first_seen": "2020-03-23 15:58:10",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Hancitor"
+      },
+      {
+        "sha256": "f75668dcd2d8c554bde126315253439858d2155588b1889473a7df5914537f10",
+        "first_seen": "2020-11-12 14:02:13",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      }
+    ],
+    "2021": [
+      {
+        "sha256": "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941",
+        "first_seen": "2021-10-26 14:04:59",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "084f69c0e0826309f75cfda262d0ef36e87dc2b73a12170dad23492117758cda",
+        "first_seen": "2021-12-20 16:42:17",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "10e5f3b96a81bb3b849a9dbba33d6f297d38b417e7d6269fbcff0ce876dcb47e",
+        "first_seen": "2021-11-17 15:10:09",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "1857f37001c2c96b7cfb6850dace37d19f9b5bedf49038ca93d2f421444b1816",
+        "first_seen": "2021-12-14 21:35:27",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "21c9472e24da9f476eafe7f8435e93657a9fffed15b75e56f7d45d12f9f1eb86",
+        "first_seen": "2021-07-02 12:07:26",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Hancitor"
+      },
+      {
+        "sha256": "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578",
+        "first_seen": "2021-08-24 11:41:58",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "32f0692da6367489eafc71602a1b075e177621e366101241206958a68318cf64",
+        "first_seen": "2021-11-17 19:04:45",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "3a311fa2632d70ba58f402a83270f3111ebd0074fe45ecfad273ebb8aecdd328",
+        "first_seen": "2021-08-29 07:11:11",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "4565983c56ad07456e1fedc689887813df0f0fbff3bb716e687347d53526d88b",
+        "first_seen": "2021-02-28 07:08:14",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "4f62613ea4bd6d30bc3a4ba8dd3e3b386419d1895253f880a7861fe43d90ebe7",
+        "first_seen": "2021-07-16 13:03:43",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "5925ecddcc4b4ea9017aad9abe70dfc47bb6aa63bd01a84536a8cd3cc039d781",
+        "first_seen": "2021-10-13 09:30:10",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "6006ab5e4fbab4d984c251d0b683040058df4ba02c51af93049617c17bb9586e",
+        "first_seen": "2021-12-20 17:43:57",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "69947cfea7518aab0920c81530b9e643d0fd0a14b0686a5d13dc1500366f071d",
+        "first_seen": "2021-05-04 15:30:01",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4",
+        "first_seen": "2021-08-23 11:39:17",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "7d35c3abef65ed1d81d2f70944db31ba2a8cc703f1ccf8b82ca7b3929b8233e1",
+        "first_seen": "2021-04-28 14:56:46",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "84d95cbc8969a22550309b3eb3633b78d48b29ca4d825314056f0e66823739cc",
+        "first_seen": "2021-12-03 02:59:13",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "8b2c21c13d38bbf20fd65e3a6b840315e14d60c0dc7e131104a5ea8b73699953",
+        "first_seen": "2021-02-15 08:01:25",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "95b999ce29d2e82dfe33e33261634d449466671debf78c2ebb4747e3434a1d9e",
+        "first_seen": "2021-09-29 07:09:28",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "9da7c4d51a2d18aa3e79bfe0c2fa6fb1a6e1754c73985bce90c4c5c1a90e41d3",
+        "first_seen": "2021-12-20 23:18:34",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "a7c4aae68e13b16ed7d916ba7cde189381e597934b05a26d113a97c8ae8afdbf",
+        "first_seen": "2021-09-23 07:11:55",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "af8fda4ee7c3a1a2fa35e6feb4416de3d9ff6b1869df2b1550557f96c49c45e5",
+        "first_seen": "2021-12-16 20:49:51",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "b86731e235e2e628d9ddfda63dfd59df5266b069531e81e8a67e56ee3798190f",
+        "first_seen": "2021-12-16 20:49:56",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "bfddf1832640408e64d941058b3030aafd9f945bb5c821641ca833fba4401590",
+        "first_seen": "2021-12-20 23:18:30",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8",
+        "first_seen": "2021-09-17 11:41:11",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "cf8500d31246c32f2437a84301d0c5de9bfcae445b60fc1bd87d62899f470cc7",
+        "first_seen": "2021-12-20 16:42:48",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "d634843da16ff74a676a748989cd01916cd86278dc96c0d45fa9872dd78ba251",
+        "first_seen": "2021-04-03 20:30:16",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "dea612148b5f17340638f8d3939c519013c5e28eb1aaacc2c026a1cbb885314b",
+        "first_seen": "2021-07-13 19:46:30",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "e6aeccd5f35f65a8043091481c0e3a4390520531a07e2c73a84f5ffd8f58c359",
+        "first_seen": "2021-11-22 20:57:49",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "efbdd00df327459c9db2ffc79b2408f7f3c60e8ba5f8c5ffd0debaff986863a8",
+        "first_seen": "2021-08-26 14:38:31",
+        "year": "2021",
+        "file_type": "dll",
+        "signature": "Hancitor"
+      },
+      {
+        "sha256": "f7333c98b0d4fac43070b0b17fb185a1934925d1be959cead7d44445abf84df7",
+        "first_seen": "2021-10-06 09:33:07",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      }
+    ],
+    "2022": [
+      {
+        "sha256": "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7",
+        "first_seen": "2022-07-25 12:01:48",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "0666d502503180e9534e95ede6d365c6cac1f53422cd2412677ab2a462e2fa3c",
+        "first_seen": "2022-11-03 22:03:41",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "0ed974de469222788be4db09ddf1720ea96a39e959df8eda85e6dcccb73e4a59",
+        "first_seen": "2022-02-03 16:21:03",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "17e503aef3804c0513838fb4ae3e00f323b1260bf753d99dbf0ae415ba54de11",
+        "first_seen": "2022-03-27 05:24:48",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "21ed24d2d6935439ae3e18b6778d8e1c6387cfbc162f0a047f4df9a00d87fbc9",
+        "first_seen": "2022-12-25 17:32:44",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47",
+        "first_seen": "2022-12-22 22:48:03",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969",
+        "first_seen": "2022-06-21 17:19:54",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "BumbleBee"
+      },
+      {
+        "sha256": "38dfeabf5526511effa346e9ced2145d4d2b1ffbc065146d3869e27fc235cd99",
+        "first_seen": "2022-05-03 00:17:34",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9",
+        "first_seen": "2022-10-29 13:45:36",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "45e972e4f9cd2cf0b0200741081df634ee3e29a5109d7632ff4739df0ed9ad25",
+        "first_seen": "2022-09-28 15:25:20",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "4e0f7777fd3ba58bb20f7ceaebaff50b6dcc3191cf27519d83b5ad3db30b8f5e",
+        "first_seen": "2022-09-28 10:14:07",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "5534f625a95609442b9ca37fe7373204a53f55db1543f2e9e140eeb3f4f96ccd",
+        "first_seen": "2022-05-04 16:51:59",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "BumbleBee"
+      },
+      {
+        "sha256": "5beefafe5567bd6707eed0bd46ed653a71816ffe4491e4c205dd899bbf002849",
+        "first_seen": "2022-07-24 06:34:25",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "65e45942fd86dca630ae7fea45d6d7aeb231a2ab29572b7649212d2822cfc43f",
+        "first_seen": "2022-09-28 13:10:23",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "6f2ec2f8dd5ec28adb7f652496ad75db346fa32372247ece6a69e15d30314b1b",
+        "first_seen": "2022-03-13 21:23:01",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130",
+        "first_seen": "2022-04-27 06:57:36",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "BumbleBee"
+      },
+      {
+        "sha256": "8104c9434708bb354ccf032cb8e5a589b296e10318d56d1fd4d0d149d8c78ed6",
+        "first_seen": "2022-11-10 13:35:23",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393",
+        "first_seen": "2022-10-16 06:29:13",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "948c821b3a3f5b1ee3a8c49a15c449224be9b0e3c13b5876b5ffc67470424267",
+        "first_seen": "2022-03-10 09:19:31",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "9c9a646099da045731162e08f6d04b1c386d81005580f27406fd2ae78ce237c1",
+        "first_seen": "2022-09-27 20:40:53",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64",
+        "first_seen": "2022-10-27 22:13:42",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe",
+        "first_seen": "2022-12-02 15:45:22",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c",
+        "first_seen": "2022-11-24 17:30:24",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "bf158ab1720e6a0da531b99de882c8c4c32eb5be8a0b1be6483156c561070641",
+        "first_seen": "2022-04-19 09:10:38",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "c999ea822a03c90b70c8f7d4fa58711725bd69f2b0252238404b6f11bda1bd21",
+        "first_seen": "2022-09-28 10:38:21",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "d41a45ea425c13b2e97bbcd8192d87f34c063de0a16616c024f58a9b05ba3411",
+        "first_seen": "2022-05-26 17:26:48",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "BumbleBee"
+      },
+      {
+        "sha256": "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc",
+        "first_seen": "2022-03-22 06:18:22",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "e6159ff62821d09c5b54837dc5a3f89a1f527fa969d5a6b1c10fb6a211aeeb0d",
+        "first_seen": "2022-12-26 19:30:23",
+        "year": "2022",
+        "file_type": "dll",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "ee0f0d5e812870bc71d54b378a8bc28598bddb1953c2b37021c202650858a636",
+        "first_seen": "2022-09-23 19:31:05",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "BumbleBee"
+      },
+      {
+        "sha256": "f63993a7e4dc3e4242509482ca4d9ee1cbd4c00d219503ecf5d139d763a42f35",
+        "first_seen": "2022-12-16 19:20:46",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "Sliver"
+      }
+    ],
+    "2023": [
+      {
+        "sha256": "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6",
+        "first_seen": "2023-05-29 10:02:12",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "08e362bf1810b2e4a97771b2890295d3c7dca17a112e0c82020e501d8fc6711d",
+        "first_seen": "2023-06-30 17:08:47",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00",
+        "first_seen": "2023-10-12 10:03:03",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "1a8921a7a0baedb853e8e618e81a372aafc403ac1961e3abe2740bf30c5e6aa2",
+        "first_seen": "2023-11-30 07:28:38",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "21c3b30041dc16f6fb0fe758c4cd1767e272133ff45dd21aee22506e6d9199aa",
+        "first_seen": "2023-08-12 17:15:59",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "2a07b1741dbf216a188938d0fec870f8395374f760c6bf452f0a0479e975b018",
+        "first_seen": "2023-01-11 08:55:13",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "31b7e9cf7298ce261b96222c4fae3ff09aee381883d0ecc095b8bca3fbe3e544",
+        "first_seen": "2023-01-24 00:43:55",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "3a613ceef615508f56436debf235f4f3fa4df4c3ab7f5a29eff0b78924593ebb",
+        "first_seen": "2023-06-30 17:03:00",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "43b1ea9d28fbd3c57dd563eb2097aa6555489795d3f060f2d03192b057878a39",
+        "first_seen": "2023-05-04 13:15:58",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "4b67e4cea7a978c9a6a73d6217d2d55ee7d6ce3c2b5e6e6a4f59b5e5deb5a4e2",
+        "first_seen": "2023-09-26 20:00:08",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "DarkGate"
+      },
+      {
+        "sha256": "55447bf55024b04dba81aea93e4980a015b16a0cbc80a14e46ae820146c65acb",
+        "first_seen": "2023-12-11 17:18:42",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "5dbda634d2ac2fa1c53a15b77ad8c0772d578e004fa98fea7668c6082f00b1a6",
+        "first_seen": "2023-10-17 10:21:59",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "66535813e58e078c4a56c502b6536725080aef5f17abf62f57348a574caccaf5",
+        "first_seen": "2023-09-07 18:34:03",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "BumbleBee"
+      },
+      {
+        "sha256": "6ee825dd6d1382f588985abaaf023a0204f005a8eb6a53952a88ee71ad6b7221",
+        "first_seen": "2023-07-12 13:36:18",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "77db3b54666b168d13a308be378cad1b8bb84db621f8055a03471a254d4c79ed",
+        "first_seen": "2023-06-27 16:38:53",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "7faba2fe65c014143a60ef7ef4ec1c24933bec883f3d959cea44e039e01036cc",
+        "first_seen": "2023-11-27 11:08:43",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "8a279783229e688a2324c224904473431cc5cab7e6b8538ac8256877cfd58384",
+        "first_seen": "2023-04-24 08:35:11",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "923bb69535e27f3493f6253abd93a1c0a9bd08bcf18dbc27d4d8d381a9220bed",
+        "first_seen": "2023-10-06 07:20:18",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "9b0dbc01aa6c7f30a59ec59a0f184dc6ee7c91baa5732192b5d191ff1687a58a",
+        "first_seen": "2023-02-05 18:47:52",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "a352b9eb373fe914888128f3e6e72cab5a5193cbe491af45304ed7985c9dff8f",
+        "first_seen": "2023-11-03 12:20:16",
+        "year": "2023",
+        "file_type": "dll",
+        "signature": "Pikabot"
+      },
+      {
+        "sha256": "aba7133b1ccdb78338fe271d73689bac4f40251b8fc194a9b86253a71e4017cc",
+        "first_seen": "2023-12-19 21:35:06",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "b34d5f723853264502eb255218c41fcd86396a3d15025484836182b0c97d5531",
+        "first_seen": "2023-08-30 04:11:33",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876",
+        "first_seen": "2023-02-01 16:03:06",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "c7b4796751027b3049df6c795519f861bc5ac50410324fdff9a315d498dddee9",
+        "first_seen": "2023-05-10 18:47:30",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "ceee57e508ebdb79ca13ec9f61253fc2a75505a0f79f49f85a3bad16d9fe2393",
+        "first_seen": "2023-12-11 20:18:55",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "d58a832f0f2ad0d394c07aefb0dd7ea8b925b10322e508496788a76ee864523a",
+        "first_seen": "2023-04-07 16:28:20",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "de3e53ef11c40625568ffbf773486d23efdbcc6831e1bca61915348940798ae9",
+        "first_seen": "2023-09-17 10:39:31",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "RaccoonStealer"
+      },
+      {
+        "sha256": "e7fbd0f33ca20caae55da9423c81241c9bced4018456d5fbd27cc9f93f912310",
+        "first_seen": "2023-05-07 23:45:30",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "ef32ef95268ba5534fdd8e75ef3c5663ffec9db01d9ea0f3a998a5869dc3106e",
+        "first_seen": "2023-02-14 18:28:17",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "f7e80f5e92bd4d9267be950088a9f5b1117a873868329bba0e927701f87c8fec",
+        "first_seen": "2023-07-18 18:41:31",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      }
+    ],
+    "2024": [
+      {
+        "sha256": "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c",
+        "first_seen": "2024-02-20 04:25:44",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Pikabot"
+      },
+      {
+        "sha256": "0809998772b4599b9dc190b7a69d282c8c938992f12ddc6d25a3c04559872580",
+        "first_seen": "2024-05-03 00:55:05",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "107300e84cf6a2b217ba019499dd33e965ec03ec70009a4361d1c067264d282f",
+        "first_seen": "2024-08-05 18:29:38",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "1940ba18ed66dd2f1c3d4dbd2fbf6cf3438bcdee1e108982fb557461106a8073",
+        "first_seen": "2024-12-26 11:02:03",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "2371d8edbb2a1245b01cc06a870ddca49acb3be47b25e0fddc5d1b0032780bdf",
+        "first_seen": "2024-10-07 21:10:17",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "2d55c9f0f1092f3346729154d75c53d75880f1bb3436590de70de522549fee9e",
+        "first_seen": "2024-12-02 20:40:31",
+        "year": "2024",
+        "file_type": "elf",
+        "signature": "Sliver"
+      },
+      {
+        "sha256": "36ca73fac0f3955bf525b4c7c72f1a5630be6f66f5726801ca3976829f8ce94b",
+        "first_seen": "2024-07-04 07:24:08",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "3efa9fdaaa74aaa54f0c90937d948bfc1159a3f920d94bd713bd5b2a69336d95",
+        "first_seen": "2024-12-16 21:59:55",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "4593213d8126635e53fd87ed0e553e2b412cb218fbf69be7a78a6bf0d05a0777",
+        "first_seen": "2024-11-20 11:08:16",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "4cf2b612939359977df51a32d2f63e2cb0c6c601e114b8e4812bd548d1db85fe",
+        "first_seen": "2024-04-26 21:13:10",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Latrodectus"
+      },
+      {
+        "sha256": "56deefa3e5f170c045ab28f8db2f5a0cac6038e6516662f3b277082320f441be",
+        "first_seen": "2024-10-23 10:35:33",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef",
+        "first_seen": "2024-05-03 21:09:50",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Latrodectus"
+      },
+      {
+        "sha256": "6a915f0e2eaa35eb47d70a933a4d8822d65e64ebea485d9dcb5657f1f4bd1cf8",
+        "first_seen": "2024-12-03 13:19:24",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Sliver"
+      },
+      {
+        "sha256": "720cb1059ddb3f22ab73de1b5730b3f491bdaa168c727f7cd85b76594b3003a1",
+        "first_seen": "2024-07-29 12:42:16",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "7b1c5147c903892f8888f91c98097c89e419ddcc89958a33e294e6dd192b6d4e",
+        "first_seen": "2024-02-13 22:05:54",
+        "year": "2024",
+        "file_type": "dll",
+        "signature": "Pikabot"
+      },
+      {
+        "sha256": "82c683a7f6e0b4a99a6d3ab519d539a3b0651953c7a71f5309b9d08e4daa7c3c",
+        "first_seen": "2024-12-18 10:27:30",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "8b6eb3aac560528cabc96363f81df8595b15db7a9ae20b1486b8fff6ebfbaa7a",
+        "first_seen": "2024-06-21 18:37:23",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "94d6af90cfb0d9ae767eb3f6a41f1ad583a3fb1e2108fdc6de7706a922855fe5",
+        "first_seen": "2024-08-06 04:46:49",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "9d415566304ae74289ed9cfacbbeddd15e56d61bc3bc8d955f9db99dd543adb5",
+        "first_seen": "2024-02-27 19:50:38",
+        "year": "2024",
+        "file_type": "dll",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "a3ae935dad0de2657b032a70d1908f622b3cf54fc53f01a69d5f086e21ad4d9a",
+        "first_seen": "2024-10-18 07:12:20",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Sliver"
+      },
+      {
+        "sha256": "a9b8879292fbf7bd63b7880cf9e1084040aa1c9adaf0b0f2d05e721696aae161",
+        "first_seen": "2024-12-12 01:55:13",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b",
+        "first_seen": "2024-08-30 10:14:40",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "bb8e116358583fd0a8b9658837d0c9bc9501e9860be9febb9a97d91f3ebc4c52",
+        "first_seen": "2024-12-23 06:54:24",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Sliver"
+      },
+      {
+        "sha256": "c2bee3616cf5c0f19ecc5738ee39a8c3d0d0523c2178177b86563d5a3d758d0f",
+        "first_seen": "2024-12-19 05:06:51",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "cb1eee26a7d2050feb980eccb69d35c05b5a0d28821972df19d974b386d9e4fe",
+        "first_seen": "2024-11-26 11:50:22",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "d1832886bd31bf7129fbd708123c19bbc633e4c12bde2affabbf69236f38afad",
+        "first_seen": "2024-06-04 11:21:57",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "d999e7ee9fb086bf4109f9c1821d959fd8b038902fa6f8dff2c3beafc36bee7b",
+        "first_seen": "2024-08-28 05:05:17",
+        "year": "2024",
+        "file_type": "dll",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "e4569a594f5901d0817956fdee290b38e488d6caaf47848648b10c07c12206cb",
+        "first_seen": "2024-12-26 12:03:42",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Sliver"
+      },
+      {
+        "sha256": "ed14a8886c207595360dbc904914f5113a656951d9aafc748d56d0e9b8f70742",
+        "first_seen": "2024-07-04 06:32:44",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "f6439b324a4baabf6a71339bae0d8f784e5ae660c106f3af6b8690d8310e2fd6",
+        "first_seen": "2024-08-18 08:28:23",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      }
+    ],
+    "2025": [
+      {
+        "sha256": "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e",
+        "first_seen": "2025-08-13 01:30:42",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "Gh0stRAT"
+      },
+      {
+        "sha256": "08edc97f63cc5d7ac7ce2fa46811098fd03404bca7a7030d7e17cfc00038052a",
+        "first_seen": "2025-12-01 07:47:41",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "121a8901094eb205730a3a7f3e176335bf000600c2af96e75c887d61b5e1fbe3",
+        "first_seen": "2025-10-07 17:45:06",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "1aab32f769ba3b4e2c651fb2f34acc5d5f251ff0b2972a5ea1fd8367b8274c06",
+        "first_seen": "2025-03-24 07:35:15",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "2395de00a23d65cb4eb0805b96fb8f326f5045413b0d19185727e302b0133bcf",
+        "first_seen": "2025-02-08 01:50:16",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "2d8a45f0de92aeb5fc5495c2df0072a00e4d2215b0b2c1ccfd1580d752e32f27",
+        "first_seen": "2025-03-24 17:50:12",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "35b2775aa41701dbe69c8f2e983bfeb81b296aa0bb585c0fda8a0011683bc693",
+        "first_seen": "2025-11-23 09:20:02",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "3f4f590c05779739682febe1a385ffad835f534808b5973aface4ee816e2aa9e",
+        "first_seen": "2025-04-15 10:02:36",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "4a0e6efe7da756a13dd1f1f7fe3a9a24f62e03ac4181e56a9b1e9e46045ff036",
+        "first_seen": "2025-12-23 15:05:06",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "5307df2391a231e16c5ef9ff68e136e40b28415e168230977ade7bba5bed1380",
+        "first_seen": "2025-02-24 10:07:52",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "5c1e7e7b83bc21cebd4ce833cac790ddc3c1f5d1c872fd009aed09b541764b91",
+        "first_seen": "2025-09-29 10:19:48",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "GuLoader"
+      },
+      {
+        "sha256": "6584f13ecd514b59ef380f0fa106ef5f6ef53e2bb39e0da02947e83de62f6444",
+        "first_seen": "2025-05-19 06:34:16",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "6eca9859b0f441c63c622a58b57be1598e9ede0b0970a6bad1d29c4039d6b677",
+        "first_seen": "2025-04-08 08:14:48",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "77fa111600d55f4f47e458ff3958e050ff1b9b1a4d42592d7e0dce1f5ed1ef8c",
+        "first_seen": "2025-09-01 09:04:27",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "LummaStealer"
+      },
+      {
+        "sha256": "8163f93e88a9ab0e3f8bd03a7923c56e8968f717397912ea114cc0e38af41353",
+        "first_seen": "2025-11-22 23:59:47",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      },
+      {
+        "sha256": "88d8aa69350b8516857c2fee3de800dc7e8afefd5660f27d3fadde51c349fdac",
+        "first_seen": "2025-07-26 15:26:58",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "Sliver"
+      },
+      {
+        "sha256": "90b52bcddab0daf79a483788dd0bc954a820ebc0882deb6fb11a69e36bf61614",
+        "first_seen": "2025-04-24 15:08:06",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "Dridex"
+      },
+      {
+        "sha256": "9929f1d675a2190594aef5ec37ab22af416879539d8ffb5c80194d2d3e8edcc3",
+        "first_seen": "2025-12-01 19:32:11",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "a1439e46019a544b1dd5712b8e2f72c5e35c278964a8f093e7d436f15b333d63",
+        "first_seen": "2025-11-23 00:03:21",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      },
+      {
+        "sha256": "a916da6ae395e55faf0a85ffea80cf0dd33c385c407c359c2f3f0751c31bfbcc",
+        "first_seen": "2025-08-22 15:12:06",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "LummaStealer"
+      },
+      {
+        "sha256": "b073bd6963c36cd4ea37acf1ccd75d418ac3e293a51e8accebc96a97215ddf81",
+        "first_seen": "2025-09-27 16:40:06",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "b946960a201ceb50e3b9b7585c7cc7c57adf228c0358772f3870d7ddd53d35bf",
+        "first_seen": "2025-03-22 13:22:08",
+        "year": "2025",
+        "file_type": "dll",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "c12a1b39a379333a188cae48cabda5eaecfed024220bf6495aca025498d6c0fd",
+        "first_seen": "2025-10-09 15:15:30",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "GuLoader"
+      },
+      {
+        "sha256": "c9da3969931b59d99a6b21cfabd2677c6c58b848d0a6b19b8c1a9112a2e61e21",
+        "first_seen": "2025-01-28 11:40:18",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "d1071e745fe33dbfeea1d838e797ceea8323cec3acaf40cc9b9aef6fbf27469e",
+        "first_seen": "2025-01-24 06:32:07",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "d90e0f94e8df83ea22b969f61790f92e5439d0ce4eac48950e7c47aac0ada1b3",
+        "first_seen": "2025-12-10 07:57:29",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "e0cd2f267e4bbb3507a100f2ea798b996f023a63f77734c5e0752f8dbc77a4aa",
+        "first_seen": "2025-08-21 16:17:40",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "LummaStealer"
+      },
+      {
+        "sha256": "e828e55c7c7fb2ebbfcc527acdf728dd8e9cd219a1a64956151b61ef5ddb2436",
+        "first_seen": "2025-11-23 00:09:37",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      },
+      {
+        "sha256": "f04927e0d8d174af5f212590ae48fb8359a6e6508346007f7637e6dff3a72059",
+        "first_seen": "2025-06-16 06:46:52",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "f805a1b598457129a8083bba30462360f4361c566d3ba6147d87e06e6fd2fa05",
+        "first_seen": "2025-11-23 00:11:02",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      }
+    ],
+    "2026": [
+      {
+        "sha256": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa",
+        "first_seen": "2026-04-01 10:53:51",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "07f553c7e997169afc8a192d0484441cea752f8154ec0e54dc756946aeed6049",
+        "first_seen": "2026-01-25 07:57:52",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "123b6141959b472dbbf2f0e8fd0d1316d35866efe23ce8a354e3b0dacafa8fde",
+        "first_seen": "2026-05-06 10:44:58",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "CobaltStrike"
+      },
+      {
+        "sha256": "1ab39bc014f6b6124fbd72d6f6390af9dbb0b67b50112e911c508b81318a3c8d",
+        "first_seen": "2026-03-06 12:18:08",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "LummaStealer"
+      },
+      {
+        "sha256": "21b19d07a414ad1ff7443c21c6530d1164c6c1eae56d3619a422d3f311b580b7",
+        "first_seen": "2026-02-27 17:57:41",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "LummaStealer"
+      },
+      {
+        "sha256": "2a6c6d3bd8f0d37255de8ddd78ce0c686b45488ca274f1c7b1588512c0327742",
+        "first_seen": "2026-01-04 19:45:39",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "32cc6624192e6882d959793c887ef9e116aedc68ceef1ec8d4dbf11609d00d02",
+        "first_seen": "2026-02-12 15:55:04",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "3a544ee360c3c495535e7ad51c96a7a07adbc4e60cdfc6d1f45cad2087b1ffc7",
+        "first_seen": "2026-04-16 11:26:10",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "433aa1a20e6ecbe0a72255ec7528f2a4cd7ce42ae5973e1f1b69ec26f9d767ab",
+        "first_seen": "2026-01-15 08:58:13",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "4b66489da4e9b7073a0432c07b55205453f3f65c427f871c7114ff2ad1dd3713",
+        "first_seen": "2026-03-23 04:57:13",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      },
+      {
+        "sha256": "53aefcb31cf737d2af9779bea562b358bb08c876bb68fbe5614c1084decb6728",
+        "first_seen": "2026-02-05 16:18:59",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      },
+      {
+        "sha256": "5bfd0fcebd3e1ec9dcd472c4597165c6787c56ecc77eaa4855c5e918e6812cd3",
+        "first_seen": "2026-06-02 06:24:32",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "RemcosRAT"
+      },
+      {
+        "sha256": "640d4390b574d98cd36bd206a65fceec9c322b4008a915519f55a8d39265c78c",
+        "first_seen": "2026-05-20 17:45:13",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "GuLoader"
+      },
+      {
+        "sha256": "6da676db8e7ca7727cc19b92aa9e4beebbc82e41bb0ebf04e022edbaf090e333",
+        "first_seen": "2026-03-06 15:33:33",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "RemcosRAT"
+      },
+      {
+        "sha256": "77940063fcd0f276c574ea55967eb0834939e8d201922be88ffc53309351a3d1",
+        "first_seen": "2026-02-13 14:16:55",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "RemcosRAT"
+      },
+      {
+        "sha256": "7f45cfd690f1e5b13399e616b33d3f1a22b06d8dce32904d4a1513c20cb742d8",
+        "first_seen": "2026-05-04 14:50:09",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "87e4d0e94f94dd01a4c6e30f6ee7b612bc6dad0581075bf43fef6f24053e6676",
+        "first_seen": "2026-03-23 15:22:27",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "8f6502f9cc4e6916a6481bf77b2e52473143f39a6fb258186edbb146e577fa65",
+        "first_seen": "2026-05-10 18:12:56",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "9860b2cdf23fc044bf7c6715197068b3cf6349f7ffb5e95dfd0229f212c40e63",
+        "first_seen": "2026-05-22 03:58:30",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "a06d2f622eb4e0403f8a8198898d2ae1d26b5f897cedadcb68cc95b888dc7525",
+        "first_seen": "2026-03-27 08:04:23",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "GuLoader"
+      },
+      {
+        "sha256": "a81d45cc8ed0559b688616b6d2c670d64bb6a5291a1841843f8421b4ddb993e9",
+        "first_seen": "2026-05-08 13:11:18",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "RemcosRAT"
+      },
+      {
+        "sha256": "b1969c15d0e57234d397e64698a4b66f33d52e902a3aaf440b4f6a809a4b6524",
+        "first_seen": "2026-05-20 18:06:53",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AgentTesla"
+      },
+      {
+        "sha256": "b9b052dfb2f19bf15aaba81f07861234f91a72a5c38d83c176a7a4dcdbb2e8c1",
+        "first_seen": "2026-05-26 05:06:38",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "c3c465c8670333252fe74404324a72ddf5f151b13c1fcb219beb4e88da4926b2",
+        "first_seen": "2026-02-04 10:27:01",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "cc6f82015fc2e26a65da84db2dc0e41cc63f5ca735150a5ad55b9f474f0673f3",
+        "first_seen": "2026-05-09 16:10:05",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "d417e00241c31f0aa1892528fc941d9e1b817e855f11006ff7cd9619f3e34243",
+        "first_seen": "2026-02-05 16:19:22",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "RemcosRAT"
+      },
+      {
+        "sha256": "dd426a8f168871393bec760724228c0584e80519c5069b4969a663846afdb88e",
+        "first_seen": "2026-04-16 14:06:15",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "Havoc"
+      },
+      {
+        "sha256": "e72be8b18b92fa5444ba5e3bf8f5b84a2a5386692f9a6e06d490b43d84f0024c",
+        "first_seen": "2026-01-18 18:28:17",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "LummaStealer"
+      },
+      {
+        "sha256": "eec9f3f49fe6d50c633c2cec1d18f4cb3d31d71e7c851fd52d83843c6e2bcd0f",
+        "first_seen": "2026-04-21 15:03:01",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "RedLineStealer"
+      },
+      {
+        "sha256": "f78238db552a2bcab1a68fcf3df9fbae50bba3c44d3bda6b7dddcfc007eee046",
+        "first_seen": "2026-01-06 13:41:19",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "QuasarRAT"
+      }
+    ]
+  }
+}

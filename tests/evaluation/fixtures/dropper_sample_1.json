@@ -1,0 +1,25 @@
+{
+  "sample_id": "dropper_sample_1",
+  "notes": "Emotet dropper — stage fetch via URLDownloadToFile, certutil decode, reflective DLL injection",
+  "technique_ids": [
+    "T1105",
+    "T1140",
+    "T1055",
+    "T1059",
+    "T1547"
+  ],
+  "attck_valid_ids": [
+    "T1105", "T1140", "T1055", "T1059", "T1547",
+    "T1486", "T1490", "T1095", "T1071", "T1003",
+    "T1082", "T1083", "T1021", "T1560", "T1489"
+  ],
+  "expected_stix_types": [
+    "malware",
+    "attack-pattern",
+    "relationship"
+  ],
+  "expected_rel_types": [
+    "uses",
+    "drops"
+  ]
+}

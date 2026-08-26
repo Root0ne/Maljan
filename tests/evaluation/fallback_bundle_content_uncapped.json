@@ -1,0 +1,53 @@
+{
+ "schema": "fallback-bundle-content/v1",
+ "n_calls": 4,
+ "identical_sets": 4,
+ "techniques_only_on_fallback_path": 0,
+ "techniques_only_on_reconciled_path": 0,
+ "per_call": [
+  {
+   "sample_id": "jhuhugit",
+   "reason": "verdict_timed_out",
+   "fallback_n": 20,
+   "cascade_n": 20,
+   "shared": 20,
+   "only_in_fallback": [],
+   "only_in_cascade": [],
+   "jaccard": 1.0,
+   "identical": true
+  },
+  {
+   "sample_id": "sardonic",
+   "reason": "verdict_timed_out",
+   "fallback_n": 25,
+   "cascade_n": 25,
+   "shared": 25,
+   "only_in_fallback": [],
+   "only_in_cascade": [],
+   "jaccard": 1.0,
+   "identical": true
+  },
+  {
+   "sample_id": "sliver",
+   "reason": "verdict_timed_out",
+   "fallback_n": 23,
+   "cascade_n": 23,
+   "shared": 23,
+   "only_in_fallback": [],
+   "only_in_cascade": [],
+   "jaccard": 1.0,
+   "identical": true
+  },
+  {
+   "sample_id": "wannacry",
+   "reason": "verdict_timed_out",
+   "fallback_n": 16,
+   "cascade_n": 16,
+   "shared": 16,
+   "only_in_fallback": [],
+   "only_in_cascade": [],
+   "jaccard": 1.0,
+   "identical": true
+  }
+ ]
+}

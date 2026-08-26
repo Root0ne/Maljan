@@ -1,0 +1,90 @@
+{
+ "schema": "weight-sensitivity-six/v1",
+ "n_samples": 97,
+ "reports_available": 97,
+ "samples_with_dynamic_source": 94,
+ "source_hits": {
+  "yara_layer": 88,
+  "import_capability": 54,
+  "sigma_layer": 94,
+  "tool_artifact": 1
+ },
+ "domain_buckets": {
+  "1": 796,
+  "2": 89,
+  "3+": 0
+ },
+ "single_domain_share": 0.8994,
+ "perturbations": {
+  "flat_0.5_all_layers": {
+   "weights": {
+    "yara": 0.5,
+    "sigma": 0.5,
+    "dynamic": 0.5,
+    "static": 0.5,
+    "network": 0.5
+   },
+   "samples_with_changed_top_n": 27,
+   "samples_with_changed_corroborated_set": 0,
+   "fraction_top_n_changed": 0.2784,
+   "fraction_corroborated_changed": 0.0,
+   "net_corroborated_delta": 0
+  },
+  "inverted_yara_network": {
+   "weights": {
+    "yara": 0.2,
+    "sigma": 0.55,
+    "dynamic": 0.45,
+    "static": 0.35,
+    "network": 0.9
+   },
+   "samples_with_changed_top_n": 28,
+   "samples_with_changed_corroborated_set": 0,
+   "fraction_top_n_changed": 0.2887,
+   "fraction_corroborated_changed": 0.0,
+   "net_corroborated_delta": 0
+  },
+  "compressed_toward_0.5_x0.25": {
+   "weights": {
+    "yara": 0.6,
+    "sigma": 0.5125,
+    "dynamic": 0.4875,
+    "static": 0.4625,
+    "network": 0.425
+   },
+   "samples_with_changed_top_n": 24,
+   "samples_with_changed_corroborated_set": 0,
+   "fraction_top_n_changed": 0.2474,
+   "fraction_corroborated_changed": 0.0,
+   "net_corroborated_delta": 0
+  },
+  "stretched_from_0.5_x1.75": {
+   "weights": {
+    "yara": 1.0,
+    "sigma": 0.5875000000000001,
+    "dynamic": 0.41250000000000003,
+    "static": 0.23749999999999993,
+    "network": 0.01
+   },
+   "samples_with_changed_top_n": 12,
+   "samples_with_changed_corroborated_set": 0,
+   "fraction_top_n_changed": 0.1237,
+   "fraction_corroborated_changed": 0.0,
+   "net_corroborated_delta": 0
+  },
+  "yara_demoted_0.90_to_0.45": {
+   "weights": {
+    "yara": 0.45,
+    "sigma": 0.55,
+    "dynamic": 0.45,
+    "static": 0.35,
+    "network": 0.2
+   },
+   "samples_with_changed_top_n": 24,
+   "samples_with_changed_corroborated_set": 0,
+   "fraction_top_n_changed": 0.2474,
+   "fraction_corroborated_changed": 0.0,
+   "net_corroborated_delta": 0
+  }
+ }
+}

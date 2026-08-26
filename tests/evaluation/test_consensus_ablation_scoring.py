@@ -1,0 +1,349 @@
+"""The arithmetic and the evidence construction behind E.2, tested without an LLM.
+
+E.2 decides the paper's framing, so the parts that can be wrong silently get
+tested first. Three of these tests exist because the corresponding mistake would
+produce a *publishable-looking* result that is meaningless:
+
+* **the leak check** — if a ground-truth technique id reaches the evidence, every
+  arm copies it and scores perfectly. The harness aborts on a leak; this pins
+  that the detector actually detects.
+* **empty prediction scores 0 precision** — the degenerate strategy in any
+  equal-budget comparison is to say nothing. If saying nothing scored precision
+  1.0, the arm that gives up would win the column.
+* **the mediator is paid out of the budget** — if K analysts split B and the
+  mediator gets a free extra call, `negotiated` quietly spends more than
+  `single` and the equal-budget control the literature demands is broken.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tests.evaluation.eval_consensus_ablation import (
+    CHANNELS,
+    bind_eval_llm,
+    build_channels,
+    cluster_ci,
+    extract_tids,
+    invalid_id_rate,
+    leaked_ids,
+    load_samples,
+    mean,
+    paired_delta,
+    per_call_budget,
+    prf,
+    render_all_channels,
+    swap_one_channel,
+)
+
+
+class TestEvidenceCarriesNoAnswers:
+    def test_no_fixture_leaks_a_technique_id_into_its_evidence(self) -> None:
+        """The whole experiment is void if this ever fails."""
+        for sid, tids in load_samples():
+            channels = build_channels(tids)
+            assert leaked_ids(channels) == [], f"{sid} leaks ids into evidence"
+
+    def test_the_leak_detector_is_not_vacuous(self) -> None:
+        """A detector that never fires would pass the test above forever."""
+        assert leaked_ids({"static": "clearly T1055 here"}) == ["T1055"]
+        assert leaked_ids({"a": "T1027 and T1055.001"}) == ["T1027", "T1055.001"]
+
+    def test_every_fixture_technique_has_an_artifact(self) -> None:
+        """A technique with no artifact is unreachable evidence — the arms would
+        be scored against something the input cannot support."""
+        for sid, tids in load_samples():
+            channels = build_channels(tids)
+            artifact_lines = sum(len(v.splitlines()) for v in channels.values())
+            assert artifact_lines == len(tids), f"{sid}: {artifact_lines} artifacts for {len(tids)}"
+
+
+class TestChannelsAreHeterogeneousAndBalanced:
+    def test_every_fixture_populates_all_three_channels(self) -> None:
+        """An empty channel hands `single` a free advantage: `negotiated` still
+        pays B/(K+1) for an analyst with nothing to say."""
+        for sid, tids in load_samples():
+            channels = build_channels(tids)
+            assert set(channels) == set(CHANNELS), f"{sid} channels: {sorted(channels)}"
+
+    def test_an_unknown_technique_is_skipped_not_crashed(self) -> None:
+        channels = build_channels(["T9999", "T1055"])
+        assert "T9999" not in render_all_channels(channels)
+        assert channels["dynamic"]
+
+    def test_render_preserves_channel_order_and_labels(self) -> None:
+        rendered = render_all_channels(build_channels(["T1547", "T1055", "T1071"]))
+        assert rendered.index("[static evidence]") < rendered.index("[dynamic evidence]")
+        assert rendered.index("[dynamic evidence]") < rendered.index("[network evidence]")
+
+    def test_single_arm_sees_exactly_what_the_analysts_see(self) -> None:
+        """Otherwise the comparison is confounded by input, not topology."""
+        channels = build_channels(["T1547", "T1055", "T1071"])
+        rendered = render_all_channels(channels)
+        for text in channels.values():
+            for line in text.splitlines():
+                assert line in rendered
+
+
+class TestNoiseControl:
+    def test_the_victim_channel_is_replaced_by_the_donor(self) -> None:
+        victim_sample = build_channels(["T1547", "T1055", "T1071"])
+        donor = build_channels(["T1140", "T1486", "T1095"])
+        out = swap_one_channel(victim_sample, donor, "static")
+        assert out["static"] == donor["static"]
+        assert out["dynamic"] == victim_sample["dynamic"]
+
+    def test_the_other_channels_are_untouched(self) -> None:
+        a = build_channels(["T1547", "T1055", "T1071"])
+        b = build_channels(["T1140", "T1486", "T1095"])
+        out = swap_one_channel(a, b, "static")
+        assert out["network"] == a["network"]
+
+    def test_a_donor_without_the_channel_leaves_the_arm_at_full_strength(self) -> None:
+        """Falling back to the original keeps the analyst count constant; silently
+        dropping a channel would make `noise` a two-analyst run and confound it
+        with the very topology under test."""
+        a = build_channels(["T1547", "T1055", "T1071"])
+        out = swap_one_channel(a, {"dynamic": "x"}, "static")
+        assert out["static"] == a["static"]
+        assert set(out) == set(a)
+
+    def test_the_swap_does_not_mutate_the_original(self) -> None:
+        a = build_channels(["T1547", "T1055", "T1071"])
+        before = dict(a)
+        swap_one_channel(a, build_channels(["T1140"]), "static")
+        assert a == before
+
+
+class TestEqualBudget:
+    def test_the_mediator_is_paid_for_out_of_the_same_budget(self) -> None:
+        """Three analysts plus one mediator is four calls, not three."""
+        assert per_call_budget(2400, 4) == 600
+        assert per_call_budget(2400, 4) * 4 <= 2400
+
+    def test_the_single_arm_gets_the_whole_budget_in_one_call(self) -> None:
+        assert per_call_budget(2400, 1) == 2400
+
+    def test_a_split_never_rounds_down_to_zero(self) -> None:
+        """A zero cap would silently produce an empty arm that then 'loses'."""
+        assert per_call_budget(3, 10) == 1
+
+    def test_zero_calls_does_not_divide_by_zero(self) -> None:
+        assert per_call_budget(2400, 0) == 2400
+
+
+class _FakeLLM:
+    """Records what was bound, and screams if someone assigns request_timeout."""
+
+    def __init__(self) -> None:
+        self.bound: dict[str, object] = {}
+        self.assigned_request_timeout: object = None
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == "request_timeout":
+            object.__setattr__(self, "assigned_request_timeout", value)
+        object.__setattr__(self, name, value)
+
+    def bind(self, **kwargs: object) -> _FakeLLM:
+        out = _FakeLLM()
+        out.bound = {**self.bound, **kwargs}
+        # LangChain's ``bind`` returns a RunnableBinding, which exposes the bound
+        # kwargs as ``.kwargs``. The fake exposed only ``.bound``, so a second
+        # ``bind_eval_llm`` on the result could not see what the first had set —
+        # and the idempotence test failed against a faithful implementation.
+        out.kwargs = out.bound
+        return out
+
+
+class _FakeAgent:
+    def __init__(self) -> None:
+        self.llm = _FakeLLM()
+
+
+class TestTheEvalTimeoutActuallyBinds:
+    """The regression test for a cap that silently did nothing.
+
+    On 2026-08-09 a B1 batch sat 14+ minutes on one call under a harness that
+    set ``agent.llm.request_timeout = 180``. ChatOpenAI builds its HTTP client
+    at construction from that field — 1800 s here — and assigning it afterwards
+    never rebuilds the client, so the cap was inert and no call was ever
+    skipped. A limit that silently does nothing looks exactly like a limit that
+    was never needed, which is why this needs a test rather than care.
+    """
+
+    def test_the_timeout_is_bound_as_a_request_kwarg(self) -> None:
+        agent = _FakeAgent()
+        bind_eval_llm(agent, timeout_s=120)
+        assert agent.llm.bound.get("timeout") == 120
+
+    def test_it_does_not_assign_request_timeout(self) -> None:
+        """That is the exact mechanism that failed; assigning it again would
+        reintroduce the bug while still looking like a fix."""
+        agent = _FakeAgent()
+        bind_eval_llm(agent, timeout_s=120)
+        assert agent.llm.assigned_request_timeout is None
+
+    def test_thinking_is_disabled_in_the_same_bind(self) -> None:
+        """Both settings must survive one bind — a second bind on the result
+        would be easy to write and easy to get wrong."""
+        agent = _FakeAgent()
+        bind_eval_llm(agent)
+        extra = agent.llm.bound.get("extra_body")
+        assert isinstance(extra, dict)
+        assert extra["chat_template_kwargs"]["enable_thinking"] is False
+
+    def test_the_providers_extra_body_survives_the_bind(self) -> None:
+        """The 2026-08-15 regression: ``bind(extra_body=...)`` *replaces*.
+
+        The provider puts the local server's output cap in ``extra_body``
+        (OUTPUT-CAP-01) and its repetition penalty beside it. Passing a fresh
+        dict here dropped both, so every harness calling this function ran a
+        differently-configured model than production — with the judge's
+        8,192-token ceiling removed, which is how one C3 call reached 30,155
+        generated tokens on a run whose purpose was to measure the capped
+        condition.
+        """
+        agent = _FakeAgent()
+        agent.llm.extra_body = {  # type: ignore[attr-defined]
+            "max_tokens": 8192,
+            "n_predict": 8192,
+            "repeat_penalty": 1.05,
+        }
+        bind_eval_llm(agent, timeout_s=120)
+        extra = agent.llm.bound.get("extra_body")
+        assert isinstance(extra, dict)
+        assert extra["max_tokens"] == 8192
+        assert extra["n_predict"] == 8192
+        assert extra["repeat_penalty"] == 1.05
+        assert extra["chat_template_kwargs"]["enable_thinking"] is False
+
+    def test_an_existing_chat_template_kwargs_is_extended_not_dropped(self) -> None:
+        """The provider sets ``enable_thinking`` too; merging must not lose a
+        sibling key it happens to carry."""
+        agent = _FakeAgent()
+        agent.llm.extra_body = {  # type: ignore[attr-defined]
+            "chat_template_kwargs": {"enable_thinking": True, "some_other_flag": 1}
+        }
+        bind_eval_llm(agent)
+        ctk = agent.llm.bound["extra_body"]["chat_template_kwargs"]  # type: ignore[index]
+        assert ctk["enable_thinking"] is False  # the harness wins on this one
+        assert ctk["some_other_flag"] == 1
+
+    def test_binding_twice_is_idempotent(self) -> None:
+        """Harnesses that wrap an already-bound model must not lose the cap."""
+        agent = _FakeAgent()
+        agent.llm.extra_body = {"max_tokens": 8192}  # type: ignore[attr-defined]
+        bind_eval_llm(agent, timeout_s=300)
+        bind_eval_llm(agent, timeout_s=120)
+        extra = agent.llm.bound["extra_body"]  # type: ignore[index]
+        assert extra["max_tokens"] == 8192
+        assert agent.llm.bound["timeout"] == 120
+
+    def test_a_provider_that_set_nothing_still_gets_the_thinking_flag(self) -> None:
+        agent = _FakeAgent()
+        bind_eval_llm(agent)
+        extra = agent.llm.bound["extra_body"]  # type: ignore[index]
+        assert extra == {"chat_template_kwargs": {"enable_thinking": False}}
+
+    def test_a_provider_that_rejects_the_kwargs_does_not_kill_the_run(self) -> None:
+        class Hostile:
+            def bind(self, **_: object) -> object:
+                raise TypeError("unexpected keyword argument")
+
+        agent = _FakeAgent()
+        agent.llm = Hostile()  # type: ignore[assignment]
+        bind_eval_llm(agent)  # must warn, not raise
+
+
+class TestExtractTids:
+    def test_ids_are_deduplicated_and_order_preserved(self) -> None:
+        assert extract_tids("T1055 then T1071 then T1055 again") == ["T1055", "T1071"]
+
+    def test_sub_techniques_are_captured_whole(self) -> None:
+        assert extract_tids("uses T1055.001 injection") == ["T1055.001"]
+
+    def test_lowercase_is_not_matched_but_uppercase_is_normalised(self) -> None:
+        assert extract_tids("T1055") == ["T1055"]
+
+    def test_empty_and_none_are_safe(self) -> None:
+        assert extract_tids("") == []
+        assert extract_tids("no techniques here") == []
+
+
+class TestPrecisionRecallF1:
+    def test_a_perfect_prediction(self) -> None:
+        p, r, f1 = prf(["T1055", "T1071"], ["T1055", "T1071"])
+        assert (p, r, f1) == (1.0, 1.0, 1.0)
+
+    def test_saying_nothing_scores_zero_precision_not_one(self) -> None:
+        """The degenerate equal-budget strategy must not win a column."""
+        assert prf([], ["T1055"]) == (0.0, 0.0, 0.0)
+
+    def test_partial_overlap(self) -> None:
+        p, r, f1 = prf(["T1055", "T9999"], ["T1055", "T1071"])
+        assert p == pytest.approx(0.5)
+        assert r == pytest.approx(0.5)
+        assert f1 == pytest.approx(0.5)
+
+    def test_duplicates_in_the_prediction_do_not_inflate_precision(self) -> None:
+        p, _, _ = prf(["T1055", "T1055", "T1055"], ["T1055", "T1071"])
+        assert p == pytest.approx(1.0)
+
+    def test_case_is_normalised_on_both_sides(self) -> None:
+        assert prf(["t1055"], ["T1055"])[2] == pytest.approx(1.0)
+
+    def test_an_empty_ground_truth_scores_zero_rather_than_dividing_by_zero(self) -> None:
+        assert prf(["T1055"], []) == (0.0, 0.0, 0.0)
+
+
+class TestInvalidIdRate:
+    def test_nothing_cited_is_zero_not_undefined(self) -> None:
+        assert invalid_id_rate([], lambda _t: True) == 0.0
+
+    def test_all_invalid(self) -> None:
+        assert invalid_id_rate(["T9999"], lambda _t: False) == 1.0
+
+    def test_mixed(self) -> None:
+        assert invalid_id_rate(["T1055", "T9999"], lambda t: t == "T1055") == pytest.approx(0.5)
+
+
+class TestStatistics:
+    def test_mean_of_empty_is_zero(self) -> None:
+        assert mean([]) == 0.0
+
+    def test_a_bootstrap_ci_brackets_the_mean(self) -> None:
+        values = [0.1, 0.2, 0.3, 0.4, 0.5]
+        lo, hi = cluster_ci(values, list(range(len(values))), iters=500)
+        assert lo <= mean(values) <= hi
+
+    def test_a_bootstrap_ci_is_deterministic(self) -> None:
+        """Reported intervals must not move between runs of the same data."""
+        values = [0.1, 0.9, 0.2, 0.8, 0.35]
+        keys = list(range(len(values)))
+        assert cluster_ci(values, keys, iters=500) == cluster_ci(values, keys, iters=500)
+
+    def test_a_constant_sample_gives_a_degenerate_interval(self) -> None:
+        lo, hi = cluster_ci([0.5] * 8, list(range(8)), iters=500)
+        assert lo == pytest.approx(0.5)
+        assert hi == pytest.approx(0.5)
+
+    def test_a_power_of_two_sample_size_does_not_collapse_the_interval(self) -> None:
+        """The LCG low-bit trap, kept after the estimator was replaced.
+
+        The original defect drew indices from the low bits of a linear
+        congruential generator, which degenerate when n shares factors with
+        2**31, silently producing a zero-width CI. The shared estimator uses
+        ``random.Random`` and cannot reproduce it — the test stays because it
+        describes a property the replacement must also have."""
+        lo, hi = cluster_ci([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0], list(range(8)), iters=1000)
+        assert hi > lo
+
+    def test_fewer_than_two_values_reports_no_interval(self) -> None:
+        assert cluster_ci([0.4], [0]) == (0.0, 0.0)
+
+    def test_paired_delta_is_elementwise(self) -> None:
+        assert paired_delta([0.5, 0.2], [0.3, 0.4]) == pytest.approx([0.2, -0.2])
+
+    def test_paired_delta_stops_at_the_shorter_arm(self) -> None:
+        """A skipped generation in one arm must not silently misalign the pairs."""
+        assert paired_delta([0.5, 0.2, 0.9], [0.3]) == pytest.approx([0.2])

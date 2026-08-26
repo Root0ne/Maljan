@@ -1,0 +1,66 @@
+[project]
+name = "maljan-api"
+version = "0.1.0"
+description = "Maljan Web API — FastAPI backend for malware analysis platform"
+requires-python = ">=3.13"
+dependencies = [
+    # Web framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    # Database
+    "sqlalchemy[asyncio]>=2.0.40",
+    "asyncpg>=0.30.0",
+    "alembic>=1.15.0",
+    # Auth
+    "python-jose[cryptography]>=3.4.0",
+    "argon2-cffi>=25.1.0",
+    # Redis / Task queue
+    "redis>=5.2.0",
+    "arq>=0.26.0",
+    # Object storage
+    "minio>=7.2.0",
+    # Utils
+    "python-multipart>=0.0.20",
+    "email-validator>=2.3.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
+    "python-dotenv>=1.2.2",
+    "maljan[yara]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.1",
+    "ruff>=0.15.9",
+]
+
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["app"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dependency injection and query params are standard patterns
+"app/api/v1/*.py" = ["B008"]
+"app/deps.py" = ["B008"]
+# Alembic migrations are auto-generated; formatting is secondary
+"alembic/**/*.py" = ["E501", "I001"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.uv.sources]
+maljan = { path = "../../", editable = true }

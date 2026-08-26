@@ -1,0 +1,123 @@
+"""OpenAI LLM provider."""
+
+from typing import Any
+
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from maljan.core.config import Settings
+from maljan.core.exceptions import LLMError
+from maljan.llm.registry import register_provider
+
+
+@register_provider("openai")
+class OpenAIProvider:
+    """Builds LangChain ChatOpenAI instances."""
+
+    name = "openai"
+
+    def __init__(self, config: Settings) -> None:
+        self._config = config
+
+    def build_model(
+        self,
+        model: str,
+        temperature: float,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        from langchain_openai import ChatOpenAI
+
+        secret = self._config.llm.openai.api_key
+        if not secret:
+            raise LLMError("OPENAI_API_KEY is not set but provider is 'openai'.")
+
+        from pydantic import SecretStr
+
+        api_key = secret if isinstance(secret, SecretStr) else SecretStr(str(secret))
+        build_kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,
+            "temperature": temperature,
+            **kwargs,
+        }
+        base_url = self._config.llm.openai.base_url
+        if base_url:
+            build_kwargs["base_url"] = base_url
+
+        # Degenerate-loop guard (2026-06-01): forward a repetition penalty to
+        # local OpenAI-compatible servers (llama.cpp / ik_llama.cpp) via
+        # extra_body. The small reasoning model otherwise loops catastrophically
+        # while trying to recall an ATT&CK technique ID, burning the whole decode
+        # budget. Only when base_url is set (vanilla OpenAI would reject the param)
+        # and the value is a real penalty. llama.cpp forks disagree on the key
+        # name; send both — unknown sampler keys are ignored, not rejected.
+        # Empirically (2026-06-01, live ik_llama probe): ``repeat_penalty`` is the
+        # honored key (changes greedy output); ``repetition_penalty`` is silently
+        # ignored. The penalty damps catastrophic single-token loops but does NOT
+        # by itself make the small model converge on an ATT&CK ID — that is what
+        # the deterministic TF-IDF re-grounding (correct_isr_reports) handles.
+        rp = self._config.llm.openai.repetition_penalty
+        if base_url and rp and rp != 1.0:
+            extra = dict(build_kwargs.get("extra_body") or {})
+            extra.setdefault("repeat_penalty", rp)
+            extra.setdefault("repetition_penalty", rp)
+            build_kwargs["extra_body"] = extra
+
+        # OUTPUT-CAP-01 (2026-08-15): re-send the output cap under the key a
+        # llama.cpp-derived server actually reads.
+        #
+        # ``ChatOpenAI(max_tokens=N)`` does not put ``max_tokens`` on the wire.
+        # ``langchain-openai`` renames it to OpenAI's newer
+        # ``max_completion_tokens``, and ik_llama.cpp's OpenAI-compatible
+        # endpoint does not know that key — so it ignores the field and decodes
+        # without a ceiling. Measured, not inferred: on 2026-08-15 a judge call
+        # built with ``judge_max_tokens=8192`` generated **30,155 tokens** past a
+        # 1,403-token prompt before the client's 600 s wrapper gave up, and it
+        # was still going. Four of eight fixtures in the C3 study never returned
+        # a verdict for this reason.
+        #
+        # The comment in ``ServiceContainer.get_judge_llm`` says the cap exists
+        # "so a degenerate decode can't consume the full wall-clock timeout".
+        # That was true of the intent and false of the request. This restores it.
+        #
+        # Sent through ``extra_body`` for the same reason the repetition penalty
+        # is: it is the only channel that reaches the server verbatim, forks
+        # disagree on the spelling, and unknown sampler keys are ignored rather
+        # than rejected. Local servers only — vanilla OpenAI would reject both.
+        cap = build_kwargs.get("max_tokens")
+        if base_url and isinstance(cap, int) and cap > 0:
+            extra = dict(build_kwargs.get("extra_body") or {})
+            extra.setdefault("max_tokens", cap)
+            extra.setdefault("n_predict", cap)
+            build_kwargs["extra_body"] = extra
+
+        # Disable the local reasoning model's chain-of-thought when configured
+        # (Qwen3 ``enable_thinking``). On a constrained host the model otherwise
+        # spends its whole decode budget inside ``<think>`` — empty answers +
+        # timeouts. Only for local OpenAI-compatible servers (base_url set);
+        # vanilla OpenAI would reject the unknown chat_template_kwargs param.
+        if base_url and self._config.llm.openai.disable_thinking:
+            extra = dict(build_kwargs.get("extra_body") or {})
+            ctk = dict(extra.get("chat_template_kwargs") or {})
+            ctk.setdefault("enable_thinking", False)
+            extra["chat_template_kwargs"] = ctk
+            build_kwargs["extra_body"] = extra
+
+        # Wave 5 HANG-01 + Wave 7 THROUGHPUT-01 (2026-05-28): explicit
+        # ``request_timeout`` and ``max_retries`` so the openai SDK can't
+        # silently retry a stalled request three times (3 x default 600s
+        # = 30 min). Caller-supplied kwargs win.
+        # ``request_timeout`` must be >= the longest agent ``wait_for``
+        # budget; otherwise the HTTP layer truncates a still-decoding
+        # response before the outer wrapper's hard cap fires (live trace
+        # 2026-05-28 showed static analyst dropping at exactly 300s
+        # because the previous Wave 5 value was tighter than its 600s
+        # ReAct budget). 1800s (2026-07-13) stays >= the longest agent
+        # ``wait_for`` hard cap: the deep-analysis restore raised static's
+        # per-chunk budget to 1500s (hard cap timeout+30 = 1530s), plus decode
+        # headroom on a cold-cache local 35B. ``max_retries=0`` keeps a single
+        # attempt regardless of size — the daemon-thread cap in
+        # ``execute_tool_loop`` is the only retry policy we want.
+        build_kwargs.setdefault("request_timeout", 1800)
+        build_kwargs.setdefault("max_retries", 0)
+
+        return ChatOpenAI(**build_kwargs)

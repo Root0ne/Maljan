@@ -1,0 +1,151 @@
+{
+  "cohorts": {
+    "2020": [
+      {
+        "sha256": "007257bf103de1173f536937eae72ea3f6f99c8e6a6599d657b70b63b763c184",
+        "first_seen": "2020-11-11 11:32:03",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "08cb598a06ac7af5e79b41b4ce3bd4b2d6c37c1cbaa7c3e1e785f3038e08da3a",
+        "first_seen": "2020-11-11 11:27:26",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d",
+        "first_seen": "2020-11-17 11:33:27",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "DarkComet"
+      },
+      {
+        "sha256": "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab",
+        "first_seen": "2020-06-25 12:57:24",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Pony"
+      },
+      {
+        "sha256": "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535",
+        "first_seen": "2020-12-24 03:32:26",
+        "year": "2020",
+        "file_type": "exe",
+        "signature": "Emotet"
+      }
+    ],
+    "2021": [
+      {
+        "sha256": "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941",
+        "first_seen": "2021-10-26 14:04:59",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578",
+        "first_seen": "2021-08-24 11:41:58",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "TrickBot"
+      },
+      {
+        "sha256": "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4",
+        "first_seen": "2021-08-23 11:39:17",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "AZORult"
+      },
+      {
+        "sha256": "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8",
+        "first_seen": "2021-09-17 11:41:11",
+        "year": "2021",
+        "file_type": "exe",
+        "signature": "AZORult"
+      }
+    ],
+    "2022": [
+      {
+        "sha256": "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47",
+        "first_seen": "2022-12-22 22:48:03",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      },
+      {
+        "sha256": "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9",
+        "first_seen": "2022-10-29 13:45:36",
+        "year": "2022",
+        "file_type": "exe",
+        "signature": "IcedID"
+      }
+    ],
+    "2023": [
+      {
+        "sha256": "43b1ea9d28fbd3c57dd563eb2097aa6555489795d3f060f2d03192b057878a39",
+        "first_seen": "2023-05-04 13:15:58",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      },
+      {
+        "sha256": "b34d5f723853264502eb255218c41fcd86396a3d15025484836182b0c97d5531",
+        "first_seen": "2023-08-30 04:11:33",
+        "year": "2023",
+        "file_type": "exe",
+        "signature": "NanoCore"
+      }
+    ],
+    "2024": [
+      {
+        "sha256": "1940ba18ed66dd2f1c3d4dbd2fbf6cf3438bcdee1e108982fb557461106a8073",
+        "first_seen": "2024-12-26 11:02:03",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Amadey"
+      },
+      {
+        "sha256": "3efa9fdaaa74aaa54f0c90937d948bfc1159a3f920d94bd713bd5b2a69336d95",
+        "first_seen": "2024-12-16 21:59:55",
+        "year": "2024",
+        "file_type": "exe",
+        "signature": "Amadey"
+      }
+    ],
+    "2025": [
+      {
+        "sha256": "08edc97f63cc5d7ac7ce2fa46811098fd03404bca7a7030d7e17cfc00038052a",
+        "first_seen": "2025-12-01 07:47:41",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      },
+      {
+        "sha256": "2395de00a23d65cb4eb0805b96fb8f326f5045413b0d19185727e302b0133bcf",
+        "first_seen": "2025-02-08 01:50:16",
+        "year": "2025",
+        "file_type": "exe",
+        "signature": "njrat"
+      }
+    ],
+    "2026": [
+      {
+        "sha256": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa",
+        "first_seen": "2026-04-01 10:53:51",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      },
+      {
+        "sha256": "07f553c7e997169afc8a192d0484441cea752f8154ec0e54dc756946aeed6049",
+        "first_seen": "2026-01-25 07:57:52",
+        "year": "2026",
+        "file_type": "exe",
+        "signature": "AsyncRAT"
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+# Python
+.venv/
+.venv-wsl/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+apps/web/node_modules/
+apps/web/.next/
+
+# Local Next.js env overrides — NEVER bake these into an image.
+# Audit 2026-07-26 (K3): Dockerfile.frontend does `COPY apps/web/ ./`, so a
+# developer's .env.local (which sets NEXT_PUBLIC_AUTH_DISABLED=true) was being
+# compiled into the production bundle, disabling authentication entirely:
+# every visitor became the `dev@local` admin, /login skipped its redirect and
+# "Sign out" became a no-op. Build-time NEXT_PUBLIC_* values must come from the
+# compose build args only.
+apps/web/.env.local
+apps/web/.env.*.local
+
+# Git & IDE
+.git/
+.github/
+.gitattributes
+.serena/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (prevent recursive context — but keep CAPE entrypoint reachable
+# for docker/cape/Dockerfile.cape-web which COPYs docker/cape/entrypoint.sh)
+docker/
+!docker/cape/
+
+# Build artifacts & logs
+*.log
+reports/
+
+# Test artifacts
+dummy_malware.exe
+analysis_output.log

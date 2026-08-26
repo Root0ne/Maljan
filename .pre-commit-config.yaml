@@ -1,0 +1,45 @@
+repos:
+  # ---------------------------------------------------------------------------
+  # File hygiene
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # 2 MB: accommodates vendored RAG data artifacts (family fingerprint
+        # catalogs, the MABEL-derived ATT&CK case corpus) while still guarding
+        # against accidental large-binary commits.
+        args: ["--maxkb=2048"]
+
+  # ---------------------------------------------------------------------------
+  # Ruff -- lint + auto-fix, then format
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.8
+    hooks:
+      - id: ruff
+        name: ruff lint (fix)
+        args: ["--fix"]
+      - id: ruff-format
+        name: ruff format
+
+  # ---------------------------------------------------------------------------
+  # mypy -- type checking (runs against the project venv via uv)
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        language: system
+        entry: uv run mypy
+        # Kept in step with the Makefile's `typecheck` target. `src/` alone left
+        # the FastAPI app and the arq worker unchecked in both places at once,
+        # so nothing anywhere type-checked the code that runs an analysis.
+        args: ["src/", "apps/api/"]
+        pass_filenames: false
+        types: [python]

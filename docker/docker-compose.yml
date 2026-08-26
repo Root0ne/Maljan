@@ -1,0 +1,350 @@
+services:
+  # ─────────────────────────────────────────────
+  # PostgreSQL 16 — Relational data store
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: maljan-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-maljan}
+      POSTGRES_USER: ${POSTGRES_USER:-maljan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maljan_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maljan} -d ${POSTGRES_DB:-maljan}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # Redis 7 — Task queue, PubSub, cache
+  # ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: maljan-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # Qdrant — Vector database (LTM / RAG)
+  # ─────────────────────────────────────────────
+  qdrant:
+    # F3 (2026-07-05): pin instead of ``:latest`` for reproducibility. An
+    # unpinned server drifted to 1.18.x while the pinned qdrant-client is
+    # 1.17.1, which logged "Failed to obtain server version. Unable to check
+    # client-server compatibility" on every run. Pinning removes that drift.
+    image: qdrant/qdrant:v1.18.2
+    container_name: maljan-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # ─────────────────────────────────────────────
+  # MinIO — S3-compatible object storage
+  # ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: maljan-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -────────────────────────────────────────────
+  # Ghidra MCP Headless — Static analysis engine
+  # -────────────────────────────────────────────
+  ghidra-mcp:
+    build:
+      context: ../external/ghidra-mcp
+      dockerfile: docker/Dockerfile
+    image: ghidra-mcp-headless:latest
+    container_name: maljan-ghidra-mcp
+    restart: unless-stopped
+    environment:
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:-maljan_ghidra_secret_2026}
+      GHIDRA_MCP_BIND_ADDRESS: 0.0.0.0
+      GHIDRA_MCP_PORT: 8089
+    ports:
+      - "${GHIDRA_MCP_PORT:-8089}:8089"
+    # A ceiling the kernel enforces, because the JVM's own does not bound the
+    # container. `-Xmx4g` caps the *heap*; Ghidra's database is memory-mapped and
+    # its direct buffers live outside it, so RSS was measured at 5.15 GB while
+    # the heap was nominally capped at 4. With no container limit, a binary whose
+    # analysis is pathological grows until the host runs out and the kernel's OOM
+    # killer picks the largest process — which on a desktop is the editor, not
+    # this container. That happened twice on 2026-08-10/11.
+    #
+    # 6g leaves the 4g heap its room plus off-heap headroom. Past it the
+    # container's own process dies, the HTTP call fails, and the harness records
+    # an error and moves on — which is the behaviour we want from a sample
+    # Ghidra cannot handle. Swap is pinned to the same value so the container
+    # cannot trade the limit for thrashing.
+    mem_limit: 6g
+    memswap_limit: 6g
+    volumes:
+      - ../data/samples:/data/samples:ro
+      - ghidra_projects:/projects
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8089/check_connection || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # -────────────────────────────────────────────
+  # Backend API — FastAPI application server
+  # -────────────────────────────────────────────
+  backend-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: maljan-api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      # F3 (2026-07-05): the CORE engine (MaljanApp / QdrantStore) reads the
+      # nested ``MEMORY__QDRANT_URL`` — NOT the flat ``QDRANT_URL`` above,
+      # which only the API server uses. Without this line the .env value
+      # (localhost, meant for the standalone CLI) leaked into the container
+      # and every LTM / function-hash Qdrant call hit ``localhost:6333``
+      # inside the container → Connection refused, silently disabling LTM
+      # and function-hash attribution.
+      MEMORY__QDRANT_URL: http://qdrant:6333
+      MINIO_ENDPOINT: minio:9000
+      MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # F1 (2026-07-05): make the ``maljan`` core package importable from the
+      # API process (the on-demand markdown re-render imports it). The worker
+      # inserts ``src`` into sys.path at runtime; the API had no such path, so
+      # /reports/{id}/markdown 500'd with ModuleNotFoundError: No module 'maljan'.
+      PYTHONPATH: /app/apps/api:/app/src
+      # llama-server on Windows host reachable via host.docker.internal
+      LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
+      LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
+      # Ollama fallback (active only if LLM__PROVIDER=ollama)
+      LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
+      # CAPEv2 dynamic-analysis backend (remote Ubuntu VM at <sandbox-host>). The
+      # worker/api submit samples to CAPE's REST API, poll, and fetch
+      # report.json, which fans out to BOTH the dynamic and network analysts.
+      # Set explicitly here (not via .env) because .env's localhost value is
+      # wrong inside the container — same leak class as MEMORY__QDRANT_URL.
+      # token_auth is disabled on this instance (empty token). MCP path stays
+      # off (:9004 wrapper not running on the VM); the REST report is enough.
+      SANDBOX__BACKEND: ${SANDBOX_BACKEND:-cape2}
+      # Container reaches CAPE (<sandbox-host>) through the host-side proxy
+      # (maljan-cape-proxy.service): the bridge can hit host.docker.internal
+      # but not the on-link WiFi peer directly. Host CLI uses <sandbox-host>
+      # directly via .env. 18000->CAPE:8000 (REST), 19004->CAPE:9004 (MCP).
+      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
+      SANDBOX__CAPE2_API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
+      SANDBOX__CAPE2_TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
+      SANDBOX__CAPE2_POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
+      # CAPE MCP over HTTP — interactive tools for the dynamic analyst's ReAct
+      # loop (search_task, get_task_iocs, get_task_config, ...). Additive on
+      # top of the REST report. Reached via the same proxy (19004->CAPE:9004).
+      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-true}
+      MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
+      MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
+      MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
+    # F8 (2026-07-05): on Linux ``host.docker.internal`` does not resolve
+    # unless mapped to the host gateway (Docker Desktop on Win/Mac provides
+    # it natively, where this is a harmless no-op). Lets the container reach
+    # a host llama-server at host.docker.internal:8080.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../src:/app/src
+      - ../apps:/app/apps
+      - ../data:/app/data
+      - ../tests:/app/tests
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      ghidra-mcp:
+        condition: service_healthy
+    command: >
+      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # -────────────────────────────────────────────
+  # Backend Worker — ARQ background task runner
+  # -────────────────────────────────────────────
+  backend-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: maljan-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      # F3 (2026-07-05): core engine reads nested MEMORY__QDRANT_URL — see the
+      # backend-api block. Without it the worker's LTM + function-hash Qdrant
+      # calls hit localhost inside the container and were refused.
+      MEMORY__QDRANT_URL: http://qdrant:6333
+      MINIO_ENDPOINT: minio:9000
+      MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # 2026-07 round 3: per-sample dynamic Ghidra tool selection — CORE triage
+      # set + tools relevant to the sample's capability categories (~30-40 of
+      # ~165). All tools stay reachable; only the relevant subset is shown per
+      # run. Measured far faster + less hallucination than "all". Options:
+      # curated | dynamic | all.
+      MCP__GHIDRA__TOOL_SELECTION: "dynamic"
+      # F1 (2026-07-05): make ``maljan`` importable (parity with API); the
+      # worker also inserts src at runtime, this makes it explicit/robust.
+      PYTHONPATH: /app/apps/api:/app/src
+      LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
+      LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
+      LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}
+      # CAPEv2 dynamic-analysis backend (remote Ubuntu VM). See backend-api
+      # block for the rationale; the worker is the process that actually
+      # submits + polls CAPE, so this env is what enables real detonation.
+      SANDBOX__BACKEND: ${SANDBOX_BACKEND:-cape2}
+      # Container reaches CAPE (<sandbox-host>) through the host-side proxy
+      # (maljan-cape-proxy.service): the bridge can hit host.docker.internal
+      # but not the on-link WiFi peer directly. Host CLI uses <sandbox-host>
+      # directly via .env. 18000->CAPE:8000 (REST), 19004->CAPE:9004 (MCP).
+      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
+      SANDBOX__CAPE2_API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
+      SANDBOX__CAPE2_TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
+      SANDBOX__CAPE2_POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
+      # CAPE MCP over HTTP — interactive tools for the dynamic analyst's ReAct
+      # loop (search_task, get_task_iocs, get_task_config, ...). Additive on
+      # top of the REST report. Reached via the same proxy (19004->CAPE:9004).
+      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-true}
+      MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
+      MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
+      MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
+      # glibc allocator (2026-07-26 memory audit). The image is python:3.13-slim
+      # (glibc) and the host has 32 cores, so the default arena cap is 8 x ncores
+      # = 256 arenas of 64 MB each. This process is genuinely multi-threaded —
+      # the arq loop, the persistent agent loop, LangGraph's node threads and
+      # asyncio's to_thread executor — which is the textbook shape for RSS that
+      # climbs and never returns even when nothing is retained. Capping arenas
+      # and lowering the trim threshold costs throughput only under malloc
+      # contention, and this workload waits on an LLM. Revert by deleting both
+      # lines; ``memprobe`` reports whether they helped.
+      MALLOC_ARENA_MAX: "2"
+      MALLOC_TRIM_THRESHOLD_: "134217728"
+      # Ask the allocator to return freed heap at each job boundary, and report
+      # how much came back — the reading that distinguishes fragmentation from
+      # retention. Cheap; leave it on.
+      MALJAN_MALLOC_TRIM: "1"
+      WORKER_RSS_RESTART_MB: ${WORKER_RSS_RESTART_MB:-6000}
+      # onnxruntime sizes its CPU arena from the host core count. Left alone on
+      # a 32-core box, embedding the 697 ATT&CK technique texts reserved 8.3 GB
+      # and was OOM-killed; at these values the same work peaks near 1.3 GB.
+      # See ``src/maljan/memory/embeddings.py`` for the measurements. Raise them
+      # on a host with memory to spare — the cost is only build time.
+      MALJAN_EMBED_THREADS: ${MALJAN_EMBED_THREADS:-2}
+      MALJAN_EMBED_BATCH: ${MALJAN_EMBED_BATCH:-32}
+    # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
+    # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
+    # also runs a ~15 GB llama-server, and the machine locked up. The graceful
+    # path is ``after_job_end`` in WorkerSettings, which exits between jobs; this
+    # is what catches a single job that runs away mid-flight. The kernel kills
+    # only this container, ``restart: unless-stopped`` brings it back, and the
+    # startup orphan sweep repairs the job row it was holding.
+    mem_limit: 8g
+    memswap_limit: 8g
+    volumes:
+      - ../src:/app/src
+      - ../apps:/app/apps
+      - ../data:/app/data
+      - ../tests:/app/tests
+      # Derived caches, not source data — but expensive enough that losing them
+      # is a production problem rather than a warm-up. Two things live here: the
+      # 40 MB ATT&CK STIX bundle (re-downloaded from MITRE when absent), and the
+      # ATT&CK embedding cache, whose absence costs the judge node +1.3 GB of
+      # resident memory and 105 s on the first analysis — measured 2026-07-28.
+      # Without this volume both are rebuilt on every container recreation,
+      # because /root is in the container's writable layer and a rebuild
+      # discards it.
+      - attck_cache:/root/.cache/maljan
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ghidra-mcp:
+        condition: service_healthy
+    command: >
+      uv run arq app.worker.analysis_worker.WorkerSettings
+
+  # -────────────────────────────────────────────
+  # Frontend — Next.js UI application
+  # -────────────────────────────────────────────
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_WS_URL: ws://localhost:8000
+        # Audit 2026-07-26 (K3): NEXT_PUBLIC_* values are baked at build time,
+        # and a developer's apps/web/.env.local used to leak `true` into the
+        # bundle, silently disabling authentication for every visitor.
+        # .dockerignore now excludes that file, and the value must be an
+        # explicit, deliberate choice — defaulting to SECURE. Set
+        # NEXT_PUBLIC_AUTH_DISABLED=true in .env only for a local dev stack.
+        NEXT_PUBLIC_AUTH_DISABLED: "${NEXT_PUBLIC_AUTH_DISABLED:-false}"
+    container_name: maljan-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend-api
+
+volumes:
+  pgdata:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  minio_data:
+    driver: local
+  ghidra_projects:
+    driver: local
+  attck_cache:
+    driver: local

@@ -1,0 +1,413 @@
+version: "1.0"
+description: "Maljan built-in YARA-TTP rules for deterministic ATT&CK technique detection"
+rules:
+  # T1055 - Process Injection
+  - id: process_injection_apis
+    technique_id: "T1055"
+    confidence: 0.90
+    description: "Process injection via classic Windows APIs"
+    platform: ["windows"]
+    patterns:
+      - "VirtualAllocEx"
+      - "WriteProcessMemory"
+      - "CreateRemoteThread"
+      - "NtCreateThreadEx"
+      - "QueueUserAPC"
+      - "SetThreadContext"
+
+  # T1055.012 - Process Hollowing
+  - id: process_hollowing
+    technique_id: "T1055.012"
+    confidence: 0.92
+    description: "Process hollowing indicators"
+    platform: ["windows"]
+    patterns:
+      - "NtUnmapViewOfSection"
+      - " hollow"
+      - "RunPE"
+      - "Process Hollowing"
+
+  # T1547.001 - Registry Run Keys
+  - id: registry_run_keys
+    technique_id: "T1547.001"
+    confidence: 0.88
+    description: "Persistence via Registry Run/RunOnce keys"
+    platform: ["windows"]
+    patterns:
+      - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+      - "RegSetValueEx"
+      - "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+
+  # T1059.001 - PowerShell
+  - id: powershell_execution
+    technique_id: "T1059.001"
+    confidence: 0.85
+    description: "Command and scripting interpreter: PowerShell"
+    platform: ["windows"]
+    patterns:
+      - "powershell.exe"
+      - "powershell -enc"
+      - "powershell -ep bypass"
+      - "IEX("
+      - "Invoke-Expression"
+      - "-EncodedCommand"
+
+  # T1059.003 - Windows Command Shell
+  - id: cmd_execution
+    technique_id: "T1059.003"
+    confidence: 0.80
+    description: "Command and scripting interpreter: cmd.exe"
+    platform: ["windows"]
+    patterns:
+      - "cmd.exe /c"
+      - "cmd.exe /k"
+      - "%COMSPEC%"
+      - "bat&"
+
+  # T1059.005 - Visual Basic
+  - id: vbs_execution
+    technique_id: "T1059.005"
+    confidence: 0.80
+    description: "Command and scripting interpreter: VBScript"
+    platform: ["windows"]
+    patterns:
+      - "wscript.exe"
+      - "cscript.exe"
+      - "CreateObject"
+      - "WScript.Shell"
+
+  # T1059.007 - JavaScript
+  - id: js_execution
+    technique_id: "T1059.007"
+    confidence: 0.78
+    description: "Command and scripting interpreter: JavaScript"
+    platform: ["windows"]
+    patterns:
+      - "wscript.exe"
+      - "mshta.exe"
+      - "javascript:"
+      - "JScript"
+
+  # T1071.001 - Application Layer Protocol: Web Protocols
+  - id: web_c2_communication
+    technique_id: "T1071.001"
+    confidence: 0.85
+    description: "C2 communication over HTTP/HTTPS"
+    platform: ["any"]
+    patterns:
+      - "HttpSendRequest"
+      - "InternetOpenUrl"
+      - "WinHttpConnect"
+      - "URLDownloadToFile"
+      - "curl http"
+      - "wget http"
+
+  # T1027 - Obfuscated Files or Information
+  - id: obfuscation_indicators
+    technique_id: "T1027"
+    confidence: 0.82
+    description: "Obfuscation and packing indicators"
+    platform: ["any"]
+    patterns:
+      - "UPX"
+      - "packed"
+      - "obfuscated"
+      - "encrypted payload"
+      - "RC4"
+      - "AES"
+      - "XOR"
+      - "Base64"
+
+  # T1027.002 - Software Packing
+  - id: software_packing
+    technique_id: "T1027.002"
+    confidence: 0.85
+    description: "Software packing detected"
+    platform: ["any"]
+    patterns:
+      - "UPX"
+      - "ASPack"
+      - "PECompact"
+      - "packed"
+      - "compress"
+      - "lzma"
+
+  # T1083 - File and Directory Discovery
+  - id: file_discovery
+    technique_id: "T1083"
+    confidence: 0.78
+    description: "File and directory discovery"
+    platform: ["windows"]
+    patterns:
+      - "FindFirstFile"
+      - "FindNextFile"
+      - "GetLogicalDrives"
+      - "GetDriveType"
+
+  # T1112 - Modify Registry
+  - id: registry_modification
+    technique_id: "T1112"
+    confidence: 0.80
+    description: "Registry modification for defense evasion"
+    platform: ["windows"]
+    patterns:
+      - "RegSetValue"
+      - "RegCreateKey"
+      - "RegDeleteKey"
+      - "DisableTaskMgr"
+      - "DisableRegistryTools"
+
+  # T1562.001 - Disable or Modify Tools
+  - id: disable_defense_tools
+    technique_id: "T1562.001"
+    confidence: 0.88
+    description: "Disable or modify security tools"
+    platform: ["windows"]
+    patterns:
+      - "Anti-Virus"
+      - "Windows Defender"
+      - "Set-MpPreference"
+      - "DisableRealtimeMonitoring"
+      - "TamperProtection"
+
+  # T1497 - Virtualization/Sandbox Evasion
+  # Cross-platform concept: anti-emu / anti-debug applies to any sandbox.
+  # The patterns include both Win-flavored APIs and generic strings so the
+  # rule is intentionally broad. Marked "any" because the Android case
+  # (zararli.apk) legitimately uses the same evasion concept (sensor
+  # listening = sandbox detection).
+  - id: sandbox_evasion
+    technique_id: "T1497"
+    confidence: 0.85
+    description: "Virtualization and sandbox evasion"
+    platform: ["any"]
+    # 2026-07 round 2: dropped bare "sandbox" — matched any incidental mention
+    # of the word. Keep VM/debugger-detection-specific markers only.
+    patterns:
+      - "IsDebuggerPresent"
+      - "CheckRemoteDebuggerPresent"
+      - "NtGlobalFlag"
+      - "vmware"
+      - "virtualbox"
+      - "SbieDll"
+      - "vboxservice"
+      - "VBoxTray"
+
+  # T1497.001 - System Checks
+  - id: system_checks_evasion
+    technique_id: "T1497.001"
+    confidence: 0.82
+    description: "System checks for sandbox evasion"
+    platform: ["windows"]
+    # 2026-07 round 2: dropped "Sleep", "GetTickCount", "QueryPerformanceCounter"
+    # — ubiquitous benign timing APIs that fired T1497.001 on ordinary apps.
+    # Keep user-activity / interaction checks that are evasion-specific.
+    patterns:
+      - "GetCursorPos"
+      - "GetForegroundWindow"
+      - "GetLastInputInfo"
+      - "mouse_event"
+      - "GetSystemFirmwareTable"
+
+  # T1003 - OS Credential Dumping
+  - id: credential_dumping
+    technique_id: "T1003"
+    confidence: 0.90
+    description: "OS credential dumping"
+    platform: ["windows"]
+    patterns:
+      - "mimikatz"
+      - "sekurlsa"
+      - "lsadump"
+      - "samdump"
+      - "WDigest"
+      - "Kerberos ticket"
+
+  # T1003.001 - LSASS Memory
+  - id: lsass_dump
+    technique_id: "T1003.001"
+    confidence: 0.91
+    description: "LSASS memory credential dumping"
+    platform: ["windows"]
+    patterns:
+      - "lsass.exe"
+      - "MiniDumpWriteDump"
+      - "sekurlsa::logonpasswords"
+      - "comsvcs.dll"
+      - "#24"
+
+  # T1105 - Ingress Tool Transfer
+  - id: tool_transfer
+    technique_id: "T1105"
+    confidence: 0.83
+    description: "Ingress tool transfer"
+    platform: ["windows"]
+    patterns:
+      - "certutil -urlcache"
+      - "bitsadmin"
+      - "mshta"
+      - " rundll32"
+
+  # T1218.011 - Rundll32
+  - id: rundll32_abuse
+    technique_id: "T1218.011"
+    confidence: 0.87
+    description: "System Binary Proxy Execution via rundll32"
+    platform: ["windows"]
+    patterns:
+      - "rundll32.exe"
+      - "ExecuteA"
+      - "DllRegisterServer"
+
+  # T1218.005 - Mshta
+  - id: mshta_abuse
+    technique_id: "T1218.005"
+    confidence: 0.87
+    description: "System Binary Proxy Execution via mshta"
+    platform: ["windows"]
+    patterns:
+      - "mshta.exe"
+      - "javascript:"
+      - "vbscript:"
+      - "hta:"
+
+  # T1218.010 - Regsvr32
+  - id: regsvr32_abuse
+    technique_id: "T1218.010"
+    confidence: 0.85
+    description: "System Binary Proxy Execution via regsvr32"
+    platform: ["windows"]
+    patterns:
+      - "regsvr32.exe"
+      - "scrobj.dll"
+      - "/i:http"
+      - "DllInstall"
+
+  # T1486 - Data Encrypted for Impact (Ransomware)
+  - id: ransomware_indicators
+    technique_id: "T1486"
+    confidence: 0.88
+    description: "Ransomware data encryption indicators"
+    platform: ["any"]
+    patterns:
+      - "ransom"
+      - "encrypt"
+      - ".locked"
+      - ".encrypted"
+      - "READ_ME"
+      - "DECRYPT"
+      - "Bitcoin"
+      - "monero"
+
+  # T1486 - Additional ransomware file extensions
+  - id: ransomware_extensions
+    technique_id: "T1486"
+    confidence: 0.85
+    description: "Ransomware file extension modification"
+    platform: ["any"]
+    patterns:
+      - ".crypto"
+      - ".vault"
+      - ".onion"
+      - ".crypt"
+      - "YOUR_FILES"
+      - "restore_files"
+
+  # T1566.001 - Spearphishing Attachment
+  - id: phishing_attachment
+    technique_id: "T1566.001"
+    confidence: 0.80
+    description: "Spearphishing attachment delivery"
+    platform: ["windows"]
+    patterns:
+      - "macro"
+      - "AutoOpen"
+      - "Document_Open"
+      - "AutoExec"
+      - "Embedded OLE"
+      - ".docm"
+      - ".xlsm"
+
+  # T1204.002 - Malicious File
+  - id: malicious_file_execution
+    technique_id: "T1204.002"
+    confidence: 0.82
+    description: "User execution of malicious file"
+    platform: ["windows"]
+    patterns:
+      - "AutoIt"
+      - "AutoHotkey"
+      - ".scr"
+      - ".pif"
+      - "shortcut"
+      - ".lnk"
+
+  # T1053.005 - Scheduled Task/Job
+  - id: scheduled_task
+    technique_id: "T1053.005"
+    confidence: 0.83
+    description: "Scheduled task for persistence"
+    platform: ["windows"]
+    patterns:
+      - "schtasks.exe"
+      - "TaskScheduler"
+      - "CreateScheduledTask"
+      - "AT \\"
+      - "cmd /c start"
+
+  # T1543.003 - Windows Service
+  - id: windows_service_persistence
+    technique_id: "T1543.003"
+    confidence: 0.82
+    description: "Persistence via Windows Service"
+    platform: ["windows"]
+    patterns:
+      - "CreateService"
+      - "StartService"
+      - "OpenSCManager"
+      - "services.exe"
+      - " SERVICE_"
+
+  # T1574.002 - DLL Side-Loading
+  - id: dll_side_loading
+    technique_id: "T1574.002"
+    confidence: 0.85
+    description: "DLL side-loading for execution"
+    platform: ["windows"]
+    # 2026-07 round 2: dropped bare "LoadLibrary" — the most common Windows API,
+    # present in nearly every PE, which caused T1574.002 to fire on benign MFC
+    # apps. Keep only side-loading-specific indicator strings.
+    patterns:
+      - "side-load"
+      - "sideload"
+      - "DLL Search Order"
+      - "phantom dll"
+      - "DllHijack"
+
+  # T1001 - Data Obfuscation
+  - id: data_obfuscation
+    technique_id: "T1001"
+    confidence: 0.78
+    description: "Data obfuscation for C2 communication"
+    platform: ["any"]
+    patterns:
+      - "steganography"
+      - "covert channel"
+      - "DNS tunnel"
+      - "ICMP tunnel"
+      - "domain fronting"
+
+  # T1078 - Valid Accounts
+  - id: valid_accounts
+    technique_id: "T1078"
+    confidence: 0.75
+    description: "Abuse of valid accounts for access"
+    platform: ["any"]
+    patterns:
+      - "default password"
+      - "admin:admin"
+      - "password123"
+      - "brute force"
+      - "credential stuffing"
+      - "pass the hash"

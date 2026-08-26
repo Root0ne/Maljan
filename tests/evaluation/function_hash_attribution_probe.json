@@ -1,0 +1,184 @@
+{
+ "results": {
+  "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535": {
+   "year": "2020",
+   "family_label": "Emotet",
+   "n_functions_kept": 61,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 8.5
+  },
+  "7e2bc1dc1e6350f7e622d47697f088b4ae00799a9f61246312932851a0d9bece": {
+   "year": "2020",
+   "family_label": "Pony",
+   "n_functions_kept": 1,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 2.7
+  },
+  "e8d4ad02e8811033f3ce05547774f6e9650ee66cf3f9221df656b326b8bd039d": {
+   "year": "2020",
+   "family_label": "DarkComet",
+   "n_functions_kept": 0,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 2.2
+  },
+  "d06be7bd36b4cdd6ac12e3c7fb675515cd33ae9ea75a26e7dc7fc3a7db14caff": {
+   "year": "2020",
+   "family_label": "Pony",
+   "n_functions_kept": 13,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 5.6
+  },
+  "37289955e43235c56374e1cee02a98bd78d1448f02377caa92255c87a9df014e": {
+   "year": "2020",
+   "family_label": "Pony",
+   "n_functions_kept": 1,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 2.6
+  },
+  "cb4e4d28e4ae4e4acaffb8087e80d9163089be1d1f08837e23d665e65d8f30fa": {
+   "year": "2020",
+   "family_label": "DarkComet",
+   "n_functions_kept": 0,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 2.3
+  },
+  "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d": {
+   "year": "2020",
+   "family_label": "DarkComet",
+   "n_functions_kept": 0,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 2.3
+  },
+  "964e7b311e933799477fd793aa4e7721af35fe5c494fd9d995a6a620b162e516": {
+   "year": "2020",
+   "family_label": "Pony",
+   "n_functions_kept": 59,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 84.0
+  },
+  "40bcf1b92cac08e72eb025659bb892a41926ebd655f448ff5544ece312986987": {
+   "year": "2020",
+   "family_label": "Pony",
+   "n_functions_kept": 1733,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 20.0
+  },
+  "52b6f57b2e7a9fc832227cc0ae02794e506358a295dadcf75387755a1b84b1ea": {
+   "year": "2020",
+   "family_label": "DarkComet",
+   "n_functions_kept": 1,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 2.9
+  },
+  "da0a4e16ef4baf46f27e666e9b4547cdf17eafad3caa235df6c29a52d3da8d0a": {
+   "year": "2020",
+   "family_label": "DarkComet",
+   "n_functions_kept": 1,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 3.3
+  },
+  "f75668dcd2d8c554bde126315253439858d2155588b1889473a7df5914537f10": {
+   "year": "2020",
+   "family_label": "DarkComet",
+   "n_functions_kept": 2155,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 105.0
+  },
+  "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab": {
+   "year": "2020",
+   "family_label": "Pony",
+   "n_functions_kept": 1966,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 23.7
+  },
+  "c3e21f7b2bfc3da5e77b37f6556fb985e4402551bac45636a7488664e67d477f": {
+   "year": "2020",
+   "family_label": "Hancitor",
+   "n_functions_kept": 10,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 5.8
+  },
+  "f7333c98b0d4fac43070b0b17fb185a1934925d1be959cead7d44445abf84df7": {
+   "year": "2021",
+   "family_label": "DarkComet",
+   "n_functions_kept": 0,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 6.3
+  },
+  "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578": {
+   "year": "2021",
+   "family_label": "TrickBot",
+   "n_functions_kept": 972,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 15.2
+  },
+  "5925ecddcc4b4ea9017aad9abe70dfc47bb6aa63bd01a84536a8cd3cc039d781": {
+   "year": "2021",
+   "family_label": "TrickBot",
+   "n_functions_kept": 743,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 42.8
+  },
+  "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8": {
+   "year": "2021",
+   "family_label": "AZORult",
+   "n_functions_kept": 0,
+   "n_matches": 0,
+   "families": [],
+   "hint_chars": 0,
+   "fires": false,
+   "seconds": 302.0
+  }
+ }
+}

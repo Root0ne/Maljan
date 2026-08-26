@@ -1,0 +1,813 @@
+{
+ "schema": "maljan-cape-task-ledger/v1",
+ "submitted_at": "2026-08-10T13:38:48+03:00",
+ "instance": "http://<sandbox-host>:8000 (CAPE 2.5, single win10 VM)",
+ "cohort_digest": "33ff934fa1e344f3e7dae28bda591a67711bc87ab523a41ab8d9a2ac849e5bb8",
+ "seed": 20260810,
+ "n": 100,
+ "failed": {},
+ "tasks": {
+  "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535": "19044",
+  "7e2bc1dc1e6350f7e622d47697f088b4ae00799a9f61246312932851a0d9bece": "19045",
+  "e8d4ad02e8811033f3ce05547774f6e9650ee66cf3f9221df656b326b8bd039d": "19046",
+  "d06be7bd36b4cdd6ac12e3c7fb675515cd33ae9ea75a26e7dc7fc3a7db14caff": "19047",
+  "37289955e43235c56374e1cee02a98bd78d1448f02377caa92255c87a9df014e": "19048",
+  "cb4e4d28e4ae4e4acaffb8087e80d9163089be1d1f08837e23d665e65d8f30fa": "19049",
+  "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d": "19050",
+  "964e7b311e933799477fd793aa4e7721af35fe5c494fd9d995a6a620b162e516": "19051",
+  "40bcf1b92cac08e72eb025659bb892a41926ebd655f448ff5544ece312986987": "19052",
+  "52b6f57b2e7a9fc832227cc0ae02794e506358a295dadcf75387755a1b84b1ea": "19053",
+  "da0a4e16ef4baf46f27e666e9b4547cdf17eafad3caa235df6c29a52d3da8d0a": "19054",
+  "f75668dcd2d8c554bde126315253439858d2155588b1889473a7df5914537f10": "19055",
+  "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab": "19056",
+  "c3e21f7b2bfc3da5e77b37f6556fb985e4402551bac45636a7488664e67d477f": "19057",
+  "f7333c98b0d4fac43070b0b17fb185a1934925d1be959cead7d44445abf84df7": "19058",
+  "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578": "19059",
+  "5925ecddcc4b4ea9017aad9abe70dfc47bb6aa63bd01a84536a8cd3cc039d781": "19060",
+  "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8": "19061",
+  "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4": "19062",
+  "a7c4aae68e13b16ed7d916ba7cde189381e597934b05a26d113a97c8ae8afdbf": "19063",
+  "3a311fa2632d70ba58f402a83270f3111ebd0074fe45ecfad273ebb8aecdd328": "19064",
+  "69947cfea7518aab0920c81530b9e643d0fd0a14b0686a5d13dc1500366f071d": "19065",
+  "4565983c56ad07456e1fedc689887813df0f0fbff3bb716e687347d53526d88b": "19066",
+  "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941": "19067",
+  "d634843da16ff74a676a748989cd01916cd86278dc96c0d45fa9872dd78ba251": "19068",
+  "95b999ce29d2e82dfe33e33261634d449466671debf78c2ebb4747e3434a1d9e": "19069",
+  "8b2c21c13d38bbf20fd65e3a6b840315e14d60c0dc7e131104a5ea8b73699953": "19070",
+  "4e0f7777fd3ba58bb20f7ceaebaff50b6dcc3191cf27519d83b5ad3db30b8f5e": "19071",
+  "bf158ab1720e6a0da531b99de882c8c4c32eb5be8a0b1be6483156c561070641": "19072",
+  "6f2ec2f8dd5ec28adb7f652496ad75db346fa32372247ece6a69e15d30314b1b": "19073",
+  "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc": "19074",
+  "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64": "19075",
+  "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c": "19076",
+  "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9": "19077",
+  "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47": "19078",
+  "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe": "19079",
+  "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393": "19080",
+  "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969": "19081",
+  "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7": "19082",
+  "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130": "19083",
+  "9c9a646099da045731162e08f6d04b1c386d81005580f27406fd2ae78ce237c1": "19084",
+  "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6": "19085",
+  "7faba2fe65c014143a60ef7ef4ec1c24933bec883f3d959cea44e039e01036cc": "19086",
+  "aba7133b1ccdb78338fe271d73689bac4f40251b8fc194a9b86253a71e4017cc": "19087",
+  "77db3b54666b168d13a308be378cad1b8bb84db621f8055a03471a254d4c79ed": "19088",
+  "43b1ea9d28fbd3c57dd563eb2097aa6555489795d3f060f2d03192b057878a39": "19089",
+  "08e362bf1810b2e4a97771b2890295d3c7dca17a112e0c82020e501d8fc6711d": "19090",
+  "f7e80f5e92bd4d9267be950088a9f5b1117a873868329bba0e927701f87c8fec": "19091",
+  "d58a832f0f2ad0d394c07aefb0dd7ea8b925b10322e508496788a76ee864523a": "19092",
+  "9b0dbc01aa6c7f30a59ec59a0f184dc6ee7c91baa5732192b5d191ff1687a58a": "19093",
+  "de3e53ef11c40625568ffbf773486d23efdbcc6831e1bca61915348940798ae9": "19094",
+  "4b67e4cea7a978c9a6a73d6217d2d55ee7d6ce3c2b5e6e6a4f59b5e5deb5a4e2": "19095",
+  "2a07b1741dbf216a188938d0fec870f8395374f760c6bf452f0a0479e975b018": "19096",
+  "21c3b30041dc16f6fb0fe758c4cd1767e272133ff45dd21aee22506e6d9199aa": "19097",
+  "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00": "19098",
+  "2371d8edbb2a1245b01cc06a870ddca49acb3be47b25e0fddc5d1b0032780bdf": "19099",
+  "f6439b324a4baabf6a71339bae0d8f784e5ae660c106f3af6b8690d8310e2fd6": "19100",
+  "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c": "19101",
+  "6a915f0e2eaa35eb47d70a933a4d8822d65e64ebea485d9dcb5657f1f4bd1cf8": "19102",
+  "a9b8879292fbf7bd63b7880cf9e1084040aa1c9adaf0b0f2d05e721696aae161": "19103",
+  "56deefa3e5f170c045ab28f8db2f5a0cac6038e6516662f3b277082320f441be": "19104",
+  "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b": "19105",
+  "c2bee3616cf5c0f19ecc5738ee39a8c3d0d0523c2178177b86563d5a3d758d0f": "19106",
+  "3efa9fdaaa74aaa54f0c90937d948bfc1159a3f920d94bd713bd5b2a69336d95": "19107",
+  "0809998772b4599b9dc190b7a69d282c8c938992f12ddc6d25a3c04559872580": "19108",
+  "4593213d8126635e53fd87ed0e553e2b412cb218fbf69be7a78a6bf0d05a0777": "19109",
+  "a3ae935dad0de2657b032a70d1908f622b3cf54fc53f01a69d5f086e21ad4d9a": "19110",
+  "1940ba18ed66dd2f1c3d4dbd2fbf6cf3438bcdee1e108982fb557461106a8073": "19111",
+  "d1832886bd31bf7129fbd708123c19bbc633e4c12bde2affabbf69236f38afad": "19112",
+  "5c1e7e7b83bc21cebd4ce833cac790ddc3c1f5d1c872fd009aed09b541764b91": "19113",
+  "a916da6ae395e55faf0a85ffea80cf0dd33c385c407c359c2f3f0751c31bfbcc": "19114",
+  "e828e55c7c7fb2ebbfcc527acdf728dd8e9cd219a1a64956151b61ef5ddb2436": "19115",
+  "77fa111600d55f4f47e458ff3958e050ff1b9b1a4d42592d7e0dce1f5ed1ef8c": "19116",
+  "b073bd6963c36cd4ea37acf1ccd75d418ac3e293a51e8accebc96a97215ddf81": "19117",
+  "c12a1b39a379333a188cae48cabda5eaecfed024220bf6495aca025498d6c0fd": "19118",
+  "c9da3969931b59d99a6b21cfabd2677c6c58b848d0a6b19b8c1a9112a2e61e21": "19119",
+  "4a0e6efe7da756a13dd1f1f7fe3a9a24f62e03ac4181e56a9b1e9e46045ff036": "19120",
+  "6eca9859b0f441c63c622a58b57be1598e9ede0b0970a6bad1d29c4039d6b677": "19121",
+  "3f4f590c05779739682febe1a385ffad835f534808b5973aface4ee816e2aa9e": "19122",
+  "a1439e46019a544b1dd5712b8e2f72c5e35c278964a8f093e7d436f15b333d63": "19123",
+  "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e": "19124",
+  "08edc97f63cc5d7ac7ce2fa46811098fd03404bca7a7030d7e17cfc00038052a": "19125",
+  "1aab32f769ba3b4e2c651fb2f34acc5d5f251ff0b2972a5ea1fd8367b8274c06": "19126",
+  "dd426a8f168871393bec760724228c0584e80519c5069b4969a663846afdb88e": "19127",
+  "77940063fcd0f276c574ea55967eb0834939e8d201922be88ffc53309351a3d1": "19128",
+  "e72be8b18b92fa5444ba5e3bf8f5b84a2a5386692f9a6e06d490b43d84f0024c": "19129",
+  "6da676db8e7ca7727cc19b92aa9e4beebbc82e41bb0ebf04e022edbaf090e333": "19130",
+  "b9b052dfb2f19bf15aaba81f07861234f91a72a5c38d83c176a7a4dcdbb2e8c1": "19131",
+  "eec9f3f49fe6d50c633c2cec1d18f4cb3d31d71e7c851fd52d83843c6e2bcd0f": "19132",
+  "1ab39bc014f6b6124fbd72d6f6390af9dbb0b67b50112e911c508b81318a3c8d": "19133",
+  "640d4390b574d98cd36bd206a65fceec9c322b4008a915519f55a8d39265c78c": "19134",
+  "5bfd0fcebd3e1ec9dcd472c4597165c6787c56ecc77eaa4855c5e918e6812cd3": "19135",
+  "123b6141959b472dbbf2f0e8fd0d1316d35866efe23ce8a354e3b0dacafa8fde": "19136",
+  "cc6f82015fc2e26a65da84db2dc0e41cc63f5ca735150a5ad55b9f474f0673f3": "19137",
+  "87e4d0e94f94dd01a4c6e30f6ee7b612bc6dad0581075bf43fef6f24053e6676": "19138",
+  "32cc6624192e6882d959793c887ef9e116aedc68ceef1ec8d4dbf11609d00d02": "19139",
+  "8f6502f9cc4e6916a6481bf77b2e52473143f39a6fb258186edbb146e577fa65": "19140",
+  "a06d2f622eb4e0403f8a8198898d2ae1d26b5f897cedadcb68cc95b888dc7525": "19141",
+  "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876": "19142",
+  "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc": "19143"
+ },
+ "detail": {
+  "2ccb45525205729f2412b3e39079b2fdef8939894bb208cf7bed413edf581535": {
+   "task_id": "19044",
+   "year": "2020",
+   "signature": "Emotet",
+   "size": 241664,
+   "upload_s": 4.8
+  },
+  "7e2bc1dc1e6350f7e622d47697f088b4ae00799a9f61246312932851a0d9bece": {
+   "task_id": "19045",
+   "year": "2020",
+   "signature": "Pony",
+   "size": 139776,
+   "upload_s": 0.6
+  },
+  "e8d4ad02e8811033f3ce05547774f6e9650ee66cf3f9221df656b326b8bd039d": {
+   "task_id": "19046",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 267776,
+   "upload_s": 0.3
+  },
+  "d06be7bd36b4cdd6ac12e3c7fb675515cd33ae9ea75a26e7dc7fc3a7db14caff": {
+   "task_id": "19047",
+   "year": "2020",
+   "signature": "Pony",
+   "size": 1166864,
+   "upload_s": 1.2
+  },
+  "37289955e43235c56374e1cee02a98bd78d1448f02377caa92255c87a9df014e": {
+   "task_id": "19048",
+   "year": "2020",
+   "signature": "Pony",
+   "size": 139776,
+   "upload_s": 0.3
+  },
+  "cb4e4d28e4ae4e4acaffb8087e80d9163089be1d1f08837e23d665e65d8f30fa": {
+   "task_id": "19049",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 325632,
+   "upload_s": 0.5
+  },
+  "113936749f6b08da52458f7536043df7dc3da181b084db8240d441ddc3d7c02d": {
+   "task_id": "19050",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 258048,
+   "upload_s": 0.3
+  },
+  "964e7b311e933799477fd793aa4e7721af35fe5c494fd9d995a6a620b162e516": {
+   "task_id": "19051",
+   "year": "2020",
+   "signature": "Pony",
+   "size": 351232,
+   "upload_s": 0.3
+  },
+  "40bcf1b92cac08e72eb025659bb892a41926ebd655f448ff5544ece312986987": {
+   "task_id": "19052",
+   "year": "2020",
+   "signature": "Pony",
+   "size": 600064,
+   "upload_s": 0.2
+  },
+  "52b6f57b2e7a9fc832227cc0ae02794e506358a295dadcf75387755a1b84b1ea": {
+   "task_id": "19053",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 459776,
+   "upload_s": 0.8
+  },
+  "da0a4e16ef4baf46f27e666e9b4547cdf17eafad3caa235df6c29a52d3da8d0a": {
+   "task_id": "19054",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 357376,
+   "upload_s": 0.6
+  },
+  "f75668dcd2d8c554bde126315253439858d2155588b1889473a7df5914537f10": {
+   "task_id": "19055",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 1753114,
+   "upload_s": 1.3
+  },
+  "23e3757121ff1a0c053d2dc66651ad8e2152373724a8091c56a7fae203401cab": {
+   "task_id": "19056",
+   "year": "2020",
+   "signature": "Pony",
+   "size": 672256,
+   "upload_s": 0.7
+  },
+  "c3e21f7b2bfc3da5e77b37f6556fb985e4402551bac45636a7488664e67d477f": {
+   "task_id": "19057",
+   "year": "2020",
+   "signature": "Hancitor",
+   "size": 689496,
+   "upload_s": 1.1
+  },
+  "f7333c98b0d4fac43070b0b17fb185a1934925d1be959cead7d44445abf84df7": {
+   "task_id": "19058",
+   "year": "2021",
+   "signature": "DarkComet",
+   "size": 671744,
+   "upload_s": 0.5
+  },
+  "29f9c88b451d133d42ecba93ec60768600748d9bf12611182f070539cc61b578": {
+   "task_id": "19059",
+   "year": "2021",
+   "signature": "TrickBot",
+   "size": 839733,
+   "upload_s": 4.9
+  },
+  "5925ecddcc4b4ea9017aad9abe70dfc47bb6aa63bd01a84536a8cd3cc039d781": {
+   "task_id": "19060",
+   "year": "2021",
+   "signature": "TrickBot",
+   "size": 544768,
+   "upload_s": 5.0
+  },
+  "c6e6ac05a991d12c28d6c57d49378e2a1c1a42bba6fdf686e9ccc8885a6ae8c8": {
+   "task_id": "19061",
+   "year": "2021",
+   "signature": "AZORult",
+   "size": 911872,
+   "upload_s": 4.2
+  },
+  "737ff2b259449c91d68130a8508b51544310a6e6b50891fdc5682e7d242a79b4": {
+   "task_id": "19062",
+   "year": "2021",
+   "signature": "AZORult",
+   "size": 454656,
+   "upload_s": 4.8
+  },
+  "a7c4aae68e13b16ed7d916ba7cde189381e597934b05a26d113a97c8ae8afdbf": {
+   "task_id": "19063",
+   "year": "2021",
+   "signature": "DarkComet",
+   "size": 532570,
+   "upload_s": 0.6
+  },
+  "3a311fa2632d70ba58f402a83270f3111ebd0074fe45ecfad273ebb8aecdd328": {
+   "task_id": "19064",
+   "year": "2021",
+   "signature": "TrickBot",
+   "size": 839733,
+   "upload_s": 0.7
+  },
+  "69947cfea7518aab0920c81530b9e643d0fd0a14b0686a5d13dc1500366f071d": {
+   "task_id": "19065",
+   "year": "2021",
+   "signature": "TrickBot",
+   "size": 340992,
+   "upload_s": 0.3
+  },
+  "4565983c56ad07456e1fedc689887813df0f0fbff3bb716e687347d53526d88b": {
+   "task_id": "19066",
+   "year": "2021",
+   "signature": "DarkComet",
+   "size": 673792,
+   "upload_s": 1.6
+  },
+  "0014daeadce3a90746e84a3ddb7388be202598fba7dc67826550df3456e70941": {
+   "task_id": "19067",
+   "year": "2021",
+   "signature": "TrickBot",
+   "size": 675883,
+   "upload_s": 1.7
+  },
+  "d634843da16ff74a676a748989cd01916cd86278dc96c0d45fa9872dd78ba251": {
+   "task_id": "19068",
+   "year": "2021",
+   "signature": "Pony",
+   "size": 309488,
+   "upload_s": 0.6
+  },
+  "95b999ce29d2e82dfe33e33261634d449466671debf78c2ebb4747e3434a1d9e": {
+   "task_id": "19069",
+   "year": "2021",
+   "signature": "TrickBot",
+   "size": 500736,
+   "upload_s": 2.9
+  },
+  "8b2c21c13d38bbf20fd65e3a6b840315e14d60c0dc7e131104a5ea8b73699953": {
+   "task_id": "19070",
+   "year": "2021",
+   "signature": "Pony",
+   "size": 655360,
+   "upload_s": 1.8
+  },
+  "4e0f7777fd3ba58bb20f7ceaebaff50b6dcc3191cf27519d83b5ad3db30b8f5e": {
+   "task_id": "19071",
+   "year": "2022",
+   "signature": "IcedID",
+   "size": 462848,
+   "upload_s": 131.8
+  },
+  "bf158ab1720e6a0da531b99de882c8c4c32eb5be8a0b1be6483156c561070641": {
+   "task_id": "19072",
+   "year": "2022",
+   "signature": "AZORult",
+   "size": 250880,
+   "upload_s": 0.6
+  },
+  "6f2ec2f8dd5ec28adb7f652496ad75db346fa32372247ece6a69e15d30314b1b": {
+   "task_id": "19073",
+   "year": "2022",
+   "signature": "RaccoonStealer",
+   "size": 5603840,
+   "upload_s": 1.2
+  },
+  "dcd86f777408e7767b916e617f98f7b4f5ef5a1e69b112aaa202ede4a55bc9cc": {
+   "task_id": "19074",
+   "year": "2022",
+   "signature": "RaccoonStealer",
+   "size": 524800,
+   "upload_s": 0.8
+  },
+  "a4905720789060b400839c087e9065758b548aa19af0071721567ac6796eba64": {
+   "task_id": "19075",
+   "year": "2022",
+   "signature": "RaccoonStealer",
+   "size": 1666264,
+   "upload_s": 0.7
+  },
+  "b86dadfd736a6c2644e96099bd6fa1f0c2ea395d757721e2b490f522b7952e9c": {
+   "task_id": "19076",
+   "year": "2022",
+   "signature": "Pony",
+   "size": 155648,
+   "upload_s": 0.5
+  },
+  "40722bb73834f97529b9fd9c497c6b6b6aaf3fe77ce61df40cbf46bf505a8fb9": {
+   "task_id": "19077",
+   "year": "2022",
+   "signature": "IcedID",
+   "size": 214528,
+   "upload_s": 0.7
+  },
+  "2a7176a246d4d5108c1d9efcff7ae86e3c95345379e53226175968ec306a3c47": {
+   "task_id": "19078",
+   "year": "2022",
+   "signature": "IcedID",
+   "size": 670835,
+   "upload_s": 2.4
+  },
+  "af5f6f066ffc8c375d6e4d1138d63da32014d7ea21b8b7582da0cd8b97794cbe": {
+   "task_id": "19079",
+   "year": "2022",
+   "signature": "IcedID",
+   "size": 165627,
+   "upload_s": 0.6
+  },
+  "8aa98f87e7d6ebc36689a7436795ec85a6b286e4c298ea82bc6f127ff98d0393": {
+   "task_id": "19080",
+   "year": "2022",
+   "signature": "RaccoonStealer",
+   "size": 219136,
+   "upload_s": 2.4
+  },
+  "313033a2d5bba8af7df75a0ff8b5b94cae7dbd074c1936a849050fd585aab969": {
+   "task_id": "19081",
+   "year": "2022",
+   "signature": "BumbleBee",
+   "size": 1682432,
+   "upload_s": 6.7
+  },
+  "00c66a686f58c9a107164c021b67920b8727c5869c521abf5989569915a46ab7": {
+   "task_id": "19082",
+   "year": "2022",
+   "signature": "AZORult",
+   "size": 184832,
+   "upload_s": 1.7
+  },
+  "78beecc828a622f7cde900a68e5653438b60f9bdaf5d733996c499241c6d7130": {
+   "task_id": "19083",
+   "year": "2022",
+   "signature": "BumbleBee",
+   "size": 2776576,
+   "upload_s": 1.7
+  },
+  "9c9a646099da045731162e08f6d04b1c386d81005580f27406fd2ae78ce237c1": {
+   "task_id": "19084",
+   "year": "2022",
+   "signature": "IcedID",
+   "size": 462848,
+   "upload_s": 0.9
+  },
+  "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6": {
+   "task_id": "19085",
+   "year": "2023",
+   "signature": "DarkComet",
+   "size": 12433920,
+   "upload_s": 4.0
+  },
+  "7faba2fe65c014143a60ef7ef4ec1c24933bec883f3d959cea44e039e01036cc": {
+   "task_id": "19086",
+   "year": "2023",
+   "signature": "AZORult",
+   "size": 644814,
+   "upload_s": 2.3
+  },
+  "aba7133b1ccdb78338fe271d73689bac4f40251b8fc194a9b86253a71e4017cc": {
+   "task_id": "19087",
+   "year": "2023",
+   "signature": "AZORult",
+   "size": 1872352,
+   "upload_s": 1.7
+  },
+  "77db3b54666b168d13a308be378cad1b8bb84db621f8055a03471a254d4c79ed": {
+   "task_id": "19088",
+   "year": "2023",
+   "signature": "IcedID",
+   "size": 320530,
+   "upload_s": 2.6
+  },
+  "43b1ea9d28fbd3c57dd563eb2097aa6555489795d3f060f2d03192b057878a39": {
+   "task_id": "19089",
+   "year": "2023",
+   "signature": "NanoCore",
+   "size": 330301,
+   "upload_s": 0.8
+  },
+  "08e362bf1810b2e4a97771b2890295d3c7dca17a112e0c82020e501d8fc6711d": {
+   "task_id": "19090",
+   "year": "2023",
+   "signature": "IcedID",
+   "size": 320512,
+   "upload_s": 1.0
+  },
+  "f7e80f5e92bd4d9267be950088a9f5b1117a873868329bba0e927701f87c8fec": {
+   "task_id": "19091",
+   "year": "2023",
+   "signature": "NanoCore",
+   "size": 652288,
+   "upload_s": 0.5
+  },
+  "d58a832f0f2ad0d394c07aefb0dd7ea8b925b10322e508496788a76ee864523a": {
+   "task_id": "19092",
+   "year": "2023",
+   "signature": "RaccoonStealer",
+   "size": 6310912,
+   "upload_s": 1.2
+  },
+  "9b0dbc01aa6c7f30a59ec59a0f184dc6ee7c91baa5732192b5d191ff1687a58a": {
+   "task_id": "19093",
+   "year": "2023",
+   "signature": "RaccoonStealer",
+   "size": 290304,
+   "upload_s": 0.8
+  },
+  "de3e53ef11c40625568ffbf773486d23efdbcc6831e1bca61915348940798ae9": {
+   "task_id": "19094",
+   "year": "2023",
+   "signature": "RaccoonStealer",
+   "size": 33573449,
+   "upload_s": 5.6
+  },
+  "4b67e4cea7a978c9a6a73d6217d2d55ee7d6ce3c2b5e6e6a4f59b5e5deb5a4e2": {
+   "task_id": "19095",
+   "year": "2023",
+   "signature": "DarkGate",
+   "size": 493056,
+   "upload_s": 0.3
+  },
+  "2a07b1741dbf216a188938d0fec870f8395374f760c6bf452f0a0479e975b018": {
+   "task_id": "19096",
+   "year": "2023",
+   "signature": "IcedID",
+   "size": 557960,
+   "upload_s": 0.5
+  },
+  "21c3b30041dc16f6fb0fe758c4cd1767e272133ff45dd21aee22506e6d9199aa": {
+   "task_id": "19097",
+   "year": "2023",
+   "signature": "Gh0stRAT",
+   "size": 122880,
+   "upload_s": 0.1
+  },
+  "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00": {
+   "task_id": "19098",
+   "year": "2023",
+   "signature": "Gh0stRAT",
+   "size": 36868,
+   "upload_s": 0.1
+  },
+  "2371d8edbb2a1245b01cc06a870ddca49acb3be47b25e0fddc5d1b0032780bdf": {
+   "task_id": "19099",
+   "year": "2024",
+   "signature": "Pony",
+   "size": 135168,
+   "upload_s": 0.1
+  },
+  "f6439b324a4baabf6a71339bae0d8f784e5ae660c106f3af6b8690d8310e2fd6": {
+   "task_id": "19100",
+   "year": "2024",
+   "signature": "CobaltStrike",
+   "size": 440320,
+   "upload_s": 1.2
+  },
+  "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c": {
+   "task_id": "19101",
+   "year": "2024",
+   "signature": "Pikabot",
+   "size": 1459816,
+   "upload_s": 0.4
+  },
+  "6a915f0e2eaa35eb47d70a933a4d8822d65e64ebea485d9dcb5657f1f4bd1cf8": {
+   "task_id": "19102",
+   "year": "2024",
+   "signature": "Sliver",
+   "size": 5043200,
+   "upload_s": 0.9
+  },
+  "a9b8879292fbf7bd63b7880cf9e1084040aa1c9adaf0b0f2d05e721696aae161": {
+   "task_id": "19103",
+   "year": "2024",
+   "signature": "NanoCore",
+   "size": 1090048,
+   "upload_s": 0.7
+  },
+  "56deefa3e5f170c045ab28f8db2f5a0cac6038e6516662f3b277082320f441be": {
+   "task_id": "19104",
+   "year": "2024",
+   "signature": "CobaltStrike",
+   "size": 8890880,
+   "upload_s": 1.3
+  },
+  "b09a8639b204d9529a6630b05962c7d4fb713d2fed400f6c963875cb61da025b": {
+   "task_id": "19105",
+   "year": "2024",
+   "signature": "CobaltStrike",
+   "size": 14720000,
+   "upload_s": 6.8
+  },
+  "c2bee3616cf5c0f19ecc5738ee39a8c3d0d0523c2178177b86563d5a3d758d0f": {
+   "task_id": "19106",
+   "year": "2024",
+   "signature": "Amadey",
+   "size": 2976768,
+   "upload_s": 3.1
+  },
+  "3efa9fdaaa74aaa54f0c90937d948bfc1159a3f920d94bd713bd5b2a69336d95": {
+   "task_id": "19107",
+   "year": "2024",
+   "signature": "Amadey",
+   "size": 1912832,
+   "upload_s": 4.5
+  },
+  "0809998772b4599b9dc190b7a69d282c8c938992f12ddc6d25a3c04559872580": {
+   "task_id": "19108",
+   "year": "2024",
+   "signature": "CobaltStrike",
+   "size": 3330569,
+   "upload_s": 3.1
+  },
+  "4593213d8126635e53fd87ed0e553e2b412cb218fbf69be7a78a6bf0d05a0777": {
+   "task_id": "19109",
+   "year": "2024",
+   "signature": "AZORult",
+   "size": 15814656,
+   "upload_s": 2.7
+  },
+  "a3ae935dad0de2657b032a70d1908f622b3cf54fc53f01a69d5f086e21ad4d9a": {
+   "task_id": "19110",
+   "year": "2024",
+   "signature": "Sliver",
+   "size": 15582720,
+   "upload_s": 4.4
+  },
+  "1940ba18ed66dd2f1c3d4dbd2fbf6cf3438bcdee1e108982fb557461106a8073": {
+   "task_id": "19111",
+   "year": "2024",
+   "signature": "Amadey",
+   "size": 1014784,
+   "upload_s": 0.6
+  },
+  "d1832886bd31bf7129fbd708123c19bbc633e4c12bde2affabbf69236f38afad": {
+   "task_id": "19112",
+   "year": "2024",
+   "signature": "AZORult",
+   "size": 225064,
+   "upload_s": 0.4
+  },
+  "5c1e7e7b83bc21cebd4ce833cac790ddc3c1f5d1c872fd009aed09b541764b91": {
+   "task_id": "19113",
+   "year": "2025",
+   "signature": "GuLoader",
+   "size": 1092936,
+   "upload_s": 0.7
+  },
+  "a916da6ae395e55faf0a85ffea80cf0dd33c385c407c359c2f3f0751c31bfbcc": {
+   "task_id": "19114",
+   "year": "2025",
+   "signature": "LummaStealer",
+   "size": 1789952,
+   "upload_s": 1.6
+  },
+  "e828e55c7c7fb2ebbfcc527acdf728dd8e9cd219a1a64956151b61ef5ddb2436": {
+   "task_id": "19115",
+   "year": "2025",
+   "signature": "QuasarRAT",
+   "size": 3266048,
+   "upload_s": 0.6
+  },
+  "77fa111600d55f4f47e458ff3958e050ff1b9b1a4d42592d7e0dce1f5ed1ef8c": {
+   "task_id": "19116",
+   "year": "2025",
+   "signature": "LummaStealer",
+   "size": 1789440,
+   "upload_s": 0.7
+  },
+  "b073bd6963c36cd4ea37acf1ccd75d418ac3e293a51e8accebc96a97215ddf81": {
+   "task_id": "19117",
+   "year": "2025",
+   "signature": "njrat",
+   "size": 25999,
+   "upload_s": 0.4
+  },
+  "c12a1b39a379333a188cae48cabda5eaecfed024220bf6495aca025498d6c0fd": {
+   "task_id": "19118",
+   "year": "2025",
+   "signature": "GuLoader",
+   "size": 1032992,
+   "upload_s": 0.6
+  },
+  "c9da3969931b59d99a6b21cfabd2677c6c58b848d0a6b19b8c1a9112a2e61e21": {
+   "task_id": "19119",
+   "year": "2025",
+   "signature": "njrat",
+   "size": 7122778,
+   "upload_s": 1.7
+  },
+  "4a0e6efe7da756a13dd1f1f7fe3a9a24f62e03ac4181e56a9b1e9e46045ff036": {
+   "task_id": "19120",
+   "year": "2025",
+   "signature": "NanoCore",
+   "size": 215040,
+   "upload_s": 0.5
+  },
+  "6eca9859b0f441c63c622a58b57be1598e9ede0b0970a6bad1d29c4039d6b677": {
+   "task_id": "19121",
+   "year": "2025",
+   "signature": "RedLineStealer",
+   "size": 1174528,
+   "upload_s": 1.3
+  },
+  "3f4f590c05779739682febe1a385ffad835f534808b5973aface4ee816e2aa9e": {
+   "task_id": "19122",
+   "year": "2025",
+   "signature": "Amadey",
+   "size": 1910272,
+   "upload_s": 0.8
+  },
+  "a1439e46019a544b1dd5712b8e2f72c5e35c278964a8f093e7d436f15b333d63": {
+   "task_id": "19123",
+   "year": "2025",
+   "signature": "QuasarRAT",
+   "size": 3266048,
+   "upload_s": 0.9
+  },
+  "001628993305ca95ed6f7854e0f7dbac369c37e6f648616c342129e66d91676e": {
+   "task_id": "19124",
+   "year": "2025",
+   "signature": "Gh0stRAT",
+   "size": 1273856,
+   "upload_s": 0.5
+  },
+  "08edc97f63cc5d7ac7ce2fa46811098fd03404bca7a7030d7e17cfc00038052a": {
+   "task_id": "19125",
+   "year": "2025",
+   "signature": "njrat",
+   "size": 623616,
+   "upload_s": 0.6
+  },
+  "1aab32f769ba3b4e2c651fb2f34acc5d5f251ff0b2972a5ea1fd8367b8274c06": {
+   "task_id": "19126",
+   "year": "2025",
+   "signature": "RedLineStealer",
+   "size": 1177088,
+   "upload_s": 0.9
+  },
+  "dd426a8f168871393bec760724228c0584e80519c5069b4969a663846afdb88e": {
+   "task_id": "19127",
+   "year": "2026",
+   "signature": "Havoc",
+   "size": 6278144,
+   "upload_s": 1.3
+  },
+  "77940063fcd0f276c574ea55967eb0834939e8d201922be88ffc53309351a3d1": {
+   "task_id": "19128",
+   "year": "2026",
+   "signature": "RemcosRAT",
+   "size": 301759,
+   "upload_s": 0.5
+  },
+  "e72be8b18b92fa5444ba5e3bf8f5b84a2a5386692f9a6e06d490b43d84f0024c": {
+   "task_id": "19129",
+   "year": "2026",
+   "signature": "LummaStealer",
+   "size": 2814976,
+   "upload_s": 0.7
+  },
+  "6da676db8e7ca7727cc19b92aa9e4beebbc82e41bb0ebf04e022edbaf090e333": {
+   "task_id": "19130",
+   "year": "2026",
+   "signature": "RemcosRAT",
+   "size": 918536,
+   "upload_s": 0.4
+  },
+  "b9b052dfb2f19bf15aaba81f07861234f91a72a5c38d83c176a7a4dcdbb2e8c1": {
+   "task_id": "19131",
+   "year": "2026",
+   "signature": "DarkComet",
+   "size": 762880,
+   "upload_s": 1.2
+  },
+  "eec9f3f49fe6d50c633c2cec1d18f4cb3d31d71e7c851fd52d83843c6e2bcd0f": {
+   "task_id": "19132",
+   "year": "2026",
+   "signature": "RedLineStealer",
+   "size": 97792,
+   "upload_s": 0.3
+  },
+  "1ab39bc014f6b6124fbd72d6f6390af9dbb0b67b50112e911c508b81318a3c8d": {
+   "task_id": "19133",
+   "year": "2026",
+   "signature": "LummaStealer",
+   "size": 513024,
+   "upload_s": 0.5
+  },
+  "640d4390b574d98cd36bd206a65fceec9c322b4008a915519f55a8d39265c78c": {
+   "task_id": "19134",
+   "year": "2026",
+   "signature": "GuLoader",
+   "size": 490100,
+   "upload_s": 0.8
+  },
+  "5bfd0fcebd3e1ec9dcd472c4597165c6787c56ecc77eaa4855c5e918e6812cd3": {
+   "task_id": "19135",
+   "year": "2026",
+   "signature": "RemcosRAT",
+   "size": 1547776,
+   "upload_s": 0.6
+  },
+  "123b6141959b472dbbf2f0e8fd0d1316d35866efe23ce8a354e3b0dacafa8fde": {
+   "task_id": "19136",
+   "year": "2026",
+   "signature": "CobaltStrike",
+   "size": 1756672,
+   "upload_s": 2.2
+  },
+  "cc6f82015fc2e26a65da84db2dc0e41cc63f5ca735150a5ad55b9f474f0673f3": {
+   "task_id": "19137",
+   "year": "2026",
+   "signature": "NanoCore",
+   "size": 207872,
+   "upload_s": 0.6
+  },
+  "87e4d0e94f94dd01a4c6e30f6ee7b612bc6dad0581075bf43fef6f24053e6676": {
+   "task_id": "19138",
+   "year": "2026",
+   "signature": "njrat",
+   "size": 161792,
+   "upload_s": 0.4
+  },
+  "32cc6624192e6882d959793c887ef9e116aedc68ceef1ec8d4dbf11609d00d02": {
+   "task_id": "19139",
+   "year": "2026",
+   "signature": "njrat",
+   "size": 33280,
+   "upload_s": 0.4
+  },
+  "8f6502f9cc4e6916a6481bf77b2e52473143f39a6fb258186edbb146e577fa65": {
+   "task_id": "19140",
+   "year": "2026",
+   "signature": "AsyncRAT",
+   "size": 28672,
+   "upload_s": 0.3
+  },
+  "a06d2f622eb4e0403f8a8198898d2ae1d26b5f897cedadcb68cc95b888dc7525": {
+   "task_id": "19141",
+   "year": "2026",
+   "signature": "GuLoader",
+   "size": 645314,
+   "upload_s": 0.5
+  },
+  "bdfc24d604f256170914e2f360d8b6ed30182fe8682fc11aa136dec7a5fb1876": {
+   "task_id": "19142",
+   "year": "2023",
+   "signature": "NanoCore",
+   "size": 801792,
+   "upload_s": 0.7
+  },
+  "1baf22dc62474324dd17936b25c461beb7890d35c29df742f918764ffeb065bc": {
+   "task_id": "19143",
+   "year": "2020",
+   "signature": "DarkComet",
+   "size": 1540096,
+   "upload_s": 0.6
+  }
+ }
+}

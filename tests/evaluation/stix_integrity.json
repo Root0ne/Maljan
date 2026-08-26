@@ -1,0 +1,346 @@
+{
+  "schema": "maljan-stix-integrity/v1",
+  "instrument": "OASIS cti-stix-validator 3.3.1, STIX 2.1, enforce_refs=True",
+  "note": "Real-bundle sample is small (n=4) and every aggregate below should be read that way. They are authentic pipeline output, which is why they are used at all: the defect classes this pass exists for come from LLM generation and cannot be produced without it.",
+  "current_emitter": {
+    "note": "A bundle built directly from the production STIX models \u2014 the arm that moves when the emitter changes. The stored bundles below predate the 2026-08-08 spec_version fix.",
+    "validator": {
+      "clean": true,
+      "errors": [],
+      "n_errors": 0,
+      "warnings": [
+        "indicator--6b5a9df6-97ab-48b2-b1d2-1a64adf7abaa: {303} Both the name and description properties SHOULD be present."
+      ],
+      "n_warnings": 1,
+      "n_ref_warnings": 0
+    }
+  },
+  "real_bundles": {
+    "n": 4,
+    "clean_without_pass": 0,
+    "clean_with_pass": 0,
+    "total_objects_removed": 0,
+    "per_bundle": [
+      {
+        "sample": "f04927e0d8d1",
+        "pass_off": {
+          "objects": 7,
+          "attack_patterns": 3,
+          "indicators": 0,
+          "relationships": 3,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "pass_on": {
+          "objects": 7,
+          "attack_patterns": 3,
+          "indicators": 0,
+          "relationships": 3,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_removed": 0
+      },
+      {
+        "sample": "000ac83fe38c",
+        "pass_off": {
+          "objects": 29,
+          "attack_patterns": 14,
+          "indicators": 0,
+          "relationships": 14,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "pass_on": {
+          "objects": 29,
+          "attack_patterns": 14,
+          "indicators": 0,
+          "relationships": 14,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_removed": 0
+      },
+      {
+        "sample": "11e77149273c",
+        "pass_off": {
+          "objects": 3,
+          "attack_patterns": 1,
+          "indicators": 0,
+          "relationships": 1,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "pass_on": {
+          "objects": 3,
+          "attack_patterns": 1,
+          "indicators": 0,
+          "relationships": 1,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_removed": 0
+      },
+      {
+        "sample": "4565983c56ad",
+        "pass_off": {
+          "objects": 11,
+          "attack_patterns": 5,
+          "indicators": 0,
+          "relationships": 5,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "pass_on": {
+          "objects": 11,
+          "attack_patterns": 5,
+          "indicators": 0,
+          "relationships": 5,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_removed": 0
+      }
+    ]
+  },
+  "injected_defects": {
+    "n": 4,
+    "clean_when_broken": 0,
+    "clean_after_repair": 0,
+    "objects_preserved_vs_rejection": 53,
+    "per_bundle": [
+      {
+        "sample": "f04927e0d8d1",
+        "defects_injected": 3,
+        "broken": {
+          "objects": 10,
+          "attack_patterns": 4,
+          "indicators": 1,
+          "relationships": 4,
+          "dangling_relationships": 1,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "repaired": {
+          "objects": 8,
+          "attack_patterns": 4,
+          "indicators": 0,
+          "relationships": 3,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_rejection_would_discard": 10,
+        "objects_repair_preserves": 8
+      },
+      {
+        "sample": "000ac83fe38c",
+        "defects_injected": 3,
+        "broken": {
+          "objects": 32,
+          "attack_patterns": 15,
+          "indicators": 1,
+          "relationships": 15,
+          "dangling_relationships": 1,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "repaired": {
+          "objects": 29,
+          "attack_patterns": 14,
+          "indicators": 0,
+          "relationships": 14,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_rejection_would_discard": 32,
+        "objects_repair_preserves": 29
+      },
+      {
+        "sample": "11e77149273c",
+        "defects_injected": 3,
+        "broken": {
+          "objects": 6,
+          "attack_patterns": 2,
+          "indicators": 1,
+          "relationships": 2,
+          "dangling_relationships": 1,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "repaired": {
+          "objects": 4,
+          "attack_patterns": 2,
+          "indicators": 0,
+          "relationships": 1,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_rejection_would_discard": 6,
+        "objects_repair_preserves": 4
+      },
+      {
+        "sample": "4565983c56ad",
+        "defects_injected": 3,
+        "broken": {
+          "objects": 14,
+          "attack_patterns": 6,
+          "indicators": 1,
+          "relationships": 6,
+          "dangling_relationships": 1,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "repaired": {
+          "objects": 12,
+          "attack_patterns": 6,
+          "indicators": 0,
+          "relationships": 5,
+          "dangling_relationships": 0,
+          "validator": {
+            "clean": false,
+            "errors": [
+              "Cannot locate a schema for the object's type, nor the base schema (core.json)."
+            ],
+            "n_errors": 1,
+            "warnings": [],
+            "n_warnings": 0,
+            "n_ref_warnings": 0
+          }
+        },
+        "objects_rejection_would_discard": 14,
+        "objects_repair_preserves": 12
+      }
+    ]
+  }
+}

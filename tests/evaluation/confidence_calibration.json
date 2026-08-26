@@ -1,0 +1,1682 @@
+[
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1140",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1547.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1105",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1027",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1547.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1033",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1105",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1105",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1140",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1547.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1059.003",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1105",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1140",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1547.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1055.012",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1105",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1059",
+    "confidence": 0.8,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1027",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1547.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1059.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1105",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "dropper_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1115",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1041",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1115",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1115",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1041",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1115",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1041",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1115",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1041",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "infostealer_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1560.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1564.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1560.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1489",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1560.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1007",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1560.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1005",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1041",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1560.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1490.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1490",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1489",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "ransomware_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1497.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1082",
+    "confidence": 0.9,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1571",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1571",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1082",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1055",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1003.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1057",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071.001",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "rat_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1071",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 0,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1546.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 0,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1021.002",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 0,
+    "technique_id": "T1071.001",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 1,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1546.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 1,
+    "technique_id": "T1021.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1021.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 1,
+    "technique_id": "T1071.001",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1546.010",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 2,
+    "technique_id": "T1546.010",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1546.010",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 2,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 2,
+    "technique_id": "T1496",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 3,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1546.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 3,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1496",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 3,
+    "technique_id": "T1190",
+    "confidence": 0.95,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1546.010",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1546.010",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "static",
+    "repeat": 4,
+    "technique_id": "T1546.010",
+    "confidence": 0.8,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1546.002",
+    "confidence": 1.0,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "dynamic",
+    "repeat": 4,
+    "technique_id": "T1486",
+    "confidence": 1.0,
+    "correct": 1
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1021.002",
+    "confidence": 0.9,
+    "correct": 0
+  },
+  {
+    "sample_id": "worm_sample_1",
+    "channel": "network",
+    "repeat": 4,
+    "technique_id": "T1190",
+    "confidence": 0.8,
+    "correct": 1
+  }
+]

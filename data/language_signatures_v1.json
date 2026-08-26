@@ -1,0 +1,86 @@
+{
+  "schema": "maljan-language-signatures/v1",
+  "version": "1.0",
+  "_note": "Source-language and runtime fingerprints for compiled binaries. Scored 3x strong + 1x weak; highest total wins, ties broken by list order. Strong markers are runtime symbols or section names that only that toolchain emits; weak markers are suggestive but shared. Deliberately does NOT cover MSVC/MFC/MinGW — the Rich-header and linker-version path in _pe_compiler_fingerprint identifies those far more precisely than any string table could.",
+  "languages": [
+    {
+      "name": "Go",
+      "min_score": 3,
+      "strong": ["Go build ID", ".gopclntab", "runtime.gopanic", "go.buildinfo", "runtime.morestack"],
+      "weak": ["golang", "goroutine", "runtime.gc", "GOMAXPROCS"]
+    },
+    {
+      "name": "Rust",
+      "min_score": 3,
+      "strong": ["rust_begin_unwind", "rust_eh_personality", "core::panicking", "RUST_BACKTRACE"],
+      "weak": ["rustc", "cargo", "alloc::raw_vec"]
+    },
+    {
+      "name": "Nim",
+      "min_score": 3,
+      "strong": ["nimFrame", "NimMain", "nimGCvisit", "nimCopyMem"],
+      "weak": ["stdlib_system", "nim"]
+    },
+    {
+      "name": "Zig",
+      "min_score": 3,
+      "strong": ["zig_probe_stack", "std.builtin", "__zig_return_error"],
+      "weak": ["zig"]
+    },
+    {
+      "name": "D",
+      "min_score": 3,
+      "strong": ["_Dmain", "rt_init", "TypeInfo_Struct"],
+      "weak": ["druntime", "phobos"]
+    },
+    {
+      "name": "Python (PyInstaller)",
+      "min_score": 3,
+      "strong": ["PYZ-00.pyz", "pyi-runtime-tmpdir", "_MEIPASS", "pyi_rth_"],
+      "weak": [".pyz", "python3", "PyInstaller"]
+    },
+    {
+      "name": "Python (py2exe)",
+      "min_score": 3,
+      "strong": ["PY2EXE_VERBOSE", "py2exe"],
+      "weak": ["zipextimporter"]
+    },
+    {
+      "name": "AutoIt",
+      "min_score": 3,
+      "strong": ["AU3!EA06", "AutoIt v3", ">>>AUTOIT SCRIPT<<<"],
+      "weak": ["autoit"]
+    },
+    {
+      "name": "Delphi / Object Pascal",
+      "min_score": 3,
+      "strong": ["Borland", "TObject", "SysUtils", "Embarcadero"],
+      "weak": ["Delphi", "TForm", "vcl"]
+    },
+    {
+      "name": ".NET / C#",
+      "min_score": 3,
+      "strong": ["mscoree.dll", "_CorExeMain", "#Strings", "#Blob", "System.Runtime"],
+      "weak": ["mscorlib", "System.Reflection", "v4.0.30319"]
+    },
+    {
+      "name": "Java",
+      "min_score": 3,
+      "strong": ["JNI_CreateJavaVM", "java/lang/Object", "META-INF/MANIFEST.MF"],
+      "weak": ["jvm.dll", "javaw"]
+    },
+    {
+      "name": "Node.js (pkg/nexe)",
+      "min_score": 3,
+      "strong": ["NODE_SEA_BLOB", "pkg/prelude/bootstrap.js", "__nexe"],
+      "weak": ["node.js", "v8::internal"]
+    },
+    {
+      "_note": "Last on purpose. A packed binary's real source language is compressed away, so this only wins when nothing else matched — which is the correct answer for a UPX stub. The packer itself is identified properly in packer_signatures_v1.json; this entry exists so language_or_compiler says 'packed' rather than going blank, which would read as 'not checked'.",
+      "name": "C/C++ (UPX packed)",
+      "min_score": 3,
+      "strong": ["UPX!"],
+      "weak": ["UPX0", "UPX1"]
+    }
+  ]
+}

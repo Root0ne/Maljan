@@ -1,0 +1,125 @@
+[project]
+name = "maljan"
+version = "1.0.0"
+description = "Multi-Agent Malware Analysis Pipeline powered by LangGraph"
+readme = "README.md"
+requires-python = ">=3.13, <3.14"
+dependencies = [
+    "langchain-core>=1.2.25",
+    "langchain-openai>=1.1.12",
+    "langchain-anthropic>=0.3.15",
+    "langchain-ollama>=0.3.3",
+    "langgraph>=1.1.6",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
+    "tiktoken>=0.9.0",
+    "typer>=0.16.0",
+    "qdrant-client>=1.17.1",
+    "fastembed>=0.4.2",
+    "httpx>=0.28.1",
+    "pyyaml>=6.0.3",
+    "pysigma>=1.3.3",
+    "networkx>=3.6.1",
+    "mcp>=1.26.0",
+    "nest-asyncio>=1.6.0",
+    "fastmcp>=3.2.4",
+    "langchain>=1.2.15",
+    "langchain-google-genai>=4.2.1",
+    "pefile>=2024.8.26",
+    "scapy>=2.6.1",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "redis>=5.0.0",
+    "arq>=0.26.1",
+    "minio>=7.2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.6",
+    "alembic>=1.14.0",
+    "filetype>=1.2.0",
+    "pyelftools>=0.32",
+    # Report export (Phase 6). markdown-it-py converts the MarkdownRenderer
+    # output to HTML with raw-HTML passthrough disabled — the XSS guard for
+    # LLM/malware-derived report text. weasyprint prints that HTML to PDF; it
+    # binds to Pango/HarfBuzz at call time, which docker/Dockerfile.backend
+    # installs, and PdfRenderer degrades with a clear error where they are absent.
+    "markdown-it-py>=3.0.0",
+    "weasyprint>=62.0",
+]
+
+[project.scripts]
+maljan = "maljan.cli:main"
+
+[project.optional-dependencies]
+yara = [
+    "yara-python>=4.5.4",
+]
+
+[dependency-groups]
+dev = [
+    "fakeredis>=2.35.1",
+    "mypy>=1.20.0",
+    "pre-commit>=4.2.0",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-mock>=3.15.1",
+    # AES-zip extraction for the §4 Item 5 sample downloader
+    # (collect_temporal_manifest.py --download); MalwareBazaar ships WinZip-AES
+    # archives the stdlib zipfile cannot decrypt.
+    "pyzipper>=0.3.6",
+    # SVG to PDF for the architecture figure. The figure is authored as SVG so
+    # it can be edited, and the document needs PDF; cairosvg renders it with the
+    # two font families the document already embeds, which is what keeps the
+    # conformance check that counts families at two.
+    "cairosvg>=2.9.0",
+    "ruff>=0.15.9",
+    "stix2-validator>=3.3.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Agent files contain LLM prompt strings that are intentionally long
+"src/maljan/agents/*.py" = ["E501"]
+# FastAPI dependency injection and query params are standard patterns
+# (configured in apps/api/pyproject.toml because that sub-package has its own Ruff config)
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "langgraph.*",
+    "langchain_core.*",
+    "langchain_openai.*",
+    "langchain_anthropic.*",
+    "langchain_ollama.*",
+    "tiktoken.*",
+    "typer.*",
+    "qdrant_client.*",
+    "httpx.*",
+    "langsmith.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "apps/api"]
+markers = [
+    # The offline re-analysis at its real iteration count takes about half a
+    # minute. It runs in `make check`; the marker exists so a tight edit loop can
+    # skip it with `-m "not slow"`.
+    "slow: takes more than a few seconds",
+]

@@ -1,0 +1,30 @@
+{
+ "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c:on": {
+  "seconds": 200.5,
+  "n_claims": 8,
+  "technique_ids": [
+   "T1027",
+   "T1055",
+   "T1057",
+   "T1102",
+   "T1105",
+   "T1134"
+  ],
+  "hint_on": true
+ },
+ "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c:off": {
+  "seconds": 150.1,
+  "n_claims": 5,
+  "technique_ids": [
+   "T1027",
+   "T1055"
+  ],
+  "hint_on": false
+ },
+ "000b535ab2a4fec86e2d8254f8ed65c6ebd37309ed68692c929f8f93a99233f6:on": {
+  "seconds": 1545.2,
+  "n_claims": 1,
+  "technique_ids": [],
+  "hint_on": true
+ }
+}

@@ -1,0 +1,112 @@
+{
+  "schema": "maljan-packer-signatures/v1",
+  "version": "1.0",
+  "_note": "Packer and protector fingerprints, authored from public tool documentation and observable section layouts. Section names are the strongest evidence and strings the weakest — a string like 'UPX!' appears in every scanner's own signature table, including this file, so a string-only match never reaches the confidence a section-name match does.",
+  "packers": [
+    {
+      "name": "UPX",
+      "kind": "packer",
+      "sections": ["UPX0", "UPX1", "UPX2", "UPX3", ".UPX0", ".UPX1"],
+      "ep_sections": ["UPX1", "UPX2"],
+      "strings": ["UPX!", "This file is packed with the UPX", "$Info: This file is packed"]
+    },
+    {
+      "name": "ASPack",
+      "kind": "packer",
+      "sections": [".aspack", ".adata", "ASPack"],
+      "ep_sections": [".aspack"],
+      "strings": ["aPLib", "ASPack"]
+    },
+    {
+      "name": "Themida / WinLicense",
+      "kind": "protector",
+      "sections": [".themida", ".winlice", ".taz", ".Themida"],
+      "ep_sections": [".themida", ".winlice"],
+      "strings": ["Themida", "WinLicense", "Oreans Technologies"]
+    },
+    {
+      "name": "VMProtect",
+      "kind": "protector",
+      "sections": [".vmp0", ".vmp1", ".vmp2", ".vmp3"],
+      "ep_sections": [".vmp0", ".vmp1"],
+      "strings": ["VMProtect begin", "VMProtect", ".vmp"]
+    },
+    {
+      "name": "MPRESS",
+      "kind": "packer",
+      "sections": [".MPRESS1", ".MPRESS2", "MPRESS1", "MPRESS2"],
+      "ep_sections": [".MPRESS1"],
+      "strings": ["MPRESS1", "MPRESS2H"]
+    },
+    {
+      "name": "PECompact",
+      "kind": "packer",
+      "sections": ["pec1", "pec2", "PEC2", ".pec"],
+      "ep_sections": ["pec1"],
+      "strings": ["PECompact2", "PEC2"]
+    },
+    {
+      "name": "Petite",
+      "kind": "packer",
+      "sections": [".petite", "petite"],
+      "ep_sections": [".petite"],
+      "strings": ["petite", "Petite"]
+    },
+    {
+      "name": "FSG",
+      "kind": "packer",
+      "sections": ["FSG!"],
+      "ep_sections": [],
+      "strings": ["FSG!", "FSG v"]
+    },
+    {
+      "name": "NSPack",
+      "kind": "packer",
+      "sections": ["nsp0", "nsp1", "nsp2", ".nsp0", ".nsp1"],
+      "ep_sections": ["nsp1"],
+      "strings": ["NsPacK", "nspack"]
+    },
+    {
+      "name": "Enigma Protector",
+      "kind": "protector",
+      "sections": [".enigma1", ".enigma2"],
+      "ep_sections": [".enigma1"],
+      "strings": ["Enigma Protector", "enigma_"]
+    },
+    {
+      "name": "MEW",
+      "kind": "packer",
+      "sections": ["MEW"],
+      "ep_sections": [],
+      "strings": ["MEW 11 SE", "Northfox"]
+    },
+    {
+      "name": "Obsidium",
+      "kind": "protector",
+      "sections": [".obsidium"],
+      "ep_sections": [".obsidium"],
+      "strings": ["Obsidium"]
+    },
+    {
+      "name": "ConfuserEx",
+      "kind": "dotnet_obfuscator",
+      "sections": [],
+      "ep_sections": [],
+      "strings": ["ConfuserEx", "Confuser.Core", "ConfusedByAttribute"]
+    },
+    {
+      "name": "SmartAssembly",
+      "kind": "dotnet_obfuscator",
+      "sections": [],
+      "ep_sections": [],
+      "strings": ["SmartAssembly", "PoweredByAttribute"]
+    },
+    {
+      "name": ".NET Reactor",
+      "kind": "dotnet_obfuscator",
+      "sections": [],
+      "ep_sections": [],
+      "strings": ["NETReactor", ".NET Reactor", "Eziriz"]
+    }
+  ]
+}

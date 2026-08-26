@@ -1,0 +1,156 @@
+"""Unit tests for the platform-inference helper added in Wave 4."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from maljan.extractors.sample_identity import (
+    _detect_language_or_compiler,
+    _infer_platform,
+    unsupported_os_reason,
+)
+
+
+class TestCompilerDetection:
+    """2026-07 round 2: compiler/language fingerprint via byte markers + PE
+    Rich header / linker version / import heuristics (was a 6-marker stub that
+    returned None for ordinary MSVC PEs)."""
+
+    def test_byte_markers(self) -> None:
+        assert _detect_language_or_compiler(b"MZ..Go build ID: abc") == "Go"
+        assert _detect_language_or_compiler(b"MZ.." + b"UPX!" + b"x" * 100) == "C/C++ (UPX packed)"
+
+    def test_one_suggestive_string_is_not_an_identification(self) -> None:
+        """Changed 2026-07-27, deliberately.
+
+        This used to assert that ``b"MZ..rustc-1.70 stuff"`` identifies Rust.
+        It does not, and should not: ``rustc`` appears in anything that merely
+        *mentions* the Rust toolchain — a scanner carrying Rust signatures, a
+        build log embedded in a resource, this repository. The scored catalog
+        weights it as a weak marker worth 1 against a minimum of 3, so a real
+        Rust binary (which carries ``rust_begin_unwind`` and
+        ``core::panicking`` as well) still resolves, and a passing mention no
+        longer does.
+        """
+        assert _detect_language_or_compiler(b"MZ..rustc-1.70 stuff") is None
+        assert (
+            _detect_language_or_compiler(b"MZ..rustc-1.70..rust_begin_unwind..core::panicking..")
+            == "Rust"
+        )
+
+    def test_none_for_empty_or_non_pe(self) -> None:
+        assert _detect_language_or_compiler(b"") is None
+        assert _detect_language_or_compiler(b"not a binary at all") is None
+
+    def test_real_mfc_sample_detected(self) -> None:
+        sample = (
+            Path(__file__).resolve().parents[3]
+            / "data"
+            / "samples"
+            / "11e77149273cd76c7184bb3e71495fa96c500b3464c6db24d73a40396f591b00.exe"
+        )
+        if not sample.exists():
+            pytest.skip("sample not present in this checkout")
+        result = _detect_language_or_compiler(sample.read_bytes())
+        assert result is not None
+        assert "Visual C++" in result
+        assert "MFC" in result
+
+
+# OS-support scope (2026-06-02): Windows + Linux only. Every other executable
+# format (Mach-O, APK/DEX, IPA, jar) resolves to "unknown".
+@pytest.mark.parametrize(
+    ("file_type", "expected"),
+    [
+        ("PE", "windows"),
+        ("pe", "windows"),
+        ("ELF", "linux"),
+        ("Mach-O", "unknown"),
+        ("ZIP/APK", "unknown"),
+        ("ZIP/IPA", "unknown"),
+        ("ZIP/JAR", "unknown"),
+        ("PDF", "unknown"),
+        ("ZIP", "unknown"),
+        ("unknown", "unknown"),
+        ("", "unknown"),
+    ],
+)
+def test_infer_platform_from_file_type(file_type: str, expected: str) -> None:
+    assert _infer_platform(file_type, None, None) == expected
+
+
+def test_infer_platform_sandbox_fallback_windows() -> None:
+    sb = {"target": {"os": "windows10"}}
+    assert _infer_platform("unknown", None, sb) == "windows"
+
+
+def test_infer_platform_foreign_sandbox_hint_is_unknown() -> None:
+    # A foreign (non-Win/Linux) sandbox hint resolves to unknown / out of scope.
+    sb = {"target": {"platform": "android-11"}}
+    assert _infer_platform("unknown", None, sb) == "unknown"
+
+
+def test_infer_platform_mime_fallback_windows() -> None:
+    # Sandbox said nothing but MIME hints at PE.
+    assert _infer_platform("unknown", "application/x-msdownload", None) == "windows"
+
+
+def test_infer_platform_file_type_wins_over_sandbox() -> None:
+    # Magic bytes beat a misrouted sandbox: an ELF in a Windows profile is linux.
+    sb = {"target": {"os": "windows10"}}
+    assert _infer_platform("ELF", None, sb) == "linux"
+
+
+def test_infer_platform_unknown_when_nothing_disambiguates() -> None:
+    assert _infer_platform("unknown", None, None) == "unknown"
+    assert _infer_platform("unknown", "application/octet-stream", {}) == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# unsupported_os_reason — OS-support scope (2026-06-02): Windows + Linux only.
+# Definitely-foreign samples are rejected; Win/Linux samples are never blocked.
+# ---------------------------------------------------------------------------
+class TestUnsupportedOsReason:
+    def _write(self, tmp_path: Path, name: str, magic: bytes) -> Path:
+        p = tmp_path / name
+        p.write_bytes(magic + b"\x00" * 32)
+        return p
+
+    def test_mach_o_magic_rejected(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, "evil.bin", b"\xcf\xfa\xed\xfe")
+        assert unsupported_os_reason(p) == "unsupported format (Mach-O)"
+
+    def test_apk_magic_rejected(self, tmp_path: Path) -> None:
+        # PK zip magic + .apk suffix -> ZIP/APK.
+        p = self._write(tmp_path, "evil.apk", b"PK\x03\x04")
+        assert unsupported_os_reason(p) == "unsupported format (APK)"
+
+    def test_dmg_by_extension_rejected(self, tmp_path: Path) -> None:
+        # No distinctive header -> extension fallback.
+        p = self._write(tmp_path, "evil.dmg", b"\x00\x01\x02\x03")
+        assert unsupported_os_reason(p) == "unsupported format (.dmg)"
+
+    def test_dex_by_extension_rejected(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, "evil.dex", b"dex\n")
+        assert unsupported_os_reason(p) == "unsupported format (.dex)"
+
+    def test_pe_accepted(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, "evil.exe", b"MZ")
+        assert unsupported_os_reason(p) is None
+
+    def test_elf_accepted(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, "evil.elf", b"\x7fELF")
+        assert unsupported_os_reason(p) is None
+
+    def test_unknown_windowsish_accepted(self, tmp_path: Path) -> None:
+        # Unknown magic + non-foreign extension must NOT be rejected.
+        p = self._write(tmp_path, "evil.dat", b"\x00\x01\x02\x03")
+        assert unsupported_os_reason(p) is None
+
+    def test_none_and_phantom_path_return_none(self, tmp_path: Path) -> None:
+        assert unsupported_os_reason(None) is None
+        # A non-existent .apk path is not a file -> not rejected here (the
+        # metadata-only path handles missing samples).
+        assert unsupported_os_reason(tmp_path / "ghost.apk") is None

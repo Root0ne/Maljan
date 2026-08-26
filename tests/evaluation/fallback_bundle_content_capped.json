@@ -1,0 +1,104 @@
+{
+ "schema": "fallback-bundle-content/v1",
+ "n_calls": 4,
+ "identical_sets": 0,
+ "techniques_only_on_fallback_path": 47,
+ "techniques_only_on_reconciled_path": 0,
+ "per_call": [
+  {
+   "sample_id": "jhuhugit",
+   "reason": "no_json_in_response",
+   "fallback_n": 32,
+   "cascade_n": 20,
+   "shared": 20,
+   "only_in_fallback": [
+    "T1027",
+    "T1046",
+    "T1053",
+    "T1059",
+    "T1071",
+    "T1078",
+    "T1082",
+    "T1083",
+    "T1190",
+    "T1486",
+    "T1490",
+    "T1562"
+   ],
+   "only_in_cascade": [],
+   "jaccard": 0.625,
+   "identical": false
+  },
+  {
+   "sample_id": "sardonic",
+   "reason": "no_json_in_response",
+   "fallback_n": 27,
+   "cascade_n": 25,
+   "shared": 25,
+   "only_in_fallback": [
+    "T1055",
+    "T1059"
+   ],
+   "only_in_cascade": [],
+   "jaccard": 0.9259,
+   "identical": false
+  },
+  {
+   "sample_id": "sliver",
+   "reason": "no_json_in_response",
+   "fallback_n": 46,
+   "cascade_n": 23,
+   "shared": 23,
+   "only_in_fallback": [
+    "T1535",
+    "T1535.001",
+    "T1535.002",
+    "T1535.003",
+    "T1535.004",
+    "T1535.005",
+    "T1535.006",
+    "T1535.007",
+    "T1535.008",
+    "T1535.009",
+    "T1535.010",
+    "T1535.011",
+    "T1535.012",
+    "T1535.013",
+    "T1535.014",
+    "T1535.015",
+    "T1535.016",
+    "T1535.017",
+    "T1535.018",
+    "T1535.019",
+    "T1535.020",
+    "T1535.021",
+    "T1535.022"
+   ],
+   "only_in_cascade": [],
+   "jaccard": 0.5,
+   "identical": false
+  },
+  {
+   "sample_id": "wannacry",
+   "reason": "no_json_in_response",
+   "fallback_n": 26,
+   "cascade_n": 16,
+   "shared": 16,
+   "only_in_fallback": [
+    "T1005",
+    "T1021.002",
+    "T1070",
+    "T1090",
+    "T1136",
+    "T1190",
+    "T1222",
+    "T1496",
+    "T1543",
+    "T1547"
+   ],
+   "only_in_cascade": [],
+   "jaccard": 0.6154,
+   "identical": false
+  }
+ ]
+}
