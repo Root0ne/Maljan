@@ -22,10 +22,16 @@ from app.config import APISettings
 
 
 def _settings(**overrides: object) -> APISettings:
+    # Every field with a strength check is supplied here rather than left to the
+    # environment. jwt_secret_key was not, so on a machine carrying a .env the
+    # settings validated and these tests ran, and on a clean checkout they failed
+    # on the JWT validator before reaching the bypass they exist to test. A test
+    # that needs an untracked file is a test that passes for the wrong reason.
     base: dict[str, object] = {
         "debug": False,
         "auth_disabled": False,
         "minio_secret_key": "a-real-secret-not-a-placeholder",
+        "jwt_secret_key": "0" * 64,
     }
     base.update(overrides)
     return APISettings(**base)  # type: ignore[arg-type]
