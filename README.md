@@ -22,9 +22,6 @@ or a final set.**
 
 ## Web UI
 
-Dark-mode dashboard over the analyses the pipeline has run. Every image below is
-this repository's own UI reading its own database, not a mock.
-
 | | |
 |---|---|
 | <img src="assets/ui-dashboard.png" alt="Dashboard"> | <img src="assets/ui-analysis.png" alt="Analysis detail"> |
