@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external external-with-cape
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external
 
 test:
 	uv run pytest tests/ -q
@@ -56,9 +56,6 @@ setup:
 # redistribute, and the ik_llama.cpp commit here is the one the paper pins.
 external:
 	bash scripts/fetch_external.sh
-
-external-with-cape:
-	bash scripts/fetch_external.sh --with-cape
 
 pre-commit-run:
 	uv run pre-commit run --all-files

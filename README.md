@@ -33,15 +33,6 @@ The last image is the corroboration cascade made visible. A technique asserted b
 one layer and a technique three independent layers agree on are different claims,
 and the interface says which is which rather than presenting a flat list.
 
-| Page | Description |
-|---|---|
-| Dashboard | Overview metrics, recent analyses, verdict distribution |
-| Samples | Upload and manage malware samples |
-| Jobs | Monitor analysis jobs with real-time status |
-| Analysis Detail | Eleven tabs: Summary, Identity, Static, Dynamic, Network, Persistence, ATT&CK, Attribution, Detection, Defense, Process |
-| Live Analysis | WebSocket-powered real-time event stream |
-| Reports | Filterable report list with JSON/STIX export |
-
 ---
 
 ## Key Capabilities
@@ -63,36 +54,33 @@ and the interface says which is which rather than presenting a flat list.
 
 ## Architecture
 
+A LangGraph `StateGraph` over one shared state. The analyst stage has two
+shapes and the topology is chosen by `parallel_analysts`:
+
 ```
 START
-  ├── static_analyst   ──┐
-  ├── dynamic_analyst  ──┤  (parallel fan-out)
-  └── network_analyst  ──┘
-           │
-     [fan-in: wait all]
-           │
-      negotiation ◄──────── revision (loop)
-           │                    │
-     [consensus? or max_iter]   │
-           │                    │
-      [no consensus] ───────────┘
-           │
-      [consensus or max_iter]
-           │
-        judge
-           │
-      YARA + Sigma scan
-           │
-     TTP cascade + ATT&CK validation
-           │
-        STIX 2.1 Bundle
-           │
-          END
+  │
+  ├─ parallel_analysts = False  (the default)
+  │     static_analyst -> dynamic_analyst -> network_analyst
+  │     one local server slot means fan-out is queue thrash, not speed
+  │
+  └─ parallel_analysts = True   (hosted APIs, one slot per request)
+        START fans out to all three, then fans in
+  │
+negotiation  <-------- revision
+  │  (consensus, or the iteration cap)   ^
+  └─ no consensus -----------------------┘
+  │
+judge
+  │   inside this node: the YARA and Sigma scanners, the per-technique
+  │   TTP cascade, ATT&CK validation, then the STIX 2.1 bundle
+  │
+report  ->  END
 ```
 
-- **ISR (Intermediate Structural Representation):** Agents exchange structured `AgentISR` objects (claims + `evidence_ref` + confidence) instead of raw text.
-- **ServiceContainer (DI):** All agents, LLMs, loaders, and stores are created/cached in a single composition root. No global state.
-- **AgentRegistry:** New agents are auto-discovered via `@register_agent` decorator; the pipeline builder wires them dynamically.
+- **ISR (Intermediate Structural Representation).** Agents exchange structured `AgentISR` objects (claims, `evidence_ref`, confidence) rather than raw text.
+- **ServiceContainer (DI).** Agents, LLMs, loaders and stores are created and cached in one composition root. No global state.
+- **AgentRegistry.** New agents are discovered through the `@register_agent` decorator and the builder wires them dynamically.
 
 ---
 
@@ -160,43 +148,69 @@ uv run python -c "from maljan.memory.attck_validator import ATTCKValidator; ATTC
 
 ## `external/` is not in this repository
 
-Three third-party projects are built against and none of them is ours to
-redistribute. Git ignores the directory; the repository records the ref each was
-used at instead, and a script reconstructs the tree:
+Two third-party projects are built against and neither is ours to redistribute.
+Git ignores the directory; the repository records the ref each was used at, and a
+script reconstructs the tree from the upstream repositories:
 
 ```bash
-make external              # ghidra-mcp and ik_llama.cpp
-make external-with-cape    # those two and CAPEv2
+make external     # or: make setup, which runs it for you
 ```
 
-`make setup` runs it for you. The `ik_llama.cpp` commit it checks out is the one
-the evaluation pins as the inference engine, so the pin is reproducible rather
-than merely recorded.
+| Project | Ref | Why |
+|---|---|---|
+| [ghidra-mcp](https://github.com/bethington/ghidra-mcp) | `v5.6.0` | `docker compose` builds the headless disassembly image from this checkout, so the tree has to be on disk before the stack comes up. |
+| [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) | `eb570eb9` | The inference engine. This is the commit the evaluation pins, so fetching it here is what makes that pin reproducible rather than merely recorded. |
 
-**CAPE is not installed by this project.** It runs on a separate machine with
-its own Windows guest and is reached over the network; set `MCP__CAPE__URL` to
-point at it. `docker/cape/` exists for anyone who wants to stand one up
-themselves and is not part of the normal path. With the sandbox unreachable the
-pipeline degrades rather than fails: the dynamic path is skipped and the run
-completes on static evidence.
+### The sandbox is not ours to install
+
+CAPE is somebody else's platform and nothing here installs, builds or packages
+it. It wants a Linux host of its own with KVM and its own Windows guest images
+registered as analysis machines, which is a deployment rather than a dependency.
+
+What this project does is talk to one over its REST API. Point it at yours:
+
+```bash
+SANDBOX__CAPE2_BASE_URL=http://<your-cape-host>:8000
+SANDBOX__CAPE2_API_TOKEN=<token from that instance>
+```
+
+With no sandbox reachable the pipeline degrades rather than fails: the dynamic
+path is skipped and the run completes on static evidence, a behaviour pinned by a
+test.
 
 ---
 
 ## API Endpoints
 
-Base path: `/api/v1`
+REST lives under `/api/v1`. The health probes and the WebSocket sit on the
+application root, not under that prefix.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/auth/register` | User registration |
-| POST | `/auth/login` | JWT token login |
-| POST | `/samples/upload` | Upload malware sample |
-| POST | `/jobs` | Create analysis job |
-| GET | `/jobs/{id}` | Get job status |
-| GET | `/reports/{id}` | Get full report |
-| GET | `/dashboard/stats` | Dashboard statistics |
+| POST | `/api/v1/auth/register` | User registration |
+| POST | `/api/v1/auth/login` | JWT token login |
+| POST | `/api/v1/auth/refresh` | Exchange a refresh token |
+| GET, PATCH | `/api/v1/auth/me` | Read or update the current user |
+| POST | `/api/v1/samples/upload` | Upload a sample |
+| GET | `/api/v1/samples` | List samples |
+| POST | `/api/v1/jobs` | Create an analysis job |
+| GET | `/api/v1/jobs/{job_id}` | Job status |
+| GET | `/api/v1/jobs/{job_id}/events` | Server-sent event stream for one job |
+| GET | `/api/v1/reports/{report_id}` | Report summary |
+| GET | `/api/v1/reports/{report_id}/full` | The whole `MalwareReport` |
+| GET | `/api/v1/reports/{report_id}/markdown` | Markdown render |
+| GET | `/api/v1/reports/{report_id}/pdf` | Print-ready PDF |
+| GET | `/api/v1/reports/{report_id}/html` | Self-contained HTML |
+| GET | `/api/v1/reports/{report_id}/stix` | STIX 2.1 bundle |
+| GET | `/api/v1/reports/{report_id}/mitre` | ATT&CK technique set |
+| GET | `/api/v1/reports/{report_id}/iocs` | Extracted indicators |
+| GET | `/api/v1/reports/{report_id}/signatures/{kind}` | Generated YARA, Sigma or Suricata |
+| POST | `/api/v1/reports/{report_id}/enrich` | Queue post-hoc threat-intel enrichment |
+| GET | `/api/v1/dashboard/stats` | Dashboard metrics |
+| GET | `/api/v1/system/status` | Component health |
+| GET | `/api/v1/audit/logs` | Audit trail |
 | WS | `/ws/analysis/{job_id}` | Real-time analysis events |
-| GET | `/health` | Health check |
+| GET | `/health`, `/healthz` | Liveness probes |
 | GET | `/docs` | Swagger UI |
 
 ---

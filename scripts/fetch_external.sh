@@ -10,13 +10,12 @@
 # fetching it here is what makes that pin reproducible rather than merely
 # recorded.
 #
-# CAPE is not fetched by default. It runs on a separate machine with its own
-# Windows guest and is reached over the network; nothing in this repository
-# installs it, and docker/cape/ is provided for the case where someone wants to
-# stand one up themselves. Pass --with-cape to clone it too.
+# CAPE is deliberately absent. It is somebody else's platform, wants a Linux
+# host of its own with KVM and registered Windows guest images, and is a
+# deployment rather than a dependency. This project talks to one over its REST
+# API; it does not install, build or package it.
 #
-#   scripts/fetch_external.sh              ghidra-mcp and ik_llama.cpp
-#   scripts/fetch_external.sh --with-cape  those two and CAPEv2
+#   scripts/fetch_external.sh
 
 set -euo pipefail
 
@@ -24,14 +23,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTERNAL="$REPO_ROOT/external"
 
 # name|url|ref  — the ref is what the project was built and measured against.
-CORE=(
+targets=(
   "ghidra-mcp|https://github.com/bethington/ghidra-mcp.git|v5.6.0"
   "ik_llama.cpp|https://github.com/ikawrakow/ik_llama.cpp|eb570eb9"
 )
-CAPE="CAPEv2|https://github.com/kevoreilly/CAPEv2|976b36905"
-
-targets=("${CORE[@]}")
-[[ "${1:-}" == "--with-cape" ]] && targets+=("$CAPE")
 
 mkdir -p "$EXTERNAL"
 
