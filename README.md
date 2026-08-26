@@ -20,6 +20,33 @@ decides what the analyst actually receives. The organising rule is that the
 model proposes and code disposes: **the model never emits a technique identifier
 or a final set.**
 
+## Web UI
+
+Dark-mode dashboard over the analyses the pipeline has run. Every image below is
+this repository's own UI reading its own database, not a mock.
+
+| | |
+|---|---|
+| <img src="assets/ui-dashboard.png" alt="Dashboard"> | <img src="assets/ui-analysis.png" alt="Analysis detail"> |
+| **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis detail.** Eleven tabs over one run, with Markdown, PDF, HTML, STIX 2.1 and MISP export. |
+| <img src="assets/ui-detection.png" alt="Detection tab"> | <img src="assets/ui-attack.png" alt="ATT&CK matrix"> |
+| **Detection.** The deterministic YARA and Sigma rules that fired, each with the technique it maps to and the pattern that matched. | **ATT&CK.** Each technique carries where it came from: `SINGLE SOURCE` or `CORROBORATED`, and which layers agreed. |
+
+The last image is the corroboration cascade made visible. A technique asserted by
+one layer and a technique three independent layers agree on are different claims,
+and the interface says which is which rather than presenting a flat list.
+
+| Page | Description |
+|---|---|
+| Dashboard | Overview metrics, recent analyses, verdict distribution |
+| Samples | Upload and manage malware samples |
+| Jobs | Monitor analysis jobs with real-time status |
+| Analysis Detail | Eleven tabs: Summary, Identity, Static, Dynamic, Network, Persistence, ATT&CK, Attribution, Detection, Defense, Process |
+| Live Analysis | WebSocket-powered real-time event stream |
+| Reports | Filterable report list with JSON/STIX export |
+
+---
+
 ## What the evaluation found
 
 This repository carries its own evaluation, and it did not confirm everything
@@ -118,7 +145,7 @@ make setup
 
 # 3. Configure environment
 cp .env.example .env
-# Edit .env — set LLM__PROVIDER and add your API key
+# Edit .env: set LLM__PROVIDER and add your API key
 
 # 4. Run a mock analysis (no API key required)
 uv run maljan analyze sample_1 --mock --name test.exe
@@ -150,7 +177,7 @@ docker compose up -d --build
 # MinIO Console: http://localhost:9001
 ```
 
-> **Local LLM:** Containers reach the Windows host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible — typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
+> **Local LLM:** Containers reach the Windows host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible: typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
 
 ### Pre-build the ATT&CK cache (optional)
 
@@ -184,33 +211,6 @@ completes on static evidence.
 
 ---
 
-## Web UI
-
-Dark-mode dashboard over the analyses the pipeline has run. Every image below is
-this repository's own UI reading its own database, not a mock.
-
-| | |
-|---|---|
-| <img src="assets/ui-dashboard.png" alt="Dashboard"> | <img src="assets/ui-reports.png" alt="Reports"> |
-| **Dashboard** — totals, failure rate, recent analyses and verdict distribution. | **Reports** — every analysis with its verdict, confidence, technique count and findings. |
-| <img src="assets/ui-analysis.png" alt="Analysis detail"> | <img src="assets/ui-attack.png" alt="ATT&CK matrix"> |
-| **Analysis detail** — eleven tabs over one run, with Markdown, PDF, HTML, STIX 2.1 and MISP export. | **ATT&CK matrix** — each technique carries where it came from: `SINGLE SOURCE` or `CORROBORATED`, and which layers agreed. |
-
-The second image is the corroboration cascade made visible. A technique asserted
-by one layer and a technique three independent layers agree on are different
-claims, and the interface says which is which rather than presenting a flat list.
-
-| Page | Description |
-|---|---|
-| Dashboard | Overview metrics, recent analyses, verdict distribution |
-| Samples | Upload and manage malware samples |
-| Jobs | Monitor analysis jobs with real-time status |
-| Analysis Detail | Eleven tabs: Summary, Identity, Static, Dynamic, Network, Persistence, ATT&CK, Attribution, Detection, Defense, Process |
-| Live Analysis | WebSocket-powered real-time event stream |
-| Reports | Filterable report list with JSON/STIX export |
-
----
-
 ## API Endpoints
 
 Base path: `/api/v1`
@@ -234,7 +234,7 @@ Base path: `/api/v1`
 
 Deterministic detection is data-driven. These live under `data/`, are loaded
 lazily, are cached per path, and **every one of them degrades to a built-in
-fallback when absent** — a missing file costs depth, never a run.
+fallback when absent**: a missing file costs depth, never a run.
 
 | Asset | What it drives |
 |---|---|
@@ -244,7 +244,7 @@ fallback when absent** — a missing file costs depth, never a run.
 | `packer_signatures_v1.json` | Packer / protector identification, ranked: section name > entry point > string. |
 | `language_signatures_v1.json` | Source-language and runtime fingerprints, scored rather than substring-matched. |
 
-The first two are generated — the curated lists live in the builder, not the
+The first two are generated: the curated lists live in the builder, not the
 JSON, so a reader can see *why* an API is classified the way it is:
 
 ```bash
@@ -252,7 +252,7 @@ make prepare-api-db   # validates every ATT&CK ID before writing
 ```
 
 **Restart the worker after regenerating.** `data/` is bind-mounted, so the
-container sees the new file immediately — but each asset is cached per path in
+container sees the new file immediately, but each asset is cached per path in
 the loading process, and the arq worker is long-lived. It keeps serving the
 catalog it read on first use, and the run looks successful while classifying
 against stale data. Editing a data asset without
@@ -276,7 +276,7 @@ make typecheck
 # Full quality gate
 make check
 
-# The gate covers every Python directory in the repo — src/, tests/, apps/api/,
+# The gate covers every Python directory in the repo: src/, tests/, apps/api/,
 # the two MCP sidecars and scripts/. It used to be src/ and tests/ only, which
 # meant the FastAPI app and the arq worker were never type-checked anywhere,
 # and a sidecar could sit unformatted for weeks because pre-commit only ever
@@ -285,8 +285,7 @@ make check
 # If `git commit` prints "`pre-commit` not found. Did you forget to activate
 # your virtualenv?", the installed hook has a stale absolute interpreter path
 # baked into it (it happens whenever the venv is recreated, or when the
-# snap-installed toolchain the venv points at is upgraded). Reinstall it —
-# do NOT reach for --no-verify:
+# snap-installed toolchain the venv points at is upgraded). Reinstall it: # do NOT reach for --no-verify:
 uv run pre-commit install
 
 # Benchmarks
@@ -302,15 +301,15 @@ and neither of them tells you:
 
 | Service | Source | Picks up an edit? |
 |---|---|---|
-| `backend-api` | bind-mounted | **yes** — uvicorn `--reload` |
-| `backend-worker` | bind-mounted | **no** — `arq` never re-imports a changed module |
-| `frontend` | **baked into the image** | **no** — it serves a Next.js standalone build |
+| `backend-api` | bind-mounted | **yes**: uvicorn `--reload` |
+| `backend-worker` | bind-mounted | **no**: `arq` never re-imports a changed module |
+| `frontend` | **baked into the image** | **no**: it serves a Next.js standalone build |
 
 So on the production stack:
 
 ```bash
 make worker-restart   # after ANY Python edit under src/ or apps/api
-make fe-rebuild       # after ANY frontend edit — a plain restart is not enough
+make fe-rebuild       # after ANY frontend edit; a plain restart is not enough
 ```
 
 Both traps cost a full debugging session on 2026-07-26: a live analysis ran the
@@ -331,7 +330,7 @@ An analysis can take the worker process from ~3.4 GB to ~8.5 GB. On a host that
 also runs a local LLM this is the difference between a working machine and a
 frozen one, so the worker is capped (`mem_limit: 8g`) and restarts itself
 between jobs above `WORKER_RSS_RESTART_MB`. Set `MALJAN_MEMPROBE=objects` (or
-`tracemalloc`) to see where the growth happens — `src/maljan/core/memprobe.py`
+`tracemalloc`) to see where the growth happens: `src/maljan/core/memprobe.py`
 explains what the numbers mean.
 
 ---
@@ -340,8 +339,8 @@ explains what the numbers mean.
 
 All settings live in `.env`. The project uses two config systems:
 
-1. **Core Engine** — nested Pydantic models with `__` delimiter (e.g., `LLM__PROVIDER=openai`)
-2. **API Server** — flat env vars (e.g., `DATABASE_URL`, `JWT_SECRET_KEY`)
+1. **Core Engine**: nested Pydantic models with `__` delimiter (e.g., `LLM__PROVIDER=openai`)
+2. **API Server**: flat env vars (e.g., `DATABASE_URL`, `JWT_SECRET_KEY`)
 
 Critical variables:
 
