@@ -2,30 +2,58 @@
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-800%2B%20passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-2%2C707%20passed-brightgreen)](tests/)
+[![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
-Maljan is a production-grade malware analysis platform that uses adversarial multi-agent debate (LangGraph) to classify samples as **Malicious**, **Benign**, or **Suspicious**. It combines LLM-powered reasoning with deterministic detection layers (YARA, Sigma) and outputs STIX 2.1 intelligence bundles with per-claim confidence annotations.
+Maljan maps evidence about a Windows PE sample to MITRE ATT&CK technique
+identifiers and emits a STIX 2.1 bundle. It is mostly not a language model: six
+deterministic evidence layers assert techniques from signatures and rules, three
+LLM analysts describe behaviour over three channels of evidence, a judge
+synthesises a verdict, and a deterministic reconciliation and gating stage
+decides what the analyst actually receives. The organising rule is that the
+model proposes and code disposes: **the model never emits a technique identifier
+or a final set.**
 
-**Key differentiator:** Instead of a single-model analysis, multiple specialized LLM agents (Static, Dynamic, Network) independently analyze samples, then enter a structured negotiation loop with sycophancy detection and adaptive termination before a Judge agent renders the final verdict.
+## What the evaluation found
 
----
+This repository carries its own evaluation, and it did not confirm everything
+the design was built on. The numbers below are derived from the retained
+per-sample records by `tests/evaluation/paper_facts.py`, not typed here.
+
+- Splitting an analysis across several model calls scores **+0.0537 F1** above a
+  single judge at 2.76 times the output. The **negotiation** those calls exist to
+  support returns **+0.0005** at matched calls: what pays is the calls, not the
+  argument between them.
+- The technique assigner composing its ranking and gating backends beats
+  choosing between them, on two external corpora.
+- Turning one decoding flag off outweighs every architecture and every parameter
+  count measured.
+- Against the signature engine it is built on, the full pipeline is **+0.0030
+  F1** at a resolution of 0.085, which bounds its contribution rather than
+  showing it is zero.
+- Three retrieval components move nothing end to end, and the verbal confidence
+  every deterministic gate consumes separates correct from incorrect claims at
+  an area under the curve of **0.550**, on an interval containing chance.
+- Seven defects in the instrument each returned a plausible result rather than
+  an error, and 2,716 passing tests caught none of them.
+
+Features are described below as what they do, not as what they were expected to
+buy. Where a measurement exists it is named.
 
 ## Key Capabilities
 
 | Feature | Description |
 |---|---|
-| Multi-agent negotiation | Static, Dynamic, and Network analysts run in parallel, then debate findings through structured ISR exchange until consensus or max iterations |
-| Deterministic grounding | YARA (40+ rules) and Sigma (2,946 rules) Layer-0 detection runs before LLM agents; maps known patterns directly to MITRE ATT&CK IDs |
-| Anti-echo-chamber | Sycophancy detection via cosine similarity; forced devil's-advocate dissent when agents converge without evidence changes |
-| Adaptive termination | Rolling confidence convergence detection exits the negotiation loop early when positions stabilize |
-| ATT&CK validation | In-memory TF-IDF index of the full ATT&CK Enterprise dataset validates every TTP claim before STIX generation |
-| Multi-layer TTP cascade | Cross-domain weighted scoring (YARA > Sigma > Dynamic > Static > Network) with corroboration multipliers up to 1.75x |
-| Long-term memory (RAG) | Past analyses are vectorized and retrieved by similarity; injected as few-shot context into verdict calls |
-| Heterogeneous ensemble | Each agent can use a different LLM provider/model via config, reducing echo-chamber risk across model families |
-| Comprehensive reports | Every run emits a structured `MalwareReport` (verdict, severity, identity, static + dynamic + network IOCs, persistence, ATT&CK heatmap, attribution + Qdrant nearest-neighbours, LLM narrative, auto-generated YARA/Sigma/Suricata, P0/P1/P2 defense playbook); rendered as Markdown / JSON / extended STIX 2.1 / MISP; surfaced through a 16-tab analysis UI. See [`docs/REPORTING.md`](docs/REPORTING.md). |
-| Post-hoc threat-intel enrichment | Async ARQ worker fills VirusTotal / AbuseIPDB / WHOIS / GeoIP reputation and Qdrant LTM nearest-neighbours after the verdict ships — verdict latency stays unaffected |
-
-> For deep-dive technical documentation see [`AGENTS.md`](AGENTS.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), and [`docs/REPORTING.md`](docs/REPORTING.md).
+| Deterministic grounding | Six Layer-0 sources assert techniques before any model runs: YARA, tool-artifact byte markers, Sigma (2,651 rules), PE import capability, LOLBin signed-proxy execution and network DGA entropy. |
+| Deterministic technique assignment | The model describes behaviour; a hybrid retrieval index over the official ATT&CK corpus assigns every identifier. This removes identifier recall from a model that does not have the taxonomy memorised. Measured against two external corpora. |
+| Multi-agent decomposition | Static, Dynamic and Network analysts each read one evidence channel through one tool server. Sequential by default, because a single local llama-server slot turns fan-out into queue thrash; set `parallel_analysts=True` for hosted APIs where each request gets its own slot. |
+| Structured negotiation | A negotiation node tests for consensus and routes disputes to a revision pass, with sycophancy detection and adaptive termination. At matched call budget this contributes +0.0005 F1; the calls it costs are what pay. |
+| Multi-layer TTP cascade | Cross-domain weighted scoring (YARA 0.90 down to network 0.20) with corroboration multipliers rising to 1.90 at five independent layers. |
+| Reconciliation and gating | After the model: unresolvable identifiers dropped, the cascade's set restored, a confidence cap, and a STIX integrity pass. This stage is why the deterministic layer dominates the output. |
+| STIX 2.1 output | Conformance measured with the OASIS `cti-stix-validator` rather than with the integrity pass this project wrote itself, which is how two specification violations were found and fixed. |
+| Long-term memory (RAG) | Past analyses and family fingerprints are vectorised in Qdrant and retrieved by similarity. Measured end to end, the three retrieval components contribute nothing; they are kept and reported rather than removed. |
+| Comprehensive reports | Every run emits a structured `MalwareReport` rendered as Markdown, JSON, STIX 2.1 and MISP, surfaced through the analysis UI. |
+| Post-hoc threat-intel enrichment | An async ARQ worker fills VirusTotal, AbuseIPDB, WHOIS and GeoIP reputation after the verdict ships, so verdict latency is unaffected. |
 
 ---
 
@@ -79,8 +107,8 @@ START
 git clone https://github.com/Root0ne/Maljan.git
 cd Maljan
 
-# 2. Install dependencies
-uv sync
+# 2. Install dependencies and fetch the third-party trees
+make setup
 
 # 3. Configure environment
 cp .env.example .env
@@ -99,6 +127,9 @@ uv run maljan analyze <sha256> --provider openai
 cp .env.example .env
 # Edit .env with your API keys and LLM provider settings
 
+# The ghidra-mcp image is built from external/, which git does not carry
+make external
+
 # Windows: avoid PostgreSQL port conflict
 $env:POSTGRES_PORT="5433"
 
@@ -113,7 +144,7 @@ docker compose up -d --build
 # MinIO Console: http://localhost:9001
 ```
 
-> **Local LLM:** Containers reach the Windows host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible — typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. See [`docs/LOCAL_LLM_LLAMACPP.md`](docs/LOCAL_LLM_LLAMACPP.md) for the recommended `Qwen3.6-35B-A3B-IQ3_K_R4` setup that fits on an 8 GB GPU.
+> **Local LLM:** Containers reach the Windows host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible — typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
 
 ### Pre-build the ATT&CK cache (optional)
 
@@ -147,8 +178,30 @@ maljan/
 ├── docker/                # Docker Compose + Dockerfiles
 ├── data/                  # YARA rules, Sigma rules, ATT&CK fixtures
 ├── tests/                 # Unit, integration, and evaluation benchmarks
-└── external/              # CAPEv2 + Ghidra-MCP integrations
+└── external/              # third-party trees, NOT in git — see below
 ```
+
+### `external/` is not in this repository
+
+Three third-party projects are built against and none of them is ours to
+redistribute. Git ignores the directory; the repository records the ref each was
+used at instead, and a script reconstructs the tree:
+
+```bash
+make external              # ghidra-mcp and ik_llama.cpp
+make external-with-cape    # those two and CAPEv2
+```
+
+`make setup` runs it for you. The `ik_llama.cpp` commit it checks out is the one
+the evaluation pins as the inference engine, so the pin is reproducible rather
+than merely recorded.
+
+**CAPE is not installed by this project.** It runs on a separate machine with
+its own Windows guest and is reached over the network; set `MCP__CAPE__URL` to
+point at it. `docker/cape/` exists for anyone who wants to stand one up
+themselves and is not part of the normal path. With the sandbox unreachable the
+pipeline degrades rather than fails: the dynamic path is skipped and the run
+completes on static evidence.
 
 ---
 
@@ -310,7 +363,7 @@ REDIS_URL=redis://localhost:6379/0
 JWT_SECRET_KEY=<generate with openssl rand -hex 32>
 ```
 
-For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and point `LLM__OPENAI__BASE_URL` at a local OpenAI-compatible server such as `ik_llama.cpp`'s `llama-server`. End-to-end recipe with the Qwen3.6-35B-A3B MoE model: [`docs/LOCAL_LLM_LLAMACPP.md`](docs/LOCAL_LLM_LLAMACPP.md).
+For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and point `LLM__OPENAI__BASE_URL` at a local OpenAI-compatible server such as `ik_llama.cpp`'s `llama-server`. `make external` fetches the engine at the pinned commit, and `scripts/llm_server.sh` carries the invocation.
 
 See `.env.example` for the full reference.
 

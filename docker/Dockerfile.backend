@@ -22,7 +22,6 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 COPY src/ src/
 COPY apps/ apps/
-COPY external/ external/
 COPY data/ data/
 COPY threatintel-mcp/ threatintel-mcp/
 COPY network-mcp/ network-mcp/
