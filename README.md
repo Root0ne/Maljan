@@ -47,32 +47,6 @@ and the interface says which is which rather than presenting a flat list.
 
 ---
 
-## What the evaluation found
-
-This repository carries its own evaluation, and it did not confirm everything
-the design was built on. The numbers below are derived from the retained
-per-sample records by `tests/evaluation/paper_facts.py`, not typed here.
-
-- Splitting an analysis across several model calls scores **+0.0537 F1** above a
-  single judge at 2.76 times the output. The **negotiation** those calls exist to
-  support returns **+0.0005** at matched calls: what pays is the calls, not the
-  argument between them.
-- The technique assigner composing its ranking and gating backends beats
-  choosing between them, on two external corpora.
-- Turning one decoding flag off outweighs every architecture and every parameter
-  count measured.
-- Against the signature engine it is built on, the full pipeline is **+0.0030
-  F1** at a resolution of 0.085, which bounds its contribution rather than
-  showing it is zero.
-- Three retrieval components move nothing end to end, and the verbal confidence
-  every deterministic gate consumes separates correct from incorrect claims at
-  an area under the curve of **0.550**, on an interval containing chance.
-- Seven defects in the instrument each returned a plausible result rather than
-  an error, and 2,716 passing tests caught none of them.
-
-Features are described below as what they do, not as what they were expected to
-buy. Where a measurement exists it is named.
-
 ## Key Capabilities
 
 | Feature | Description |
