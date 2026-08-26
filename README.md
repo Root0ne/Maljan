@@ -1,4 +1,10 @@
-# Maljan: Multi-Agent Malware Analysis Framework
+<p align="center">
+  <img src="assets/logo.svg" alt="Maljan" width="112">
+</p>
+
+<h1 align="center">Maljan</h1>
+<p align="center"><em>Multi-Agent Malware Analysis Framework</em></p>
+
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
@@ -154,34 +160,7 @@ uv run python -c "from maljan.memory.attck_validator import ATTCKValidator; ATTC
 
 ---
 
-## Project Structure
-
-```
-maljan/
-├── src/maljan/            # Core analysis engine (importable library)
-│   ├── agents/            # LLM analyst agents + Judge + MCP client
-│   ├── pipeline/          # LangGraph workflow (builder, nodes, routing, state)
-│   ├── analysis/          # Deterministic layers (YARA, Sigma, TTP cascade, TIEF)
-│   ├── core/              # DI container, config, protocols
-│   ├── llm/               # Provider implementations (OpenAI, Anthropic, Ollama, Gemini)
-│   ├── loaders/           # Data ingestion + sandbox clients
-│   ├── memory/            # LTM/RAG (Qdrant, ATT&CK index/validator)
-│   ├── parsers/           # Sandbox output parsers
-│   └── schemas/           # Pydantic models (ISR, STIX 2.1)
-│
-├── apps/api/              # FastAPI backend + ARQ worker
-│   ├── app/api/v1/        # REST endpoints (auth, samples, jobs, reports)
-│   ├── app/worker/        # Background analysis worker
-│   └── alembic/           # Database migrations
-│
-├── apps/web/              # Next.js 16 + React 19 + TailwindCSS 4 frontend
-├── docker/                # Docker Compose + Dockerfiles
-├── data/                  # YARA rules, Sigma rules, ATT&CK fixtures
-├── tests/                 # Unit, integration, and evaluation benchmarks
-└── external/              # third-party trees, NOT in git — see below
-```
-
-### `external/` is not in this repository
+## `external/` is not in this repository
 
 Three third-party projects are built against and none of them is ours to
 redistribute. Git ignores the directory; the repository records the ref each was
@@ -207,14 +186,26 @@ completes on static evidence.
 
 ## Web UI
 
-A professional dark-mode dashboard inspired by Google Threat Intelligence.
+Dark-mode dashboard over the analyses the pipeline has run. Every image below is
+this repository's own UI reading its own database, not a mock.
+
+| | |
+|---|---|
+| <img src="assets/ui-dashboard.png" alt="Dashboard"> | <img src="assets/ui-reports.png" alt="Reports"> |
+| **Dashboard** — totals, failure rate, recent analyses and verdict distribution. | **Reports** — every analysis with its verdict, confidence, technique count and findings. |
+| <img src="assets/ui-analysis.png" alt="Analysis detail"> | <img src="assets/ui-attack.png" alt="ATT&CK matrix"> |
+| **Analysis detail** — eleven tabs over one run, with Markdown, PDF, HTML, STIX 2.1 and MISP export. | **ATT&CK matrix** — each technique carries where it came from: `SINGLE SOURCE` or `CORROBORATED`, and which layers agreed. |
+
+The second image is the corroboration cascade made visible. A technique asserted
+by one layer and a technique three independent layers agree on are different
+claims, and the interface says which is which rather than presenting a flat list.
 
 | Page | Description |
 |---|---|
 | Dashboard | Overview metrics, recent analyses, verdict distribution |
 | Samples | Upload and manage malware samples |
 | Jobs | Monitor analysis jobs with real-time status |
-| Analysis Detail | 7-tab view: Summary, Agents, **Pipeline**, Rules, TTPs, Timeline, STIX |
+| Analysis Detail | Eleven tabs: Summary, Identity, Static, Dynamic, Network, Persistence, ATT&CK, Attribution, Detection, Defense, Process |
 | Live Analysis | WebSocket-powered real-time event stream |
 | Reports | Filterable report list with JSON/STIX export |
 
