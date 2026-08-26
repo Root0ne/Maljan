@@ -384,7 +384,15 @@ fi
 # therefore the style's dash and not ours. The carve-out is deliberately narrow:
 # digits either side, and only after the References heading, so a range in the
 # body still fails.
+# One more carve-out, and it is a controlled term rather than a style's dash.
+# CRediT spells two of its fourteen roles "Writing – original draft" and
+# "Writing – review and editing", and those names are Elsevier's vocabulary, not
+# ours to respell. They were written with parentheses to get past this check
+# until 2026-08-26, which is the wrong way round: the paper argues against
+# adjusting a record to suit a rule, so here the rule yields. Only these two
+# exact phrases are removed before counting.
 endash_body=$(sed '/^[[:space:]0-9.]*References[[:space:]]*$/,$d' <<<"$pdf_text" \
+              | sed 's/Writing – original draft//g; s/Writing – review and editing//g' \
               | grep -oF '–' | wc -l)
 # Joined into one line first. A page range that wraps prints as "pp. 3473–" at
 # the end of one line and "3487" at the start of the next, and the digit the

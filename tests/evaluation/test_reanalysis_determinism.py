@@ -23,10 +23,24 @@ coupling this directory has been bitten by before.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from tests.evaluation import reanalyse
+
+# The re-analysis reads the archived sandbox reports, and those are deliberately
+# not released: they embed strings and memory contents lifted out of live
+# malware, which the paper's data-availability statement says in as many words.
+# A checkout without them cannot run this module, so it skips rather than fails.
+# A clone that reports seven red tests because the withheld data is withheld
+# tells a reader nothing about the code, and teaches them to ignore a red suite.
+_REPORTS = Path(reanalyse.__file__).resolve().parents[2] / "data" / "cape_reports"
+if not any(_REPORTS.glob("*.json")):  # pragma: no cover - depends on the checkout
+    pytest.skip(
+        "the archived sandbox reports are not in this checkout",
+        allow_module_level=True,
+    )
 
 
 def test_the_reanalysis_is_deterministic():
