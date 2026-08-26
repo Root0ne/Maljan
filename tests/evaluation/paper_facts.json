@@ -408,7 +408,7 @@
  "judge_uncapped_resolvable_per_call": "3.0",
  "judge_uncapped_share": "0.0%",
  "judge_uncapped_total_calls": "8",
- "layer0_declined_domains": "48--68",
+ "layer0_declined_domains": "48 to 68",
  "layer0_declined_median_calls": "8,667",
  "layer0_declined_of": "95",
  "layer0_declined_sources": "2",

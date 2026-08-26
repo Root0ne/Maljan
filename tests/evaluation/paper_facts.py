@@ -881,7 +881,11 @@ def layer0_excluded_facts() -> dict[str, Any]:
         if median := re.search(r"median\s+([\d,]+)\s+API calls", reason):
             out["layer0_declined_median_calls"] = f"{int(median.group(1).replace(',', '')):,}"
         if domains := re.search(r"(\d+-\d+)\s+domains", reason):
-            out["layer0_declined_domains"] = domains.group(1).replace("-", "--")
+            # "48-68" is a range, and this paper writes a range as "48 to 68":
+            # the house rule refuses an en dash in the rendered text, so turning
+            # the hyphen into one only moved the problem, and the escaper then
+            # printed it as a hyphen followed by a maths minus.
+            out["layer0_declined_domains"] = domains.group(1).replace("-", " to ")
     if len(seen) != 1:
         raise FactError(f"the excluded sources disagree on their denominator: {sorted(seen)}")
     out["layer0_declined_of"] = seen.pop()
