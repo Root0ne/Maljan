@@ -28,6 +28,16 @@ targets=(
   "ik_llama.cpp|https://github.com/ikawrakow/ik_llama.cpp|eb570eb9"
 )
 
+# The Sigma corpus is SigmaHQ's work, not ours, and it lands outside external/
+# because the layer reads it from data/sigma_rules by default. It used to be
+# committed here: 2,651 rule files by Florian Roth, Nasreddine Bencherchali,
+# frack113 and the rest of SigmaHQ, carrying no licence and no attribution, in a
+# repository that calls itself MIT. Their rules are under the Detection Rule
+# License. Fetching beats vendoring for the same reason it does above.
+SIGMA_URL="https://github.com/SigmaHQ/sigma.git"
+SIGMA_REF="r2026-07-01"
+SIGMA_DEST="$REPO_ROOT/data/sigma_rules"
+
 mkdir -p "$EXTERNAL"
 
 for spec in "${targets[@]}"; do
@@ -57,5 +67,17 @@ for spec in "${targets[@]}"; do
   git -C "$dest" checkout --quiet "$ref"
 done
 
+
+if [[ -d "$SIGMA_DEST/.git" ]]; then
+  echo "  ok       sigma rules at $(git -C "$SIGMA_DEST" rev-parse --short HEAD)"
+elif [[ -e "$SIGMA_DEST" ]]; then
+  echo "  SKIP     $SIGMA_DEST exists and is not a git checkout" >&2
+else
+  echo "  clone    sigma rules $SIGMA_REF"
+  git clone --quiet --depth 1 --branch "$SIGMA_REF" "$SIGMA_URL" "$SIGMA_DEST" \
+    || git clone --quiet --depth 1 "$SIGMA_URL" "$SIGMA_DEST"
+fi
+
 echo
-echo "external/ is ignored by git. Re-run this after a fresh clone."
+echo "external/ and data/sigma_rules are ignored by git."
+echo "Re-run this after a fresh clone."

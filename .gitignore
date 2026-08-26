@@ -163,3 +163,9 @@ Guide for authors - Computers & Security*_files/
 # PDFs, drafts. One directory rather than a scatter of root-level entries, so
 # "is this ours" is answered by where a file sits.
 /other/
+
+# The Sigma corpus is SigmaHQ's, under the Detection Rule License, and was
+# committed here as 2,651 files carrying neither their licence nor their names.
+# scripts/fetch_external.sh clones it at a pinned release instead, licence file
+# and all.
+data/sigma_rules/

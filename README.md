@@ -39,7 +39,7 @@ and the interface says which is which rather than presenting a flat list.
 
 | Feature | Description |
 |---|---|
-| Deterministic grounding | Six Layer-0 sources assert techniques before any model runs: YARA, tool-artifact byte markers, Sigma (2,651 rules), PE import capability, LOLBin signed-proxy execution and network DGA entropy. |
+| Deterministic grounding | Six Layer-0 sources assert techniques before any model runs: YARA, tool-artifact byte markers, Sigma, PE import capability, LOLBin signed-proxy execution and network DGA entropy. The rule sets behind two of them are covered below. |
 | Deterministic technique assignment | The model describes behaviour; a hybrid retrieval index over the official ATT&CK corpus assigns every identifier. This removes identifier recall from a model that does not have the taxonomy memorised. Measured against two external corpora. |
 | Multi-agent decomposition | Static, Dynamic and Network analysts each read one evidence channel through one tool server. Sequential by default, because a single local llama-server slot turns fan-out into queue thrash; set `parallel_analysts=True` for hosted APIs where each request gets its own slot. |
 | Structured negotiation | A negotiation node tests for consensus and routes disputes to a revision pass, with sycophancy detection and adaptive termination. At matched call budget this contributes +0.0005 F1; the calls it costs are what pay. |
@@ -180,6 +180,34 @@ test.
 
 ---
 
+## Whose rules these are
+
+Two rule sets drive the deterministic layer and only one of them is ours.
+
+**Sigma is SigmaHQ's.** The corpus is not in this repository and never should
+have been: it was committed here as 2,651 files by Florian Roth, Nasreddine
+Bencherchali, frack113 and the rest of [SigmaHQ](https://github.com/SigmaHQ/sigma),
+carrying neither their licence nor their names. Their rules are published under
+the Detection Rule License. `make external` clones the corpus at a pinned release
+into `data/sigma_rules`, licence file included, and git ignores the directory. No
+rule in it was written here.
+
+**The YARA-TTP set is ours.** `data/yara_ttp_rules.yaml` holds 30 hand-written
+patterns that map byte and API-name markers straight to ATT&CK identifiers. It is
+a small grounding set for this pipeline rather than a detection corpus, and it is
+not a substitute for one.
+
+The Sigma layer degrades to zero rules when the corpus is absent: it logs the
+missing directory and the run continues on the other five Layer-0 sources.
+
+There is a third thing that is easy to confuse with these. `MalwareReport` can
+pivot the indicators one run produced into **draft** YARA, Sigma and Suricata
+rules, offered through `/api/v1/reports/{report_id}/signatures/{kind}`. Those are
+generated from that sample's own evidence for an analyst to review. This project
+does not author detection rules.
+
+---
+
 ## API Endpoints
 
 REST lives under `/api/v1`. The health probes and the WebSocket sit on the
@@ -224,7 +252,7 @@ fallback when absent**: a missing file costs depth, never a run.
 | Asset | What it drives |
 |---|---|
 | `api_behaviour_map_v1.json` | Windows API → behaviour category, ~780 names / 13 categories. Each category carries a `tier`; only `high`/`medium` mark an import *suspicious*, so categorising `RegOpenKeyExA` does not mean accusing it. |
-| `api_attck_map_v1.json` | Windows API → ATT&CK, 47 techniques. This is what gives a **sandbox-less run real technique coverage**: with CAPE unreachable the Sigma corpus (2651 rules) is telemetry-gated and contributes nothing. |
+| `api_attck_map_v1.json` | Windows API → ATT&CK, 47 techniques. This is what gives a **sandbox-less run real technique coverage**: with CAPE unreachable the Sigma corpus is telemetry-gated and contributes nothing. |
 | `tool_artifacts_v1.json` | Offensive-tool / RAT byte markers. The only source of a **malware family name without a sandbox**. |
 | `packer_signatures_v1.json` | Packer / protector identification, ranked: section name > entry point > string. |
 | `language_signatures_v1.json` | Source-language and runtime fingerprints, scored rather than substring-matched. |
