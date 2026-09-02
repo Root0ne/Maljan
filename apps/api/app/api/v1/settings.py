@@ -110,7 +110,7 @@ async def export_overrides(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> str:
     index = catalog_index()
-    lines = ["# Maljan runtime overrides (UI). Secrets are not exported."]
+    lines = ["# Maljan runtime overrides (UI). Secrets are exported masked as ***."]
     for key, info in (await SettingsService(db).values()).items():
         if info.source != "ui":
             continue

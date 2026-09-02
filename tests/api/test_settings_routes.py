@@ -121,6 +121,16 @@ def test_export_is_env_syntax_with_secrets_masked(client):
     assert "CHUNKING__OVERLAP_TOKENS" not in r.text  # only overrides are exported
 
 
+def test_reset_group_unknown_is_404(client):
+    r = client.delete("/api/v1/settings?group=does-not-exist")
+    assert r.status_code == 404
+
+
+def test_probe_unknown_is_404(client):
+    r = client.post("/api/v1/settings/test/bogus", json={"values": {}})
+    assert r.status_code == 404
+
+
 def test_non_admin_is_rejected():
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
