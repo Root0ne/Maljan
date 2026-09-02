@@ -64,8 +64,18 @@ from tests.evaluation.eval_layer0_verdict import (  # noqa: E402
     restart_llama,
 )
 
-OUT_JSON = _REPO_ROOT / "tests" / "evaluation" / "judge_contribution.json"
-OUT_MD = _REPO_ROOT / "tests" / "evaluation" / "judge_contribution.md"
+
+def _artefact(tag: str, suffix: str) -> Path:
+    """Output path named by the confidence-cap condition the run was made under.
+
+    That condition is runtime configuration, invisible to this script, so the
+    operator declares it. An unsuffixed ``judge_contribution.json`` used to be
+    written and then copied by hand to ``_capped``, leaving a byte-identical
+    duplicate whose condition nothing recorded.
+    """
+    return _REPO_ROOT / "tests" / "evaluation" / f"judge_contribution_{tag}{suffix}"
+
+
 CHECKPOINT = Path("/tmp/judge_contribution_checkpoint.jsonl")
 
 
@@ -430,6 +440,12 @@ def summarise(rows: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="C3 — the judge's contribution to the bundle.")
     ap.add_argument("--limit", type=int, default=0, help="Cap the fixture count (0 = all).")
+    ap.add_argument(
+        "--tag",
+        required=True,
+        choices=("capped", "uncapped"),
+        help="Whether the degraded-confidence cap was active for this run; names the output.",
+    )
     args = ap.parse_args()
 
     samples = load_large_fixtures()
@@ -527,9 +543,10 @@ def main() -> int:
 
     report, blob = summarise(rows)
     print("\n" + report, flush=True)
-    OUT_MD.write_text(report + "\n")
-    OUT_JSON.write_text(json.dumps(blob, indent=1) + "\n")
-    print(f"\nwrote {OUT_JSON.name} and {OUT_MD.name}")
+    out_md, out_json = _artefact(args.tag, ".md"), _artefact(args.tag, ".json")
+    out_md.write_text(report + "\n")
+    out_json.write_text(json.dumps(blob, indent=1) + "\n")
+    print(f"\nwrote {out_json.name} and {out_md.name}")
     return 0
 
 

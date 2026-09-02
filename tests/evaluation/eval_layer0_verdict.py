@@ -95,8 +95,19 @@ from tests.evaluation.eval_consensus_ablation import (
     mean,
 )
 
-_OUT_FILE = _REPO_ROOT / "tests" / "evaluation" / "layer0_verdict_v2.md"
-_JSON_FILE = _REPO_ROOT / "tests" / "evaluation" / "layer0_verdict_v2.json"
+
+def _artefact(overlap: bool, suffix: str) -> Path:
+    """Output path named by condition: ``_overlap`` or ``_disjoint``.
+
+    The two conditions used to write one unsuffixed file that was then copied
+    by hand to the name paper_facts.py reads, which left a byte-identical
+    duplicate in the tree and no record of which condition the unsuffixed one
+    was. The name now says.
+    """
+    condition = "overlap" if overlap else "disjoint"
+    return _REPO_ROOT / "tests" / "evaluation" / f"layer0_verdict_v2_{condition}{suffix}"
+
+
 _DEFAULT_CHECKPOINT = Path("/tmp/layer0_verdict_v2_checkpoint.jsonl")
 
 # The Layer-0 sources that **can** move a verdict on this corpus, with the
@@ -681,12 +692,12 @@ def main_async(repeats: int, smoke: bool, overlap: bool, checkpoint: Path) -> No
     report = "\n".join(lines)
     print("\n" + report, flush=True)
     try:
-        _OUT_FILE.write_text(report + "\n", encoding="utf-8")
+        _artefact(overlap, ".md").write_text(report + "\n", encoding="utf-8")
         # Provenance travels with the numbers: which sources were in, which were
         # measured out and why, which fixtures were drawn and under what seed.
         # The earlier artefact was a bare list of arms, and when the source list
         # changed underneath it there was nothing on disk that said so.
-        _JSON_FILE.write_text(
+        _artefact(overlap, ".json").write_text(
             json.dumps(
                 {
                     "schema": "layer0-verdict/v2",
@@ -705,7 +716,7 @@ def main_async(repeats: int, smoke: bool, overlap: bool, checkpoint: Path) -> No
             + "\n",
             encoding="utf-8",
         )
-        print(f"\nWrote {_OUT_FILE} and {_JSON_FILE}", flush=True)
+        print(f"\nWrote {_artefact(overlap, '.md')} and {_artefact(overlap, '.json')}", flush=True)
     except OSError as exc:
         print(f"Could not write report: {exc}", flush=True)
 

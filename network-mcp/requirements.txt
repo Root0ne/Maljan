@@ -1,5 +1,0 @@
-# Network MCP Server Dependencies
-# Install: pip install -r requirements.txt
-scapy>=2.6.1
-mcp>=1.26.0
-fastmcp>=3.2.4
