@@ -15,7 +15,7 @@ import signal
 import time
 import traceback
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,9 @@ from urllib.parse import urlparse
 import redis.asyncio as aioredis
 from arq import cron  # noqa: F401 — for future scheduled tasks
 from arq.connections import RedisSettings
+from maljan.core.config import Settings as _CoreSettings
+from maljan.core.settings_catalog import core_catalog
+from maljan.core.settings_overrides import build_settings, public_snapshot
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -32,6 +35,37 @@ from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
 
 logger = get_logger("worker")
+
+_SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
+
+
+def build_job_settings(
+    overrides: dict[str, Any], job_config: dict[str, Any] | None
+) -> _CoreSettings:
+    """UI overrides layered over the environment, then the job's own config on top."""
+    core_settings = build_settings(overrides)
+    if job_config:
+        if "max_iterations" in job_config:
+            core_settings.negotiation.max_iterations = job_config["max_iterations"]
+        if "llm_provider" in job_config:
+            core_settings.llm.provider = job_config["llm_provider"]
+    return core_settings
+
+
+def settings_snapshot(
+    core_settings: _CoreSettings, overridden_keys: Iterable[str] | None = None
+) -> dict[str, Any]:
+    """Non-secret view of the effective per-job Settings for ``run_summary``.
+
+    ``overridden_keys`` names the dotted core paths (without the ``core.``
+    namespace prefix) that came from a stored UI override rather than the
+    environment/default, so a report reader can tell what was in effect
+    without re-deriving it from the (masked) values alone.
+    """
+    snap: dict[str, Any] = public_snapshot(core_settings, _SECRET_PATHS)
+    snap["overridden_keys"] = sorted(overridden_keys or [])
+    return snap
+
 
 # ── Redis event channel helper ───────────────────────────────────
 
@@ -253,20 +287,37 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 sys.path.insert(0, core_path)
 
             from maljan.app import MaljanApp
-            from maljan.core.config import Settings
 
             logger.info(
                 "Starting pipeline execution...",
                 extra={"job_id": job_id, "component": "pipeline"},
             )
 
-            # Build settings with optional overrides
-            core_settings = Settings()
-            if job.config:
-                if "max_iterations" in job.config:
-                    core_settings.negotiation.max_iterations = job.config["max_iterations"]
-                if "llm_provider" in job.config:
-                    core_settings.llm.provider = job.config["llm_provider"]
+            # Build this job's Settings from env + any stored UI overrides
+            # (UI > env > default; see settings_overrides.build_settings),
+            # then the job's own config on top. A DB error loading overrides
+            # must not fail the job -- fall back to env-only settings and
+            # say so, without ever logging a secret value.
+            from app.services.settings_service import load_core_overrides
+
+            try:
+                overrides = await load_core_overrides(db)
+            except Exception as exc:  # noqa: BLE001 — overrides are best-effort
+                logger.warning(
+                    "Failed to load runtime setting overrides (%s); "
+                    "running job %s on environment settings only.",
+                    type(exc).__name__,
+                    job_id,
+                    extra={"job_id": job_id},
+                )
+                overrides = {}
+            core_settings = build_job_settings(overrides, job.config)
+            if overrides:
+                logger.info(
+                    "Applying %d runtime setting override(s) from the UI.",
+                    len(overrides),
+                    extra={"job_id": job_id},
+                )
 
             # Mock-mode resolution (audit 2026-05-17: W-01 permanent fix).
             # Two independent toggles must agree before the pipeline runs
@@ -569,6 +620,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             if isinstance(stix_bundle_for_persist, dict):
                 stix_bundle_for_persist.setdefault("spec_version", "2.1")
 
+            # A masked, non-secret record of the Settings this job actually
+            # ran with, plus which core keys came from a stored UI override
+            # rather than the environment/default -- lets a report reader
+            # tell what was in effect without re-deriving it.
+            _run_summary = pipeline_result.get("run_summary")
+            _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
+            _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
+
             report = AnalysisReport(
                 job_id=job.id,
                 verdict=pipeline_result.get("final_decision", "Unknown"),
@@ -637,7 +696,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     # a genuine consensus from a manufactured one.
                     "sycophancy_detected": bool(pipeline_result.get("sycophancy_detected", False)),
                 },
-                run_summary=pipeline_result.get("run_summary"),
+                run_summary=_run_summary,
                 malware_report=pipeline_result.get("malware_report"),
             )
             # A re-run supersedes its predecessor. ``analysis_reports.job_id``
