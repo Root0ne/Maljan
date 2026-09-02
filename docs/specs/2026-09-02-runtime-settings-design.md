@@ -1,6 +1,8 @@
 # Runtime settings managed from the web UI
 
-Date: 2026-09-02. Status: approved design, awaiting implementation plan.
+Date: 2026-09-02. Status: implemented — tasks 1-14 of
+`docs/plans/2026-09-02-runtime-settings.md` landed on `feat/runtime-settings`,
+pending final review.
 
 ## Problem
 
