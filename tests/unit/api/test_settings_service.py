@@ -2,6 +2,7 @@ import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,7 +12,7 @@ _API = Path(__file__).resolve().parents[3] / "apps" / "api"
 if str(_API) not in sys.path:
     sys.path.insert(0, str(_API))
 
-from app.models import RuntimeSetting  # noqa: E402
+from app.models import AuditLog, RuntimeSetting  # noqa: E402
 from app.services import settings_service as svc  # noqa: E402
 from app.services.settings_catalog_api import catalog_index, full_catalog  # noqa: E402
 
@@ -116,12 +117,118 @@ async def test_values_masks_secrets_and_labels_source(key):
 
 
 @pytest.mark.asyncio
+async def test_values_reports_is_set_when_stored_secret_cannot_be_decrypted(monkeypatch):
+    """Finding 1: a row exists but the current key can't open it (missing,
+    rotated, or wrong SETTINGS_ENCRYPTION_KEY, or a corrupted value). The
+    secret is still set -- is_set must come from the row's existence, not
+    from a successful decrypt."""
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    rows = [
+        RuntimeSetting(
+            key="core.llm.openai.api_key",
+            value="enc:v1:not-a-real-token",
+            is_secret=True,
+        ),
+    ]
+    s = svc.SettingsService(make_db(rows))
+    vals = await s.values()
+    sec = vals["core.llm.openai.api_key"]
+    assert sec.is_set is True
+    assert sec.hint is None
+    assert sec.source == "ui"
+
+
+@pytest.mark.asyncio
+async def test_values_hints_env_only_core_secret_by_attribute_not_json_dump(monkeypatch):
+    """Finding 2: a core secret configured only via .env must not be hinted
+    from Settings().model_dump(mode="json"), whose default SecretStr dump
+    masks any non-empty secret to "**********". Read it by attribute and
+    unwrap SecretStr instead."""
+    monkeypatch.setenv("LLM__OPENAI__API_KEY", "sk-envonly-9999")
+    s = svc.SettingsService(make_db([]))
+    vals = await s.values()
+    sec = vals["core.llm.openai.api_key"]
+    assert sec.is_set is True
+    assert sec.hint == "9999"
+    assert sec.source == "env"
+
+
+@pytest.mark.asyncio
 async def test_save_secret_without_key_is_refused(monkeypatch):
     monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY", raising=False)
     s = svc.SettingsService(make_db([]))
     with pytest.raises(svc.SettingsValidationError) as ei:
         await s.save({"core.llm.openai.api_key": "x"}, user_id=None, ip=None)
     assert "SETTINGS_ENCRYPTION_KEY" in ei.value.errors["core.llm.openai.api_key"]
+
+
+class FakeAuditSession:
+    """Async-context-manager fake standing in for async_session_factory()."""
+
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.added: list[Any] = []
+        self.commit = AsyncMock(side_effect=RuntimeError("boom") if fail else None)
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
+
+    async def __aenter__(self) -> "FakeAuditSession":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
+@pytest.mark.asyncio
+async def test_save_writes_audit_log_with_masked_secrets(monkeypatch, key):
+    session = FakeAuditSession()
+    monkeypatch.setattr(svc, "async_session_factory", lambda: session)
+    db = make_db([])
+    s = svc.SettingsService(db)
+    await s.save(
+        {"core.llm.openai.api_key": "sk-secret-value-1234", "api.enrichment_enabled": False},
+        user_id=uuid.uuid4(),
+        ip="127.0.0.1",
+    )
+    assert len(session.added) == 1
+    entry = session.added[0]
+    assert isinstance(entry, AuditLog)
+    assert entry.action == "settings.update"
+    assert entry.resource_type == "settings"
+    assert set(entry.details["changed"]) == {"core.llm.openai.api_key", "api.enrichment_enabled"}
+    assert entry.details["before"]["core.llm.openai.api_key"] == "unset"
+    assert entry.details["after"]["core.llm.openai.api_key"] == "set"
+    assert entry.details["after"]["api.enrichment_enabled"] is False
+    assert "sk-secret" not in str(entry.details)
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reset_writes_audit_log_with_keys(monkeypatch):
+    session = FakeAuditSession()
+    monkeypatch.setattr(svc, "async_session_factory", lambda: session)
+    rows = [RuntimeSetting(key="api.enrichment_enabled", value=False, is_secret=False)]
+    db = make_db(rows)
+    s = svc.SettingsService(db)
+    removed = await s.reset(["api.enrichment_enabled"], user_id=uuid.uuid4(), ip=None)
+    assert removed == ["api.enrichment_enabled"]
+    assert len(session.added) == 1
+    entry = session.added[0]
+    assert entry.action == "settings.reset"
+    assert entry.details["keys"] == ["api.enrichment_enabled"]
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_save_does_not_raise_when_audit_session_fails(monkeypatch, key):
+    session = FakeAuditSession(fail=True)
+    monkeypatch.setattr(svc, "async_session_factory", lambda: session)
+    db = make_db([])
+    s = svc.SettingsService(db)
+    res = await s.save({"api.enrichment_enabled": False}, user_id=uuid.uuid4(), ip=None)
+    assert res.applied == ["api.enrichment_enabled"]
+    session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

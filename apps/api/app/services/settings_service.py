@@ -91,24 +91,52 @@ class SettingsService:
                 env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
             if entry.secret:
                 if row is not None:
+                    # A row exists: the secret is set, full stop -- even if it
+                    # cannot be decrypted right now (missing/rotated/wrong
+                    # SETTINGS_ENCRYPTION_KEY, or a corrupted value). is_set
+                    # must not depend on whether decryption happened to work.
                     try:
                         plain = box.decrypt(str(row.value))
                     except box.SecretsUnavailable:
                         plain = ""
-                    src = "ui"
+                    out[key] = ValueInfo(
+                        None,
+                        True,
+                        box.hint(plain) if plain else None,
+                        "ui",
+                        row.updated_at,
+                        row.updated_by,
+                    )
                 else:
-                    plain = env_value or ""
+                    # No row: whatever the secret's effective value is comes
+                    # straight from the environment. For a core secret,
+                    # `core_env` was built from `Settings().model_dump(mode=
+                    # "json")`, and pydantic's default SecretStr JSON dump
+                    # masks any non-empty secret to the literal "**********" --
+                    # useless for a hint. Read the live Settings instance by
+                    # attribute instead and unwrap SecretStr directly.
+                    if entry.namespace == "core":
+                        obj: Any = env_core
+                        for part in entry.path.split("."):
+                            obj = getattr(obj, part)
+                        plain = (
+                            obj.get_secret_value()
+                            if hasattr(obj, "get_secret_value")
+                            else (obj or "")
+                        )
+                    else:
+                        plain = env_value or ""
                     src = effective_source(
                         overridden=False, env_value=bool(plain), default_value=False
                     )
-                out[key] = ValueInfo(
-                    None,
-                    bool(plain),
-                    box.hint(plain) if plain else None,
-                    src,
-                    row.updated_at if row else None,
-                    row.updated_by if row else None,
-                )
+                    out[key] = ValueInfo(
+                        None,
+                        bool(plain),
+                        box.hint(plain) if plain else None,
+                        src,
+                        None,
+                        None,
+                    )
                 continue
             if row is not None:
                 out[key] = ValueInfo(row.value, None, None, "ui", row.updated_at, row.updated_by)
