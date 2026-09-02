@@ -991,6 +991,19 @@ def reset_settings_cache() -> None:
     _settings_instance = None
 
 
+def install_settings(instance: Settings) -> None:
+    """Make ``instance`` the process-wide singleton every ``get_settings()`` caller sees.
+
+    The arq worker (``max_jobs = 1``) calls this once per job with the Settings
+    it built from the environment plus the UI-managed overrides. Agents,
+    pipeline nodes and extractors read ``get_settings()`` rather than an
+    injected config, so without this a UI override would reach the container
+    and nothing below it.
+    """
+    global _settings_instance
+    _settings_instance = instance
+
+
 class _LazySettingsProxy:
     """Attribute-forwarding proxy that builds Settings on first access."""
 

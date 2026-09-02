@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -25,6 +26,8 @@ from app.config import settings as api_settings
 from app.database import async_session_factory
 from app.models import AuditLog, RuntimeSetting
 from app.services.settings_catalog_api import _masked, catalog_index
+
+logger = logging.getLogger(__name__)
 
 
 class SettingsValidationError(Exception):
@@ -70,6 +73,11 @@ class SettingsService:
                 try:
                     out[row.key] = box.decrypt(str(row.value))
                 except box.SecretsUnavailable:
+                    logger.warning(
+                        "Stored override for %s cannot be decrypted (encryption key "
+                        "changed?); the environment value stays in effect.",
+                        row.key,
+                    )
                     continue
             else:
                 out[row.key] = row.value

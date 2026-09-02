@@ -128,6 +128,7 @@ API_READONLY: dict[str, dict[str, Any]] = {
     "redis_url": {
         "title": "Redis",
         "description": "Queue, events and rate-limit counters.",
+        "probe": "redis",
     },
     "minio_endpoint": {
         "title": "Object store",
@@ -220,7 +221,7 @@ def api_catalog() -> list[CatalogEntry]:
                 applies="restart",
                 editable=False,
                 reason="set in .env; restart required",
-                probe=None,
+                probe=ann.get("probe"),
             )
         )
     return entries

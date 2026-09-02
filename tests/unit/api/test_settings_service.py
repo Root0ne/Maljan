@@ -1,3 +1,4 @@
+import logging
 import sys
 import uuid
 from pathlib import Path
@@ -241,3 +242,21 @@ async def test_readonly_key_reports_env_value_and_database_url_is_masked():
     assert db_info.source in ("env", "default")
     assert "maljan_dev" not in str(db_info.value)
     assert "***" in str(db_info.value)
+
+
+@pytest.mark.asyncio
+async def test_load_overrides_drops_undecryptable_secret_and_warns_by_key_only(monkeypatch, caplog):
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    rows = [
+        RuntimeSetting(
+            key="core.llm.openai.api_key", value="enc:v1:not-a-real-token", is_secret=True
+        ),
+        RuntimeSetting(key="core.llm.provider", value="ollama", is_secret=False),
+    ]
+    s = svc.SettingsService(make_db(rows))
+    with caplog.at_level(logging.WARNING, logger="app.services.settings_service"):
+        out = await s.load_overrides()
+    assert out == {"core.llm.provider": "ollama"}
+    msgs = [r.getMessage() for r in caplog.records if "cannot be decrypted" in r.getMessage()]
+    assert len(msgs) == 1 and "core.llm.openai.api_key" in msgs[0]
+    assert "not-a-real-token" not in caplog.text

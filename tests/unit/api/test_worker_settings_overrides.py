@@ -32,3 +32,15 @@ def test_snapshot_records_overridden_keys():
     s = build_job_settings({"negotiation.max_iterations": 7}, None)
     snap = settings_snapshot(s, ["negotiation.max_iterations"])
     assert snap["overridden_keys"] == ["negotiation.max_iterations"]
+
+
+def test_install_settings_replaces_the_process_singleton():
+    from maljan.core import config as core_config
+
+    s = build_job_settings({"negotiation.max_iterations": 7}, None)
+    try:
+        core_config.install_settings(s)
+        assert core_config.get_settings() is s
+        assert core_config.settings.negotiation.max_iterations == 7
+    finally:
+        core_config.reset_settings_cache()

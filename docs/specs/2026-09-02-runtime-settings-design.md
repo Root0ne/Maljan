@@ -135,6 +135,11 @@ Audit: `settings.update` with `{changed: [key], before: {…}, after: {…}}`
 
 - `core.*`: read by the worker at the start of every job. Changes take effect
   on the next analysis; running jobs are untouched.
+  The worker also installs the merged object as the process-wide
+  `get_settings()` singleton (`install_settings`, `max_jobs = 1`), because
+  agents, pipeline nodes and extractors read that singleton rather than the
+  config handed to `MaljanApp`; without it an override would stop at the
+  container.
 - `api.*`: read through `RuntimeConfig` with a 5-second TTL, so a change is
   live within five seconds on every API process.
 - `applies: restart` fields are display-only.

@@ -298,6 +298,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # then the job's own config on top. A DB error loading overrides
             # must not fail the job -- fall back to env-only settings and
             # say so, without ever logging a secret value.
+            from maljan.core.config import install_settings
+
             from app.services.settings_service import load_core_overrides
 
             try:
@@ -312,6 +314,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
                 overrides = {}
             core_settings = build_job_settings(overrides, job.config)
+            # Agents, pipeline nodes and extractors read the process singleton
+            # (``get_settings()``), not the config handed to MaljanApp. With
+            # ``max_jobs = 1`` installing this job's Settings there is what
+            # makes a UI override reach every consumer, not only the container.
+            install_settings(core_settings)
             if overrides:
                 logger.info(
                     "Applying %d runtime setting override(s) from the UI.",
