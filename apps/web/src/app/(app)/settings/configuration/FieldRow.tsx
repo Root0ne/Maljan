@@ -80,7 +80,14 @@ export default function FieldRow({
       </div>
       <div>
         <div role="group" aria-labelledby={labelId}>
-          <Widget entry={entry} current={current} staged={staged} onChange={onChange} models={models} />
+          <Widget
+            entry={entry}
+            current={current}
+            staged={staged}
+            onChange={onChange}
+            onUnstage={onUnstage}
+            models={models}
+          />
         </div>
         {error && (
           <div className="text-[11px] text-status-red mt-1" role="alert">

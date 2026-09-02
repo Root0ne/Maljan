@@ -131,6 +131,22 @@ export default function ConfigurationTab() {
           {exportError}
         </div>
       )}
+      {s.actionError && (
+        <div
+          className="flex items-center justify-between gap-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-3 py-2 mb-3"
+          role="alert"
+        >
+          <span>{s.actionError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            className="text-status-red/80 hover:text-status-red shrink-0"
+            onClick={s.clearActionError}
+          >
+            &times;
+          </button>
+        </div>
+      )}
       {s.lastResult && (
         <div className="text-xs text-status-green mb-3" role="status">
           Applied {s.lastResult.applied.length} setting

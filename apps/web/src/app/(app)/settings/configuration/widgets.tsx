@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CatalogEntry, SettingValue } from "@/types/settings";
 
 const input =
@@ -11,6 +11,11 @@ export interface WidgetProps {
   current: SettingValue | undefined;
   staged: unknown; // undefined when nothing is staged for this key
   onChange: (value: unknown) => void;
+  /** Removes this key from `pending` entirely (distinct from `onChange`,
+   * which always stages a value, even `null`/`undefined`). Used by
+   * `NumberWidget` when a required field is emptied: there is nothing valid
+   * to stage, so the edit is un-staged instead. */
+  onUnstage?: () => void;
   /** Filled in by the LLM probe result so a model field renders a datalist. */
   models?: string[];
 }
@@ -43,10 +48,47 @@ export function BoolWidget(p: WidgetProps) {
   );
 }
 
-export function NumberWidget(p: WidgetProps) {
+function formatShown(p: WidgetProps): string {
   const v = shown(p);
+  return v === null || v === undefined ? "" : String(v);
+}
+
+/**
+ * A controlled number input whose *source of truth while typing* is a local
+ * text buffer, not `shown(p)` — a plain `value={shown(p)}` input (as the
+ * other widgets use) recomputes from props on every render, so clearing a
+ * non-nullable field could never actually show empty: onChange would have
+ * nothing valid to stage, the parent's state would not change, and the very
+ * next render would snap the box back to the last staged/live number.
+ *
+ * The buffer is only re-synced from props when the *external* value moves
+ * out from under the user — staged edits being cleared (discard, reset,
+ * reset-group, or a successful apply all clear `pending`) or the live value
+ * itself changing (a reset's reload landing new data) — never on every
+ * keystroke, so mid-edit text (an empty box, a trailing decimal point) isn't
+ * fought by a resync triggered by the very `onChange` that produced it.
+ */
+export function NumberWidget(p: WidgetProps) {
   const [requiredHint, setRequiredHint] = useState(false);
+  const [text, setText] = useState(() => formatShown(p));
+  const prevStagedRef = useRef(p.staged);
+  const prevCurrentValueRef = useRef(p.current?.value);
   const hintId = `number-required-${p.entry.key}`;
+
+  useEffect(() => {
+    const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
+    const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
+    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+      setText(formatShown(p));
+      setRequiredHint(false);
+    }
+    prevStagedRef.current = p.staged;
+    prevCurrentValueRef.current = p.current?.value;
+    // `p` itself is intentionally not a dependency: only these two fields
+    // decide whether an external (not-from-this-widget) change happened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.staged, p.current?.value]);
+
   return (
     <div>
       <input
@@ -59,25 +101,28 @@ export function NumberWidget(p: WidgetProps) {
         step={p.entry.type === "float" ? "any" : 1}
         min={p.entry.minimum ?? undefined}
         max={p.entry.maximum ?? undefined}
-        value={v === null || v === undefined ? "" : String(v)}
+        value={text}
         onChange={(e) => {
-          if (e.target.value === "") {
-            // Mirrors TextWidget: clearing a nullable field stages `null`;
-            // clearing a required one stages nothing and shows an inline
-            // hint instead of silently proposing a null value the backend
-            // would reject.
+          const raw = e.target.value;
+          setText(raw);
+          if (raw === "") {
+            // Mirrors TextWidget: clearing a nullable field stages `null`.
+            // Clearing a required one has nothing valid to stage, so it is
+            // un-staged instead (falling back to the live/default value)
+            // and an inline hint explains why the box is empty.
             if (p.entry.nullable) {
               setRequiredHint(false);
               p.onChange(null);
             } else {
               setRequiredHint(true);
+              p.onUnstage?.();
             }
             return;
           }
+          const parsed = p.entry.type === "float" ? parseFloat(raw) : parseInt(raw, 10);
+          if (Number.isNaN(parsed)) return; // mid-edit text (e.g. "-", "1."): wait for more input
           setRequiredHint(false);
-          p.onChange(
-            p.entry.type === "float" ? parseFloat(e.target.value) : parseInt(e.target.value, 10)
-          );
+          p.onChange(parsed);
         }}
       />
       {requiredHint && (

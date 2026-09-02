@@ -29,6 +29,12 @@ export function useSettings() {
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Distinct from `loadError`: `loadError` means "the schema/values could not
+  // be loaded at all" and tears down the whole tab; `actionError` is a
+  // recoverable failure of a single mutating action (reset/resetGroup/a
+  // non-validation apply failure) surfaced as a dismissible inline banner
+  // while the rest of the tab stays usable.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastResult, setLastResult] = useState<PatchResult | null>(null);
 
@@ -81,11 +87,18 @@ export function useSettings() {
       delete n[key];
       return n;
     });
+    setErrors((e) => {
+      if (!(key in e)) return e;
+      const n = { ...e };
+      delete n[key];
+      return n;
+    });
   }, []);
 
   const apply = useCallback(async () => {
     setSaving(true);
     setErrors({});
+    setActionError(null);
     try {
       const res = await api.patchSettings(pending);
       setLastResult(res);
@@ -94,7 +107,7 @@ export function useSettings() {
       return res;
     } catch (e) {
       if (e instanceof SettingsValidationError) setErrors(e.errors);
-      else setLoadError(getErrorMessage(e));
+      else setActionError(getErrorMessage(e));
       return null;
     } finally {
       setSaving(false);
@@ -103,16 +116,20 @@ export function useSettings() {
 
   // Callers fire-and-forget these (`void s.reset(key)`), so a rejected
   // promise here would surface only as an unhandled-rejection console entry
-  // with no on-page feedback. Both are caught and routed to the same
-  // `loadError` surface `apply`'s non-validation failures already use.
+  // with no on-page feedback. Both are caught and routed to `actionError`,
+  // NOT `loadError` — `loadError` blanks the whole tab, which is correct for
+  // "the schema could not be loaded" but was wrong here: a failed DELETE was
+  // tearing down the entire form (search box, rail, every row, any other
+  // pending edits) over one row's reset failing.
   const reset = useCallback(
     async (key: string) => {
+      setActionError(null);
       try {
         await api.resetSetting(key);
         unstage(key);
         await reload();
       } catch (e) {
-        setLoadError(getErrorMessage(e));
+        setActionError(getErrorMessage(e));
       }
     },
     [reload, unstage]
@@ -120,12 +137,13 @@ export function useSettings() {
 
   const resetGroup = useCallback(
     async (group: string) => {
+      setActionError(null);
       try {
         await api.resetSettingsGroup(group);
         setPending({});
         await reload();
       } catch (e) {
-        setLoadError(getErrorMessage(e));
+        setActionError(getErrorMessage(e));
       }
     },
     [reload]
@@ -149,6 +167,8 @@ export function useSettings() {
     loading,
     forbidden,
     loadError,
+    actionError,
+    clearActionError: () => setActionError(null),
     saving,
     lastResult,
     stage,
