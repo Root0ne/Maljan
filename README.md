@@ -371,8 +371,8 @@ For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and poi
 
 See `.env.example` for the full reference.
 
-**From the UI.** Administrators (Settings → Configuration, hidden for
-non-admin accounts) can change every core pipeline setting and the API's
+**From the UI.** Administrators (Settings → Configuration; the tab is shown
+but disabled for everyone else) can change every core pipeline setting and the API's
 runtime-safe knobs without editing `.env`. Precedence is
 `UI (Postgres) > environment / .env > code default`; nothing writes `.env`.
 Each field shows where its current value is coming from. A saved change
