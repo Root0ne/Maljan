@@ -1,15 +1,21 @@
-# Python
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
+# Python. Docker anchors a pattern to the context root, so `.venv/` alone
+# excluded /.venv and let apps/api/.venv (438 MB) into every image build;
+# the `**/` forms cover the nested copies too.
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.mypy_cache/
+**/.ruff_cache/
+**/.pytest_cache/
+**/*.egg-info/
 
 # Node
-apps/web/node_modules/
-apps/web/.next/
+**/node_modules/
+**/.next/
+apps/web/playwright-report/
+apps/web/test-results/
+**/*.tsbuildinfo
 
 # Local Next.js env overrides — NEVER bake these into an image.
 # Audit 2026-07-26 (K3): Dockerfile.frontend does `COPY apps/web/ ./`, so a
@@ -20,6 +26,37 @@ apps/web/.next/
 # compose build args only.
 apps/web/.env.local
 apps/web/.env.*.local
+
+# The same class of leak on the backend side. Dockerfile.backend does
+# `COPY apps/ apps/` and `COPY data/ data/`: without these lines a developer's
+# apps/api/.env (JWT and object-store secrets) and the live-malware mirror the
+# worker keeps under data/samples/ would be baked into the image layers.
+**/.env
+**/.env.*
+!**/.env.example
+data/samples/*.apk
+data/samples/*.exe
+data/samples/*.dll
+data/samples/*.elf
+data/samples/*.so
+data/samples/*.dex
+data/samples/*.jar
+data/samples/*.bin
+data/samples/*.dat
+data/samples/*.sys
+data/samples/*.macho
+data/samples/.tmp/
+data/samples/rat-collection/
+data/samples/dike/
+data/samples/extracted/
+data/uploads/
+data/cape_reports/
+data/external/
+data/sigma_rules/
+models/
+logs/
+other/
+external/
 
 # Git & IDE
 .git/

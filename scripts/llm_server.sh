@@ -20,6 +20,10 @@ cd "$(dirname "$0")/.." || exit 2
 BIN="${LLAMA_BIN:-/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server}"
 MODEL="${LLAMA_MODEL:-$PWD/models/Qwen3.6-35B-A3B-IQ3_K_R4.gguf}"
 PORT="${LLAMA_PORT:-8080}"
+# Loopback by default: the server has no authentication and the pipeline sends
+# it decompiled code and strings from the sample. Set LLAMA_HOST=0.0.0.0 only
+# when containers on another host must reach it.
+HOST="${LLAMA_HOST:-127.0.0.1}"
 CTX="${LLAMA_CTX:-131072}"
 LOG="logs/llama-server.log"
 # Blocks 10..39: expert tensors to host memory. Blocks 0..9 and every non-expert
@@ -74,7 +78,7 @@ start)
         -ot "$OFFLOAD" \
         --context-shift on --jinja \
         --alias qwen3.6-35b-a3b \
-        --host 0.0.0.0 --port "$PORT" \
+        --host "$HOST" --port "$PORT" \
         >>"$LOG" 2>&1 &
     echo "starting (pid $!), ctx $CTX, log $LOG"
     ;;

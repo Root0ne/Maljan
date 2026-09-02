@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: ["main"]
 
+# The workflow reads the repository and nothing else; it references no secrets.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -32,14 +36,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # The same set the Makefile's PY_SOURCES names: the FastAPI app, the arq
+      # worker, the two MCP sidecars and scripts/ were outside this gate.
       - name: Ruff lint
-        run: uv run ruff check src/ tests/
+        run: uv run ruff check src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
 
       - name: Ruff format check
-        run: uv run ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
 
       - name: mypy type check
-        run: uv run mypy src/
+        run: uv run mypy src/ apps/api/
 
   test:
     name: Test Suite (Python ${{ matrix.python-version }})
@@ -78,7 +84,7 @@ jobs:
 
     services:
       qdrant:
-        image: qdrant/qdrant:latest
+        image: qdrant/qdrant:v1.18.2
         ports:
           - 6333:6333
 
@@ -116,6 +122,43 @@ jobs:
         env:
           QDRANT_URL: http://localhost:6333
         run: uv run pytest tests/unit/test_qdrant_store.py -v
+
+  frontend:
+    name: Frontend (tsc, eslint, next build)
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      # A TypeScript error used to surface only when docker/Dockerfile.frontend
+      # ran `next build` at deploy time; the e2e job mocks every route and never
+      # compiles the production bundle.
+      - name: Type check
+        working-directory: apps/web
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Production build
+        working-directory: apps/web
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
 
   e2e:
     name: E2E Tests (Playwright)
