@@ -63,7 +63,7 @@ export interface SettingsValues {
 
 export interface PatchResult {
   applied: string[];
-  applies: Record<Applies, number>;
+  applies: Partial<Record<Applies, number>>; // only the buckets that changed are present
 }
 
 export interface ProbeResult {
