@@ -4,6 +4,13 @@ import type {
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
+import { SettingsValidationError } from "@/types/settings";
+import type {
+  PatchResult,
+  ProbeResult,
+  SettingsSchema,
+  SettingsValues,
+} from "@/types/settings";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -427,6 +434,63 @@ class ApiClient {
     const data = await this.request<SystemStatusDTO>("/api/v1/system/status");
     assertShape("getSystemStatus", data, _SYSTEM_STATUS_SCHEMA);
     return data;
+  }
+
+  /* ── Runtime settings (admin) ─────────────────────── */
+  getSettingsSchema() {
+    return this.request<SettingsSchema>("/api/v1/settings/schema");
+  }
+
+  getSettingsValues() {
+    return this.request<SettingsValues>("/api/v1/settings");
+  }
+
+  async patchSettings(changes: Record<string, unknown>): Promise<PatchResult> {
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}/api/v1/settings`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ changes }),
+    });
+    if (res.status === 422) {
+      const body = (await res.json().catch(() => ({}))) as {
+        errors?: Record<string, string>;
+      };
+      throw new SettingsValidationError(body.errors ?? {});
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  resetSetting(key: string) {
+    return this.request<{ reset: string[] }>(
+      `/api/v1/settings/${encodeURIComponent(key)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  resetSettingsGroup(group: string) {
+    return this.request<{ reset: string[] }>(
+      `/api/v1/settings?group=${encodeURIComponent(group)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  testSettingsProbe(probe: string, values: Record<string, unknown>) {
+    return this.request<ProbeResult>(`/api/v1/settings/test/${probe}`, {
+      method: "POST",
+      body: JSON.stringify({ values }),
+    });
+  }
+
+  exportSettings() {
+    return this.textRequest("/api/v1/settings/export");
   }
 
   /* ── Samples ───────────────────────────────────────── */
