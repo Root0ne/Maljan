@@ -180,7 +180,10 @@ async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
     )
 
 
-_CREDENTIAL_IN_URL = re.compile(r"(://)([^/\s:@]+):([^/\s@]+)@")
+# Everything between "://" and the LAST "@" before the path is userinfo. Greedy on
+# purpose: a password may itself contain "@" or ":" and the username may be empty
+# (redis://:password@host is the usual Redis AUTH shape).
+_CREDENTIAL_IN_URL = re.compile(r"(://)[^\s/@]*(?:@[^\s/@]*)*@")
 
 
 def _redact_url(text: str) -> str:

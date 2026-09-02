@@ -227,3 +227,22 @@ async def test_redis_probe_masks_credentials_in_url_on_failure(monkeypatch):
     assert "hunter2" not in r.detail
     assert "user:hunter2@" not in r.detail
     assert "***@bad-host" in r.detail
+
+
+@pytest.mark.parametrize(
+    "raw, leaked",
+    [
+        ("redis://:onlypass@bad-host:6379/0", "onlypass"),
+        ("redis://user:p@ss@bad-host:6379/0", "ss@"),
+        ("redis://user:pa:ss@bad-host:6379/0", "pa:ss"),
+    ],
+)
+def test_redact_url_handles_empty_user_and_at_in_password(raw, leaked):
+    out = probes._redact_url(f"could not connect to {raw}")
+    assert leaked not in out
+    assert "***@bad-host:6379/0" in out
+
+
+def test_redact_url_leaves_credential_free_urls_alone():
+    text = "could not connect to redis://bad-host:6379/0 (mail x@y.z)"
+    assert probes._redact_url(text) == text
