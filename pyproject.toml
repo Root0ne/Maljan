@@ -116,6 +116,10 @@ ignore = []
 
 [tool.mypy]
 python_version = "3.13"
+# Explicit so a single-file run (`uv run mypy <file>`) resolves modules exactly
+# like the whole-tree hook (`mypy src/ apps/api/`); otherwise the two write
+# conflicting entries into one .mypy_cache and the hook reports phantom errors.
+mypy_path = ["src", "apps/api"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

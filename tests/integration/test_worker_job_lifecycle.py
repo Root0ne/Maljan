@@ -17,6 +17,27 @@ import pytest_asyncio
 from app.worker.analysis_worker import WorkerSettings, run_analysis
 
 
+@pytest.fixture(autouse=True)
+def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
+    """Keep these tests off the real runtime-settings singletons.
+
+    ``runtime_config`` would otherwise try the real session factory on every
+    ``run_analysis`` (and fall back on the connection error), and
+    ``install_settings`` would leave the last job's Settings behind for the
+    next test.
+    """
+    from app import runtime_config as rc
+
+    from maljan.core.config import reset_settings_cache
+
+    async def _no_overrides() -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(rc.runtime_config, "_overrides", _no_overrides)
+    yield
+    reset_settings_cache()
+
+
 @pytest_asyncio.fixture
 async def mock_db_session() -> AsyncMock:
     """A mocked async DB session that supports async context manager.

@@ -41,15 +41,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         app: ASGIApp,
         *,
         redis_url: str,
-        enabled: bool = True,
-        max_requests: int = 100,
-        window_seconds: int = 60,
         whitelist: list[str] | None = None,
     ) -> None:
+        # ``enabled`` / ``max_requests`` / ``window_seconds`` are read live in
+        # ``dispatch`` through ``runtime_config`` (UI override > env > default),
+        # so they are deliberately not constructor parameters any more.
         super().__init__(app)
-        self.enabled = enabled
-        self.max_requests = max_requests
-        self.window_seconds = window_seconds
         self.whitelist = set(whitelist or [])
         self._redis_pool = aioredis.ConnectionPool.from_url(
             redis_url,

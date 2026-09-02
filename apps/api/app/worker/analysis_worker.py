@@ -318,6 +318,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # (``get_settings()``), not the config handed to MaljanApp. With
             # ``max_jobs = 1`` installing this job's Settings there is what
             # makes a UI override reach every consumer, not only the container.
+            # The object stays installed after the job: ``enrich_threat_intel``
+            # runs in this process too but reads only API settings and
+            # ``runtime_config`` today; if it ever needs core config it must
+            # install its own.
             install_settings(core_settings)
             if overrides:
                 logger.info(

@@ -265,9 +265,6 @@ def create_app() -> FastAPI:
     app.add_middleware(
         RateLimitMiddleware,
         redis_url=settings.redis_url,
-        enabled=settings.rate_limit_enabled,
-        max_requests=settings.rate_limit_requests,
-        window_seconds=settings.rate_limit_window_seconds,
         whitelist=settings.rate_limit_whitelist,
     )
 

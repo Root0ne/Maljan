@@ -85,9 +85,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=10,
-            window_seconds=60,
             whitelist=[],
         )
         # Replace with fake Redis for testing
@@ -123,9 +120,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=2,
-            window_seconds=60,
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -166,9 +160,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=1,
-            window_seconds=60,
             whitelist=["/health"],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -200,9 +191,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=False,
-            max_requests=1,
-            window_seconds=60,
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -236,9 +224,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://invalid:6379/0",
-            enabled=True,
-            max_requests=10,
-            window_seconds=60,
             whitelist=[],
         )
 
@@ -268,9 +253,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=2,
-            window_seconds=60,
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
