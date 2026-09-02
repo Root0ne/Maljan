@@ -57,19 +57,6 @@ PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
 }
 
 
-def provider_capabilities(provider_name: str) -> dict[str, Any]:
-    """Return the capability dict for ``provider_name``, or a safe default.
-
-    Callers should treat missing keys as conservative ``False`` /
-    ``"request_timeout"`` rather than raising — new providers join the
-    registry without needing a capability entry up-front.
-    """
-    return PROVIDER_CAPABILITIES.get(
-        provider_name,
-        {"supports_structured_output": False, "timeout_kwarg": "request_timeout"},
-    )
-
-
 def register_provider(name: str):  # type: ignore[no-untyped-def]
     """Decorator that registers an LLM provider class under the given name."""
 

@@ -754,15 +754,12 @@ class ReportingConfig(BaseModel):
       (Faz 3). Keeps tail latency predictable.
     - ``auto_generate_detection_rules``: template-based YARA/Sigma/Suricata
       generation (Faz 4).
-    - ``enrichment_async``: enqueue a threat-intel enrichment ARQ job after
-      verdict instead of blocking the pipeline (Faz 6).
     """
 
     enabled: bool = True
     include_extended_stix: bool = True
     narrative_max_tokens: int = 1500
     auto_generate_detection_rules: bool = True
-    enrichment_async: bool = True
 
     # --- Report-reshaping (professional-report front-matter + Composer) ---
     # Front-matter identity for the report cover / TLP banner.

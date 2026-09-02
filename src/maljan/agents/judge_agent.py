@@ -432,7 +432,7 @@ class JudgeAgent:
         # negotiation loop can keep running.
         verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
 
-        is_consensus = verdict.confidence >= CONSENSUS_THRESHOLD
+        is_consensus = verdict.confidence >= self._consensus_threshold()
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
         self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
 
@@ -1065,6 +1065,18 @@ class JudgeAgent:
         except Exception as exc:
             self.logger.warning("_build_schema_hint failed (%s). Skipping schema pruning.", exc)
             return ""
+
+    def _consensus_threshold(self) -> float:
+        """The confidence at which mediation counts as consensus.
+
+        ``NEGOTIATION__CONSENSUS_THRESHOLD`` was documented, validated and
+        never read: the check used the module constant, so setting the
+        variable changed nothing. The configured value wins when a config is
+        present; the constant remains the default for standalone use.
+        """
+        negotiation = getattr(self._config, "negotiation", None)
+        value = getattr(negotiation, "consensus_threshold", None)
+        return float(value) if value is not None else CONSENSUS_THRESHOLD
 
     def _supports_structured_output(self) -> bool:
         """Delegates to the registry — see ``structured_output_supported``.

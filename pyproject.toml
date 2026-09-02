@@ -21,14 +21,12 @@ dependencies = [
     "pysigma>=1.3.3",
     "networkx>=3.6.1",
     "mcp>=1.26.0",
-    "nest-asyncio>=1.6.0",
     "fastmcp>=3.2.4",
-    "langchain>=1.2.15",
     "langchain-google-genai>=4.2.1",
     "pefile>=2024.8.26",
     "scapy>=2.6.1",
     "fastapi>=0.115.0",
-    "uvicorn>=0.34.0",
+    "uvicorn[standard]>=0.34.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30.0",
     "redis>=5.0.0",
@@ -46,6 +44,14 @@ dependencies = [
     # installs, and PdfRenderer degrades with a clear error where they are absent.
     "markdown-it-py>=3.0.0",
     "weasyprint>=62.0",
+    # Imported directly by apps/api (three modules) rather than only through
+    # FastAPI's re-exports, so it is declared rather than inherited.
+    "starlette>=0.40",
+    # apps/api's own requirements. The image installs from this file alone, and
+    # these were arriving only as transitive dependencies of minio and fastmcp.
+    "argon2-cffi>=25.1.0",
+    "email-validator>=2.3.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.scripts]
@@ -75,6 +81,10 @@ dev = [
     "cairosvg>=2.9.0",
     "ruff>=0.15.9",
     "stix2-validator>=3.3.1",
+    # tests/evaluation/make_paper_figures.py and the eval helpers import both;
+    # `make paper` failed on an exact `uv sync` because neither was declared.
+    "numpy>=2.0",
+    "matplotlib>=3.9",
 ]
 
 [tool.ruff]
