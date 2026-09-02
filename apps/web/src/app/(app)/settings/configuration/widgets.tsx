@@ -73,12 +73,18 @@ export function NumberWidget(p: WidgetProps) {
   const [text, setText] = useState(() => formatShown(p));
   const prevStagedRef = useRef(p.staged);
   const prevCurrentValueRef = useRef(p.current?.value);
+  // Set right before this widget un-stages itself (required field cleared):
+  // the resulting `staged: value -> undefined` transition is ours, not an
+  // external discard/reset, and must not resync the (deliberately empty) box.
+  const selfClearRef = useRef(false);
   const hintId = `number-required-${p.entry.key}`;
 
   useEffect(() => {
     const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
     const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
-    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+    const selfClear = selfClearRef.current && !currentValueChanged;
+    selfClearRef.current = false;
+    if (p.staged === undefined && (stagedJustCleared || currentValueChanged) && !selfClear) {
       setText(formatShown(p));
       setRequiredHint(false);
     }
@@ -115,6 +121,7 @@ export function NumberWidget(p: WidgetProps) {
               p.onChange(null);
             } else {
               setRequiredHint(true);
+              selfClearRef.current = true;
               p.onUnstage?.();
             }
             return;
