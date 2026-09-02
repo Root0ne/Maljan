@@ -42,7 +42,7 @@ export default function SettingsPage() {
   const tabs = [
     { key: "general" as const, label: "General" },
     { key: "apikeys" as const, label: "API Keys" },
-    ...(isAdmin ? [{ key: "configuration" as const, label: "Configuration" }] : []),
+    { key: "configuration" as const, label: "Configuration" },
   ];
 
   useEffect(() => {
@@ -186,19 +186,31 @@ export default function SettingsPage() {
 
       {/* Tab Bar */}
       <div className="flex border-b border-border mb-6">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
-              activeTab === tab.key
-                ? "border-accent text-accent"
-                : "border-transparent text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const disabled = tab.key === "configuration" && !isAdmin;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                if (disabled) return;
+                setActiveTab(tab.key);
+              }}
+              disabled={disabled}
+              aria-disabled={disabled}
+              title={disabled ? "Admin role required" : undefined}
+              className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
+                disabled
+                  ? "border-transparent text-text-disabled cursor-not-allowed"
+                  : activeTab === tab.key
+                    ? "border-accent text-accent"
+                    : "border-transparent text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* General Tab */}

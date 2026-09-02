@@ -45,26 +45,47 @@ export function BoolWidget(p: WidgetProps) {
 
 export function NumberWidget(p: WidgetProps) {
   const v = shown(p);
+  const [requiredHint, setRequiredHint] = useState(false);
+  const hintId = `number-required-${p.entry.key}`;
   return (
-    <input
-      type="number"
-      aria-label={p.entry.title}
-      className={input}
-      disabled={!p.entry.editable}
-      step={p.entry.type === "float" ? "any" : 1}
-      min={p.entry.minimum ?? undefined}
-      max={p.entry.maximum ?? undefined}
-      value={v === null || v === undefined ? "" : String(v)}
-      onChange={(e) =>
-        p.onChange(
-          e.target.value === ""
-            ? null
-            : p.entry.type === "float"
-              ? parseFloat(e.target.value)
-              : parseInt(e.target.value, 10)
-        )
-      }
-    />
+    <div>
+      <input
+        type="number"
+        aria-label={p.entry.title}
+        aria-describedby={requiredHint ? hintId : undefined}
+        aria-invalid={requiredHint || undefined}
+        className={input}
+        disabled={!p.entry.editable}
+        step={p.entry.type === "float" ? "any" : 1}
+        min={p.entry.minimum ?? undefined}
+        max={p.entry.maximum ?? undefined}
+        value={v === null || v === undefined ? "" : String(v)}
+        onChange={(e) => {
+          if (e.target.value === "") {
+            // Mirrors TextWidget: clearing a nullable field stages `null`;
+            // clearing a required one stages nothing and shows an inline
+            // hint instead of silently proposing a null value the backend
+            // would reject.
+            if (p.entry.nullable) {
+              setRequiredHint(false);
+              p.onChange(null);
+            } else {
+              setRequiredHint(true);
+            }
+            return;
+          }
+          setRequiredHint(false);
+          p.onChange(
+            p.entry.type === "float" ? parseFloat(e.target.value) : parseInt(e.target.value, 10)
+          );
+        }}
+      />
+      {requiredHint && (
+        <div id={hintId} className="text-[11px] text-status-red mt-1" role="alert">
+          Required — enter a value, or use &ldquo;Discard change&rdquo; / &ldquo;Reset to env&rdquo;.
+        </div>
+      )}
+    </div>
   );
 }
 

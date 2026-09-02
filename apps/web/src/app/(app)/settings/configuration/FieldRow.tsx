@@ -67,7 +67,7 @@ export default function FieldRow({
         </div>
         <button
           type="button"
-          className="text-[11px] font-mono text-text-muted hover:text-text-secondary"
+          className="text-[11px] font-mono text-text-muted hover:text-text-secondary break-all"
           title="Copy key"
           onClick={() => void navigator.clipboard?.writeText(entry.key)}
         >

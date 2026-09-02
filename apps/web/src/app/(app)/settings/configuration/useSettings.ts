@@ -101,20 +101,32 @@ export function useSettings() {
     }
   }, [pending, reload]);
 
+  // Callers fire-and-forget these (`void s.reset(key)`), so a rejected
+  // promise here would surface only as an unhandled-rejection console entry
+  // with no on-page feedback. Both are caught and routed to the same
+  // `loadError` surface `apply`'s non-validation failures already use.
   const reset = useCallback(
     async (key: string) => {
-      await api.resetSetting(key);
-      unstage(key);
-      await reload();
+      try {
+        await api.resetSetting(key);
+        unstage(key);
+        await reload();
+      } catch (e) {
+        setLoadError(getErrorMessage(e));
+      }
     },
     [reload, unstage]
   );
 
   const resetGroup = useCallback(
     async (group: string) => {
-      await api.resetSettingsGroup(group);
-      setPending({});
-      await reload();
+      try {
+        await api.resetSettingsGroup(group);
+        setPending({});
+        await reload();
+      } catch (e) {
+        setLoadError(getErrorMessage(e));
+      }
     },
     [reload]
   );

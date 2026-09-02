@@ -183,6 +183,7 @@ export default function ConfigurationTab() {
               <section key={g.key} className="mb-8">
                 <GroupHeader
                   group={g}
+                  values={s.values}
                   probes={probes}
                   onProbe={async (name) => {
                     const keys = g.entries.filter((e) => e.probe === name).map((e) => e.key);

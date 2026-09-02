@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ProbeResult, SettingsGroup } from "@/types/settings";
+import type { ProbeResult, SettingValue, SettingsGroup } from "@/types/settings";
 
 const PROBE_LABEL: Record<string, string> = {
   llm: "Test connection & fetch models",
@@ -9,17 +9,22 @@ const PROBE_LABEL: Record<string, string> = {
 
 export default function GroupHeader({
   group,
+  values,
   probes,
   onProbe,
   onResetGroup,
 }: {
   group: SettingsGroup;
+  values: Record<string, SettingValue>;
   probes: string[];
   onProbe: (name: string) => Promise<ProbeResult>;
   onResetGroup: () => Promise<void>;
 }) {
   const [results, setResults] = useState<Record<string, ProbeResult | "running" | undefined>>({});
-  const overridden = group.entries.some((e) => e.editable);
+  // "editable" only says a UI-override is *permitted*; it does not mean one
+  // exists. The reset action must only appear once a row actually carries a
+  // ui-sourced override to reset away.
+  const overridden = group.entries.some((e) => values[e.key]?.source === "ui");
   return (
     <div className="flex items-center justify-between gap-4 mb-2 flex-wrap">
       <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
