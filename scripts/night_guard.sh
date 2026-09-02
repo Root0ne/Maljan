@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A watcher that actually intervenes, because the polite one was not enough.
 #
-# `overnight_watch.sh` deliberately only writes a STOP sentinel and lets heavy
+# An earlier, polite watcher deliberately only wrote a STOP sentinel and let heavy
 # steps notice it, on the reasoning that killing someone's work while they sleep
 # is worse than the problem. On 2026-08-10 the machine froze anyway: two heavy
 # jobs ran concurrently (a Ghidra pre-pass whose JVM reaches ~5 GB on large

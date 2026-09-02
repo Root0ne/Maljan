@@ -1,6 +1,5 @@
 # Python
 .venv/
-.venv-wsl/
 __pycache__/
 *.pyc
 *.pyo
@@ -26,21 +25,14 @@ apps/web/.env.*.local
 .git/
 .github/
 .gitattributes
-.serena/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Docker (prevent recursive context — but keep CAPE entrypoint reachable
-# for docker/cape/Dockerfile.cape-web which COPYs docker/cape/entrypoint.sh)
+# Docker (prevent recursive context)
 docker/
-!docker/cape/
 
 # Build artifacts & logs
 *.log
 reports/
-
-# Test artifacts
-dummy_malware.exe
-analysis_output.log

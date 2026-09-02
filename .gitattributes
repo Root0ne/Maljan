@@ -4,25 +4,6 @@
 
 * text=auto eol=lf
 
-# Explicitly mark Python source files
-*.py text eol=lf
-
-# YAML (GitHub Actions workflows)
-*.yml text eol=lf
-*.yaml text eol=lf
-
-# Configuration and documentation
-*.toml text eol=lf
-*.cfg text eol=lf
-*.ini text eol=lf
-*.md text eol=lf
-*.txt text eol=lf
-*.rst text eol=lf
-
-# Environment and shell
-.env* text eol=lf
-Makefile text eol=lf
-
 # Binary files — no line ending conversion
 *.png binary
 *.jpg binary

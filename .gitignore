@@ -8,7 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
-.venv-wsl
 **/.venv/
 
 # External MCP tool installations (not part of Maljan — install separately)
@@ -46,10 +45,6 @@ data/uploads/
 **/.env.local
 **/.env.*.local
 
-# Generated datasets (large, produced by prepare-* scripts)
-# attck_valid_ids.json IS committed (small); labeled sentences is not.
-data/attck_labeled_sentences.jsonl
-
 # Real malware samples (must never be committed to a public repo)
 samples/
 
@@ -58,38 +53,10 @@ models/
 *.gguf
 *.safetensors
 
-# Local reference PDFs (Twitter threads, papers — collected per machine)
-docs/twitter/
-
-# Third-party threat-analysis reports, collected while reading. Not ours to
-# redistribute: one carries a TLP:AMBER marking, which is a limited-distribution
-# marking that a public repository breaks. 18 MB, and read by nothing here.
-/analiz raporları/
-*.pdf.tlp
-
-# docs/ carries the manuscript and the three supplements the paper says the
-# artefact contains. Everything else under it was written while the work was
-# being done rather than to be read afterwards, and lives under other/docs/.
-docs/research/
-docs/font/
-docs/migration/
-docs/report-reference/
-docs/AUDIT_*.md
-docs/CONTINUE_ON_WINDOWS.md
-other/docs/academic-article/findings-log.md
-other/docs/academic-article/literature-review-brief.md
-other/docs/academic-article/paper-roadmap.md
-other/docs/academic-article/self-audit-pitfalls.md
-other/docs/academic-article/research-briefs/
-
-# Local analysis outputs
-reports/
-
 # Tool caches
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-.serena/cache/
 
 # Frontend
 node_modules/
@@ -115,9 +82,6 @@ tests/evaluation/ab_off.jsonl
 tests/evaluation/ab_on.jsonl
 tests/evaluation/ab_off.partial.jsonl
 
-# Local transfer helper containing a GitHub token — never commit
-_GITHUB_SETUP.txt
-
 # Playwright run artefacts (screenshots, traces, error contexts from failed runs)
 apps/web/test-results/
 apps/web/playwright-report/
@@ -133,30 +97,6 @@ data/external/
 # (tests/evaluation/cape_task_ledger_n100.json) plus the instance. The ledger
 # is the artifact worth versioning; these are its bulky output.
 data/cape_reports/
-
-# built paper artifacts (regenerate with build_paper.py)
-other/docs/academic-article/paper/build/
-
-# LaTeX build products. The sources and the generated facts.tex are tracked; a
-# .aux is a compiler's scratch file and reviewing its diff is noise.
-other/docs/academic-article/paper/tex/*.aux
-other/docs/academic-article/paper/tex/*.log
-other/docs/academic-article/paper/tex/*.out
-other/docs/academic-article/paper/tex/*.toc
-other/docs/academic-article/paper/tex/*.fls
-other/docs/academic-article/paper/tex/*.xdv
-other/docs/academic-article/paper/tex/*.fdb_latexmk
-other/docs/academic-article/paper/tex/*.blg
-other/docs/academic-article/paper/tex/*.spl
-# submission bundle: a rebuildable view of files already tracked above
-# (make_submission.py assembles it for Editorial Manager)
-other/docs/academic-article/paper/submission/
-other/docs/academic-article/paper/tex/.facts-inputs.sha256
-1-s2.0-S0921889026003003-main.pdf
-makale_yazim.md
-elsarticle.zip
-Guide for authors - Computers & Security*.html
-Guide for authors - Computers & Security*_files/
 
 # Everything that is deliberately not part of the repository lives here:
 # third-party threat reports, the journal's guide and class files, reference
