@@ -363,12 +363,11 @@ def probe_facts() -> dict[str, Any]:
 
 
 _PASSED = re.compile(r"(\d+) passed")
-_SUITE_COUNT = _HERE / "test_suite_count.json"
 
 
 def recorded_suite_count() -> int:
     """The passing-test count the paper states, read from its artefact."""
-    return int(json.loads(_SUITE_COUNT.read_text())["count"])
+    return int(load("test_suite_count.json")["count"])
 
 
 def _format_count(n: int) -> str:
