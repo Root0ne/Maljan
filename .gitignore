@@ -49,7 +49,7 @@ data/uploads/
 samples/
 
 # Local LLM model weights (large, downloaded separately)
-models/
+/models/
 *.gguf
 *.safetensors
 
