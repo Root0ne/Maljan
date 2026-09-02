@@ -156,7 +156,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
 
     Prefers the comprehensive ``MalwareReport`` rendering that the
     ``report`` pipeline node leaves in ``result["malware_report_markdown"]``
-    (added in Phase 2 of the reporting refactor — see ``docs/REPORTING.md``).
+    (added in Phase 2 of the reporting refactor).
 
     Falls back to the legacy ``RunSummary.to_markdown()`` when the new
     payload is absent — happens when ``MALJAN_REPORTING__ENABLED=false``

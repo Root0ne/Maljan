@@ -9,7 +9,7 @@ per LLM call**, each grounded ONLY in that section's evidence bundle
 
 Why per-section and not one big call: the local Qwen3.6-35B/SWA model stalls and
 hallucinates on long single-shot generation (documented in
-other/docs/academic-article/findings-log.md). Bounded prompts (≤~1K tokens), a hard
+the authors' findings log, not in this repository). Bounded prompts (≤~1K tokens), a hard
 per-section timeout, and a deterministic skip-on-empty keep it stable. The
 cardinal rule mirrors the reference spec: **cite the evidence; if a section has
 no evidence, leave it empty — never invent** (the renderer states absence).

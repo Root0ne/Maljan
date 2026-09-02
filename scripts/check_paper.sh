@@ -13,6 +13,14 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
 PAPER_DIR="other/docs/academic-article/paper"
+# The manuscript lives under other/, which is local to the authors and not in
+# the repository. Every other paper gate (tests/evaluation/test_paper_*.py)
+# skips with that reason on a clean clone; this one exited 1 with "no built
+# PDF", which reads as a failure of the checkout rather than a fact about it.
+if [[ ! -d "$PAPER_DIR" ]]; then
+    echo "manuscript not in this checkout ($PAPER_DIR is local to the authors); nothing to check"
+    exit 0
+fi
 BUILD="$PAPER_DIR/tex"
 PDF="$BUILD/main.pdf"
 LOG="$BUILD/main.log"

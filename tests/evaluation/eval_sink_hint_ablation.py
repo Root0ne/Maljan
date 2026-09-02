@@ -29,15 +29,12 @@ import time
 os.environ.setdefault("REACT_AGENT_TIMEOUT_OVERRIDES__static", "600")
 from pathlib import Path
 
-sys.path.insert(0, "/home/user/Belgeler/kingston/Projects/Maljan")
-sys.path.insert(0, "/home/user/Belgeler/kingston/Projects/Maljan/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import httpx
 
-ROOT = Path("/home/user/Belgeler/kingston/Projects/Maljan")
-OUT = Path(
-    "/tmp/claude-1000/-home-user-Belgeler-kingston-Projects-Maljan/"
-    "797a8dd1-30c6-476b-be2d-9fe83a5a9f1e/scratchpad/b6_ablation.json"
-)
+ROOT = Path(__file__).resolve().parents[2]
+OUT = Path(os.environ.get("MALJAN_EVAL_OUT", ROOT / "logs")) / "b6_ablation.json"
 CONTAINER_DIR = "/data/samples"
 
 
@@ -60,7 +57,7 @@ def restart_llama() -> None:
     memory floor. temp 0 makes the restart measurement-neutral.
     """
     # Tell the guard this drop is declared, not runaway (see night_guard.sh).
-    grace = "/home/user/Belgeler/kingston/Projects/Maljan/logs/night-job.grace"
+    grace = str(ROOT / "logs" / "night-job.grace")
     open(grace, "w").close()
     subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
     subprocess.run(["systemctl", "--user", "reset-failed", "b6-llama.service"], capture_output=True)
@@ -92,9 +89,11 @@ def restart_llama() -> None:
             "--property=MemoryMax=20G",
             "--property=MemorySwapMax=2G",
             "--setenv=CUDA_VISIBLE_DEVICES=0",
-            "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server",
+            os.environ.get(
+                "LLAMA_BIN", "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server"
+            ),
             "-m",
-            "/home/user/Belgeler/kingston/Projects/Maljan/models/Qwen3.6-35B-A3B-IQ3_K_R4.gguf",
+            str(ROOT / "models" / "Qwen3.6-35B-A3B-IQ3_K_R4.gguf"),
             "-c",
             "65536",
             "-t",

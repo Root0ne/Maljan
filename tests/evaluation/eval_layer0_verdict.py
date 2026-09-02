@@ -73,6 +73,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import random
 import subprocess
 import sys
@@ -430,7 +431,9 @@ def b4_block(results: list[ArmResult]) -> list[str]:
 GT_DIR = _REPO_ROOT / "tests" / "evaluation" / "ground_truth" / "attck_malware"
 FIXTURE_SEED = 20260812
 LLAMA_UNIT = "c3-llama"
-LLAMA_BIN = "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server"
+LLAMA_BIN = os.environ.get(
+    "LLAMA_BIN", "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server"
+)
 LLAMA_MODEL = str(_REPO_ROOT / "models" / "Qwen3.6-35B-A3B-IQ3_K_R4.gguf")
 GRACE = _REPO_ROOT / "logs" / "night-job.grace"
 

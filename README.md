@@ -122,8 +122,9 @@ cp .env.example .env
 # The ghidra-mcp image is built from external/, which git does not carry
 make external
 
-# Windows: avoid PostgreSQL port conflict
-$env:POSTGRES_PORT="5433"
+# If host port 5432 is already taken, publish Postgres elsewhere and point
+# DATABASE_URL at the same port
+export POSTGRES_PORT=5433
 
 # Start all 8 services
 cd docker
@@ -136,7 +137,7 @@ docker compose up -d --build
 # MinIO Console: http://localhost:9001
 ```
 
-> **Local LLM:** Containers reach the Windows host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible: typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
+> **Local LLM:** Containers reach the host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible: typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
 
 ### Pre-build the ATT&CK cache (optional)
 

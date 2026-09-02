@@ -23,12 +23,13 @@ has to report and nothing else currently counts.
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/home/user/Belgeler/kingston/Projects/Maljan/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import httpx
 
 from maljan.analysis.ghidra_program import SWITCH_PARAM, SWITCH_PATH, program_name_from_load
@@ -43,11 +44,8 @@ MAX_FUNCS = 12
 LIMIT = 20000
 RESTART_EVERY = 1
 CALL_TIMEOUT = 300.0
-OUT = Path(
-    "/tmp/claude-1000/-home-user-Belgeler-kingston-Projects-Maljan/"
-    "797a8dd1-30c6-476b-be2d-9fe83a5a9f1e/scratchpad/b6_hint_rate.json"
-)
-ROOT = Path("/home/user/Belgeler/kingston/Projects/Maljan")
+ROOT = Path(__file__).resolve().parents[2]
+OUT = Path(os.environ.get("MALJAN_EVAL_OUT", ROOT / "logs")) / "b6_hint_rate.json"
 
 
 def restart_ghidra() -> None:

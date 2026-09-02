@@ -18,12 +18,13 @@ lost the first time this kind of sweep was run.
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/home/user/Belgeler/kingston/Projects/Maljan/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import httpx
 
 from maljan.analysis.function_hash_attribution import (
@@ -38,11 +39,8 @@ CFG = get_settings()
 G = CFG.mcp.ghidra
 BASE = G.url.rstrip("/")
 MIN_INSTR = CFG.preprocessing.function_hash_min_instructions
-ROOT = Path("/home/user/Belgeler/kingston/Projects/Maljan")
-OUT = Path(
-    "/tmp/claude-1000/-home-user-Belgeler-kingston-Projects-Maljan/"
-    "797a8dd1-30c6-476b-be2d-9fe83a5a9f1e/scratchpad/b7_attribution.json"
-)
+ROOT = Path(__file__).resolve().parents[2]
+OUT = Path(os.environ.get("MALJAN_EVAL_OUT", ROOT / "logs")) / "b7_attribution.json"
 
 
 def restart_ghidra() -> None:

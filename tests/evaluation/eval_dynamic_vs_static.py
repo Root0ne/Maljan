@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -103,7 +104,9 @@ COOL_CEILING_C = 82
 COOL_MAX_WAIT_S = 600
 
 LLAMA_UNIT = "c4-llama"
-LLAMA_BIN = "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server"
+LLAMA_BIN = os.environ.get(
+    "LLAMA_BIN", "/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server"
+)
 LLAMA_MODEL = str(_REPO_ROOT / "models" / "Qwen3.6-35B-A3B-IQ3_K_R4.gguf")
 GRACE = _REPO_ROOT / "logs" / "night-job.grace"
 

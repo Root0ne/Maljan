@@ -27,7 +27,7 @@ This module is intentionally side-effect free and config-gated off by default
 (see ``PreprocessingConfig.category_inference_backend``). It is shipped so the
 choice between keyword / semantic / hybrid is a measured, reversible knob — not
 a hardcoded assumption. See ``tests/evaluation/eval_category_inference.py`` for
-the head-to-head harness and ``other/docs/academic-article/findings-log.md`` for the
+the head-to-head harness and the authors' findings log (not in this repository) for the
 numbers that justify the default.
 """
 

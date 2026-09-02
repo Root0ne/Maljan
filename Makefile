@@ -61,13 +61,13 @@ pre-commit-run:
 	uv run pre-commit run --all-files
 
 benchmark:
-	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite
+	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite
 
 prepare-tram:
 	uv run python scripts/prepare_tram_dataset.py
 
 benchmark-tram:
-	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
+	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
 
 prepare-attck:
 	uv run python scripts/prepare_attck_malware_fixtures.py
@@ -80,15 +80,15 @@ prepare-api-db:
 	uv run python scripts/build_api_capability_db.py
 
 benchmark-attck:
-	set PYTHONPATH=src && uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
+	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
 
 # ── Docker Orchestration ───────────────────────────────────────────
 
 docker-build:
-	cd docker && set POSTGRES_PORT=5433 && docker compose build
+	cd docker && POSTGRES_PORT=$${POSTGRES_PORT:-5433} docker compose build
 
 docker-up:
-	cd docker && set POSTGRES_PORT=5433 && docker compose up -d
+	cd docker && POSTGRES_PORT=$${POSTGRES_PORT:-5433} docker compose up -d
 
 docker-down:
 	cd docker && docker compose down
@@ -145,10 +145,10 @@ rebuild-ghidra: ghidra-build
 # Every interval in the paper, recomputed at the cluster its observations are
 # independent at. Reads committed per-sample artifacts only: no LLM, no network.
 reanalyse:
-	.venv/bin/python tests/evaluation/reanalyse.py
+	uv run python tests/evaluation/reanalyse.py
 
 facts: reanalyse
-	.venv/bin/python tests/evaluation/paper_facts.py
+	uv run python tests/evaluation/paper_facts.py
 
 # Recover the three samples the sandbox lost and take the cohort to 100.
 # Needs the sandbox's network; refuses clearly without it.
@@ -160,6 +160,6 @@ paper-check:
 	./scripts/check_paper.sh
 
 paper: facts
-	.venv/bin/python tests/evaluation/make_paper_figures.py
-	.venv/bin/python other/docs/academic-article/paper/make_architecture_figure.py
-	.venv/bin/python other/docs/academic-article/paper/build_paper.py
+	uv run python tests/evaluation/make_paper_figures.py
+	uv run python other/docs/academic-article/paper/make_architecture_figure.py
+	uv run python other/docs/academic-article/paper/build_paper.py
