@@ -9,7 +9,7 @@ from app.database import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class UserRole(str, enum.Enum):
+class UserRole(enum.StrEnum):
     """Allowed roles for a platform user."""
 
     ADMIN = "admin"
