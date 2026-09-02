@@ -39,6 +39,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -362,10 +363,20 @@ def probe_facts() -> dict[str, Any]:
 
 
 _PASSED = re.compile(r"(\d+) passed")
+_SUITE_COUNT = _HERE / "test_suite_count.json"
+
+
+def recorded_suite_count() -> int:
+    """The passing-test count the paper states, read from its artefact."""
+    return int(json.loads(_SUITE_COUNT.read_text())["count"])
+
+
+def _format_count(n: int) -> str:
+    return f"{n:,}"
 
 
 def suite_facts() -> dict[str, Any]:
-    """The number of tests that **pass**, from a run — not from collection.
+    """The recorded passing-test count from study time, verified by a live run.
 
     The first version of this counted ``pytest --collect-only`` and returned
     2,671 while ``make check`` reported 2,666 passed. The paper's sentence is "a
@@ -374,8 +385,9 @@ def suite_facts() -> dict[str, Any]:
     that is off by five in the direction of flattering the suite is exactly the
     kind this module exists to prevent, and it got in on the first attempt.
 
-    Runs the same command ``make test`` does, so the number in the paper and the
-    number in the gate cannot disagree. Costs about a minute.
+    The count is recorded in an artefact so tests can be added without moving the
+    number in a paper under submission. The run is the green check that the suite
+    still works at study time. Costs about a minute.
     """
     # The paper's own gates are excluded, for two reasons that point the same
     # way. They test the manuscript rather than the pipeline, so none of them
@@ -410,11 +422,22 @@ def suite_facts() -> dict[str, Any]:
             f"the suite did not pass (pytest exit {proc.returncode}); the paper cannot "
             "state a passing-test count from it: " + ("; ".join(failed[:5]) or "see make test")
         )
+    live = None
     for line in reversed(proc.stdout.splitlines()):
         m = _PASSED.search(line)
         if m:
-            return {"test_count": f"{int(m.group(1)):,}"}
-    raise FactError("could not read a passing-test count from pytest")
+            live = int(m.group(1))
+            break
+    if live is None:
+        raise FactError("could not read a passing-test count from pytest")
+    recorded = recorded_suite_count()
+    if live != recorded:
+        print(
+            f"note: live suite passes {live} tests; the paper states the recorded "
+            f"{recorded} (tests/evaluation/test_suite_count.json)",
+            file=sys.stderr,
+        )
+    return {"test_count": _format_count(recorded)}
 
 
 def confidence_facts() -> dict[str, Any]:
