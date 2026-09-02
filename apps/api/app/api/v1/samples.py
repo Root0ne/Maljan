@@ -32,6 +32,7 @@ from app.logging_config import get_logger
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.user import User
+from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
 
 logger = get_logger("api.samples")
@@ -60,7 +61,7 @@ def _minio_client() -> Any:
     )
 
 
-def _streaming_hashes(file: UploadFile, dest: Path) -> tuple[str, str, str, int]:
+def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str, str, str, int]:
     """Stream the upload to ``dest`` and return (sha256, sha1, md5, size).
 
     SHA1 and MD5 are emitted alongside SHA256 because every downstream CTI
@@ -81,12 +82,10 @@ def _streaming_hashes(file: UploadFile, dest: Path) -> tuple[str, str, str, int]
             if not chunk:
                 break
             total += len(chunk)
-            if total > settings.upload_max_bytes:
+            if total > max_bytes:
                 raise HTTPException(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=(
-                        f"File too large. Maximum: {settings.upload_max_bytes // (1024 * 1024)} MB"
-                    ),
+                    detail=(f"File too large. Maximum: {max_bytes // (1024 * 1024)} MB"),
                 )
             sha256.update(chunk)
             sha1.update(chunk)
@@ -214,6 +213,7 @@ async def upload_sample(
     db: AsyncSession = Depends(get_db),
 ) -> Sample:
     """Upload a malware sample for analysis (streaming)."""
+    upload_max_bytes = await runtime_config.get("upload_max_bytes")
     safe_filename = _sanitise_filename(file.filename)
     logger.info(
         "Sample upload started: %s",
@@ -237,7 +237,7 @@ async def upload_sample(
         tmp_path = Path(tmp.name)
 
     try:
-        sha256, sha1, md5, size = _streaming_hashes(file, tmp_path)
+        sha256, sha1, md5, size = _streaming_hashes(file, tmp_path, upload_max_bytes)
         if size == 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 

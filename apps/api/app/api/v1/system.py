@@ -14,6 +14,7 @@ from app.config import settings
 from app.deps import require_admin
 from app.logging_config import get_logger
 from app.models.user import User
+from app.runtime_config import runtime_config
 
 logger = get_logger("api.system")
 
@@ -50,13 +51,13 @@ async def system_status() -> SystemStatusResponse:
     No API keys leave the server — only booleans indicating whether keys
     are configured. Safe to expose without authentication.
     """
-    vt_key = settings.virustotal_api_key.get_secret_value() if settings.virustotal_api_key else ""
-    abuse_key = settings.abuseipdb_api_key.get_secret_value() if settings.abuseipdb_api_key else ""
+    vt_key = await runtime_config.get_secret("virustotal_api_key")
+    abuse_key = await runtime_config.get_secret("abuseipdb_api_key")
     return SystemStatusResponse(
         app_name=settings.app_name,
         app_version=settings.app_version,
-        mock_mode_allowed=bool(settings.mock_mode_allowed),
-        enrichment_enabled=bool(settings.enrichment_enabled),
+        mock_mode_allowed=bool(await runtime_config.get("mock_mode_allowed")),
+        enrichment_enabled=bool(await runtime_config.get("enrichment_enabled")),
         has_virustotal_key=bool(vt_key),
         has_abuseipdb_key=bool(abuse_key),
     )

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.logging_config import get_logger, setup_logging
+from app.runtime_config import runtime_config
 
 logger = get_logger("worker")
 
@@ -280,7 +281,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             _env_mock = os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true"
             _job_mock = bool(job.config and job.config.get("mock_mode"))
             _mock_requested = _env_mock or _job_mock
-            _mock_active = bool(settings.mock_mode_allowed and _mock_requested)
+            _mock_mode_allowed = await runtime_config.get("mock_mode_allowed")
+            _mock_active = bool(_mock_mode_allowed and _mock_requested)
             if _mock_requested and not _mock_active:
                 logger.warning(
                     "Pipeline mock requested (env=%s, job=%s) but blocked: "
@@ -293,7 +295,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 "MOCK" if _mock_active else "REAL",
                 _env_mock,
                 _job_mock,
-                settings.mock_mode_allowed,
+                _mock_mode_allowed,
             )
             # The sink is what turns a 30-minute silent run into a readable
             # transcript: each node reports its own findings as it produces

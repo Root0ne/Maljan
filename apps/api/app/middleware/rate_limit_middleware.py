@@ -22,6 +22,7 @@ from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.logging_config import get_logger
+from app.runtime_config import runtime_config
 
 logger = get_logger("middleware.rate_limit")
 
@@ -64,11 +65,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
 
     @staticmethod
-    def _extract_client_ip(request: Request) -> str:
+    async def _extract_client_ip(request: Request) -> str:
         """Return the client IP, honouring X-Forwarded-For from trusted proxies."""
-        from app.config import settings
-
-        trusted = set(getattr(settings, "trusted_proxy_ips", []) or [])
+        trusted = set(await runtime_config.get("trusted_proxy_ips") or [])
         peer = getattr(request.client, "host", "") or "unknown"
         if peer in trusted:
             xff = request.headers.get("x-forwarded-for", "")
@@ -103,14 +102,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         call_next: RequestResponseEndpoint,
     ) -> Response:
         """Check rate limit before processing request."""
-        if not self.enabled:
+        enabled = await runtime_config.get("rate_limit_enabled")
+        if not enabled:
             return await call_next(request)
 
         path = request.url.path
         if path in self.whitelist:
             return await call_next(request)
 
-        client_ip = self._extract_client_ip(request)
+        max_requests = await runtime_config.get("rate_limit_requests")
+        window_seconds = await runtime_config.get("rate_limit_window_seconds")
+        client_ip = await self._extract_client_ip(request)
         key = f"ratelimit:{client_ip}:{path}"
 
         redis = aioredis.Redis(connection_pool=self._redis_pool)
@@ -118,24 +120,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Atomic incr-with-TTL: SETNX-style via Lua. Avoids the previous
             # bug where two concurrent first-requests both saw ttl=-1, raced
             # on EXPIRE, and one of them ended up without a TTL at all.
-            current_count, ttl_remaining = await self._incr_with_ttl(
-                redis, key, self.window_seconds
-            )
+            current_count, ttl_remaining = await self._incr_with_ttl(redis, key, window_seconds)
 
-            remaining = max(0, self.max_requests - current_count)
+            remaining = max(0, max_requests - current_count)
 
             # Rate limit exceeded
-            if current_count > self.max_requests:
+            if current_count > max_requests:
                 logger.warning(
                     "Rate limit exceeded for %s on %s (%d/%d)",
                     client_ip,
                     path,
                     current_count,
-                    self.max_requests,
+                    max_requests,
                     extra={
                         "client_ip": client_ip,
                         "path": path,
-                        "limit": self.max_requests,
+                        "limit": max_requests,
                         "count": current_count,
                     },
                 )
@@ -145,7 +145,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     media_type="application/json",
                     headers={
                         "Retry-After": str(ttl_remaining),
-                        "X-RateLimit-Limit": str(self.max_requests),
+                        "X-RateLimit-Limit": str(max_requests),
                         "X-RateLimit-Remaining": "0",
                         "X-RateLimit-Reset": str(ttl_remaining),
                     },
@@ -153,7 +153,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             # Proceed with request
             response = await call_next(request)
-            response.headers["X-RateLimit-Limit"] = str(self.max_requests)
+            response.headers["X-RateLimit-Limit"] = str(max_requests)
             response.headers["X-RateLimit-Remaining"] = str(remaining)
             response.headers["X-RateLimit-Reset"] = str(ttl_remaining)
             return response
