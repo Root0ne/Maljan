@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -45,7 +46,10 @@ async def _get(
         return False, f"{type(exc).__name__}: {exc}", None
 
 
-async def probe_llm(v: dict[str, Any]) -> ProbeResult:
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     base = str(v.get("base_url") or "https://api.openai.com/v1").rstrip("/")
     headers = {"Authorization": f"Bearer {v.get('api_key') or 'none'}"}
@@ -85,6 +89,66 @@ async def probe_llm(v: dict[str, Any]) -> ProbeResult:
     )
 
 
+async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
+    t0 = time.perf_counter()
+    headers = {
+        "x-api-key": str(v.get("anthropic_api_key") or ""),
+        "anthropic-version": ANTHROPIC_VERSION,
+    }
+    ok, detail, r = await _get("https://api.anthropic.com/v1/models", headers)
+    if not ok or r is None:
+        return ProbeResult(False, _ms(t0), f"model list: {detail}")
+    models = [m.get("id", "") for m in r.json().get("data", [])]
+    model = v.get("anthropic_expert_model") or (models[0] if models else "")
+    return ProbeResult(True, _ms(t0), f"{len(models)} models listed; {model!r} configured", models)
+
+
+async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
+    t0 = time.perf_counter()
+    base = str(v.get("ollama_base_url") or "http://localhost:11434").rstrip("/")
+    ok, detail, r = await _get(f"{base}/api/tags")
+    if not ok or r is None:
+        return ProbeResult(False, _ms(t0), f"model list: {detail}")
+    models = [m.get("name", "") for m in r.json().get("models", [])]
+    expert = v.get("ollama_expert_model") or ""
+    judge = v.get("ollama_judge_model") or ""
+    missing = [m for m in {expert, judge} if m and m not in models]
+    if missing:
+        return ProbeResult(
+            False, _ms(t0), f"{len(models)} models available; missing {missing}", models
+        )
+    return ProbeResult(
+        True, _ms(t0), f"{len(models)} models available; expert/judge present", models
+    )
+
+
+async def _probe_llm_gemini(v: dict[str, Any]) -> ProbeResult:
+    t0 = time.perf_counter()
+    headers = {"x-goog-api-key": str(v.get("gemini_api_key") or "")}
+    ok, detail, r = await _get("https://generativelanguage.googleapis.com/v1beta/models", headers)
+    if not ok or r is None:
+        return ProbeResult(False, _ms(t0), f"model list: {detail}")
+    models = [m.get("name", "") for m in r.json().get("models", [])]
+    model = v.get("gemini_expert_model") or (models[0] if models else "")
+    return ProbeResult(True, _ms(t0), f"{len(models)} models listed; {model!r} configured", models)
+
+
+_LLM_PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
+    "openai": _probe_llm_openai,
+    "anthropic": _probe_llm_anthropic,
+    "ollama": _probe_llm_ollama,
+    "gemini": _probe_llm_gemini,
+}
+
+
+async def probe_llm(v: dict[str, Any]) -> ProbeResult:
+    provider = str(v.get("provider") or "openai")
+    probe = _LLM_PROBES.get(provider)
+    if probe is None:
+        return ProbeResult(False, 0, f"unknown provider: {provider!r}")
+    return await probe(v)
+
+
 async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     headers = {"Authorization": f"Bearer {v['auth_token']}"} if v.get("auth_token") else None
@@ -116,15 +180,28 @@ async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
     )
 
 
+_CREDENTIAL_IN_URL = re.compile(r"(://)([^/\s:@]+):([^/\s@]+)@")
+
+
+def _redact_url(text: str) -> str:
+    """Mask any ``scheme://user:pass@`` credential in ``text`` before it is echoed.
+
+    Applied to exception text, not just a known URL value: a driver's error
+    message often embeds the DSN it failed to reach, credentials included.
+    """
+    return _CREDENTIAL_IN_URL.sub(r"\1***@", text)
+
+
 async def probe_redis(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
+    url = str(v.get("url") or api_settings.redis_url)
     try:
-        r = Redis.from_url(str(v.get("url") or api_settings.redis_url), socket_timeout=TIMEOUT)
+        r = Redis.from_url(url, socket_timeout=TIMEOUT)
         pong = await r.ping()
         await r.aclose()
         return ProbeResult(bool(pong), _ms(t0), "PONG" if pong else "no PONG")
     except Exception as exc:  # noqa: BLE001 - reported to the operator, never raised to the route
-        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {_redact_url(str(exc))}")
 
 
 async def probe_virustotal(v: dict[str, Any]) -> ProbeResult:
@@ -164,6 +241,15 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.openai.api_key": "api_key",
         "core.llm.openai.expert_model": "expert_model",
         "core.llm.openai.judge_model": "judge_model",
+        "core.llm.anthropic.api_key": "anthropic_api_key",
+        "core.llm.anthropic.expert_model": "anthropic_expert_model",
+        "core.llm.anthropic.judge_model": "anthropic_judge_model",
+        "core.llm.ollama.base_url": "ollama_base_url",
+        "core.llm.ollama.expert_model": "ollama_expert_model",
+        "core.llm.ollama.judge_model": "ollama_judge_model",
+        "core.llm.gemini.api_key": "gemini_api_key",
+        "core.llm.gemini.expert_model": "gemini_expert_model",
+        "core.llm.gemini.judge_model": "gemini_judge_model",
     },
     "ghidra": {"core.mcp.ghidra.url": "url", "core.mcp.ghidra.auth_token": "auth_token"},
     "cape": {

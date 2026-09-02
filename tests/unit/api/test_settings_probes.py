@@ -72,13 +72,25 @@ async def test_run_probe_merges_form_over_stored_and_env(monkeypatch):
         {"core.llm.openai.base_url": "http://form/v1", "core.llm.openai.api_key": None},
         {"core.llm.openai.expert_model": "stored-model"},
     )
-    assert seen == {
-        "base_url": "http://form/v1",
-        "api_key": "env-key",
-        "expert_model": "stored-model",
-        "judge_model": seen["judge_model"],
-        "provider": seen["provider"],
-    }
+    # form beats stored beats env, per field, for the OpenAI slot...
+    assert seen["base_url"] == "http://form/v1"
+    assert seen["api_key"] == "env-key"
+    assert seen["expert_model"] == "stored-model"
+    assert seen["provider"] == "openai"
+    # ...and every other provider's fields are still resolved (candidate > stored > env),
+    # so _INPUTS["llm"] covers all four providers regardless of which one is active.
+    assert {
+        "judge_model",
+        "anthropic_api_key",
+        "anthropic_expert_model",
+        "anthropic_judge_model",
+        "ollama_base_url",
+        "ollama_expert_model",
+        "ollama_judge_model",
+        "gemini_api_key",
+        "gemini_expert_model",
+        "gemini_judge_model",
+    } <= seen.keys()
 
 
 @pytest.mark.asyncio
@@ -116,3 +128,102 @@ async def test_probe_results_never_leak_secret_values(monkeypatch):
     )
     r = await probes.probe_virustotal({"api_key": "super-secret-value"})
     assert "super-secret-value" not in r.detail
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_anthropic_ok(monkeypatch):
+    def handler(req: httpx.Request):
+        assert req.headers["x-api-key"] == "sk-ant-secret"
+        assert req.headers["anthropic-version"] == probes.ANTHROPIC_VERSION
+        return httpx.Response(
+            200, json={"data": [{"id": "claude-sonnet-4-20250514"}, {"id": "claude-haiku"}]}
+        )
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "anthropic",
+            "anthropic_api_key": "sk-ant-secret",
+            "anthropic_expert_model": "claude-sonnet-4-20250514",
+        }
+    )
+    assert r.ok and r.models == ["claude-sonnet-4-20250514", "claude-haiku"]
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_ollama_ok(monkeypatch):
+    def handler(req: httpx.Request):
+        assert req.url.path.endswith("/api/tags")
+        return httpx.Response(200, json={"models": [{"name": "qwen3.5:9b"}, {"name": "llama3:8b"}]})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3.5:9b",
+            "ollama_judge_model": "qwen3.5:9b",
+        }
+    )
+    assert r.ok and "qwen3.5:9b" in r.models
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_gemini_ok(monkeypatch):
+    def handler(req: httpx.Request):
+        assert req.headers["x-goog-api-key"] == "goog-secret"
+        assert "key=" not in str(req.url)
+        return httpx.Response(200, json={"models": [{"name": "models/gemini-2.5-pro"}]})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "gemini",
+            "gemini_api_key": "goog-secret",
+            "gemini_expert_model": "gemini-2.5-pro",
+        }
+    )
+    assert r.ok and r.models == ["models/gemini-2.5-pro"]
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_unknown_provider_fails_without_raising():
+    r = await probes.probe_llm({"provider": "bedrock"})
+    assert r.ok is False and "bedrock" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_anthropic_and_gemini_keys_never_leak_on_failure(monkeypatch):
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda: httpx.AsyncClient(transport=transport(lambda r: httpx.Response(403)), timeout=10),
+    )
+    r1 = await probes.probe_llm(
+        {"provider": "anthropic", "anthropic_api_key": "sk-ant-super-secret"}
+    )
+    assert r1.ok is False and "sk-ant-super-secret" not in r1.detail
+
+    r2 = await probes.probe_llm({"provider": "gemini", "gemini_api_key": "goog-super-secret"})
+    assert r2.ok is False and "goog-super-secret" not in r2.detail
+
+
+@pytest.mark.asyncio
+async def test_redis_probe_masks_credentials_in_url_on_failure(monkeypatch):
+    class FailingRedis:
+        @staticmethod
+        def from_url(url, **kwargs):
+            raise ConnectionError("could not connect to redis://user:hunter2@bad-host:6379/0")
+
+    monkeypatch.setattr(probes, "Redis", FailingRedis)
+    r = await probes.probe_redis({"url": "redis://user:hunter2@bad-host:6379/0"})
+    assert r.ok is False
+    assert "hunter2" not in r.detail
+    assert "user:hunter2@" not in r.detail
+    assert "***@bad-host" in r.detail
