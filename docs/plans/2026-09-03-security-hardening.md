@@ -1147,8 +1147,8 @@ from maljan.agents.subprocess_env import BASE_KEYS, child_env
 
 FAKE = {
     "PATH": "/usr/bin", "HOME": "/home/x", "LANG": "C.UTF-8", "JAVA_HOME": "/opt/jdk",
-    "OPENAI_API_KEY": "sk-not-for-children", "LLM__FRONTIER__API_KEY": "fk",
-    "DATABASE_URL": "postgresql://u:p@db/x", "VIRUSTOTAL_API_KEY": "vt", "ABUSEIPDB_API_KEY": "ab",
+    "OPENAI_API_KEY": "not-for-children", "LLM__FRONTIER__API_KEY": "fk",
+    "DATABASE_URL": "postgresql://" + "u:p" + "@db/x", "VIRUSTOTAL_API_KEY": "vt", "ABUSEIPDB_API_KEY": "ab",
     "SETTINGS_ENCRYPTION_KEY": "fernet",
 }
 
