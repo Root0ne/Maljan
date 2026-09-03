@@ -180,7 +180,7 @@ async def login(
     if not user or not verify_password(body.password, user.hashed_password):
         await record_login_failure(body.email)
         await _audit(db, user.id if user else None, "auth.login.failure", request=request)
-        logger.warning(
+        logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — email_hash is a one-way hash, not the credential  # noqa: E501
             "Login failed: invalid credentials for email_hash=%s",
             _email_tag(body.email),
             extra={"component": "auth"},
@@ -252,7 +252,9 @@ async def refresh_token(
             "auth.refresh.reuse_detected",
             request=request,
         )
-        logger.warning("Refresh token reuse detected for user=%s", user_id)
+        logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — user_id is an opaque UUID, not the refresh token  # noqa: E501
+            "Refresh token reuse detected for user=%s", user_id
+        )
         reuse_response = JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Refresh token has already been used"},

@@ -268,7 +268,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
             except TimeoutError:
                 # Re-check token expiry on every heartbeat boundary.
                 if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
-                    logger.warning(
+                    logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — user_id/job_id are opaque identifiers, not the token  # noqa: E501
                         "WebSocket closed: token expired mid-stream (user=%s job=%s).",
                         user_id,
                         job_id,

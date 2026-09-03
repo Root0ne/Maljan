@@ -87,6 +87,7 @@ def fetch_ghidra_release_date(version: str) -> str | None:
                 "User-Agent": "maljan-ghidra-manager",
             },
         )
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected — GHIDRA_RELEASES_API is a module-level https:// constant, never user input  # noqa: E501
         with urllib.request.urlopen(req, timeout=15) as resp:
             releases = json.loads(resp.read().decode())
     except Exception as exc:

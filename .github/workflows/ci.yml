@@ -47,6 +47,22 @@ jobs:
       - name: mypy type check
         run: uv run mypy src/ apps/api/
 
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install semgrep
+        run: pip install semgrep==1.176.0
+      - name: Scan
+        run: semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+
   test:
     name: Test Suite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

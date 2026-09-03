@@ -161,9 +161,8 @@ def _compute_hashes(
             md5=hashlib.md5(
                 bytes_blob, usedforsecurity=False
             ).hexdigest(),  # nosemgrep: insecure-hash-algorithm-md5
-            sha1=hashlib.sha1(
-                bytes_blob, usedforsecurity=False
-            ).hexdigest(),  # nosemgrep: insecure-hash-algorithm-sha1
+            # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+            sha1=hashlib.sha1(bytes_blob, usedforsecurity=False).hexdigest(),
             sha256=(sha256_override or hashlib.sha256(bytes_blob).hexdigest()),
             sha512=hashlib.sha512(bytes_blob).hexdigest(),
             imphash=_safe_imphash(bytes_blob),

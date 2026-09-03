@@ -1,0 +1,6 @@
+other/
+tests/
+apps/web/
+data/
+.venv/
+node_modules/

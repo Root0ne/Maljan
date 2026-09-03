@@ -103,7 +103,9 @@ async def refresh_token_register(user_id: str, jti: str) -> None:
     try:
         await r.set(key, "1", ex=ttl)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("refresh_token_register failed: %s", type(exc).__name__)
+        logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs only the exception's class name, never the exception itself  # noqa: E501
+            "refresh_token_register failed: %s", type(exc).__name__
+        )
         _mark_down(exc)
 
 
@@ -123,7 +125,9 @@ async def refresh_token_consume(user_id: str | None, jti: str) -> bool:
     try:
         return bool(await r.delete(key))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("refresh_token_consume failed: %s", type(exc).__name__)
+        logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs only the exception's class name, never the exception itself  # noqa: E501
+            "refresh_token_consume failed: %s", type(exc).__name__
+        )
         _mark_down(exc)
         return False
 

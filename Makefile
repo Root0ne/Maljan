@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external
+.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external semgrep
 
 test:
 	uv run pytest tests/ -q
@@ -39,6 +39,10 @@ format-check:
 # annotation.
 typecheck:
 	uv run mypy src/ apps/api/
+
+# Same rulesets CI runs in the semgrep job, pinned to the same version.
+semgrep:
+	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
 
 # Full local quality gate (mirrors CI)
 check: lint format-check typecheck test

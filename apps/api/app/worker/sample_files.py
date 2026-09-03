@@ -24,6 +24,7 @@ WORK_SUBDIR = ".work"
 
 def _private_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions — 0o700 is intentional: owner-only access to a private working directory that holds uploaded sample bytes  # noqa: E501
     os.chmod(path, 0o700)
     return path
 
