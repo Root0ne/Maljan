@@ -158,8 +158,17 @@ figcaption b { color: var(--ink); }
 class HtmlRenderer:
     """Render a complete ``MalwareReport`` as one self-contained HTML document."""
 
-    def render(self, report: MalwareReport, *, embed_figures: bool = True) -> str:
-        """Return a full ``<!DOCTYPE html>`` document for ``report``."""
+    def render(
+        self, report: MalwareReport, *, embed_figures: bool = True, nonce: str | None = None
+    ) -> str:
+        """Return a full ``<!DOCTYPE html>`` document for ``report``.
+
+        ``nonce`` is a caller-supplied CSP nonce for the one ``<style>`` tag
+        this document emits. It is ``None`` for every existing caller (the PDF
+        pipeline, and any HTML export served without a per-response CSP); the
+        report route mints one so it can serve the export under a policy with
+        no ``'unsafe-inline'``.
+        """
         body_html = self._body_html(report)
         figures = list(report.figures or []) if embed_figures else []
         preamble, sections, leftover = self._place_figures(body_html, figures)
@@ -167,6 +176,7 @@ class HtmlRenderer:
         appendix = self._figure_appendix(leftover, start_index=len(figures) - len(leftover) + 1)
         title = self._title(report)
         sha = report.identity.hashes.sha256 or "unknown"
+        style_open = f'<style nonce="{escape(nonce)}">' if nonce else "<style>"
         # Order matters: title block, then the contents page, then the body. The
         # TOC carries ``break-after: page`` so the report opens on its own cover.
         return (
@@ -176,7 +186,7 @@ class HtmlRenderer:
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
             f"<title>{escape(title)}</title>\n"
             '<meta name="generator" content="Maljan">\n'
-            f"<style>{_STYLESHEET}</style>\n"
+            f"{style_open}{_STYLESHEET}</style>\n"
             "</head>\n<body>\n"
             f"<span style=\"string-set: doc-sha 'sha256 {escape(sha[:16])}…'\"></span>\n"
             f"{preamble}{toc}{''.join(sections)}{appendix}"

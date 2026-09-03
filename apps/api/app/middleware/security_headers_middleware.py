@@ -18,10 +18,25 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-# A minimal CSP that allows the API to serve its own resources and the
-# Swagger UI assets it bundles, while disallowing everything else. The
-# frontend is a separate origin so it never inherits this policy.
+# A minimal CSP that allows the API to serve its own resources while
+# disallowing everything else, including inline scripts — the API has none.
+# The frontend is a separate origin so it never inherits this policy.
 _DEFAULT_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+# Swagger UI and ReDoc load their bundle from a CDN and inject inline
+# <script>/<style> tags to boot themselves, so only these debug-only routes
+# (see app.main: /docs, /redoc, /openapi.json exist only when settings.debug
+# is true) get the looser policy. Everything else keeps the strict default.
+_DOCS_CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
     "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
@@ -70,8 +85,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Permissions-Policy",
             "geolocation=(), microphone=(), camera=()",
         )
-        if self._csp:
-            headers.setdefault("Content-Security-Policy", self._csp)
+        policy = self._csp
+        if policy and (
+            request.url.path.startswith(("/docs", "/redoc")) or request.url.path == "/openapi.json"
+        ):
+            policy = _DOCS_CSP
+        if policy:
+            headers.setdefault("Content-Security-Policy", policy)
         if self._hsts:
             headers.setdefault(
                 "Strict-Transport-Security",
