@@ -352,28 +352,24 @@ export async function installApiMocks(
   });
 
   /* ── Auth ─────────────────────────────────────────── */
+  // The refresh token is an HttpOnly cookie now: the browser holds it, not
+  // localStorage, and these mocks answer with the access token alone.
   await page.route("**/api/v1/auth/login", (route) =>
-    json(route, {
-      access_token: "mock_access_token",
-      refresh_token: "mock_refresh_token",
-    })
+    json(route, { access_token: "mock_access_token", token_type: "bearer" })
   );
   await page.route("**/api/v1/auth/register", (route) =>
-    json(route, {
-      access_token: "mock_access_token",
-      refresh_token: "mock_refresh_token",
-    })
+    json(route, { access_token: "mock_access_token", token_type: "bearer" })
   );
   await page.route("**/api/v1/auth/me", (route) => json(route, options.user ?? MOCK_USER));
-  // Armed by AuthProvider at login. The stub refresh token is not a JWT, so the
+  // Armed by AuthProvider at login. The stub access token is not a JWT, so the
   // timer defaults to ~14 min and this never fires inside a test — mocked
   // anyway, because "never fires" is a property of the fixture data, not a
   // guarantee, and a real call here would be invisible.
   await page.route("**/api/v1/auth/refresh", (route) =>
-    json(route, {
-      access_token: "mock_access_token_2",
-      refresh_token: "mock_refresh_token_2",
-    })
+    json(route, { access_token: "mock_access_token_2", token_type: "bearer" })
+  );
+  await page.route("**/api/v1/auth/logout", (route) =>
+    route.fulfill({ status: 204, body: "" })
   );
 
   /* ── Dashboard ────────────────────────────────────── */

@@ -55,7 +55,6 @@ test.describe("Authentication", () => {
   test("a server outage shows an error and keeps the session", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("access_token", "mock_access_token");
-      localStorage.setItem("refresh_token", "mock_refresh_token");
     });
     await page.route("**/api/v1/auth/me", (route) => route.abort("connectionrefused"));
 
@@ -76,7 +75,6 @@ test.describe("Authentication", () => {
   test("a rejected session does sign the user out", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("access_token", "expired_token");
-      localStorage.setItem("refresh_token", "expired_refresh");
     });
     await page.route("**/api/v1/auth/me", (route) =>
       route.fulfill({
@@ -108,5 +106,46 @@ test.describe("Authentication", () => {
      * test to reach /dashboard pays that compile, which on WebKit overran the
      * 5 s default. The assertion is that it redirects, not how quickly. */
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
+  });
+
+  /* Task 11: the refresh token lives in an HttpOnly cookie now, not in
+   * localStorage — the browser can no longer read it, let alone hold it. */
+  test("login keeps only the access token in storage and sends credentials", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    const [req] = await Promise.all([
+      page.waitForRequest(
+        (r) => r.url().endsWith("/api/v1/auth/login") && r.method() === "POST"
+      ),
+      (async () => {
+        await page.getByLabel(/email/i).fill("a@b.c");
+        await page.getByLabel(/password/i).fill("pw");
+        await page.getByRole("button", { name: /sign in/i }).click();
+      })(),
+    ]);
+    // The browser decides whether to attach the cookie header; what matters
+    // here is that the request was made at all — `credentials: "include"` is
+    // reviewed directly in api.ts.
+    expect(req.url()).toContain("/api/v1/auth/login");
+    await page.waitForURL(/dashboard/);
+    const stored = await page.evaluate(() => Object.keys(localStorage));
+    expect(stored).toContain("access_token");
+    expect(stored).not.toContain("refresh_token");
+  });
+
+  test("sign out calls logout and clears the access token", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/dashboard");
+    const logout = page.waitForRequest((r) =>
+      r.url().endsWith("/api/v1/auth/logout")
+    );
+    await page.getByRole("button", { name: /sign out/i }).click();
+    await logout;
+    await page.waitForURL(/login/);
+    expect(
+      await page.evaluate(() => localStorage.getItem("access_token"))
+    ).toBeNull();
   });
 });

@@ -84,26 +84,28 @@ function decodeJwtExpiry(token: string): number | null {
  * Refresh exactly once across every open tab.
  *
  * The timer is per-mounted-AuthProvider, so N tabs wake up at roughly the same
- * moment holding the same refresh token. If the backend rotates refresh tokens
- * — and it does — the first request invalidates the value the others are still
- * holding, and each loser's refresh comes back 401. That used to call
+ * moment. The refresh token itself now lives in an HttpOnly cookie the browser
+ * cannot read, so `POST /auth/refresh` needs no body and always uses whatever
+ * cookie the browser attaches — but the backend still rotates it, and if two
+ * tabs both fire, the loser's request is answered from the same cookie the
+ * winner already consumed and can come back 401. That used to call
  * `onFailure` → `logout()` → a hard redirect, so opening the app in a second
  * tab could sign you out of the first.
  *
  * Two independent guards, because either alone leaves a hole:
  *  - a Web Lock serialises the tabs that have one, and
- *  - inside the lock the token is re-read from localStorage, so a tab that
- *    queued behind the winner sees the rotated value and stands down rather
- *    than spending a token that is already gone. This is also the whole fix on
- *    browsers without `navigator.locks`.
+ *  - inside the lock the access token is re-read from localStorage, so a tab
+ *    that queued behind the winner sees the rotated value and stands down
+ *    rather than firing a refresh the cookie can no longer honour. This is
+ *    also the whole fix on browsers without `navigator.locks`.
  */
 async function runRefresh(
   scheduledWith: string,
-  onSuccess: (access: string, refresh: string) => void,
+  onSuccess: (access: string) => void,
   onFailure: (error: unknown) => void,
-  onAlreadyRefreshed: (refresh: string) => void
+  onAlreadyRefreshed: (access: string) => void
 ): Promise<void> {
-  const current = localStorage.getItem("refresh_token");
+  const current = localStorage.getItem("access_token");
   if (!current) return;
   if (current !== scheduledWith) {
     // Another tab got there first. Adopt its token and re-arm.
@@ -111,28 +113,27 @@ async function runRefresh(
     return;
   }
   try {
-    const tokens = await api.refresh(current);
+    const tokens = await api.refresh();
     localStorage.setItem("access_token", tokens.access_token);
-    localStorage.setItem("refresh_token", tokens.refresh_token);
-    onSuccess(tokens.access_token, tokens.refresh_token);
+    onSuccess(tokens.access_token);
   } catch (err) {
     onFailure(err);
   }
 }
 
 function scheduleRefresh(
-  refreshToken: string,
-  onSuccess: (access: string, refresh: string) => void,
+  accessToken: string,
+  onSuccess: (access: string) => void,
   onFailure: (error: unknown) => void,
-  onAlreadyRefreshed: (refresh: string) => void
+  onAlreadyRefreshed: (access: string) => void
 ): ReturnType<typeof setTimeout> {
-  const expiry = decodeJwtExpiry(refreshToken);
+  const expiry = decodeJwtExpiry(accessToken);
   const msUntilExpiry = expiry ? expiry - Date.now() : 14 * 60 * 1000; // default 14 min
   const msBefore = Math.max(msUntilExpiry - 60_000, 5_000); // refresh 60s before expiry, min 5s
 
   return setTimeout(() => {
     const attempt = () =>
-      runRefresh(refreshToken, onSuccess, onFailure, onAlreadyRefreshed);
+      runRefresh(accessToken, onSuccess, onFailure, onAlreadyRefreshed);
     const locks = globalThis.navigator?.locks;
     if (locks) {
       void locks.request("maljan-token-refresh", attempt);
@@ -166,14 +167,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startRefreshTimer = useCallback(
-    (refreshToken: string) => {
+    (accessToken: string) => {
       clearRefreshTimer();
       refreshTimerRef.current = scheduleRefresh(
-        refreshToken,
+        accessToken,
         // Re-arm through the ref so this always reaches the latest closure (a
         // future dep change on startRefreshTimer would otherwise leave the call
         // site bound to the original).
-        (_access, refresh) => startRefreshTimerRef.current?.(refresh),
+        (access) => startRefreshTimerRef.current?.(access),
         (err) => {
           // Only a *rejected* credential ends the session. A connection
           // failure or a 500 says nothing about the token — signing out there
@@ -181,10 +182,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // the delay floors at 5 s once the token's expiry has passed, so
           // this retries until the API answers or genuinely refuses.
           if (isSessionRejection(err)) logoutRef.current?.();
-          else startRefreshTimerRef.current?.(refreshToken);
+          else startRefreshTimerRef.current?.(accessToken);
         },
         // Another tab refreshed first: adopt its token and re-arm on that.
-        (refresh) => startRefreshTimerRef.current?.(refresh),
+        (access) => startRefreshTimerRef.current?.(access),
       );
     },
     [clearRefreshTimer]
@@ -205,7 +206,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // The server looked at the credential and refused it. Clearing is
         // correct; the guard effect below then sends the user to /login.
         localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
         setUser(null);
       } else {
         // We never got an answer. The session may well still be valid, so keep
@@ -232,9 +232,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // call; there is no derived-state alternative because the value
     // depends on server-side session state, not props.
     fetchUser();
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (refreshToken) {
-      startRefreshTimer(refreshToken);
+    const accessToken = localStorage.getItem("access_token");
+    if (accessToken) {
+      startRefreshTimer(accessToken);
     }
     return () => clearRefreshTimer();
   }, [fetchUser, startRefreshTimer, clearRefreshTimer]);
@@ -258,8 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const tokens = await api.login(email, password);
     localStorage.setItem("access_token", tokens.access_token);
-    localStorage.setItem("refresh_token", tokens.refresh_token);
-    startRefreshTimer(tokens.refresh_token);
+    startRefreshTimer(tokens.access_token);
     await fetchUser();
   };
 
@@ -272,14 +271,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await login(email, password);
   };
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     if (AUTH_DISABLED) {
       // Auth is disabled — logout is a no-op; keep the dev user logged in.
       return;
     }
     clearRefreshTimer();
+    // The refresh cookie is HttpOnly, so only the server can clear it; a
+    // failed request here (offline, server down) must still sign the user
+    // out locally, hence the swallow rather than a rethrow.
+    await api.logout().catch(() => undefined);
     localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
     setUser(null);
     window.location.href = "/login";
   }, [clearRefreshTimer]);
