@@ -13,6 +13,7 @@ Hardening applied:
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -47,6 +48,11 @@ from app.schemas.auth import (
 logger = get_logger("api.auth")
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def _email_tag(email: str) -> str:
+    """A short, stable stand-in for an e-mail address in log lines."""
+    return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:12]
 
 
 def _client_ip(request: Request) -> str:
@@ -105,11 +111,14 @@ async def register(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Register a new user account."""
-    logger.info("Registration attempt: email=%s", body.email)
+    logger.info("Registration attempt: email_hash=%s", _email_tag(body.email))
 
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
-        logger.warning("Registration failed: email already exists - %s", body.email)
+        logger.warning(
+            "Registration failed: email already exists - email_hash=%s",
+            _email_tag(body.email),
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
@@ -136,7 +145,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Authenticate and receive JWT tokens."""
-    logger.info("Login attempt: email=%s", body.email)
+    logger.info("Login attempt: email_hash=%s", _email_tag(body.email))
 
     if await is_login_locked(body.email):
         await _audit(db, None, "auth.login.locked", request=request)
@@ -152,7 +161,9 @@ async def login(
         await record_login_failure(body.email)
         await _audit(db, user.id if user else None, "auth.login.failure", request=request)
         logger.warning(
-            "Login failed: invalid credentials for %s", body.email, extra={"component": "auth"}
+            "Login failed: invalid credentials for email_hash=%s",
+            _email_tag(body.email),
+            extra={"component": "auth"},
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

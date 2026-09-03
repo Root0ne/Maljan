@@ -241,6 +241,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
+    docs_enabled = settings.debug
     app = FastAPI(
         title=settings.app_name,
         description=(
@@ -249,8 +250,9 @@ def create_app() -> FastAPI:
             "adversarial multi-agent debate, and STIX 2.1 intelligence output."
         ),
         version=settings.app_version,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 

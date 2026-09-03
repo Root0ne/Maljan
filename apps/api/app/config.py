@@ -156,7 +156,7 @@ class APISettings(BaseSettings):
     rate_limit_enabled: bool = Field(default=True)
     rate_limit_requests: int = Field(default=100)
     rate_limit_window_seconds: int = Field(default=60)
-    rate_limit_whitelist: list[str] = Field(default=["/health", "/docs", "/redoc", "/openapi.json"])
+    rate_limit_whitelist: list[str] = Field(default=["/health"])
 
     # ── File upload ──────────────────────────────────────────────
     upload_max_bytes: int = Field(default=100 * 1024 * 1024)  # 100 MB
