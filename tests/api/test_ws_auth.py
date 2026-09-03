@@ -129,6 +129,50 @@ def test_missing_credential_accepts_before_closing_with_4401(
     assert calls == [("accept", None), ("close", 4401)]
 
 
+@pytest.mark.parametrize(
+    "protocols, job_lookup, expected_reason",
+    [
+        pytest.param(
+            ["maljan.v1", "maljan.v1.bad"],
+            None,
+            "invalid token",
+            id="invalid-token",
+        ),
+        pytest.param(
+            ["maljan.v1", "maljan.v1.good"],
+            "not_found",
+            "does not exist",
+            id="job-not-found",
+        ),
+    ],
+)
+def test_rejection_branches_accept_before_closing_with_1008(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    protocols: list[str],
+    job_lookup: str | None,
+    expected_reason: str,
+) -> None:
+    """1008 branches must accept before closing too, same as the 4401 one.
+
+    These go through the shared ``_reject`` helper (Fix round 2), so the
+    close code reaches the client as a real close frame rather than being
+    downgraded to 1006 by a pre-accept HTTP 403. Covers the "invalid token"
+    branch (fails before any DB lookup) and the "job not found" branch
+    (needs a session that resolves to no job), per the review's minimum.
+    """
+    if job_lookup == "not_found":
+        monkeypatch.setattr(ws_module, "async_session_factory", lambda: _FakeSession(None))
+
+    job_id = str(uuid.uuid4())
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/ws/analysis/{job_id}", subprotocols=protocols) as ws:
+            ws.receive_text()
+
+    assert exc.value.code == 1008
+    assert expected_reason in (exc.value.reason or "")
+
+
 def test_subprotocol_token_is_accepted(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     job_id = str(uuid.uuid4())
 
