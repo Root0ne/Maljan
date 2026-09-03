@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import observability
 from app.auth.jwt import create_access_token, create_refresh_token, decode_token
 from app.auth.password import hash_password, verify_password
 from app.auth.throttle import (
@@ -92,8 +93,9 @@ async def _audit(
                 )
             )
             await audit_session.commit()
-    except Exception as exc:
-        logger.debug("AuditLog insert failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - audit is best effort, but never silent
+        observability.counters.audit_write_failures += 1
+        logger.error("Audit write failed (action=%s): %s", action, type(exc).__name__)
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

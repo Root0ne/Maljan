@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import observability
 from app.config import APISettings
 from app.config import settings as api_settings
 from app.database import async_session_factory
@@ -279,8 +280,9 @@ async def _audit(
                 )
             )
             await s.commit()
-    except Exception:  # noqa: BLE001 - audit must never turn a save into a 500
-        pass
+    except Exception as exc:  # noqa: BLE001 - audit is best effort, but never silent
+        observability.counters.audit_write_failures += 1
+        logger.error("Audit write failed (action=%s): %s", action, type(exc).__name__)
 
 
 async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:
