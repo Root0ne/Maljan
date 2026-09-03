@@ -3,6 +3,15 @@
 A harness that skips a sample it cannot parse must say so: the artefact then
 carries attempted / parsed / scored and the reasons, and ``paper_facts``
 refuses an artefact whose denominator shrank without explanation.
+
+The reason strings are not a closed set — a producer names its own drop
+causes, one string per distinct cause, so two different reasons never get
+collapsed into one label. Reasons in use across the evaluation harnesses as
+of this writing: ``unparseable`` (an exception while parsing a sample),
+``no_static`` (static analysis produced no result), ``no_isrs`` (no ISR
+reports were collected at all, a distinct precondition from ``no_static``),
+``no_profile_text`` (a rendered profile was empty), ``torn_line`` (a
+checkpoint/JSONL line could not be decoded).
 """
 
 from __future__ import annotations

@@ -410,7 +410,12 @@ def techniques_by_source(result: Any) -> dict[str, list[str]]:
 
 
 def attempts_by_key(path: Path = ATTEMPTS, tally: Tally | None = None) -> dict[str, int]:
-    """How many times each arm has been started. Missing file → nothing tried."""
+    """How many times each arm has been started. Missing file → nothing tried.
+
+    ``tally``, when given, tallies the lines of ``path`` once. ``first_attempt_epoch``
+    reads the same file for a different projection of the same rows and does not
+    tally it again.
+    """
     counts: dict[str, int] = {}
     if not path.exists():
         return counts
@@ -431,23 +436,21 @@ def attempts_by_key(path: Path = ATTEMPTS, tally: Tally | None = None) -> dict[s
     return counts
 
 
-def first_attempt_epoch(path: Path = ATTEMPTS, tally: Tally | None = None) -> dict[str, int]:
-    """When each arm was first started, so guard kills can be counted from there."""
+def first_attempt_epoch(path: Path = ATTEMPTS) -> dict[str, int]:
+    """When each arm was first started, so guard kills can be counted from there.
+
+    Reads the same file ``attempts_by_key`` does. Only ``attempts_by_key``
+    tallies those lines — this reader shares that count rather than taking
+    its own, so the same file is not counted twice under one population.
+    """
     firsts: dict[str, int] = {}
     if not path.exists():
         return firsts
     for line in path.read_text().splitlines():
-        if tally is not None:
-            tally.attempt()
         try:
             row = json.loads(line)
-        except Exception as exc:  # noqa: BLE001
-            if tally is not None:
-                tally.drop("torn_line", detail=type(exc).__name__)
+        except Exception:  # noqa: BLE001
             continue
-        if tally is not None:
-            tally.parse_ok()
-            tally.score_ok()
         key, at = row.get("key"), row.get("at")
         if key and isinstance(at, int) and key not in firsts:
             firsts[key] = at
@@ -643,7 +646,11 @@ async def main_async(limit: int) -> int:
     # resolves ground truth the same way so the two studies stay comparable.
     by_sha = {s["sha256"]: s for s in json.loads(COHORT.read_text())["samples"]}
     skipped = {"unverified_report": 0, "no_ground_truth": 0}
-    tally = Tally()
+    # Informational only — attempts_by_key's file is run-management bookkeeping
+    # (how many times each arm was started), not the analysis population. It is
+    # written into the artefact as summary.attempts_population, which
+    # check_population never inspects.
+    attempts_tally = Tally()
 
     for sha in sorted(p.stem for p in REPORTS_DIR.glob("*.json")):
         report = load_report(sha)
@@ -676,14 +683,10 @@ async def main_async(limit: int) -> int:
     done: set[str] = set()
     if CHECKPOINT.exists():
         for line in CHECKPOINT.read_text().splitlines():
-            tally.attempt()
             try:
                 row = json.loads(line)
-            except Exception as exc:  # noqa: BLE001
-                tally.drop("torn_line", detail=type(exc).__name__)
+            except Exception:  # noqa: BLE001
                 continue
-            tally.parse_ok()
-            tally.score_ok()
             if "error" not in row and row.get("key"):
                 done.add(row["key"])
             elif row.get("key") and str(row.get("error", "")).startswith("abandoned"):
@@ -691,8 +694,8 @@ async def main_async(limit: int) -> int:
                 # retried on the next resume or the livelock simply resumes too.
                 done.add(row["key"])
 
-    attempts = attempts_by_key(tally=tally)
-    firsts = first_attempt_epoch(tally=tally)
+    attempts = attempts_by_key(tally=attempts_tally)
+    firsts = first_attempt_epoch()
     stuck = sorted(k for k, n in attempts.items() if n >= ATTEMPT_CEILING and k not in done)
     print(
         f"attempts recorded for {len(attempts)} arms"
@@ -765,11 +768,13 @@ async def main_async(limit: int) -> int:
                 flush=True,
             )
 
-    return summarise(tally)
+    return summarise(attempts_tally)
 
 
-def summarise(tally: Tally | None = None) -> int:
-    tally = tally if tally is not None else Tally()
+def summarise(attempts_tally: Tally | None = None) -> int:
+    # The population this artefact reports on: the CHECKPOINT, read once, here.
+    # attempted = lines read, scored = rows that decoded, dropped = torn_line.
+    tally = Tally()
     rows: list[dict[str, Any]] = []
     for line in CHECKPOINT.read_text().splitlines():
         tally.attempt()
@@ -833,6 +838,11 @@ def summarise(tally: Tally | None = None) -> int:
         "abandoned_arms": summary_lost,
         "population": tally.as_dict(),
     }
+    if attempts_tally is not None:
+        # Informational only: how many arm-starts attempts_by_key could account
+        # for, not the analysis population. check_population only ever looks at
+        # "population" (or a nested "summary.population"), never this key.
+        summary["attempts_population"] = attempts_tally.as_dict()
     interim = len(pairs) < INFERENCE_FLOOR
     print(f"\npaired deltas (dynamic − static-only), n={len(pairs)}")
     if interim:

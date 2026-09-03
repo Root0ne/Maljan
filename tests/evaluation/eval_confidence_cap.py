@@ -152,7 +152,7 @@ def measure_sample(
 
     isrs = collect_isrs(sample_path, yara_layer, tool_catalog)
     if not isrs:
-        tally.drop("no_static")
+        tally.drop("no_isrs")
         return None
     try:
         static = build_static_analysis(sample_path=str(sample_path))
