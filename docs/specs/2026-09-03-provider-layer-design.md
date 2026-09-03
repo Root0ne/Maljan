@@ -278,3 +278,23 @@ test count is not re-measured.
    swaps the visible fields and its probe fails legibly without a key; `static.provider=r2` runs end to
    end when r2mcp is installed and its probe fails legibly otherwise.
 6. PR into `dev`, CI green including Semgrep; merge left to the user.
+
+## 15. Amendments from plan writing (2026-09-04)
+
+Source facts found while writing `docs/plans/2026-09-03-provider-layer.md`; the plan is authoritative
+where it differs from the sections above.
+
+- The CAPE golden corpus is `data/cape_reports/*.json` (97 reports) plus `data/samples/dynamic/sample_1.json`;
+  `tests/fixtures/` did not exist and is created by Task 1.
+- The static system prompt names Ghidra at `static_analyst.py:23`, before four provider-neutral
+  sentences, so the byte-identical seam sits after line 22 and those sentences travel inside each
+  provider's fragment. Sub-project C removes that duplication.
+- `static.provider=none` is a new, tool-free choice. Today's `mcp.ghidra.enabled=false` behaviour
+  (full Ghidra prompt, no tools) is reproduced by the alias table as `static.provider=ghidra` with
+  `static.ghidra.enabled=false`.
+- `MCPServerConfig.tools` never existed; the dynamic analyst's `getattr(cfg.mcp.cape, "tools", [])`
+  branch was dead and is dropped in Task 11. The field arrives in sub-project B.
+- `Settings.mcp` survives Tasks 2–11 as a two-way mirror of `static.ghidra` and `sandbox.cape2.mcp`
+  and is deleted in Task 12, whose grep gate enforces §14 item 3.
+- `DynamicBehavior.unavailable` adds one key to every extractor golden; Task 17 regenerates them in
+  the same commit and reviews the diff so every changed line is exactly the new empty list.
