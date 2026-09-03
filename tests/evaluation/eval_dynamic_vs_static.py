@@ -63,6 +63,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 import httpx  # noqa: E402
 
 from tests.evaluation import stats  # noqa: E402
+from tests.evaluation._tally import Tally  # noqa: E402
 from tests.evaluation.eval_temporal_drift import (  # noqa: E402
     available_fixture_slugs,
     extract_predicted_tids,
@@ -408,31 +409,45 @@ def techniques_by_source(result: Any) -> dict[str, list[str]]:
     return out
 
 
-def attempts_by_key(path: Path = ATTEMPTS) -> dict[str, int]:
+def attempts_by_key(path: Path = ATTEMPTS, tally: Tally | None = None) -> dict[str, int]:
     """How many times each arm has been started. Missing file → nothing tried."""
     counts: dict[str, int] = {}
     if not path.exists():
         return counts
     for line in path.read_text().splitlines():
+        if tally is not None:
+            tally.attempt()
         try:
             key = json.loads(line).get("key")
-        except Exception:  # noqa: BLE001 — a torn line is one lost count, not a stop
+        except Exception as exc:  # noqa: BLE001 — a torn line is one lost count, not a stop
+            if tally is not None:
+                tally.drop("torn_line", detail=type(exc).__name__)
             continue
+        if tally is not None:
+            tally.parse_ok()
+            tally.score_ok()
         if key:
             counts[key] = counts.get(key, 0) + 1
     return counts
 
 
-def first_attempt_epoch(path: Path = ATTEMPTS) -> dict[str, int]:
+def first_attempt_epoch(path: Path = ATTEMPTS, tally: Tally | None = None) -> dict[str, int]:
     """When each arm was first started, so guard kills can be counted from there."""
     firsts: dict[str, int] = {}
     if not path.exists():
         return firsts
     for line in path.read_text().splitlines():
+        if tally is not None:
+            tally.attempt()
         try:
             row = json.loads(line)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            if tally is not None:
+                tally.drop("torn_line", detail=type(exc).__name__)
             continue
+        if tally is not None:
+            tally.parse_ok()
+            tally.score_ok()
         key, at = row.get("key"), row.get("at")
         if key and isinstance(at, int) and key not in firsts:
             firsts[key] = at
@@ -628,6 +643,7 @@ async def main_async(limit: int) -> int:
     # resolves ground truth the same way so the two studies stay comparable.
     by_sha = {s["sha256"]: s for s in json.loads(COHORT.read_text())["samples"]}
     skipped = {"unverified_report": 0, "no_ground_truth": 0}
+    tally = Tally()
 
     for sha in sorted(p.stem for p in REPORTS_DIR.glob("*.json")):
         report = load_report(sha)
@@ -660,10 +676,14 @@ async def main_async(limit: int) -> int:
     done: set[str] = set()
     if CHECKPOINT.exists():
         for line in CHECKPOINT.read_text().splitlines():
+            tally.attempt()
             try:
                 row = json.loads(line)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                tally.drop("torn_line", detail=type(exc).__name__)
                 continue
+            tally.parse_ok()
+            tally.score_ok()
             if "error" not in row and row.get("key"):
                 done.add(row["key"])
             elif row.get("key") and str(row.get("error", "")).startswith("abandoned"):
@@ -671,8 +691,8 @@ async def main_async(limit: int) -> int:
                 # retried on the next resume or the livelock simply resumes too.
                 done.add(row["key"])
 
-    attempts = attempts_by_key()
-    firsts = first_attempt_epoch()
+    attempts = attempts_by_key(tally=tally)
+    firsts = first_attempt_epoch(tally=tally)
     stuck = sorted(k for k, n in attempts.items() if n >= ATTEMPT_CEILING and k not in done)
     print(
         f"attempts recorded for {len(attempts)} arms"
@@ -745,11 +765,22 @@ async def main_async(limit: int) -> int:
                 flush=True,
             )
 
-    return summarise()
+    return summarise(tally)
 
 
-def summarise() -> int:
-    rows = [json.loads(line) for line in CHECKPOINT.read_text().splitlines()]
+def summarise(tally: Tally | None = None) -> int:
+    tally = tally if tally is not None else Tally()
+    rows: list[dict[str, Any]] = []
+    for line in CHECKPOINT.read_text().splitlines():
+        tally.attempt()
+        try:
+            row = json.loads(line)
+        except Exception as exc:  # noqa: BLE001 — a torn line is one lost row, not a stop
+            tally.drop("torn_line", detail=type(exc).__name__)
+            continue
+        tally.parse_ok()
+        tally.score_ok()
+        rows.append(row)
     by_sha: dict[str, dict[str, Any]] = {}
     for r in rows:
         by_sha.setdefault(r["sha256"], {})[r["arm"]] = r
@@ -800,6 +831,7 @@ def summarise() -> int:
         "n_pairs": len(pairs),
         "inference_floor": INFERENCE_FLOOR,
         "abandoned_arms": summary_lost,
+        "population": tally.as_dict(),
     }
     interim = len(pairs) < INFERENCE_FLOOR
     print(f"\npaired deltas (dynamic − static-only), n={len(pairs)}")

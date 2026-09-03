@@ -69,6 +69,7 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src", Path(__file__).resolve().parent):
 import numpy as np
 
 from maljan.memory import embeddings
+from tests.evaluation._tally import Tally
 
 # Defaults mirror PreprocessingConfig so the eval measures the shipped operating point.
 _TOP_K = 5
@@ -265,22 +266,33 @@ def _runtime_regime(
         return {"samples": 0, "note": "no labelled samples resolvable"}
 
     rows: list[dict] = []
+    tally = Tally()
     for item in labelled:
+        tally.attempt()
         try:
             static = build_static_analysis(sample_path=str(item["path"]))
-        except Exception:  # noqa: BLE001 - unparseable members are simply skipped
+        except Exception as exc:  # noqa: BLE001 - unparseable members are simply skipped
+            tally.drop("unparseable", detail=type(exc).__name__)
             continue
         if static is None:
+            tally.drop("no_static")
             continue
         text = build_sample_profile_text(static)
         if not text:
+            tally.drop("no_profile_text")
             continue
+        tally.parse_ok()
+        tally.score_ok()
         rows.append(
             {**item, "shipped": text, "imports_lowercased": _lowercased_imports(static, text)}
         )
 
     if not rows:
-        return {"samples": 0, "note": "no parseable labelled samples"}
+        return {
+            "samples": 0,
+            "note": "no parseable labelled samples",
+            "population": tally.as_dict(),
+        }
 
     truths = [c["tids"] for c in cases]
     prior, _ = _frequency_prior(truths, max_techniques)
@@ -342,6 +354,7 @@ def _runtime_regime(
         "rag_vocabulary_matched_similarity": matched_sim,
         "frequency_prior": _mean([_prf(prior, {str(t) for t in r["truth"]}) for r in rows]),
         "per_sample": detail,
+        "population": tally.as_dict(),
     }
 
 

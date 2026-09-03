@@ -55,6 +55,8 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from tests.evaluation._tally import Tally  # noqa: E402
+
 _OUT_FILE = _REPO_ROOT / "tests" / "evaluation" / "confidence_cap.md"
 _JSON_FILE = _REPO_ROOT / "tests" / "evaluation" / "confidence_cap.json"
 
@@ -139,7 +141,9 @@ def summarise(results: list[SampleResult]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def measure_sample(sample_path: Path, yara_layer: Any, tool_catalog: str) -> SampleResult | None:
+def measure_sample(
+    sample_path: Path, yara_layer: Any, tool_catalog: str, tally: Tally
+) -> SampleResult | None:
     """Build the capability matrix with the cap OFF and ON; diff the confidences."""
     from maljan.analysis.ttp_cascade import TTPCascadeEngine
     from maljan.extractors.capability_matrix import build_capability_matrix
@@ -148,12 +152,15 @@ def measure_sample(sample_path: Path, yara_layer: Any, tool_catalog: str) -> Sam
 
     isrs = collect_isrs(sample_path, yara_layer, tool_catalog)
     if not isrs:
+        tally.drop("no_static")
         return None
     try:
         static = build_static_analysis(sample_path=str(sample_path))
-    except Exception:  # noqa: BLE001 — unparseable members are skipped, not fatal
+    except Exception as exc:  # noqa: BLE001 — unparseable members are skipped, not fatal
+        tally.drop("unparseable", detail=type(exc).__name__)
         return None
     if static is None:
+        tally.drop("no_static")
         return None
 
     summary = TTPCascadeEngine().compute(isrs)
@@ -192,6 +199,8 @@ def measure_sample(sample_path: Path, yara_layer: Any, tool_catalog: str) -> Sam
             capped += 1
             deltas.append(d)
 
+    tally.parse_ok()
+    tally.score_ok()
     return SampleResult(
         sample=sample_path.name,
         total_techniques=len(off),
@@ -233,12 +242,15 @@ def main() -> int:
     print(f"samples: {len(paths)}", flush=True)
 
     results: list[SampleResult] = []
+    tally = Tally()
     for i, path in enumerate(paths, 1):
         if i % 25 == 0:
             print(f"  {i}/{len(paths)}", flush=True)
+        tally.attempt()
         try:
-            res = measure_sample(path, yara_layer, args.tool_catalog)
+            res = measure_sample(path, yara_layer, args.tool_catalog, tally)
         except Exception as exc:  # noqa: BLE001 — one bad sample must not end the run
+            tally.drop("unparseable", detail=type(exc).__name__)
             print(f"  skip {path.name}: {type(exc).__name__}: {exc}", file=sys.stderr)
             continue
         if res is not None:
@@ -247,6 +259,7 @@ def main() -> int:
                 break
 
     stats = summarise(results)
+    stats["population"] = tally.as_dict()
     hist = Counter(r.capped for r in results)
 
     gated_names = ", ".join((*GATED_OBFUSCATION, *GATED_INJECTION))

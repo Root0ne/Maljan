@@ -42,9 +42,10 @@ from maljan.analysis.family_feature_rag import (
 )
 from maljan.extractors.pe_extractor import build_static_analysis
 from maljan.memory.family_fingerprint_index import FamilyFingerprintIndex
+from tests.evaluation._tally import Tally
 
 
-def _profiles_from_dir(dir_path: Path, cap: int) -> list[str]:
+def _profiles_from_dir(dir_path: Path, cap: int, tally: Tally) -> list[str]:
     """Static-feature profiles for up to ``cap`` parseable PEs under ``dir_path``."""
     out: list[str] = []
     for f in sorted(dir_path.rglob("*")):
@@ -52,15 +53,22 @@ def _profiles_from_dir(dir_path: Path, cap: int) -> list[str]:
             break
         if not f.is_file():
             continue
+        tally.attempt()
         try:
             static = build_static_analysis(sample_path=str(f))
-        except Exception:  # noqa: BLE001 - skip unparseable members (NE/16-bit/non-PE)
+        except Exception as exc:  # noqa: BLE001 - skip unparseable members (NE/16-bit/non-PE)
+            tally.drop("unparseable", detail=type(exc).__name__)
             continue
         if static is None:
+            tally.drop("no_static")
             continue
+        tally.parse_ok()
         prof = build_sample_profile_text(static)
         if prof:
+            tally.score_ok()
             out.append(prof)
+        else:
+            tally.drop("no_profile_text")
     return out
 
 
@@ -82,15 +90,16 @@ def main() -> int:
     # Build the held-out split: a0 -> train fingerprint, a1 -> test queries.
     train_records: list[dict] = []
     test_queries: list[tuple[str, str]] = []  # (true_family, profile)
+    tally = Tally()
     fams = sorted(p for p in root.iterdir() if p.is_dir())
     for fam in fams:
         a0, a1 = fam / "a0", fam / "a1"
         if not a0.is_dir() or not a1.is_dir():
             continue  # need both halves for a leakage-free split
-        train = _profiles_from_dir(a0, args.max_train)
+        train = _profiles_from_dir(a0, args.max_train, tally)
         if len(train) < args.min_train:
             continue
-        test = _profiles_from_dir(a1, args.max_test)
+        test = _profiles_from_dir(a1, args.max_test, tally)
         if not test:
             continue
         desc = build_family_fingerprint_text(train)
@@ -131,6 +140,7 @@ def main() -> int:
         "mrr": round(rr_sum / n, 4),
         "random_baseline_recall_at_5": round(min(5, n_fam) / n_fam, 4),
         "leakage_free": True,
+        "population": tally.as_dict(),
     }
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
