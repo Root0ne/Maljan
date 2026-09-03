@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import observability
+from app.auth.throttle import throttle_state
 from app.config import settings
 from app.database import get_db
 from app.deps import require_admin
@@ -44,6 +46,13 @@ class SystemStatusResponse(BaseModel):
     )
     has_virustotal_key: bool
     has_abuseipdb_key: bool
+    throttle: dict[str, object] = Field(
+        default_factory=dict,
+        description="Auth throttle store availability; degraded means refresh fails closed.",
+    )
+    audit_write_failures: int = Field(
+        default=0, description="Audit rows this process could not write since start."
+    )
 
 
 @router.get("/status", response_model=SystemStatusResponse)
@@ -62,6 +71,8 @@ async def system_status() -> SystemStatusResponse:
         enrichment_enabled=bool(await runtime_config.get("enrichment_enabled")),
         has_virustotal_key=bool(vt_key),
         has_abuseipdb_key=bool(abuse_key),
+        throttle=throttle_state(),
+        audit_write_failures=observability.counters.audit_write_failures,
     )
 
 

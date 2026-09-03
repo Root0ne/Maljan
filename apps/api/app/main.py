@@ -343,6 +343,11 @@ def create_app() -> FastAPI:
 
         components = await _probe_components()
         body["components"] = components
+
+        from app import observability
+
+        body["throttle_degraded"] = not observability.throttle.available
+        body["audit_write_failures"] = observability.counters.audit_write_failures
         # Only components the API cannot serve requests without are allowed to
         # flip the overall status; optional subsystems are reported but not fatal.
         required = ("database", "redis")

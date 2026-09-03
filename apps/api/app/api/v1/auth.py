@@ -198,6 +198,14 @@ async def refresh_token(
     jti = payload.get("jti", "")
     consumed = await refresh_token_consume(user_id, jti)
     if not consumed:
+        from app.auth.throttle import throttle_state
+
+        if not throttle_state()["available"]:
+            await _audit(db, None, "auth.refresh.store_unavailable", request=request)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session store unavailable; sign in again.",
+            )
         await _audit(
             db,
             uuid.UUID(user_id) if user_id else None,

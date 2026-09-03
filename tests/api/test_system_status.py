@@ -80,6 +80,8 @@ class TestSystemStatus:
             "enrichment_enabled": True,
             "has_virustotal_key": True,
             "has_abuseipdb_key": False,
+            "throttle": {"available": True, "degraded_since": None, "last_error": None},
+            "audit_write_failures": 0,
         }
 
     def test_never_returns_raw_secret_values(self, client: TestClient) -> None:
