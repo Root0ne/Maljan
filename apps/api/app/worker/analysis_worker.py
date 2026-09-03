@@ -223,6 +223,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     async with db_session() as db:
         job = None  # Ensure job is defined for the except block
         app: Any = None  # released in the finally below, whichever way we leave
+        # Declared here (rather than at the download site further down) so the
+        # outer ``finally`` can always remove them, including on every early
+        # return above the download (invalid job id, job not found, already
+        # cancelled) — those paths never reach the download but still run
+        # this function's one ``finally``, which references both names.
+        temp_path: str | None = None
+        host_mirror: Path | None = None
         try:
             # ── 1. Load job ──────────────────────────────────────
             from app.models.job import AnalysisJob
@@ -445,7 +452,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
 
             # Download sample from MinIO for sandbox submission
-            temp_path: str | None = None
+            # (temp_path / host_mirror are declared above, before the early
+            # returns, so the outer finally can always find them)
             static_sample_path: str | None = None
             try:
                 from minio import Minio
@@ -487,14 +495,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # resolve once at use-site so every downstream consumer
                 # (sandbox submit, Ghidra container path map, sandbox
                 # uploader) receives an absolute path.
-                _worker_tmp = Path(settings.upload_temp_dir).resolve()
-                _worker_tmp.mkdir(parents=True, exist_ok=True)
+                from app.worker import sample_files
+
+                _worker_tmp = sample_files.temp_dir()
                 temp_path = str(_worker_tmp / f"{sample.sha256}{_orig_ext}")
                 minio_client.fget_object(
                     settings.minio_bucket,
                     derived_path,
                     temp_path,
                 )
+                os.chmod(temp_path, 0o600)
                 logger.info(
                     "Downloaded sample from MinIO: %s -> %s",
                     sample.storage_path,
@@ -503,25 +513,28 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
 
                 # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): mirror the binary
-                # into ``data/samples/<sha256><ext>`` (relative to the project
-                # root). That directory is bind-mounted into the Ghidra MCP
-                # container at ``/data/samples/``, so the static analyst can
-                # call ``load_program(file=/data/samples/<sha256><ext>)`` and
-                # actually get a hit. Previously the file only lived in the
+                # into ``<samples_dir>/.work/<sha256><ext>`` (relative to the
+                # project root by default). That directory is bind-mounted
+                # into the Ghidra MCP container at
+                # ``ghidra_container_samples_path``, so the static analyst can
+                # call ``load_program(file=<container_path>/.work/<sha256><ext>)``
+                # and actually get a hit. Previously the file only lived in the
                 # host's tempdir, invisible to the container, so every static
                 # analysis ran without ever loading the sample.
+                #
+                # Wave 10 (security hardening, H3): the mirror is now a
+                # private 0o600 copy under a 0o700 ``.work`` subdirectory of
+                # ``samples_dir`` — never the operator's own corpus directory
+                # itself — and is removed by the ``finally`` below when the
+                # job ends, whichever way it ends.
                 try:
-                    import shutil
-
-                    host_samples_dir = Path("data/samples")
-                    host_samples_dir.mkdir(parents=True, exist_ok=True)
-                    host_mirror = host_samples_dir / f"{sample.sha256}{_orig_ext}"
-                    shutil.copyfile(temp_path, host_mirror)
+                    host_mirror = sample_files.work_dir() / f"{sample.sha256}{_orig_ext}"
+                    sample_files.private_copy(Path(temp_path), host_mirror)
                     # Container path mirrors the bind mount in
                     # docker/docker-compose.yml (``../data/samples:/data/samples``).
                     static_sample_path = (
                         f"{settings.ghidra_container_samples_path.rstrip('/')}/"
-                        f"{sample.sha256}{_orig_ext}"
+                        f"{sample_files.WORK_SUBDIR}/{sample.sha256}{_orig_ext}"
                     )
                     logger.info(
                         "Mirrored sample to %s for Ghidra container (%s).",
@@ -531,8 +544,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     )
                 except Exception as mirror_exc:
                     logger.warning(
-                        "Failed to mirror sample to data/samples for Ghidra: %s. "
+                        "Failed to mirror sample to %s for Ghidra: %s. "
                         "Static analyst will fall back to metadata-only prompt.",
+                        settings.samples_dir,
                         mirror_exc,
                         extra={"job_id": job_id, "component": "ghidra-mirror"},
                     )
@@ -989,6 +1003,15 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             return {"status": "failed", "error": error_msg}
 
         finally:
+            # The worker's own private copies of the sample never outlive the
+            # job that downloaded them, on success, failure or cancellation
+            # alike (H3, security hardening). ``remove_quietly`` is a no-op
+            # on ``None`` (nothing was ever downloaded) and never raises.
+            from app.worker import sample_files
+
+            sample_files.remove_quietly(temp_path, job_id=job_id)
+            sample_files.remove_quietly(host_mirror, job_id=job_id)
+
             # Release the agents' MCP toolkits, their stdio subprocesses and the
             # per-job caches. A ``finally`` rather than ``async with`` because
             # the body above spans ~500 lines and returns early on the
@@ -1218,6 +1241,19 @@ async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process
     setup_logging()
+
+    # Clear stale private sample copies left behind by a worker that was
+    # killed mid-job (no finally ran) before this one starts taking jobs.
+    try:
+        from app.worker import sample_files
+
+        sample_files.sweep()
+    except OSError as exc:
+        logger.warning(
+            "Startup sample sweep failed (non-fatal): %s",
+            exc,
+            extra={"component": "worker.lifecycle"},
+        )
 
     # Create database session factory
     engine = create_async_engine(

@@ -147,6 +147,11 @@ API_READONLY: dict[str, dict[str, Any]] = {
         "title": "Refresh token lifetime (days)",
         "description": "Set in .env.",
     },
+    "samples_dir": {
+        "title": "Samples directory",
+        "description": "Host path mounted into the Ghidra MCP container; the worker mirrors "
+        "each job's binary under its .work subdirectory and removes it when the job ends.",
+    },
 }
 
 # Any read-only value shaped like a URL is shown with its userinfo masked

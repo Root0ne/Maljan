@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -253,6 +254,168 @@ async def test_pipeline_failure_sets_failed_status(
     assert "Simulated pipeline crash" in result["error"]
     assert job.status == "failed"
     assert job.error_message is not None
+
+
+# ---------------------------------------------------------------------------
+# H3 (security hardening): the worker's private sample copies (download +
+# Ghidra mirror) are removed when the job ends, success or failure alike.
+# ---------------------------------------------------------------------------
+
+
+class _FakeMinioClient:
+    """Stands in for the real MinIO client so the download step actually
+    writes a file, letting the mirror step run for real too."""
+
+    def fget_object(self, bucket: str, object_name: str, file_path: str) -> None:
+        Path(file_path).write_bytes(b"MZfakebinary")
+
+
+@pytest.mark.asyncio
+async def test_worker_removes_private_sample_copies_after_success(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed job leaves neither the downloaded temp copy nor the
+    Ghidra ``.work`` mirror behind."""
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app.worker import sample_files
+
+    recorded: list[tuple[Any, str | None]] = []
+    monkeypatch.setattr(
+        sample_files,
+        "remove_quietly",
+        lambda path, *, job_id=None: recorded.append((path, job_id)),
+    )
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "MALJAN_MOCK_MODE": "true",
+                "MOCK_MODE_ALLOWED": "true",
+                "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
+                "SAMPLES_DIR": str(tmp_path / "samples"),
+            },
+            clear=False,
+        ),
+        patch("minio.Minio", return_value=_FakeMinioClient()),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
+    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
+    assert expected_temp in called_paths
+    assert expected_mirror in called_paths
+
+
+@pytest.mark.asyncio
+async def test_worker_removes_private_sample_copies_after_pipeline_failure(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job that fails mid-pipeline (after the sample was already downloaded
+    and mirrored) still has both private copies removed."""
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app.worker import sample_files
+
+    recorded: list[tuple[Any, str | None]] = []
+    monkeypatch.setattr(
+        sample_files,
+        "remove_quietly",
+        lambda path, *, job_id=None: recorded.append((path, job_id)),
+    )
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "MALJAN_MOCK_MODE": "true",
+                "MOCK_MODE_ALLOWED": "true",
+                "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
+                "SAMPLES_DIR": str(tmp_path / "samples"),
+            },
+            clear=False,
+        ),
+        patch("minio.Minio", return_value=_FakeMinioClient()),
+        # The download/mirror happen before ``app.arun`` is ever awaited, so
+        # failing here (rather than in ``MaljanApp.__init__``, as the other
+        # failure test does) is what actually exercises cleanup of real
+        # on-disk copies rather than of two still-``None`` paths.
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(side_effect=RuntimeError("Simulated pipeline crash")),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
+    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
+    assert expected_temp in called_paths
+    assert expected_mirror in called_paths
 
 
 # ---------------------------------------------------------------------------

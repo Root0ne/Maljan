@@ -494,6 +494,11 @@ async def delete_sample(
                 extra={"user_id": str(user.id), "component": "minio"},
             )
 
+        from app.worker import sample_files
+
+        for removed in sample_files.remove_for_sha(sha256):
+            logger.info("Removed local copy %s", removed, extra={"sample_id": str(sample_id)})
+
     logger.info(
         "Sample deleted: id=%s sha256=%s",
         sample_id,

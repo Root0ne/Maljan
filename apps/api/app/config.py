@@ -291,6 +291,11 @@ class APISettings(BaseSettings):
     # (HTTP 503). The fix: route every sample-handling tempfile through
     # a Defender-excluded directory created at API startup.
     upload_temp_dir: str = Field(default="data/uploads/.tmp")
+    samples_dir: str = Field(
+        default="data/samples",
+        description="Host directory bind-mounted into the Ghidra container; the worker's "
+        "per-job mirror lives in its .work subdirectory.",
+    )
 
     @field_validator("jwt_secret_key")
     @classmethod
@@ -393,6 +398,13 @@ class _LazyAPISettings:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(get_settings(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Forwarded (rather than raising) so tests can ``monkeypatch.setattr``
+        # a single field on this module-level singleton — e.g.
+        # ``monkeypatch.setattr(settings, "upload_temp_dir", tmp_path)`` —
+        # without replacing the whole proxy and losing every other field.
+        setattr(get_settings(), name, value)
 
 
 # Legacy import surface — many modules still do ``from app.config import settings``.
