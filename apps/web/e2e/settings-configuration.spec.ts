@@ -312,6 +312,99 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(pendingBar).toBeVisible();
     await expect(requiredAlert).toHaveCount(0);
   });
+
+  test("typing into a list field entry by entry stages every entry, not just the first", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({
+          json: { applied: ["core.negotiation.blocked_hosts"], applies: { next_job: 1 } },
+        });
+      }
+      return r.fallback();
+    });
+
+    const field = page.locator("#setting-core\\.negotiation\\.blocked_hosts textarea");
+    // Mirrors real typing, not a paste: fill the first entry, press Enter
+    // (which used to be swallowed — see ListWidget's onChange), then type a
+    // second entry at the cursor.
+    await field.fill("a");
+    await field.press("Enter");
+    await field.type("b");
+
+    await expect(field).toHaveValue("a\nb");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+    await expect(page.getByText(/Applied 1 setting/)).toBeVisible();
+
+    expect(patches).toEqual([
+      { changes: { "core.negotiation.blocked_hosts": ["a", "b"] } },
+    ]);
+  });
+
+  test("Discard resets the list widget's textarea back to the current value", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    const field = page.locator("#setting-core\\.negotiation\\.blocked_hosts textarea");
+    await field.fill("a");
+    await field.press("Enter");
+    await field.type("b");
+    await expect(field).toHaveValue("a\nb");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    // The current value is the mock's `[]` default, so the textarea goes
+    // back to empty rather than keeping the abandoned "a\nb" text.
+    await expect(field).toHaveValue("");
+    await expect(page.getByText(/change.*pending/)).toHaveCount(0);
+  });
+
+  test("resetGroup unstages only that group's pending edits, leaving another group's edit intact", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await expect(page.getByText("core.negotiation.max_iterations")).toBeVisible();
+
+    // Stage an edit in "negotiation" (the group about to be reset)...
+    const negotiationField = page.locator(
+      "#setting-core\\.negotiation\\.max_iterations input[type=number]"
+    );
+    await negotiationField.fill("7");
+
+    // ...and a second edit in "providers", a different group.
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.getByRole("button", { name: "Set new value" }).click();
+    await page.locator("input[type=password]").fill("sk-new-secret-value");
+    await page.getByRole("button", { name: "Stage" }).click();
+    await expect(page.getByText("2 changes pending")).toBeVisible();
+
+    await page.route("**/api/v1/settings?**", (r) =>
+      r.fulfill({ json: { reset: ["core.negotiation.max_iterations"] } })
+    );
+
+    await page.getByRole("button", { name: "Negotiation", exact: true }).click();
+    await page.getByRole("button", { name: "Reset group to env" }).click();
+
+    // The negotiation group's own edit is gone, but the providers group's
+    // staged secret survives — resetGroup must only touch its own group's
+    // keys, not wipe `pending` wholesale.
+    await expect(page.getByText("1 change pending")).toBeVisible();
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await expect(page.getByText("new value staged")).toBeVisible();
+  });
 });
 
 test.describe("Settings → Configuration (non-admin)", () => {

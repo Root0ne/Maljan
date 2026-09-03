@@ -140,13 +140,26 @@ export function useSettings() {
       setActionError(null);
       try {
         await api.resetSettingsGroup(group);
-        setPending({});
+        // Only unstage the keys that belong to *this* group — `setPending({})`
+        // used to wipe every group's pending edits, so resetting one group's
+        // overrides silently discarded unrelated in-flight edits elsewhere.
+        const keys = schema?.groups.find((g) => g.key === group)?.entries.map((e) => e.key) ?? [];
+        setPending((p) => {
+          const n = { ...p };
+          for (const k of keys) delete n[k];
+          return n;
+        });
+        setErrors((e) => {
+          const n = { ...e };
+          for (const k of keys) delete n[k];
+          return n;
+        });
         await reload();
       } catch (e) {
         setActionError(getErrorMessage(e));
       }
     },
-    [reload]
+    [reload, schema]
   );
 
   const probe = useCallback(

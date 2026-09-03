@@ -192,27 +192,89 @@ export function EnumWidget(p: WidgetProps) {
   );
 }
 
+function formatList(p: WidgetProps): string {
+  return ((shown(p) as string[] | null) ?? []).join("\n");
+}
+
+/**
+ * Like `NumberWidget`, a local text buffer is the source of truth while
+ * typing. A plain `value={v.join("\n")}` textarea (the previous shape)
+ * recomputed from `shown(p)` on every render: pressing Enter after "a"
+ * produced the text "a\n", `onChange` staged `"a\n".split("\n") ->
+ * ["a", ""] -> filter(Boolean) -> ["a"]`, and the very next render rendered
+ * `["a"].join("\n")` back as the single line "a" — the trailing newline the
+ * user just typed was swallowed before a second entry could ever be typed,
+ * so only paste (never entry-by-entry typing) worked.
+ *
+ * The buffer is only re-synced from props when the *external* value moves
+ * out from under the user — staged edits being cleared (discard, reset,
+ * reset-group, or a successful apply all clear `pending`) or the live value
+ * itself changing (a reset's reload landing new data) — never on the
+ * keystroke that produced the current `p.staged`, so a mid-edit trailing
+ * newline is never fought.
+ */
 export function ListWidget(p: WidgetProps) {
-  const v = (shown(p) as string[] | null) ?? [];
+  const [text, setText] = useState(() => formatList(p));
+  const prevStagedRef = useRef(p.staged);
+  const prevCurrentValueRef = useRef(p.current?.value);
+
+  useEffect(() => {
+    const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
+    const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
+    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+      setText(formatList(p));
+    }
+    prevStagedRef.current = p.staged;
+    prevCurrentValueRef.current = p.current?.value;
+    // `p` itself is intentionally not a dependency: only these two fields
+    // decide whether an external (not-from-this-widget) change happened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.staged, p.current?.value]);
+
   return (
     <textarea
       aria-label={p.entry.title}
       className={`${input} font-mono`}
-      rows={Math.min(6, Math.max(2, v.length))}
+      rows={Math.min(6, Math.max(2, text.split("\n").length))}
       disabled={!p.entry.editable}
       placeholder="one entry per line"
-      value={v.join("\n")}
-      onChange={(e) =>
-        p.onChange(e.target.value.split("\n").map((s) => s.trim()).filter(Boolean))
-      }
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        p.onChange(e.target.value.split("\n").map((s) => s.trim()).filter(Boolean));
+      }}
     />
   );
 }
 
+function formatJson(p: WidgetProps): string {
+  return JSON.stringify(shown(p) ?? (p.entry.type === "dict" ? {} : null), null, 2);
+}
+
+/**
+ * Same external-change re-sync as `ListWidget`/`NumberWidget`: `text` used to
+ * be seeded once via `useState(initial)` and never revisited, so Discard /
+ * Reset to env / a group reset left the textarea showing abandoned JSON even
+ * though `pending` no longer held it.
+ */
 export function JsonWidget(p: WidgetProps) {
-  const initial = JSON.stringify(shown(p) ?? (p.entry.type === "dict" ? {} : null), null, 2);
-  const [text, setText] = useState(initial);
+  const [text, setText] = useState(() => formatJson(p));
   const [bad, setBad] = useState<string | null>(null);
+  const prevStagedRef = useRef(p.staged);
+  const prevCurrentValueRef = useRef(p.current?.value);
+
+  useEffect(() => {
+    const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
+    const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
+    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+      setText(formatJson(p));
+      setBad(null);
+    }
+    prevStagedRef.current = p.staged;
+    prevCurrentValueRef.current = p.current?.value;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.staged, p.current?.value]);
+
   return (
     <div>
       <textarea

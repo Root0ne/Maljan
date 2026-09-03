@@ -171,11 +171,13 @@ export const MOCK_API_KEY = {
 
 /**
  * Matches `apps/api/app/schemas/settings.py::SchemaResponse` /
- * `apps/web/src/types/settings.ts::SettingsSchema`. Two groups, two field
- * shapes (plain int, secret) plus a second int field pre-seeded with a
- * `"ui"` source in `MOCK_SETTINGS_VALUES` below, so per-row / group reset
- * visibility (shown only for a `"ui"`-sourced value) has something to
- * contrast against the `"default"`/`"env"` rows that must not show it.
+ * `apps/web/src/types/settings.ts::SettingsSchema`. Two groups, three field
+ * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
+ * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
+ * — shown only for a `"ui"`-sourced value — has something to contrast
+ * against the `"default"`/`"env"` rows that must not show it, and a `list`
+ * field defaulting to `[]` for `ListWidget` coverage) plus one secret in
+ * "providers".
  */
 export const MOCK_SETTINGS_SCHEMA = {
   secrets_available: true,
@@ -217,6 +219,25 @@ export const MOCK_SETTINGS_SCHEMA = {
           group: "negotiation",
           title: "Retry delay seconds",
           description: "Delay between negotiation retries.",
+          applies: "next_job",
+          editable: true,
+          reason: null,
+          probe: null,
+        },
+        {
+          key: "core.negotiation.blocked_hosts",
+          namespace: "core",
+          path: "negotiation.blocked_hosts",
+          type: "list",
+          default: [],
+          nullable: false,
+          choices: null,
+          minimum: null,
+          maximum: null,
+          secret: false,
+          group: "negotiation",
+          title: "Blocked hosts",
+          description: "Hostnames the negotiator refuses to contact.",
           applies: "next_job",
           editable: true,
           reason: null,
@@ -269,6 +290,14 @@ export const MOCK_SETTINGS_VALUES = {
       source: "ui",
       updated_at: "2026-08-01T00:00:00Z",
       updated_by: "user-1",
+    },
+    "core.negotiation.blocked_hosts": {
+      value: [],
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
     },
     "core.llm.openai.api_key": {
       value: null,
