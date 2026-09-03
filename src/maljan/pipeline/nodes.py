@@ -1899,7 +1899,7 @@ def make_report_node(container: ServiceContainer) -> Any:
                 report.technical_evidence = _tool_ev
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
-            return {}
+            return {"report_error": f"{type(exc).__name__}: {exc}"}
 
         # Narrative LLM round (Faz 3). NarrativeAgent is None in mock mode;
         # also returns None when the structured-output and manual-parse

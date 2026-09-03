@@ -211,6 +211,68 @@ async def test_mock_pipeline_completes(
 
 
 @pytest.mark.asyncio
+async def test_report_less_pipeline_result_fails_the_job(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A pipeline run that produced no report is a failed job, not a
+    completed one with an empty report (L15, security hardening).
+
+    ``report_node`` returns ``{"report_error": "<type>: <message>"}`` instead
+    of a ``malware_report`` when the deterministic build raises; the worker
+    must surface that message through the same failure path any other
+    pipeline exception takes.
+    """
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+            clear=False,
+        ),
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(return_value={"report_error": "ValueError: boom"}),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    assert "ValueError: boom" in result["error"]
+    assert job.status == "failed"
+    assert job.error_message is not None
+    assert "ValueError: boom" in job.error_message
+
+
+@pytest.mark.asyncio
 async def test_pipeline_failure_sets_failed_status(
     mock_ctx: dict[str, Any], mock_db_session: AsyncMock
 ) -> None:

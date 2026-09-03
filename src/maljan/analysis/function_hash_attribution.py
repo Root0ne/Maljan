@@ -121,8 +121,14 @@ def fetch_bulk_function_hashes(
             try:
                 http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
                 http.post(f"{base}/run_analysis", json={})
-            except Exception:  # noqa: BLE001 - tolerated
-                pass
+            except Exception as exc:  # noqa: BLE001 - the current program is now unknown
+                logger.warning(
+                    "function-hash fetch: could not switch Ghidra to %s (%s); skipping "
+                    "attribution rather than hashing whichever binary is current.",
+                    name,
+                    type(exc).__name__,
+                )
+                return []
 
             offset = 0
             for _ in range(max_pages):

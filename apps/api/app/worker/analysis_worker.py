@@ -691,6 +691,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
             _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
 
+            # A pipeline that produced no report is a failed run, not a
+            # completed one with nothing in it (L15, security hardening):
+            # ``report_node`` returns ``{"report_error": "<type>: <msg>"}``
+            # instead of a ``malware_report`` when the deterministic build
+            # raised. Surface that message (or a generic one, if the report
+            # is simply missing) through the same failure path every other
+            # pipeline exception takes, below.
+            if not pipeline_result.get("malware_report"):
+                _report_error = pipeline_result.get("report_error")
+                if _report_error:
+                    _run_summary["report_error"] = _report_error
+                raise RuntimeError(_report_error or "pipeline produced no report")
+
             report = AnalysisReport(
                 job_id=job.id,
                 verdict=pipeline_result.get("final_decision", "Unknown"),
