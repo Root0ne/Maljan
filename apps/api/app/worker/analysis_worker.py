@@ -51,9 +51,9 @@ def build_job_settings(
     """
     merged = dict(overrides)
     if job_config:
-        if "max_iterations" in job_config:
+        if job_config.get("max_iterations") is not None:
             merged["negotiation.max_iterations"] = job_config["max_iterations"]
-        if "llm_provider" in job_config:
+        if job_config.get("llm_provider") is not None:
             merged["llm.provider"] = job_config["llm_provider"]
     return build_settings(merged)
 
@@ -332,8 +332,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     else [type(exc).__name__]
                 )
                 logger.warning(
-                    "Stored runtime overrides no longer validate (%s); "
-                    "running job %s on environment settings only.",
+                    "Runtime settings rejected by the model (%s); "
+                    "retrying job %s without the stored overrides.",
                     ", ".join(bad),
                     job_id,
                     extra={"job_id": job_id},

@@ -37,6 +37,9 @@ class JobCreateRequest(BaseModel):
     @classmethod
     def _known_keys_are_valid(cls, value: dict | None) -> dict | None:
         if value:
+            nulls = [k for k in _KnownJobConfig.model_fields if k in value and value[k] is None]
+            if nulls:
+                raise ValueError(f"explicit null is not allowed for: {', '.join(nulls)}")
             _KnownJobConfig.model_validate(value)
         return value
 

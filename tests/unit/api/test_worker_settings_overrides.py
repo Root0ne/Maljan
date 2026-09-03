@@ -69,3 +69,7 @@ def test_job_create_request_rejects_bad_config_at_submit_time():
         JobCreateRequest(sample_id=uuid.uuid4(), config={"max_iterations": 0})
     with pytest.raises(ValidationError):
         JobCreateRequest(sample_id=uuid.uuid4(), config={"llm_provider": "bedrock"})
+    with pytest.raises(ValidationError):
+        JobCreateRequest(sample_id=uuid.uuid4(), config={"max_iterations": None})
+    # a null in a row written another way is "absent", not "zero"
+    assert build_job_settings({}, {"max_iterations": None}).negotiation.max_iterations == 5
