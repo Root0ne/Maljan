@@ -13,6 +13,8 @@ When limit is exceeded, returns 429 with Retry-After header.
 
 from __future__ import annotations
 
+import ipaddress
+from functools import lru_cache
 from typing import cast
 
 import redis.asyncio as aioredis
@@ -25,6 +27,13 @@ from app.logging_config import get_logger
 from app.runtime_config import runtime_config
 
 logger = get_logger("middleware.rate_limit")
+
+
+@lru_cache(maxsize=8)
+def _trusted_networks(
+    entries: tuple[str, ...],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    return tuple(ipaddress.ip_network(e, strict=False) for e in entries)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -64,12 +73,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     @staticmethod
     async def _extract_client_ip(request: Request) -> str:
         """Return the client IP, honouring X-Forwarded-For from trusted proxies."""
-        trusted = set(await runtime_config.get("trusted_proxy_ips") or [])
+        entries = tuple(await runtime_config.get("trusted_proxy_ips") or ())
         peer = getattr(request.client, "host", "") or "unknown"
-        if peer in trusted:
+        try:
+            peer_addr = ipaddress.ip_address(peer)
+        except ValueError:
+            return peer
+        if any(peer_addr in net for net in _trusted_networks(entries)):
             xff = request.headers.get("x-forwarded-for", "")
             if xff:
-                # The left-most XFF entry is the original client.
                 return xff.split(",")[0].strip() or peer
         return peer
 

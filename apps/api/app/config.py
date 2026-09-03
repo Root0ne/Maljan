@@ -9,6 +9,7 @@ the API in non-debug mode unless the operator provided real values.
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 from pydantic import Field, SecretStr, field_validator
@@ -314,6 +315,18 @@ class APISettings(BaseSettings):
             # itself cannot see other fields, so we leave the assertion to a
             # post-init hook (model_post_init).
             return SecretStr(secret)
+        return value
+
+    @field_validator("trusted_proxy_ips")
+    @classmethod
+    def _proxies_are_networks(cls, value: list[str]) -> list[str]:
+        for entry in value:
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"trusted_proxy_ips entry {entry!r} is not an IP address or CIDR network"
+                ) from exc
         return value
 
     def model_post_init(self, __context: object) -> None:
