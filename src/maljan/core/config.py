@@ -213,7 +213,7 @@ class LLMConfig(BaseModel):
     # ~40 tok/s, well under the timeout. This is a worst-case-latency/robustness
     # guard (in the spirit of the §3.3 degenerate-loop damper), not a quality
     # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
-    judge_max_tokens: Annotated[int, Field(ge=1)] = 8192
+    judge_max_tokens: Annotated[int, Field(ge=0)] = 8192
 
     # Wave 7 THROUGHPUT-01 (2026-05-28): when True, analysts run in parallel —
     # correct for hosted multi-slot LLMs. When False (the DEFAULT since
@@ -270,7 +270,7 @@ class LLMConfig(BaseModel):
     # full 25 minutes to burn. 8192 matches ``judge_max_tokens`` and is far above
     # any legitimate analyst answer (~2-4k tokens observed), so it bounds the
     # tail without truncating real output. Set 0 to restore unbounded.
-    expert_max_tokens: Annotated[int, Field(ge=1)] = 8192
+    expert_max_tokens: Annotated[int, Field(ge=0)] = 8192
 
     # View-decomposition strategy when ``view_decomposition_views >= 2``
     # (findings-log §4 Item 3, LAMD). "facet" = horizontal, AppPoet-style
