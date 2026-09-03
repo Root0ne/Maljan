@@ -1,8 +1,9 @@
 # Runtime settings managed from the web UI
 
 Date: 2026-09-02. Status: implemented — tasks 1-14 of
-`docs/plans/2026-09-02-runtime-settings.md` landed on `feat/runtime-settings`,
-pending final review.
+`docs/plans/2026-09-02-runtime-settings.md` landed on `feat/runtime-settings`;
+final whole-branch review clean after three fix rounds (2026-09-03), verified
+live against the running stack (apply, secrets, probes, per-job override).
 
 ## Problem
 
