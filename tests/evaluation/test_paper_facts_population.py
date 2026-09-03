@@ -27,3 +27,5 @@ def test_population_gate() -> None:
             "x.json",
             {"population": {"attempted": 5, "parsed": 4, "scored": 3, "dropped": {}}},
         )
+    with pytest.raises(pf.FactError):
+        pf.check_population("x.json", {"population": {"attempted": 5}})  # missing "scored"

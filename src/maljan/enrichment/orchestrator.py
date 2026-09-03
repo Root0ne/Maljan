@@ -124,7 +124,7 @@ def _is_public_fqdn(name: str) -> bool:
         return False
     except ValueError:
         pass
-    return not any(host.endswith(suffix) or host == suffix[1:] for suffix in _PRIVATE_SUFFIXES)
+    return not any(host.endswith(suffix) for suffix in _PRIVATE_SUFFIXES)
 
 
 async def enrich_malware_report(

@@ -37,9 +37,14 @@ _pool: Any = None
 _last_failure_at: float | None = None
 
 
-def _mark_down(exc: BaseException) -> None:
+async def _mark_down(exc: BaseException) -> None:
     global _pool, _last_failure_at
-    _pool = None
+    old_pool, _pool = _pool, None
+    if old_pool is not None:
+        try:
+            await old_pool.aclose()
+        except Exception:  # noqa: BLE001 - already down; closing is best-effort
+            pass
     _last_failure_at = time.monotonic()
     state = observability.throttle
     if state.available:
@@ -77,7 +82,7 @@ async def _redis() -> Any | None:
         client = aioredis.from_url(settings.redis_url, decode_responses=True)
         await client.ping()
     except Exception as exc:  # noqa: BLE001 - any failure means "down"
-        _mark_down(exc)
+        await _mark_down(exc)
         return None
     if _pool is not None:
         # Another coroutine already reconnected while we were pinging; keep
@@ -106,7 +111,7 @@ async def refresh_token_register(user_id: str, jti: str) -> None:
         logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs only the exception's class name, never the exception itself  # noqa: E501
             "refresh_token_register failed: %s", type(exc).__name__
         )
-        _mark_down(exc)
+        await _mark_down(exc)
 
 
 async def refresh_token_consume(user_id: str | None, jti: str) -> bool:
@@ -128,7 +133,7 @@ async def refresh_token_consume(user_id: str | None, jti: str) -> bool:
         logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs only the exception's class name, never the exception itself  # noqa: E501
             "refresh_token_consume failed: %s", type(exc).__name__
         )
-        _mark_down(exc)
+        await _mark_down(exc)
         return False
 
 
@@ -145,7 +150,7 @@ async def record_login_failure(email: str) -> None:
         await pipe.execute()
     except Exception as exc:  # noqa: BLE001
         logger.debug("record_login_failure failed: %s", type(exc).__name__)
-        _mark_down(exc)
+        await _mark_down(exc)
 
 
 async def clear_login_throttle(email: str) -> None:
@@ -156,7 +161,7 @@ async def clear_login_throttle(email: str) -> None:
         await r.delete(_LOGIN_FAIL_KEY.format(email=email.lower()))
     except Exception as exc:  # noqa: BLE001
         logger.debug("clear_login_throttle failed: %s", type(exc).__name__)
-        _mark_down(exc)
+        await _mark_down(exc)
 
 
 async def is_login_locked(email: str) -> bool:
@@ -168,5 +173,5 @@ async def is_login_locked(email: str) -> bool:
         return value is not None and int(value) >= await runtime_config.get("login_max_attempts")
     except Exception as exc:  # noqa: BLE001
         logger.debug("is_login_locked failed: %s", type(exc).__name__)
-        _mark_down(exc)
+        await _mark_down(exc)
         return False

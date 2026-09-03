@@ -64,7 +64,10 @@ def check_population(name: str, blob: Any) -> None:
         pop = summary.get("population") if isinstance(summary, dict) else None
     if not pop:
         return
-    attempted, scored = int(pop["attempted"]), int(pop["scored"])
+    try:
+        attempted, scored = int(pop["attempted"]), int(pop["scored"])
+    except KeyError as exc:
+        raise FactError(f"{name}: population is missing {exc}") from exc
     explained = sum(int(v) for v in (pop.get("dropped") or {}).values())
     if attempted != scored and explained != attempted - scored:
         raise FactError(

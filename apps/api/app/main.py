@@ -349,7 +349,9 @@ def create_app() -> FastAPI:
         from app import observability
 
         body["throttle_degraded"] = not observability.throttle.available
-        body["audit_write_failures"] = observability.counters.audit_write_failures
+        # ``audit_write_failures`` stays admin-only, on ``/system/status`` —
+        # this endpoint is unauthenticated and only publishes the public
+        # readiness bit.
         # Only components the API cannot serve requests without are allowed to
         # flip the overall status; optional subsystems are reported but not fatal.
         required = ("database", "redis")

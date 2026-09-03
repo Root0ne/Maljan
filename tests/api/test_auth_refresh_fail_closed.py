@@ -25,7 +25,7 @@ def test_refresh_answers_401_when_the_session_store_is_unavailable(monkeypatch):
     audit = AsyncMock()
     monkeypatch.setattr(auth_module, "_audit", audit)
     monkeypatch.setattr(
-        "app.auth.throttle.throttle_state", lambda: {"available": False, "last_error": "x"}
+        auth_module, "throttle_state", lambda: {"available": False, "last_error": "x"}
     )
     client = TestClient(app)
     client.cookies.set(REFRESH_COOKIE, "t")

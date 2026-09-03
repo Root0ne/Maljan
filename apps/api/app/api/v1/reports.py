@@ -171,6 +171,11 @@ async def get_full_malware_report_html(
             detail="Report not found or HTML could not be rendered",
         )
     headers = _disposition(rendered.filename, attachment=download)
+    # Safari has no ``style-src-attr`` support and falls back to ``style-src``
+    # for it, which does not carry ``unsafe-inline`` here — so the single
+    # ``style="string-set: ..."`` attribute used for paged-media page headers
+    # is blocked on Safari. Cosmetic only: it affects print/PDF pagination
+    # headers, not the report's rendered content.
     headers["Content-Security-Policy"] = (
         "default-src 'none'; img-src data:; "
         f"style-src 'nonce-{nonce}'; style-src-attr 'unsafe-inline'; "

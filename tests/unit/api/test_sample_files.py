@@ -59,3 +59,27 @@ def test_sweep_removes_only_old_files_in_the_scoped_dirs(dirs):
 def test_remove_quietly_never_raises(dirs):
     sf.remove_quietly(dirs / "missing.bin")
     sf.remove_quietly(None)
+
+
+def test_sweep_skips_a_file_that_vanishes_between_iterdir_and_stat(dirs, monkeypatch):
+    """One file that disappears (or becomes unreadable) mid-sweep must not
+    abort the sweep for every other file in the scoped directories."""
+    vanished = sf.work_dir() / "vanished.exe"
+    vanished.write_bytes(b"x")
+    os.utime(vanished, (time.time() - 90_000, time.time() - 90_000))
+    old = sf.temp_dir() / "old.exe"
+    old.write_bytes(b"x")
+    os.utime(old, (time.time() - 90_000, time.time() - 90_000))
+
+    real_stat = Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self == vanished:
+            raise FileNotFoundError(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+
+    assert sf.sweep() == 1
+    assert os.path.exists(vanished)  # never got past the raising stat() call
+    assert not old.exists()

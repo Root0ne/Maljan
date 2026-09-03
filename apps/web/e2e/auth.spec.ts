@@ -116,10 +116,9 @@ test.describe("Authentication", () => {
     // Same hydration race as "successful login redirects to dashboard" above
     // — retry the whole fill+click+request as one unit rather than repeating
     // the explanation.
-    let req: import("@playwright/test").Request;
     await expect(async () => {
       await page.goto("/login");
-      const [request] = await Promise.all([
+      await Promise.all([
         page.waitForRequest(
           (r) => r.url().endsWith("/api/v1/auth/login") && r.method() === "POST",
           { timeout: 5_000 }
@@ -130,12 +129,7 @@ test.describe("Authentication", () => {
           await page.getByRole("button", { name: /sign in/i }).click();
         })(),
       ]);
-      req = request;
     }).toPass({ timeout: 30_000 });
-    // The browser decides whether to attach the cookie header; what matters
-    // here is that the request was made at all — `credentials: "include"` is
-    // reviewed directly in api.ts.
-    expect(req!.url()).toContain("/api/v1/auth/login");
     await page.waitForURL(/dashboard/);
     const stored = await page.evaluate(() => Object.keys(localStorage));
     expect(stored).toContain("access_token");

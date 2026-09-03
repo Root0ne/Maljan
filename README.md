@@ -294,10 +294,9 @@ by Redis. When Redis is unreachable, refresh-token consumption fails
 closed — no refresh succeeds until Redis is back — while the login lock
 fails open rather than locking every account for the outage. This state is
 visible without authentication in `GET /health?deep=true` as
-`throttle_degraded` and `audit_write_failures`, and to an authenticated
-admin in `GET /system/status` as `throttle.available` /
-`throttle.degraded_since` / `throttle.last_error` and
-`audit_write_failures`.
+`throttle_degraded`, and to an authenticated admin in `GET /system/status`
+as `throttle.available` / `throttle.degraded_since` / `throttle.last_error`
+and `audit_write_failures`.
 
 **Sample copies on disk.** The worker's private working copies of a sample
 live under `data/uploads/.tmp` (download staging) and `<SAMPLES_DIR>/.work`

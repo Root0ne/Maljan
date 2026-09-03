@@ -70,9 +70,15 @@ def sweep(max_age_s: float = 86_400.0, *, now: float | None = None) -> int:
     count = 0
     for base in (temp_dir(), work_dir()):
         for candidate in base.iterdir():
-            if candidate.is_file() and candidate.stat().st_mtime < cutoff:
-                remove_quietly(candidate)
-                count += 1
+            try:
+                if candidate.is_file() and candidate.stat().st_mtime < cutoff:
+                    remove_quietly(candidate)
+                    count += 1
+            except OSError:
+                # Vanished or became unreadable between ``iterdir`` and
+                # ``stat``/unlink (another sweep, a concurrent cleanup) —
+                # skip it rather than aborting the rest of the sweep.
+                continue
     if count:
         logger.info("Swept %d stale sample copies from %s and %s", count, temp_dir(), work_dir())
     return count

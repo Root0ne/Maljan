@@ -504,6 +504,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     derived_path,
                     temp_path,
                 )
+                # 0o600 on the file; the parent dir is already 0o700 (owner-
+                # only) via ``sample_files.temp_dir()``, so this file is
+                # unreachable to anyone but the worker's own user either way.
                 os.chmod(temp_path, 0o600)
                 logger.info(
                     "Downloaded sample from MinIO: %s -> %s",
@@ -1393,9 +1396,11 @@ def build_redis_settings(redis_url: str) -> RedisSettings:
     """Build arq's RedisSettings from a redis:// URL, credentials included.
 
     ``redis://:${REDIS_PASSWORD}@redis:6379/0`` (the compose default once Redis
-    runs with --requirepass) carries a password arq's own URL parsing ignores
-    unless it is forwarded explicitly here; without it every queue command the
-    worker issues comes back NOAUTH against a password-protected Redis.
+    runs with --requirepass) carries a password. arq's own ``RedisSettings.
+    from_dsn`` parses that password correctly; the bug this function fixed
+    was in ``WorkerSettings``'s previous hand-rolled URL parsing, which
+    dropped it — every queue command the worker issued then came back NOAUTH
+    against a password-protected Redis.
     """
     parsed = urlparse(redis_url)
     return RedisSettings(

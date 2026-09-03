@@ -100,7 +100,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "title": "Trusted proxy IPs",
         "description": (
             "Peers whose X-Forwarded-For header is believed for rate "
-            "limiting. Exact IPs, one per entry."
+            "limiting. CIDR networks (or single IPs), one per entry."
         ),
     },
 }

@@ -113,6 +113,15 @@ class AnalysisState(TypedDict):
     malware_report_markdown: str | None
     stix_bundle_extended: dict[str, Any] | None
 
+    # Set by ``report_node`` when the deterministic report build raises,
+    # instead of populating ``malware_report``. Must be declared here like
+    # every other node-to-node channel above — an undeclared key is dropped
+    # by ``StateGraph(AnalysisState)`` between nodes, which is exactly what
+    # happened before this field existed: the worker's failure check always
+    # read ``None`` and a pipeline that produced no report was persisted as
+    # a quietly successful run.
+    report_error: str | None
+
     # CONF-INFL-01 (2026-05-19 audit): flag set by the judge node when a
     # run produced TTPs but zero LLM analyst corroboration, or when one
     # or more analyst reports are tagged ``[ERROR]``. Consumers (report

@@ -30,6 +30,7 @@ from app.auth.throttle import (
     record_login_failure,
     refresh_token_consume,
     refresh_token_register,
+    throttle_state,
 )
 from app.config import settings
 from app.database import async_session_factory, get_db
@@ -66,7 +67,13 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
+    response.delete_cookie(
+        REFRESH_COOKIE,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=bool(settings.cookie_secure),
+    )
 
 
 def _email_tag(email: str) -> str:
@@ -237,8 +244,6 @@ async def refresh_token(
     jti = payload.get("jti", "")
     consumed = await refresh_token_consume(user_id, jti)
     if not consumed:
-        from app.auth.throttle import throttle_state
-
         if not throttle_state()["available"]:
             await _audit(db, None, "auth.refresh.store_unavailable", request=request)
             logger.warning("Refresh rejected: session store unavailable.")
