@@ -273,6 +273,77 @@ async def test_report_less_pipeline_result_fails_the_job(
 
 
 @pytest.mark.asyncio
+async def test_reporting_disabled_completes_without_a_malware_report(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A missing ``malware_report`` is not itself a failure.
+
+    With ``reporting.enabled = False`` the graph routes judge -> END and the
+    report node never runs at all (``pipeline/builder.py``,
+    ``pipeline/state.py``) — ``malware_report`` stays ``None`` on every run
+    of a job configured this way, and that is the documented, shipped
+    behaviour (see ``tests/integration/test_report_pipeline.py::
+    TestReportNodeDisabled``), not a report-less failure. The job must still
+    complete.
+    """
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "MALJAN_MOCK_MODE": "true",
+                "MOCK_MODE_ALLOWED": "true",
+                "REPORTING__ENABLED": "false",
+            },
+            clear=False,
+        ),
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(
+                return_value={
+                    "final_decision": "Malware",
+                    "judge_report": "legacy judge prose",
+                }
+            ),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    assert job.status == "completed"
+    assert job.error_message is None
+
+
+@pytest.mark.asyncio
 async def test_pipeline_failure_sets_failed_status(
     mock_ctx: dict[str, Any], mock_db_session: AsyncMock
 ) -> None:

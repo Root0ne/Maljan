@@ -695,13 +695,27 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # completed one with nothing in it (L15, security hardening):
             # ``report_node`` returns ``{"report_error": "<type>: <msg>"}``
             # instead of a ``malware_report`` when the deterministic build
-            # raised. Surface that message (or a generic one, if the report
-            # is simply missing) through the same failure path every other
-            # pipeline exception takes, below.
-            if not pipeline_result.get("malware_report"):
-                _report_error = pipeline_result.get("report_error")
-                if _report_error:
-                    _run_summary["report_error"] = _report_error
+            # raised. Surface that message through the same failure path
+            # every other pipeline exception takes, below.
+            #
+            # A missing ``malware_report`` is not on its own evidence of a
+            # failure, though: with ``reporting.enabled = False`` the graph
+            # routes judge -> END and never runs the report node at all
+            # (``pipeline/builder.py``, ``pipeline/state.py``), so
+            # ``malware_report`` stays ``None`` by design on every run. Only
+            # fail the job when the report node actually raised
+            # (``report_error`` present) or reporting was expected to run
+            # for this job and did not produce one.
+            _report_error = pipeline_result.get("report_error")
+            if _report_error or (
+                core_settings.reporting.enabled and not pipeline_result.get("malware_report")
+            ):
+                logger.error(
+                    "Pipeline produced no report: job=%s report_error=%s",
+                    job_id,
+                    _report_error,
+                    extra={"job_id": job_id},
+                )
                 raise RuntimeError(_report_error or "pipeline produced no report")
 
             report = AnalysisReport(
