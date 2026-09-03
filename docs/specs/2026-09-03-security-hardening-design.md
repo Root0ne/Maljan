@@ -274,9 +274,11 @@ Files: new `src/maljan/agents/subprocess_env.py`; `static_analyst.py`,
 `child_env(extra: Mapping[str, str] | None = None, *, allow: Iterable[str] = ())`
 returns a dict with the base set `PATH HOME LANG LC_ALL LC_CTYPE TMPDIR TZ
 JAVA_HOME PYTHONIOENCODING VIRTUAL_ENV` (when present), the explicit
-`mcp.<server>.env` mapping, and only the named `allow` keys. The network
-analyst passes `allow=("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")` because
-`threatintel-mcp/server.py` reads exactly those; the other three pass none.
+`mcp.<server>.env` mapping, and only the named `allow` keys. The judge
+agent, which spawns `threatintel-mcp`, passes
+`allow=("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")` because
+`threatintel-mcp/server.py` reads exactly those; the static, dynamic and
+network analysts pass none (`network-mcp/server.py` reads no environment).
 Frontier, OpenAI, Anthropic, Gemini and database credentials never reach a
 child process.
 
