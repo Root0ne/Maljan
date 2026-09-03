@@ -76,8 +76,8 @@ async def _audit(
     Writing on a separate session decouples the audit record from the request
     transaction's fate, so it survives the rollback. Best-effort by design: an
     audit failure must never turn a handled 401 into a 500, so every error is
-    swallowed at DEBUG. ``db`` is kept in the signature for call-site
-    compatibility and is deliberately unused.
+    logged at ERROR and counted for operator visibility. ``db`` is kept in the
+    signature for call-site compatibility and is deliberately unused.
     """
     del db  # audit rows must not share the request transaction (see docstring)
     try:

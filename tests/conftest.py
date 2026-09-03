@@ -1,8 +1,32 @@
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from maljan.app import MaljanApp
+
+# Import observability to reset counters/throttle
+_API_PATH = Path(__file__).resolve().parent.parent / "apps" / "api"
+if str(_API_PATH) not in sys.path:
+    sys.path.insert(0, str(_API_PATH))
+
+from app import observability  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def reset_observability_state() -> None:
+    """Reset observability counters and throttle before each test.
+
+    The counters and throttle are module-level singletons shared across tests.
+    Without resetting them, tests that fail to increment/decrement counters will
+    interfere with subsequent tests. This fixture ensures each test starts with
+    a clean state.
+    """
+    observability.counters.audit_write_failures = 0
+    observability.throttle.available = True
+    observability.throttle.degraded_since = None
+    observability.throttle.last_error = None
 
 
 @pytest.fixture
