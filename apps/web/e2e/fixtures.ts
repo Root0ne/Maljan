@@ -91,6 +91,11 @@ export const test = base.extend<{
     await seedSession(page);
     await page.goto("/dashboard");
     await page.waitForURL("**/dashboard");
+    // The dashboard fires four fetches on mount. A spec that navigates away
+    // at once cancels them, and WebKit reports a cancelled fetch as a page
+    // error ("cannot load ... due to access control checks") often enough to
+    // fail any spec that asserts a clean error log. Hand over a settled page.
+    await page.waitForLoadState("networkidle");
     await use(page);
   },
 });
