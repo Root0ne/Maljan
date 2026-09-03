@@ -130,7 +130,12 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
         query parameter (proxy access logs and browser Referer headers can
         leak query strings): open the socket with subprotocols
         ``["maljan.v1", "maljan.v1.<jwt-access-token>"]``. The server
-        accepts and echoes back only ``maljan.v1``.
+        accepts and echoes back only ``maljan.v1``. A missing/malformed
+        credential is accepted (with no subprotocol echoed, since nothing
+        was validated) and then immediately closed with 4401 — closing
+        before accept would be turned into an HTTP 403 handshake rejection
+        by the ASGI server, which discards the close code and leaves the
+        client seeing 1006 instead.
 
     Event types:
         - ``status_change``: Job status transition
@@ -160,6 +165,15 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
 
         if not token:
             logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
+            # A close before accept is turned into an HTTP 403 handshake
+            # rejection by uvicorn: the close code is discarded and the
+            # browser sees 1006, so a client-side check keyed on 4401 (e.g.
+            # "don't auto-reconnect on a rejected credential") never fires
+            # and the client retries forever. Accept first — echoing no
+            # subprotocol, since nothing about the request was validated —
+            # then close immediately so a real close frame carrying 4401
+            # reaches the client. Nothing is sent between accept and close.
+            await websocket.accept()
             await websocket.close(
                 code=4401,
                 reason="Unauthorized: token must be sent as the maljan.v1.<jwt> subprotocol",

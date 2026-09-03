@@ -182,8 +182,11 @@ Files: `apps/api/app/api/ws.py`, `apps/web/src/lib/useWebSocket.ts`,
 
 The client opens the socket with protocols `["maljan.v1", "maljan.v1.<jwt>"]`
 and no query string. The server drops the `?token=` branch: a connection
-without the subprotocol form is closed with 4401 before accept. The route
-docstring is updated.
+without the subprotocol form is accepted and immediately closed with 4401
+so the code reaches the client (closing before accept is turned into an
+HTTP 403 handshake rejection by the ASGI server, which discards the close
+code and leaves the client seeing 1006 instead). The route docstring is
+updated.
 
 Tests: API test with a subprotocol token (accepted) and a query token
 (closed 4401); frontend hook test that the URL has no `token` and the
