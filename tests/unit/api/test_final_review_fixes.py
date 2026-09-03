@@ -55,9 +55,11 @@ def test_export_literals_survive_a_round_trip_through_pydantic_settings(tmp_path
 
 
 def test_readonly_values_mask_credentials_in_every_url_shaped_setting():
-    assert cat._masked("redis_url", "redis://:pw@redis:6379/0") == "redis://***@redis:6379/0"
+    assert (
+        cat._masked("redis_url", _dsn("redis", ":pw", "redis:6379/0")) == "redis://***@redis:6379/0"
+    )
     assert cat._masked("qdrant_url", "http://qdrant:6333") == "http://qdrant:6333"
-    assert cat._masked("database_url", "postgresql+asyncpg://u:p@db/x") == (
+    assert cat._masked("database_url", _dsn("postgresql+asyncpg", "u:p", "db/x")) == (
         "postgresql+asyncpg://***@db/x"
     )
     assert cat._masked("rate_limit_requests", 100) == 100
