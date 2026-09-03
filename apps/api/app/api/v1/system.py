@@ -15,7 +15,7 @@ from app import observability
 from app.auth.throttle import throttle_state
 from app.config import settings
 from app.database import get_db
-from app.deps import require_admin
+from app.deps import optional_current_user, require_admin
 from app.logging_config import get_logger
 from app.models.user import User
 from app.runtime_config import runtime_config
@@ -46,24 +46,40 @@ class SystemStatusResponse(BaseModel):
     )
     has_virustotal_key: bool
     has_abuseipdb_key: bool
-    throttle: dict[str, object] = Field(
-        default_factory=dict,
-        description="Auth throttle store availability; degraded means refresh fails closed.",
+    throttle: dict[str, object] | None = Field(
+        default=None,
+        description=(
+            "Auth throttle store availability; degraded means refresh fails "
+            "closed. Admin callers only — omitted for anonymous requests."
+        ),
     )
-    audit_write_failures: int = Field(
-        default=0, description="Audit rows this process could not write since start."
+    audit_write_failures: int | None = Field(
+        default=None,
+        description=(
+            "Audit rows this process could not write since start. Admin "
+            "callers only — omitted for anonymous requests."
+        ),
     )
 
 
-@router.get("/status", response_model=SystemStatusResponse)
-async def system_status() -> SystemStatusResponse:
+@router.get("/status", response_model=SystemStatusResponse, response_model_exclude_none=True)
+async def system_status(
+    user: User | None = Depends(optional_current_user),
+) -> SystemStatusResponse:
     """Return non-secret pipeline-mode flags for dashboards.
 
     No API keys leave the server — only booleans indicating whether keys
     are configured. Safe to expose without authentication.
+
+    The throttle/audit fields reveal operational state (whether the auth
+    store is currently degraded, how many audit rows were dropped) that is
+    harmless to an operator but is still internal detail; they are populated
+    only for an authenticated admin caller and omitted from the response
+    entirely for everyone else.
     """
     vt_key = await runtime_config.get_secret("virustotal_api_key")
     abuse_key = await runtime_config.get_secret("abuseipdb_api_key")
+    is_admin = user is not None and user.role == "admin"
     return SystemStatusResponse(
         app_name=settings.app_name,
         app_version=settings.app_version,
@@ -71,8 +87,8 @@ async def system_status() -> SystemStatusResponse:
         enrichment_enabled=bool(await runtime_config.get("enrichment_enabled")),
         has_virustotal_key=bool(vt_key),
         has_abuseipdb_key=bool(abuse_key),
-        throttle=throttle_state(),
-        audit_write_failures=observability.counters.audit_write_failures,
+        throttle=throttle_state() if is_admin else None,
+        audit_write_failures=observability.counters.audit_write_failures if is_admin else None,
     )
 
 

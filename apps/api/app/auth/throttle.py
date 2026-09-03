@@ -79,6 +79,11 @@ async def _redis() -> Any | None:
     except Exception as exc:  # noqa: BLE001 - any failure means "down"
         _mark_down(exc)
         return None
+    if _pool is not None:
+        # Another coroutine already reconnected while we were pinging; keep
+        # its client as the one shared pool instead of racing to overwrite it.
+        await client.aclose()
+        return _pool
     _pool = client
     _mark_up()
     return _pool
@@ -98,7 +103,7 @@ async def refresh_token_register(user_id: str, jti: str) -> None:
     try:
         await r.set(key, "1", ex=ttl)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("refresh_token_register failed: %s", exc)
+        logger.debug("refresh_token_register failed: %s", type(exc).__name__)
         _mark_down(exc)
 
 
@@ -118,7 +123,7 @@ async def refresh_token_consume(user_id: str | None, jti: str) -> bool:
     try:
         return bool(await r.delete(key))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("refresh_token_consume failed: %s", exc)
+        logger.debug("refresh_token_consume failed: %s", type(exc).__name__)
         _mark_down(exc)
         return False
 
@@ -135,7 +140,7 @@ async def record_login_failure(email: str) -> None:
         pipe.expire(key, await runtime_config.get("login_lockout_seconds"))
         await pipe.execute()
     except Exception as exc:  # noqa: BLE001
-        logger.debug("record_login_failure failed: %s", exc)
+        logger.debug("record_login_failure failed: %s", type(exc).__name__)
         _mark_down(exc)
 
 
@@ -146,7 +151,7 @@ async def clear_login_throttle(email: str) -> None:
     try:
         await r.delete(_LOGIN_FAIL_KEY.format(email=email.lower()))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("clear_login_throttle failed: %s", exc)
+        logger.debug("clear_login_throttle failed: %s", type(exc).__name__)
         _mark_down(exc)
 
 
@@ -158,6 +163,6 @@ async def is_login_locked(email: str) -> bool:
         value = await r.get(_LOGIN_FAIL_KEY.format(email=email.lower()))
         return value is not None and int(value) >= await runtime_config.get("login_max_attempts")
     except Exception as exc:  # noqa: BLE001
-        logger.debug("is_login_locked failed: %s", exc)
+        logger.debug("is_login_locked failed: %s", type(exc).__name__)
         _mark_down(exc)
         return False

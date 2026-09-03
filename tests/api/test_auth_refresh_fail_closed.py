@@ -22,10 +22,16 @@ def test_refresh_answers_401_when_the_session_store_is_unavailable(monkeypatch):
         auth_module, "decode_token", lambda t: {"type": "refresh", "sub": "u1", "jti": "j1"}
     )
     monkeypatch.setattr(auth_module, "refresh_token_consume", AsyncMock(return_value=False))
-    monkeypatch.setattr(auth_module, "_audit", AsyncMock())
+    audit = AsyncMock()
+    monkeypatch.setattr(auth_module, "_audit", audit)
     monkeypatch.setattr(
         "app.auth.throttle.throttle_state", lambda: {"available": False, "last_error": "x"}
     )
     r = TestClient(app).post("/api/v1/auth/refresh", json={"refresh_token": "t"})
     assert r.status_code == 401
-    assert "sign in again" in r.json()["detail"]
+    # Generic detail: the reason (store outage vs. reuse) stays server-side,
+    # in the audit row and the log line, not in the response body.
+    assert r.json()["detail"] == "Session could not be refreshed; sign in again."
+    audit.assert_awaited_once()
+    _db, _user_id, action = audit.await_args.args
+    assert action == "auth.refresh.store_unavailable"

@@ -145,6 +145,25 @@ async def get_current_user(
     return user
 
 
+async def optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    api_key: str | None = Depends(api_key_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Resolve the caller like ``get_current_user``, but never raise.
+
+    For routes that stay reachable without authentication but reveal extra
+    detail to a signed-in caller instead of gating the whole route behind
+    it (``/system/status``'s throttle state is the first user). Any failure
+    that would make ``get_current_user`` raise — no credential, an invalid
+    or expired token, a deactivated account — resolves to ``None`` here.
+    """
+    try:
+        return await get_current_user(credentials=credentials, api_key=api_key, db=db)
+    except HTTPException:
+        return None
+
+
 async def require_active_user(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

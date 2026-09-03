@@ -2,8 +2,10 @@
 
 Hardening applied:
     * AuditLog entries on register / login / refresh / failure.
-    * Per-account brute-force throttle backed by Redis (graceful fallback to
-      noop when Redis is unavailable).
+    * Per-account brute-force throttle backed by Redis. When Redis is down,
+      refresh-token consumption fails closed (no refresh is honoured) while
+      the login lock stays a no-op (failing closed there would lock every
+      account for the outage) — see ``app.auth.throttle``.
     * Refresh-token rotation with reuse detection — each refresh issues a
       new ``jti`` and invalidates the previous one. Re-using a previously
       rotated token logs an audit event and forces re-authentication.
@@ -202,9 +204,10 @@ async def refresh_token(
 
         if not throttle_state()["available"]:
             await _audit(db, None, "auth.refresh.store_unavailable", request=request)
+            logger.warning("Refresh rejected: session store unavailable.")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session store unavailable; sign in again.",
+                detail="Session could not be refreshed; sign in again.",
             )
         await _audit(
             db,

@@ -77,3 +77,31 @@ async def test_login_lock_stays_open_but_degraded(monkeypatch):
     assert await throttle.is_login_locked("a@b.c") is False
     await throttle.record_login_failure("a@b.c")  # must not raise
     assert throttle.throttle_state()["available"] is False
+
+
+class _LeakyOnCommand:
+    """Connects fine, but a subsequent command raises an exception whose
+    ``str()`` embeds credential-shaped text — as a real redis-py connection
+    error can when it echoes the DSN it failed to reach."""
+
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    async def ping(self) -> bool:
+        return True
+
+    async def delete(self, key: str) -> int:
+        raise Exception(self._message)
+
+
+@pytest.mark.asyncio
+async def test_debug_logs_never_carry_the_exception_text(monkeypatch, caplog):
+    user, pw, host = "u", "pw", "h"
+    leaky_message = f"redis://{user}:{pw}@{host}:1/0 refused"
+    monkeypatch.setattr(
+        throttle.aioredis, "from_url", lambda *a, **k: _LeakyOnCommand(leaky_message)
+    )
+    with caplog.at_level("DEBUG", logger="maljan.auth.throttle"):
+        assert await throttle.refresh_token_consume("u1", "j1") is False
+    assert "pw@" not in caplog.text
+    assert leaky_message not in caplog.text
