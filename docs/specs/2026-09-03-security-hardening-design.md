@@ -41,17 +41,20 @@ After:
   and the next call retries once `RETRY_AFTER_S = 30` has passed. Success
   resets the state. A transition in either direction logs one `warning`.
 - `refresh_token_consume()` returns `False` when Redis is unavailable or the
-  command fails. The refresh route then answers 401 with detail
-  `"session store unavailable; sign in again"`. A user loses at most the
-  access-token lifetime (30 minutes) during an outage; nobody can replay a
-  refresh token while reuse detection is blind.
+  command fails. The refresh route then answers 401 with the generic detail
+  `"Session could not be refreshed; sign in again."` (the store-unavailable
+  reason is audited and logged server-side, never told to an unauthenticated
+  caller). A user loses at most the access-token lifetime (30 minutes) during
+  an outage; nobody can replay a refresh token while reuse detection is blind.
 - `is_login_locked()` still returns `False` without Redis (failing closed
   would lock every account for the length of an outage), and
   `record_login_failure()` is still a no-op. Both mark the state degraded.
 - `throttle_state()` returns `{"available": bool, "degraded_since": float | None,
   "last_error": str | None}`. `/health?deep=true` gains `throttle_degraded`
-  (bool) and `/system/status` gains the full object. The module docstring is
-  rewritten to describe this behaviour.
+  (bool); `/system/status` gains the full object and the audit-failure counter
+  only for an authenticated admin (the route is otherwise unauthenticated and
+  must not tell an anonymous caller that the login lock is open). The module
+  docstring is rewritten to describe this behaviour.
 
 Tests: fake Redis that raises on demand; assert refresh → 401, login lock →
 open, state object transitions, retry after the interval (clock injected),
