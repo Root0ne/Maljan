@@ -67,11 +67,10 @@ export function useWebSocket(jobId: string | null) {
         ? localStorage.getItem("access_token")
         : null;
 
-    const url = token
-      ? `${WS_BASE}/ws/analysis/${jobId}?token=${encodeURIComponent(token)}`
-      : `${WS_BASE}/ws/analysis/${jobId}`;
-
-    const ws = new WebSocket(url);
+    const url = `${WS_BASE}/ws/analysis/${jobId}`;
+    const ws = token
+      ? new WebSocket(url, ["maljan.v1", `maljan.v1.${token}`])
+      : new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => {

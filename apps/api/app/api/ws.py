@@ -126,8 +126,11 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     Events are forwarded from the ARQ worker via Redis PubSub.
 
     Authentication:
-        Pass the JWT access token as a query parameter:
-        ``wss://api/ws/analysis/{job_id}?token=<jwt>``
+        Pass the JWT access token as a WebSocket subprotocol, never as a
+        query parameter (proxy access logs and browser Referer headers can
+        leak query strings): open the socket with subprotocols
+        ``["maljan.v1", "maljan.v1.<jwt-access-token>"]``. The server
+        accepts and echoes back only ``maljan.v1``.
 
     Event types:
         - ``status_change``: Job status transition
@@ -141,8 +144,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     #
     # Tokens MUST be sent via the WebSocket subprotocol so they do not appear
     # in proxy access logs or browser Referer headers. The expected protocol
-    # is ``maljan.v1.<jwt-access-token>``. Legacy clients passing ``?token=``
-    # still work but are logged as deprecated and will be removed.
+    # is ``maljan.v1.<jwt-access-token>``.
     payload: dict[str, object] = {}
     user_id: str
     if settings.auth_disabled:
@@ -156,17 +158,12 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 token = candidate[len("maljan.v1.") :]
                 break
 
-        if token is None:
-            legacy = websocket.query_params.get("token")
-            if legacy:
-                logger.warning(
-                    "WebSocket using deprecated query-string auth (job=%s)", job_id
-                )  # nosemgrep # noqa: E501
-                token = legacy
-
         if not token:
             logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
-            await websocket.close(code=1008, reason="Unauthorized: missing token")
+            await websocket.close(
+                code=4401,
+                reason="Unauthorized: token must be sent as the maljan.v1.<jwt> subprotocol",
+            )
             return
 
         decoded = decode_token(token)
