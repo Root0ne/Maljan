@@ -253,6 +253,65 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(page.getByText("OpenAI-compatible API key")).toBeVisible();
     await expect(page.getByText("Max iterations")).toHaveCount(0);
   });
+
+  test("a reset failure shows a dismissible banner and the tab stays mounted", async ({
+    authenticatedPage: page,
+  }) => {
+    const pageErrors: Error[] = [];
+    page.on("pageerror", (err) => pageErrors.push(err));
+
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    // `core.negotiation.retry_delay` is the "ui"-sourced key in the mock —
+    // the only one of the two negotiation entries that actually renders a
+    // "Reset to env" button to click (see the "per-row reset" test above).
+    await page.route("**/api/v1/settings/core.negotiation.retry_delay", (r) =>
+      r.request().method() === "DELETE"
+        ? r.fulfill({ status: 500, json: { detail: "reset failed: database unavailable" } })
+        : r.fallback()
+    );
+
+    const uiRow = page.locator("#setting-core\\.negotiation\\.retry_delay");
+    await uiRow.getByRole("button", { name: "Reset to env" }).click();
+
+    const banner = page.getByRole("alert").filter({ hasText: "reset failed" });
+    await expect(banner).toBeVisible();
+    await expect(banner.getByRole("button", { name: "Dismiss error" })).toBeVisible();
+
+    // The failure is scoped to the banner — the rest of the tab, including
+    // an unrelated row, is still on the page.
+    await expect(page.locator("#settings-search")).toBeVisible();
+    await expect(page.getByText("core.negotiation.max_iterations")).toBeVisible();
+
+    await banner.getByRole("button", { name: "Dismiss error" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "reset failed" })).toHaveCount(0);
+
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test("clearing a required number field un-stages the edit instead of reverting it", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    const field = page.locator("#setting-core\\.negotiation\\.max_iterations input[type=number]");
+    const pendingBar = page.getByText("1 change pending");
+    const requiredAlert = page.getByText(/Required — enter a value/);
+
+    await field.fill("7");
+    await expect(pendingBar).toBeVisible();
+
+    await field.fill("");
+    await expect(requiredAlert).toBeVisible();
+    await expect(page.getByText(/change.*pending/)).toHaveCount(0);
+    await expect(field).toHaveValue("");
+
+    await field.fill("9");
+    await expect(pendingBar).toBeVisible();
+    await expect(requiredAlert).toHaveCount(0);
+  });
 });
 
 test.describe("Settings → Configuration (non-admin)", () => {

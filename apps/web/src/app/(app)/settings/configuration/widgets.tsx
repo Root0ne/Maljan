@@ -128,6 +128,8 @@ export function NumberWidget(p: WidgetProps) {
           }
           const parsed = p.entry.type === "float" ? parseFloat(raw) : parseInt(raw, 10);
           if (Number.isNaN(parsed)) return; // mid-edit text (e.g. "-", "1."): wait for more input
+          // An int field shows exactly what will be staged: "1.5" -> "1".
+          if (p.entry.type !== "float" && raw !== String(parsed)) setText(String(parsed));
           setRequiredHint(false);
           p.onChange(parsed);
         }}
