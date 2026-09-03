@@ -22,3 +22,9 @@ def test_cookie_secure_types_as_bool_not_str():
 def test_every_api_catalog_entry_has_a_known_widget_type():
     for entry in api_catalog():
         assert entry.type in _KNOWN_WIDGET_TYPES, (entry.path, entry.type)
+
+
+def test_qdrant_api_key_types_as_secret():
+    by_path = {e.path: e for e in api_catalog()}
+    assert by_path["qdrant_api_key"].type == "secret"
+    assert by_path["qdrant_api_key"].secret

@@ -1389,6 +1389,24 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
+def build_redis_settings(redis_url: str) -> RedisSettings:
+    """Build arq's RedisSettings from a redis:// URL, credentials included.
+
+    ``redis://:${REDIS_PASSWORD}@redis:6379/0`` (the compose default once Redis
+    runs with --requirepass) carries a password arq's own URL parsing ignores
+    unless it is forwarded explicitly here; without it every queue command the
+    worker issues comes back NOAUTH against a password-protected Redis.
+    """
+    parsed = urlparse(redis_url)
+    return RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        database=int((parsed.path or "/0").strip("/") or 0),
+        username=parsed.username or None,
+        password=parsed.password or None,
+    )
+
+
 class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
 
@@ -1397,13 +1415,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     after_job_end = _recycle_if_bloated
 
-    # Parse Redis URL from app config so Docker networking works
-    _redis_parsed = urlparse(settings.redis_url)
-    redis_settings = RedisSettings(
-        host=_redis_parsed.hostname or "localhost",
-        port=_redis_parsed.port or 6379,
-        database=int((_redis_parsed.path or "/0").strip("/") or 0),
-    )
+    redis_settings = build_redis_settings(settings.redis_url)
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.

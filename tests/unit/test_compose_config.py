@@ -49,6 +49,17 @@ def test_compose_binds_loopback_and_requires_the_secrets(tmp_path):
             found_a_published_port = True
     assert found_a_published_port
 
+    redis_service = config["services"]["redis"]
+    healthcheck_test = " ".join(redis_service["healthcheck"]["test"])
+    # Exec-form "$$REDIS_PASSWORD" never goes through a shell, so redis-cli
+    # received the literal string "$REDIS_PASSWORD" as its -a argument and
+    # exited 0 on WRONGPASS regardless — the container reported healthy no
+    # matter what. The fixed healthcheck must authenticate via REDISCLI_AUTH
+    # (never in argv) and tie its exit code to an actual PONG.
+    assert "$REDIS_PASSWORD" not in healthcheck_test
+    assert "PONG" in healthcheck_test
+    assert "REDISCLI_AUTH" in redis_service["environment"]
+
     missing = subprocess.run(
         ["docker", "compose", "--env-file", str(empty_env), "-f", str(copy), "config"],
         env={"PATH": "/usr/bin:/bin"},

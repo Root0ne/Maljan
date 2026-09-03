@@ -35,12 +35,22 @@ services:
         "--appendonly",
         "yes",
       ]
+    environment:
+      # Read by redis-cli itself (not the server), so the healthcheck below
+      # authenticates without the password ever appearing in argv/`docker inspect`.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env (see README)}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "$$REDIS_PASSWORD", "ping"]
+      # Exec form never runs through a shell, so "$$REDIS_PASSWORD" was passed
+      # to redis-cli as the literal four-character string "$REDIS_PASSWORD",
+      # and redis-cli exits 0 on WRONGPASS regardless — the container reported
+      # healthy no matter what. CMD-SHELL runs through /bin/sh, so REDISCLI_AUTH
+      # is picked up from the environment and the exit code is tied to an
+      # actual PONG via grep.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
