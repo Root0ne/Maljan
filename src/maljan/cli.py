@@ -33,10 +33,10 @@ def analyze(
         None, "--sample", "-s", help="Path to the malware sample file for sandbox submission."
     ),
     provider: str = typer.Option(
-        "openai", "--provider", "-p", help="LLM provider: openai, anthropic, ollama."
+        "openai", "--provider", "-p", help="LLM provider: openai, anthropic, ollama, gemini."
     ),
     max_iterations: int = typer.Option(
-        2, "--max-iterations", "-i", help="Maximum negotiation rounds."
+        2, "--max-iterations", "-i", min=1, help="Maximum negotiation rounds."
     ),
     mock: bool = typer.Option(
         False, "--mock", "-m", help="Run in mock mode without real LLM calls."
@@ -359,7 +359,7 @@ def _build_memory_store_cli() -> object:
     from maljan.memory.in_memory_store import InMemoryStore
 
     cfg = Settings()
-    backend = (cfg.memory.backend or "in_memory").lower()
+    backend = cfg.memory.backend.lower()
     if backend == "qdrant":
         from maljan.memory.qdrant_store import QdrantStore
 

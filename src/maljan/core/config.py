@@ -707,7 +707,7 @@ class MCPServerConfig(BaseModel):
     """
 
     enabled: bool = False
-    transport: Literal["stdio", "http"] = "stdio"
+    transport: Literal["stdio", "http", "streamable-http", "sse"] = "stdio"
     # stdio transport settings
     command: str = ""
     args: list[str] = Field(default_factory=list)

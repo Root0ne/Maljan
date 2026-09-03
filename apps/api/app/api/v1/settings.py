@@ -121,7 +121,10 @@ def _env_literal(secret: bool, value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, dict)):
-        return json.dumps(value, separators=(",", ":"))
+        # Quoted twice on purpose: dotenv strips the outer quotes (and would
+        # otherwise cut the line at a " #" inside a list element), then
+        # pydantic-settings JSON-parses the inner text.
+        return json.dumps(json.dumps(value, separators=(",", ":")))
     text = str(value)
     if text == "" or any(ch in text for ch in " \t#\"'"):
         return json.dumps(text)

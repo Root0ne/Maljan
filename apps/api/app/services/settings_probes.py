@@ -182,9 +182,6 @@ async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
     )
 
 
-_redact_url = redact_url
-
-
 async def probe_redis(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     url = str(api_settings.redis_url)  # read-only setting; no candidate value can arrive
@@ -194,7 +191,7 @@ async def probe_redis(v: dict[str, Any]) -> ProbeResult:
         await r.aclose()
         return ProbeResult(bool(pong), _ms(t0), "PONG" if pong else "no PONG")
     except Exception as exc:  # noqa: BLE001 - reported to the operator, never raised to the route
-        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {_redact_url(str(exc))}")
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {redact_url(str(exc))}")
 
 
 async def probe_virustotal(v: dict[str, Any]) -> ProbeResult:

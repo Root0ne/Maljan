@@ -238,11 +238,11 @@ async def test_redis_probe_masks_credentials_in_url_on_failure(monkeypatch):
     ],
 )
 def test_redact_url_handles_empty_user_and_at_in_password(raw, leaked):
-    out = probes._redact_url(f"could not connect to {raw}")
+    out = probes.redact_url(f"could not connect to {raw}")
     assert leaked not in out
     assert "***@bad-host:6379/0" in out
 
 
 def test_redact_url_leaves_credential_free_urls_alone():
     text = "could not connect to redis://bad-host:6379/0 (mail x@y.z)"
-    assert probes._redact_url(text) == text
+    assert probes.redact_url(text) == text

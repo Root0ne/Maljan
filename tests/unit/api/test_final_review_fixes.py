@@ -23,15 +23,29 @@ from app.services import settings_catalog_api as cat  # noqa: E402
 from app.services import settings_probes as probes  # noqa: E402
 
 
-def test_export_literals_survive_a_round_trip_through_pydantic_settings():
+def test_export_literals_survive_a_round_trip_through_pydantic_settings(tmp_path):
+    from maljan.core.config import Settings
+
+    cases = {
+        "MCP__GHIDRA__ARGS": ["-x", "a b", "c #d"],
+        "MCP__CAPE__ENV": {"K": "v #w", "Q": "x"},
+        "REPORTING__PUBLISHER": "Team #1",
+        "REPORTING__REPORT_NUMBER_PREFIX": "",
+        "LLM__PARALLEL_ANALYSTS": True,
+        "NEGOTIATION__MAX_ITERATIONS": 7,
+        "LLM__OLLAMA__BASE_URL": "http://ollama:11434",
+    }
+    env = tmp_path / ".env"
+    env.write_text("".join(f"{k}={_env_literal(False, v)}\n" for k, v in cases.items()))
+    s = Settings(_env_file=env)
+    assert s.mcp.ghidra.args == cases["MCP__GHIDRA__ARGS"]
+    assert s.mcp.cape.env == cases["MCP__CAPE__ENV"]
+    assert s.reporting.publisher == "Team #1"
+    assert s.reporting.report_number_prefix == ""
+    assert s.llm.parallel_analysts is True
+    assert s.negotiation.max_iterations == 7
+    assert s.llm.ollama.base_url == "http://ollama:11434"
     assert _env_literal(True, "whatever") == "***"
-    assert _env_literal(False, ["-x", "a b"]) == '["-x","a b"]'
-    assert _env_literal(False, {"k": 1}) == '{"k":1}'
-    assert _env_literal(False, True) == "true"
-    assert _env_literal(False, 42) == "42"
-    assert _env_literal(False, "plain") == "plain"
-    assert _env_literal(False, "has space") == '"has space"'
-    assert _env_literal(False, "") == '""'
 
 
 def test_readonly_values_mask_credentials_in_every_url_shaped_setting():

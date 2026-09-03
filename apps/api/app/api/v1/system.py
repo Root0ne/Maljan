@@ -117,7 +117,7 @@ async def _build_memory_store(db: AsyncSession) -> object:
     # The worker reads and writes the UI-configured collection; purging the
     # environment-configured one would be destructive and silent.
     cfg = build_settings(await load_core_overrides(db))
-    backend = (cfg.memory.backend or "in_memory").lower()
+    backend = cfg.memory.backend.lower()
     if backend == "qdrant":
         from maljan.memory.qdrant_store import QdrantStore
 

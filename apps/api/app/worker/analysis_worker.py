@@ -43,14 +43,19 @@ _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 def build_job_settings(
     overrides: dict[str, Any], job_config: dict[str, Any] | None
 ) -> _CoreSettings:
-    """UI overrides layered over the environment, then the job's own config on top."""
-    core_settings = build_settings(overrides)
+    """UI overrides layered over the environment, then the job's own config on top.
+
+    The job's values are folded into the override dict rather than assigned
+    afterwards, so the model's Literal choices and bounds apply to them too
+    (``Settings`` does not validate on assignment).
+    """
+    merged = dict(overrides)
     if job_config:
         if "max_iterations" in job_config:
-            core_settings.negotiation.max_iterations = job_config["max_iterations"]
+            merged["negotiation.max_iterations"] = job_config["max_iterations"]
         if "llm_provider" in job_config:
-            core_settings.llm.provider = job_config["llm_provider"]
-    return core_settings
+            merged["llm.provider"] = job_config["llm_provider"]
+    return build_settings(merged)
 
 
 def settings_snapshot(
@@ -316,11 +321,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 overrides = {}
             try:
                 core_settings = build_job_settings(overrides, job.config)
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
                 # Stored overrides that validated when saved can stop validating
-                # after a deploy narrows a field. One job must not take the
-                # queue down: run on environment settings, name the fields.
-                bad = sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+                # after a deploy narrows a field, and two orphan rows can nest
+                # into a conflict. One job must not take the queue down: run on
+                # environment settings, name the fields.
+                bad = (
+                    sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+                    if isinstance(exc, ValidationError)
+                    else [type(exc).__name__]
+                )
                 logger.warning(
                     "Stored runtime overrides no longer validate (%s); "
                     "running job %s on environment settings only.",
