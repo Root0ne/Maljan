@@ -1,6 +1,8 @@
 # Security hardening after the 2026-09-02 audit
 
-Date: 2026-09-03. Status: approved design, implementation pending.
+Date: 2026-09-03. Status: implemented on branch `feat/security-hardening` on
+2026-09-03; rulings made during implementation are recorded in this
+document's amended sections.
 
 The audit of 2026-09-02 left a set of findings that change behaviour and were
 therefore not applied with the clean-up. This document is the binding design
