@@ -1,0 +1,41 @@
+{
+  "dynamic_behavior": {
+    "file_operations": [],
+    "notable_apis": [
+      {
+        "api": "HttpSendRequestW",
+        "category": "network",
+        "count": 12,
+        "process": "2572"
+      },
+      {
+        "api": "RegSetValueExW",
+        "category": "registry_write",
+        "count": 3,
+        "process": "2572"
+      },
+      {
+        "api": "WriteProcessMemory",
+        "category": "process_injection",
+        "count": 1,
+        "process": "2572"
+      },
+      {
+        "api": "CreateRemoteThread",
+        "category": "process_injection",
+        "count": 1,
+        "process": "2572"
+      },
+      {
+        "api": "VirtualAllocEx",
+        "category": "process_injection",
+        "count": 1,
+        "process": "2572"
+      }
+    ],
+    "process_tree": [],
+    "registry_mods": [],
+    "sandbox_signatures": []
+  },
+  "network_iocs": null
+}
