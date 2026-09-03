@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from app.middleware.rate_limit_middleware import RateLimitMiddleware
@@ -298,3 +298,35 @@ class TestRateLimitMiddleware:
         with _patch_runtime_config(max_requests=2, window_seconds=60):
             allowed = await middleware.dispatch(req_b, call_next)
         assert allowed.status_code == 200
+
+
+async def _peer_ip(middleware, peer: str, xff: str | None, trusted: list[str], monkeypatch):
+    from app.middleware import rate_limit_middleware as rlm
+
+    async def _get(name):
+        return trusted if name == "trusted_proxy_ips" else None
+
+    monkeypatch.setattr(rlm.runtime_config, "get", _get)
+    request = MagicMock()
+    request.client.host = peer
+    request.headers = {"x-forwarded-for": xff} if xff else {}
+    return await middleware._extract_client_ip(request)
+
+
+class TestTrustedProxyNetworks:
+    async def test_cidr_matches_a_host_inside_it(self, mock_app, fake_redis, monkeypatch):
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0", whitelist=[])
+        result = await _peer_ip(mw, "10.1.2.3", "203.0.113.9", ["10.0.0.0/8"], monkeypatch)
+        assert result == "203.0.113.9"
+
+    async def test_bare_address_matches_itself_only(self, mock_app, fake_redis, monkeypatch):
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0", whitelist=[])
+        result1 = await _peer_ip(mw, "192.168.1.5", "203.0.113.9", ["192.168.1.5"], monkeypatch)
+        assert result1 == "203.0.113.9"
+        result2 = await _peer_ip(mw, "192.168.1.6", "203.0.113.9", ["192.168.1.5"], monkeypatch)
+        assert result2 == "192.168.1.6"
+
+    async def test_untrusted_peer_ignores_xff(self, mock_app, fake_redis, monkeypatch):
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0", whitelist=[])
+        result = await _peer_ip(mw, "198.51.100.7", "203.0.113.9", ["10.0.0.0/8"], monkeypatch)
+        assert result == "198.51.100.7"

@@ -387,15 +387,14 @@ class StaticAnalyst(BaseAnalyst):
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.agents.subprocess_env import child_env
         from maljan.core.paths import resolve_mcp_args
 
         command = cfg.mcp.ghidra.command
         args = cfg.mcp.ghidra.args
 
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        if cfg.mcp.ghidra.env:
-            env.update(cfg.mcp.ghidra.env)
+        env = child_env(cfg.mcp.ghidra.env)
+        env.setdefault("PYTHONIOENCODING", "utf-8")
 
         args = resolve_mcp_args(args)
         server_params = StdioServerParameters(command=command, args=args, env=env)
@@ -579,6 +578,11 @@ class StaticAnalyst(BaseAnalyst):
             store = FunctionHashStore(
                 url=cfg.memory.qdrant_url,
                 collection=cfg.memory.qdrant_function_hash_collection,
+                api_key=(
+                    cfg.memory.qdrant_api_key.get_secret_value()
+                    if cfg.memory.qdrant_api_key
+                    else None
+                ),
             )
             matches = store.match(
                 [fh for _name, fh in functions],

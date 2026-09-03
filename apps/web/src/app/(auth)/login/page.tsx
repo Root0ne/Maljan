@@ -27,7 +27,6 @@ export default function LoginPage() {
     try {
       const tokens = await api.login(email, password);
       localStorage.setItem("access_token", tokens.access_token);
-      localStorage.setItem("refresh_token", tokens.refresh_token);
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -59,8 +58,9 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Email</label>
+            <label htmlFor="login-email" className="block text-xs text-text-secondary mb-1">Email</label>
             <input
+              id="login-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -70,8 +70,9 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Password</label>
+            <label htmlFor="login-password" className="block text-xs text-text-secondary mb-1">Password</label>
             <input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

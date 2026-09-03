@@ -72,8 +72,8 @@ def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str
     sha256 = hashlib.sha256()
     # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
     sha1 = hashlib.sha1()
-    # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-md5
-    md5 = hashlib.md5()
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5 — sample identity fingerprint, not a cryptographic signature  # noqa: E501
+    md5 = hashlib.md5(usedforsecurity=False)
     total = 0
     chunk_size = 64 * 1024
     with dest.open("wb") as out:
@@ -493,6 +493,11 @@ async def delete_sample(
                 exc,
                 extra={"user_id": str(user.id), "component": "minio"},
             )
+
+        from app.worker import sample_files
+
+        for removed in sample_files.remove_for_sha(sha256):
+            logger.info("Removed local copy %s", removed, extra={"sample_id": str(sample_id)})
 
     logger.info(
         "Sample deleted: id=%s sha256=%s",

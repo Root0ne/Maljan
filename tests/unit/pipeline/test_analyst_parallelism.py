@@ -22,6 +22,12 @@ import pytest
 _REAL_GATHER = asyncio.gather
 
 
+def _edges(graph: Any) -> set[tuple[str, str]]:
+    """Extract edges from the public drawable graph."""
+    drawable = graph.get_graph()
+    return {(e.source, e.target) for e in drawable.edges}
+
+
 @pytest.fixture
 def fake_container() -> Any:
     """Minimal ServiceContainer stub for ``build_graph``."""
@@ -30,6 +36,7 @@ def fake_container() -> Any:
     container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
     container.is_mock = True
     container.config.reporting.enabled = False  # keep the topology compact
+    container.config.llm.parallel_analysts = True
     return container
 
 
@@ -40,16 +47,10 @@ def test_start_fans_out_to_every_analyst(fake_container: Any) -> None:
     from maljan.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
-    # LangGraph's compiled graph exposes its edges via ``graph.edges`` —
-    # the underlying ``StateGraph`` object is at ``compiled.builder``.
-    builder = getattr(graph, "builder", None) or graph
-    edges = getattr(builder, "edges", None)
-    if edges is None:
-        pytest.skip("LangGraph internal layout changed; revisit this test.")
+    edge_set = _edges(graph)
 
     start_targets: set[str] = set()
-    for edge in edges:
-        source, target = edge if isinstance(edge, tuple) else (edge[0], edge[1])
+    for source, target in edge_set:
         if source == START:
             start_targets.add(target)
     expected = {"static_analyst", "dynamic_analyst", "network_analyst"}
@@ -66,16 +67,12 @@ def test_no_serialising_router_between_start_and_analysts(fake_container: Any) -
     from maljan.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
-    builder = getattr(graph, "builder", None) or graph
-    edges = getattr(builder, "edges", None)
-    if edges is None:
-        pytest.skip("LangGraph internal layout changed; revisit this test.")
+    edge_set = _edges(graph)
 
     # Build an adjacency map and verify analysts have only START as
     # direct predecessor — never another analyst.
     predecessors: dict[str, set[str]] = {}
-    for edge in edges:
-        source, target = edge if isinstance(edge, tuple) else (edge[0], edge[1])
+    for source, target in edge_set:
         predecessors.setdefault(target, set()).add(source)
 
     for analyst in ("static_analyst", "dynamic_analyst", "network_analyst"):
@@ -111,15 +108,7 @@ def test_sequential_mode_chains_analysts(sequential_container: Any) -> None:
     from maljan.pipeline.builder import build_graph
 
     graph = build_graph(sequential_container)
-    builder = getattr(graph, "builder", None) or graph
-    edges = getattr(builder, "edges", None)
-    if edges is None:
-        pytest.skip("LangGraph internal layout changed; revisit this test.")
-
-    edge_set: set[tuple[str, str]] = set()
-    for edge in edges:
-        source, target = edge if isinstance(edge, tuple) else (edge[0], edge[1])
-        edge_set.add((source, target))
+    edge_set = _edges(graph)
 
     # START hits only the first analyst.
     start_targets = {tgt for src, tgt in edge_set if src == START}
@@ -148,15 +137,7 @@ def test_sequential_mode_preserves_negotiation_downstream(
     from maljan.pipeline.builder import build_graph
 
     graph = build_graph(sequential_container)
-    builder = getattr(graph, "builder", None) or graph
-    edges = getattr(builder, "edges", None)
-    if edges is None:
-        pytest.skip("LangGraph internal layout changed; revisit this test.")
-
-    edge_set: set[tuple[str, str]] = set()
-    for edge in edges:
-        source, target = edge if isinstance(edge, tuple) else (edge[0], edge[1])
-        edge_set.add((source, target))
+    edge_set = _edges(graph)
 
     # Revision still loops back to negotiation, judge still follows
     # negotiation via the conditional router (not visible as a plain

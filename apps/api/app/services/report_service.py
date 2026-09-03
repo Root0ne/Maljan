@@ -271,15 +271,21 @@ class ReportService:
         self,
         report_id: uuid.UUID,
         user: User,
+        *,
+        nonce: str | None = None,
     ) -> RenderedReport | None:
-        """Render the comprehensive report as a standalone HTML document (Phase 6)."""
+        """Render the comprehensive report as a standalone HTML document (Phase 6).
+
+        ``nonce`` is forwarded to ``HtmlRenderer`` for the report's CSP nonce;
+        it is ``None`` by default so existing callers are unaffected.
+        """
         loaded = await self._load_malware_report(report_id, user, "html")
         if loaded is None:
             return None
         from maljan.reporting.renderers import HtmlRenderer
 
         return RenderedReport(
-            content=HtmlRenderer().render(loaded).encode("utf-8"),
+            content=HtmlRenderer().render(loaded, nonce=nonce).encode("utf-8"),
             filename=_export_filename(loaded, "html"),
         )
 

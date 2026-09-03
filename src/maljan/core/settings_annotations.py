@@ -611,6 +611,13 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "probe": "qdrant",
     },
+    "memory.qdrant_api_key": {
+        "title": "Qdrant API key",
+        "description": (
+            "API key sent with every Qdrant request when the server enforces one (compose "
+            "does); empty means no authentication, which is fine for a loopback-only server."
+        ),
+    },
     "memory.top_k": {
         "title": "Memory top-K",
         "description": (

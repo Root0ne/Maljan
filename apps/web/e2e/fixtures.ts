@@ -39,8 +39,15 @@ import { assertNoUnmockedCalls, installApiMocks, type MockOptions } from "./mock
  */
 async function seedSession(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
+    // `addInitScript` re-runs on every navigation the page makes for its
+    // whole lifetime, not just the first — including the redirect a sign-out
+    // test drives to /login. Without the sessionStorage guard, that redirect
+    // would silently re-seed the very token the logout flow just cleared,
+    // and a passing assertion on the token being gone would be watching the
+    // seed script overwrite it, not the app.
+    if (sessionStorage.getItem("__e2e_seeded")) return;
+    sessionStorage.setItem("__e2e_seeded", "1");
     localStorage.setItem("access_token", "mock_access_token");
-    localStorage.setItem("refresh_token", "mock_refresh_token");
   });
 }
 
@@ -84,6 +91,11 @@ export const test = base.extend<{
     await seedSession(page);
     await page.goto("/dashboard");
     await page.waitForURL("**/dashboard");
+    // The dashboard fires four fetches on mount. A spec that navigates away
+    // at once cancels them, and WebKit reports a cancelled fetch as a page
+    // error ("cannot load ... due to access control checks") often enough to
+    // fail any spec that asserts a clean error log. Hand over a settled page.
+    await page.waitForLoadState("networkidle");
     await use(page);
   },
 });

@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-maljan}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maljan_dev}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -27,12 +27,30 @@ services:
     image: redis:7-alpine
     container_name: maljan-redis
     restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env (see README)}",
+        "--appendonly",
+        "yes",
+      ]
+    environment:
+      # Read by redis-cli itself (not the server), so the healthcheck below
+      # authenticates without the password ever appearing in argv/`docker inspect`.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env (see README)}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Exec form never runs through a shell, so "$$REDIS_PASSWORD" was passed
+      # to redis-cli as the literal four-character string "$REDIS_PASSWORD",
+      # and redis-cli exits 0 on WRONGPASS regardless — the container reported
+      # healthy no matter what. CMD-SHELL runs through /bin/sh, so REDISCLI_AUTH
+      # is picked up from the environment and the exit code is tied to an
+      # actual PONG via grep.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -48,9 +66,11 @@ services:
     image: qdrant/qdrant:v1.18.2
     container_name: maljan-qdrant
     restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in docker/.env (see README)}
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "6334:6334"
+      - "${BIND_ADDRESS:-127.0.0.1}:${QDRANT_PORT:-6333}:6333"
+      - "${BIND_ADDRESS:-127.0.0.1}:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -66,8 +86,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -87,11 +107,11 @@ services:
     container_name: maljan-ghidra-mcp
     restart: unless-stopped
     environment:
-      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:-maljan_ghidra_secret_2026}
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:?set GHIDRA_MCP_AUTH_TOKEN in docker/.env (see README)}
       GHIDRA_MCP_BIND_ADDRESS: 0.0.0.0
       GHIDRA_MCP_PORT: 8089
     ports:
-      - "${GHIDRA_MCP_PORT:-8089}:8089"
+      - "${BIND_ADDRESS:-127.0.0.1}:${GHIDRA_MCP_PORT:-8089}:8089"
     # A ceiling the kernel enforces, because the JVM's own does not bound the
     # container. `-Xmx4g` caps the *heap*; Ghidra's database is memory-mapped and
     # its direct buffers live outside it, so RSS was measured at 5.15 GB while
@@ -130,8 +150,9 @@ services:
       - ../.env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
       # F3 (2026-07-05): the CORE engine (MaljanApp / QdrantStore) reads the
       # nested ``MEMORY__QDRANT_URL`` — NOT the flat ``QDRANT_URL`` above,
       # which only the API server uses. Without this line the .env value
@@ -140,6 +161,7 @@ services:
       # inside the container → Connection refused, silently disabling LTM
       # and function-hash attribution.
       MEMORY__QDRANT_URL: http://qdrant:6333
+      MEMORY__QDRANT_API_KEY: ${QDRANT_API_KEY}
       MINIO_ENDPOINT: minio:9000
       MCP__GHIDRA__URL: http://ghidra-mcp:8089
       # F1 (2026-07-05): make the ``maljan`` core package importable from the
@@ -187,7 +209,7 @@ services:
       - ../data:/app/data
       - ../tests:/app/tests
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -213,12 +235,14 @@ services:
       - ../.env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
       # F3 (2026-07-05): core engine reads nested MEMORY__QDRANT_URL — see the
       # backend-api block. Without it the worker's LTM + function-hash Qdrant
       # calls hit localhost inside the container and were refused.
       MEMORY__QDRANT_URL: http://qdrant:6333
+      MEMORY__QDRANT_API_KEY: ${QDRANT_API_KEY}
       MINIO_ENDPOINT: minio:9000
       MCP__GHIDRA__URL: http://ghidra-mcp:8089
       # 2026-07 round 3: per-sample dynamic Ghidra tool selection — CORE triage
@@ -331,7 +355,7 @@ services:
     container_name: maljan-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend-api
 

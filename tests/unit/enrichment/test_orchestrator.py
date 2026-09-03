@@ -233,6 +233,20 @@ class TestSignalQualityFeedback:
         assert mr["network"]["ips"][0].get("reputation") is None
 
     @pytest.mark.asyncio
+    async def test_private_fqdn_skipped_no_lookup(self) -> None:
+        mr = _mr(domains=[{"fqdn": "build.corp.internal"}])
+        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 5})
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ) as http:
+            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
+                await enrich_malware_report(
+                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
+                )
+        vt.domain_reputation.assert_not_awaited()
+        assert mr["network"]["domains"][0].get("reputation") is None
+
+    @pytest.mark.asyncio
     async def test_malicious_reputation_sets_is_suspicious(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com", "is_suspicious": False}])
         vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 8})

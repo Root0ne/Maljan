@@ -22,17 +22,11 @@ class UserLoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """Response with JWT tokens."""
+    """Response with the access token. The refresh token travels as an
+    HttpOnly cookie, never in the response body."""
 
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
-
-
-class RefreshTokenRequest(BaseModel):
-    """Request body for token refresh."""
-
-    refresh_token: str
 
 
 class UserResponse(BaseModel):

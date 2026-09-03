@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -210,6 +211,139 @@ async def test_mock_pipeline_completes(
 
 
 @pytest.mark.asyncio
+async def test_report_less_pipeline_result_fails_the_job(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A pipeline run that produced no report is a failed job, not a
+    completed one with an empty report (L15, security hardening).
+
+    ``report_node`` returns ``{"report_error": "<type>: <message>"}`` instead
+    of a ``malware_report`` when the deterministic build raises; the worker
+    must surface that message through the same failure path any other
+    pipeline exception takes.
+    """
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+            clear=False,
+        ),
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(return_value={"report_error": "ValueError: boom"}),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    assert "ValueError: boom" in result["error"]
+    assert job.status == "failed"
+    assert job.error_message is not None
+    assert "ValueError: boom" in job.error_message
+
+
+@pytest.mark.asyncio
+async def test_reporting_disabled_completes_without_a_malware_report(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A missing ``malware_report`` is not itself a failure.
+
+    With ``reporting.enabled = False`` the graph routes judge -> END and the
+    report node never runs at all (``pipeline/builder.py``,
+    ``pipeline/state.py``) — ``malware_report`` stays ``None`` on every run
+    of a job configured this way, and that is the documented, shipped
+    behaviour (see ``tests/integration/test_report_pipeline.py::
+    TestReportNodeDisabled``), not a report-less failure. The job must still
+    complete.
+    """
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "MALJAN_MOCK_MODE": "true",
+                "MOCK_MODE_ALLOWED": "true",
+                "REPORTING__ENABLED": "false",
+            },
+            clear=False,
+        ),
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(
+                return_value={
+                    "final_decision": "Malware",
+                    "judge_report": "legacy judge prose",
+                }
+            ),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    assert job.status == "completed"
+    assert job.error_message is None
+
+
+@pytest.mark.asyncio
 async def test_pipeline_failure_sets_failed_status(
     mock_ctx: dict[str, Any], mock_db_session: AsyncMock
 ) -> None:
@@ -253,6 +387,168 @@ async def test_pipeline_failure_sets_failed_status(
     assert "Simulated pipeline crash" in result["error"]
     assert job.status == "failed"
     assert job.error_message is not None
+
+
+# ---------------------------------------------------------------------------
+# H3 (security hardening): the worker's private sample copies (download +
+# Ghidra mirror) are removed when the job ends, success or failure alike.
+# ---------------------------------------------------------------------------
+
+
+class _FakeMinioClient:
+    """Stands in for the real MinIO client so the download step actually
+    writes a file, letting the mirror step run for real too."""
+
+    def fget_object(self, bucket: str, object_name: str, file_path: str) -> None:
+        Path(file_path).write_bytes(b"MZfakebinary")
+
+
+@pytest.mark.asyncio
+async def test_worker_removes_private_sample_copies_after_success(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed job leaves neither the downloaded temp copy nor the
+    Ghidra ``.work`` mirror behind."""
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app.worker import sample_files
+
+    recorded: list[tuple[Any, str | None]] = []
+    monkeypatch.setattr(
+        sample_files,
+        "remove_quietly",
+        lambda path, *, job_id=None: recorded.append((path, job_id)),
+    )
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "MALJAN_MOCK_MODE": "true",
+                "MOCK_MODE_ALLOWED": "true",
+                "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
+                "SAMPLES_DIR": str(tmp_path / "samples"),
+            },
+            clear=False,
+        ),
+        patch("minio.Minio", return_value=_FakeMinioClient()),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
+    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
+    assert expected_temp in called_paths
+    assert expected_mirror in called_paths
+
+
+@pytest.mark.asyncio
+async def test_worker_removes_private_sample_copies_after_pipeline_failure(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job that fails mid-pipeline (after the sample was already downloaded
+    and mirrored) still has both private copies removed."""
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app.worker import sample_files
+
+    recorded: list[tuple[Any, str | None]] = []
+    monkeypatch.setattr(
+        sample_files,
+        "remove_quietly",
+        lambda path, *, job_id=None: recorded.append((path, job_id)),
+    )
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "MALJAN_MOCK_MODE": "true",
+                "MOCK_MODE_ALLOWED": "true",
+                "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
+                "SAMPLES_DIR": str(tmp_path / "samples"),
+            },
+            clear=False,
+        ),
+        patch("minio.Minio", return_value=_FakeMinioClient()),
+        # The download/mirror happen before ``app.arun`` is ever awaited, so
+        # failing here (rather than in ``MaljanApp.__init__``, as the other
+        # failure test does) is what actually exercises cleanup of real
+        # on-disk copies rather than of two still-``None`` paths.
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(side_effect=RuntimeError("Simulated pipeline crash")),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
+    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
+    assert expected_temp in called_paths
+    assert expected_mirror in called_paths
 
 
 # ---------------------------------------------------------------------------

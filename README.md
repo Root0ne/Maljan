@@ -119,6 +119,21 @@ uv run maljan analyze <sha256> --provider openai
 cp .env.example .env
 # Edit .env with your API keys and LLM provider settings
 
+cp docker/.env.example docker/.env
+# docker/.env holds three variables compose refuses to start without —
+# there is no baked-in default for any of them:
+#   GHIDRA_MCP_AUTH_TOKEN  bearer token the ghidra-mcp container requires
+#   REDIS_PASSWORD         --requirepass on the redis container
+#   QDRANT_API_KEY         QDRANT__SERVICE__API_KEY on the qdrant container
+# Generate all three:
+python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY')]"
+# and paste the output into docker/.env.
+#
+# Every published port binds to BIND_ADDRESS, which docker/.env.example
+# defaults to 127.0.0.1 — the stack is unreachable from the network unless
+# you deliberately set BIND_ADDRESS=0.0.0.0 behind a firewall or reverse
+# proxy you control.
+
 # The ghidra-mcp image is built from external/, which git does not carry
 make external
 
@@ -130,7 +145,7 @@ export POSTGRES_PORT=5433
 cd docker
 docker compose up -d --build
 
-# Access points
+# Access points (loopback only, per BIND_ADDRESS above)
 # Frontend:      http://localhost:3000
 # Backend API:   http://localhost:8000/docs
 # Ghidra MCP:    http://localhost:8089/check_connection
@@ -240,7 +255,81 @@ application root, not under that prefix.
 | GET | `/api/v1/audit/logs` | Audit trail |
 | WS | `/ws/analysis/{job_id}` | Real-time analysis events |
 | GET | `/health`, `/healthz` | Liveness probes |
-| GET | `/docs` | Swagger UI |
+| GET | `/docs` | Swagger UI (served only when `DEBUG=true`) |
+
+---
+
+## Security
+
+**Sessions.** Login and refresh return the access token in the response
+body only; the API never puts it in a cookie. The refresh token instead
+rides an HttpOnly, `SameSite=Lax` cookie named `maljan_refresh`, scoped to
+the path `/api/v1/auth`, so it is invisible to page JavaScript and is only
+ever sent back to the auth endpoints. `Secure` is on by default outside
+`DEBUG=true` (`COOKIE_SECURE` overrides either way). `POST /auth/logout`
+clears that cookie and consumes the refresh token server-side; the web
+client keeps only the short-lived access token, in memory and
+`localStorage`, and refreshes it silently before it expires.
+
+**WebSocket auth.** `/ws/analysis/{job_id}` takes the JWT access token as a
+WebSocket subprotocol — `maljan.v1.<jwt>` — never as a query string, so it
+does not land in access logs or browser history. The server accepts and
+echoes back only the bare `maljan.v1` subprotocol. A connection lacking that
+token subprotocol is rejected with close code 4401; every other auth
+failure (invalid token, unknown job, a job that belongs to someone else)
+closes with the generic policy code 1008. The frontend's WebSocket client
+treats both codes as terminal and does not attempt to reconnect on them.
+
+**API docs.** `/docs`, `/redoc` and `/openapi.json` are served only when
+`DEBUG=true`; in a production deployment those paths do not exist.
+
+**Report HTML.** `GET /reports/{report_id}/html` is self-contained (inline
+CSS, inline SVG, no external requests) and is served with a
+`Content-Security-Policy` that allows inline `<style>` only via a
+per-response nonce (`style-src 'nonce-<random>'`); everything else
+(`script-src`, `default-src`) is denied.
+
+**Throttle degradation.** The per-account login/refresh throttle is backed
+by Redis. When Redis is unreachable, refresh-token consumption fails
+closed — no refresh succeeds until Redis is back — while the login lock
+fails open rather than locking every account for the outage. This state is
+visible without authentication in `GET /health?deep=true` as
+`throttle_degraded`, and to an authenticated admin in `GET /system/status`
+as `throttle.available` / `throttle.degraded_since` / `throttle.last_error`
+and `audit_write_failures`.
+
+**Sample copies on disk.** The worker's private working copies of a sample
+live under `data/uploads/.tmp` (download staging) and `<SAMPLES_DIR>/.work`
+(the Ghidra bind-mount mirror), both created `0o700` with files `0o600`.
+Every worker startup sweeps both directories for copies left behind by a
+process that was killed mid-job.
+
+**Trusted proxies.** `TRUSTED_PROXY_IPS` takes CIDR networks (e.g.
+`10.0.0.0/8`), not just bare IPs — only requests arriving through one of
+these networks may set `X-Forwarded-For` for rate-limit identity. Left
+empty, only the direct TCP peer address is trusted.
+
+**MCP sidecar environment.** Each MCP sidecar subprocess (Ghidra, CAPE,
+network capture, judge) starts from a fixed, minimal base environment
+(`PATH`, `HOME`, locale/timezone vars, `JAVA_HOME`, no LLM keys, no database
+URL, no encryption key) plus only the credentials that server is documented
+to read — the judge sidecar is the one that additionally sees
+`VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY`.
+
+**Enrichment domain filter.** Threat-intel enrichment skips IP literals,
+single-label names and special-use/private DNS suffixes before ever calling
+a public reputation service, so internal hostnames are not leaked to
+VirusTotal or spent against its quota for an answer that is always
+"unknown".
+
+**Static analysis.** `make semgrep` runs the same `p/python` and
+`p/security-audit` rulesets, pinned to the same semgrep version, as the
+CI "Semgrep" job, across `src/`, `apps/api/`, the two MCP sidecars and
+`scripts/`.
+
+**Compose secrets and network binding** are documented in the Full-Stack
+Docker section above (`GHIDRA_MCP_AUTH_TOKEN`, `REDIS_PASSWORD`,
+`QDRANT_API_KEY`, `BIND_ADDRESS`).
 
 ---
 

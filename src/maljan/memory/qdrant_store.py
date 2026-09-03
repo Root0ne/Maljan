@@ -81,7 +81,9 @@ class QdrantStore:
         collection: Qdrant collection name. Auto-created on first store() call.
     """
 
-    def __init__(self, url: str, collection: str = "maljan_cases_v2") -> None:
+    def __init__(
+        self, url: str, collection: str = "maljan_cases_v2", api_key: str | None = None
+    ) -> None:
         try:
             from qdrant_client import QdrantClient
         except ImportError as exc:
@@ -93,7 +95,7 @@ class QdrantStore:
 
         self._url = url
         self._collection = collection
-        self._client: Any = QdrantClient(url=url)
+        self._client: Any = QdrantClient(url=url, api_key=api_key)
         self._collection_ready = False
 
         logger.info(

@@ -9,9 +9,10 @@ the API in non-debug mode unless the operator provided real values.
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PLACEHOLDER_JWT_SECRETS = {
@@ -124,6 +125,15 @@ class APISettings(BaseSettings):
     jwt_previous_secret_key: SecretStr = SecretStr("")
     jwt_previous_key_id: str = "v0"
 
+    # Secure flag on the HttpOnly refresh cookie. Left unset by default so it
+    # can default to the inverse of ``debug`` (true outside debug, so the
+    # cookie only ever crosses the wire over HTTPS); an operator may still
+    # force it either way.
+    cookie_secure: bool | None = Field(
+        default=None,
+        description="Secure flag on the refresh cookie; defaults to the inverse of debug.",
+    )
+
     # Login throttle (per-account)
     login_max_attempts: int = 10
     login_lockout_seconds: int = 300
@@ -142,6 +152,7 @@ class APISettings(BaseSettings):
     # ── Qdrant (passed through to maljan-core) ───────────────────
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection: str = "maljan_ltm"
+    qdrant_api_key: SecretStr | None = None
 
     # ── Threat-intel enrichment (Faz 6) ──────────────────────────
     # API keys are optional. When empty the enrichment task skips the
@@ -155,7 +166,7 @@ class APISettings(BaseSettings):
     rate_limit_enabled: bool = Field(default=True)
     rate_limit_requests: int = Field(default=100)
     rate_limit_window_seconds: int = Field(default=60)
-    rate_limit_whitelist: list[str] = Field(default=["/health", "/docs", "/redoc", "/openapi.json"])
+    rate_limit_whitelist: list[str] = Field(default=["/health"])
 
     # ── File upload ──────────────────────────────────────────────
     upload_max_bytes: int = Field(default=100 * 1024 * 1024)  # 100 MB
@@ -290,6 +301,11 @@ class APISettings(BaseSettings):
     # (HTTP 503). The fix: route every sample-handling tempfile through
     # a Defender-excluded directory created at API startup.
     upload_temp_dir: str = Field(default="data/uploads/.tmp")
+    samples_dir: str = Field(
+        default="data/samples",
+        description="Host directory bind-mounted into the Ghidra container; the worker's "
+        "per-job mirror lives in its .work subdirectory.",
+    )
 
     @field_validator("jwt_secret_key")
     @classmethod
@@ -315,6 +331,24 @@ class APISettings(BaseSettings):
             # post-init hook (model_post_init).
             return SecretStr(secret)
         return value
+
+    @field_validator("trusted_proxy_ips")
+    @classmethod
+    def _proxies_are_networks(cls, value: list[str]) -> list[str]:
+        for entry in value:
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"trusted_proxy_ips entry {entry!r} is not an IP address or CIDR network"
+                ) from exc
+        return value
+
+    @model_validator(mode="after")
+    def _cookie_secure_default(self) -> APISettings:
+        if self.cookie_secure is None:
+            self.cookie_secure = not self.debug
+        return self
 
     def model_post_init(self, __context: object) -> None:
         # The auth-bypass flag is for interactive local development only;
@@ -380,6 +414,13 @@ class _LazyAPISettings:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(get_settings(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Forwarded (rather than raising) so tests can ``monkeypatch.setattr``
+        # a single field on this module-level singleton — e.g.
+        # ``monkeypatch.setattr(settings, "upload_temp_dir", tmp_path)`` —
+        # without replacing the whole proxy and losing every other field.
+        setattr(get_settings(), name, value)
 
 
 # Legacy import surface — many modules still do ``from app.config import settings``.

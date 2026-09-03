@@ -26,9 +26,40 @@ if str(_API_PATH) not in sys.path:
     sys.path.insert(0, str(_API_PATH))
 
 
+from app.api.v1 import auth as auth_module  # noqa: E402
 from app.api.v1.auth import update_me  # noqa: E402
 from app.auth.password import verify_password  # noqa: E402
 from app.schemas.auth import UserUpdateRequest  # noqa: E402
+
+
+class _FakeAuditSession:
+    """Async-context-manager fake for async_session_factory() in audit."""
+
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.added: list[Any] = []
+        self.commit = AsyncMock(side_effect=RuntimeError("boom") if fail else None)
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
+
+    async def __aenter__(self) -> _FakeAuditSession:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def mock_audit_session_factory(monkeypatch):
+    """Mock async_session_factory in auth module to avoid real database dependency.
+
+    The _audit function uses async_session_factory to write audit rows. In unit
+    tests, we don't have a real database, so we mock it with FakeAuditSession
+    which provides a working async context manager.
+    """
+    session = _FakeAuditSession()
+    monkeypatch.setattr(auth_module, "async_session_factory", lambda: session)
 
 
 def _fake_request() -> Any:

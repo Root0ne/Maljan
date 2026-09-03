@@ -36,6 +36,7 @@ import sys
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlparse
 
 TRAM2_URL = (
     "https://raw.githubusercontent.com/center-for-threat-informed-defense"
@@ -100,7 +101,14 @@ def _slugify(title: str) -> str:
 def _fetch_tram2(url: str) -> list[dict[str, str]]:
     """Download and parse the TRAM2 single_label.json file."""
     print(f"Fetching TRAM2 dataset from:\n  {url}", flush=True)
+    # ``--url`` is operator-supplied; refuse anything but HTTP(S) so it can
+    # never coerce urllib into reading file:// / ftp:// resources.
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        print(f"[ERROR] Refusing non-HTTP(S) dataset URL: {url!r}", file=sys.stderr)
+        sys.exit(1)
     try:
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected — scheme validated above  # noqa: E501
         with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310
             raw = response.read().decode("utf-8")
     except Exception as exc:

@@ -45,6 +45,7 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from tests.evaluation._tally import Tally  # noqa: E402
 from tests.evaluation.eval_layer0_verdict import (  # noqa: E402
     assign_to_sources,
     build_isr_reports,
@@ -94,11 +95,17 @@ def main() -> int:
         return 1
 
     rows = []
+    tally = Tally()
     for line in checkpoint.read_text().splitlines():
+        tally.attempt()
         try:
-            rows.append(json.loads(line))
-        except Exception:  # noqa: BLE001
+            row = json.loads(line)
+        except Exception as exc:  # noqa: BLE001
+            tally.drop("torn_line", detail=type(exc).__name__)
             continue
+        tally.parse_ok()
+        tally.score_ok()
+        rows.append(row)
     fallbacks = [r for r in rows if r.get("path") == "fallback"]
     if not fallbacks:
         print("no fallback calls on record — nothing to compare")
@@ -218,6 +225,7 @@ def main() -> int:
                 "techniques_only_on_fallback_path": only_fb,
                 "techniques_only_on_reconciled_path": only_casc,
                 "per_call": per_call,
+                "population": tally.as_dict(),
             },
             indent=1,
         )

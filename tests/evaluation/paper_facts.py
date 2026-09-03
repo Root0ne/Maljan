@@ -52,11 +52,36 @@ class FactError(RuntimeError):
     """A fact could not be derived. Never swallowed — the build must stop."""
 
 
+def check_population(name: str, blob: Any) -> None:
+    """Refuse an artefact whose scored count shrank without an explained drop.
+
+    ``population`` is absent on artefacts that predate this check; those pass
+    through untouched. A harness may also nest it under ``summary``.
+    """
+    pop = blob.get("population") if isinstance(blob, dict) else None
+    if pop is None and isinstance(blob, dict):
+        summary = blob.get("summary")
+        pop = summary.get("population") if isinstance(summary, dict) else None
+    if not pop:
+        return
+    try:
+        attempted, scored = int(pop["attempted"]), int(pop["scored"])
+    except KeyError as exc:
+        raise FactError(f"{name}: population is missing {exc}") from exc
+    explained = sum(int(v) for v in (pop.get("dropped") or {}).values())
+    if attempted != scored and explained != attempted - scored:
+        raise FactError(
+            f"{name}: {attempted} attempted, {scored} scored, {explained} drops explained"
+        )
+
+
 def load(name: str) -> Any:
     path = _HERE / name
     if not path.exists():
         raise FactError(f"missing artifact: {name}")
-    return json.loads(path.read_text())
+    blob = json.loads(path.read_text())
+    check_population(name, blob)
+    return blob
 
 
 def pct(x: float, places: int = 1) -> str:

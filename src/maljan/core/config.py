@@ -385,6 +385,10 @@ class MemoryConfig(BaseModel):
     # known one yields a high-precision family link. Independent of the
     # semantic ``qdrant_collection`` above (which does fuzzy prose retrieval).
     qdrant_function_hash_collection: str = "maljan_function_hashes_v1"
+    # Sent with every Qdrant request when the server enforces one (compose
+    # does, via QDRANT__SERVICE__API_KEY). Empty means no authentication,
+    # which is fine for a loopback-only server.
+    qdrant_api_key: SecretStr | None = None
 
 
 class SandboxConfig(BaseModel):

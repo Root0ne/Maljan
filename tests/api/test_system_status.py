@@ -22,7 +22,7 @@ if str(_API_PATH) not in sys.path:
 
 
 from app.api.v1.system import router as system_router  # noqa: E402
-from app.deps import require_admin  # noqa: E402
+from app.deps import optional_current_user, require_admin  # noqa: E402
 
 
 @pytest.fixture
@@ -81,6 +81,50 @@ class TestSystemStatus:
             "has_virustotal_key": True,
             "has_abuseipdb_key": False,
         }
+        # Anonymous caller: the throttle/audit fields are admin-only detail,
+        # not merely null — they are absent from the payload entirely.
+        assert "throttle" not in body
+        assert "audit_write_failures" not in body
+
+    def test_admin_caller_sees_throttle_and_audit_fields(self, client: TestClient) -> None:
+        fake_settings = MagicMock()
+        fake_settings.app_name = "Maljan"
+        fake_settings.app_version = "0.1.0"
+        client.app.dependency_overrides[optional_current_user] = lambda: MagicMock(role="admin")
+        try:
+            with (
+                patch("app.api.v1.system.settings", fake_settings),
+                patch(
+                    "app.api.v1.system.runtime_config.get",
+                    AsyncMock(
+                        side_effect=lambda n: {
+                            "enrichment_enabled": True,
+                            "mock_mode_allowed": True,
+                        }[n]
+                    ),
+                ),
+                patch(
+                    "app.api.v1.system.runtime_config.get_secret",
+                    AsyncMock(
+                        side_effect=lambda n: {
+                            "virustotal_api_key": "",
+                            "abuseipdb_api_key": "",
+                        }[n]
+                    ),
+                ),
+            ):
+                resp = client.get("/api/v1/system/status")
+        finally:
+            del client.app.dependency_overrides[optional_current_user]
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["throttle"] == {
+            "available": True,
+            "degraded_since": None,
+            "last_error": None,
+        }
+        assert body["audit_write_failures"] == 0
 
     def test_never_returns_raw_secret_values(self, client: TestClient) -> None:
         # Belt-and-braces: even with both keys configured, response payload

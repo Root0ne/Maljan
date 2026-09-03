@@ -49,8 +49,6 @@ class DynamicAnalyst(BaseAnalyst):
         if getattr(self, "tools", None):
             return
 
-        import os
-
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
@@ -85,9 +83,9 @@ class DynamicAnalyst(BaseAnalyst):
             command = cfg.mcp.cape.command
             args = cfg.mcp.cape.args
 
-            env = os.environ.copy()
-            if cfg.mcp.cape.env:
-                env.update(cfg.mcp.cape.env)
+            from maljan.agents.subprocess_env import child_env
+
+            env = child_env(cfg.mcp.cape.env)
 
             from maljan.core.paths import get_project_root, resolve_mcp_args
 

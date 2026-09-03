@@ -270,7 +270,6 @@ class ApiClient {
     if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
       }
       throw new Error("Unauthorized");
     }
@@ -304,7 +303,6 @@ class ApiClient {
     if (res.status === 401) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
       }
       throw new Error("Unauthorized");
     }
@@ -335,7 +333,6 @@ class ApiClient {
     if (res.status === 401) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
       }
       throw new Error("Unauthorized");
     }
@@ -369,7 +366,6 @@ class ApiClient {
     if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
       }
       throw new Error("Unauthorized");
     }
@@ -383,9 +379,13 @@ class ApiClient {
 
   /* ── Auth ──────────────────────────────────────────── */
   login(email: string, password: string) {
-    return this.request<{ access_token: string; refresh_token: string }>(
+    return this.request<{ access_token: string; token_type: string }>(
       "/api/v1/auth/login",
-      { method: "POST", body: JSON.stringify({ email, password }) }
+      {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+        credentials: "include",
+      }
     );
   }
 
@@ -417,11 +417,18 @@ class ApiClient {
     });
   }
 
-  refresh(refreshToken: string) {
-    return this.request<{ access_token: string; refresh_token: string }>(
+  refresh() {
+    return this.request<{ access_token: string; token_type: string }>(
       "/api/v1/auth/refresh",
-      { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) }
+      { method: "POST", credentials: "include" }
     );
+  }
+
+  logout() {
+    return this.request<Record<string, never>>("/api/v1/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
   }
 
   /* ── Dashboard ─────────────────────────────────────── */

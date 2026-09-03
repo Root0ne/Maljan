@@ -241,6 +241,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
+    docs_enabled = settings.debug
     app = FastAPI(
         title=settings.app_name,
         description=(
@@ -249,8 +250,9 @@ def create_app() -> FastAPI:
             "adversarial multi-agent debate, and STIX 2.1 intelligence output."
         ),
         version=settings.app_version,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 
@@ -343,6 +345,13 @@ def create_app() -> FastAPI:
 
         components = await _probe_components()
         body["components"] = components
+
+        from app import observability
+
+        body["throttle_degraded"] = not observability.throttle.available
+        # ``audit_write_failures`` stays admin-only, on ``/system/status`` —
+        # this endpoint is unauthenticated and only publishes the public
+        # readiness bit.
         # Only components the API cannot serve requests without are allowed to
         # flip the overall status; optional subsystems are reported but not fatal.
         required = ("database", "redis")

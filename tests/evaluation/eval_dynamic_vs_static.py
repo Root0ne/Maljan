@@ -63,6 +63,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 import httpx  # noqa: E402
 
 from tests.evaluation import stats  # noqa: E402
+from tests.evaluation._tally import Tally  # noqa: E402
 from tests.evaluation.eval_temporal_drift import (  # noqa: E402
     available_fixture_slugs,
     extract_predicted_tids,
@@ -408,23 +409,40 @@ def techniques_by_source(result: Any) -> dict[str, list[str]]:
     return out
 
 
-def attempts_by_key(path: Path = ATTEMPTS) -> dict[str, int]:
-    """How many times each arm has been started. Missing file → nothing tried."""
+def attempts_by_key(path: Path = ATTEMPTS, tally: Tally | None = None) -> dict[str, int]:
+    """How many times each arm has been started. Missing file → nothing tried.
+
+    ``tally``, when given, tallies the lines of ``path`` once. ``first_attempt_epoch``
+    reads the same file for a different projection of the same rows and does not
+    tally it again.
+    """
     counts: dict[str, int] = {}
     if not path.exists():
         return counts
     for line in path.read_text().splitlines():
+        if tally is not None:
+            tally.attempt()
         try:
             key = json.loads(line).get("key")
-        except Exception:  # noqa: BLE001 — a torn line is one lost count, not a stop
+        except Exception as exc:  # noqa: BLE001 — a torn line is one lost count, not a stop
+            if tally is not None:
+                tally.drop("torn_line", detail=type(exc).__name__)
             continue
+        if tally is not None:
+            tally.parse_ok()
+            tally.score_ok()
         if key:
             counts[key] = counts.get(key, 0) + 1
     return counts
 
 
 def first_attempt_epoch(path: Path = ATTEMPTS) -> dict[str, int]:
-    """When each arm was first started, so guard kills can be counted from there."""
+    """When each arm was first started, so guard kills can be counted from there.
+
+    Reads the same file ``attempts_by_key`` does. Only ``attempts_by_key``
+    tallies those lines — this reader shares that count rather than taking
+    its own, so the same file is not counted twice under one population.
+    """
     firsts: dict[str, int] = {}
     if not path.exists():
         return firsts
@@ -628,6 +646,11 @@ async def main_async(limit: int) -> int:
     # resolves ground truth the same way so the two studies stay comparable.
     by_sha = {s["sha256"]: s for s in json.loads(COHORT.read_text())["samples"]}
     skipped = {"unverified_report": 0, "no_ground_truth": 0}
+    # Informational only — attempts_by_key's file is run-management bookkeeping
+    # (how many times each arm was started), not the analysis population. It is
+    # written into the artefact as summary.attempts_population, which
+    # check_population never inspects.
+    attempts_tally = Tally()
 
     for sha in sorted(p.stem for p in REPORTS_DIR.glob("*.json")):
         report = load_report(sha)
@@ -671,7 +694,7 @@ async def main_async(limit: int) -> int:
                 # retried on the next resume or the livelock simply resumes too.
                 done.add(row["key"])
 
-    attempts = attempts_by_key()
+    attempts = attempts_by_key(tally=attempts_tally)
     firsts = first_attempt_epoch()
     stuck = sorted(k for k, n in attempts.items() if n >= ATTEMPT_CEILING and k not in done)
     print(
@@ -745,11 +768,24 @@ async def main_async(limit: int) -> int:
                 flush=True,
             )
 
-    return summarise()
+    return summarise(attempts_tally)
 
 
-def summarise() -> int:
-    rows = [json.loads(line) for line in CHECKPOINT.read_text().splitlines()]
+def summarise(attempts_tally: Tally | None = None) -> int:
+    # The population this artefact reports on: the CHECKPOINT, read once, here.
+    # attempted = lines read, scored = rows that decoded, dropped = torn_line.
+    tally = Tally()
+    rows: list[dict[str, Any]] = []
+    for line in CHECKPOINT.read_text().splitlines():
+        tally.attempt()
+        try:
+            row = json.loads(line)
+        except Exception as exc:  # noqa: BLE001 — a torn line is one lost row, not a stop
+            tally.drop("torn_line", detail=type(exc).__name__)
+            continue
+        tally.parse_ok()
+        tally.score_ok()
+        rows.append(row)
     by_sha: dict[str, dict[str, Any]] = {}
     for r in rows:
         by_sha.setdefault(r["sha256"], {})[r["arm"]] = r
@@ -800,7 +836,13 @@ def summarise() -> int:
         "n_pairs": len(pairs),
         "inference_floor": INFERENCE_FLOOR,
         "abandoned_arms": summary_lost,
+        "population": tally.as_dict(),
     }
+    if attempts_tally is not None:
+        # Informational only: how many arm-starts attempts_by_key could account
+        # for, not the analysis population. check_population only ever looks at
+        # "population" (or a nested "summary.population"), never this key.
+        summary["attempts_population"] = attempts_tally.as_dict()
     interim = len(pairs) < INFERENCE_FLOOR
     print(f"\npaired deltas (dynamic − static-only), n={len(pairs)}")
     if interim:

@@ -203,6 +203,11 @@ class ServiceContainer:
                     self._memory_store_cache = QdrantStore(
                         url=self.config.memory.qdrant_url,
                         collection=self.config.memory.qdrant_collection,
+                        api_key=(
+                            self.config.memory.qdrant_api_key.get_secret_value()
+                            if self.config.memory.qdrant_api_key
+                            else None
+                        ),
                     )
                     logger.info(
                         "LTM backend: QdrantStore (url=%s, collection=%s)",

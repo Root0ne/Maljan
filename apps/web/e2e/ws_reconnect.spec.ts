@@ -81,4 +81,27 @@ test.describe("WebSocket reconnect", () => {
     await authenticatedPage.waitForTimeout(3_000);
     expect(attempts).toBe(1);
   });
+
+  test("does not retry after a rejected-credential close (4401)", async ({
+    authenticatedPage,
+  }) => {
+    // Sibling of the 1008 case above: 4401 is the server's dedicated
+    // "credential rejected" code (apps/api/app/api/ws.py), used once the
+    // access token travels only in the maljan.v1 subprotocol. Same
+    // reasoning applies — retrying just resends the same bad token.
+    let attempts = 0;
+    await authenticatedPage.routeWebSocket("**/ws/analysis/**", (ws) => {
+      attempts += 1;
+      ws.close({ code: 4401, reason: "e2e: credential rejected" });
+    });
+
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
+
+    await expect.poll(() => attempts, { timeout: 10_000 }).toBe(1);
+
+    // Longer than the 1 s base delay by a wide margin, so a regression that
+    // dropped the 4401 check would have reconnected several times by now.
+    await authenticatedPage.waitForTimeout(3_000);
+    expect(attempts).toBe(1);
+  });
 });

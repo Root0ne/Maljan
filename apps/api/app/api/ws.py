@@ -32,6 +32,24 @@ logger = get_logger("ws")
 router = APIRouter(tags=["WebSocket"])
 
 
+async def _reject(websocket: WebSocket, code: int, reason: str) -> None:
+    """Accept the handshake, then immediately close it with ``code``/``reason``.
+
+    A close sent before ``accept()`` is downgraded by uvicorn to an HTTP 403
+    handshake rejection: the close code never becomes a WebSocket close
+    frame, so the browser sees 1006 ("abnormal closure") instead of whatever
+    code the caller asked for, and a client-side check keyed on that code
+    (e.g. "don't auto-reconnect on a rejected credential") never fires.
+    Every rejection path in this route must go through this helper — never
+    call ``websocket.close(...)`` directly before an ``accept()`` — so the
+    accept-then-close pattern cannot drift back to a bare pre-accept close.
+    No subprotocol is echoed: nothing about the request was validated, and
+    nothing else is sent between the accept and the close.
+    """
+    await websocket.accept()
+    await websocket.close(code=code, reason=reason)
+
+
 class ConnectionManager:
     """Manages active WebSocket connections and Redis PubSub subscriptions.
 
@@ -126,8 +144,17 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     Events are forwarded from the ARQ worker via Redis PubSub.
 
     Authentication:
-        Pass the JWT access token as a query parameter:
-        ``wss://api/ws/analysis/{job_id}?token=<jwt>``
+        Pass the JWT access token as a WebSocket subprotocol, never as a
+        query parameter (proxy access logs and browser Referer headers can
+        leak query strings): open the socket with subprotocols
+        ``["maljan.v1", "maljan.v1.<jwt-access-token>"]``. The server
+        accepts and echoes back only ``maljan.v1``. Every rejection (missing
+        or malformed credential, invalid job ID, unowned job, ...) is
+        accepted first (with no subprotocol echoed, since nothing was
+        validated) and then immediately closed with its close code via the
+        ``_reject`` helper — closing before accept would be turned into an
+        HTTP 403 handshake rejection by the ASGI server, which discards the
+        close code and leaves the client seeing 1006 instead.
 
     Event types:
         - ``status_change``: Job status transition
@@ -141,8 +168,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     #
     # Tokens MUST be sent via the WebSocket subprotocol so they do not appear
     # in proxy access logs or browser Referer headers. The expected protocol
-    # is ``maljan.v1.<jwt-access-token>``. Legacy clients passing ``?token=``
-    # still work but are logged as deprecated and will be removed.
+    # is ``maljan.v1.<jwt-access-token>``.
     payload: dict[str, object] = {}
     user_id: str
     if settings.auth_disabled:
@@ -156,29 +182,25 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 token = candidate[len("maljan.v1.") :]
                 break
 
-        if token is None:
-            legacy = websocket.query_params.get("token")
-            if legacy:
-                logger.warning(
-                    "WebSocket using deprecated query-string auth (job=%s)", job_id
-                )  # nosemgrep # noqa: E501
-                token = legacy
-
         if not token:
             logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
-            await websocket.close(code=1008, reason="Unauthorized: missing token")
+            await _reject(
+                websocket,
+                4401,
+                "Unauthorized: token must be sent as the maljan.v1.<jwt> subprotocol",
+            )
             return
 
         decoded = decode_token(token)
         if decoded is None:
             logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)  # nosemgrep
-            await websocket.close(code=1008, reason="Unauthorized: invalid token")
+            await _reject(websocket, 1008, "Unauthorized: invalid token")
             return
         payload = decoded
 
         if payload.get("type") != "access":
             logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)  # nosemgrep
-            await websocket.close(code=1008, reason="Unauthorized: access token required")
+            await _reject(websocket, 1008, "Unauthorized: access token required")
             return
 
         sub = payload.get("sub")
@@ -186,7 +208,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
             logger.warning(  # nosemgrep
                 "WebSocket rejected: token missing subject (job=%s)", job_id
             )
-            await websocket.close(code=1008, reason="Unauthorized: token missing subject")
+            await _reject(websocket, 1008, "Unauthorized: token missing subject")
             return
         user_id = sub
 
@@ -195,7 +217,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
         job_uuid = uuid.UUID(job_id)
     except ValueError:
         logger.warning("WebSocket rejected: invalid job_id format (%s)", job_id)
-        await websocket.close(code=1008, reason="Bad request: invalid job ID")
+        await _reject(websocket, 1008, "Bad request: invalid job ID")
         return
 
     async with async_session_factory() as db:
@@ -204,7 +226,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
 
         if job is None:
             logger.warning("WebSocket rejected: job not found (%s)", job_id)
-            await websocket.close(code=1008, reason="Not found: job does not exist")
+            await _reject(websocket, 1008, "Not found: job does not exist")
             return
 
         if str(job.created_by) != user_id:
@@ -213,7 +235,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 user_id,
                 job_id,
             )
-            await websocket.close(code=1008, reason="Forbidden: not your job")
+            await _reject(websocket, 1008, "Forbidden: not your job")
             return
 
     # ── Connection accepted ──────────────────────────────────────────
@@ -246,7 +268,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
             except TimeoutError:
                 # Re-check token expiry on every heartbeat boundary.
                 if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
-                    logger.warning(
+                    logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — user_id/job_id are opaque identifiers, not the token  # noqa: E501
                         "WebSocket closed: token expired mid-stream (user=%s job=%s).",
                         user_id,
                         job_id,

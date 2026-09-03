@@ -93,6 +93,40 @@ def _is_public_ip(address: str) -> bool:
     )
 
 
+_PRIVATE_SUFFIXES = (
+    ".local",
+    ".localhost",
+    ".internal",
+    ".lan",
+    ".home",
+    ".corp",
+    ".intranet",
+    ".test",
+    ".example",
+    ".invalid",
+    ".onion",
+    ".arpa",
+)
+
+
+def _is_public_fqdn(name: str) -> bool:
+    """True for a name a public reputation service can say something about.
+
+    IP literals, single-label names and the special-use suffixes are internal
+    infrastructure: sending them to VirusTotal leaks the operator's naming and
+    costs quota for an answer that is always "unknown".
+    """
+    host = name.strip().rstrip(".").lower().strip("[]")
+    if not host or ".." in host or "." not in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host.endswith(suffix) for suffix in _PRIVATE_SUFFIXES)
+
+
 async def enrich_malware_report(
     malware_report: dict[str, Any],
     *,
@@ -146,13 +180,18 @@ async def enrich_malware_report(
         if vt is None and abuse is None:
             logger.warning("enrich: no provider API keys available; reputation fields left null.")
 
-        await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
+        private_domains_skipped = await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
         await _enrich_ips(ips, vt=vt, abuse=abuse, whois=whois, cap=max_lookups_per_kind)
     finally:
         if own_client:
             await client.aclose()
 
-    logger.info("enrich: completed (domains=%d, ips=%d).", len(domains), len(ips))
+    logger.info(
+        "enrich: completed (domains=%d, ips=%d, private_domains_skipped=%d).",
+        len(domains),
+        len(ips),
+        private_domains_skipped,
+    )
     return malware_report
 
 
@@ -161,14 +200,18 @@ async def _enrich_domains(
     *,
     vt: VirusTotalClient | None,
     cap: int,
-) -> None:
+) -> int:
+    skipped = 0
     if vt is None:
-        return
+        return skipped
     for dom in domains[:cap]:
         if _has_successful_rep(dom):
             continue
         fqdn = dom.get("fqdn")
         if not isinstance(fqdn, str) or not fqdn:
+            continue
+        if not _is_public_fqdn(fqdn):
+            skipped += 1
             continue
         rep = await vt.domain_reputation(fqdn)
         if rep is not None:
@@ -179,6 +222,7 @@ async def _enrich_domains(
             # an enriched-malicious domain is not stuck at is_suspicious=False.
             if _reputation_is_malicious(rep):
                 dom["is_suspicious"] = True
+    return skipped
 
 
 async def _enrich_ips(

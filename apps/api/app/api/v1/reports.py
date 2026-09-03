@@ -3,6 +3,8 @@
 Uses ReportService for business logic separation.
 """
 
+import base64
+import secrets
 import uuid
 from typing import Any
 
@@ -161,16 +163,28 @@ async def get_full_malware_report_html(
     it can be archived or opened in an offline analysis VM. Served inline by
     default so it opens in a tab; ``?download=true`` forces a file save.
     """
-    rendered = await svc.get_malware_report_html(report_id, user)
+    nonce = base64.b64encode(secrets.token_bytes(16)).decode()
+    rendered = await svc.get_malware_report_html(report_id, user, nonce=nonce)
     if rendered is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or HTML could not be rendered",
         )
+    headers = _disposition(rendered.filename, attachment=download)
+    # Safari has no ``style-src-attr`` support and falls back to ``style-src``
+    # for it, which does not carry ``unsafe-inline`` here — so the single
+    # ``style="string-set: ..."`` attribute used for paged-media page headers
+    # is blocked on Safari. Cosmetic only: it affects print/PDF pagination
+    # headers, not the report's rendered content.
+    headers["Content-Security-Policy"] = (
+        "default-src 'none'; img-src data:; "
+        f"style-src 'nonce-{nonce}'; style-src-attr 'unsafe-inline'; "
+        "script-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    )
     return Response(
         content=rendered.content,
         media_type="text/html; charset=utf-8",
-        headers=_disposition(rendered.filename, attachment=download),
+        headers=headers,
     )
 
 

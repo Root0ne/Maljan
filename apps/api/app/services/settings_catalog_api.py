@@ -9,7 +9,7 @@ in APISettings that is in neither list is not shown at all.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, get_args, get_origin
 
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, core_catalog
@@ -100,7 +100,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "title": "Trusted proxy IPs",
         "description": (
             "Peers whose X-Forwarded-For header is believed for rate "
-            "limiting. Exact IPs, one per entry."
+            "limiting. CIDR networks (or single IPs), one per entry."
         ),
     },
 }
@@ -139,6 +139,10 @@ API_READONLY: dict[str, dict[str, Any]] = {
         "title": "Qdrant (API health probe)",
         "description": "Address the API pings on /health?deep=true.",
     },
+    "qdrant_api_key": {
+        "title": "Qdrant API key",
+        "description": "Sent with the API's own Qdrant health probe. Set in .env.",
+    },
     "jwt_access_token_expire_minutes": {
         "title": "Access token lifetime (min)",
         "description": "Set in .env.",
@@ -147,22 +151,54 @@ API_READONLY: dict[str, dict[str, Any]] = {
         "title": "Refresh token lifetime (days)",
         "description": "Set in .env.",
     },
+    "cookie_secure": {
+        "title": "Refresh cookie Secure flag",
+        "description": (
+            "Set on the HttpOnly refresh cookie; true outside debug so the cookie is "
+            "sent over HTTPS only."
+        ),
+    },
+    "samples_dir": {
+        "title": "Samples directory",
+        "description": "Host path mounted into the Ghidra MCP container; the worker mirrors "
+        "each job's binary under its .work subdirectory and removes it when the job ends.",
+    },
 }
 
 # Any read-only value shaped like a URL is shown with its userinfo masked
 # (database, Redis, MinIO and Qdrant addresses may all carry credentials).
 
 
-def _type_of(name: str, default: Any) -> tuple[FieldType, bool]:
+def _unwrap_optional(annotation: Any) -> Any:
+    """Strip a ``X | None`` / ``Optional[X]`` wrapper down to ``X``.
+
+    A field left unset so a ``model_validator`` can fill in its real default
+    later (e.g. ``cookie_secure: bool | None = None``) still has a concrete
+    widget type — the ``None`` arm is just how "not yet resolved" is spelled,
+    not a type of its own.
+    """
+    if get_origin(annotation) is type(int | None):  # UnionType, e.g. "bool | None"
+        args = [a for a in get_args(annotation) if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return annotation
+
+
+def _type_of(name: str, annotation: Any, default: Any) -> tuple[FieldType, bool]:
     if isinstance(default, SecretStr):
         return "secret", True
-    if isinstance(default, bool):
+    tp = _unwrap_optional(annotation)
+    if tp is SecretStr:
+        return "secret", True
+    if tp is bool:
         return "bool", False
-    if isinstance(default, int):
+    if tp is int:
         return "int", False
-    if isinstance(default, float):
+    if tp is float:
         return "float", False
-    if isinstance(default, list):
+    if tp is str:
+        return "str", False
+    if get_origin(tp) in (list, set, tuple):
         return "list", False
     return "str", False
 
@@ -178,7 +214,7 @@ def api_catalog() -> list[CatalogEntry]:
     entries: list[CatalogEntry] = []
     for name, ann in API_EDITABLE.items():
         default = fields[name].default
-        ftype, secret = _type_of(name, default)
+        ftype, secret = _type_of(name, fields[name].annotation, default)
         entries.append(
             CatalogEntry(
                 key=f"api.{name}",
@@ -202,7 +238,7 @@ def api_catalog() -> list[CatalogEntry]:
         )
     for name, ann in API_READONLY.items():
         default = fields[name].default
-        ftype, secret = _type_of(name, default)
+        ftype, secret = _type_of(name, fields[name].annotation, default)
         entries.append(
             CatalogEntry(
                 key=f"api.{name}",

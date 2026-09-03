@@ -307,6 +307,7 @@ class MaljanApp:
             "malware_report": None,
             "malware_report_markdown": None,
             "stix_bundle_extended": None,
+            "report_error": None,
             "degraded_mode": False,
             "degradation_reasons": [],
             # F10: declared AnalysisState channels, populated later by the

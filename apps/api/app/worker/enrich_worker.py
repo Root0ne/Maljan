@@ -54,6 +54,9 @@ def _get_memory_store() -> MemoryStore | None:
         _memory_store = QdrantStore(
             url=settings.qdrant_url,
             collection=settings.qdrant_collection,
+            api_key=(
+                settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None
+            ),
         )
         logger.info(
             "enrich: Qdrant LTM available (url=%s, collection=%s).",

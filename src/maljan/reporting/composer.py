@@ -297,6 +297,7 @@ class ReportComposer:
 
                 record_response_usage(self.token_ledger, raw)
             except Exception as exc:  # noqa: BLE001
+                # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                 logger.debug("ReportComposer: token usage not recorded (%s).", exc)
         payload = safe_parse_json(_message_text(raw))
         if not payload:

@@ -13,6 +13,7 @@ _API = Path(__file__).resolve().parents[3] / "apps" / "api"
 if str(_API) not in sys.path:
     sys.path.insert(0, str(_API))
 
+from app import observability  # noqa: E402
 from app.models import AuditLog, RuntimeSetting  # noqa: E402
 from app.services import settings_service as svc  # noqa: E402
 from app.services.settings_catalog_api import catalog_index, full_catalog  # noqa: E402
@@ -227,9 +228,11 @@ async def test_save_does_not_raise_when_audit_session_fails(monkeypatch, key):
     monkeypatch.setattr(svc, "async_session_factory", lambda: session)
     db = make_db([])
     s = svc.SettingsService(db)
+    before = observability.counters.audit_write_failures
     res = await s.save({"api.enrichment_enabled": False}, user_id=uuid.uuid4(), ip=None)
     assert res.applied == ["api.enrichment_enabled"]
     session.commit.assert_awaited_once()
+    assert observability.counters.audit_write_failures == before + 1
 
 
 @pytest.mark.asyncio

@@ -254,3 +254,29 @@ def test_redact_url_handles_empty_user_and_at_in_password(raw, leaked):
 def test_redact_url_leaves_credential_free_urls_alone():
     text = "could not connect to redis://bad-host:6379/0 (mail x@y.z)"
     assert probes.redact_url(text) == text
+
+
+@pytest.mark.asyncio
+async def test_qdrant_probe_sends_the_api_key_header_when_set(monkeypatch):
+    def handler(req: httpx.Request):
+        assert req.headers.get("api-key") == "k"
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c", "api_key": "k"})
+    assert r.ok
+
+
+@pytest.mark.asyncio
+async def test_qdrant_probe_omits_the_header_when_no_api_key(monkeypatch):
+    def handler(req: httpx.Request):
+        assert "api-key" not in req.headers
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c"})
+    assert r.ok
