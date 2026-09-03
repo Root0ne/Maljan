@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from maljan.core.settings_overrides import build_settings, split_key
+from maljan.core.settings_overrides import build_settings, redact_url, split_key
+from pydantic import ValidationError
 from redis.asyncio import Redis
 
 from app.config import settings as api_settings
@@ -43,7 +43,9 @@ async def _get(
     except httpx.TimeoutException:
         return False, f"timeout after {int(TIMEOUT)} s", None
     except httpx.HTTPError as exc:
-        return False, f"{type(exc).__name__}: {exc}", None
+        # httpx embeds the request URL in several transport errors; the URL
+        # came from an operator setting and may carry credentials.
+        return False, redact_url(f"{type(exc).__name__}: {exc}"), None
 
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -180,24 +182,12 @@ async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
     )
 
 
-# Everything between "://" and the LAST "@" before the path is userinfo. Greedy on
-# purpose: a password may itself contain "@" or ":" and the username may be empty
-# (redis://:password@host is the usual Redis AUTH shape).
-_CREDENTIAL_IN_URL = re.compile(r"(://)[^\s/@]*(?:@[^\s/@]*)*@")
-
-
-def _redact_url(text: str) -> str:
-    """Mask any ``scheme://user:pass@`` credential in ``text`` before it is echoed.
-
-    Applied to exception text, not just a known URL value: a driver's error
-    message often embeds the DSN it failed to reach, credentials included.
-    """
-    return _CREDENTIAL_IN_URL.sub(r"\1***@", text)
+_redact_url = redact_url
 
 
 async def probe_redis(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
-    url = str(v.get("url") or api_settings.redis_url)
+    url = str(api_settings.redis_url)  # read-only setting; no candidate value can arrive
     try:
         r = Redis.from_url(url, socket_timeout=TIMEOUT)
         pong = await r.ping()
@@ -272,11 +262,25 @@ def _unwrap(value: Any) -> Any:
 
 async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
     probe = PROBES[name]
-    core_layer = {split_key(k)[1]: v for k, v in stored.items() if k.startswith("core.")}
-    core_layer.update(
-        {split_key(k)[1]: v for k, v in values.items() if k.startswith("core.") and v is not None}
-    )
-    core = build_settings(core_layer)
+    try:
+        core_layer = {split_key(k)[1]: v for k, v in stored.items() if k.startswith("core.")}
+        core_layer.update(
+            {
+                split_key(k)[1]: v
+                for k, v in values.items()
+                if k.startswith("core.") and v is not None
+            }
+        )
+        core = build_settings(core_layer)
+    except (ValueError, ValidationError) as exc:
+        # A malformed key or a staged value the model rejects is an operator
+        # error, not a route error. Name the fields, never echo the values.
+        fields = (
+            "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+            if isinstance(exc, ValidationError)
+            else type(exc).__name__
+        )
+        return ProbeResult(False, 0, f"invalid candidate values: {fields}")
     resolved: dict[str, Any] = {}
     for key, short in _INPUTS[name].items():
         ns, path = split_key(key)

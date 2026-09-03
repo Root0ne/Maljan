@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from maljan.core import settings_secrets as box
@@ -98,11 +100,32 @@ async def reset_key(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ResetResponse:
-    if key not in catalog_index():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
+    # A row whose key left the catalog (a later deploy renamed the field) must
+    # still be removable, so the catalog check only decides between 404 and
+    # an empty reset when nothing is stored either.
     removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
+    if not removed and key not in catalog_index():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
     return ResetResponse(reset=removed)
+
+
+def _env_literal(secret: bool, value: object) -> str:
+    """One ``.env`` right-hand side pydantic-settings reads back unchanged.
+
+    Lists and dicts must be JSON (a Python repr with single quotes is
+    rejected); strings with whitespace or ``#`` need quoting.
+    """
+    if secret:
+        return "***"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, separators=(",", ":"))
+    text = str(value)
+    if text == "" or any(ch in text for ch in " \t#\"'"):
+        return json.dumps(text)
+    return text
 
 
 @router.get("/export", response_class=PlainTextResponse)
@@ -116,8 +139,7 @@ async def export_overrides(
             continue
         entry = index[key]
         env_name = entry.path.upper().replace(".", "__")
-        value = "***" if entry.secret else info.value
-        lines.append(f"{env_name}={value}")
+        lines.append(f"{env_name}={_env_literal(entry.secret, info.value)}")
     return "\n".join(lines) + "\n"
 
 

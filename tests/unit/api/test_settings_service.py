@@ -260,3 +260,18 @@ async def test_load_overrides_drops_undecryptable_secret_and_warns_by_key_only(m
     msgs = [r.getMessage() for r in caplog.records if "cannot be decrypted" in r.getMessage()]
     assert len(msgs) == 1 and "core.llm.openai.api_key" in msgs[0]
     assert "not-a-real-token" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_save_rejects_values_the_pipeline_could_not_use():
+    """Found live on 2026-09-03: provider "bedrock" and max_iterations 0 were
+    accepted because the model left both unconstrained. The catalog derives
+    choices and bounds from pydantic, so the constraint lives there."""
+    s = svc.SettingsService(make_db([]))
+    with pytest.raises(svc.SettingsValidationError) as exc:
+        await s.save(
+            {"core.llm.provider": "bedrock", "core.negotiation.max_iterations": 0},
+            user_id=None,
+            ip=None,
+        )
+    assert set(exc.value.errors) == {"core.llm.provider", "core.negotiation.max_iterations"}

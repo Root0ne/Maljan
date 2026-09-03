@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_db
 from app.deps import require_admin
 from app.logging_config import get_logger
 from app.models.user import User
@@ -100,17 +102,21 @@ class LTMPurgeResponse(BaseModel):
     dry_run: bool
 
 
-def _build_memory_store() -> object:
+async def _build_memory_store(db: AsyncSession) -> object:
     """Build a MemoryStore the same way the pipeline does.
 
     Kept local to avoid coupling the API router to internal container
     initialisation. Returns whichever backend the operator configured
     (Qdrant in production; InMemoryStore in tests / local).
     """
-    from maljan.core.config import Settings as MaljanSettings
+    from maljan.core.settings_overrides import build_settings
     from maljan.memory.in_memory_store import InMemoryStore
 
-    cfg = MaljanSettings()
+    from app.services.settings_service import load_core_overrides
+
+    # The worker reads and writes the UI-configured collection; purging the
+    # environment-configured one would be destructive and silent.
+    cfg = build_settings(await load_core_overrides(db))
     backend = (cfg.memory.backend or "in_memory").lower()
     if backend == "qdrant":
         from maljan.memory.qdrant_store import QdrantStore
@@ -126,6 +132,7 @@ def _build_memory_store() -> object:
 async def ltm_purge(
     body: LTMPurgeRequest,
     admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ) -> LTMPurgeResponse:
     """Purge low-quality cases from the long-term memory store.
 
@@ -133,7 +140,7 @@ async def ltm_purge(
     so operators can preview the blast radius before committing.
     """
     try:
-        store = _build_memory_store()
+        store = await _build_memory_store(db)
     except Exception as exc:
         logger.warning("ltm_purge: failed to build memory store: %s", exc)
         raise HTTPException(

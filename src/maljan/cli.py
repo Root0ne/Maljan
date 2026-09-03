@@ -6,11 +6,12 @@ It does not mutate global settings or know about internal architecture.
 
 import json
 from pathlib import Path
+from typing import Any, cast, get_args
 
 import typer
 
 from maljan.app import MaljanApp
-from maljan.core.config import Settings
+from maljan.core.config import LLMConfig, Settings
 from maljan.core.logger import logger
 
 app = typer.Typer(
@@ -55,7 +56,10 @@ def analyze(
     # Build config at construction time — no post-init mutation
     config = Settings()
     if not mock:
-        config.llm.provider = provider
+        allowed = get_args(LLMConfig.model_fields["provider"].annotation)
+        if provider not in allowed:
+            raise typer.BadParameter(f"provider must be one of {', '.join(allowed)}")
+        config.llm.provider = cast(Any, provider)
     config.negotiation.max_iterations = max_iterations
 
     # Create and run

@@ -47,7 +47,7 @@ def decrypt(stored: str) -> str:
         raise SecretsUnavailable("value is not an encrypted secret")
     try:
         return _fernet().decrypt(stored[len(PREFIX) :].encode("ascii")).decode("utf-8")
-    except InvalidToken as exc:
+    except (InvalidToken, ValueError, UnicodeEncodeError) as exc:
         raise SecretsUnavailable("stored secret cannot be opened with the current key") from exc
 
 

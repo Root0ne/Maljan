@@ -13,6 +13,7 @@ from typing import Any
 
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, core_catalog
+from maljan.core.settings_overrides import redact_url
 from pydantic import SecretStr
 
 from app.config import APISettings
@@ -148,7 +149,8 @@ API_READONLY: dict[str, dict[str, Any]] = {
     },
 }
 
-_MASK_URL = ("database_url",)
+# Any read-only value shaped like a URL is shown with its userinfo masked
+# (database, Redis, MinIO and Qdrant addresses may all carry credentials).
 
 
 def _type_of(name: str, default: Any) -> tuple[FieldType, bool]:
@@ -166,10 +168,8 @@ def _type_of(name: str, default: Any) -> tuple[FieldType, bool]:
 
 
 def _masked(name: str, value: Any) -> Any:
-    if name in _MASK_URL and isinstance(value, str) and "@" in value:
-        head, _, tail = value.rpartition("@")
-        scheme, _, _ = head.partition("://")
-        return f"{scheme}://***@{tail}"
+    if isinstance(value, str) and "://" in value:
+        return redact_url(value)
     return value
 
 

@@ -200,6 +200,10 @@ class SettingsService:
         current = await self.load_overrides()
         merged = {**current}
         for key, value in changes.items():
+            # ``null`` means "drop the override" for every key, secrets
+            # included; an admin cannot pin a nullable field to None against
+            # a non-null environment value (the spec defines null only for
+            # clearing).
             if value is None:
                 merged.pop(key, None)
             else:

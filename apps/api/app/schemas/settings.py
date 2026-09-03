@@ -58,7 +58,7 @@ class ValuesResponse(BaseModel):
 
 
 class PatchRequest(BaseModel):
-    changes: dict[str, Any] = Field(min_length=1)
+    changes: dict[str, Any] = Field(min_length=1, max_length=500)
 
 
 class PatchResponse(BaseModel):

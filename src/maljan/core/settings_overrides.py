@@ -10,6 +10,7 @@ init kwargs with the environment and dotenv sources, so an overridden
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
@@ -88,3 +89,18 @@ def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str,
         if key in secrets:
             snap[key] = "***" if snap[key] else None
     return snap
+
+
+# Everything between "://" and the LAST "@" before the path is userinfo. Greedy
+# on purpose: a password may itself contain "@" or ":" and the username may be
+# empty (redis://:password@host is the usual Redis AUTH shape).
+_CREDENTIAL_IN_URL = re.compile(r"(://)[^\s/@]*(?:@[^\s/@]*)*@")
+
+
+def redact_url(text: str) -> str:
+    """Mask any ``scheme://user:pass@`` credential in ``text`` before it is shown.
+
+    Applied to free text (a driver's error message, a config value echoed
+    back), not only to values known to be URLs.
+    """
+    return _CREDENTIAL_IN_URL.sub(r"\1***@", text)

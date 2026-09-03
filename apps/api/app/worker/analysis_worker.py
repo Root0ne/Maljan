@@ -27,6 +27,7 @@ from arq.connections import RedisSettings
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -313,7 +314,22 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id},
                 )
                 overrides = {}
-            core_settings = build_job_settings(overrides, job.config)
+            try:
+                core_settings = build_job_settings(overrides, job.config)
+            except ValidationError as exc:
+                # Stored overrides that validated when saved can stop validating
+                # after a deploy narrows a field. One job must not take the
+                # queue down: run on environment settings, name the fields.
+                bad = sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+                logger.warning(
+                    "Stored runtime overrides no longer validate (%s); "
+                    "running job %s on environment settings only.",
+                    ", ".join(bad),
+                    job_id,
+                    extra={"job_id": job_id},
+                )
+                overrides = {}
+                core_settings = build_job_settings({}, job.config)
             # Agents, pipeline nodes and extractors read the process singleton
             # (``get_settings()``), not the config handed to MaljanApp. With
             # ``max_jobs = 1`` installing this job's Settings there is what
@@ -862,7 +878,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # The enrichment job is post-hoc; pipeline latency is unaffected.
             # ARQ enforces the unique ``_job_id`` so duplicate triggers
             # (e.g. operator also calling /enrich manually) are coalesced.
-            if settings.enrichment_enabled and report.malware_report:
+            if await runtime_config.get("enrichment_enabled") and report.malware_report:
                 try:
                     arq_pool = ctx.get("arq_pool")
                     if arq_pool is None:
