@@ -151,6 +151,9 @@ async def _build_memory_store(db: AsyncSession) -> object:
         return QdrantStore(
             url=cfg.memory.qdrant_url,
             collection=cfg.memory.qdrant_collection,
+            api_key=(
+                cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
+            ),
         )
     return InMemoryStore()
 

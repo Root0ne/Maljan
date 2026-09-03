@@ -139,6 +139,10 @@ API_READONLY: dict[str, dict[str, Any]] = {
         "title": "Qdrant (API health probe)",
         "description": "Address the API pings on /health?deep=true.",
     },
+    "qdrant_api_key": {
+        "title": "Qdrant API key",
+        "description": "Sent with the API's own Qdrant health probe. Set in .env.",
+    },
     "jwt_access_token_expire_minutes": {
         "title": "Access token lifetime (min)",
         "description": "Set in .env.",

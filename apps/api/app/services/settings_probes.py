@@ -170,10 +170,12 @@ async def probe_cape(v: dict[str, Any]) -> ProbeResult:
 async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     base = str(v.get("url") or "").rstrip("/")
-    ok, detail, _ = await _get(f"{base}/readyz")
+    key = v.get("api_key")
+    headers = {"api-key": str(key)} if key else None
+    ok, detail, _ = await _get(f"{base}/readyz", headers)
     if not ok:
         return ProbeResult(False, _ms(t0), f"readyz: {detail}")
-    ok2, detail2, _ = await _get(f"{base}/collections/{v.get('collection')}")
+    ok2, detail2, _ = await _get(f"{base}/collections/{v.get('collection')}", headers)
     return ProbeResult(
         True,
         _ms(t0),
@@ -246,7 +248,11 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.sandbox.cape2_base_url": "base_url",
         "core.sandbox.cape2_api_token": "api_token",
     },
-    "qdrant": {"core.memory.qdrant_url": "url", "core.memory.qdrant_collection": "collection"},
+    "qdrant": {
+        "core.memory.qdrant_url": "url",
+        "core.memory.qdrant_collection": "collection",
+        "core.memory.qdrant_api_key": "api_key",
+    },
     "redis": {},
     "virustotal": {"api.virustotal_api_key": "api_key"},
     "abuseipdb": {"api.abuseipdb_api_key": "api_key"},

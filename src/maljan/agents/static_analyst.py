@@ -578,6 +578,11 @@ class StaticAnalyst(BaseAnalyst):
             store = FunctionHashStore(
                 url=cfg.memory.qdrant_url,
                 collection=cfg.memory.qdrant_function_hash_collection,
+                api_key=(
+                    cfg.memory.qdrant_api_key.get_secret_value()
+                    if cfg.memory.qdrant_api_key
+                    else None
+                ),
             )
             matches = store.match(
                 [fh for _name, fh in functions],

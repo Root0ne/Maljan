@@ -152,6 +152,7 @@ class APISettings(BaseSettings):
     # ── Qdrant (passed through to maljan-core) ───────────────────
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection: str = "maljan_ltm"
+    qdrant_api_key: SecretStr | None = None
 
     # ── Threat-intel enrichment (Faz 6) ──────────────────────────
     # API keys are optional. When empty the enrichment task skips the

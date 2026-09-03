@@ -119,6 +119,21 @@ uv run maljan analyze <sha256> --provider openai
 cp .env.example .env
 # Edit .env with your API keys and LLM provider settings
 
+cp docker/.env.example docker/.env
+# docker/.env holds three variables compose refuses to start without —
+# there is no baked-in default for any of them:
+#   GHIDRA_MCP_AUTH_TOKEN  bearer token the ghidra-mcp container requires
+#   REDIS_PASSWORD         --requirepass on the redis container
+#   QDRANT_API_KEY         QDRANT__SERVICE__API_KEY on the qdrant container
+# Generate all three:
+python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY')]"
+# and paste the output into docker/.env.
+#
+# Every published port binds to BIND_ADDRESS, which docker/.env.example
+# defaults to 127.0.0.1 — the stack is unreachable from the network unless
+# you deliberately set BIND_ADDRESS=0.0.0.0 behind a firewall or reverse
+# proxy you control.
+
 # The ghidra-mcp image is built from external/, which git does not carry
 make external
 
@@ -130,7 +145,7 @@ export POSTGRES_PORT=5433
 cd docker
 docker compose up -d --build
 
-# Access points
+# Access points (loopback only, per BIND_ADDRESS above)
 # Frontend:      http://localhost:3000
 # Backend API:   http://localhost:8000/docs
 # Ghidra MCP:    http://localhost:8089/check_connection

@@ -1539,6 +1539,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                         _fh_store = FunctionHashStore(
                             url=_cfg.memory.qdrant_url,
                             collection=_cfg.memory.qdrant_function_hash_collection,
+                            api_key=(
+                                _cfg.memory.qdrant_api_key.get_secret_value()
+                                if _cfg.memory.qdrant_api_key
+                                else None
+                            ),
                         )
                         # Read side: surface prior family overlap in the report.
                         _func_hash_report = to_report_dicts(

@@ -73,7 +73,12 @@ class FunctionHashStore:
         matches = store.match([h1, h2, ...], exclude_sample_id=sample_id)
     """
 
-    def __init__(self, url: str, collection: str = "maljan_function_hashes_v1") -> None:
+    def __init__(
+        self,
+        url: str,
+        collection: str = "maljan_function_hashes_v1",
+        api_key: str | None = None,
+    ) -> None:
         try:
             from qdrant_client import QdrantClient
         except ImportError as exc:  # pragma: no cover - exercised via integration
@@ -85,7 +90,7 @@ class FunctionHashStore:
 
         self._url = url
         self._collection = collection
-        self._client: Any = QdrantClient(url=url)
+        self._client: Any = QdrantClient(url=url, api_key=api_key)
         self._collection_ready = False
         logger.info("FunctionHashStore initialized (url=%s, collection=%s).", url, collection)
 
