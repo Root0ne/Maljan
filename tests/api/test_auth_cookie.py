@@ -48,7 +48,10 @@ def client(monkeypatch):
         return {"type": "refresh", "sub": str(user.id), "jti": "jti-1"}
 
     monkeypatch.setattr(auth_module, "decode_token", _decode)
-    return TestClient(app)
+    # Outside debug the cookie carries Secure, and the client jar only returns a
+    # Secure cookie over https; an https base URL keeps the tests valid under
+    # both settings (CI has no .env, so debug is off there).
+    return TestClient(app, base_url="https://testserver")
 
 
 def test_login_sets_httponly_cookie_and_keeps_refresh_out_of_the_body(client):
