@@ -106,8 +106,20 @@ export function useSettings() {
       await reload();
       return res;
     } catch (e) {
-      if (e instanceof SettingsValidationError) setErrors(e.errors);
-      else setActionError(getErrorMessage(e));
+      if (e instanceof SettingsValidationError) {
+        setErrors(e.errors);
+        // The server validates the whole merged set, so a stored override
+        // that stopped validating (a later deploy narrowed its field) blocks
+        // every save and blames a row the user never touched. Name it.
+        const foreign = Object.keys(e.errors).filter((k) => !(k in pending));
+        if (foreign.length > 0) {
+          setActionError(
+            `Stored override${foreign.length > 1 ? "s" : ""} no longer valid: ${foreign.join(
+              ", "
+            )}. Reset ${foreign.length > 1 ? "them" : "it"} to env to save again.`
+          );
+        }
+      } else setActionError(getErrorMessage(e));
       return null;
     } finally {
       setSaving(false);

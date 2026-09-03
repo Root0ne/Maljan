@@ -409,6 +409,32 @@ test.describe("Settings → Configuration (admin)", () => {
   });
 });
 
+test.describe("Settings → Configuration (stale stored override)", () => {
+  test("a 422 that blames an untouched key is named in the action banner", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.route("**/api/v1/settings", (r) =>
+      r.request().method() === "PATCH"
+        ? r.fulfill({
+            status: 422,
+            json: { errors: { "core.negotiation.retry_delay": "Input should be >= 1" } },
+          })
+        : r.fallback()
+    );
+    await page
+      .locator("#setting-core\\.negotiation\\.max_iterations input[type=number]")
+      .fill("7");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+    const banner = page.getByRole("alert").filter({ hasText: "no longer valid" });
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText("core.negotiation.retry_delay");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+  });
+});
+
 test.describe("Settings → Configuration (non-admin)", () => {
   test("the tab is disabled with 'Admin role required' and cannot be opened", async ({
     authenticatedPage: page,
