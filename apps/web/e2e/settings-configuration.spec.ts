@@ -363,7 +363,7 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(field).toHaveValue("a\nb");
     await expect(page.getByText("1 change pending")).toBeVisible();
 
-    await page.getByRole("button", { name: "Discard" }).click();
+    await page.getByRole("button", { name: "Discard", exact: true }).click();
 
     // The current value is the mock's `[]` default, so the textarea goes
     // back to empty rather than keeping the abandoned "a\nb" text.
@@ -395,14 +395,16 @@ test.describe("Settings → Configuration (admin)", () => {
       r.fulfill({ json: { reset: ["core.negotiation.max_iterations"] } })
     );
 
-    await page.getByRole("button", { name: "Negotiation", exact: true }).click();
+    // The rail button carries a pending marker once the group is dirty, so
+    // match on the title prefix rather than the exact accessible name.
+    await page.getByRole("button", { name: /^Negotiation/ }).click();
     await page.getByRole("button", { name: "Reset group to env" }).click();
 
     // The negotiation group's own edit is gone, but the providers group's
     // staged secret survives — resetGroup must only touch its own group's
     // keys, not wipe `pending` wholesale.
     await expect(page.getByText("1 change pending")).toBeVisible();
-    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.getByRole("button", { name: /^Providers/ }).click();
     await expect(page.getByText("new value staged")).toBeVisible();
   });
 });
