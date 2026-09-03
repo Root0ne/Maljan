@@ -10,7 +10,7 @@ if str(_API) not in sys.path:
     sys.path.insert(0, str(_API))
 
 from app.api.v1 import auth as auth_module  # noqa: E402
-from app.api.v1.auth import router  # noqa: E402
+from app.api.v1.auth import REFRESH_COOKIE, router  # noqa: E402
 from app.database import get_db  # noqa: E402
 
 
@@ -27,7 +27,9 @@ def test_refresh_answers_401_when_the_session_store_is_unavailable(monkeypatch):
     monkeypatch.setattr(
         "app.auth.throttle.throttle_state", lambda: {"available": False, "last_error": "x"}
     )
-    r = TestClient(app).post("/api/v1/auth/refresh", json={"refresh_token": "t"})
+    client = TestClient(app)
+    client.cookies.set(REFRESH_COOKIE, "t")
+    r = client.post("/api/v1/auth/refresh")
     assert r.status_code == 401
     # Generic detail: the reason (store outage vs. reuse) stays server-side,
     # in the audit row and the log line, not in the response body.

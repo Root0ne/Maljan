@@ -147,6 +147,13 @@ API_READONLY: dict[str, dict[str, Any]] = {
         "title": "Refresh token lifetime (days)",
         "description": "Set in .env.",
     },
+    "cookie_secure": {
+        "title": "Refresh cookie Secure flag",
+        "description": (
+            "Set on the HttpOnly refresh cookie; true outside debug so the cookie is "
+            "sent over HTTPS only."
+        ),
+    },
     "samples_dir": {
         "title": "Samples directory",
         "description": "Host path mounted into the Ghidra MCP container; the worker mirrors "

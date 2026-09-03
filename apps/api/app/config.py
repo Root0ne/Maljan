@@ -12,7 +12,7 @@ from __future__ import annotations
 import ipaddress
 from typing import Any
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PLACEHOLDER_JWT_SECRETS = {
@@ -124,6 +124,15 @@ class APISettings(BaseSettings):
     jwt_key_id: str = "v1"
     jwt_previous_secret_key: SecretStr = SecretStr("")
     jwt_previous_key_id: str = "v0"
+
+    # Secure flag on the HttpOnly refresh cookie. Left unset by default so it
+    # can default to the inverse of ``debug`` (true outside debug, so the
+    # cookie only ever crosses the wire over HTTPS); an operator may still
+    # force it either way.
+    cookie_secure: bool | None = Field(
+        default=None,
+        description="Secure flag on the refresh cookie; defaults to the inverse of debug.",
+    )
 
     # Login throttle (per-account)
     login_max_attempts: int = 10
@@ -333,6 +342,12 @@ class APISettings(BaseSettings):
                     f"trusted_proxy_ips entry {entry!r} is not an IP address or CIDR network"
                 ) from exc
         return value
+
+    @model_validator(mode="after")
+    def _cookie_secure_default(self) -> APISettings:
+        if self.cookie_secure is None:
+            self.cookie_secure = not self.debug
+        return self
 
     def model_post_init(self, __context: object) -> None:
         # The auth-bypass flag is for interactive local development only;

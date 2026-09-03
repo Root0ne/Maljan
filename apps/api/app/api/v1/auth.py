@@ -16,7 +16,8 @@ from __future__ import annotations
 import hashlib
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +38,6 @@ from app.logging_config import get_logger
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.auth import (
-    RefreshTokenRequest,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
@@ -48,6 +48,25 @@ from app.schemas.auth import (
 logger = get_logger("api.auth")
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+REFRESH_COOKIE = "maljan_refresh"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        REFRESH_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=bool(settings.cookie_secure),
+        path=REFRESH_COOKIE_PATH,
+        max_age=settings.jwt_refresh_token_expire_days * 86400,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
 
 
 def _email_tag(email: str) -> str:
@@ -142,6 +161,7 @@ async def register(
 async def login(
     body: UserLoginRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Authenticate and receive JWT tokens."""
@@ -179,29 +199,33 @@ async def login(
     token_data = {"sub": str(user.id)}
     refresh, jti = create_refresh_token(token_data)
     await refresh_token_register(str(user.id), jti)
+    _set_refresh_cookie(response, refresh)
 
     await _audit(db, user.id, "auth.login.success", request=request)
     logger.info("Login successful: user=%s", user.id, extra={"user_id": str(user.id)})
     return {
         "access_token": create_access_token(token_data),
-        "refresh_token": refresh,
         "token_type": "bearer",
     }
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    body: RefreshTokenRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Exchange a refresh token for a new access + refresh token pair.
+    maljan_refresh: str | None = Cookie(default=None),
+) -> dict | Response:
+    """Exchange the refresh cookie for a new access token and rotate it.
 
     Implements rotation + reuse detection: if the same refresh token is used
     twice, all of that user's refresh tokens are invalidated and the request
     is rejected with 401.
     """
-    payload = decode_token(body.refresh_token)
+    if not maljan_refresh:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh session")
+
+    payload = decode_token(maljan_refresh)
     if payload is None or payload.get("type") != "refresh":
         await _audit(db, None, "auth.refresh.invalid", request=request)
         raise HTTPException(
@@ -229,10 +253,12 @@ async def refresh_token(
             request=request,
         )
         logger.warning("Refresh token reuse detected for user=%s", user_id)
-        raise HTTPException(
+        reuse_response = JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token has already been used",
+            content={"detail": "Refresh token has already been used"},
         )
+        _clear_refresh_cookie(reuse_response)
+        return reuse_response
 
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
@@ -246,13 +272,39 @@ async def refresh_token(
     token_data = {"sub": str(user.id)}
     new_refresh, new_jti = create_refresh_token(token_data)
     await refresh_token_register(str(user.id), new_jti)
+    _set_refresh_cookie(response, new_refresh)
 
     await _audit(db, user.id, "auth.refresh.success", request=request)
     return {
         "access_token": create_access_token(token_data),
-        "refresh_token": new_refresh,
         "token_type": "bearer",
     }
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    maljan_refresh: str | None = Cookie(default=None),
+) -> Response:
+    """Consume the refresh cookie's session, if any, and always clear it.
+
+    A missing or already-consumed cookie is not an error: logout is
+    idempotent so a client can call it defensively without checking state.
+    """
+    if maljan_refresh:
+        payload = decode_token(maljan_refresh) or {}
+        if payload.get("type") == "refresh":
+            await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
+            await _audit(
+                db,
+                uuid.UUID(payload["sub"]) if payload.get("sub") else None,
+                "auth.logout",
+                request=request,
+            )
+    out = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_refresh_cookie(out)
+    return out
 
 
 @router.get("/me", response_model=UserResponse)
