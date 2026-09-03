@@ -132,12 +132,12 @@ class JudgeAgent:
         if getattr(self, "tools", None):
             return
 
-        import os
         import sys
 
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.agents.subprocess_env import child_env
         from maljan.core.paths import get_project_root
 
         project_root = get_project_root()
@@ -146,7 +146,7 @@ class JudgeAgent:
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[server_script],
-            env=os.environ.copy(),
+            env=child_env(allow=("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")),
             cwd=str(project_root / "threatintel-mcp"),
         )
 
