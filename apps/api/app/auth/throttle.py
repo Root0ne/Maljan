@@ -14,6 +14,7 @@ import redis.asyncio as aioredis
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.runtime_config import runtime_config
 
 logger = get_logger("auth.throttle")
 
@@ -79,7 +80,7 @@ async def record_login_failure(email: str) -> None:
     try:
         pipe = r.pipeline()
         pipe.incr(key)
-        pipe.expire(key, settings.login_lockout_seconds)
+        pipe.expire(key, await runtime_config.get("login_lockout_seconds"))
         await pipe.execute()
     except Exception as exc:
         logger.debug("record_login_failure failed: %s", exc)
@@ -101,7 +102,7 @@ async def is_login_locked(email: str) -> bool:
         return False
     try:
         value = await r.get(_LOGIN_FAIL_KEY.format(email=email.lower()))
-        return value is not None and int(value) >= settings.login_max_attempts
+        return value is not None and int(value) >= await runtime_config.get("login_max_attempts")
     except Exception as exc:
         logger.debug("is_login_locked failed: %s", exc)
         return False

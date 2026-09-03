@@ -6,11 +6,12 @@ It does not mutate global settings or know about internal architecture.
 
 import json
 from pathlib import Path
+from typing import Any, cast, get_args
 
 import typer
 
 from maljan.app import MaljanApp
-from maljan.core.config import Settings
+from maljan.core.config import LLMConfig, Settings
 from maljan.core.logger import logger
 
 app = typer.Typer(
@@ -32,10 +33,10 @@ def analyze(
         None, "--sample", "-s", help="Path to the malware sample file for sandbox submission."
     ),
     provider: str = typer.Option(
-        "openai", "--provider", "-p", help="LLM provider: openai, anthropic, ollama."
+        "openai", "--provider", "-p", help="LLM provider: openai, anthropic, ollama, gemini."
     ),
     max_iterations: int = typer.Option(
-        2, "--max-iterations", "-i", help="Maximum negotiation rounds."
+        2, "--max-iterations", "-i", min=1, help="Maximum negotiation rounds."
     ),
     mock: bool = typer.Option(
         False, "--mock", "-m", help="Run in mock mode without real LLM calls."
@@ -55,7 +56,10 @@ def analyze(
     # Build config at construction time — no post-init mutation
     config = Settings()
     if not mock:
-        config.llm.provider = provider
+        allowed = get_args(LLMConfig.model_fields["provider"].annotation)
+        if provider not in allowed:
+            raise typer.BadParameter(f"provider must be one of {', '.join(allowed)}")
+        config.llm.provider = cast(Any, provider)
     config.negotiation.max_iterations = max_iterations
 
     # Create and run
@@ -355,7 +359,7 @@ def _build_memory_store_cli() -> object:
     from maljan.memory.in_memory_store import InMemoryStore
 
     cfg = Settings()
-    backend = (cfg.memory.backend or "in_memory").lower()
+    backend = cfg.memory.backend.lower()
     if backend == "qdrant":
         from maljan.memory.qdrant_store import QdrantStore
 

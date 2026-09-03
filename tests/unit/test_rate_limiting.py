@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from app.middleware.rate_limit_middleware import RateLimitMiddleware
 from starlette.requests import Request
@@ -27,6 +29,34 @@ def fake_redis():
     from fakeredis.aioredis import FakeRedis
 
     return FakeRedis()
+
+
+def _patch_runtime_config(
+    *,
+    enabled: bool = True,
+    max_requests: int = 100,
+    window_seconds: int = 60,
+    trusted_proxy_ips: list[str] | None = None,
+):
+    """Rate limits now come from ``runtime_config`` rather than constructor
+    attributes (Task 7: live api.* overrides). Tests exercise ``dispatch``
+    directly, so the values that used to live on ``self`` are supplied
+    through a patched ``runtime_config.get`` instead.
+    """
+    values = {
+        "rate_limit_enabled": enabled,
+        "rate_limit_requests": max_requests,
+        "rate_limit_window_seconds": window_seconds,
+        "trusted_proxy_ips": trusted_proxy_ips or [],
+    }
+
+    async def _get(name: str):
+        return values[name]
+
+    return patch(
+        "app.middleware.rate_limit_middleware.runtime_config.get",
+        AsyncMock(side_effect=_get),
+    )
 
 
 def _install_counter(middleware: RateLimitMiddleware) -> dict[str, int]:
@@ -55,9 +85,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=10,
-            window_seconds=60,
             whitelist=[],
         )
         # Replace with fake Redis for testing
@@ -80,7 +107,8 @@ class TestRateLimitMiddleware:
         async def call_next(req):
             return Response(content='{"ok":true}', status_code=200)
 
-        response = await middleware.dispatch(request, call_next)
+        with _patch_runtime_config(max_requests=10, window_seconds=60):
+            response = await middleware.dispatch(request, call_next)
 
         assert response.status_code == 200
         assert response.headers["X-RateLimit-Limit"] == "10"
@@ -92,9 +120,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=2,
-            window_seconds=60,
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -116,15 +141,16 @@ class TestRateLimitMiddleware:
         async def call_next(req):
             return Response(content='{"ok":true}', status_code=200)
 
-        # First two requests succeed
-        response1 = await middleware.dispatch(request, call_next)
-        assert response1.status_code == 200
+        with _patch_runtime_config(max_requests=2, window_seconds=60):
+            # First two requests succeed
+            response1 = await middleware.dispatch(request, call_next)
+            assert response1.status_code == 200
 
-        response2 = await middleware.dispatch(request, call_next)
-        assert response2.status_code == 200
+            response2 = await middleware.dispatch(request, call_next)
+            assert response2.status_code == 200
 
-        # Third request is blocked
-        response3 = await middleware.dispatch(request, call_next)
+            # Third request is blocked
+            response3 = await middleware.dispatch(request, call_next)
         assert response3.status_code == 429
         assert response3.headers["Retry-After"]
         assert response3.headers["X-RateLimit-Remaining"] == "0"
@@ -134,9 +160,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=1,
-            window_seconds=60,
             whitelist=["/health"],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -158,18 +181,16 @@ class TestRateLimitMiddleware:
             return Response(content='{"ok":true}', status_code=200)
 
         # Multiple requests to whitelisted path should all succeed
-        for _ in range(5):
-            response = await middleware.dispatch(request, call_next)
-            assert response.status_code == 200
+        with _patch_runtime_config(max_requests=1, window_seconds=60):
+            for _ in range(5):
+                response = await middleware.dispatch(request, call_next)
+                assert response.status_code == 200
 
     async def test_disabled_middleware_allows_all(self, mock_app, fake_redis):
         """When disabled, all requests pass through without Redis checks."""
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=False,
-            max_requests=1,
-            window_seconds=60,
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -191,20 +212,18 @@ class TestRateLimitMiddleware:
             return Response(content='{"ok":true}', status_code=200)
 
         # Many requests should all succeed
-        for _ in range(10):
-            response = await middleware.dispatch(request, call_next)
-            assert response.status_code == 200
-            # No rate limit headers when disabled
-            assert "X-RateLimit-Limit" not in response.headers
+        with _patch_runtime_config(enabled=False, max_requests=1, window_seconds=60):
+            for _ in range(10):
+                response = await middleware.dispatch(request, call_next)
+                assert response.status_code == 200
+                # No rate limit headers when disabled
+                assert "X-RateLimit-Limit" not in response.headers
 
     async def test_graceful_degradation_on_redis_failure(self, mock_app):
         """When Redis fails, request is allowed to proceed."""
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://invalid:6379/0",
-            enabled=True,
-            max_requests=10,
-            window_seconds=60,
             whitelist=[],
         )
 
@@ -225,7 +244,8 @@ class TestRateLimitMiddleware:
             return Response(content='{"ok":true}', status_code=200)
 
         # Should NOT raise; should allow request through
-        response = await middleware.dispatch(request, call_next)
+        with _patch_runtime_config(max_requests=10, window_seconds=60):
+            response = await middleware.dispatch(request, call_next)
         assert response.status_code == 200
 
     async def test_different_ips_have_separate_counters(self, mock_app, fake_redis):
@@ -233,9 +253,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            enabled=True,
-            max_requests=2,
-            window_seconds=60,
             whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
@@ -258,9 +275,10 @@ class TestRateLimitMiddleware:
             }
         )
 
-        await middleware.dispatch(req_a, call_next)
-        await middleware.dispatch(req_a, call_next)
-        blocked = await middleware.dispatch(req_a, call_next)
+        with _patch_runtime_config(max_requests=2, window_seconds=60):
+            await middleware.dispatch(req_a, call_next)
+            await middleware.dispatch(req_a, call_next)
+            blocked = await middleware.dispatch(req_a, call_next)
         assert blocked.status_code == 429
 
         # IP B should still be allowed
@@ -277,5 +295,6 @@ class TestRateLimitMiddleware:
             }
         )
 
-        allowed = await middleware.dispatch(req_b, call_next)
+        with _patch_runtime_config(max_requests=2, window_seconds=60):
+            allowed = await middleware.dispatch(req_b, call_next)
         assert allowed.status_code == 200

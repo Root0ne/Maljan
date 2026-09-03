@@ -169,6 +169,147 @@ export const MOCK_API_KEY = {
   updated_at: "2026-07-26T10:00:00Z",
 };
 
+/**
+ * Matches `apps/api/app/schemas/settings.py::SchemaResponse` /
+ * `apps/web/src/types/settings.ts::SettingsSchema`. Two groups, three field
+ * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
+ * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
+ * — shown only for a `"ui"`-sourced value — has something to contrast
+ * against the `"default"`/`"env"` rows that must not show it, and a `list`
+ * field defaulting to `[]` for `ListWidget` coverage) plus one secret in
+ * "providers".
+ */
+export const MOCK_SETTINGS_SCHEMA = {
+  secrets_available: true,
+  groups: [
+    {
+      key: "negotiation",
+      title: "Negotiation",
+      entries: [
+        {
+          key: "core.negotiation.max_iterations",
+          namespace: "core",
+          path: "negotiation.max_iterations",
+          type: "int",
+          default: 5,
+          nullable: false,
+          choices: null,
+          minimum: 1,
+          maximum: null,
+          secret: false,
+          group: "negotiation",
+          title: "Max iterations",
+          description: "Hard ceiling on negotiation rounds.",
+          applies: "next_job",
+          editable: true,
+          reason: null,
+          probe: null,
+        },
+        {
+          key: "core.negotiation.retry_delay",
+          namespace: "core",
+          path: "negotiation.retry_delay",
+          type: "int",
+          default: 2,
+          nullable: false,
+          choices: null,
+          minimum: 0,
+          maximum: null,
+          secret: false,
+          group: "negotiation",
+          title: "Retry delay seconds",
+          description: "Delay between negotiation retries.",
+          applies: "next_job",
+          editable: true,
+          reason: null,
+          probe: null,
+        },
+        {
+          key: "core.negotiation.blocked_hosts",
+          namespace: "core",
+          path: "negotiation.blocked_hosts",
+          type: "list",
+          default: [],
+          nullable: false,
+          choices: null,
+          minimum: null,
+          maximum: null,
+          secret: false,
+          group: "negotiation",
+          title: "Blocked hosts",
+          description: "Hostnames the negotiator refuses to contact.",
+          applies: "next_job",
+          editable: true,
+          reason: null,
+          probe: null,
+        },
+      ],
+    },
+    {
+      key: "providers",
+      title: "Providers",
+      entries: [
+        {
+          key: "core.llm.openai.api_key",
+          namespace: "core",
+          path: "llm.openai.api_key",
+          type: "secret",
+          default: null,
+          nullable: true,
+          choices: null,
+          minimum: null,
+          maximum: null,
+          secret: true,
+          group: "providers",
+          title: "OpenAI-compatible API key",
+          description: "Bearer token for the OpenAI-compatible endpoint.",
+          applies: "next_job",
+          editable: true,
+          reason: null,
+          probe: "llm",
+        },
+      ],
+    },
+  ],
+};
+
+export const MOCK_SETTINGS_VALUES = {
+  values: {
+    "core.negotiation.max_iterations": {
+      value: 5,
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.negotiation.retry_delay": {
+      value: 10,
+      is_set: null,
+      hint: null,
+      source: "ui",
+      updated_at: "2026-08-01T00:00:00Z",
+      updated_by: "user-1",
+    },
+    "core.negotiation.blocked_hosts": {
+      value: [],
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.openai.api_key": {
+      value: null,
+      is_set: true,
+      hint: "1234",
+      source: "env",
+      updated_at: null,
+      updated_by: null,
+    },
+  },
+};
+
 export interface MockOptions {
   /**
    * Handler for `**​/ws/analysis/**`. The default accepts the connection and
@@ -177,6 +318,13 @@ export interface MockOptions {
    * explicit, rather than relying on which `routeWebSocket` registration wins.
    */
   webSocket?: ((ws: WebSocketRoute) => void) | null;
+  /**
+   * Overrides the `auth/me` payload. The default fixture user is role
+   * `"analyst"`; specs covering the admin-only Configuration tab pass a
+   * `{ ...MOCK_USER, role: "admin" }` variant via `test.use({ mockOptions })`
+   * rather than a second fixture, following this file's one-surface pattern.
+   */
+  user?: typeof MOCK_USER;
 }
 
 /**
@@ -216,7 +364,7 @@ export async function installApiMocks(
       refresh_token: "mock_refresh_token",
     })
   );
-  await page.route("**/api/v1/auth/me", (route) => json(route, MOCK_USER));
+  await page.route("**/api/v1/auth/me", (route) => json(route, options.user ?? MOCK_USER));
   // Armed by AuthProvider at login. The stub refresh token is not a JWT, so the
   // timer defaults to ~14 min and this never fires inside a test — mocked
   // anyway, because "never fires" is a property of the fixture data, not a
@@ -301,6 +449,48 @@ export async function installApiMocks(
   await page.route("**/api/v1/samples/*", (route) => json(route, MOCK_SAMPLE));
   // After `samples/*`, which also matches this path — last registration wins.
   await page.route("**/api/v1/samples/upload", (route) => json(route, MOCK_SAMPLE));
+
+  /* ── Runtime settings (admin) ─────────────────────────
+   * Route precedence matters here more than elsewhere: `/settings/schema`,
+   * `/settings/export` and `/settings/*` (the per-key DELETE) all have one
+   * path segment after `settings`, so the generic `settings/*` handler is
+   * registered FIRST and the two literal paths AFTER it, exactly like the
+   * jobs section above — last registration wins when patterns overlap.
+   * `/settings/test/*` has two segments after `settings` so it never
+   * overlaps with `settings/*` and its position doesn't matter.
+   * The bare "settings" pattern (no query) and the "settings" + query
+   * pattern below are disjoint by construction — a bare-"settings" glob
+   * does not match a URL with a "?" per the note atop this file — so
+   * GET/PATCH (values, no query) and DELETE-by-group ("?group=") can't
+   * collide either. */
+  await page.route("**/api/v1/settings/*", (route) => {
+    const key = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+    return json(route, { reset: [key] });
+  });
+  await page.route("**/api/v1/settings/schema", (route) =>
+    json(route, MOCK_SETTINGS_SCHEMA)
+  );
+  await page.route("**/api/v1/settings/export", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/plain",
+      body: "CORE_NEGOTIATION_RETRY_DELAY=10\n",
+    })
+  );
+  await page.route("**/api/v1/settings/test/*", (route) =>
+    json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null })
+  );
+  await page.route("**/api/v1/settings", (route) =>
+    route.request().method() === "PATCH"
+      ? json(route, {
+          applied: Object.keys(
+            (route.request().postDataJSON() as { changes: Record<string, unknown> }).changes
+          ),
+          applies: { next_job: 1 },
+        })
+      : json(route, MOCK_SETTINGS_VALUES)
+  );
+  await page.route("**/api/v1/settings?**", (route) => json(route, { reset: [] }));
 
   /* ── Audit & API keys ─────────────────────────────── */
   await page.route("**/api/v1/audit/logs?**", (route) =>

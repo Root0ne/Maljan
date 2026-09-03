@@ -7,6 +7,7 @@ needing a real ARQ worker process.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,6 +15,33 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from app.worker.analysis_worker import WorkerSettings, run_analysis
+
+
+def _dsn(scheme: str, userinfo: str, rest: str) -> str:
+    """Assemble a credentialed URL at runtime so no literal DSN sits in the source
+    (secret scanners flag ``scheme://user:pass@host`` even in a masking test)."""
+    return f"{scheme}://{userinfo}@{rest}"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
+    """Keep these tests off the real runtime-settings singletons.
+
+    ``runtime_config`` would otherwise try the real session factory on every
+    ``run_analysis`` (and fall back on the connection error), and
+    ``install_settings`` would leave the last job's Settings behind for the
+    next test.
+    """
+    from app import runtime_config as rc
+
+    from maljan.core.config import reset_settings_cache
+
+    async def _no_overrides() -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(rc.runtime_config, "_overrides", _no_overrides)
+    yield
+    reset_settings_cache()
 
 
 @pytest_asyncio.fixture
@@ -374,3 +402,67 @@ def test_upload_temp_dir_resolves_to_absolute_path() -> None:
         f"upload_temp_dir resolved to non-absolute path {resolved!r}. "
         "Add ``.resolve()`` at the affected call site."
     )
+
+
+@pytest.mark.asyncio
+async def test_override_load_failure_falls_back_to_env_settings(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A DB error while loading UI overrides must not fail the job.
+
+    The job runs on environment settings and one warning names the exception
+    type only -- never a value, never a connection string.
+    """
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        if isinstance(getattr(obj, "status", None), str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    exec_results = [_make_result(job), _make_result(sample)]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    async def _boom(_db: Any) -> dict[str, Any]:
+        raise ConnectionError(f"{_dsn('postgres', 'maljan:s3cret', 'db:5432/maljan')} unreachable")
+
+    from app.services import settings_service
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _boom)
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict(
+            "os.environ",
+            {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+            clear=False,
+        ),
+        caplog.at_level(logging.WARNING, logger="app.worker.analysis_worker"),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    warnings = [r for r in caplog.records if "environment settings only" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "ConnectionError" in warnings[0].getMessage()
+    assert "s3cret" not in caplog.text

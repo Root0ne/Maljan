@@ -28,6 +28,32 @@ def _fake_user() -> Any:
     return MagicMock(id=uuid.uuid4())
 
 
+def _enabled_patch():
+    """Patch runtime_config so the enrichment-enabled gate is deterministic.
+
+    Task 7 moved the ``enrichment_enabled`` / API-key / ``enrichment_max_lookups``
+    reads from ``settings`` to ``runtime_config`` (a 5-second TTL cache over the
+    UI-managed overrides). These tests exercise the worker directly, without a
+    database, so ``runtime_config`` would otherwise fall back to a real (failed)
+    DB connection attempt before landing on the static default.
+    """
+    return (
+        patch(
+            "app.worker.enrich_worker.runtime_config.get",
+            AsyncMock(
+                side_effect=lambda n: {
+                    "enrichment_enabled": True,
+                    "enrichment_max_lookups": 25,
+                }[n]
+            ),
+        ),
+        patch(
+            "app.worker.enrich_worker.runtime_config.get_secret",
+            AsyncMock(side_effect=lambda n: {"virustotal_api_key": "", "abuseipdb_api_key": ""}[n]),
+        ),
+    )
+
+
 def _malware_report_dict() -> dict[str, Any]:
     return {
         "network": {
@@ -83,9 +109,14 @@ class TestEnrichWorkerHappy:
         redis = AsyncMock()
         ctx = {"redis": redis, "db_session": session_factory}
 
-        with patch(
-            "maljan.enrichment.enrich_malware_report",
-            new=AsyncMock(return_value=updated_payload),
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch(
+                "maljan.enrichment.enrich_malware_report",
+                new=AsyncMock(return_value=updated_payload),
+            ),
+            get_patch,
+            get_secret_patch,
         ):
             result = await enrich_threat_intel(ctx, str(report_id))
 
@@ -102,7 +133,9 @@ class TestEnrichWorkerSkips:
     @pytest.mark.asyncio
     async def test_invalid_uuid(self) -> None:
         ctx = {"redis": AsyncMock(), "db_session": MagicMock()}
-        result = await enrich_threat_intel(ctx, "not-a-uuid")
+        get_patch, get_secret_patch = _enabled_patch()
+        with get_patch, get_secret_patch:
+            result = await enrich_threat_intel(ctx, "not-a-uuid")
         assert result["status"] == "invalid_id"
 
     @pytest.mark.asyncio
@@ -113,7 +146,9 @@ class TestEnrichWorkerSkips:
         session_cm.__aenter__.return_value = db
         session_cm.__aexit__.return_value = None
         ctx = {"redis": AsyncMock(), "db_session": MagicMock(return_value=session_cm)}
-        result = await enrich_threat_intel(ctx, str(uuid.uuid4()))
+        get_patch, get_secret_patch = _enabled_patch()
+        with get_patch, get_secret_patch:
+            result = await enrich_threat_intel(ctx, str(uuid.uuid4()))
         assert result["status"] == "not_found"
 
     @pytest.mark.asyncio
@@ -126,7 +161,9 @@ class TestEnrichWorkerSkips:
         session_cm.__aenter__.return_value = db
         session_cm.__aexit__.return_value = None
         ctx = {"redis": AsyncMock(), "db_session": MagicMock(return_value=session_cm)}
-        result = await enrich_threat_intel(ctx, str(uuid.uuid4()))
+        get_patch, get_secret_patch = _enabled_patch()
+        with get_patch, get_secret_patch:
+            result = await enrich_threat_intel(ctx, str(uuid.uuid4()))
         assert result["status"] == "skipped"
 
 
@@ -146,9 +183,14 @@ class TestEnrichWorkerErrorIsContained:
         session_cm.__aexit__.return_value = None
         ctx = {"redis": AsyncMock(), "db_session": MagicMock(return_value=session_cm)}
 
-        with patch(
-            "maljan.enrichment.enrich_malware_report",
-            new=AsyncMock(side_effect=RuntimeError("boom")),
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch(
+                "maljan.enrichment.enrich_malware_report",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+            get_patch,
+            get_secret_patch,
         ):
             result = await enrich_threat_intel(ctx, str(fake_report.id))
 

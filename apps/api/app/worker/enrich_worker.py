@@ -23,6 +23,7 @@ import redis.asyncio as aioredis
 from app.config import settings
 from app.logging_config import get_logger
 from app.models.report import AnalysisReport
+from app.runtime_config import runtime_config
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -75,7 +76,7 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
     The task is **fail-safe**: any unexpected exception is logged but does
     not raise so ARQ does not retry-storm on permanent failures.
     """
-    if not settings.enrichment_enabled:
+    if not await runtime_config.get("enrichment_enabled"):
         logger.info("enrich: feature disabled in config, skipping.")
         return {"status": "disabled"}
 
@@ -101,8 +102,8 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
         # maljan-core dependencies.
         from maljan.enrichment import enrich_malware_report
 
-        vt_key = settings.virustotal_api_key.get_secret_value() or None
-        abuse_key = settings.abuseipdb_api_key.get_secret_value() or None
+        vt_key = await runtime_config.get_secret("virustotal_api_key") or None
+        abuse_key = await runtime_config.get_secret("abuseipdb_api_key") or None
 
         before_domain_reps = _count_reputations(report.malware_report, "domains")
         before_ip_reps = _count_reputations(report.malware_report, "ips")
@@ -114,7 +115,7 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
                 dict(report.malware_report),
                 vt_api_key=vt_key,
                 abuseipdb_api_key=abuse_key,
-                max_lookups_per_kind=settings.enrichment_max_lookups,
+                max_lookups_per_kind=await runtime_config.get("enrichment_max_lookups"),
                 memory_store=memory_store,
             )
         except Exception as exc:  # noqa: BLE001

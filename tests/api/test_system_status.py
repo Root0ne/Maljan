@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
 
 _API_PATH = Path(__file__).resolve().parents[2] / "apps" / "api"
 if str(_API_PATH) not in sys.path:
@@ -48,12 +47,28 @@ class TestSystemStatus:
         fake_settings = MagicMock()
         fake_settings.app_name = "Maljan"
         fake_settings.app_version = "0.1.0"
-        fake_settings.mock_mode_allowed = True
-        fake_settings.enrichment_enabled = True
-        fake_settings.virustotal_api_key = SecretStr("vt-secret-key")
-        fake_settings.abuseipdb_api_key = SecretStr("")
 
-        with patch("app.api.v1.system.settings", fake_settings):
+        with (
+            patch("app.api.v1.system.settings", fake_settings),
+            patch(
+                "app.api.v1.system.runtime_config.get",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "enrichment_enabled": True,
+                        "mock_mode_allowed": True,
+                    }[n]
+                ),
+            ),
+            patch(
+                "app.api.v1.system.runtime_config.get_secret",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "virustotal_api_key": "vt-secret-key",
+                        "abuseipdb_api_key": "",
+                    }[n]
+                ),
+            ),
+        ):
             resp = client.get("/api/v1/system/status")
 
         assert resp.status_code == 200
@@ -73,12 +88,28 @@ class TestSystemStatus:
         fake_settings = MagicMock()
         fake_settings.app_name = "Maljan"
         fake_settings.app_version = "0.1.0"
-        fake_settings.mock_mode_allowed = False
-        fake_settings.enrichment_enabled = True
-        fake_settings.virustotal_api_key = SecretStr("vt-supersecret-leak-canary")
-        fake_settings.abuseipdb_api_key = SecretStr("abuse-supersecret-leak-canary")
 
-        with patch("app.api.v1.system.settings", fake_settings):
+        with (
+            patch("app.api.v1.system.settings", fake_settings),
+            patch(
+                "app.api.v1.system.runtime_config.get",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "enrichment_enabled": True,
+                        "mock_mode_allowed": False,
+                    }[n]
+                ),
+            ),
+            patch(
+                "app.api.v1.system.runtime_config.get_secret",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "virustotal_api_key": "vt-supersecret-leak-canary",
+                        "abuseipdb_api_key": "abuse-supersecret-leak-canary",
+                    }[n]
+                ),
+            ),
+        ):
             resp = client.get("/api/v1/system/status")
 
         assert resp.status_code == 200

@@ -371,6 +371,26 @@ For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and poi
 
 See `.env.example` for the full reference.
 
+**From the UI.** Administrators (Settings → Configuration; the tab is shown
+but disabled for everyone else) can change every core pipeline setting and the API's
+runtime-safe knobs without editing `.env`. Precedence is
+`UI (Postgres) > environment / .env > code default`; nothing writes `.env`.
+Each field shows where its current value is coming from. A saved change
+either takes effect immediately (`live`, read through a 5-second cache),
+at the start of the next analysis (`next job`, the worker reads overrides
+when a job starts), or requires a process restart (`restart` — shown
+read-only: database, Redis, MinIO, JWT and other bootstrap settings stay in
+`.env`). Secret fields (API keys, tokens) are stored Fernet-encrypted under
+`SETTINGS_ENCRYPTION_KEY` and are only ever set or cleared from the UI — a
+saved secret is never read back, the API returns whether it is set and a
+short hint. "Test connection" checks the LLM endpoint (OpenAI, Anthropic,
+Ollama or Gemini, whichever is selected), Ghidra MCP, the CAPEv2 sandbox,
+Qdrant, Redis, VirusTotal and AbuseIPDB against the values you are about to
+save, before you save them. Exporting the current UI overrides produces a
+`.env`-formatted file with secret values masked as `***`. Every analysis
+records the settings that were actually in effect, and which of them came
+from a UI override, in its run summary.
+
 ---
 
 ## Design Principles

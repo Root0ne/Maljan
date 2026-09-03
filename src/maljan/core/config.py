@@ -19,7 +19,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -45,7 +45,7 @@ class OpenAIConfig(BaseModel):
     # 1.15 break the small reasoning model out of the catastrophic ATT&CK
     # ID-recall loops observed in live runs. Only applied when base_url is
     # set, so vanilla OpenAI (which would 400 on the param) stays untouched.
-    repetition_penalty: float = 1.0
+    repetition_penalty: Annotated[float, Field(ge=0)] = 1.0
     # Disable a local reasoning model's chain-of-thought (Qwen3 ``<think>``)
     # by forwarding ``chat_template_kwargs.enable_thinking=false`` via extra_body.
     # On constrained hosts the reasoning model otherwise spends the whole decode
@@ -70,7 +70,7 @@ class OllamaConfig(BaseModel):
     expert_model: str = "qwen3.5:9b"
     judge_model: str = "qwen3.5:9b"
     keep_alive: str = "30m"
-    num_ctx: int = 32768
+    num_ctx: Annotated[int, Field(ge=1)] = 32768
 
 
 class GeminiConfig(BaseModel):
@@ -120,9 +120,9 @@ class FrontierArm(BaseModel):
     api_key: SecretStr | None = None
     model: str = ""
     # Deliberately small. Raising it should be a decision, not a default.
-    max_spend_usd: float = 25.0
-    input_usd_per_mtok: float = 0.0
-    output_usd_per_mtok: float = 0.0
+    max_spend_usd: Annotated[float, Field(ge=0)] = 25.0
+    input_usd_per_mtok: Annotated[float, Field(ge=0)] = 0.0
+    output_usd_per_mtok: Annotated[float, Field(ge=0)] = 0.0
 
     # Set True only when the endpoint genuinely bills nothing (e.g. an
     # OpenRouter ``:free`` model). It is an explicit acknowledgement, not a
@@ -156,15 +156,15 @@ class FrontierArm(BaseModel):
     # The first attempt at B8 recorded throttles as failures and reported n=9
     # with a wrong point estimate, so a paced client with backoff is now part of
     # the arm's definition and not something each harness reinvents.
-    min_interval_s: float = 0.0
-    max_retries: int = 6
+    min_interval_s: Annotated[float, Field(ge=0)] = 0.0
+    max_retries: Annotated[int, Field(ge=0)] = 6
 
     # Provenance for the parameter-size analysis, which is the whole reason
     # more than one arm exists. Recorded here so the correlation in the paper is
     # computed from configuration rather than from a number remembered while
     # writing, and so an arm cannot enter the series without declaring its size.
-    total_params_b: float = 0.0
-    active_params_b: float = 0.0
+    total_params_b: Annotated[float, Field(ge=0)] = 0.0
+    active_params_b: Annotated[float, Field(ge=0)] = 0.0
     quantisation: str = ""
 
 
@@ -193,7 +193,7 @@ class LLMConfig(BaseModel):
     Empty dict means all agents share the global expert LLM (default behavior).
     """
 
-    provider: str = "openai"
+    provider: Literal["openai", "anthropic", "ollama", "gemini"] = "openai"
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
@@ -213,7 +213,7 @@ class LLMConfig(BaseModel):
     # ~40 tok/s, well under the timeout. This is a worst-case-latency/robustness
     # guard (in the spirit of the §3.3 degenerate-loop damper), not a quality
     # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
-    judge_max_tokens: int = 8192
+    judge_max_tokens: Annotated[int, Field(ge=0)] = 8192
 
     # Wave 7 THROUGHPUT-01 (2026-05-28): when True, analysts run in parallel —
     # correct for hosted multi-slot LLMs. When False (the DEFAULT since
@@ -254,7 +254,7 @@ class LLMConfig(BaseModel):
     # monolithic arm (the equal-budget control §3.2 lacked). Text path only;
     # the tool-using Ghidra/CAPE ReAct loop is unaffected. Stays off until the
     # §3.6 eval justifies it. Set ``LLM__VIEW_DECOMPOSITION_VIEWS=2`` to pilot.
-    view_decomposition_views: int = 0
+    view_decomposition_views: Annotated[int, Field(ge=0)] = 0
 
     # Per-call output budget for the analyst LLM. Used to size the equal-budget
     # split when ``view_decomposition_views > 0`` (0 = provider/server default,
@@ -270,7 +270,7 @@ class LLMConfig(BaseModel):
     # full 25 minutes to burn. 8192 matches ``judge_max_tokens`` and is far above
     # any legitimate analyst answer (~2-4k tokens observed), so it bounds the
     # tail without truncating real output. Set 0 to restore unbounded.
-    expert_max_tokens: int = 8192
+    expert_max_tokens: Annotated[int, Field(ge=0)] = 8192
 
     # View-decomposition strategy when ``view_decomposition_views >= 2``
     # (findings-log §4 Item 3, LAMD). "facet" = horizontal, AppPoet-style
@@ -320,8 +320,8 @@ class NegotiationConfig(BaseModel):
     loops when adaptive convergence fails.
     """
 
-    max_iterations: int = 5
-    consensus_threshold: float = 0.85
+    max_iterations: Annotated[int, Field(ge=1)] = 5
+    consensus_threshold: Annotated[float, Field(ge=0, le=1)] = 0.85
 
 
 class ChunkingConfig(BaseModel):
@@ -346,10 +346,10 @@ class ChunkingConfig(BaseModel):
     # system and ~8K generation leaves ~36K headroom, so 20K/chunk is safe and
     # collapses that same PE to ~8 chunks. Override via
     # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
-    max_tokens_per_chunk: int = 20000
+    max_tokens_per_chunk: Annotated[int, Field(ge=1)] = 20000
 
     # Overlap between consecutive chunks (in tokens) to preserve context
-    overlap_tokens: int = 200
+    overlap_tokens: Annotated[int, Field(ge=0)] = 200
 
     # If True, skip chunking for data smaller than max_tokens_per_chunk
     skip_if_fits: bool = True
@@ -371,14 +371,14 @@ class MemoryConfig(BaseModel):
                         increase prompt length.
     """
 
-    backend: str = "qdrant"  # "memory" | "qdrant"
+    backend: Literal["memory", "qdrant"] = "qdrant"
     qdrant_url: str = "http://localhost:6333"
     # v2 collection name — created with fastembed/BGE 384-dim vectors. Operators
     # upgrading from the pre-fastembed era (which used 512-dim hash vectors in
     # a collection named ``maljan_cases``) should either point at this fresh
     # name or delete the old collection explicitly.
     qdrant_collection: str = "maljan_cases_v2"
-    top_k: int = 3
+    top_k: Annotated[int, Field(ge=1)] = 3
     # Function-hash attribution tier (deterministic, exact opcode-hash match).
     # A separate Qdrant collection stores per-function normalized-opcode hashes
     # keyed to the malware family, so a new sample sharing functions with a
@@ -408,7 +408,7 @@ class SandboxConfig(BaseModel):
         interval. Token can be empty for unauthenticated local instances.
     """
 
-    backend: str = "mock"  # "mock" | "cape2"
+    backend: Literal["mock", "cape2"] = "mock"
     cape2_base_url: str = "http://localhost:8000"
     cape2_api_token: SecretStr = SecretStr("")
     cape2_timeout_seconds: int = 300
@@ -449,9 +449,9 @@ class PreprocessingConfig(BaseModel):
     """
 
     use_function_summarizer: bool = False
-    summarizer_provider: str = "ollama"
+    summarizer_provider: Literal["openai", "anthropic", "ollama", "gemini"] = "ollama"
     summarizer_model: str = "llama3.2:3b"
-    summarizer_max_words: int = 150
+    summarizer_max_words: Annotated[int, Field(ge=1)] = 150
     # 2026-07-13 — restored 3000 -> 6000 (was 8000 before the 2026-07-11 cut).
     # The cut to 3000 blamed "SWA re-prefill", a MISDIAGNOSIS: the served model
     # is a hybrid Gated-DeltaNet (recurrent) MoE, not sliding-window, and the
@@ -467,7 +467,7 @@ class PreprocessingConfig(BaseModel):
     # triggers a silent server context-shift that drops the earliest tokens (the
     # load_program framing) — catastrophic and invisible. Override via
     # ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
-    max_tool_output_chars: int = 6000
+    max_tool_output_chars: Annotated[int, Field(ge=1)] = 6000
 
     # Sink-reachability triage (Maltracker-inspired). When enabled, the static
     # analyst runs a deterministic pre-pass over the Ghidra call graph to find
@@ -475,7 +475,7 @@ class PreprocessingConfig(BaseModel):
     # "priority functions" hint into its prompt, focusing decompilation on the
     # malicious core. Fail-safe: any error or a stripped binary yields no hint.
     use_sink_reachability: bool = True
-    sink_reachability_max_funcs: int = 12
+    sink_reachability_max_funcs: Annotated[int, Field(ge=1)] = 12
 
     # TraceRAG-style function-level retrieval for the static analyst (§4 Item 2).
     # 0 = off (linear chunking — every function chunk fed to the LLM). N > 0: for
@@ -484,8 +484,8 @@ class PreprocessingConfig(BaseModel):
     # analyst on the malicious core. Engages only when the static chunk count
     # exceeds ``static_function_rag_min_chunks`` (small binaries keep the full
     # path). Fail-safe: retrieval that matches nothing falls back to all chunks.
-    static_function_rag_top_k: int = 0
-    static_function_rag_min_chunks: int = 6
+    static_function_rag_top_k: Annotated[int, Field(ge=0)] = 0
+    static_function_rag_min_chunks: Annotated[int, Field(ge=1)] = 6
 
     # LAMD-style inline foundational-tier consistency gate (§4 Item 4). When
     # True, the analyst safe_* wrappers drop claims whose cited artifact /
@@ -505,8 +505,8 @@ class PreprocessingConfig(BaseModel):
     # are ignored — tiny thunks/stubs collide across unrelated binaries and would
     # otherwise produce false family links. Fail-safe and http-transport only.
     use_function_hash_attribution: bool = True
-    function_hash_min_instructions: int = 8
-    function_hash_max_matches: int = 8
+    function_hash_min_instructions: Annotated[int, Field(ge=1)] = 8
+    function_hash_max_matches: Annotated[int, Field(ge=1)] = 8
 
     # Family-feature RAG (§4 dataset-survey workstream — LLM-centric attribution).
     # When enabled AND a vendored fingerprint catalog exists at
@@ -532,8 +532,8 @@ class PreprocessingConfig(BaseModel):
     # data/samples/extracted/<Family>/{a0,a1}/, which is not vendored.
     use_family_feature_rag: bool = False
     family_fingerprint_catalog_path: str = "data/family_fingerprints_v1.json"
-    family_rag_top_k: int = 5
-    family_rag_min_score: float = 0.3
+    family_rag_top_k: Annotated[int, Field(ge=1)] = 5
+    family_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.3
 
     # Windows API behaviour map — the data-driven replacement for the 51-entry
     # ``pe_extractor._SUSPICIOUS_IMPORTS`` table. ~680 API names across 13
@@ -626,14 +626,14 @@ class PreprocessingConfig(BaseModel):
     # (or the query in capa's) — the eval script re-runs in ~2 min and answers it.
     use_attck_case_rag: bool = False
     attck_case_corpus_path: str = "data/attck_case_corpus_v1.json"
-    attck_case_rag_top_k: int = 5
+    attck_case_rag_top_k: Annotated[int, Field(ge=1)] = 5
     # NOTE: this floor is inert at present — every one of the 15 production-style queries
     # scored 0.78-0.90 against the corpus, so nothing is ever filtered. It is kept (rather
     # than raised to a value that would appear to work) because the scores do not separate
     # good matches from bad ones, exactly as measured for the semantic ATT&CK gate above;
     # a threshold picked to make the numbers look decisive would only hide that.
-    attck_case_rag_min_score: float = 0.35
-    attck_case_rag_max_techniques: int = 8
+    attck_case_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.35
+    attck_case_rag_max_techniques: Annotated[int, Field(ge=1)] = 8
 
     # Deterministic ATT&CK technique-ID correction. When enabled, the judge node
     # runs a pre-cascade pass that re-grounds each LLM analyst claim's technique_id
@@ -644,7 +644,7 @@ class PreprocessingConfig(BaseModel):
     # describes behaviour and the index assigns the ID. Layer-0 deterministic
     # sources (yara/sigma) are skipped — their IDs are rule-authoritative. Fail-safe.
     use_attck_autocorrect: bool = True
-    attck_autocorrect_min_alignment: float = 0.08
+    attck_autocorrect_min_alignment: Annotated[float, Field(ge=0, le=1)] = 0.08
     # Whether to also swap VALID-but-low-alignment technique IDs (not just fix
     # invalid ones). The TRAM2 ablation (findings-log §1.5.2) found this path
     # damages ~38% of already-correct IDs while recovering only ~21% of wrong
@@ -663,12 +663,12 @@ class PreprocessingConfig(BaseModel):
     # so the existing 0.08 threshold applies. fastembed is already loaded in
     # production for long-term memory, so the marginal cost is one catalog embed
     # at startup. Set to "tfidf" to skip embeddings entirely (air-gapped/minimal).
-    attck_index_backend: str = "hybrid"
+    attck_index_backend: Literal["tfidf", "semantic", "hybrid"] = "hybrid"
     # Semantic threshold is intentionally 0.0: the eval showed absolute semantic
     # scores do not separate correct from wrong, so the absolute low-alignment
     # gate is disabled for that backend (it still fixes invalid IDs and applies
     # strictly-better relative swaps, which need no absolute threshold).
-    attck_autocorrect_min_alignment_semantic: float = 0.0
+    attck_autocorrect_min_alignment_semantic: Annotated[float, Field(ge=0, le=1)] = 0.0
 
     # Backend for malware-category inference (drives the §7.1 STIX schema-pruning
     # hint). Default "keyword" = the deterministic substring classifier
@@ -690,7 +690,7 @@ class PreprocessingConfig(BaseModel):
     # regime) it is competitive AND safe-abstaining; the hint is advisory anyway,
     # so the marginal category-accuracy gain has limited end-to-end effect.
     # Set to "hybrid" to recover keyword's abstentions via the semantic fallback.
-    category_inference_backend: str = "keyword"  # "keyword" | "semantic" | "hybrid"
+    category_inference_backend: Literal["keyword", "semantic", "hybrid"] = "keyword"
 
 
 # ---------------------------------------------------------------------------
@@ -707,7 +707,7 @@ class MCPServerConfig(BaseModel):
     """
 
     enabled: bool = False
-    transport: str = "stdio"  # "stdio" | "http"
+    transport: Literal["stdio", "http", "streamable-http", "sse"] = "stdio"
     # stdio transport settings
     command: str = ""
     args: list[str] = Field(default_factory=list)
@@ -758,7 +758,7 @@ class ReportingConfig(BaseModel):
 
     enabled: bool = True
     include_extended_stix: bool = True
-    narrative_max_tokens: int = 1500
+    narrative_max_tokens: Annotated[int, Field(ge=1)] = 1500
     auto_generate_detection_rules: bool = True
 
     # --- Report-reshaping (professional-report front-matter + Composer) ---
@@ -772,8 +772,8 @@ class ReportingConfig(BaseModel):
     # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
-    composer_section_max_tokens: int = 900
-    composer_per_section_timeout: int = 120
+    composer_section_max_tokens: Annotated[int, Field(ge=1)] = 900
+    composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
     # Server-side HTML→PDF export (Phase 6).
     html_export_enabled: bool = True
 
@@ -828,18 +828,18 @@ class Settings(BaseSettings):
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
 
     # Token overflow protection (128K is conservative for Gemini 1M+ context)
-    max_token_limit: int = 128_000
+    max_token_limit: Annotated[int, Field(ge=1)] = 128_000
 
     # ReAct agent execution limits
-    react_agent_timeout: int = 180  # seconds before agent loop times out
-    react_agent_max_steps: int = 10  # max LangGraph recursion steps
+    react_agent_timeout: Annotated[int, Field(ge=1)] = 180  # seconds before agent loop times out
+    react_agent_max_steps: Annotated[int, Field(ge=1)] = 10  # max LangGraph recursion steps
     # PERF-STATIC-ANALYST-LATENCY-01 (audit 2026-05-19) — tool-call budget.
     # When an analyst's ReAct loop exceeds this many cumulative tool calls
     # we log a WARNING. Not a hard limit (LangGraph's recursion_limit is
     # the structural cap); this is the early signal that an analyst is
     # spinning unproductively on tool calls. Set via env
     # ``REACT_AGENT_TOOL_CALL_BUDGET``.
-    react_agent_tool_call_budget: int = 20
+    react_agent_tool_call_budget: Annotated[int, Field(ge=1)] = 20
 
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The
@@ -989,6 +989,19 @@ def reset_settings_cache() -> None:
     """Drop the cached Settings instance (intended for tests)."""
     global _settings_instance
     _settings_instance = None
+
+
+def install_settings(instance: Settings) -> None:
+    """Make ``instance`` the process-wide singleton every ``get_settings()`` caller sees.
+
+    The arq worker (``max_jobs = 1``) calls this once per job with the Settings
+    it built from the environment plus the UI-managed overrides. Agents,
+    pipeline nodes and extractors read ``get_settings()`` rather than an
+    injected config, so without this a UI override would reach the container
+    and nothing below it.
+    """
+    global _settings_instance
+    _settings_instance = instance
 
 
 class _LazySettingsProxy:

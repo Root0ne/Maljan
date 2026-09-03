@@ -5,9 +5,13 @@ import { api } from "@/lib/api";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/report-utils";
+import { useAuth } from "@/lib/auth";
+import ConfigurationTab from "./configuration/ConfigurationTab";
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<"general" | "apikeys">("general");
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.role === "admin";
+  const [activeTab, setActiveTab] = useState<"general" | "apikeys" | "configuration">("general");
 
   // General tab state
   const [user, setUser] = useState<{ full_name: string; email: string } | null>(null);
@@ -38,6 +42,7 @@ export default function SettingsPage() {
   const tabs = [
     { key: "general" as const, label: "General" },
     { key: "apikeys" as const, label: "API Keys" },
+    { key: "configuration" as const, label: "Configuration" },
   ];
 
   useEffect(() => {
@@ -181,19 +186,31 @@ export default function SettingsPage() {
 
       {/* Tab Bar */}
       <div className="flex border-b border-border mb-6">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
-              activeTab === tab.key
-                ? "border-accent text-accent"
-                : "border-transparent text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const disabled = tab.key === "configuration" && !isAdmin;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                if (disabled) return;
+                setActiveTab(tab.key);
+              }}
+              disabled={disabled}
+              aria-disabled={disabled}
+              title={disabled ? "Admin role required" : undefined}
+              className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
+                disabled
+                  ? "border-transparent text-text-disabled cursor-not-allowed"
+                  : activeTab === tab.key
+                    ? "border-accent text-accent"
+                    : "border-transparent text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* General Tab */}
@@ -430,6 +447,13 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Configuration Tab (admin only) */}
+      {activeTab === "configuration" && isAdmin && (
+        <div className="max-w-5xl">
+          <ConfigurationTab />
         </div>
       )}
 
