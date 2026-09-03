@@ -2,10 +2,26 @@
 
 import uuid
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ── Job Schemas ──────────────────────────────────────────────────
+
+
+class _KnownJobConfig(BaseModel):
+    """The job-config keys the worker folds into the per-job Settings.
+
+    Same choices and bounds as the core model, checked at submit time so a
+    bad value is a 422 here rather than a failed job minutes later. Unknown
+    keys pass through untouched.
+    """
+
+    model_config = {"extra": "allow"}
+
+    max_iterations: Annotated[int, Field(ge=1)] | None = None
+    llm_provider: Literal["openai", "anthropic", "ollama", "gemini"] | None = None
+    mock_mode: bool | None = None
 
 
 class JobCreateRequest(BaseModel):
@@ -16,6 +32,13 @@ class JobCreateRequest(BaseModel):
         default=None,
         description="Optional pipeline config overrides (llm_provider, max_iterations, etc.)",
     )
+
+    @field_validator("config")
+    @classmethod
+    def _known_keys_are_valid(cls, value: dict | None) -> dict | None:
+        if value:
+            _KnownJobConfig.model_validate(value)
+        return value
 
 
 class JobResponse(BaseModel):

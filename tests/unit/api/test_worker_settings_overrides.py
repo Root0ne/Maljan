@@ -44,3 +44,28 @@ def test_install_settings_replaces_the_process_singleton():
         assert core_config.settings.negotiation.max_iterations == 7
     finally:
         core_config.reset_settings_cache()
+
+
+def test_job_config_is_validated_by_the_model():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        build_job_settings({}, {"max_iterations": 0})
+    with pytest.raises(ValidationError):
+        build_job_settings({}, {"llm_provider": "bedrock"})
+
+
+def test_job_create_request_rejects_bad_config_at_submit_time():
+    import uuid
+
+    import pytest
+    from app.schemas.job import JobCreateRequest
+    from pydantic import ValidationError
+
+    ok = JobCreateRequest(sample_id=uuid.uuid4(), config={"max_iterations": 2, "extra": 1})
+    assert ok.config == {"max_iterations": 2, "extra": 1}
+    with pytest.raises(ValidationError):
+        JobCreateRequest(sample_id=uuid.uuid4(), config={"max_iterations": 0})
+    with pytest.raises(ValidationError):
+        JobCreateRequest(sample_id=uuid.uuid4(), config={"llm_provider": "bedrock"})

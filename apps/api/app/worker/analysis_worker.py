@@ -339,7 +339,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id},
                 )
                 overrides = {}
-                core_settings = build_job_settings({}, job.config)
+                try:
+                    core_settings = build_job_settings({}, job.config)
+                except (ValidationError, ValueError):
+                    # The rejected value was the job's own config, not a
+                    # stored override (the API validates it at submit time,
+                    # but a row written another way still reaches here).
+                    logger.warning(
+                        "Job %s config rejected by the model; "
+                        "running on environment settings only.",
+                        job_id,
+                        extra={"job_id": job_id},
+                    )
+                    core_settings = build_job_settings({}, None)
             # Agents, pipeline nodes and extractors read the process singleton
             # (``get_settings()``), not the config handed to MaljanApp. With
             # ``max_jobs = 1`` installing this job's Settings there is what
