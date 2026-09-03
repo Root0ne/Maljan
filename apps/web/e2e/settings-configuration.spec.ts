@@ -410,6 +410,8 @@ test.describe("Settings → Configuration (admin)", () => {
 });
 
 test.describe("Settings → Configuration (stale stored override)", () => {
+  test.use({ mockOptions: { user: { ...MOCK_USER, role: "admin" } } });
+
   test("a 422 that blames an untouched key is named in the action banner", async ({
     authenticatedPage: page,
   }) => {
