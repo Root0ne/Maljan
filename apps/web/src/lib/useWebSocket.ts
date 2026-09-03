@@ -33,6 +33,13 @@ const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || defaultWsBase();
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 30_000;
 
+// Close codes that mean "the credential was rejected" rather than "the
+// connection dropped": retrying immediately would just resend the same bad
+// token. 1008 is the generic policy-violation code the server used to close
+// with; 4401 is its dedicated "unauthorized" code (see apps/api/app/api/ws.py)
+// now that the access token travels only in the maljan.v1 subprotocol.
+const NO_RETRY_CLOSE_CODES = new Set([1008, 4401]);
+
 function backoffDelay(attempt: number): number {
   // Full jitter (AWS architecture blog): pick a random value between 0
   // and the exponential ceiling. Avoids thundering-herd reconnects when
@@ -94,9 +101,9 @@ export function useWebSocket(jobId: string | null) {
 
     ws.onclose = (event) => {
       setConnected(false);
-      /* Don't auto-reconnect on auth/policy failure (1008) — credential
+      /* Don't auto-reconnect on auth/policy failure (1008, 4401) — credential
          needs to be refreshed first. */
-      if (event.code === 1008) return;
+      if (NO_RETRY_CLOSE_CODES.has(event.code)) return;
       if (cancelledRef.current) return;
       const delay = backoffDelay(attemptRef.current);
       attemptRef.current += 1;
