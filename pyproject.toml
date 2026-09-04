@@ -36,6 +36,11 @@ dependencies = [
     "python-multipart>=0.0.6",
     "alembic>=1.14.0",
     "filetype>=1.2.0",
+    # RFC 9535 JSONPath, the standardised selector language, used to describe a
+    # sandbox's report shape in settings rather than in code. Pure Python and
+    # dependency-free, which is why it is a direct dependency rather than an
+    # extra: sandbox.provider=rest must work on a plain `uv sync`.
+    "jsonpath-rfc9535>=1.0.0",
     "pyelftools>=0.32",
     # Report export (Phase 6). markdown-it-py converts the MarkdownRenderer
     # output to HTML with raw-HTML passthrough disabled — the XSS guard for

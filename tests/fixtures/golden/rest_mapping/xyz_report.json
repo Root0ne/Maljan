@@ -1,0 +1,22 @@
+{
+  "sample": {"hashes": {"sha256": "b1946ac92492d2347c6235b4d2611184b1946ac92492d2347c6235b4d2611184"}},
+  "run": {
+    "processes": [
+      {"pid": 100, "ppid": 4, "image": "loader.exe", "cmdline": "loader.exe /q",
+       "syscalls": [{"pid": 100, "syscall": "NtCreateFile", "args": {"path": "C:\\t"}, "timestamp": 1},
+                    {"pid": 100, "syscall": "NtWriteFile", "args": {}, "timestamp": 2}]},
+      {"pid": 101, "ppid": 100, "image": "svc.exe", "cmdline": "svc.exe",
+       "syscalls": [{"syscall": "NtOpenKey", "timestamp": 3}]}
+    ],
+    "registry": ["HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc", ""]
+  },
+  "detections": [
+    {"name": "persistence_run_key", "description": "Writes a Run key", "score": 3, "attack": ["T1547.001"]},
+    {"description": "unnamed rule", "score": 1}
+  ],
+  "net": {
+    "lookups": [{"qname": "c2.example", "type": "A", "answers": ["203.0.113.9"]}],
+    "streams": [{"peer": "203.0.113.9", "peer_port": 443}]
+  },
+  "artifacts": [{"filename": "svc.exe", "sha256": "0f", "size": 2048}]
+}
