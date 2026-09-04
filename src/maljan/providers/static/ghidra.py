@@ -2,9 +2,9 @@
 
 The tool allow-list, the tool-selection modes, the load_program path pin and
 the http/stdio attach path are all the static analyst's own code
-(``StaticAnalyst``, pre-2026-09), transplanted here unchanged. The analyst
-still drives its own copy for now (``_initialize_mcp_client``); Task 10 is
-what makes it call this provider instead.
+(``StaticAnalyst``, pre-2026-09), transplanted here unchanged. The analyst's
+``_initialize_mcp_client`` now calls this provider instead of driving its own
+copy.
 """
 
 from __future__ import annotations
@@ -29,9 +29,76 @@ if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig, Settings
 
 
-# Filled in by Task 10, which builds the static system prompt's tool-facing
-# fragment out of the provider instead of the analyst's own inline string.
-GHIDRA_PROMPT_FRAGMENT: str = ""
+# The tool-facing body of the static system prompt: verbatim lines 23-85 of
+# the old ``_ISR_SYSTEM`` in the analyst, moved rather than retyped so a
+# golden test can pin the assembled prompt byte for byte. ``_ISR_HEAD`` in
+# the analyst supplies the provider-independent opening line this fragment
+# completes.
+GHIDRA_PROMPT_FRAGMENT: str = (
+    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
+    "You can decompile functions, find cross-references, extract strings, and more. "
+    "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
+    "string offset (.data+0xNN), API import, or hex pattern. "
+    "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
+    "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
+    "=== TOOL USAGE WORKFLOW ===\n"
+    "Follow this reverse engineering sequence. Prefer the malware-specific\n"
+    "analyzers first — they return pre-digested triage signals in one call,\n"
+    "which is far cheaper than walking every function manually:\n"
+    "1. Call `load_program(file=<path>)` to load the binary into Ghidra.\n"
+    "   The file path is the absolute path on the server filesystem.\n"
+    "2. Call `get_current_program_info` to verify the program loaded correctly.\n"
+    "3. Call `detect_malware_behaviors` for a fast behavior-category summary.\n"
+    "4. Call `analyze_api_call_chains` for suspicious API sequences with threat\n"
+    "   classifications.\n"
+    "5. Call `find_anti_analysis_techniques` to surface packing/anti-debug/VM\n"
+    "   evasion patterns.\n"
+    "6. Call `extract_iocs_with_context` to pull URLs, IPs, registry keys, and\n"
+    "   filesystem paths with the calling function context.\n"
+    "7. Call `list_imports` to confirm suspicious API imports raised above.\n"
+    "8. Call `list_strings` for any encoded/hardcoded artefacts the IOC pass\n"
+    "   missed.\n"
+    "9. For the 3–5 most suspicious functions: `decompile_function(address=<addr>)`\n"
+    "   then `get_xrefs_to(address=<addr>)` to confirm call-sites.\n\n"
+    "=== ADVANCED TOOLS (reach for these when the triage signals call for them) ===\n"
+    "- API names resolved by hash (a hashing loop, sparse imports): call\n"
+    "  `emulate_hash_batch` to brute-force the obfuscated API names.\n"
+    "- Suspected encryption / ransomware: `detect_crypto_constants`.\n"
+    "- Trace a key, config value, or decoded buffer through a function:\n"
+    "  `analyze_dataflow(address=<addr>, direction=backward|forward)`.\n"
+    "- Run a small hash / decode routine to see its output: `emulate_function`.\n"
+    "- Packed binary with few functions: `find_code_gaps` to surface missed code.\n"
+    "- Record `get_function_hash` on the core malicious function for attribution.\n\n"
+    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
+    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
+    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
+    "  FALSIFY it first: `emulate_function` with a known input vs the expected\n"
+    "  output, OR `analyze_dataflow(direction=backward)` to confirm its origin.\n"
+    "  If you cannot run the check (non-leaf, syscall/heap side effects), cap\n"
+    "  CONFIDENCE at 0.7.\n"
+    "- `emulate_hash_batch`: read the FULL `matches` list. If more than one API\n"
+    "  name collides, do NOT blindly take `best_match` — disambiguate via the\n"
+    "  likely source DLL, or emit CONFIDENCE <= 0.5.\n"
+    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
+    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
+    "  contradictory signals before emitting.\n"
+    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
+    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
+    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
+    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
+    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
+    "  import table that hides the real APIs. A rich, fully-named import table\n"
+    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
+    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim.\n\n"
+    "IMPORTANT:\n"
+    "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
+    "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
+    "  decompiling individual functions — they are much cheaper.\n"
+    "- Focus decompilation on 3-5 most suspicious functions, not every function.\n"
+    "- Large binaries may have 1000+ functions. Prioritize entry point, main,\n"
+    "  and functions referencing crypto/network/process APIs.\n"
+    "- Summarize assembly patterns instead of dumping raw hex."
+)
 
 
 # Allowlist of Ghidra MCP tools exposed to the ReAct agent.
@@ -136,6 +203,9 @@ class GhidraStaticProvider(StaticProvider):
             supports_tool_curation=True,
             degrade_on_failure=False,
         )
+
+    def prompt_fragment(self) -> str:
+        return GHIDRA_PROMPT_FRAGMENT
 
     def open(self, job: StaticJobContext) -> None:
         self._job = job

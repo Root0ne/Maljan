@@ -15,75 +15,35 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.registry import register_agent
+from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
-# Structured ISR system prompt shared by analyze and revise
-_ISR_SYSTEM = (
+# The provider-independent head of the static system prompt. Everything that
+# names a tool lives in the provider's fragment, so attaching radare2 or capa
+# changes the middle and nothing else. A golden test pins the assembled result
+# byte for byte against the prompt this project measured its evaluation on.
+_ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
-    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
-    "You can decompile functions, find cross-references, extract strings, and more. "
-    "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-    "string offset (.data+0xNN), API import, or hex pattern. "
-    "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-    "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
-    "=== TOOL USAGE WORKFLOW ===\n"
-    "Follow this reverse engineering sequence. Prefer the malware-specific\n"
-    "analyzers first — they return pre-digested triage signals in one call,\n"
-    "which is far cheaper than walking every function manually:\n"
-    "1. Call `load_program(file=<path>)` to load the binary into Ghidra.\n"
-    "   The file path is the absolute path on the server filesystem.\n"
-    "2. Call `get_current_program_info` to verify the program loaded correctly.\n"
-    "3. Call `detect_malware_behaviors` for a fast behavior-category summary.\n"
-    "4. Call `analyze_api_call_chains` for suspicious API sequences with threat\n"
-    "   classifications.\n"
-    "5. Call `find_anti_analysis_techniques` to surface packing/anti-debug/VM\n"
-    "   evasion patterns.\n"
-    "6. Call `extract_iocs_with_context` to pull URLs, IPs, registry keys, and\n"
-    "   filesystem paths with the calling function context.\n"
-    "7. Call `list_imports` to confirm suspicious API imports raised above.\n"
-    "8. Call `list_strings` for any encoded/hardcoded artefacts the IOC pass\n"
-    "   missed.\n"
-    "9. For the 3–5 most suspicious functions: `decompile_function(address=<addr>)`\n"
-    "   then `get_xrefs_to(address=<addr>)` to confirm call-sites.\n\n"
-    "=== ADVANCED TOOLS (reach for these when the triage signals call for them) ===\n"
-    "- API names resolved by hash (a hashing loop, sparse imports): call\n"
-    "  `emulate_hash_batch` to brute-force the obfuscated API names.\n"
-    "- Suspected encryption / ransomware: `detect_crypto_constants`.\n"
-    "- Trace a key, config value, or decoded buffer through a function:\n"
-    "  `analyze_dataflow(address=<addr>, direction=backward|forward)`.\n"
-    "- Run a small hash / decode routine to see its output: `emulate_function`.\n"
-    "- Packed binary with few functions: `find_code_gaps` to surface missed code.\n"
-    "- Record `get_function_hash` on the core malicious function for attribution.\n\n"
-    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
-    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
-    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
-    "  FALSIFY it first: `emulate_function` with a known input vs the expected\n"
-    "  output, OR `analyze_dataflow(direction=backward)` to confirm its origin.\n"
-    "  If you cannot run the check (non-leaf, syscall/heap side effects), cap\n"
-    "  CONFIDENCE at 0.7.\n"
-    "- `emulate_hash_batch`: read the FULL `matches` list. If more than one API\n"
-    "  name collides, do NOT blindly take `best_match` — disambiguate via the\n"
-    "  likely source DLL, or emit CONFIDENCE <= 0.5.\n"
-    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
-    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
-    "  contradictory signals before emitting.\n"
-    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
-    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
-    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
-    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
-    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
-    "  import table that hides the real APIs. A rich, fully-named import table\n"
-    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
-    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim.\n\n"
-    "IMPORTANT:\n"
-    "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
-    "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
-    "  decompiling individual functions — they are much cheaper.\n"
-    "- Focus decompilation on 3-5 most suspicious functions, not every function.\n"
-    "- Large binaries may have 1000+ functions. Prioritize entry point, main,\n"
-    "  and functions referencing crypto/network/process APIs.\n"
-    "- Summarize assembly patterns instead of dumping raw hex."
 )
+
+# Empty today. Declared because the assembly order is the contract sub-projects
+# B and C build agent prompts from, and an implicit empty tail is a trap.
+_ISR_TAIL = ""
+
+
+def _static_prompt(provider: Any | None = None) -> str:
+    """Assemble the static system prompt for ``provider`` (the configured one by default)."""
+    if provider is None:
+        from maljan.core.config import get_settings
+        from maljan.providers.registry import get_static_provider
+
+        provider = get_static_provider(get_settings())
+    return _ISR_HEAD + provider.prompt_fragment() + _ISR_TAIL
+
+
+# Back-compat: several modules and tests import this name. It is the default
+# profile's assembled prompt, which is what it always was.
+_ISR_SYSTEM = _static_prompt()
 
 
 # BUG-07 (2026-06-23 live-UI audit): the deterministic raw-data slot.
@@ -154,7 +114,7 @@ class _LegacyGhidraJob:
 
 @register_agent("static")
 class StaticAnalyst(BaseAnalyst):
-    """Specialized agent for evaluating decompiled code and strings via Ghidra MCP."""
+    """Specialized agent for evaluating decompiled code and strings via the configured static provider."""
 
     # ------------------------------------------------------------------
     # MCP Tool Interface
@@ -232,131 +192,64 @@ class StaticAnalyst(BaseAnalyst):
         except Exception as e:  # noqa: BLE001
             self.logger.warning("Dynamic tool selection failed (%s); keeping current set.", e)
 
-    def _initialize_mcp_client(self) -> None:
-        # Client already built (possibly on a previous sample if the agent is
-        # cached) — don't rebuild it, but DO refresh the per-sample dynamic tool
-        # selection from the full pool using this sample's categories.
-        _pool = getattr(self, "_all_ghidra_tools", None)
-        if _pool:
-            self.tools = self._select_ghidra_tools(_pool)
-            return
-        if getattr(self, "tools", None):
-            return
+    def _provider(self) -> Any:
+        """The static provider for this run: the container's, or one built ad hoc."""
+        container = getattr(self, "_container", None)
+        if container is not None:
+            return container.get_static_provider()
+        from maljan.core.config import get_settings
+        from maljan.providers.registry import get_static_provider
 
+        return get_static_provider(get_settings())
+
+    def _initialize_mcp_client(self) -> None:
+        """Attach the configured static provider's tools. Idempotent per sample.
+
+        Everything this used to do — transports, clients, guardrails, the shared
+        agent loop — moved into ``GhidraStaticProvider.open``. What is left is
+        the analyst's half of the contract: ask, and narrow.
+        """
+        provider = self._provider()
+        if not provider.capabilities.provides_tools:
+            self.logger.info("Static provider '%s' exposes no tools.", provider.id)
+            self.tools = []
+            return
+        provider.open(self._job_context())
+        pool = provider.get_tools()
+        self._all_ghidra_tools = pool  # kept: the report and tests read this name
+        self.toolkit = getattr(provider, "toolkit", None)
+        self.tools = provider.select_tools(pool, getattr(self, "_sample_categories", None))
+        self.logger.info(
+            "Static provider '%s': %d/%d tools attached.", provider.id, len(self.tools), len(pool)
+        )
+
+    def _job_context(self) -> StaticJobContext:
         from maljan.core.config import get_settings
 
         cfg = get_settings()
-
-        if not cfg.mcp.ghidra.enabled:
-            self.logger.info("Ghidra MCP is disabled in config.")
-            return
-
-        # Build output guardrail: use FunctionSummarizer if available
-        output_guardrail = None
+        guardrail = None
         if cfg.preprocessing.use_function_summarizer:
             # Reuse the container that owns this agent. Constructing a fresh
             # one here rebuilt the 2651-rule Sigma layer, the YARA layer and a
             # new set of LLM clients — and this runs once per chunk, so a run
             # with ten static chunks built ten of them and dropped them all.
             container = getattr(self, "_container", None)
-            if container is None:
-                from maljan.core.container import ServiceContainer
-
-                container = ServiceContainer(config=cfg)
-            summarizer = container.get_function_summarizer()
-            if summarizer is not None:
-                output_guardrail = summarizer.summarize_chunk
-                self.logger.info("Ghidra output guardrail: FunctionSummarizer enabled.")
-
-        max_chars = cfg.preprocessing.max_tool_output_chars
-
-        # ------------------------------------------------------------------
-        # HTTP transport (headless Docker server)
-        # ------------------------------------------------------------------
-        if cfg.mcp.ghidra.transport == "http":
-            from maljan.agents.ghidra_http_client import GhidraHTTPClient
-
-            client = GhidraHTTPClient(
-                base_url=cfg.mcp.ghidra.url,
-                auth_token=cfg.mcp.ghidra.auth_token,
-                output_guardrail=output_guardrail,
-                max_output_chars=max_chars,
-                truncation_ledger=getattr(self, "truncation_ledger", None),
-            )
-
-            self._run_async(client.initialize())
-            self.toolkit = client
-            all_tools = list(client.get_tools())
-            self._all_ghidra_tools = all_tools  # full pool; kept reachable
-            self.tools = self._select_ghidra_tools(all_tools)
-            self.logger.info(
-                "Initialized Ghidra HTTP tools: %d/%d (mode=%s).",
-                len(self.tools),
-                len(all_tools),
-                self._ghidra_tool_mode(),
-            )
-            return
-
-        # ------------------------------------------------------------------
-        # stdio transport (legacy local subprocess)
-        # ------------------------------------------------------------------
-        from mcp import StdioServerParameters
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.paths import resolve_mcp_args
-
-        command = cfg.mcp.ghidra.command
-        args = cfg.mcp.ghidra.args
-
-        env = child_env(cfg.mcp.ghidra.env)
-        env.setdefault("PYTHONIOENCODING", "utf-8")
-
-        args = resolve_mcp_args(args)
-        server_params = StdioServerParameters(command=command, args=args, env=env)
-
-        toolkit = MCPLangChainToolkit(
-            server_params,
-            output_guardrail=output_guardrail,
-            max_output_chars=max_chars,
+            if container is not None:
+                summarizer = container.get_function_summarizer()
+                if summarizer is not None:
+                    guardrail = summarizer.summarize_chunk
+        return StaticJobContext(
+            host_sample_path=getattr(self, "_host_sample_path", None),
+            mirror_sample_path=getattr(self, "_analysis_file_path", None),
+            capability_categories=frozenset(getattr(self, "_sample_categories", None) or ()),
+            output_guardrail=guardrail,
+            max_output_chars=cfg.preprocessing.max_tool_output_chars,
             truncation_ledger=getattr(self, "truncation_ledger", None),
         )
 
-        self._run_async(toolkit.initialize())
-        self.toolkit = toolkit  # type: ignore[assignment]
-        all_tools = list(toolkit.get_tools())
-        self._all_ghidra_tools = all_tools  # full pool; kept reachable
-        self.tools = self._select_ghidra_tools(all_tools)
-        self.logger.info(
-            "Initialized Ghidra MCP tools: %d/%d (mode=%s).",
-            len(self.tools),
-            len(all_tools),
-            self._ghidra_tool_mode(),
-        )
-
-    def _run_async(self, coro: Any) -> None:
-        """Run an MCP-client init coroutine on the *shared agent loop*.
-
-        The Ghidra HTTP client builds its long-lived ``httpx.AsyncClient`` inside
-        ``initialize()`` (via ``_get_http``); httpx binds that client's
-        connection pool — and the asyncio primitives behind it — to whichever
-        loop first creates it. The ReAct tool calls later run on the
-        process-wide agent loop (``base_agent._get_agent_loop``), so the old
-        implementation here — which ran init on a throwaway ``new_event_loop()``
-        (LangGraph runs sync nodes in a worker thread with no running loop) —
-        bound the client to a *different* loop than the ReAct. The first chunk's
-        tool call then raised ``<asyncio.locks.Event ...> is bound to a different
-        event loop`` and that chunk was lost on every run (and, under the CLI's
-        ``asyncio.run``, the whole static analyst). Submitting init to the same
-        shared loop the ReAct uses keeps client creation and use on one loop.
-
-        Only ever called from a synchronous setup path (``analyze`` /
-        ``analyze_isr``) on the main/worker thread — never from within the agent
-        loop itself — so blocking on the result cannot deadlock.
-        """
-        from maljan.agents.base_agent import _run_coro_blocking
-
-        _run_coro_blocking(coro, hard_timeout=120.0, label="ghidra-mcp-init")
+    def _static_capabilities(self) -> Any:
+        """The provider's degrade policy: Ghidra's is loud, others may differ."""
+        return self._provider().capabilities
 
     def _compute_sink_priority_hint(self, file_path: str) -> str:
         """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.
@@ -684,7 +577,7 @@ class StaticAnalyst(BaseAnalyst):
             self._refine_tools_for_sample(data.strip())
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", _static_prompt(self._provider())),
             (
                 "human",
                 "Analyze the following target for obfuscation, "
@@ -836,7 +729,7 @@ class StaticAnalyst(BaseAnalyst):
         self._refine_tools_for_sample(host_path)
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", _static_prompt(self._provider())),
             (
                 "human",
                 "Analyze the target binary and return a structured list of findings.\n"

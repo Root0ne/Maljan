@@ -142,3 +142,81 @@ def test_a_disabled_server_yields_no_tools_and_does_not_raise():
     provider = GhidraStaticProvider.from_settings(cfg)
     provider.open(StaticJobContext())
     assert provider.get_tools() == []
+
+
+def test_the_analyst_asks_the_provider_for_tools(monkeypatch):
+    """``_initialize_mcp_client`` resolves a provider and does nothing else."""
+    from unittest.mock import MagicMock
+
+    from maljan.agents.static_analyst import StaticAnalyst
+    from maljan.providers.base import StaticCapabilities
+
+    calls: list[str] = []
+
+    class _Provider:
+        id = "ghidra"
+        capabilities = StaticCapabilities(provides_tools=True, supports_tool_curation=True)
+
+        def open(self, job):
+            calls.append("open")
+
+        def get_tools(self):
+            calls.append("get_tools")
+            return [_Tool("load_program"), _Tool("list_imports")]
+
+        def select_tools(self, tools, categories=None):
+            calls.append("select_tools")
+            return list(tools)
+
+    analyst = StaticAnalyst(llm=MagicMock(), name="static")
+    container = MagicMock()
+    container.get_static_provider.return_value = _Provider()
+    analyst._container = container
+    analyst._initialize_mcp_client()
+    assert calls == ["open", "get_tools", "select_tools"]
+    assert [t.name for t in analyst.tools] == ["load_program", "list_imports"]
+
+
+def test_a_provider_without_tools_leaves_the_analyst_toolless():
+    from unittest.mock import MagicMock
+
+    from maljan.agents.static_analyst import StaticAnalyst
+    from maljan.providers.base import StaticCapabilities
+
+    class _Evidence:
+        id = "capa_yara"
+        capabilities = StaticCapabilities(provides_evidence=True, degrade_on_failure=True)
+
+        def open(self, job):
+            raise AssertionError("open must not be called for a toolless provider")
+
+    analyst = StaticAnalyst(llm=MagicMock(), name="static")
+    container = MagicMock()
+    container.get_static_provider.return_value = _Evidence()
+    analyst._container = container
+    analyst._initialize_mcp_client()
+    assert analyst.tools == []
+
+
+def test_static_still_fails_loudly_and_a_degrading_provider_does_not(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from maljan.agents.static_analyst import StaticAnalyst
+    from maljan.providers.base import StaticCapabilities
+
+    analyst = StaticAnalyst(llm=MagicMock(), name="static")
+
+    def boom():
+        raise RuntimeError("ghidra is unreachable")
+
+    monkeypatch.setattr(analyst, "_initialize_mcp_client", boom)
+    monkeypatch.setattr(
+        analyst, "_static_capabilities", lambda: StaticCapabilities(degrade_on_failure=False)
+    )
+    with pytest.raises(RuntimeError):
+        analyst._try_initialize_mcp()
+
+    monkeypatch.setattr(
+        analyst, "_static_capabilities", lambda: StaticCapabilities(degrade_on_failure=True)
+    )
+    assert analyst._try_initialize_mcp() is False

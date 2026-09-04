@@ -59,3 +59,19 @@ def test_cape_essential_tool_names_are_unchanged():
     for name in expected["cape_essential_tools"]:
         assert f'"{name}"' in source, name
     assert len(expected["cape_essential_tools"]) == 13
+
+
+def test_the_assembled_static_prompt_equals_the_golden():
+    from maljan.agents.static_analyst import _ISR_HEAD, _ISR_TAIL
+    from maljan.core.config import Settings
+    from maljan.providers.static.ghidra import GhidraStaticProvider
+
+    provider = GhidraStaticProvider.from_settings(Settings(_env_file=None))
+    assembled = _ISR_HEAD + provider.prompt_fragment() + _ISR_TAIL
+    assert assembled == _golden("static_isr_system_ghidra.txt")
+
+
+def test_the_module_constant_is_still_the_assembled_prompt():
+    from maljan.agents.static_analyst import _ISR_SYSTEM
+
+    assert _ISR_SYSTEM == _golden("static_isr_system_ghidra.txt")

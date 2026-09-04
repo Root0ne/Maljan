@@ -795,23 +795,30 @@ class BaseAnalyst(ABC):
         half-dead, an unreachable toolkit aborted the whole analyst on every
         single run rather than falling back to the evidence it already had.
 
-        Whether degrading is *right* is a per-analyst judgement, not a default.
-        It is right for dynamic and network, which each hold a second source of
-        evidence. It is wrong for static, where Ghidra IS the evidence and a
-        toolless run would produce a confident-looking report grounded in
-        nothing — so static keeps calling ``_initialize_mcp_client()`` bare and
-        keeps failing loudly.
+        Whether degrading is *right* is a per-analyst judgement, not a
+        default — ``_static_capabilities()`` is where an analyst with a
+        provider says so; one without a provider keeps the old universal
+        degrade-and-continue behaviour.
         """
+        capabilities = self._static_capabilities()
         try:
             self._initialize_mcp_client()
             return bool(self.tools)
         except Exception as exc:
+            if capabilities is not None and not capabilities.degrade_on_failure:
+                # Ghidra IS the static evidence: a toolless run would produce a
+                # confident-looking report grounded in nothing. Fail loudly.
+                raise
             self.logger.warning(
                 "%s MCP initialization failed (graceful degradation, continuing without tools): %s",
                 self.name,
                 describe_exception(exc),
             )
             return False
+
+    def _static_capabilities(self) -> Any | None:
+        """The provider's degrade policy, or None for an analyst without one."""
+        return None
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
