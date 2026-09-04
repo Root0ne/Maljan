@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import builtins
+import multiprocessing as mp
+import time
 
 from maljan.core.config import Settings
 from maljan.providers.static.capa_yara import CapaYaraStaticProvider
@@ -75,7 +77,15 @@ def test_capa_results_become_capabilities_techniques_and_a_table(monkeypatch, tm
     assert bundle.api_capabilities["host-interaction"] == 1
     ids = {hit["technique_id"] for hit in bundle.technique_hits}
     assert ids == {"T1027", "T1106"}
-    assert all(hit["evidence"] for hit in bundle.technique_hits)
+    # Same row shape the import-capability Layer 0 already writes into
+    # ``api_technique_hits`` (analysis/import_capability_layer.py) and the
+    # Markdown renderer reads (renderers/markdown.py): technique_id, name,
+    # confidence, matched_apis — plus "source" as an extra, harmless key.
+    by_id = {hit["technique_id"]: hit for hit in bundle.technique_hits}
+    assert by_id["T1027"]["name"] == "encrypt data using RC4"
+    assert by_id["T1027"]["matched_apis"] == ["data-manipulation/encryption/rc4"]
+    assert all(hit["confidence"] > 0 for hit in bundle.technique_hits)
+    assert all(hit["source"] == "capa" for hit in bundle.technique_hits)
     assert "encrypt data using RC4" in bundle.technical_evidence["capa"]
 
 
@@ -102,9 +112,36 @@ def test_the_evidence_text_is_capped():
 
 # A real (un-mocked) ``_run_capa`` smoke test against ``data/samples`` was
 # deliberately left out: a real vivisect pass over one of the malware samples
-# in this repo measured well over two minutes on this box, and a timed-out
-# run leaves its worker thread running in the background afterwards (see the
-# ``ThreadPoolExecutor`` note in ``capa_yara.py``) — a cost not worth paying
-# in every test run for a call sequence already verified by hand against the
-# installed flare-capa 9.4.0 (module docstring) and covered here through the
-# monkeypatched ``_run_capa`` seam.
+# in this repo measured well over two minutes on this box — a cost not worth
+# paying in every test run for a call sequence already verified by hand
+# against the installed flare-capa 9.4.0 (module docstring) and covered here
+# through the monkeypatched ``_run_capa`` seam.
+
+
+def _sleepy_worker(sample_path, rules_dir, signatures_dir, backend_name, queue):
+    """Module-level (picklable) stand-in for ``_capa_worker`` that never returns.
+
+    Used only to drive ``_run_capa_bounded``'s timeout/kill path without a
+    real capa install or a multi-minute analysis. Must live at module scope:
+    ``multiprocessing.get_context("spawn")`` pickles a target function by
+    module + qualified name, so a closure or a monkeypatched attribute on the
+    real ``_capa_worker`` would not survive the trip to the child process.
+    """
+    import time
+
+    time.sleep(30)
+    queue.put(("ok", {"rules": {}}))  # pragma: no cover - never reached in the test
+
+
+def test_a_capa_run_past_its_budget_is_killed_not_waited_out(tmp_path):
+    provider = _provider(tmp_path)
+    provider._capa.timeout_seconds = 1
+    started = time.monotonic()
+    result = provider._run_capa_bounded(str(tmp_path / "s.exe"), tmp_path, target=_sleepy_worker)
+    elapsed = time.monotonic() - started
+    assert result is None
+    # Killed well before the worker's 30s sleep would have elapsed on its own,
+    # and nothing is left behind for the caller (an arq worker, in production)
+    # to join or wait on later.
+    assert elapsed < 15
+    assert mp.active_children() == []

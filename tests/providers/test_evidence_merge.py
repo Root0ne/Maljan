@@ -17,18 +17,39 @@ from maljan.providers.base import StaticEvidenceBundle
 from maljan.providers.static.capa_yara import merge_static_evidence
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import StaticAnalysis
+from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+# The real row shape ``api_technique_hits`` already has one producer for
+# (analysis/import_capability_layer.py) and one reader of
+# (renderers/markdown.py): technique_id, name, confidence, matched_apis.
+# capa rows add "source" on top — the renderer reads with ``.get``, so the
+# extra key is harmless and lets a future renderer branch on where a hit
+# came from.
+_EXISTING_HIT = {
+    "technique_id": "T1071",
+    "name": "Application Layer Protocol",
+    "confidence": 0.55,
+    "matched_apis": ["WS2_32.dll::connect"],
+}
+_CAPA_HIT = {
+    "technique_id": "T1027",
+    "name": "encrypt data using RC4",
+    "confidence": 0.70,
+    "matched_apis": ["data-manipulation/encryption/rc4"],
+    "source": "capa",
+}
 
 
 def test_counters_are_summed_and_hits_extended():
     static = StaticAnalysis(
         api_capabilities={"network": 2, "crypto": 1},
-        api_technique_hits=[{"technique_id": "T1071", "evidence": ["WS2_32.dll"]}],
+        api_technique_hits=[_EXISTING_HIT],
     )
     merged = merge_static_evidence(
         static,
         StaticEvidenceBundle(
             api_capabilities={"crypto": 3, "anti-analysis": 1},
-            technique_hits=[{"technique_id": "T1027", "evidence": ["capa: RC4"]}],
+            technique_hits=[_CAPA_HIT],
             technical_evidence={"capa": "…"},
         ),
     )
@@ -79,7 +100,7 @@ def test_the_builder_folds_evidence_into_the_report(tmp_path):
     sample.write_bytes(b"MZ" + b"\x00" * 128)
     bundle = StaticEvidenceBundle(
         api_capabilities={"data-manipulation": 1},
-        technique_hits=[{"technique_id": "T1027", "evidence": ["capa: encrypt data using RC4"]}],
+        technique_hits=[_CAPA_HIT],
         technical_evidence={
             "capa": "| rule | namespace |\n| encrypt data using RC4 | x |",
             "yara": "ransom_note",
@@ -89,6 +110,20 @@ def test_the_builder_folds_evidence_into_the_report(tmp_path):
     assert report.static is not None
     assert report.static.api_capabilities.get("data-manipulation") == 1
     assert any(h["technique_id"] == "T1027" for h in report.static.api_technique_hits)
+
+
+def test_a_capa_hit_renders_its_name_and_confidence_in_the_markdown_table(tmp_path):
+    sample = tmp_path / "s.exe"
+    sample.write_bytes(b"MZ" + b"\x00" * 128)
+    bundle = StaticEvidenceBundle(
+        api_capabilities={"data-manipulation": 1},
+        technique_hits=[_CAPA_HIT],
+        technical_evidence={},
+    )
+    report = _builder(sample_path=str(sample), static_evidence=bundle).build_deterministic()
+    markdown = MarkdownRenderer().render(report)
+    assert "encrypt data using RC4" in markdown
+    assert "0.70" in markdown
 
 
 def test_no_bundle_leaves_the_report_untouched(tmp_path):

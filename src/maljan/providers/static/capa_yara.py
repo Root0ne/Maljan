@@ -34,9 +34,9 @@ this environment via ``uv sync --extra capa``); a few names moved since the
 
 from __future__ import annotations
 
-import concurrent.futures
+import multiprocessing as mp
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
@@ -56,6 +56,86 @@ _BACKEND_NAMES: dict[str, str] = {
     "pefile": "BACKEND_PEFILE",
     "binja": "BACKEND_BINJA",
 }
+
+# ``api_technique_hits`` already has one producer — the import-capability
+# Layer 0 (analysis/import_capability_layer.py) — whose rows start at
+# confidence_base ~0.38-0.5 (data/api_attck_map_v1.json) and rise slowly with
+# the number of *distinct imports* corroborating the technique, because a
+# resolved import merely *being present* in the table is weak evidence on its
+# own. A fired capa rule is not that: capa already requires the matching
+# code pattern (an instruction sequence, a string, an API call in the right
+# context) to be present, the same bar the deterministic YARA layer clears —
+# so this reuses YARA's own deterministic floor
+# (``analysis/yara_layer._CONFIDENCE_FLOOR`` = 0.70) rather than
+# import_capability_layer's low-and-rising scheme: the corroboration
+# import_capability_layer earns via extra imports, a capa match already has
+# by construction.
+_CAPA_TECHNIQUE_CONFIDENCE: float = 0.70
+
+
+class _CapaWorker(Protocol):
+    """Shape of the picklable, module-level function run in the capa subprocess."""
+
+    def __call__(
+        self,
+        sample_path: str,
+        rules_dir: str,
+        signatures_dir: str,
+        backend_name: str,
+        queue: Any,
+    ) -> None: ...
+
+
+def _capa_worker(
+    sample_path: str,
+    rules_dir: str,
+    signatures_dir: str,
+    backend_name: str,
+    queue: Any,
+) -> None:
+    """Run one capa pass to completion and put the result on ``queue``.
+
+    Runs in a ``multiprocessing.get_context("spawn")`` child, so it must be
+    module-level (picklable by reference) and its imports must be local to
+    itself: the spawn start method re-imports this module in the child
+    process, and every import this function makes is one the child actually
+    pays for. Only capa and the stdlib are imported here — never the FastAPI
+    app, never ``Settings`` — so a capa run never drags the rest of the
+    worker's dependency graph into a process whose only job is to run capa
+    and exit (or be killed).
+    """
+    try:
+        import capa.capabilities.common as capa_capabilities
+        import capa.helpers as capa_helpers
+        import capa.loader as capa_loader
+        import capa.render.result_document as capa_rd
+        import capa.rules as capa_rules
+        import capa.rules.cache  # noqa: F401 - get_rules() references this submodule
+
+        path = Path(sample_path)
+        rules_path = Path(rules_dir)
+        rules = capa_rules.get_rules([rules_path], enable_cache=False)
+        input_format = capa_helpers.get_auto_format(path)
+        backend = getattr(capa_loader, backend_name)
+        sig_dir = Path(signatures_dir)
+        sigpaths = capa_loader.get_signatures(sig_dir) if sig_dir.is_dir() else []
+        extractor = capa_loader.get_extractor(
+            path,
+            input_format,
+            capa_loader.OS_AUTO,
+            backend,
+            sigpaths,
+            should_save_workspace=False,
+            disable_progress=True,
+        )
+        capabilities = capa_capabilities.find_capabilities(rules, extractor, disable_progress=True)
+        meta = capa_loader.collect_metadata(
+            [], path, input_format, capa_loader.OS_AUTO, [rules_path], extractor, capabilities
+        )
+        document = capa_rd.ResultDocument.from_capa(meta, rules, capabilities.matches)
+        queue.put(("ok", document.model_dump(mode="json")))
+    except Exception as exc:  # noqa: BLE001 - reported to the parent, never raised here
+        queue.put(("error", f"{type(exc).__name__}: {exc}"))
 
 
 @register_static_provider("capa_yara")
@@ -103,8 +183,9 @@ class CapaYaraStaticProvider(StaticProvider):
                 hits.append(
                     {
                         "technique_id": tid,
-                        "technique": str(attack.get("technique") or ""),
-                        "evidence": [f"capa: {name}"],
+                        "name": str(name),
+                        "confidence": _CAPA_TECHNIQUE_CONFIDENCE,
+                        "matched_apis": [namespace] if namespace else [],
                         "source": "capa",
                     }
                 )
@@ -129,11 +210,11 @@ class CapaYaraStaticProvider(StaticProvider):
     def _run_capa(self, sample_path: str) -> dict[str, Any] | None:
         """Run capa, or return None and warn once when it is unavailable."""
         try:
-            import capa.capabilities.common as capa_capabilities  # noqa: F401
-            import capa.helpers as capa_helpers  # noqa: F401
-            import capa.loader as capa_loader  # noqa: F401
-            import capa.render.result_document as capa_rd  # noqa: F401
-            import capa.rules as capa_rules  # noqa: F401
+            import capa.capabilities.common  # noqa: F401
+            import capa.helpers  # noqa: F401
+            import capa.loader  # noqa: F401
+            import capa.render.result_document  # noqa: F401
+            import capa.rules  # noqa: F401
             import capa.rules.cache  # noqa: F401 - get_rules() references this submodule
         except ImportError as exc:
             if self._capa_available is not False:
@@ -156,15 +237,7 @@ class CapaYaraStaticProvider(StaticProvider):
 
         self._capa_available = True
         try:
-            return self._run_capa_bounded(
-                sample_path,
-                rules_dir,
-                capa_capabilities,
-                capa_helpers,
-                capa_loader,
-                capa_rd,
-                capa_rules,
-            )
+            return self._run_capa_bounded(sample_path, rules_dir)
         except Exception as exc:  # noqa: BLE001 - capa must never fail a run
             logger.warning(
                 "capa failed on %s (%s: %s); continuing without capa evidence.",
@@ -178,61 +251,67 @@ class CapaYaraStaticProvider(StaticProvider):
         self,
         sample_path: str,
         rules_dir: Path,
-        capa_capabilities: Any,
-        capa_helpers: Any,
-        capa_loader: Any,
-        capa_rd: Any,
-        capa_rules: Any,
+        target: _CapaWorker | None = None,
     ) -> dict[str, Any] | None:
-        """Run the actual capa pipeline under the configured wall-clock budget."""
+        """Run the capa pipeline in a subprocess, killed if it overruns its budget.
 
-        def _work() -> dict[str, Any]:
-            path = Path(sample_path)
-            rules = capa_rules.get_rules([rules_dir], enable_cache=False)
-            input_format = capa_helpers.get_auto_format(path)
-            backend_name = _BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV")
-            backend = getattr(capa_loader, backend_name)
-            sig_dir = Path(resolve_data(self._capa.signatures_dir))
-            sigpaths = capa_loader.get_signatures(sig_dir) if sig_dir.is_dir() else []
-            extractor = capa_loader.get_extractor(
-                path,
-                input_format,
-                capa_loader.OS_AUTO,
-                backend,
-                sigpaths,
-                should_save_workspace=False,
-                disable_progress=True,
-            )
-            capabilities = capa_capabilities.find_capabilities(
-                rules, extractor, disable_progress=True
-            )
-            meta = capa_loader.collect_metadata(
-                [], path, input_format, capa_loader.OS_AUTO, [rules_dir], extractor, capabilities
-            )
-            document = capa_rd.ResultDocument.from_capa(meta, rules, capabilities.matches)
-            dumped: dict[str, Any] = document.model_dump(mode="json")
-            return dumped
+        capa's vivisect backend has no cooperative cancellation point inside a
+        disassembly loop, so it cannot be interrupted from inside the calling
+        process — a thread-based timeout (this method's first cut) could only
+        report a timeout to the caller while the actual vivisect thread kept
+        running for however long the analysis really took, and
+        ``ThreadPoolExecutor`` registers an ``atexit`` hook that joins every
+        outstanding worker thread, which would have hung an arq worker's
+        shutdown on a slow sample. A ``multiprocessing`` child process can
+        actually be killed: on expiry this calls ``terminate()``, escalates to
+        ``kill()`` if the process is still alive after a short grace period,
+        and returns ``None`` either way — the existing warn-and-degrade
+        contract, just backed by something that can really stop the work.
 
-        # Not a context manager on purpose: ``ThreadPoolExecutor.__exit__`` calls
-        # ``shutdown(wait=True)``, which would block this call until the
-        # vivisect analysis finishes regardless of the timeout below — exactly
-        # the hang a wall-clock budget exists to avoid. ``shutdown(wait=False)``
-        # lets a timed-out run's thread finish on its own time; it is daemonic
-        # by default under ``ThreadPoolExecutor`` only via the interpreter exit
-        # hook, so the process can still exit cleanly afterwards.
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(_work)
-        try:
-            return future.result(timeout=self._capa.timeout_seconds)
-        except concurrent.futures.TimeoutError:
+        ``target`` defaults to the module-level ``_capa_worker`` and exists so
+        a test can inject a fake (module-level, picklable) target — e.g. one
+        that only sleeps — to exercise the timeout/kill path without needing
+        capa installed or a real multi-minute analysis.
+        """
+        worker = target or _capa_worker
+        ctx = mp.get_context("spawn")
+        queue: Any = ctx.Queue()
+        backend_name = _BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV")
+        signatures_dir = str(Path(resolve_data(self._capa.signatures_dir)))
+        process = ctx.Process(
+            target=worker,
+            args=(sample_path, str(rules_dir), signatures_dir, backend_name, queue),
+            daemon=True,
+        )
+        process.start()
+        process.join(self._capa.timeout_seconds)
+        if process.is_alive():
             logger.warning(
-                "capa on %s exceeded its %ss budget; continuing without capa evidence.",
+                "capa on %s exceeded its %ss budget; terminating the worker process.",
                 sample_path,
                 self._capa.timeout_seconds,
             )
+            process.terminate()
+            process.join(5.0)
+            if process.is_alive():
+                process.kill()
+                process.join(5.0)
+            queue.close()
+            return None
+        try:
+            kind, payload = queue.get_nowait()
+        except Exception:  # noqa: BLE001 - an empty queue is a crashed/killed child
+            logger.warning("capa on %s exited without a result.", sample_path)
             return None
         finally:
-            pool.shutdown(wait=False)
+            queue.close()
+        if kind != "ok":
+            logger.warning(
+                "capa failed on %s (%s); continuing without capa evidence.", sample_path, payload
+            )
+            return None
+        result: dict[str, Any] = payload
+        return result
 
     # ------------------------------------------------------------------
     # YARA

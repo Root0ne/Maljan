@@ -1687,7 +1687,7 @@ requires-dist = [
     { name = "fastembed", specifier = ">=0.4.2" },
     { name = "fastmcp", specifier = ">=3.2.4" },
     { name = "filetype", specifier = ">=1.2.0" },
-    { name = "flare-capa", marker = "extra == 'capa'", specifier = ">=7.0.0" },
+    { name = "flare-capa", marker = "extra == 'capa'", specifier = ">=9.0.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-anthropic", specifier = ">=0.3.15" },
     { name = "langchain-core", specifier = ">=1.2.25" },
