@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import httpx
 import pytest
+from pydantic import SecretStr
 
-from maljan.core.config import Settings
+from maljan.core.config import RestMappingConfig, Settings
 from maljan.providers.errors import ProviderConfigurationError, ProviderError
 from maljan.providers.sandbox.rest import RestSandboxProvider
+
+FIX = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
+GOLDEN = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "rest_mapping"
 
 
 def _cfg(**over):
@@ -66,7 +73,7 @@ def test_submit_posts_the_configured_field_and_reads_the_task_id(tmp_path):
     cfg.sandbox.rest.submit.extra_fields = {"profile": "win10"}
     cfg.sandbox.rest.auth.header = "X-Api-Key"
     cfg.sandbox.rest.auth.scheme = ""
-    cfg.sandbox.rest.auth.token = "tok"
+    cfg.sandbox.rest.auth.token = SecretStr("tok")
     assert _provider(handler, cfg).submit(sample) == "T-9"
     assert seen["method"] == "POST" and seen["url"].endswith("/samples")
     assert b'name="binary"' in seen["body"] and b'name="profile"' in seen["body"]
@@ -124,6 +131,21 @@ def test_retry_after_is_honoured_and_clamped():
     assert slept and max(slept) <= 60.0
 
 
+def test_a_sustained_429_past_the_deadline_raises_rather_than_looping_forever():
+    """The rate-limit branch is on the same clock as everything else.
+
+    A server that keeps answering 429 with a short ``Retry-After`` forever
+    must still hit the deadline check at the top of the loop rather than
+    sleeping past it indefinitely.
+    """
+    clock = iter([0.0, 0.0, 5.0, 10.0, 1000.0])
+    provider = _provider(lambda r: httpx.Response(429, headers={"Retry-After": "1"}))
+    provider._now = lambda: next(clock)
+    with pytest.raises(ProviderError) as exc:
+        provider.wait_for_completion("T-9", timeout_seconds=10)
+    assert "did not complete" in str(exc.value)
+
+
 def test_fetch_maps_a_generic_report_through_the_configured_paths():
     cfg = _cfg()
     cfg.sandbox.rest.mapping.processes = "$.procs[*]"
@@ -148,6 +170,86 @@ def test_a_cape_shaped_body_goes_through_the_cape_reader_untouched():
     assert to_cape_shaped_dict(run.report) is run.report.raw, "identity, as for every CAPE source"
 
 
+def test_a_real_cape_fixture_goes_through_the_cape_reader_by_identity():
+    """The committed/real CAPE fixture, not a hand-rolled minimal body."""
+    from tests.providers._cape_fixture import first_cape_report
+
+    cfg = _cfg()
+    cfg.sandbox.rest.report.format = "cape2"
+    body = first_cape_report()
+    provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
+    run = provider.fetch("T-9")
+    assert run.report.source_format == "cape2"
+    from maljan.providers.cape_view import to_cape_shaped_dict
+
+    assert to_cape_shaped_dict(run.report) is run.report.raw
+
+
+def test_a_triage_shaped_body_goes_through_the_triage_reader():
+    """A single-endpoint REST fetch of an overview-shaped Triage body.
+
+    Unlike ``TriageSandboxProvider`` (which fetches an overview and each
+    task's behavioural report separately and combines them), this provider
+    makes one GET against ``report.path``; with ``format="triage"`` that one
+    body is read by the same ``triage_overview_to_sandbox_report`` mapper,
+    without per-task ``task_reports`` — so the overview-level channels
+    (target identity, family, signatures) come through and the per-task ones
+    (processes, network, dropped files) stay empty, exactly as they would for
+    any other caller of that mapper given only an overview.
+    """
+    cfg = _cfg()
+    cfg.sandbox.rest.report.format = "triage"
+    overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
+    provider = _provider(lambda r: httpx.Response(200, json=overview), cfg)
+    run = provider.fetch("260904-abcdefgh1")
+    report = run.report
+    assert report.source_format == "triage"
+    assert report.target.sha256 == overview["sample"]["sha256"]
+    assert run.sample_sha256 == overview["sample"]["sha256"]
+    assert report.cti["family"] == overview["analysis"]["family"]
+    assert [s.name for s in report.signatures] == [s["name"] for s in overview["signatures"]]
+
+
+def test_a_generic_golden_report_names_every_unmapped_channel_unavailable():
+    """Task 10's own golden fixture, mapped through the REST provider end to end."""
+    xyz_mapping = RestMappingConfig(
+        target_sha256="$.sample.hashes.sha256",
+        processes="$.run.processes[*]",
+        calls="$.run.processes[*].syscalls[*]",
+        signatures="$.detections[*]",
+        dns="$.net.lookups[*]",
+        tcp="$.net.streams[*]",
+        dropped_files="$.artifacts[*]",
+        registry="$.run.registry[*]",
+        field_names={
+            "processes.command_line": "cmdline",
+            "processes.name": "image",
+            "calls.api": "syscall",
+            "signatures.severity": "score",
+            "signatures.ttps": "attack",
+            "dns.request": "qname",
+            "tcp.dst": "peer",
+            "tcp.dport": "peer_port",
+            "dropped_files.name": "filename",
+        },
+    )
+    cfg = _cfg()
+    cfg.sandbox.rest.mapping = xyz_mapping
+    body = json.loads((GOLDEN / "xyz_report.json").read_text(encoding="utf-8"))
+    provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
+    run = provider.fetch("xyz-1")
+    report = run.report
+    assert report.source_format == "generic"
+    unavailable = set(report.unavailable)
+    # Every channel this mapping left unpointed (http, udp, hosts, domains)
+    # plus the three that never have a settings field of their own.
+    for channel in ("http", "udp", "hosts", "domains", "generic_events", "screenshots"):
+        assert channel in unavailable, f"{channel!r} should be named unavailable"
+    # And every channel the mapping does point at produced at least one row.
+    assert report.processes and report.signatures and report.network.dns
+    assert report.network.tcp and report.dropped_files
+
+
 def test_fetch_pcap_is_none_when_no_path_is_configured(tmp_path):
     provider = _provider(lambda r: httpx.Response(200, content=b"x" * 64))
     assert provider.fetch_pcap("T-9", tmp_path) is None
@@ -170,8 +272,6 @@ def test_verify_tls_off_is_visible_in_the_probe_detail():
 
 
 def test_the_auth_header_is_exactly_scheme_and_token():
-    from pydantic import SecretStr
-
     cfg = _cfg()
     cfg.sandbox.rest.auth.header = "Authorization"
     cfg.sandbox.rest.auth.scheme = "Bearer"
@@ -181,8 +281,6 @@ def test_the_auth_header_is_exactly_scheme_and_token():
 
 
 def test_the_token_never_appears_in_a_log_record(caplog):
-    from pydantic import SecretStr
-
     cfg = _cfg()
     cfg.sandbox.rest.verify_tls = False
     cfg.sandbox.rest.auth.token = SecretStr("s3cr3t-token")
@@ -191,3 +289,57 @@ def test_the_token_never_appears_in_a_log_record(caplog):
         provider._get_http()
         provider.close()
     assert all("s3cr3t-token" not in record.getMessage() for record in caplog.records)
+
+
+def test_a_path_traversal_task_id_cannot_escape_the_status_url():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={"status": "reported"})
+
+    provider = _provider(handler)
+    assert provider.wait_for_completion("../../etc") == "reported"
+    assert "../" not in seen["path"] and ".." not in seen["path"].split("/")
+
+
+def test_a_path_traversal_task_id_cannot_escape_the_report_url():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={"target": {"sha256": "ab"}})
+
+    provider = _provider(handler)
+    provider.fetch("../../etc/passwd")
+    assert "../" not in seen["path"] and ".." not in seen["path"].split("/")
+
+
+def test_the_configured_token_is_redacted_out_of_an_error_body():
+    """A server that echoes the request's auth header back in an error body
+    (some do, for an "invalid credential" response) must not carry the
+    secret into the ``ProviderError`` message a caller can log."""
+    cfg = _cfg()
+    cfg.sandbox.rest.auth.header = "Authorization"
+    cfg.sandbox.rest.auth.scheme = "Bearer"
+    cfg.sandbox.rest.auth.token = SecretStr("s3cr3t-token")
+    provider = RestSandboxProvider.from_settings(cfg)
+
+    echoed = httpx.Response(403, text="forbidden: saw header 'Bearer s3cr3t-token'")
+    with pytest.raises(ProviderError) as exc:
+        provider._raise_for_status(echoed, "probe")
+    assert "s3cr3t-token" not in str(exc.value)
+    assert "***" in str(exc.value)
+
+
+def test_a_bare_token_with_no_scheme_is_also_redacted():
+    cfg = _cfg()
+    cfg.sandbox.rest.auth.header = "X-Api-Key"
+    cfg.sandbox.rest.auth.scheme = ""
+    cfg.sandbox.rest.auth.token = SecretStr("s3cr3t-token")
+    provider = RestSandboxProvider.from_settings(cfg)
+
+    echoed = httpx.Response(403, text="forbidden: key=s3cr3t-token")
+    with pytest.raises(ProviderError) as exc:
+        provider._raise_for_status(echoed, "probe")
+    assert "s3cr3t-token" not in str(exc.value)

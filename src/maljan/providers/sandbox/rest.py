@@ -102,12 +102,28 @@ class RestSandboxProvider(SandboxProvider):
             )
         return self._http
 
-    @staticmethod
-    def _raise_for_status(response: httpx.Response, operation: str) -> None:
+    def _redact(self, text: str) -> str:
+        """Strip the credential out of a body a server chose to echo back.
+
+        A misbehaving or misconfigured sandbox can reflect the request it
+        received (the header line, or just the token) into an error body;
+        that body is truncated and folded into a ``ProviderError`` message
+        below, which can reach a log. Never let the secret ride along.
+        """
+        redacted = text
+        token = self._cfg.auth.token.get_secret_value()
+        if token:
+            scheme = self._cfg.auth.scheme.strip()
+            header_value = f"{scheme} {token}".strip() if scheme else token
+            # The full header value first (it contains the token), then any
+            # bare occurrence of the token left over, so neither survives.
+            redacted = redacted.replace(header_value, "***").replace(token, "***")
+        return redacted
+
+    def _raise_for_status(self, response: httpx.Response, operation: str) -> None:
         if response.status_code >= 400:
-            raise ProviderError(
-                f"Sandbox {operation} failed (HTTP {response.status_code}): {response.text[:200]}"
-            )
+            body = self._redact(response.text[:200])
+            raise ProviderError(f"Sandbox {operation} failed (HTTP {response.status_code}): {body}")
 
     def _select_one(self, expression: str, payload: Any, what: str) -> str:
         """One scalar out of a response, or a failure that names the path."""
@@ -153,7 +169,11 @@ class RestSandboxProvider(SandboxProvider):
         )
         deadline = self._now() + budget
         http = self._get_http()
-        url = self._cfg.status.path.format(task_id=task_id)
+        # The task id came back from the sandbox's own submit response; it is
+        # interpolated into a URL path here exactly as it is into a filename
+        # in ``fetch_pcap``, so it gets the same guard against a server that
+        # hands back a path-traversal payload instead of an opaque id.
+        url = self._cfg.status.path.format(task_id=_safe_path_component(str(task_id)))
         done = {v.lower() for v in self._cfg.status.done_values}
         failed = {v.lower() for v in self._cfg.status.failed_values}
         while True:
@@ -191,7 +211,9 @@ class RestSandboxProvider(SandboxProvider):
             triage_overview_to_sandbox_report,
         )
 
-        response = self._get_http().get(self._cfg.report.path.format(task_id=task_id))
+        response = self._get_http().get(
+            self._cfg.report.path.format(task_id=_safe_path_component(str(task_id)))
+        )
         self._raise_for_status(response, "report fetch")
         payload = response.json()
         if not isinstance(payload, dict):
