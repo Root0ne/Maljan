@@ -137,3 +137,42 @@ def test_non_admin_is_rejected():
     app.dependency_overrides[get_db] = lambda: MagicMock()
     r = TestClient(app).get("/api/v1/settings/schema")
     assert r.status_code in (401, 403)
+
+
+def test_the_preview_route_caps_the_pasted_sample(client):
+    from app.services.mapping_preview import PREVIEW_MAX_BYTES
+
+    r = client.post(
+        "/api/v1/settings/sandbox-rest/preview",
+        json={"sample": {"pad": "x" * (PREVIEW_MAX_BYTES + 1)}, "mapping": {}},
+    )
+    assert r.status_code == 413
+
+
+def test_the_preview_route_counts_rows_per_channel(client):
+    r = client.post(
+        "/api/v1/settings/sandbox-rest/preview",
+        json={"sample": {"p": [{"pid": 1}, {"nope": 2}]}, "mapping": {"processes": "$.p[*]"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["channels"]["processes"] == {
+        "matched": 2,
+        "kept": 1,
+        "dropped": 1,
+        "sample_rows": [{"pid": 1}],
+        "error": None,
+    }
+
+
+def test_the_preview_route_is_admin_only():
+    """Without the ``require_admin`` override the real dependency runs and refuses."""
+    from app.api.v1.settings import router
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    r = TestClient(app).post(
+        "/api/v1/settings/sandbox-rest/preview", json={"sample": {}, "mapping": {}}
+    )
+    assert r.status_code in (401, 403)

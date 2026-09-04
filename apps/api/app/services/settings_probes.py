@@ -14,8 +14,10 @@ import httpx
 from maljan.core.config import MCPServerConfig
 from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
+from maljan.providers.errors import ProviderConfigurationError
+from maljan.providers.sandbox.rest_mapping import compile_mapping
 from maljan.providers.servers import ServerHandle
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from redis.asyncio import Redis
 
 from app.config import settings as api_settings
@@ -407,6 +409,26 @@ async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+async def probe_rest(v: dict[str, Any]) -> ProbeResult:
+    """Ask the configured sandbox's status endpoint about a task that does not exist."""
+    t0 = time.perf_counter()
+    from maljan.core.config import Settings
+    from maljan.providers.sandbox.rest import RestSandboxProvider
+
+    cfg = Settings()
+    rest = cfg.sandbox.rest.model_copy(deep=True)
+    rest.base_url = str(v.get("base_url") or rest.base_url)
+    rest.auth.token = SecretStr(str(v.get("token") or rest.auth.token.get_secret_value()))
+    rest.status.path = str(v.get("status_path") or rest.status.path)
+    rest.verify_tls = bool(v.get("verify_tls", rest.verify_tls))
+    try:
+        provider = RestSandboxProvider(rest, compile_mapping(rest.mapping))
+    except ProviderConfigurationError as exc:
+        return ProbeResult(False, _ms(t0), str(exc))
+    result = await provider.probe()
+    return ProbeResult(result.ok, result.latency_ms or _ms(t0), result.detail)
+
+
 PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "llm": probe_llm,
     "ghidra": probe_ghidra,
@@ -424,6 +446,7 @@ PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "redis": probe_redis,
     "virustotal": probe_virustotal,
     "abuseipdb": probe_abuseipdb,
+    "rest": probe_rest,
 }
 
 # Which settings each probe reads, and the short name it gets them under.
@@ -480,6 +503,12 @@ _INPUTS: dict[str, dict[str, str]] = {
     "redis": {},
     "virustotal": {"api.virustotal_api_key": "api_key"},
     "abuseipdb": {"api.abuseipdb_api_key": "api_key"},
+    "rest": {
+        "core.sandbox.rest.base_url": "base_url",
+        "core.sandbox.rest.auth.token": "token",
+        "core.sandbox.rest.status.path": "status_path",
+        "core.sandbox.rest.verify_tls": "verify_tls",
+    },
 }
 
 

@@ -85,3 +85,21 @@ class ProbeResponse(BaseModel):
     models: list[str] | None = None
     # the server's whole manifest, so the editor can render it as tick boxes
     tools: list[str] | None = None
+
+
+class MappingPreviewRequest(BaseModel):
+    sample: dict[str, Any]
+    mapping: dict[str, Any]
+
+
+class ChannelPreview(BaseModel):
+    matched: int
+    kept: int
+    dropped: int
+    sample_rows: list[Any]
+    error: str | None = None
+
+
+class MappingPreviewResponse(BaseModel):
+    target_sha256: str
+    channels: dict[str, ChannelPreview]

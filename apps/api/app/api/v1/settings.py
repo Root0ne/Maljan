@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -17,6 +19,8 @@ from app.runtime_config import runtime_config
 from app.schemas.settings import (
     CatalogEntryDTO,
     GroupDTO,
+    MappingPreviewRequest,
+    MappingPreviewResponse,
     PatchRequest,
     PatchResponse,
     ProbeRequest,
@@ -26,6 +30,7 @@ from app.schemas.settings import (
     ValueDTO,
     ValuesResponse,
 )
+from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.settings_catalog_api import catalog_index, full_catalog
 from app.services.settings_probes import PROBES, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
@@ -158,3 +163,46 @@ async def test_probe(
     stored = await SettingsService(db).load_overrides()
     result = await run_probe(probe, body.values, stored)
     return ProbeResponse(**vars(result))
+
+
+async def _capped_body(request: Request) -> dict[str, Any]:
+    """Read the request body, refusing anything over the preview cap before it is parsed.
+
+    ``Content-Length`` catches an honest client without reading a byte; the
+    streamed guard catches a body sent without one (chunked transfer) or a
+    header that understates the real size, so the cap holds either way.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        with suppress(ValueError):
+            if int(content_length) > PREVIEW_MAX_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
+                )
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > PREVIEW_MAX_BYTES:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
+            )
+        chunks.append(chunk)
+    try:
+        parsed: dict[str, Any] = json.loads(b"".join(chunks) or b"{}")
+        return parsed
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid JSON body: {exc}") from exc
+
+
+@router.post("/sandbox-rest/preview", response_model=MappingPreviewResponse)
+async def preview_sandbox_mapping(
+    request: Request,
+    _: User = Depends(require_admin),
+) -> MappingPreviewResponse:
+    """Run a mapping against a pasted response. Nothing is stored or submitted."""
+    payload = await _capped_body(request)
+    body = MappingPreviewRequest.model_validate(payload)
+    return MappingPreviewResponse(**preview_mapping(body.sample, body.mapping))

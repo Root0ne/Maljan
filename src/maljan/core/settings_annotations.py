@@ -1359,19 +1359,26 @@ ANNOTATIONS.update(
 )
 
 
-def _rest(title: str, description: str, *, generic_only: bool = False) -> Annotation:
+def _rest(
+    title: str, description: str, *, generic_only: bool = False, probe: str | None = None
+) -> Annotation:
     """One ``sandbox.rest.*`` leaf: gated on the provider, drawn by one editor.
 
     ``generic_only`` adds the second gate the mapping leaves need — the
     catalog's ``applies_when`` is a conjunction of key/value sets, so two keys
     in one dict is exactly "the REST provider AND the generic report format".
+    ``probe`` names the connection test the group header's button runs; only
+    one leaf per group needs it.
     """
-    return {
+    annotation: Annotation = {
         "title": title,
         "description": description,
         "applies_when": _SANDBOX_REST_GENERIC if generic_only else _SANDBOX_REST,
         "editor": "rest_sandbox",
     }
+    if probe is not None:
+        annotation["probe"] = probe
+    return annotation
 
 
 ANNOTATIONS.update(
@@ -1379,6 +1386,7 @@ ANNOTATIONS.update(
         "sandbox.rest.base_url": _rest(
             "Sandbox API base URL",
             "Root of the sandbox's HTTP API; every path below is appended to it.",
+            probe="rest",
         ),
         "sandbox.rest.auth.header": _rest(
             "Auth header", "Header carrying the credential, e.g. Authorization or X-API-Key."
