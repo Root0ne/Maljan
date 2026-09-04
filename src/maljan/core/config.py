@@ -23,7 +23,7 @@ import copy
 import json
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -716,7 +716,39 @@ class MCPConfig(BaseModel):
     mirror is gone. Sub-project B fills this back in with a real
     ``servers: dict[str, MCPServerConfig]`` for operator-configured MCP tools
     that are not one of the built-in providers.
+
+    ``ghidra`` and ``cape`` below are a **deprecated read-only compatibility
+    view**, for ``tests/evaluation/``'s reproduction scripts alone (final
+    review I5) — that harness predates the provider layer and reads
+    ``cfg.mcp.ghidra`` / ``cfg.mcp.cape`` directly, and the plan-wide
+    constraint forbids editing it. ``Settings.model_validator(mode="after")``
+    populates the two private attributes with the *same objects* as
+    ``settings.static.ghidra`` / ``settings.sandbox.cape2.mcp`` (not copies),
+    so a mutation through either name is visible through the other. Nothing
+    in ``src/`` or ``apps/`` reads these properties, and they are not
+    ``Settings`` fields — the catalog and every new caller belong on the
+    provider-layer paths instead.
     """
+
+    _ghidra_view: MCPServerConfig | None = PrivateAttr(default=None)
+    _cape_view: MCPServerConfig | None = PrivateAttr(default=None)
+
+    @property
+    def ghidra(self) -> MCPServerConfig:
+        """Deprecated: the same object as ``settings.static.ghidra``."""
+        if self._ghidra_view is None:
+            # Only reachable for an ``MCPConfig`` built outside a validated
+            # ``Settings`` (e.g. constructed bare in a test); a real
+            # ``Settings`` always populates this in its after-validator.
+            self._ghidra_view = MCPServerConfig()
+        return self._ghidra_view
+
+    @property
+    def cape(self) -> MCPServerConfig:
+        """Deprecated: the same object as ``settings.sandbox.cape2.mcp``."""
+        if self._cape_view is None:
+            self._cape_view = MCPServerConfig()
+        return self._cape_view
 
 
 # ---------------------------------------------------------------------------
@@ -1283,6 +1315,22 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
+
+    @model_validator(mode="after")
+    def _populate_deprecated_mcp_view(self) -> "Settings":
+        """Wire ``mcp.ghidra`` / ``mcp.cape`` to the real provider-layer objects.
+
+        See ``MCPConfig``'s docstring (final review I5): this is a read-only
+        compatibility view for ``tests/evaluation/``'s scripts, which predate
+        the provider layer and cannot be edited under the plan-wide
+        constraint. The views share the *same* ``MCPServerConfig`` instances
+        as ``static.ghidra`` and ``sandbox.cape2.mcp`` — never copies — so
+        this must run after those sub-configs exist, which an "after"
+        validator guarantees.
+        """
+        self.mcp._ghidra_view = self.static.ghidra
+        self.mcp._cape_view = self.sandbox.cape2.mcp
+        return self
 
 
 # ---------------------------------------------------------------------------

@@ -264,6 +264,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # this function's one ``finally``, which references both names.
         temp_path: str | None = None
         host_mirror: Path | None = None
+        # L2 (live-run finding): set below when an attached sandbox report's
+        # own claimed hash disagreed with the sample at upload time, so the
+        # degradation makes it into both run_summary and the report banner
+        # even though nothing in the pipeline itself reads the stored flag.
+        _report_hash_mismatch_reason: str | None = None
         try:
             # ── 1. Load job ──────────────────────────────────────
             from app.models.job import AnalysisJob
@@ -482,6 +487,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 ).scalar_one_or_none()
                 if row is None or row.sample_id != sample.id:
                     raise ValueError("The attached sandbox report does not belong to this sample.")
+                # L2: the upload endpoint's mismatch warning promises "The
+                # analysis will still run and will say so in its findings" —
+                # nothing threaded the stored flag into the run until now.
+                if row.sample_sha256_match is False:
+                    _report_hash_mismatch_reason = (
+                        "uploaded sandbox report's target hash differs from the sample"
+                    )
+                    logger.warning(
+                        "Attached sandbox report %s claims a target hash that does not "
+                        "match sample %s; recording it as a run degradation.",
+                        row.id,
+                        sample.sha256[:12],
+                        extra={"job_id": job_id},
+                    )
                 sandbox_provider = app.container.get_sandbox_provider()
                 # A mock-mode job still resolves sandbox.provider="upload" through
                 # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
@@ -774,6 +793,24 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             _run_summary = pipeline_result.get("run_summary")
             _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
             _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
+            if _report_hash_mismatch_reason:
+                # Threaded in here rather than through the pipeline state:
+                # the mismatch is known before the graph runs (it is on the
+                # stored row, checked at upload time), and both the run
+                # summary and the report banner read a plain list of
+                # strings, so appending to each is the whole fix.
+                _existing_reasons = _run_summary.get("degradation_reasons")
+                _run_summary["degradation_reasons"] = [
+                    *(_existing_reasons if isinstance(_existing_reasons, list) else []),
+                    _report_hash_mismatch_reason,
+                ]
+                _malware_report = pipeline_result.get("malware_report")
+                if isinstance(_malware_report, dict):
+                    _report_reasons = _malware_report.get("degradation_reasons")
+                    _malware_report["degradation_reasons"] = [
+                        *(_report_reasons if isinstance(_report_reasons, list) else []),
+                        _report_hash_mismatch_reason,
+                    ]
 
             # A pipeline that produced no report is a failed run, not a
             # completed one with nothing in it (L15, security hardening):
