@@ -1514,26 +1514,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 from maljan.core.config import get_settings
 
                 _cfg = get_settings()
+                _provider = container.get_static_provider()
                 _static_path = state.get("static_sample_path")
                 if (
                     _cfg.preprocessing.use_function_hash_attribution
-                    and _cfg.mcp.ghidra.transport == "http"
+                    and _provider.capabilities.provides_function_hashes
                     and _cfg.memory.backend == "qdrant"
                     and _static_path
                 ):
                     from maljan.analysis.function_hash_attribution import (
                         aggregate_matches,
-                        fetch_bulk_function_hashes,
                         to_report_dicts,
                     )
                     from maljan.memory.function_hash_store import FunctionHashStore
+                    from maljan.providers.base import StaticJobContext
 
                     _sample_id = state.get("file_hash", "") or ""
-                    _funcs = fetch_bulk_function_hashes(
-                        base_url=_cfg.mcp.ghidra.url,
-                        auth_token=_cfg.mcp.ghidra.auth_token,
-                        file_path=_static_path,
-                        min_instructions=_cfg.preprocessing.function_hash_min_instructions,
+                    _funcs = _provider.function_hashes(
+                        StaticJobContext(mirror_sample_path=str(_static_path))
                     )
                     if _funcs:
                         _fh_store = FunctionHashStore(

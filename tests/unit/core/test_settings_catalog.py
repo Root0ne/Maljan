@@ -32,8 +32,8 @@ def test_types_and_choices():
     assert by_path["llm.parallel_analysts"].type == "bool"
     assert by_path["llm.frontier.arms"].type == "json"
     assert by_path["react_agent_timeout_overrides"].type == "dict"
-    assert by_path["mcp.ghidra.args"].type == "list"
-    assert by_path["mcp.ghidra.auth_token"].type == "secret"
+    assert by_path["static.ghidra.args"].type == "list"
+    assert by_path["static.ghidra.auth_token"].type == "secret"
 
 
 def test_groups_cover_every_entry_in_order():

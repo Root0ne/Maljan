@@ -70,9 +70,6 @@ def test_legacy_ghidra_env_lands_on_static_ghidra(monkeypatch):
     assert s.static.ghidra.transport == "http"
     assert s.static.ghidra.url == "http://ghidra.example:8089"
     assert s.static.ghidra.tool_selection == "curated"
-    # The transitional mirror carries the same values for the modules that
-    # still read ``mcp.ghidra`` until Task 12.
-    assert s.mcp.ghidra.url == s.static.ghidra.url
 
 
 def test_legacy_sandbox_env_lands_on_the_nested_cape2_block(monkeypatch):

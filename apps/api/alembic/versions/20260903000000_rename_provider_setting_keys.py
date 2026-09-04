@@ -1,10 +1,11 @@
 """Rename the stored UI overrides the provider layer moved.
 
 ``runtime_settings`` is keyed by the dotted setting path, so the provider
-rename (``core.mcp.ghidra.*`` -> ``core.static.ghidra.*``,
-``core.sandbox.cape2_*`` -> ``core.sandbox.cape2.*``, …) would otherwise strand
-every override an operator had set: the key would no longer match a catalog
-entry and the value would be ignored in silence. The table is derived from
+rename (the old ``core.mcp.<name>.*`` provider blocks moving under
+``core.static``/``core.sandbox``, ``core.sandbox.cape2_*`` ->
+``core.sandbox.cape2.*``, …) would otherwise strand every override an
+operator had set: the key would no longer match a catalog entry and the
+value would be ignored in silence. The table is derived from
 ``maljan.core.config.SETTINGS_ALIASES`` so config and migration cannot drift.
 
 Idempotent by construction: a row already carrying the new key is left alone
@@ -46,7 +47,12 @@ _MCP_LEAVES = (
 def _build_renames() -> dict[str, str]:
     out: dict[str, str] = {}
     for old, new in SETTINGS_ALIASES:
-        if old in ("mcp.ghidra", "mcp.cape"):
+        # The two legacy aliases rooted at ``mcp`` each moved a whole
+        # MCPServerConfig block (a leaf's worth of settings), not a single
+        # scalar, so the stored keys are one level deeper than the alias
+        # itself and need expanding over every leaf it used to carry.
+        head, _, _tail = old.partition(".")
+        if head == "mcp":
             for leaf in _MCP_LEAVES:
                 out[f"core.{old}.{leaf}"] = f"core.{new}.{leaf}"
         else:

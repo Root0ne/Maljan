@@ -20,6 +20,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
 """
 
 import copy
+import json
 from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
@@ -707,10 +708,15 @@ class MCPServerConfig(BaseModel):
 
 
 class MCPConfig(BaseModel):
-    """MCP integration configurations for external tools."""
+    """Generic MCP server registry — empty until sub-project B.
 
-    ghidra: MCPServerConfig = Field(default_factory=MCPServerConfig)
-    cape: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    ``ghidra`` and ``cape`` used to live here as a transitional mirror of
+    ``static.ghidra`` / ``sandbox.cape2.mcp`` for readers that had not yet
+    moved onto the provider layer; Task 12 moved the last of them, so the
+    mirror is gone. Sub-project B fills this back in with a real
+    ``servers: dict[str, MCPServerConfig]`` for operator-configured MCP tools
+    that are not one of the built-in providers.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -946,9 +952,43 @@ def _warn_once(paths: list[str]) -> None:
     )
 
 
+_MCP_ALIAS_JSON_LEAVES = ("args", "env")  # the only list-/dict-typed MCPServerConfig fields
+
+
+def _redecode_json_leaves_stranded_by_the_mcp_alias(data: dict[str, Any]) -> None:
+    """JSON-decode ``args``/``env`` a legacy ``mcp.*`` env var left as raw text.
+
+    ``mcp.ghidra``/``mcp.cape`` used to be real ``MCPServerConfig`` fields, so
+    pydantic-settings' own nested-env decoder resolved ``MCP__GHIDRA__ARGS``
+    against that field's ``list[str]`` annotation and JSON-decoded it before
+    this module ever saw the assembled dict. ``MCPConfig`` is empty now (Task
+    12): the decoder can no longer find a type along the legacy path, so it
+    hands back the raw JSON text under the *new* path instead — one
+    validation error away from a silently broken ``.env``. A value that
+    already decoded correctly (set via the new ``STATIC__GHIDRA__ARGS`` name,
+    say, where the schema is real) is already a list/dict and is left alone.
+    Mutates ``data`` in place.
+    """
+    for old, new in SETTINGS_ALIASES:
+        if old.partition(".")[0] != "mcp":
+            continue
+        for leaf in _MCP_ALIAS_JSON_LEAVES:
+            owner, key = _dig(data, f"{new}.{leaf}")
+            if owner is None:
+                continue
+            value = owner.get(key)
+            if isinstance(value, str):
+                try:
+                    owner[key] = json.loads(value)
+                except ValueError:
+                    pass  # let ordinary model validation raise on the bad value
+
+
 def apply_settings_aliases(data: dict[str, Any]) -> dict[str, Any]:
     """Public, pure form of the alias pass — used by the validator and by tests."""
-    return _alias_within(data, SETTINGS_ALIASES)
+    out = _alias_within(data, SETTINGS_ALIASES)
+    _redecode_json_leaves_stranded_by_the_mcp_alias(out)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1041,14 +1081,15 @@ class Settings(BaseSettings):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
-    # Transitional mirror of static.ghidra / sandbox.cape2.mcp. Every reader
-    # moves to the provider in tasks 9-12; MCPConfig itself goes in Task 23.
+    # Empty until sub-project B (see ``MCPConfig``'s own docstring); the
+    # transitional ``static.ghidra`` / ``sandbox.cape2.mcp`` mirror that used
+    # to live here for not-yet-migrated readers is gone as of Task 12.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
 
     @classmethod
     def _alias_legacy_keys(cls, data: Any) -> Any:
-        """Translate the pre-provider setting names, then mirror back for readers.
+        """Translate the pre-provider setting names before validation.
 
         Called from ``settings_customise_sources`` against each assembled
         source in turn (init kwargs, environment nested by the ``__``
@@ -1059,30 +1100,16 @@ class Settings(BaseSettings):
         test that monkeypatches this classmethod afterwards never observes
         the call; the source pre-pass calls ``cls._alias_legacy_keys``
         through ordinary attribute lookup on every construction instead,
-        which a monkeypatch does reach. See the plan's Task 2 Step 5.
+        which a monkeypatch does reach.
+
+        Used to also mirror the translated value back onto the deprecated
+        ``mcp.ghidra`` / ``mcp.cape`` paths for readers that had not yet moved
+        onto the provider layer; Task 12 moved the last of them, so the
+        mirror-back is gone and this is a straight translation now.
         """
         if not isinstance(data, dict):
             return data
-        out = apply_settings_aliases(data)
-        # Keep the deprecated mirror in step with the new home so a module that
-        # has not been migrated yet reads the operator's real value.
-        static_ghidra = (
-            (out.get("static") or {}).get("ghidra") if isinstance(out.get("static"), dict) else None
-        )
-        if isinstance(static_ghidra, dict):
-            mcp = out.setdefault("mcp", {})
-            if isinstance(mcp, dict) and not isinstance(mcp.get("ghidra"), dict):
-                mcp["ghidra"] = dict(static_ghidra)
-        cape_mcp = (
-            ((out.get("sandbox") or {}).get("cape2") or {}).get("mcp")
-            if isinstance(out.get("sandbox"), dict)
-            else None
-        )
-        if isinstance(cape_mcp, dict):
-            mcp = out.setdefault("mcp", {})
-            if isinstance(mcp, dict) and not isinstance(mcp.get("cape"), dict):
-                mcp["cape"] = dict(cape_mcp)
-        return out
+        return apply_settings_aliases(data)
 
     @classmethod
     def settings_customise_sources(
@@ -1256,13 +1283,6 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
-        # Transitional: the readers that still say ``mcp.ghidra`` (static
-        # analyst, pipeline nodes, worker mirror) must see the provider's
-        # configuration until Task 12 moves them.
-        if self.mcp.ghidra == MCPServerConfig():
-            self.mcp.ghidra = self.static.ghidra.model_copy(deep=True)
-        if self.mcp.cape == MCPServerConfig():
-            self.mcp.cape = self.sandbox.cape2.mcp.model_copy(deep=True)
 
 
 # ---------------------------------------------------------------------------

@@ -58,6 +58,27 @@ def build_job_settings(
     return build_settings(merged)
 
 
+def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Path, str] | None:
+    """Where this sample has to be copied for the static provider to read it.
+
+    Returns (host path, container-visible path), or None when the provider does
+    not need a copy at all — a capa/YARA or radare2 run that reads the bytes in
+    place, and every future provider that does the same. The host directory and
+    its 0o700/0o600 handling stay in ``sample_files``; only the decision moved.
+    """
+    from app.worker import sample_files
+
+    if not provider.capabilities.needs_sample_mirror:
+        return None
+    spec = provider.mirror_spec()
+    if spec is None:
+        return None
+    host = sample_files.work_dir() / f"{sha256}{extension}"
+    prefix = settings.ghidra_container_samples_path.rstrip("/")
+    container = f"{prefix}/{spec.work_subdir}/{sha256}{extension}"
+    return host, container
+
+
 def settings_snapshot(
     core_settings: _CoreSettings, overridden_keys: Iterable[str] | None = None
 ) -> dict[str, Any]:
@@ -515,36 +536,42 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id, "component": "minio"},
                 )
 
-                # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): mirror the binary
-                # into ``<samples_dir>/.work/<sha256><ext>`` (relative to the
-                # project root by default). That directory is bind-mounted
-                # into the Ghidra MCP container at
-                # ``ghidra_container_samples_path``, so the static analyst can
-                # call ``load_program(file=<container_path>/.work/<sha256><ext>)``
-                # and actually get a hit. Previously the file only lived in the
-                # host's tempdir, invisible to the container, so every static
-                # analysis ran without ever loading the sample.
+                # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01) mirrored every
+                # sample into ``<samples_dir>/.work/<sha256><ext>`` for the
+                # Ghidra container unconditionally. Task 12 (provider
+                # capabilities) turned that into a capability read: a
+                # capa/YARA or radare2 provider reads the bytes in place and
+                # needs no copy at all, so ``mirror_target_for`` asks the
+                # configured static provider first and returns None when it
+                # has nothing to mirror. When it does, the container-visible
+                # path still mirrors the bind mount in
+                # docker/docker-compose.yml (``../data/samples:/data/samples``).
                 #
-                # Wave 10 (security hardening, H3): the mirror is now a
-                # private 0o600 copy under a 0o700 ``.work`` subdirectory of
+                # Wave 10 (security hardening, H3): the mirror is a private
+                # 0o600 copy under a 0o700 ``.work`` subdirectory of
                 # ``samples_dir`` — never the operator's own corpus directory
                 # itself — and is removed by the ``finally`` below when the
                 # job ends, whichever way it ends.
                 try:
-                    host_mirror = sample_files.work_dir() / f"{sample.sha256}{_orig_ext}"
-                    sample_files.private_copy(Path(temp_path), host_mirror)
-                    # Container path mirrors the bind mount in
-                    # docker/docker-compose.yml (``../data/samples:/data/samples``).
-                    static_sample_path = (
-                        f"{settings.ghidra_container_samples_path.rstrip('/')}/"
-                        f"{sample_files.WORK_SUBDIR}/{sample.sha256}{_orig_ext}"
+                    target = mirror_target_for(
+                        app.container.get_static_provider(),
+                        sha256=sample.sha256,
+                        extension=_orig_ext,
                     )
-                    logger.info(
-                        "Mirrored sample to %s for Ghidra container (%s).",
-                        host_mirror,
-                        static_sample_path,
-                        extra={"job_id": job_id, "component": "ghidra-mirror"},
-                    )
+                    if target is None:
+                        logger.info(
+                            "Static provider needs no sample mirror; skipping the copy.",
+                            extra={"job_id": job_id, "component": "sample-mirror"},
+                        )
+                    else:
+                        host_mirror, static_sample_path = target
+                        sample_files.private_copy(Path(temp_path), host_mirror)
+                        logger.info(
+                            "Mirrored sample to %s for the static provider (%s).",
+                            host_mirror,
+                            static_sample_path,
+                            extra={"job_id": job_id, "component": "sample-mirror"},
+                        )
                 except Exception as mirror_exc:
                     logger.warning(
                         "Failed to mirror sample to %s for Ghidra: %s. "

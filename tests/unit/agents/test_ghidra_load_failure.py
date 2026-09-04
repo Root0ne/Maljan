@@ -91,7 +91,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         sink_reachability_max_funcs = 12
 
     class _S:
-        class mcp:  # noqa: N801
+        class static:  # noqa: N801
             ghidra = _G()
 
         preprocessing = _P()

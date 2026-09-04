@@ -137,10 +137,8 @@ class StaticAnalyst(BaseAnalyst):
         which is what keeps a bare analyst — ``tests/unit/test_load_program_pinning.py``
         constructs one with ``StaticAnalyst.__new__`` — working. ``memory`` is
         never read by any of the four delegated methods, so the fallback does
-        not need a real one. Reads ``mcp.ghidra`` rather than the newer
-        ``static.ghidra`` on purpose: this shim preserves the pre-provider
-        behaviour byte for byte, including for callers that still fake only
-        the old path.
+        not need a real one. Reads ``static.ghidra`` directly: the transitional
+        ``mcp``-namespaced mirror this shim used to prefer is gone (Task 12).
         """
         from maljan.core.config import MemoryConfig, get_settings
 
@@ -148,7 +146,7 @@ class StaticAnalyst(BaseAnalyst):
         provider = container.get_static_provider() if container is not None else None
         if not isinstance(provider, GhidraStaticProvider):
             cfg = get_settings()
-            provider = GhidraStaticProvider(cfg.mcp.ghidra, cfg.preprocessing, MemoryConfig())
+            provider = GhidraStaticProvider(cfg.static.ghidra, cfg.preprocessing, MemoryConfig())
         provider._job = _LegacyGhidraJob(self)  # type: ignore[assignment]
         return provider
 
@@ -268,7 +266,11 @@ class StaticAnalyst(BaseAnalyst):
         cfg = get_settings()
         if not cfg.preprocessing.use_sink_reachability:
             return ""
-        if cfg.mcp.ghidra.transport != "http":
+        # Ghidra-specific by construction: this pre-pass drives the headless
+        # Ghidra REST API directly (load_program / call graph), not a
+        # capability any other static provider could satisfy. Generalising it
+        # behind a capability flag is sub-project C's, not this one's.
+        if cfg.static.ghidra.transport != "http":
             return ""  # the pre-pass speaks the headless REST API directly
 
         try:
@@ -276,8 +278,8 @@ class StaticAnalyst(BaseAnalyst):
 
             from maljan.analysis.sink_reachability import build_priority_hint
 
-            base = cfg.mcp.ghidra.url.rstrip("/")
-            token = cfg.mcp.ghidra.auth_token
+            base = cfg.static.ghidra.url.rstrip("/")
+            token = cfg.static.ghidra.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
             from maljan.analysis.ghidra_program import (
                 SWITCH_PARAM,
@@ -365,8 +367,8 @@ class StaticAnalyst(BaseAnalyst):
         cfg = get_settings()
         if not cfg.preprocessing.use_function_hash_attribution:
             return ""
-        if cfg.mcp.ghidra.transport != "http":
-            return ""  # the pre-pass speaks the headless REST API directly
+        if not self._provider().capabilities.provides_function_hashes:
+            return ""  # this static provider cannot produce function hashes
         if cfg.memory.backend != "qdrant":
             return ""  # the function-hash store needs the Qdrant backend
 
@@ -374,15 +376,11 @@ class StaticAnalyst(BaseAnalyst):
             from maljan.analysis.function_hash_attribution import (
                 aggregate_matches,
                 build_attribution_hint,
-                fetch_bulk_function_hashes,
             )
             from maljan.memory.function_hash_store import FunctionHashStore
 
-            functions = fetch_bulk_function_hashes(
-                base_url=cfg.mcp.ghidra.url,
-                auth_token=cfg.mcp.ghidra.auth_token,
-                file_path=file_path,
-                min_instructions=cfg.preprocessing.function_hash_min_instructions,
+            functions = self._provider().function_hashes(
+                StaticJobContext(mirror_sample_path=file_path)
             )
             if not functions:
                 return ""
