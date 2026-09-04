@@ -42,6 +42,19 @@ against the brief. No rate-limit, 429 or Retry-After section was reachable in
 any of the pages above; the backoff and Retry-After handling in
 ``wait_for_completion`` is therefore defensive engineering, not a documented
 contract, and is called out as such here rather than implied to be spec'd.
+
+A first pass at ``report_triage.json``'s ``network`` shape (flat
+``requests``/``flows`` arrays with CAPE-like fields) turned out to be wrong —
+found during review, not confirmed against anything. The "Dynamic Report"
+docs page, reached the same way as the pages above, gives the real shape:
+``network.flows[]`` carries the endpoint as one combined ``"host:port"``
+string (no separate port field) plus per-flow ``proto``/``country``/
+``as_num``/``as_org``; ``network.requests[]`` is a discriminated union —
+``domain_req``/``domain_resp`` for a DNS lookup, ``web_req``/``web_resp`` for
+an HTTP request — never a flat DNS/HTTP row. ``triage_overview_to_sandbox_report``
+(``schemas/sandbox_report.py``) maps both into the shapes
+``network_extractor``/``network_parser`` actually read, not Triage's own
+field names.
 """
 
 from __future__ import annotations
@@ -54,6 +67,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
+from maljan.core.logger import logger
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
@@ -74,14 +88,6 @@ TASK_REPORT_PATH = "/samples/{sample_id}/{task}/report_triage.json"  # GET
 PCAP_PATH = "/samples/{sample_id}/{task}/dump.pcap"  # GET, streamed
 TERMINAL_STATUSES = frozenset({"reported", "failed"})
 
-# Triage numbers behavioural tasks sequentially; both the "Overview Report"
-# and "Samples" pages' own examples name the first one this way.
-# ``fetch_pcap`` targets it directly rather than re-fetching the overview
-# just to learn a task name — the network analyst reads the structured
-# ``network`` block first regardless (Task 17), and a sample with no
-# behavioural task has no PCAP to offer either way.
-FIRST_BEHAVIORAL_TASK = "behavioral1"
-
 # The read used by both connection tests (this provider's own ``probe`` and
 # the settings UI's ``probe_triage``): "List all resources available", the
 # cheapest authenticated GET this API documents — the same role CAPE2's
@@ -97,12 +103,22 @@ class TriageSandboxProvider(SandboxProvider):
     """Hatching Triage cloud sandbox: submit, poll, fetch, all over REST.
 
     Triage never publishes a per-API-call log, so there is no ``apistats``,
-    ``calls``, registry timeline or generic-event stream to map —
-    ``UNAVAILABLE`` names all four rather than leaving them silently empty,
-    which would read exactly like a clean sample.
+    ``calls``, registry timeline or generic-event stream to map, and a file
+    sample gets no screenshot either (the "Dynamic Report" docs page lists
+    Triage's own top-level report fields — Version/Sample/Task/Errors/
+    Analysis/Processes/Signatures/Network/Debug/Dumped/Extracted — and none
+    of them is a screenshot). ``UNAVAILABLE`` names all five rather than
+    leaving them silently empty, which would read exactly like a clean
+    sample.
     """
 
-    UNAVAILABLE: ClassVar[tuple[str, ...]] = ("apistats", "calls", "registry", "generic_events")
+    UNAVAILABLE: ClassVar[tuple[str, ...]] = (
+        "apistats",
+        "calls",
+        "registry",
+        "generic_events",
+        "screenshots",
+    )
 
     def __init__(self, cfg: SandboxTriageConfig) -> None:
         self._cfg = cfg
@@ -195,6 +211,11 @@ class TriageSandboxProvider(SandboxProvider):
         http = self._get_http()
         url = STATUS_PATH.format(sample_id=task_id)
         while True:
+            # Checked at the top of every iteration, including the rate-limit
+            # branch below: a server that keeps answering 429/503 past the
+            # deadline must still raise rather than loop forever.
+            if self._now() >= deadline:
+                raise ProviderError(f"Triage task {task_id} did not complete within {budget:.0f}s.")
             response = http.get(url, headers=headers)
             if response.status_code in (429, 503):
                 # "Come back later" — no documented rate limit was reachable
@@ -210,10 +231,28 @@ class TriageSandboxProvider(SandboxProvider):
             status = str(response.json().get("status") or "")
             if status in TERMINAL_STATUSES:
                 return status
-            if self._now() >= deadline:
-                raise ProviderError(f"Triage task {task_id} did not complete within {budget:.0f}s.")
             self._sleep(interval)
             interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
+
+    @staticmethod
+    def _behavioral_task_names(overview: dict[str, Any]) -> list[str]:
+        """Names of every behavioural task in an overview, in listed order.
+
+        The one place this is worked out, shared by ``fetch`` (which needs
+        every behavioural task's report) and ``fetch_pcap`` (which needs the
+        first one's capture) — so a sample whose first task isn't literally
+        named ``"behavioral1"``, or that ran several, is handled the same way
+        in both places instead of one of them guessing.
+        """
+        tasks = overview.get("tasks")
+        names: list[str] = []
+        for one_task in tasks if isinstance(tasks, list) else []:
+            if not isinstance(one_task, dict) or one_task.get("kind") != "behavioral":
+                continue
+            name = str(one_task.get("name") or "")
+            if name:
+                names.append(name)
+        return names
 
     def fetch(self, task_id: str) -> SandboxRun:
         from maljan.schemas.sandbox_report import SandboxRun
@@ -225,13 +264,7 @@ class TriageSandboxProvider(SandboxProvider):
         overview = overview_response.json()
 
         task_reports: dict[str, dict[str, Any]] = {}
-        tasks = overview.get("tasks")
-        for one_task in tasks if isinstance(tasks, list) else []:
-            if not isinstance(one_task, dict) or one_task.get("kind") != "behavioral":
-                continue
-            name = str(one_task.get("name") or "")
-            if not name:
-                continue
+        for name in self._behavioral_task_names(overview):
             response = http.get(
                 TASK_REPORT_PATH.format(sample_id=task_id, task=name), headers=headers
             )
@@ -256,12 +289,28 @@ class TriageSandboxProvider(SandboxProvider):
     def fetch_pcap(self, task_id: str, dest_dir: str | Path) -> str | None:
         if not self._cfg.fetch_pcap:
             return None
+        headers = self._auth_headers()
+        http = self._get_http()
+        overview_response = http.get(OVERVIEW_PATH.format(sample_id=task_id), headers=headers)
+        if overview_response.status_code >= 400:
+            logger.info(
+                "Triage: could not fetch the overview for %s (HTTP %d) while looking for a "
+                "PCAP task; skipping.",
+                task_id,
+                overview_response.status_code,
+            )
+            return None
+        names = self._behavioral_task_names(overview_response.json())
+        if not names:
+            logger.info("Triage: sample %s has no behavioural task; no PCAP to fetch.", task_id)
+            return None
+
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
         out = dest / f"triage_{task_id}.pcap"
-        url = PCAP_PATH.format(sample_id=task_id, task=FIRST_BEHAVIORAL_TASK)
+        url = PCAP_PATH.format(sample_id=task_id, task=names[0])
         try:
-            with self._get_http().stream("GET", url, headers=self._auth_headers()) as response:
+            with http.stream("GET", url, headers=headers) as response:
                 if response.status_code >= 400:
                     return None
                 with open(out, "wb") as f:

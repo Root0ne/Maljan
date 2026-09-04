@@ -17,6 +17,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 from __future__ import annotations
 
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler, field_validator
 
@@ -280,6 +281,22 @@ def cape_report_to_sandbox_report(
     )
 
 
+def _split_host_port(value: str) -> tuple[str, int | None]:
+    """Split Triage's combined ``"host:port"`` flow endpoint.
+
+    Triage's dynamic-report flows carry the destination as one string rather
+    than separate host/port fields (confirmed against the "Dynamic Report"
+    docs page on 2026-09-04). A value with no trailing ``:<digits>`` is kept
+    whole as the host, port ``None`` — this also covers a bare IPv6 address,
+    which is never mistaken for a port suffix since the part after the last
+    ``:`` would not be all-digits.
+    """
+    host, sep, port_str = value.rpartition(":")
+    if sep and port_str.isdigit():
+        return host, int(port_str)
+    return value, None
+
+
 def triage_overview_to_sandbox_report(
     overview: dict[str, Any],
     *,
@@ -290,10 +307,24 @@ def triage_overview_to_sandbox_report(
     """Map a Triage overview (plus its behavioural task reports) onto the model.
 
     Triage reports what it observed, not every API call: there is no per-call
-    log, no apistats and no registry timeline. Those four sections are listed in
-    ``unavailable`` rather than left empty and silent, because an empty dynamic
-    section reads exactly like a clean sample — and the report renderers say so
-    out loud (Task 17).
+    log, no apistats, no registry timeline, no generic-event stream and (for a
+    file sample) no screenshot. Those five sections are listed in
+    ``unavailable`` rather than left empty and silent, because an empty
+    dynamic section reads exactly like a clean sample — and the report
+    renderers say so out loud (Task 17).
+
+    Every other channel a consumer reads is populated straight from the
+    fixture shape confirmed against Triage's "Dynamic Report" docs page on
+    2026-09-04: each task's ``network.flows`` (tcp/udp, split by ``proto``,
+    plus a synthesised ``network.hosts`` row per destination carrying that
+    flow's ASN/country) and ``network.requests`` (``domain_req``/
+    ``domain_resp`` pairs for DNS, ``web_req``/``web_resp`` pairs for HTTP),
+    and each task's ``dumped`` files for ``dropped_files``. Every one of these
+    is mapped into the *consumer* shape (``network.dns`` rows as
+    ``{request, type, answers: [{data}]}``, ``network.tcp``/``udp`` rows as
+    ``{dst, dport}``) rather than passed through in Triage's own shape, so
+    ``network_extractor``/``network_parser`` read real domains and IPs
+    instead of rendering ``N/A`` for fields they don't recognise.
 
     ``TriageSandboxProvider`` is imported here, inside the function body rather
     than at module scope, because it is the one caller: the provider module
@@ -308,7 +339,9 @@ def triage_overview_to_sandbox_report(
     sample = sample_field if isinstance(sample_field, dict) else {}
     analysis = analysis_field if isinstance(analysis_field, dict) else {}
     processes: list[SandboxProcess] = []
+    dropped_files: list[dict[str, Any]] = []
     network = SandboxNetwork()
+    hosts_by_ip: dict[str, dict[str, Any]] = {}
     for task in (task_reports or {}).values():
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
@@ -323,13 +356,75 @@ def triage_overview_to_sandbox_report(
                     calls=[],
                 )
             )
+        dumped_field = task.get("dumped")
+        dropped_files.extend(_rows(dumped_field))
+
         net_field = task.get("network")
         net = net_field if isinstance(net_field, dict) else {}
-        network.dns.extend(_rows(net.get("requests")))
-        network.http.extend(_rows(net.get("flows")))
-        network.domains.extend(
-            [str(r.get("domain")) for r in _rows(net.get("requests")) if r.get("domain")]
-        )
+
+        for flow in _rows(net.get("flows")):
+            proto = str(flow.get("proto") or "").lower()
+            dst_host, dst_port = _split_host_port(str(flow.get("dst") or ""))
+            if not dst_host:
+                continue
+            row = {"dst": dst_host, "dport": dst_port}
+            if proto == "tcp":
+                network.tcp.append(row)
+            elif proto == "udp":
+                network.udp.append(row)
+            host_row = hosts_by_ip.setdefault(dst_host, {"ip": dst_host})
+            as_num, as_org = flow.get("as_num"), flow.get("as_org")
+            if as_num or as_org:
+                host_row["asn"] = " ".join(str(x) for x in (as_num, as_org) if x)
+            if flow.get("country"):
+                host_row["country_name"] = str(flow["country"])
+
+        for req in _rows(net.get("requests")):
+            domain_req_field = req.get("domain_req")
+            domain_req = domain_req_field if isinstance(domain_req_field, dict) else None
+            domain_resp_field = req.get("domain_resp")
+            domain_resp = domain_resp_field if isinstance(domain_resp_field, dict) else None
+            web_req_field = req.get("web_req")
+            web_req = web_req_field if isinstance(web_req_field, dict) else None
+            web_resp_field = req.get("web_resp")
+            web_resp = web_resp_field if isinstance(web_resp_field, dict) else None
+
+            if domain_req is not None:
+                answers = [
+                    {"data": str(a["value"])}
+                    for a in _rows((domain_resp or {}).get("answers"))
+                    if a.get("value")
+                ]
+                for question in _rows(domain_req.get("questions")):
+                    name = str(question.get("name") or "")
+                    if not name:
+                        continue
+                    network.dns.append(
+                        {
+                            "request": name,
+                            "type": str(question.get("type") or ""),
+                            "answers": answers,
+                        }
+                    )
+                    network.domains.append(name)
+
+            if web_req is not None:
+                parsed_url = urlsplit(str(web_req.get("url") or ""))
+                headers_field = web_req.get("headers")
+                headers = headers_field if isinstance(headers_field, dict) else {}
+                network.http.append(
+                    {
+                        "host": parsed_url.hostname or "",
+                        "uri": parsed_url.path or "/",
+                        "method": str(web_req.get("method") or ""),
+                        "status": (web_resp or {}).get("status"),
+                        "port": parsed_url.port,
+                        "encrypted": parsed_url.scheme == "https",
+                        "user_agent": str(headers.get("User-Agent") or ""),
+                    }
+                )
+    network.hosts = list(hosts_by_ip.values())
+
     return SandboxReport(
         provider=provider,
         source_format="triage",
@@ -357,7 +452,7 @@ def triage_overview_to_sandbox_report(
             if isinstance(s, dict)
         ],
         network=network,
-        dropped_files=[],
+        dropped_files=dropped_files,
         registry=[],
         screenshots=[],
         cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},

@@ -28,12 +28,72 @@
     }
   ],
   "network": {
-    "requests": [
-      {"domain": "example-c2.test", "ip": "198.51.100.23", "type": "dns"}
-    ],
     "flows": [
-      {"domain": "example-c2.test", "dst": "198.51.100.23", "dport": 80, "proto": "tcp"}
+      {
+        "id": 1,
+        "src": "10.0.2.15:49512",
+        "dst": "45.33.32.23:443",
+        "proto": "tcp",
+        "pid": 2100,
+        "procid": 1000,
+        "first_seen": 1.2,
+        "last_seen": 3.4,
+        "rx_bytes": 4096,
+        "tx_bytes": 2048,
+        "domain": "update-relay-c9f2.net",
+        "tls_ja3": "e7d705a3286e19ea42f587b344ee6865",
+        "tls_sni": "update-relay-c9f2.net",
+        "country": "United States",
+        "as_num": 63949,
+        "as_org": "EXAMPLE-HOSTING"
+      },
+      {
+        "id": 2,
+        "src": "10.0.2.15:53211",
+        "dst": "10.0.2.3:53",
+        "proto": "udp",
+        "pid": 2100,
+        "procid": 1000,
+        "first_seen": 0.4,
+        "last_seen": 0.5
+      }
+    ],
+    "requests": [
+      {
+        "flow": 2,
+        "domain_req": {
+          "questions": [{"name": "update-relay-c9f2.net", "type": "A"}]
+        },
+        "domain_resp": {
+          "answers": [{"name": "update-relay-c9f2.net", "type": "A", "value": "45.33.32.23"}]
+        }
+      },
+      {
+        "flow": 1,
+        "web_req": {
+          "method": "GET",
+          "url": "https://update-relay-c9f2.net/gate.php",
+          "headers": {"User-Agent": "Mozilla/5.0 (compatible)"}
+        },
+        "web_resp": {
+          "status": 200,
+          "headers": {}
+        }
+      }
     ]
   },
+  "dumped": [
+    {
+      "at": "00:00:05",
+      "pid": 2100,
+      "procid": 1000,
+      "path": "C:\\Users\\user\\AppData\\Local\\Temp\\payload.dll",
+      "name": "payload.dll",
+      "kind": "pe",
+      "md5": "9e107d9d372bb6826bd81d3542a419d6",
+      "sha1": "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85"
+    }
+  ],
   "signatures": []
 }

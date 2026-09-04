@@ -91,7 +91,13 @@ def test_a_triage_upload_is_mapped_instead_of_refused():
     assert run.report.target.sha256 == "a" * 64
     assert run.report.cti["family"] == ["qakbot"]
     assert [s.name for s in run.report.signatures] == ["s"]
-    assert sorted(run.report.unavailable) == ["apistats", "calls", "generic_events", "registry"]
+    assert sorted(run.report.unavailable) == [
+        "apistats",
+        "calls",
+        "generic_events",
+        "registry",
+        "screenshots",
+    ]
     assert run.status == "reported"
     assert provider.attach_report(_blob()).report.source_format == "cape2"
 

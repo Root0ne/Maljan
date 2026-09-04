@@ -102,6 +102,39 @@ def test_a_retry_after_header_is_honoured():
     assert slept == [7.0]
 
 
+class _Clock:
+    """A monotonic clock that always has another value, unlike a bounded iterator.
+
+    Used to drive ``wait_for_completion``'s deadline check without sleeping
+    and without risking ``StopIteration`` if a fix changes how many times the
+    loop reads the clock.
+    """
+
+    def __init__(self, step: float = 50.0) -> None:
+        self._t = 0.0
+        self._step = step
+
+    def __call__(self) -> float:
+        self._t += self._step
+        return self._t
+
+
+def test_a_permanent_rate_limit_raises_at_the_deadline_instead_of_hanging():
+    """Regression: the deadline used to be checked only after a successful,
+    non-terminal status read, so a server that keeps answering 429 forever
+    never reached that check and the loop never returned."""
+
+    def handler(request):
+        return httpx.Response(429, headers={"Retry-After": "1"}, json={})
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    provider._now = _Clock(step=50.0)
+    with pytest.raises(ProviderError) as exc:
+        provider.wait_for_completion("s1", timeout_seconds=600)
+    assert "did not complete" in str(exc.value)
+
+
 def test_a_timeout_raises_rather_than_reporting_success():
     def handler(request):
         return httpx.Response(200, json={"id": "s1", "status": "running"})
@@ -134,9 +167,38 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
     assert [p.name for p in report.processes] == [
         p["procid_parent"] and p["image"] or p["image"] for p in task["processes"]
     ]
-    assert sorted(report.unavailable) == ["apistats", "calls", "generic_events", "registry"]
+    assert sorted(report.unavailable) == [
+        "apistats",
+        "calls",
+        "generic_events",
+        "registry",
+        "screenshots",
+    ]
     assert report.apistats == {}
     assert run.sample_sha256 == overview["sample"]["sha256"]
+
+    # The consumer shape, not Triage's own field names: a flow's combined
+    # "host:port" is split, and a DNS/HTTP request is read from its
+    # domain_req/domain_resp or web_req/web_resp sub-object.
+    assert report.network.dns == [
+        {"request": "update-relay-c9f2.net", "type": "A", "answers": [{"data": "45.33.32.23"}]}
+    ]
+    assert report.network.domains == ["update-relay-c9f2.net"]
+    assert report.network.tcp == [{"dst": "45.33.32.23", "dport": 443}]
+    assert report.network.udp == [{"dst": "10.0.2.3", "dport": 53}]
+    assert {h["ip"] for h in report.network.hosts} == {"45.33.32.23", "10.0.2.3"}
+    assert report.network.http == [
+        {
+            "host": "update-relay-c9f2.net",
+            "uri": "/gate.php",
+            "method": "GET",
+            "status": 200,
+            "port": None,
+            "encrypted": True,
+            "user_agent": "Mozilla/5.0 (compatible)",
+        }
+    ]
+    assert [d["sha256"] for d in report.dropped_files] == [d["sha256"] for d in task["dumped"]]
 
 
 def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
@@ -149,8 +211,75 @@ def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
     assert "apistats" in rendered["unavailable"]
 
 
+def test_every_consumer_channel_is_populated_or_named_unavailable():
+    """The mapper's own rule, enforced generically: a channel a consumer
+    reads is either filled from the fixture or named in ``unavailable`` —
+    never silently empty, which would read exactly like a clean sample.
+    Written as a loop over the channel list so a future edit to the mapper
+    cannot reintroduce a silent gap without this test catching it."""
+    from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+
+    overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
+    task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
+    report = triage_overview_to_sandbox_report(
+        overview, task_reports={"behavioral1": task}, task_id="260904-abcdefgh1"
+    )
+    unavailable = set(report.unavailable)
+    channels: list[tuple[str, object]] = [
+        ("apistats", report.apistats),
+        ("calls", [c for p in report.processes for c in p.calls]),
+        ("generic_events", report.generic_events),
+        ("registry", report.registry),
+        ("screenshots", report.screenshots),
+        ("processes", report.processes),
+        ("signatures", report.signatures),
+        ("network.dns", report.network.dns),
+        ("network.http", report.network.http),
+        ("network.tcp", report.network.tcp),
+        ("network.udp", report.network.udp),
+        ("network.hosts", report.network.hosts),
+        ("network.domains", report.network.domains),
+        ("dropped_files", report.dropped_files),
+    ]
+    for name, value in channels:
+        assert bool(value) or name in unavailable, (
+            f"{name!r} is empty and not named in `unavailable`: "
+            "a rendered report would read like a clean sample for it"
+        )
+
+
+def test_the_mapped_network_survives_the_real_parsers_not_as_na():
+    """The mapping is only proven correct once real consumers, not the
+    mapper's own assertions, read real domains and IPs out of it."""
+    from maljan.extractors.network_extractor import build_network_iocs
+    from maljan.parsers.network_parser import NetworkParser
+    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+
+    overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
+    task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
+    report = triage_overview_to_sandbox_report(
+        overview, task_reports={"behavioral1": task}, task_id="260904-abcdefgh1"
+    )
+    rendered = to_cape_shaped_dict(report)
+
+    parsed = NetworkParser().parse(rendered["network"])
+    assert "update-relay-c9f2.net" in parsed
+    assert "45.33.32.23" in parsed
+    assert "N/A / N/A" not in parsed
+
+    iocs = build_network_iocs(rendered)
+    assert iocs is not None
+    assert any(d.fqdn == "update-relay-c9f2.net" for d in iocs.domains)
+    assert any(ip.address == "45.33.32.23" for ip in iocs.ips)
+
+
 def test_pcap_is_written_only_when_it_is_a_real_capture(tmp_path):
+    overview = {"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}
+
     def handler(request):
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
         if request.url.path.endswith("dump.pcap"):
             return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
         return httpx.Response(404, json={})
@@ -159,8 +288,48 @@ def test_pcap_is_written_only_when_it_is_a_real_capture(tmp_path):
     assert path is not None and Path(path).stat().st_size >= 24
 
 
-def test_an_empty_pcap_is_not_written(tmp_path):
+def test_the_pcap_is_fetched_from_the_discovered_task_not_a_hardcoded_name(tmp_path):
+    """Regression: the task name used to be the hardcoded literal
+    "behavioral1"; a sample whose first (or only) behavioural task is named
+    differently, or that ran several, must still get the right capture."""
+    seen_paths: list[str] = []
+    overview = {
+        "tasks": [
+            {"name": "static1", "kind": "static"},
+            {"name": "behavioral7", "kind": "behavioral"},
+            {"name": "behavioral8", "kind": "behavioral"},
+        ]
+    }
+
     def handler(request):
+        seen_paths.append(request.url.path)
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if request.url.path.endswith("dump.pcap"):
+            return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+        return httpx.Response(404, json={})
+
+    path = _provider(handler).fetch_pcap("s1", tmp_path)
+    assert path is not None
+    assert any(p.endswith("/behavioral7/dump.pcap") for p in seen_paths)
+    assert not any("behavioral8" in p or "static1" in p for p in seen_paths)
+
+
+def test_no_behavioral_task_means_no_pcap_and_no_pcap_request(tmp_path):
+    def handler(request):
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json={"tasks": [{"name": "static1", "kind": "static"}]})
+        raise AssertionError("must not request a PCAP with no behavioural task")
+
+    assert _provider(handler).fetch_pcap("s1", tmp_path) is None
+
+
+def test_an_empty_pcap_is_not_written(tmp_path):
+    overview = {"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}
+
+    def handler(request):
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
         return httpx.Response(200, content=b"tiny")
 
     assert _provider(handler).fetch_pcap("s1", tmp_path) is None
