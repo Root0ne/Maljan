@@ -1091,7 +1091,7 @@ ANNOTATIONS.update(
                 "provider to no evidence with a warning rather than failing a run."
             ),
             "applies_when": _STATIC_CAPA_YARA,
-            "probe": "capa",
+            "probe": "capa_yara",
         },
         "static.capa.signatures_dir": {
             "title": "capa signatures directory",
@@ -1100,7 +1100,7 @@ ANNOTATIONS.update(
                 "statically linked library code out of the results."
             ),
             "applies_when": _STATIC_CAPA_YARA,
-            "probe": "capa",
+            "probe": "capa_yara",
         },
         "static.capa.timeout_seconds": {
             "title": "capa timeout (s)",
@@ -1127,6 +1127,7 @@ ANNOTATIONS.update(
                 "and is unaffected by this."
             ),
             "applies_when": _STATIC_CAPA_YARA,
+            "probe": "capa_yara",
         },
         "static.yara.timeout_seconds": {
             "title": "YARA timeout (s)",
