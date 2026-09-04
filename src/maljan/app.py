@@ -133,6 +133,27 @@ class MaljanApp:
         platform = _infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
+    def _poll_budget(self) -> tuple[int, int]:
+        """``(timeout_seconds, poll_interval_seconds)`` for the active sandbox provider.
+
+        Each provider carries its own pair (CAPE's 300s/10s, Triage's
+        900s/15s, or the REST provider's config-driven pair); reading
+        ``sandbox.cape2.*`` unconditionally here — as this used to do —
+        threaded CAPE's budget into a poll loop for whichever sandbox was
+        actually configured. CAPE's own numbers are unchanged by this: they
+        are still read from the same ``sandbox.cape2`` block, only now
+        behind the branch that names it.
+        """
+        provider_id = self.config.sandbox.provider
+        cfg: Any
+        if provider_id == "triage":
+            cfg = self.config.sandbox.triage
+        elif provider_id == "rest":
+            cfg = self.config.sandbox.rest
+        else:
+            cfg = self.config.sandbox.cape2
+        return cfg.timeout_seconds, cfg.poll_interval_seconds
+
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return normalized report.
 
@@ -169,17 +190,19 @@ class MaljanApp:
                 result = await client.submit_and_wait(path)
             else:
                 task_id = client.submit(sample_path)
-                # Thread the configured completion timeout + poll interval
-                # (SANDBOX__CAPE2_TIMEOUT_SECONDS / _POLL_INTERVAL_SECONDS)
-                # into the poll loop. Without this the client's 300s default
-                # was used regardless of config, and a real CAPE detonation
+                # Thread the active provider's own completion timeout + poll
+                # interval into the poll loop (see ``_poll_budget``). Without
+                # this the client's 300s default — or another provider's
+                # config read from the wrong block — was used regardless of
+                # which sandbox was configured, and a real CAPE detonation
                 # (win10 guest run alone is ~280s + processing) timed out
                 # before the report was ready — silently degrading every run
                 # to static-only. All SandboxClient impls share this signature.
+                timeout_seconds, poll_interval_seconds = self._poll_budget()
                 status = client.wait_for_completion(
                     task_id,
-                    timeout_seconds=self.config.sandbox.cape2.timeout_seconds,
-                    poll_interval_seconds=self.config.sandbox.cape2.poll_interval_seconds,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
                 )
                 if status == "reported":
                     result = client.fetch_report(task_id)
