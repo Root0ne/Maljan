@@ -19,7 +19,7 @@
 - `tests/evaluation/**` is not modified at all (the CI gate from A enforces it), `make facts` output is byte-identical, and `tests/evaluation/test_suite_count.json` is not re-measured.
 - Every new core setting needs an `ANNOTATIONS` leaf in `src/maljan/core/settings_annotations.py` (`tests/unit/core/test_settings_catalog.py` enforces it); every new `APISettings` field needs an `API_EDITABLE` or `API_READONLY` entry in `apps/api/app/services/settings_catalog_api.py`.
 - Registry ids, the `Settings` provider `Literal`s and the job schema literal in `apps/api/app/schemas/job.py` stay in parity; a test refuses any drift.
-- Never print or read the real `.env`; never log or return a secret value; test credentials are built at runtime (see `_dsn()` in `tests/unit/api/test_settings_probes.py`), never a literal `scheme://user:pass@host`.
+- Never print or read the real `.env`; never log or return a secret value; test credentials are built at runtime (see `_dsn()` in `tests/unit/api/test_settings_probes.py`), never a literal `scheme://user:pass@host`. A per-server MCP token is stored as its own encrypted `is_secret` row and never inside the `core.mcp.servers` JSON row, never in an audit detail, and never in a response body — only ever the mask `"**********"`.
 - No question sentences in headings, comments or docs.
 - Playwright runs only the spec a task names, `--project=chromium` in the task, `--project=chromium --project=firefox` in the final gate.
 - Every subprocess is started through `maljan.agents.subprocess_env.child_env`, with an argv **list** and never through a shell.
@@ -50,6 +50,11 @@ The spec leaves these internal names open. They are chosen once here and used id
 | `CHANNELS`, `MAX_ROWS_PER_CHANNEL` | `rest_mapping.py` | the 12 mapped channels, 5 000 |
 | `build_stub_app()` | `tests/servers/rest_stub.py` | the FastAPI stub sandbox |
 | `validate_server_map` / `ServerMapError` | `apps/api/app/services/server_map.py` | PATCH-time validation of `core.mcp.servers` |
+| `split_server_secrets` / `merge_server_secrets` | `apps/api/app/services/server_map.py` | tokens out of the map on save, back in on load |
+| `server_token_key(server)` | `apps/api/app/services/server_map.py` | `core.mcp.servers.<server>.auth_token` |
+| `SERVER_MAP_KEY` / `TOKEN_MASK` | `apps/api/app/services/server_map.py` | `"core.mcp.servers"` / `"**********"` |
+| `SettingsService._save_server_tokens` / `._masked_server_map` | `apps/api/app/services/settings_service.py` | write the runtime-keyed secret rows / show the mask |
+| `auth_token_source` | the `core.mcp.servers` value shape | `"ui"` / `"env"` / `"default"`, view-only, stripped on save |
 | `POST /api/v1/settings/test/mcp?server=<key>` | API | the MCP probe route |
 | `POST /api/v1/settings/sandbox-rest/preview` | API | the mapping preview route |
 | `ServerMapEditor.tsx` / `RestSandboxEditor.tsx` | `apps/web/src/app/(app)/settings/configuration/` | the two composite editors |
@@ -933,7 +938,7 @@ git commit -m "feat(settings): annotate the tool-server registry and the rest sa
 
 **Files:**
 - Modify: `src/maljan/core/config.py:896-904` (`SETTINGS_ALIASES`), `:989-1024` (the JSON re-decode helper), `:1026-1031` (`apply_settings_aliases`)
-- Create: `apps/api/alembic/versions/20260904000000_move_generic_mcp_server_overrides.py`
+- Create: `apps/api/alembic/versions/20260905000000_move_generic_mcp_server_overrides.py`
 - Test: `tests/unit/core/test_generic_server_aliases.py` (create), `tests/unit/api/test_generic_server_migration.py` (create)
 
 **Interfaces:**
@@ -941,7 +946,7 @@ git commit -m "feat(settings): annotate the tool-server registry and the rest sa
   ```python
   # src/maljan/core/config.py
   GENERIC_SERVER_KEY = "custom"          # the slug a migrated static.generic block lands on
-  # apps/api/alembic/versions/20260904000000_move_generic_mcp_server_overrides.py
+  # apps/api/alembic/versions/20260905000000_move_generic_mcp_server_overrides.py
   KEY_RENAMES: dict[str, str]
   def upgrade() -> None
   def downgrade() -> None
@@ -1001,7 +1006,7 @@ from pathlib import Path
 
 MIGRATION = (
     Path(__file__).resolve().parents[3]
-    / "apps/api/alembic/versions/20260904000000_move_generic_mcp_server_overrides.py"
+    / "apps/api/alembic/versions/20260905000000_move_generic_mcp_server_overrides.py"
 )
 
 
@@ -1131,7 +1136,7 @@ The function is renamed from `_redecode_json_leaves_stranded_by_the_mcp_alias`, 
 - [ ] **Step 4: Write the data migration**
 
 ```python
-# apps/api/alembic/versions/20260904000000_move_generic_mcp_server_overrides.py
+# apps/api/alembic/versions/20260905000000_move_generic_mcp_server_overrides.py
 """Move a stored static.generic block into the tool-server registry.
 
 Sub-project B turns ``static.generic`` from a server's configuration into the
@@ -1148,8 +1153,8 @@ a key the settings service refuses.
 
 Idempotent by construction: a run that finds no legacy row writes nothing.
 
-Revision ID: 20260904000000
-Revises: 20260903000000
+Revision ID: 20260905000000
+Revises: 20260904000000
 """
 
 from __future__ import annotations
@@ -1160,8 +1165,11 @@ import logging
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260904000000"
-down_revision = "20260903000000"
+# ``20260904000000`` is already taken by ``add_sandbox_reports`` on this branch
+# (sub-project A shipped it), so this one is dated a day later and chains after
+# it rather than forking a second head off ``20260903000000``.
+revision = "20260905000000"
+down_revision = "20260904000000"
 branch_labels = None
 depends_on = None
 
@@ -1276,7 +1284,7 @@ Expected: PASS.
 uv run ruff check src/maljan/core/config.py apps/api/alembic/versions tests/unit/core tests/unit/api && \
 uv run ruff format --check src/maljan/core/config.py apps/api/alembic/versions tests/unit/core tests/unit/api && \
 uv run mypy src/ apps/api/
-git add src/maljan/core/config.py apps/api/alembic/versions/20260904000000_move_generic_mcp_server_overrides.py tests/unit/core/test_generic_server_aliases.py tests/unit/api/test_generic_server_migration.py
+git add src/maljan/core/config.py apps/api/alembic/versions/20260905000000_move_generic_mcp_server_overrides.py tests/unit/core/test_generic_server_aliases.py tests/unit/api/test_generic_server_migration.py
 git commit -m "feat(config): map the legacy static.generic block onto the custom tool server, in env and in stored overrides"
 ```
 
@@ -3438,7 +3446,7 @@ git commit -m "feat(sandbox): map an arbitrary sandbox report onto SandboxReport
 
 **Files:**
 - Create: `src/maljan/providers/sandbox/rest.py`, `tests/providers/sandbox/test_rest_provider.py`
-- Modify: `src/maljan/providers/registry.py:96-118` (`discover_providers` imports the new adapter)
+- Modify: `src/maljan/providers/registry.py:52-70` (`discover_providers` imports the new adapter)
 - Test: `tests/providers/sandbox/test_rest_provider.py`, `tests/providers/test_registry.py`
 
 **Interfaces:**
@@ -3447,7 +3455,7 @@ git commit -m "feat(sandbox): map an arbitrary sandbox report onto SandboxReport
   # src/maljan/providers/sandbox/rest.py
   @register_sandbox_provider("rest")
   class RestSandboxProvider(SandboxProvider):
-      def __init__(self, cfg: SandboxRestConfig) -> None
+      def __init__(self, cfg: SandboxRestConfig, mapping: CompiledMapping) -> None
       @classmethod
       def from_settings(cls, cfg: Settings) -> RestSandboxProvider   # compiles the mapping
       @property
@@ -4470,39 +4478,43 @@ git commit -m "feat(api): test a REST sandbox's endpoint and preview its mapping
 
 ### Task 14: The API resolves the choices, validates the server map, and probes one key of it
 
-**Amendment A1 (controller ruling, supersedes the "refuses an inline auth_token" paragraph below):** a token typed
-into the server-map editor is accepted and protected the same way every other secret leaf is. On a PATCH of
-`core.mcp.servers`, `validate_server_map` strips `auth_token` from every entry before the JSON row is stored and
-hands each non-empty value to the settings secret box under the synthetic secret key
-`core.mcp.servers.<key>.auth_token` (one `is_secret` row per server, Fernet-encrypted through
-`maljan.core.settings_secrets` exactly like `core.static.ghidra.auth_token`); when `SETTINGS_ENCRYPTION_KEY` is
-not set the PATCH answers the same 422 the other secret leaves answer ("SETTINGS_ENCRYPTION_KEY is not set;
-secrets stay in .env"). When effective settings are assembled (`SettingsService.effective`/`load`), the secret
-rows are merged back into `mcp.servers.<key>.auth_token`; the GET catalog value and every snapshot carry the mask
-`"**********"` for a set token and `""` for an unset one, never the value; removing a server deletes its row;
-`MCP__SERVERS__<KEY>__AUTH_TOKEN` in `.env` keeps working as the environment source when no row exists. Tests to
-add in this task: PATCH with a token (key set) stores no token in the JSON row and one secret row; effective
-settings return the plain token to the worker path; GET masks it; PATCH without the key is 422; deleting the
-server deletes the row; a `.env`-sourced token with no row is preserved and reported as `env`. The editor
-(Task 16) renders `auth_token` per card with the secret widget's set/unset semantics (mask shown, "clear"
-sends `null`).
+**A per-server `auth_token` is stored, not refused (controller ruling A1).** `core.mcp.servers` is one
+non-secret JSONB row, so a token written into it would sit in the database in clear beside values the UI
+echoes back. It is therefore split out on the way in and put back on the way out: the PATCH stores the map
+without any token and one `is_secret` row per server keyed `core.mcp.servers.<key>.auth_token`, encrypted by
+the same Fernet box every other secret uses; `load_overrides` merges the rows back into the map before the
+worker builds `Settings`; and the values endpoint shows the mask, never the value. That needs one new
+capability in `SettingsService` — secret rows whose key is chosen at runtime rather than declared in the
+catalog — and this task builds it. Everything that makes it work is in Steps 3 and 4 below and is tested in
+Step 1; nothing about it is left to a later task except the card that renders it (Task 16).
 
 **Files:**
 - Create: `apps/api/app/services/server_map.py`
-- Modify: `apps/api/app/services/settings_catalog_api.py:245-258` (`full_catalog`), `apps/api/app/api/v1/settings.py:40-53` (`get_schema`), `:63-78` (`patch_values`), `:147-160` (the MCP probe route), `apps/api/app/services/settings_service.py:176-190` (`check_keys`)
-- Test: `tests/unit/api/test_server_map_validation.py` (create), `tests/api/test_settings_schema_choices.py` (create)
+- Modify: `apps/api/app/services/settings_catalog_api.py:245-258` (`full_catalog`), `apps/api/app/api/v1/settings.py:40-53` (`get_schema`), `:63-78` (`patch_values`), `:147-160` (the MCP probe route), `apps/api/app/services/settings_service.py:68-83` (`load_overrides`), `:84-163` (`values`), `:196-250` (`save`)
+- Test: `tests/unit/api/test_server_map_validation.py` (create), `tests/unit/api/test_server_map_secrets.py` (create), `tests/api/test_settings_schema_choices.py` (create)
 
 **Interfaces:**
 - Produces:
   ```python
   # apps/api/app/services/server_map.py
+  SERVER_MAP_KEY = "core.mcp.servers"
+  TOKEN_MASK = "**********"
   class ServerMapError(Exception):
       errors: dict[str, str]
+  def server_token_key(server: str) -> str          # "core.mcp.servers.<server>.auth_token"
   def validate_server_map(value: Any, *, stored: dict[str, Any] | None = None) -> dict[str, Any]
+  def split_server_secrets(
+      value: Any, *, stored: dict[str, Any] | None = None
+  ) -> tuple[dict[str, Any], dict[str, str | None]]  # (map without tokens, {server: token or None})
+  def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]
   # apps/api/app/services/settings_catalog_api.py
   def resolved_catalog(servers: Iterable[str]) -> list[CatalogEntry]
+  # apps/api/app/services/settings_service.py
+  class SettingsService:
+      def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None
+      def _masked_server_map(self, stored_map, env_servers, rows) -> dict[str, Any]
   ```
-- Consumes: `maljan.core.config.{SERVER_KEY_PATTERN, RESERVED_SERVER_KEYS, BUILTIN_SERVER_KEYS, MCPServerConfig, AgentRole}`, `maljan.providers.registry.{static_provider_ids, sandbox_provider_ids}`, `run_mcp_probe` (Task 9).
+- Consumes: `maljan.core.config.{SERVER_KEY_PATTERN, RESERVED_SERVER_KEYS, BUILTIN_SERVER_KEYS, MCPServerConfig, AgentRole}`, `maljan.providers.registry.{static_provider_ids, sandbox_provider_ids}`, `maljan.core.settings_secrets` (`encrypt`, `decrypt`, `is_available`, `hint`), `app.models.RuntimeSetting`, `run_mcp_probe` (Task 9).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4514,7 +4526,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.server_map import ServerMapError, validate_server_map
+from app.services.server_map import ServerMapError, split_server_secrets, validate_server_map
 
 
 def _entry(**over):
@@ -4560,12 +4572,65 @@ def test_an_unknown_agent_role_is_refused():
     assert "x.agents" in exc.value.errors
 
 
-def test_a_credential_is_not_accepted_into_the_map():
-    """The registry leaf is one plain JSON row; a token there would be stored in clear."""
-    with pytest.raises(ServerMapError) as exc:
-        validate_server_map({"x": _entry(transport="http", url="https://h", auth_token="t")})
-    assert "x.auth_token" in exc.value.errors
-    assert "MCP__SERVERS__X__AUTH_TOKEN" in exc.value.errors["x.auth_token"]
+def test_a_token_is_split_out_of_the_map_rather_than_stored_in_it():
+    """The registry leaf is one plain JSON row; a token in it would be in clear."""
+    cleaned, tokens = split_server_secrets(
+        {"x": _entry(transport="http", url="https://h", command="", auth_token="s3cr3t")}
+    )
+    assert "auth_token" not in cleaned["x"]
+    assert tokens == {"x": "s3cr3t"}
+
+
+def test_the_mask_means_unchanged_and_never_becomes_the_token():
+    from app.services.server_map import TOKEN_MASK
+
+    cleaned, tokens = split_server_secrets(
+        {"x": _entry(transport="http", url="https://h", command="", auth_token=TOKEN_MASK)}
+    )
+    assert "auth_token" not in cleaned["x"]
+    assert tokens == {}, "a round-tripped mask leaves the stored row alone"
+
+
+def test_an_empty_or_null_token_asks_for_the_row_to_be_deleted():
+    _, empty = split_server_secrets({"x": _entry(auth_token="")})
+    _, nulled = split_server_secrets({"x": _entry(auth_token=None)})
+    assert empty == {"x": None} and nulled == {"x": None}
+
+
+def test_an_entry_that_never_mentions_a_token_leaves_the_row_untouched():
+    _, tokens = split_server_secrets({"x": _entry()})
+    assert tokens == {}
+
+
+def test_the_token_key_is_derived_from_the_server_name():
+    from app.services.server_map import server_token_key
+
+    assert server_token_key("r2custom") == "core.mcp.servers.r2custom.auth_token"
+
+
+def test_merge_puts_the_rows_back_into_the_map_and_drops_the_synthetic_keys():
+    from app.services.server_map import merge_server_secrets
+
+    merged = merge_server_secrets(
+        {
+            "core.mcp.servers": {"x": {"command": "mcp"}},
+            "core.mcp.servers.x.auth_token": "s3cr3t",
+            "core.llm.provider": "openai",
+        }
+    )
+    assert merged["core.mcp.servers"]["x"]["auth_token"] == "s3cr3t"
+    assert "core.mcp.servers.x.auth_token" not in merged
+    assert merged["core.llm.provider"] == "openai"
+
+
+def test_merge_ignores_a_row_whose_server_is_gone():
+    from app.services.server_map import merge_server_secrets
+
+    merged = merge_server_secrets(
+        {"core.mcp.servers": {}, "core.mcp.servers.gone.auth_token": "s3cr3t"}
+    )
+    assert merged["core.mcp.servers"] == {}
+    assert "core.mcp.servers.gone.auth_token" not in merged
 
 
 def test_a_stdio_server_without_a_command_is_refused():
@@ -4578,6 +4643,187 @@ def test_an_http_server_without_a_url_is_refused():
     with pytest.raises(ServerMapError) as exc:
         validate_server_map({"x": _entry(transport="http", command="", url="")})
     assert "x.url" in exc.value.errors
+```
+
+```python
+# tests/unit/api/test_server_map_secrets.py
+"""A per-server token is stored the way every other secret is stored.
+
+The map itself is one non-secret JSONB row. The tokens are not in it: each is
+its own ``is_secret`` row, encrypted with the same Fernet box that protects
+``core.static.ghidra.auth_token``, and merged back only when the effective
+settings are assembled for a job.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from maljan.core import settings_secrets as box
+
+from app.services.server_map import TOKEN_MASK, server_token_key
+from app.services.settings_service import SettingsService, SettingsValidationError
+
+
+@pytest.fixture()
+def encryption_key(monkeypatch):
+    """A real Fernet key, generated per run rather than committed."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv(box.ENV_VAR, Fernet.generate_key().decode())
+
+
+class _Rows(list):
+    """A stand-in session: records adds and deletes, replays rows."""
+
+    def __init__(self, rows=()):
+        super().__init__(rows)
+        self.added: list = []
+        self.deleted: list = []
+
+    def add(self, row):
+        self.added.append(row)
+
+    async def delete(self, row):
+        self.deleted.append(row)
+
+    async def commit(self):
+        return None
+
+
+def _service(rows=()) -> tuple[SettingsService, _Rows]:
+    session = _Rows(rows)
+    service = SettingsService(MagicMock())
+    service._rows = AsyncMock(return_value=list(session))  # type: ignore[method-assign]
+    service.db = session
+    return service, session
+
+
+@pytest.mark.asyncio
+async def test_a_patch_with_a_token_stores_it_as_its_own_encrypted_row(encryption_key):
+    service, session = _service()
+    service.load_overrides = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await service.save(
+        {
+            "core.mcp.servers": {
+                "x": {"enabled": True, "transport": "http", "url": "https://h",
+                      "auth_token": "s3cr3t"}
+            }
+        },
+        user_id=None,
+        ip=None,
+    )
+    map_row = next(r for r in session.added if r.key == "core.mcp.servers")
+    token_row = next(r for r in session.added if r.key == server_token_key("x"))
+    assert "auth_token" not in map_row.value["x"]
+    assert "s3cr3t" not in str(map_row.value)
+    assert token_row.is_secret is True
+    assert box.is_encrypted(token_row.value)
+    assert box.decrypt(str(token_row.value)) == "s3cr3t"
+
+
+@pytest.mark.asyncio
+async def test_a_patch_with_a_token_and_no_encryption_key_is_the_same_422(monkeypatch):
+    monkeypatch.delenv(box.ENV_VAR, raising=False)
+    service, _ = _service()
+    service.load_overrides = AsyncMock(return_value={})  # type: ignore[method-assign]
+    with pytest.raises(SettingsValidationError) as exc:
+        await service.save(
+            {"core.mcp.servers": {"x": {"enabled": True, "command": "mcp",
+                                        "auth_token": "s3cr3t"}}},
+            user_id=None,
+            ip=None,
+        )
+    assert exc.value.errors[server_token_key("x")] == (
+        "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_null_token_deletes_the_row_and_a_removed_server_deletes_its_row(encryption_key):
+    from app.models import RuntimeSetting
+
+    existing = [
+        RuntimeSetting(key=server_token_key("x"), value=box.encrypt("a"), is_secret=True),
+        RuntimeSetting(key=server_token_key("gone"), value=box.encrypt("b"), is_secret=True),
+    ]
+    service, session = _service(existing)
+    service.load_overrides = AsyncMock(
+        return_value={"core.mcp.servers": {"x": {"command": "mcp"}, "gone": {"command": "mcp"}}}
+    )  # type: ignore[method-assign]
+    await service.save(
+        {"core.mcp.servers": {"x": {"enabled": True, "command": "mcp", "auth_token": None}}},
+        user_id=None,
+        ip=None,
+    )
+    deleted = {r.key for r in session.deleted}
+    assert server_token_key("x") in deleted, "an explicit null clears the token"
+    assert server_token_key("gone") in deleted, "a removed server takes its token with it"
+
+
+@pytest.mark.asyncio
+async def test_the_effective_overrides_carry_the_plain_token_to_the_worker(encryption_key):
+    from app.models import RuntimeSetting
+
+    rows = [
+        RuntimeSetting(key="core.mcp.servers", value={"x": {"command": "mcp"}}, is_secret=False),
+        RuntimeSetting(key=server_token_key("x"), value=box.encrypt("s3cr3t"), is_secret=True),
+    ]
+    service, _ = _service(rows)
+    overrides = await service.load_overrides()
+    assert overrides["core.mcp.servers"]["x"]["auth_token"] == "s3cr3t"
+    assert server_token_key("x") not in overrides
+
+
+@pytest.mark.asyncio
+async def test_the_effective_settings_build_with_the_merged_token(encryption_key):
+    from maljan.core.settings_overrides import build_settings, split_key
+
+    from app.models import RuntimeSetting
+
+    rows = [
+        RuntimeSetting(
+            key="core.mcp.servers",
+            value={"x": {"enabled": True, "transport": "http", "url": "https://h"}},
+            is_secret=False,
+        ),
+        RuntimeSetting(key=server_token_key("x"), value=box.encrypt("s3cr3t"), is_secret=True),
+    ]
+    service, _ = _service(rows)
+    overrides = await service.load_overrides()
+    core = {split_key(k)[1]: v for k, v in overrides.items() if k.startswith("core.")}
+    cfg = build_settings(core)
+    assert cfg.mcp.servers["x"].auth_token.get_secret_value() == "s3cr3t"
+
+
+@pytest.mark.asyncio
+async def test_the_values_endpoint_masks_a_set_token_and_reports_its_source(encryption_key):
+    from app.models import RuntimeSetting
+
+    rows = [
+        RuntimeSetting(key="core.mcp.servers", value={"x": {"command": "mcp"}}, is_secret=False),
+        RuntimeSetting(key=server_token_key("x"), value=box.encrypt("s3cr3t"), is_secret=True),
+    ]
+    service, _ = _service(rows)
+    values = await service.values()
+    shown = values["core.mcp.servers"].value
+    assert shown["x"]["auth_token"] == TOKEN_MASK
+    assert shown["x"]["auth_token_source"] == "ui"
+    assert "s3cr3t" not in str(shown)
+
+
+@pytest.mark.asyncio
+async def test_an_unset_token_shows_empty_and_a_dot_env_token_shows_env(monkeypatch, encryption_key):
+    monkeypatch.setenv("MCP__SERVERS__NETWORK__AUTH_TOKEN", "from-env")
+    service, _ = _service()
+    values = await service.values()
+    shown = values["core.mcp.servers"].value
+    assert shown["network"]["auth_token"] == TOKEN_MASK
+    assert shown["network"]["auth_token_source"] == "env"
+    assert shown["threatintel"]["auth_token"] == ""
+    assert shown["threatintel"]["auth_token_source"] == "default"
+    assert "from-env" not in str(shown)
 ```
 
 ```python
@@ -4675,28 +4921,30 @@ def test_the_mcp_probe_route_needs_a_server(client):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/unit/api/test_server_map_validation.py tests/api/test_settings_schema_choices.py -q`
+Run: `uv run pytest tests/unit/api/test_server_map_validation.py tests/unit/api/test_server_map_secrets.py tests/api/test_settings_schema_choices.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.server_map'`, and the schema's `core.static.generic.server` carries `choices: null`.
 
 - [ ] **Step 3: Write the validator**
 
 ```python
 # apps/api/app/services/server_map.py
-"""What an admin may write into ``core.mcp.servers``.
+"""What an admin may write into ``core.mcp.servers``, and where its tokens go.
 
 The registry is one catalog leaf holding a whole map, so the settings
 service's per-key checks (editable, secret, type) cannot see inside it. These
 are the checks that belong inside: the key is a slug and not one of the names
-the code reserves, every entry validates as an ``MCPServerConfig``, a built-in
-is disabled rather than deleted, and no credential is written here.
+the code reserves, every entry validates as an ``MCPServerConfig``, and a
+built-in is disabled rather than deleted.
 
-That last one is a ruling rather than a spec line, and it is worth stating
-plainly: the map is stored as one non-secret JSON row, so a token typed into
-it would sit in the database in clear text next to values the UI happily
-echoes back. ``MCPServerConfig.auth_token`` stays a real setting — it is set
-in ``.env`` as ``MCP__SERVERS__<KEY>__AUTH_TOKEN``, where the secrets machinery
-and the process environment already apply — and this refuses it here with that
-sentence, rather than accepting it and quietly downgrading its protection.
+The tokens are the interesting part. The map is stored as one *non-secret*
+JSONB row, so a token left inside it would sit in the database in clear text
+beside values the UI echoes back. It is therefore split out on the way in and
+put back on the way out: ``split_server_secrets`` returns the map to store and
+the tokens to encrypt, ``SettingsService.save`` writes one ``is_secret`` row
+per server, and ``merge_server_secrets`` folds them back in when the effective
+overrides are assembled. The value an operator sees is always the mask, and
+the mask coming back in an unchanged PATCH means exactly that — unchanged —
+rather than a token whose literal characters are ten asterisks.
 """
 
 from __future__ import annotations
@@ -4714,8 +4962,25 @@ from maljan.core.config import (
 from pydantic import ValidationError
 import re
 
+SERVER_MAP_KEY = "core.mcp.servers"
+# What a set token looks like from outside. Identical to pydantic's own
+# SecretStr JSON rendering, so a value read out of a snapshot and one read out
+# of this endpoint say the same thing.
+TOKEN_MASK = "**********"
+
 _KEY_RE = re.compile(SERVER_KEY_PATTERN)
 _ROLES = set(get_args(AgentRole))
+
+
+def server_token_key(server: str) -> str:
+    """The settings key one server's token is stored under.
+
+    Deliberately shaped like a catalog key without being one: the catalog is a
+    static list and cannot contain a name an operator invents at runtime, so
+    ``SettingsService`` handles these rows itself rather than through
+    ``check_keys``. Nothing else in the system may write a key of this shape.
+    """
+    return f"{SERVER_MAP_KEY}.{server}.auth_token"
 
 
 class ServerMapError(Exception):
@@ -4745,18 +5010,14 @@ def validate_server_map(value: Any, *, stored: dict[str, Any] | None = None) -> 
         if not isinstance(entry, dict):
             errors[key] = "a server entry must be an object"
             continue
-        if entry.get("auth_token"):
-            errors[f"{key}.auth_token"] = (
-                "an MCP server's auth token is set in .env as "
-                f"MCP__SERVERS__{key.upper()}__AUTH_TOKEN; the server map stores no credentials"
-            )
-            continue
         for role in entry.get("agents") or []:
             if role not in _ROLES:
                 errors[f"{key}.agents"] = (
                     f"{role!r} is not an analyst; expected one of {', '.join(sorted(_ROLES))}"
                 )
         try:
+            # The token is validated and stored separately (``split_server_secrets``);
+            # blanking it here keeps it out of the JSON row under every path.
             model = MCPServerConfig.model_validate({**entry, "auth_token": ""})
         except ValidationError as exc:
             for err in exc.errors():
@@ -4781,6 +5042,61 @@ def validate_server_map(value: Any, *, stored: dict[str, Any] | None = None) -> 
             entry = default.model_dump(mode="json")
             entry.pop("auth_token", None)
             out[key] = entry
+    return out
+
+
+def split_server_secrets(
+    value: Any, *, stored: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """Validate the map, and separate the tokens from what gets stored in it.
+
+    The second element is an *instruction set*, not a state: a server appears
+    in it only when the incoming entry actually said something about its
+    token. A non-empty string means "store this"; ``None`` (from an explicit
+    ``null`` or an empty string) means "delete the row"; the mask means "leave
+    it alone", and so does an entry that never mentions ``auth_token`` at all.
+    That distinction is what lets the editor round-trip a masked value without
+    overwriting the real one with ten asterisks.
+    """
+    cleaned = validate_server_map(value, stored=stored)
+    tokens: dict[str, str | None] = {}
+    for key, entry in (value or {}).items():
+        if not isinstance(entry, dict) or "auth_token" not in entry:
+            continue
+        token = entry["auth_token"]
+        if token == TOKEN_MASK:
+            continue
+        tokens[key] = str(token) if token else None
+    return cleaned, tokens
+
+
+def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
+    """Fold the per-server token rows back into the map, and drop them.
+
+    Done here rather than by letting both key shapes reach ``nest()``: that
+    function walks a flat mapping in iteration order, so a ``core.mcp.servers``
+    entry arriving after ``core.mcp.servers.x.auth_token`` would overwrite the
+    token instead of merging with it. Making the merge explicit makes it
+    order-independent, which is the only version of this that is safe.
+    """
+    prefix = f"{SERVER_MAP_KEY}."
+    token_keys = [
+        k for k in overrides if k.startswith(prefix) and k.endswith(".auth_token")
+    ]
+    if not token_keys:
+        return overrides
+    out = {k: v for k, v in overrides.items() if k not in token_keys}
+    servers = out.get(SERVER_MAP_KEY)
+    if not isinstance(servers, dict):
+        return out
+    merged = {name: dict(entry) for name, entry in servers.items() if isinstance(entry, dict)}
+    for key in token_keys:
+        name = key[len(prefix) : -len(".auth_token")]
+        if name in merged:
+            merged[name]["auth_token"] = overrides[key]
+        # A row whose server is gone is simply dropped: `save` deletes these,
+        # and a stale one must never resurrect a server that is not in the map.
+    out[SERVER_MAP_KEY] = merged
     return out
 ```
 
@@ -4880,18 +5196,212 @@ async def test_mcp_server(
     return ProbeResponse(**vars(result))
 ```
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 5: Teach `SettingsService` about runtime-keyed secret rows**
+
+Three additions in `apps/api/app/services/settings_service.py`, and nothing else in that file
+changes. `check_keys` is untouched: the synthetic keys never arrive in `changes` — the route sends
+one `core.mcp.servers` change and the service derives the rows itself.
+
+`load_overrides` (line 68-83) folds the rows back in before returning:
+
+```python
+    async def load_overrides(self) -> dict[str, Any]:
+        """Full keys -> plain values; secrets decrypted, or dropped if they cannot be.
+
+        The per-server MCP tokens are stored as their own ``is_secret`` rows
+        (see ``server_map``); they are merged back into the ``core.mcp.servers``
+        map here, so every caller downstream — the worker's ``Settings``, the
+        probes, ``runtime_config`` — sees one map with the tokens in place and
+        never has to know the storage was split.
+        """
+        out: dict[str, Any] = {}
+        for row in await self._rows():
+            if row.is_secret:
+                try:
+                    out[row.key] = box.decrypt(str(row.value))
+                except box.SecretsUnavailable:
+                    logger.warning(
+                        "Stored override for %s cannot be decrypted (encryption key "
+                        "changed?); the environment value stays in effect.",
+                        row.key,
+                    )
+                    continue
+            else:
+                out[row.key] = row.value
+        return merge_server_secrets(out)
+```
+Only the last line is new; the loop above it is today's body, repeated here so the insertion
+point is unambiguous.
+
+`save` (line 196-250) splits the map before validating it, and writes the token rows itself:
+
+```python
+        self.check_keys(changes)
+        index = catalog_index()
+        current = await self.load_overrides()
+        changes = dict(changes)
+        tokens: dict[str, str | None] = {}
+        if SERVER_MAP_KEY in changes:
+            # The map is one non-secret row and the tokens are not in it. Split
+            # first so neither validation nor the audit trail ever sees one.
+            stored_map = current.get(SERVER_MAP_KEY)
+            changes[SERVER_MAP_KEY], tokens = split_server_secrets(
+                changes[SERVER_MAP_KEY],
+                stored=stored_map if isinstance(stored_map, dict) else None,
+            )
+            unstorable = [
+                server_token_key(name)
+                for name, token in tokens.items()
+                if token and not box.is_available()
+            ]
+            if unstorable:
+                raise SettingsValidationError(
+                    {
+                        key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                        for key in unstorable
+                    }
+                )
+        merged = {**current}
+        for key, value in changes.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
+        api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
+        self.validate(core, api)
+```
+
+Everything from `merged = {**current}` onwards — the `validate` call above and the row-writing
+loop, `commit` and `_audit` that follow it — is today's body, unchanged, operating on
+the *cleaned* `changes` — which is what keeps a token out of `before`/`after` and therefore out of
+the audit row. The one insertion is immediately before the existing `await self.db.commit()`:
+
+```python
+        if SERVER_MAP_KEY in changes:
+            await self._save_server_tokens(tokens, set(changes[SERVER_MAP_KEY]))
+        await self.db.commit()
+```
+
+and the writer itself, beside `save`:
+
+```python
+    async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
+        """One encrypted row per server that has a token, and none for one that does not.
+
+        Runtime-keyed rows: the catalog is a static list and cannot hold a name
+        an operator invents, so these are written here rather than through the
+        catalog-driven path in ``save``. They are otherwise ordinary secret
+        rows — same Fernet box, same ``is_secret`` flag, same decrypt-or-drop
+        behaviour in ``load_overrides`` — so a rotated key degrades them the
+        same way it degrades every other secret.
+
+        ``kept`` is the set of servers the new map still holds; a token row for
+        a server that is gone is deleted with it, so a re-created server never
+        inherits a predecessor's credential.
+        """
+        rows = {r.key: r for r in await self._rows()}
+        prefix = f"{SERVER_MAP_KEY}."
+        for key, row in rows.items():
+            if not (key.startswith(prefix) and key.endswith(".auth_token")):
+                continue
+            name = key[len(prefix) : -len(".auth_token")]
+            if name not in kept:
+                await self.db.delete(row)
+        for name, token in tokens.items():
+            key = server_token_key(name)
+            existing = rows.get(key)
+            if not token:
+                if existing is not None:
+                    await self.db.delete(existing)
+                continue
+            stored = box.encrypt(token)
+            if existing is None:
+                self.db.add(RuntimeSetting(key=key, value=stored, is_secret=True))
+            else:
+                existing.value = stored
+                existing.is_secret = True
+```
+
+The audit detail for a `core.mcp.servers` change records `before`/`after` from the *cleaned* map,
+so no token reaches `_audit` — the split happens before the `before`/`after` dicts are built.
+
+`values` (line 84-163) shows the mask. `core.mcp.servers` is a non-secret entry, so the existing
+code returns `row.value` — the cleaned map, with no `auth_token` key at all. One branch replaces
+that value with a masked view:
+
+```python
+    def _masked_server_map(
+        self, stored_map: dict[str, Any], env_servers: dict[str, Any], rows: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The map as the UI may see it: every token a mask, never a value.
+
+        ``auth_token_source`` rides along beside it for the same reason every
+        other row carries ``source``: "set in .env" and "set from the UI" are
+        different facts, and an operator deciding whether to type a new token
+        needs to know which one they are looking at. The editor sends the mask
+        straight back for an unchanged field, and ``split_server_secrets``
+        reads that as "leave the row alone".
+        """
+        out: dict[str, Any] = {}
+        for name, entry in stored_map.items():
+            shown = dict(entry)
+            if server_token_key(name) in rows:
+                shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
+            else:
+                env_entry = env_servers.get(name)
+                from_env = bool(
+                    env_entry is not None and env_entry.auth_token.get_secret_value()
+                )
+                shown["auth_token"] = TOKEN_MASK if from_env else ""
+                shown["auth_token_source"] = "env" if from_env else "default"
+            out[name] = shown
+        return out
+```
+
+called from `values()` where the non-secret branch assigns `ValueInfo(row.value, ...)` and where the
+no-row branch assigns `ValueInfo(shown, ...)`:
+
+```python
+            if entry.key == SERVER_MAP_KEY:
+                stored_map = row.value if row is not None else env_value
+                shown = self._masked_server_map(
+                    dict(stored_map or {}), env_core.mcp.servers, rows
+                )
+                src = "ui" if row is not None else effective_source(
+                    overridden=False, env_value=env_value, default_value=entry.default
+                )
+                out[key] = ValueInfo(
+                    shown,
+                    None,
+                    None,
+                    src,
+                    row.updated_at if row is not None else None,
+                    row.updated_by if row is not None else None,
+                )
+                continue
+```
+
+with `from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK, merge_server_secrets, server_token_key, split_server_secrets` and `from app.models import RuntimeSetting` (already imported) at the top of the module.
+
+`.env` keeps working unchanged: `MCP__SERVERS__<KEY>__AUTH_TOKEN` is resolved by pydantic-settings
+against `MCPConfig.servers`' `dict[str, MCPServerConfig]` annotation, so it reaches
+`cfg.mcp.servers[key].auth_token` with no row involved — which is exactly what
+`test_an_unset_token_shows_empty_and_a_dot_env_token_shows_env` asserts, and what the `env`
+source above reports.
+
+- [ ] **Step 6: Run the tests**
 
 Run: `uv run pytest tests/unit/api tests/api/test_settings_schema_choices.py tests/api/test_settings_routes.py -q`
 Expected: PASS.
 
-- [ ] **Step 6: Lint, type-check and commit**
+- [ ] **Step 7: Lint, type-check and commit**
 
 ```bash
 uv run ruff check apps/api/app tests/unit/api && uv run ruff format --check apps/api/app tests/unit/api && \
 uv run mypy src/ apps/api/
-git add apps/api/app tests/unit/api/test_server_map_validation.py tests/api/test_settings_schema_choices.py
-git commit -m "feat(api): resolve catalog choices server-side, validate the tool-server map, and probe one server by key"
+git add apps/api/app tests/unit/api/test_server_map_validation.py tests/unit/api/test_server_map_secrets.py tests/api/test_settings_schema_choices.py
+git commit -m "feat(api): resolve catalog choices server-side, store each server's token as its own secret row, and probe one server by key"
 ```
 
 ---
@@ -4914,6 +5424,7 @@ git commit -m "feat(api): resolve catalog choices server-side, validate the tool
   export interface ProbeResult { …; tools: string[] | null }
   export interface McpServerEntry { enabled: boolean; transport: string; command: string;
     args: string[]; env: Record<string, string>; cwd: string; env_allow: string[]; url: string;
+    auth_token: string; auth_token_source: "ui" | "env" | "default";
     tool_selection: string; use_all_tools: boolean; tools: string[] | null; agents: string[];
     label: string }
   // apps/web/src/lib/api.ts
@@ -4955,7 +5466,7 @@ In `apps/web/e2e/mocks.ts`, add `choices_from: null, editor: null` to every entr
     },
 ```
 
-with a `MOCK_SETTINGS_VALUES` row for each (`core.mcp.servers` value: `{ network: { enabled: true, transport: "stdio", command: "python", args: ["network-mcp/server.py"], env: {}, cwd: "network-mcp", env_allow: [], url: "", tool_selection: "dynamic", use_all_tools: false, tools: null, agents: ["network"], label: "Network MCP" } }`, source `"default"`), and a route for the new probe:
+with a `MOCK_SETTINGS_VALUES` row for each (`core.mcp.servers` value: `{ network: { enabled: true, transport: "stdio", command: "python", args: ["network-mcp/server.py"], env: {}, cwd: "network-mcp", env_allow: [], url: "", auth_token: "", auth_token_source: "default", tool_selection: "dynamic", use_all_tools: false, tools: null, agents: ["network"], label: "Network MCP" }, threatintel: { enabled: true, transport: "stdio", command: "python", args: ["threatintel-mcp/server.py"], env: {}, cwd: "threatintel-mcp", env_allow: ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"], url: "", auth_token: "**********", auth_token_source: "env", tool_selection: "dynamic", use_all_tools: false, tools: null, agents: ["judge"], label: "Threat intel MCP" } }`, source `"default"` — the second entry carries a set token so Task 18 can assert the mask is never the value), and a route for the new probe:
 
 ```ts
   await page.route("**/api/v1/settings/test/mcp?**", (route) =>
@@ -5003,6 +5514,36 @@ Expected: FAIL — the sandbox select has five options; `rest` is missing, becau
 ```
 
 and `ProbeResult` gains `tools: string[] | null;` ("the probed server's whole manifest, for the allow-list tick boxes").
+
+`McpServerEntry` is declared in the same file, and it is where the per-server token lives:
+
+```ts
+export interface McpServerEntry {
+  enabled: boolean;
+  transport: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  env_allow: string[];
+  url: string;
+  /** The mask `"**********"` when a token is set, `""` when it is not — never
+   *  the value. Sending the mask back unchanged means "leave the stored token
+   *  alone"; sending a new string replaces it; sending `null` clears it. The
+   *  token is not a catalog entry of its own, so there is no new column on
+   *  `CatalogEntry` and no second request: it rides inside this map value, and
+   *  the API splits it back out into its own encrypted row on PATCH. */
+  auth_token: string;
+  /** Where the effective token comes from, reported the way every other row's
+   *  `source` is: a UI-saved secret row, `.env`, or nothing set at all. */
+  auth_token_source: "ui" | "env" | "default";
+  tool_selection: string;
+  use_all_tools: boolean;
+  tools: string[] | null;
+  agents: string[];
+  label: string;
+}
+```
 
 `apps/web/src/lib/api.ts`, beside `testSettingsProbe`:
 
@@ -5116,16 +5657,10 @@ git commit -m "feat(web): read the provider choices from the settings catalog in
 
 ### Task 16: The server-map editor
 
-**Amendment A1 (controller ruling):** each server card renders `auth_token` through the same secret semantics as
-`SecretWidget` (masked "set · …" state from the catalog value, a password input only while editing, "clear"
-stages `null`); the staged value travels inside the `core.mcp.servers` PATCH body and the API (Task 14
-Amendment A1) moves it into an encrypted secret row. The e2e mocks return the mask for a set token and the
-spec asserts the mask never contains the typed value.
-
 **Files:**
 - Create: `apps/web/src/app/(app)/settings/configuration/ServerMapEditor.tsx`
 - Modify: `apps/web/src/app/(app)/settings/configuration/FieldRow.tsx:78-90` (the widget slot), `widgets.tsx:389-407` (`Widget` is untouched; the editor is chosen above it)
-- Test: covered by Task 18's spec; this task runs `npx tsc --noEmit && npm run lint`
+- Test: Task 18's spec, whose third case fills a token and asserts it never comes back; this task runs `npx tsc --noEmit && npm run lint`
 
 **Interfaces:**
 - Produces:
@@ -5159,6 +5694,14 @@ const input =
 const BUILTIN = new Set(["network", "threatintel"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
 const SLUG = /^[a-z][a-z0-9_-]{0,31}$/;
+/** What a set token looks like from outside; identical to the API's mask. */
+const TOKEN_MASK = "**********";
+
+const TOKEN_SOURCE_LABEL: Record<string, string> = {
+  ui: "set from the UI",
+  env: "set in .env",
+  default: "not set",
+};
 
 export const EMPTY_SERVER: McpServerEntry = {
   enabled: true,
@@ -5169,6 +5712,8 @@ export const EMPTY_SERVER: McpServerEntry = {
   cwd: "",
   env_allow: [],
   url: "",
+  auth_token: "",
+  auth_token_source: "default",
   tool_selection: "dynamic",
   use_all_tools: false,
   // A new server exposes nothing until its tools are ticked off a probe.
@@ -5184,6 +5729,14 @@ export const EMPTY_SERVER: McpServerEntry = {
  * full dict, so the apply bar, the hidden-dirty count and the reset behaviour
  * from sub-project A all apply unchanged, and a half-applied map — three
  * servers saved and the fourth rejected — cannot happen.
+ *
+ * The token field rides inside that same dict and behaves the way `SecretWidget`
+ * behaves everywhere else: what arrives is the mask (or an empty string), the
+ * input is a password field that only appears once the operator asks to edit,
+ * an untouched card sends the mask straight back and the API reads that as
+ * "leave the stored row alone", and "Clear" stages `null`. The value the
+ * operator types exists only in this component's state until it is applied;
+ * it never comes back from a GET.
  */
 export default function ServerMapEditor({
   entry,
@@ -5200,6 +5753,10 @@ export default function ServerMapEditor({
   const [newKey, setNewKey] = useState("");
   const [keyError, setKeyError] = useState<string | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "running">>({});
+  /** Which cards have their token field open for editing. A card is closed
+   *  until the operator asks, so a masked value cannot be typed over by
+   *  accident and cannot be read back by looking at the form. */
+  const [editingToken, setEditingToken] = useState<Record<string, boolean>>({});
 
   const put = (key: string, next: Partial<McpServerEntry>) =>
     onChange({ ...value, [key]: { ...value[key], ...next } });
@@ -5351,15 +5908,70 @@ export default function ServerMapEditor({
                   </label>
                 </>
               ) : (
-                <label className="block">
-                  <span className="text-text-muted">URL</span>
-                  <input
-                    className={input}
-                    aria-label={`${key} url`}
-                    value={server.url}
-                    onChange={(e) => put(key, { url: e.target.value })}
-                  />
-                </label>
+                <>
+                  <label className="block">
+                    <span className="text-text-muted">URL</span>
+                    <input
+                      className={input}
+                      aria-label={`${key} url`}
+                      value={server.url}
+                      onChange={(e) => put(key, { url: e.target.value })}
+                    />
+                  </label>
+                  <div className="block">
+                    <span className="text-text-muted">Auth token</span>
+                    {editingToken[key] ? (
+                      <input
+                        type="password"
+                        className={input}
+                        aria-label={`${key} auth token`}
+                        autoComplete="new-password"
+                        value={server.auth_token === TOKEN_MASK ? "" : server.auth_token}
+                        onChange={(e) => put(key, { auth_token: e.target.value })}
+                      />
+                    ) : (
+                      <p className="text-text-secondary py-1.5" data-token-state={key}>
+                        {TOKEN_SOURCE_LABEL[server.auth_token_source] ?? "not set"}
+                      </p>
+                    )}
+                    <div className="flex gap-3 mt-1">
+                      <button
+                        type="button"
+                        className="text-[11px] text-accent-strong"
+                        onClick={() => {
+                          if (editingToken[key]) {
+                            // Closing the field abandons whatever was typed and
+                            // puts the mask back, which the API reads as
+                            // "leave the stored token alone".
+                            put(key, {
+                              auth_token:
+                                server.auth_token_source === "default" ? "" : TOKEN_MASK,
+                            });
+                          }
+                          setEditingToken((t) => ({ ...t, [key]: !t[key] }));
+                        }}
+                      >
+                        {editingToken[key] ? "Keep current" : "Replace token"}
+                      </button>
+                      {server.auth_token_source !== "default" && (
+                        <button
+                          type="button"
+                          className="text-[11px] text-text-secondary"
+                          aria-label={`${key} clear auth token`}
+                          onClick={() => {
+                            // `null` is how every secret in this project is
+                            // cleared: the API deletes the row rather than
+                            // storing an empty one.
+                            put(key, { auth_token: null as unknown as string });
+                            setEditingToken((t) => ({ ...t, [key]: false }));
+                          }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
 
@@ -5860,6 +6472,49 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(page.getByText("1 change pending")).toBeVisible();
   });
 
+  test("a token is typed once, never read back, and an untouched one stays untouched", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+
+    // The fixture's `threatintel` entry arrives with a token set in .env: the
+    // page may say so, but must never carry the value.
+    const intel = page.locator('[data-server="threatintel"]');
+    await intel.getByLabel("threatintel transport").selectOption("http");
+    await expect(intel.locator('[data-token-state="threatintel"]')).toHaveText("set in .env");
+    await expect(page.getByLabel("threatintel auth token")).toHaveCount(0);
+
+    const custom = page.locator('[data-server="network"]');
+    await custom.getByLabel("network transport").selectOption("http");
+    await custom.getByRole("button", { name: "Replace token" }).click();
+    await custom.getByLabel("network auth token").fill("s3cr3t");
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, { auth_token: string }>>;
+    };
+    const sent = body.changes["core.mcp.servers"];
+    expect(sent.network.auth_token).toBe("s3cr3t");
+    // The card nobody edited sends the mask back, which the API reads as
+    // "leave the stored row alone" — not as a token of ten asterisks.
+    expect(sent.threatintel.auth_token).toBe("**********");
+
+    // Nothing on the page renders the typed value after it is applied.
+    await expect(page.getByText("s3cr3t")).toHaveCount(0);
+  });
+
   test("the REST editor appears with the provider and its preview counts rows", async ({
     authenticatedPage: page,
   }) => {
@@ -6006,7 +6661,7 @@ git commit -m "feat(api): accept the rest sandbox as a per-job override, and pin
 - Test: `tests/servers/test_server_security.py`
 
 **Interfaces:**
-- Consumes: `ServerHandle`, `child_env`, `settings_snapshot`, `public_snapshot`, `validate_server_map`, `preview_mapping`.
+- Consumes: `ServerHandle`, `child_env`, `settings_snapshot`, `public_snapshot`, `split_server_secrets`, `preview_mapping`.
 - Produces: nothing new; this task pins behaviour the earlier tasks built.
 
 Five of the spec's §8.7 invariants already have a test: the `cwd` rule
@@ -6118,13 +6773,16 @@ def test_an_absolute_cwd_must_exist(tmp_path):
         missing._resolve_cwd()
 
 
-def test_the_server_map_refuses_a_credential_because_it_is_stored_in_clear():
-    from app.services.server_map import ServerMapError, validate_server_map
+def test_a_server_token_never_lands_in_the_map_row_it_arrived_in():
+    """The map is one non-secret JSONB row; the token goes to its own encrypted one."""
+    from app.services.server_map import split_server_secrets
 
-    with pytest.raises(ServerMapError):
-        validate_server_map(
-            {"x": {"transport": "http", "url": "https://h", "auth_token": "s3cr3t"}}
-        )
+    cleaned, tokens = split_server_secrets(
+        {"x": {"enabled": True, "transport": "http", "url": "https://h", "auth_token": "s3cr3t"}}
+    )
+    assert "s3cr3t" not in str(cleaned)
+    assert "auth_token" not in cleaned["x"]
+    assert tokens == {"x": "s3cr3t"}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -6223,7 +6881,12 @@ argument list, never through a shell. Its environment is a fixed base set
 exactly the variable names you list under "Environment names passed through" —
 so `threatintel-mcp` sees `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` and
 nothing else, and no server sees the database URL, the settings encryption key
-or any LLM credential. A server bound to the static or dynamic analyst degrades
+or any LLM credential. A bearer token for an HTTP server is typed once and
+stored the way every other secret in Maljan is stored: encrypted with
+`SETTINGS_ENCRYPTION_KEY`, in a row of its own rather than in the server list,
+never returned by the API and never written into a run summary. Without that
+key set, the UI refuses a token the same way it refuses every other secret, and
+`MCP__SERVERS__<KEY>__AUTH_TOKEN` in `.env` stays the way to supply one. A server bound to the static or dynamic analyst degrades
 rather than failing a job: if it cannot be reached, the run says so in its
 degradation reasons and continues on the evidence it has.
 
@@ -6292,7 +6955,9 @@ and add a new block after it:
 # MCP__SERVERS__CUSTOM__TOOLS=["open_file", "analyze", "list_imports"]
 # MCP__SERVERS__CUSTOM__AGENTS=["static"]
 # MCP__SERVERS__CUSTOM__LABEL=radare2 (custom)
-# [SECRET] — http transports only
+# [SECRET] — http transports only. A token typed in the UI instead is stored
+# encrypted in its own row (core.mcp.servers.<key>.auth_token) and takes
+# precedence over this; this stays the way to set one without the UI.
 # MCP__SERVERS__CUSTOM__AUTH_TOKEN=
 ```
 
@@ -6391,13 +7056,14 @@ The test count is **not** re-pinned: `tests/evaluation/test_suite_count.json` is
 
 - [ ] **Step 3: Live verification**
 
-Recipe in the `local-observation-run-recipe` memory; cap the CPU before starting llama, confirm `free -g` >= 10 GB, and stop `next dev` before any browser check. The five scenarios are the spec's §10, as a checklist:
+Recipe in the `local-observation-run-recipe` memory; cap the CPU before starting llama, confirm `free -g` >= 10 GB, and stop `next dev` before any browser check. The scenarios are the spec's §10 plus the token ruling from Task 14, as a checklist:
 
 1. **Default profile.** Today's `.env`, one job to completion. The log lines `Network tool servers: N tools attached` and `Judge tool servers: [...]` list exactly the names in `tests/fixtures/golden/mcp_tools/network.json` and `threatintel.json`. `run_summary.degradation_reasons` carries no `mcp server` entry.
 2. **A custom server, narrowed.** In Settings → Tool servers, add `r2custom`, transport stdio, command `r2mcp`; press Test; tick `open_file`, `analyze`, `list_imports` and nothing else; tick the `static` agent; apply. Set `static.provider=none`. Run a job: the static analyst's log line reports three tools, and they are those three.
 3. **The REST stub.** `uv run uvicorn tests.servers.rest_stub:build_stub_app --factory --port 8099` with a `StubState()`; in Settings switch the sandbox to `rest`, fill in the stub's base URL and paths, paste `tests/fixtures/golden/rest_mapping/xyz_report.json` into the preview box and press Preview mapping — the processes row reads `2 / 2 / 0`. Apply and run a job: the report's dynamic and network sections are populated and `unavailable` names `domains`, `hosts`, `http` and `udp`.
 4. **A disabled built-in.** Disable `threatintel` in the editor and apply. Run a job: the judge's log line lists no tools and `run_summary.degradation_reasons` is silent — a *disabled* server is a choice, not a degradation, and only a server that fails to open produces a reason. Re-enable it and break its command instead (`MCP__SERVERS__THREATINTEL__COMMAND=/nonexistent`) to see `mcp server 'threatintel' unavailable` in the summary.
-5. **Legacy env.** With `STATIC__GENERIC__COMMAND=my-mcp` alone in the environment, `uv run python -c "from maljan.core.config import Settings; s=Settings(); print(s.static.generic.server, s.mcp.servers['custom'].command, s.mcp.servers['custom'].agents)"` prints `custom my-mcp ['static']`, and the one-time alias warning names the legacy key.
+5. **A token, stored and masked.** Give `r2custom` the `http` transport and a token, apply, then re-open the page: the card reads "set from the UI" and the value is nowhere in the response — check with `psql -c "select key, is_secret from runtime_settings where key like 'core.mcp.servers%'"`, which shows one non-secret map row and one `is_secret` token row. Unset `SETTINGS_ENCRYPTION_KEY` and try again: the apply answers 422 with the same message every other secret gives.
+6. **Legacy env.** With `STATIC__GENERIC__COMMAND=my-mcp` alone in the environment, `uv run python -c "from maljan.core.config import Settings; s=Settings(); print(s.static.generic.server, s.mcp.servers['custom'].command, s.mcp.servers['custom'].agents)"` prints `custom my-mcp ['static']`, and the one-time alias warning names the legacy key.
 
 - [ ] **Step 4: Update the spec's status line and open the PR**
 
@@ -6406,9 +7072,9 @@ The spec's status line becomes `implemented on branch feat/tool-servers; PR into
 - what moved (the two sidecars, `static.generic`) and the two fixtures that prove nothing changed with them;
 - the allow-list and the trust boundary, in the README's words;
 - the `rest` provider, the stub it is tested against, and the mapping golden;
-- the five live-verification results;
+- the six live-verification results;
 - the note that the pinned test count is unchanged while the live count grew;
-- the two rulings this branch made that the spec did not fix: per-server `auth_token` values are moved into encrypted secret rows by the server-map PATCH (Task 14, Amendment A1), and `MaljanApp` now reads each provider's own poll budget rather than CAPE's (Task 12), which changes Triage's effective timeout from 300 s to its configured 900 s;
+- the two rulings this branch made that the spec did not fix in detail: per-server `auth_token` values are split out of the `core.mcp.servers` row and stored as one encrypted `is_secret` row each — the project's first runtime-keyed secret rows, with the reader, writer and mask all in Task 14 — and `MaljanApp` now reads each provider's own poll budget rather than CAPE's (Task 12), which changes Triage's effective timeout from 300 s to its configured 900 s;
 - the follow-ups sub-project C inherits: `agents` becomes the default `tools` of an agent definition, per-job server selection, and roles beyond the four.
 
 ```bash
@@ -6426,14 +7092,14 @@ git commit -m "ci: name sub-project B in the evaluation-artefact gate"
 4. The default-profile gates green — prompt byte identity, the extractor goldens, the CAPE identity test, and `tests/servers/test_builtin_tool_sets.py` (the network and judge tool sets equal the pinned fixtures); `grep -rn "network-mcp/server.py\|threatintel-mcp/server.py" src/` shows only `core/config.py`'s `_builtin_servers`.
 5. Parity green — `tests/providers/test_registry.py` and `tests/api/test_job_provider_overrides.py` agree on all three id lists, `rest` included; `tests/unit/core/test_settings_catalog.py` finds every new leaf annotated.
 6. `cd apps/web && npx tsc --noEmit && npm run lint && npm run build`; `npx playwright test e2e/settings-servers.spec.ts e2e/settings-configuration.spec.ts e2e/job-submit-providers.spec.ts --project=chromium --project=firefox`.
-7. Live run (mock sandbox, local llama, CPU cap first): the five scenarios in Task 22 Step 3.
+7. Live run (mock sandbox, local llama, CPU cap first): the six scenarios in Task 22 Step 3.
 8. PR into `dev`, CI green including Semgrep and the evaluation-diff gate; merging is left to the user.
 
 ## Self-review notes
 
-- **Type and name consistency across tasks:** `AgentRole` (T2, T3, T14), `_builtin_servers` (T2, T4, T14), `BUILTIN_SERVER_KEYS` / `RESERVED_SERVER_KEYS` / `SERVER_KEY_PATTERN` (T2, T5, T14, T16), `GENERIC_SERVER_KEY` (T4), `ServerHandle` (T5, T6, T7, T9, T20), `ServerRegistry` (T5, T6, T7, T8, T20), `ServerRegistry.degradation_reasons` (T5, T8), `tools_for` / `atools_for` (T5, T7, T8), `ServiceContainer.get_server_registry` (T6, T7, T8), `server_degradation_reasons` (T8), `_attach_registry_tools` (T7, T8), `GenericMCPStaticProvider.server_name` (T5, T8), `handshake_tools` / `probe_mcp` / `run_mcp_probe` (T9, T14), `ProbeResult.tools` / `ProbeResponse.tools` (T9, T14, T15, T16), `compile_mapping` / `apply_mapping` / `CompiledMapping` / `MappingResult` / `ChannelStats` / `CHANNELS` / `MAX_ROWS_PER_CHANNEL` (T10, T11, T13), `RestSandboxProvider` (T11, T12, T13), `build_stub_app` / `StubState` (T12, T22), `preview_mapping` / `PREVIEW_MAX_BYTES` (T13, T20), `validate_server_map` / `ServerMapError` (T14, T20), `resolved_catalog` (T14), `choices_from` / `editor` (T3, T14, T15, T16, T17), `McpServerEntry` / `MappingPreview` (T15, T16, T17), `useProviderChoices` (T15), `ServerMapEditor` (T16, T18), `RestSandboxEditor` (T17, T18). Settings keys: `mcp.servers` (T2 declares, T3 annotates, T4 migrates, T14 validates, T16 renders, T21 documents), `static.generic.server` (T2, T3, T4, T5, T14, T21), `sandbox.rest.*` (T2, T3, T11, T13, T17, T21), `sandbox.provider` (T2, T3, T11, T19).
+- **Type and name consistency across tasks:** `AgentRole` (T2, T3, T14), `_builtin_servers` (T2, T4, T14), `BUILTIN_SERVER_KEYS` / `RESERVED_SERVER_KEYS` / `SERVER_KEY_PATTERN` (T2, T5, T14, T16), `GENERIC_SERVER_KEY` (T4), `ServerHandle` (T5, T6, T7, T9, T20), `ServerRegistry` (T5, T6, T7, T8, T20), `ServerRegistry.degradation_reasons` (T5, T8), `tools_for` / `atools_for` (T5, T7, T8), `ServiceContainer.get_server_registry` (T6, T7, T8), `server_degradation_reasons` (T8), `_attach_registry_tools` (T7, T8), `GenericMCPStaticProvider.server_name` (T5, T8), `handshake_tools` / `probe_mcp` / `run_mcp_probe` (T9, T14), `ProbeResult.tools` / `ProbeResponse.tools` (T9, T14, T15, T16), `compile_mapping` / `apply_mapping` / `CompiledMapping` / `MappingResult` / `ChannelStats` / `CHANNELS` / `MAX_ROWS_PER_CHANNEL` (T10, T11, T13), `RestSandboxProvider` (T11, T12, T13), `build_stub_app` / `StubState` (T12, T22), `preview_mapping` / `PREVIEW_MAX_BYTES` (T13, T20), `validate_server_map` / `ServerMapError` (T14), `split_server_secrets` / `merge_server_secrets` / `server_token_key` / `SERVER_MAP_KEY` / `TOKEN_MASK` (T14, T16, T20), `resolved_catalog` (T14), `choices_from` / `editor` (T3, T14, T15, T16, T17), `McpServerEntry` / `MappingPreview` (T15, T16, T17), `useProviderChoices` (T15), `ServerMapEditor` (T16, T18), `RestSandboxEditor` (T17, T18). Settings keys: `mcp.servers` (T2 declares, T3 annotates, T4 migrates, T14 validates, T16 renders, T21 documents), `static.generic.server` (T2, T3, T4, T5, T14, T21), `sandbox.rest.*` (T2, T3, T11, T13, T17, T21), `sandbox.provider` (T2, T3, T11, T19).
 - **Order dependencies:** T1 must be green on unmodified code before T2 — a tool set captured after the sidecars moved proves nothing. T2 before T3 before T4. T5 before T6 before T7 before T8. T9 depends on T5 (`ServerHandle`) and is what T14's route calls. T10 before T11 before T12; T13 depends on T10 and T11. T14 depends on T9 and T2. T15 before T16 and T17 (the DTO and the API client come first); T18 after both. T19 depends on T11 (`rest` must be registered for the parity test to pass). T20 after T14. T21 next to last, T22 last. Two tasks are red on purpose in between: `test_registry.py::test_sandbox_ids_equal_the_settings_choices` from T2 to T11, and `test_settings_catalog.py` from T2 to T3; both are named in the task that breaks them and in the task that fixes them.
-- **Deliberate compromises, named rather than hidden:** (a) superseded by Amendment A1 in T14/T16: tokens are stored as per-server secret rows rather than refused — the leaf is one non-secret JSONB row, and accepting a token there would store it in clear beside values the UI echoes; the field stays real and is set through `MCP__SERVERS__<KEY>__AUTH_TOKEN`, and the editor says so. (b) `MaljanApp._poll_budget` (T12) changes Triage's effective timeout from CAPE's 300 s to its own configured 900 s — a bug fix rather than a feature, called out in the PR body because it is a behaviour change outside sub-project B's stated scope. (c) `ServerHandle` carries both a sync and an async lifecycle (T5, T7) because the judge enters its toolkit on the graph's loop and the analysts on the shared agent loop; one construction path and two ways to run its coroutine is the smallest honest way to keep that asymmetry. (d) the built-in sidecars keep `tools=None` — "every tool" — where a custom server starts at `[]`; narrowing them would change the evaluated profile, and the fixture is what makes that safe. (e) `hosts` rows are wrapped as `{"ip": value}` by the generic mapper (T10) because `SandboxNetwork.hosts` is `list[dict]` while the spec's channel comment says one string per match; wrapping keeps one row shape for the consumers rather than teaching them a second.
+- **Deliberate compromises, named rather than hidden:** (a) a per-server `auth_token` is stored as its own encrypted `is_secret` row keyed `core.mcp.servers.<key>.auth_token` rather than inside the map (T14 Steps 3 and 5, T16's card, T18's third case) — the map leaf is one non-secret JSONB row, so a token left in it would be in clear beside values the UI echoes back. This is the one place in the project where a secret row's key is chosen at runtime instead of declared in the catalog, so `SettingsService` handles those rows itself rather than through `check_keys`; `merge_server_secrets` is an explicit merge rather than two key shapes reaching `nest()`, because `nest()` is order-dependent and would let a late `core.mcp.servers` overwrite a token. (b) `MaljanApp._poll_budget` (T12) changes Triage's effective timeout from CAPE's 300 s to its own configured 900 s — a bug fix rather than a feature, called out in the PR body because it is a behaviour change outside sub-project B's stated scope. (c) `ServerHandle` carries both a sync and an async lifecycle (T5, T7) because the judge enters its toolkit on the graph's loop and the analysts on the shared agent loop; one construction path and two ways to run its coroutine is the smallest honest way to keep that asymmetry. (d) the built-in sidecars keep `tools=None` — "every tool" — where a custom server starts at `[]`; narrowing them would change the evaluated profile, and the fixture is what makes that safe. (e) `hosts` rows are wrapped as `{"ip": value}` by the generic mapper (T10) because `SandboxNetwork.hosts` is `list[dict]` while the spec's channel comment says one string per match; wrapping keeps one row shape for the consumers rather than teaching them a second.
 - **Source facts worth knowing before starting:** `MCPConfig` keeps two deprecated read-only properties (`ghidra`, `cape`) that `tests/evaluation/` reads and that must not be touched (`src/maljan/core/config.py:710-757`); `settings_customise_sources` applies the alias table per source, so `apply_settings_aliases` runs several times per construction and must stay idempotent (`config.py:1152-1180`); `flatten_leaves` returns a dict-typed leaf whole, which is why `mcp.servers` works as one catalog entry (`settings_overrides.py:58`); `runtime_settings.value` is JSONB, so the whole map stores in one row (`apps/api/app/models/settings.py:19`); `network-mcp` offers three tools and `threatintel-mcp` four, so the fixtures are small (`network-mcp/server.py:15-57`, `threatintel-mcp/server.py:271-336`).
 
 ## Spec coverage
@@ -6450,6 +7116,7 @@ git commit -m "ci: name sub-project B in the evaluation-artefact gate"
 | §2 — failure policy | T5, T8 |
 | §3.1 `MCPServerConfig` extended | T2, T3 |
 | §3.2 `MCPConfig.servers`, `_builtin_servers`, reserved keys, disable-not-delete | T2, T14, T16 |
+| §3.1 per-server `auth_token` stored as one encrypted row (ruling A1) | T14 (validator, `SettingsService`, tests), T15 (DTO), T16 (card), T18 (e2e), T20 (invariant) |
 | §3.3 `static.generic` becomes a reference, aliases, migration | T2, T4, T5 |
 | §3.4 `sandbox.rest` tree and its `applies_when` | T2, T3 |
 | §4 `ServerHandle` / `ServerRegistry`, container, agent wiring, degrade, collisions | T5, T6, T7, T8 |
@@ -6463,7 +7130,7 @@ git commit -m "ci: name sub-project B in the evaluation-artefact gate"
 | §8.5 REST adapter: stub, end-to-end, mapping golden, unit failures | T10, T11, T12 |
 | §8.6 `settings-servers.spec.ts`, chromium in the task and firefox in the gate | T18, T22 |
 | §8.7 Security tests | T5 (cwd), T9 (probe kill), T13 (admin, 4 MiB), T20 (snapshot, `env_allow`, argv) |
-| §9 Security narrative and the README's trust boundary | T14, T20, T21 |
+| §9 Security narrative, per-server token storage, and the README's trust boundary | T14, T16, T20, T21 |
 | §10 Live verification | T22 |
 | §11 Out of scope | not implemented, by design |
 | §12 Risks — tool-set drift, per-job server lifetime, JSONPath on large reports | T1 (names only), T5 + T6 (lazy open, closed at job end), T10 (`MAX_ROWS_PER_CHANNEL`) |
