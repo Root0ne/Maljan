@@ -389,6 +389,96 @@ async def test_pipeline_failure_sets_failed_status(
     assert job.error_message is not None
 
 
+@pytest.mark.asyncio
+async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A job carrying both ``mock_mode`` and ``sandbox_report_id`` must not
+    surface a raw ``AttributeError``.
+
+    ``build_job_settings`` forces ``sandbox.provider="upload"`` because a
+    report is attached, but ``ServiceContainer.get_sandbox_provider()``'s own
+    mock override runs after that and wins whenever the container's ``mock``
+    flag is set, handing back a ``MockSandboxProvider`` — which has no
+    ``set_pending_blob``. The worker must check
+    ``capabilities.accepts_uploaded_report`` before calling it and fail with a
+    legible, worded message instead of letting the attribute error escape to
+    ``job.error_message`` where the user would see it. Task 20 (per-job
+    override validation) is the real fix for the underlying combination; this
+    is the defence in depth underneath it.
+    """
+    job = _make_job(
+        config={
+            "sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000",
+            "mock_mode": True,
+        }
+    )
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    report_result = MagicMock()
+    report_result.scalar_one_or_none.return_value = report_row
+
+    # Job, then sample, then the ``started_at`` UPDATE every job fires right
+    # after, then ``load_core_overrides``'s own settings-table read (both
+    # unused — a plain MagicMock's default empty ``__iter__`` is enough for
+    # ``list(res.scalars().all())`` to come back ``[]``, same as every other
+    # test in this file relies on for that call), then the sandbox-report row
+    # lookup this task's own attach-path added.
+    exec_results = [
+        _make_result(job),
+        _make_result(sample),
+        MagicMock(),
+        MagicMock(),
+        report_result,
+    ]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict("os.environ", {"MOCK_MODE_ALLOWED": "true"}, clear=False),
+        # Never actually reached once the capability guard fires first — mocked
+        # anyway so a wrong fix ordering fails loudly instead of hitting MinIO.
+        patch("app.api.v1.sandbox_reports.get_object", return_value=b"{}"),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    assert "AttributeError" not in result["error"]
+    assert "cannot accept an uploaded report" in result["error"]
+    assert job.status == "failed"
+    assert job.error_message is not None
+    assert "AttributeError" not in job.error_message
+    assert "cannot accept an uploaded report" in job.error_message
+
+
 # ---------------------------------------------------------------------------
 # H3 (security hardening): the worker's private sample copies (download +
 # Ghidra mirror) are removed when the job ends, success or failure alike.

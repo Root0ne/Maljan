@@ -478,6 +478,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 if row is None or row.sample_id != sample.id:
                     raise ValueError("The attached sandbox report does not belong to this sample.")
                 sandbox_provider = app.container.get_sandbox_provider()
+                # A mock-mode job still resolves sandbox.provider="upload" through
+                # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
+                # own mock override runs after that and wins, so the object here
+                # can be a MockSandboxProvider with no set_pending_blob at all.
+                # Checked by capability, not by provider id, the same way every
+                # other branch in this layer is: an attribute error escaping to
+                # job.error_message would show the user a raw internal exception
+                # instead of saying what actually happened.
+                if not sandbox_provider.capabilities.accepts_uploaded_report:
+                    raise ValueError(
+                        "A sandbox report is attached to this job, but the configured "
+                        f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
+                        "uploaded report."
+                    )
                 sandbox_provider.set_pending_blob(
                     await asyncio.to_thread(get_object, row.storage_path),
                     filename=f"{row.id}.json",

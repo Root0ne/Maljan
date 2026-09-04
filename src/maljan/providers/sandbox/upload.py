@@ -100,23 +100,35 @@ class UploadSandboxProvider(SandboxProvider):
 
         payload = self._parse(blob)
         fmt = sniff_format(payload)
+        if fmt == "unknown":
+            # Never a legitimate target regardless of ``allowed_formats``:
+            # ``SandboxReport.source_format`` has no "unknown" member, so
+            # letting this through to ``cape_report_to_sandbox_report`` would
+            # surface a raw pydantic ValidationError instead of a clean,
+            # worded refusal — even if an operator misconfigured the allow
+            # list to include it.
+            raise ProviderError(
+                "Could not recognise the uploaded report's sandbox format; accepted "
+                f"formats are {', '.join(sorted(self._cfg.allowed_formats))}."
+            )
         if fmt not in set(self._cfg.allowed_formats):
             raise ProviderError(
                 f"Uploaded report sniffed as {fmt!r}; accepted formats are "
                 f"{', '.join(sorted(self._cfg.allowed_formats))}."
             )
-        report = cape_report_to_sandbox_report(
-            payload,
-            provider="upload",
-            source_format=fmt,  # type: ignore[arg-type]
-        )
         if fmt == "triage":
             # Task 16 removes this refusal once `triage_overview_to_sandbox_report`
             # exists — the allow-list check above is what actually gates access;
             # this is only a placeholder for a format the allow-list still lets in.
+            # Checked before any conversion runs, so nothing is built only to be
+            # discarded.
             raise ProviderError(
                 "Uploaded report sniffed as 'triage'; the Triage reader lands in the next task."
             )
+        # ``fmt`` is narrowed to Literal["cape2", "cuckoo"] here: "unknown" and
+        # "triage" both raised above, so this always names a format
+        # ``SandboxReport.source_format`` actually accepts — no type: ignore.
+        report = cape_report_to_sandbox_report(payload, provider="upload", source_format=fmt)
         return SandboxRun(
             task_id=report.task_id or "uploaded",
             sample_sha256=report.target.sha256,

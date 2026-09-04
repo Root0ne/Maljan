@@ -60,6 +60,21 @@ def test_a_format_outside_the_allow_list_is_refused():
     assert "cape2" in str(exc.value)
 
 
+def test_an_unrecognisable_payload_is_refused_even_with_a_misconfigured_allow_list():
+    """``sniff_format`` can return "unknown", which has no member in
+    ``SandboxReport.source_format``'s Literal. That must be refused before the
+    allow-list check ever runs, so an operator who misconfigures
+    ``allowed_formats`` to include "unknown" still gets a clean, worded
+    ``ProviderError`` instead of a raw pydantic ``ValidationError`` out of
+    ``cape_report_to_sandbox_report``."""
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.upload.allowed_formats = ["unknown", "cape2", "cuckoo", "triage"]
+    provider = UploadSandboxProvider.from_settings(cfg)
+    with pytest.raises(ProviderError) as exc:
+        provider.attach_report(b'{"nothing": "recognisable"}', filename="weird.json")
+    assert "Could not recognise" in str(exc.value)
+
+
 def test_a_triage_upload_is_refused_narrowly_until_task_16():
     """The refusal names only the triage format; a cape2 upload right after
     still succeeds, so the gate is not accidentally catching every upload."""
