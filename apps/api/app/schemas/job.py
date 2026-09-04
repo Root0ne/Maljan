@@ -101,6 +101,31 @@ class SampleListResponse(BaseModel):
     page_size: int
 
 
+# ── Sandbox Report Schemas ───────────────────────────────────────
+
+
+class SandboxReportResponse(BaseModel):
+    """An operator-uploaded sandbox report attached to a sample."""
+
+    id: uuid.UUID
+    format: str
+    task_id: str | None
+    size_bytes: int
+    # Set once at upload time and never recomputed — see SandboxReportRow.
+    sample_sha256_match: bool
+    warning: str | None = None
+    uploaded_at: datetime = Field(validation_alias="created_at")
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class SandboxReportListResponse(BaseModel):
+    """Every sandbox report attached to one sample."""
+
+    items: list[SandboxReportResponse]
+    total: int
+
+
 # ── Report Schemas ───────────────────────────────────────────────
 
 
