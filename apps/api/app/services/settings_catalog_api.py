@@ -269,7 +269,7 @@ def api_catalog() -> list[CatalogEntry]:
 
 def full_catalog() -> list[CatalogEntry]:
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}
-    return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.path))
+    return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.order, e.path))
 
 
 @lru_cache(maxsize=1)
