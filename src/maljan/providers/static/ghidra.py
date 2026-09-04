@@ -160,15 +160,7 @@ class GhidraStaticProvider(StaticProvider):
                 truncation_ledger=job.truncation_ledger,
             )
 
-            try:
-                self._run_async(client.initialize())
-            except Exception as exc:  # noqa: BLE001 - a toolless attach must not crash the run
-                logger.warning(
-                    "Ghidra MCP HTTP attach failed (%s: %s); continuing without tools.",
-                    type(exc).__name__,
-                    exc,
-                )
-                return
+            self._run_async(client.initialize())
             self._toolkit = client
             all_tools = list(client.get_tools())
             self._all_tools = all_tools  # full pool; kept reachable
@@ -206,15 +198,7 @@ class GhidraStaticProvider(StaticProvider):
             truncation_ledger=job.truncation_ledger,
         )
 
-        try:
-            self._run_async(toolkit.initialize())
-        except Exception as exc:  # noqa: BLE001 - a toolless attach must not crash the run
-            logger.warning(
-                "Ghidra MCP stdio attach failed (%s: %s); continuing without tools.",
-                type(exc).__name__,
-                exc,
-            )
-            return
+        self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
         all_tools = list(toolkit.get_tools())
         self._all_tools = all_tools  # full pool; kept reachable

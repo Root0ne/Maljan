@@ -122,10 +122,10 @@ def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
 # Moved to maljan.providers.static.ghidra in the provider layer (2026-09-03).
 # Re-exported so the modules and tests that import them from here keep working;
 # removed in the last task of the provider plan.
-from maljan.providers.static.ghidra import (  # noqa: E402, I001
+from maljan.providers.static.ghidra import (  # noqa: E402
     GHIDRA_ALLOWED_TOOLS as _GHIDRA_ALLOWED_TOOLS_MODULE,
-    GhidraStaticProvider,
 )
+from maljan.providers.static.ghidra import GhidraStaticProvider  # noqa: E402
 
 
 class _LegacyGhidraJob:

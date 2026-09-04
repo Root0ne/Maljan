@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
+import pytest
+
 from maljan.core.config import Settings
 from maljan.providers.base import StaticJobContext
 from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS, GhidraStaticProvider
@@ -62,9 +65,29 @@ def test_all_mode_keeps_everything():
     assert len(provider.select_tools(tools)) == 50
 
 
+def test_a_failed_attach_raises_instead_of_degrading():
+    """Ghidra IS the static evidence; a broken attach must not be swallowed.
+
+    ``ghidra.example`` is an RFC 2606 domain guaranteed to never resolve, so
+    this never risks a real network call — it only pins that ``open()`` lets
+    the connection failure propagate, exactly like the pre-provider
+    ``_initialize_mcp_client`` it was transplanted from. A provider that
+    degraded quietly here would hand the ReAct loop zero tools and let the
+    LLM write a confident-looking report grounded in nothing.
+    """
+    provider = _provider()
+    with pytest.raises(httpx.HTTPError):
+        provider.open(StaticJobContext())
+
+
 def test_dynamic_mode_uses_the_categories_from_the_job():
     provider = _provider(tool_selection="dynamic")
-    provider.open(StaticJobContext(capability_categories=frozenset({"crypto"})))
+    # The attach itself fails (unreachable host, see the test above) but
+    # ``self._job`` is assigned before the attach is attempted, so it is
+    # still set by the time the exception propagates — exercise that here
+    # rather than reaching into the private attribute directly.
+    with pytest.raises(httpx.HTTPError):
+        provider.open(StaticJobContext(capability_categories=frozenset({"crypto"})))
     tools = [_Tool(f"filler_{i}") for i in range(80)] + [
         _Tool("detect_crypto_constants", "find AES and RC4 constants")
     ]
@@ -98,7 +121,10 @@ def test_load_program_is_pinned_to_the_mirror_path():
         args_schema=create_model("Args", file=(str, ...)),
     )
     provider = _provider()
-    provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe"))
+    # As above: the attach fails against the unreachable host, but ``_job``
+    # is set first, so the pin is still exercised past the raised error.
+    with pytest.raises(httpx.HTTPError):
+        provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe"))
     pinned = provider.select_tools([tool])[0]
     asyncio.run(pinned.coroutine(file="/home/user/invented.exe"))
     assert seen["file"] == "/data/samples/.work/abc.exe"
