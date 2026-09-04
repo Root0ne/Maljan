@@ -11,6 +11,7 @@ const APPLIES: Record<string, string> = {
 export default function ApplyBar({
   pending,
   entries,
+  hiddenKeys,
   saving,
   onApply,
   onDiscard,
@@ -19,6 +20,7 @@ export default function ApplyBar({
 }: {
   pending: Record<string, unknown>;
   entries: Map<string, CatalogEntry>;
+  hiddenKeys: string[];
   saving: boolean;
   onApply: () => void;
   onDiscard: () => void;
@@ -27,6 +29,7 @@ export default function ApplyBar({
 }) {
   const keys = Object.keys(pending);
   if (keys.length === 0) return null;
+  const hidden = keys.filter((k) => hiddenKeys.includes(k));
   return (
     <div className="sticky bottom-0 mt-6 border-t border-border bg-bg-surface/95 backdrop-blur px-4 py-3 rounded-t">
       {confirming && (
@@ -40,6 +43,9 @@ export default function ApplyBar({
                 {" → "}
                 {e?.secret ? (v === null ? "cleared" : "new secret") : JSON.stringify(v)}{" "}
                 <span className="text-text-muted">({APPLIES[e?.applies ?? "next_job"]})</span>
+                {hiddenKeys.includes(k) && (
+                  <span className="text-text-muted"> (hidden by the current provider selection)</span>
+                )}
               </li>
             );
           })}
@@ -48,6 +54,11 @@ export default function ApplyBar({
       <div className="flex items-center gap-4 flex-wrap">
         <span className="text-sm text-text-primary">
           {keys.length} change{keys.length === 1 ? "" : "s"} pending
+          {hidden.length > 0 && (
+            <span className="text-text-muted">
+              {" "}· {hidden.length} in a hidden field{hidden.length === 1 ? "" : "s"}
+            </span>
+          )}
         </span>
         {!confirming ? (
           <button

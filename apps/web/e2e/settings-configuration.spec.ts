@@ -407,6 +407,64 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.getByRole("button", { name: /^Providers/ }).click();
     await expect(page.getByText("new value staged")).toBeVisible();
   });
+
+  test("switching the sandbox provider reveals the Triage fields and hides the CAPE ones", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
+
+    await expect(page.getByText("core.sandbox.cape2.base_url")).toBeVisible();
+    await expect(page.getByText("core.sandbox.triage.base_url")).toHaveCount(0);
+
+    await page
+      .locator("#setting-core\\.sandbox\\.provider select")
+      .selectOption("triage");
+
+    await expect(page.getByText("core.sandbox.triage.base_url")).toBeVisible();
+    await expect(page.getByText("core.sandbox.cape2.base_url")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Test triage" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Test cape2" })).toHaveCount(0);
+  });
+
+  test("an edit that a provider switch hides is still staged and is counted", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
+
+    await page
+      .locator("#setting-core\\.sandbox\\.cape2\\.base_url input[type=text]")
+      .fill("http://cape.example:8000");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+
+    await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("triage");
+
+    await expect(page.getByText("core.sandbox.cape2.base_url")).toHaveCount(0);
+    await expect(page.getByText("2 changes pending")).toBeVisible();
+    await expect(page.getByText("1 in a hidden field")).toBeVisible();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: [], applies: { next_job: 2 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+    expect(patches).toEqual([
+      {
+        changes: {
+          "core.sandbox.cape2.base_url": "http://cape.example:8000",
+          "core.sandbox.provider": "triage",
+        },
+      },
+    ]);
+  });
 });
 
 test.describe("Settings → Configuration (stale stored override)", () => {
