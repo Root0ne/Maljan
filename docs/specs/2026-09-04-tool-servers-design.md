@@ -1,6 +1,6 @@
 # Tool servers design — Maljan sub-project B
 
-Status: approved design, plan pending. Builds on sub-project A (`docs/specs/2026-09-03-provider-layer-design.md`,
+Status: approved design; plan `docs/plans/2026-09-04-tool-servers.md` (22 tasks). Builds on sub-project A (`docs/specs/2026-09-03-provider-layer-design.md`,
 PR #5 into `dev`). Companion plan: `docs/plans/2026-09-04-tool-servers.md`.
 
 ## 1. Problem
@@ -62,7 +62,7 @@ class MCPServerConfig(BaseModel):
 `auth_token` becomes `SecretStr` so it renders through the secret widget and is redacted in
 snapshots; A's `static.ghidra.auth_token`, `sandbox.cape2.mcp.auth_token` and `static.generic`
 follow the same change (their values are already redacted by the annotations' `secret` flag; the type
-change closes the gap in `settings_snapshot`). `tool_selection` and `use_all_tools` stay because the
+change closes the gap in `settings_snapshot`). Tokens entered for `mcp.servers.<key>` in the UI are stored as one encrypted secret row per server (`core.mcp.servers.<key>.auth_token`), never inside the JSON map row; without `SETTINGS_ENCRYPTION_KEY` the UI refuses them the way it refuses every other secret. `tool_selection` and `use_all_tools` stay because the
 Ghidra provider reads them; the new editor shows them only for `static.ghidra`.
 
 ### 3.2 `MCPConfig`
