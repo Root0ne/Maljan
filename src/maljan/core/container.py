@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
     from maljan.providers.base import SandboxProvider, StaticProvider
+    from maljan.providers.servers import ServerRegistry
 
 
 # Per-closer budget in ``aclose``. Each toolkit is already bounded internally;
@@ -111,6 +112,7 @@ class ServiceContainer:
         self._sandbox_client_cache: SandboxClient | None = None
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: StaticProvider | None = None
+        self._server_registry_cache: ServerRegistry | None = None
         self._yara_layer_cache: YaraLayer | None = None
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
@@ -259,6 +261,25 @@ class ServiceContainer:
                 logger.info("Static provider: %s.", self._static_provider_cache.id)
             return self._static_provider_cache
 
+    def get_server_registry(self) -> ServerRegistry:
+        """The tool servers this job may attach, built from the job's settings.
+
+        One registry per container, and the container is per job, so a stdio
+        server's subprocess lives for exactly one analysis and is closed by
+        ``aclose`` at the end of it — the same lifetime the static and sandbox
+        providers already have.
+        """
+        with self._lock:
+            if self._server_registry_cache is None:
+                from maljan.providers.servers import ServerRegistry
+
+                self._server_registry_cache = ServerRegistry(self.config)
+                logger.info(
+                    "Tool servers: %s.",
+                    ", ".join(sorted(self.config.mcp.servers)) or "(none)",
+                )
+            return self._server_registry_cache
+
     def get_sandbox_client(self) -> SandboxClient:
         """The provider, dressed as the client the pipeline already speaks."""
         with self._lock:
@@ -378,6 +399,15 @@ class ServiceContainer:
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
 
+        # Same rule as the providers above: close the *cached* registry, never
+        # ``get_server_registry()`` — a job that never attached a tool server
+        # must not build one here for the sole purpose of closing it.
+        if self._server_registry_cache is not None:
+            try:
+                self._server_registry_cache.close_all()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing the tool-server registry failed (non-fatal): %s", exc)
+
         # The sample's parsed text and the per-job analysis layers. Not a leak
         # on their own — the container dies with the job — but dropping them
         # here means a worker that is *not* recycled starts the next job with a
@@ -389,6 +419,7 @@ class ServiceContainer:
             self._function_summarizer_cache = None
             self._narrative_agent_cache = None
             self._report_composer_cache = None
+            self._server_registry_cache = None
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
