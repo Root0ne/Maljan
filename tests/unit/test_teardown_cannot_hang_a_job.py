@@ -200,14 +200,31 @@ class TestTheJudgeCloseIsBounded:
     async def test_a_hanging_stdio_toolkit_is_abandoned(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import judge_agent as judge_mod
+        """The bound moved into ``ServerHandle.aclose`` (tool-server registry
+        refactor, Task 7): the judge no longer owns a single ``toolkit`` to
+        close, it closes every handle bound to its role through
+        ``JudgeAgent.aclose``, and each handle's own fixed 20s budget is what
+        stands between a hung child process and a stuck job. The 20s itself
+        is a literal inside ``ServerHandle.aclose``, not a setting, so this
+        shortens only that specific call rather than every ``wait_for`` in
+        the test.
+        """
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
 
-        monkeypatch.setattr(judge_mod, "CLOSE_TOOLS_TIMEOUT", 0.3)
+        real_wait_for = asyncio.wait_for
 
-        judge = judge_mod.JudgeAgent(llm=MagicMock())
+        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
+            if timeout == 20.0:
+                timeout = 0.1
+            return await real_wait_for(coro, timeout=timeout)
+
+        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+
+        handle = ServerHandle("threatintel", MCPServerConfig(enabled=True))
         toolkit: Any = _NeverReturns()
-        judge.toolkit = toolkit
+        handle._toolkit = toolkit
 
-        await asyncio.wait_for(judge.aclose(), timeout=5)
+        await asyncio.wait_for(handle.aclose(), timeout=5)
         assert toolkit.close_started
-        assert judge.toolkit is None
+        assert handle._toolkit is None

@@ -102,6 +102,53 @@ class ServerHandle:
             )
         return str(resolved)
 
+    def _build_toolkit(
+        self,
+        output_guardrail: Callable[[str], str] | None,
+        max_output_chars: int,
+        truncation_ledger: Any | None,
+    ) -> Any:
+        """Everything ``open`` does except awaiting ``initialize``.
+
+        Factored out because the judge enters its toolkit with a plain
+        ``await`` on the graph's own loop while the analysts hand theirs to
+        the shared agent loop — the asymmetry ``JudgeAgent.aclose`` documents
+        — and the only safe way to have both is one construction path and two
+        ways of running the coroutine it returns.
+        """
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        if self.config.transport == "stdio":
+            from mcp import StdioServerParameters
+
+            from maljan.agents.subprocess_env import child_env
+            from maljan.core.paths import resolve_mcp_args
+
+            env = child_env(self.config.env, allow=tuple(self.config.env_allow))
+            env.setdefault("PYTHONIOENCODING", "utf-8")
+            params = StdioServerParameters(
+                command=self.config.command,
+                args=resolve_mcp_args(list(self.config.args)),
+                env=env,
+                cwd=self._resolve_cwd(),
+            )
+            return MCPLangChainToolkit(
+                params,
+                output_guardrail=output_guardrail,
+                max_output_chars=max_output_chars,
+                truncation_ledger=truncation_ledger,
+            )
+        token = self.config.auth_token.get_secret_value()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        return MCPLangChainToolkit(
+            transport=self.config.transport,
+            http_url=self.config.url,
+            http_headers=headers,
+            output_guardrail=output_guardrail,
+            max_output_chars=max_output_chars,
+            truncation_ledger=truncation_ledger,
+        )
+
     def open(
         self,
         job_id: str,
@@ -124,39 +171,7 @@ class ServerHandle:
             logger.info("mcp server '%s' is disabled.", self.name)
             return
 
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-
-        if self.config.transport == "stdio":
-            from mcp import StdioServerParameters
-
-            from maljan.agents.subprocess_env import child_env
-            from maljan.core.paths import resolve_mcp_args
-
-            env = child_env(self.config.env, allow=tuple(self.config.env_allow))
-            env.setdefault("PYTHONIOENCODING", "utf-8")
-            params = StdioServerParameters(
-                command=self.config.command,
-                args=resolve_mcp_args(list(self.config.args)),
-                env=env,
-                cwd=self._resolve_cwd(),
-            )
-            toolkit = MCPLangChainToolkit(
-                params,
-                output_guardrail=output_guardrail,
-                max_output_chars=max_output_chars,
-                truncation_ledger=truncation_ledger,
-            )
-        else:
-            token = self.config.auth_token.get_secret_value()
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            toolkit = MCPLangChainToolkit(
-                transport=self.config.transport,
-                http_url=self.config.url,
-                http_headers=headers,
-                output_guardrail=output_guardrail,
-                max_output_chars=max_output_chars,
-                truncation_ledger=truncation_ledger,
-            )
+        toolkit = self._build_toolkit(output_guardrail, max_output_chars, truncation_ledger)
 
         try:
             _run_async(toolkit.initialize(), label=f"{self.name}-mcp-init")
@@ -193,6 +208,50 @@ class ServerHandle:
             len(self.tools()),
             len(self._all_tools),
         )
+
+    async def aopen(self, job_id: str, **context: Any) -> None:
+        """Attach on the caller's own loop; the exit stack stays where it was wound."""
+        if self._toolkit is not None:
+            if job_id == self._job_id:
+                return
+            await self.aclose()
+        self._job_id = job_id
+        if not self.config.enabled:
+            logger.info("mcp server '%s' is disabled.", self.name)
+            return
+        toolkit = self._build_toolkit(
+            context.get("output_guardrail"),
+            int(context.get("max_output_chars", 8000)),
+            context.get("truncation_ledger"),
+        )
+        await toolkit.initialize()
+        self._toolkit = toolkit
+        self._all_tools = list(toolkit.get_tools())
+
+    async def aclose(self) -> None:
+        """Close on the caller's own loop. Bounded, and never raises."""
+        import asyncio
+
+        toolkit, self._toolkit = self._toolkit, None
+        self._all_tools = []
+        if toolkit is None:
+            return
+        closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
+        if closer is None:
+            return
+        try:
+            # A stdio transport's exit stack waits on the child process, and a
+            # child that does not exit waits forever — the 42-minute teardown
+            # ``JudgeAgent.aclose`` was written for.
+            await asyncio.wait_for(closer(), timeout=20.0)
+        except TimeoutError:
+            logger.warning(
+                "mcp server '%s' cleanup did not finish in 20s; abandoning it. "
+                "The subprocess may outlive this job.",
+                self.name,
+            )
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
 
     def all_tool_names(self) -> list[str]:
         """Every tool the server advertises, allow-list ignored."""
@@ -274,6 +333,23 @@ class ServerRegistry:
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
+    def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: set[str]) -> int:
+        """Append ``handle``'s tools to ``tools``, renaming any name collision.
+
+        Returns how many tools were renamed, so the caller can log it once
+        per handle instead of per tool.
+        """
+        renamed = 0
+        for tool in handle.tools():
+            name = str(getattr(tool, "name", ""))
+            if name in seen:
+                tool = tool.model_copy(update={"name": f"{handle.name}__{name}"})
+                name = str(tool.name)
+                renamed += 1
+            seen.add(name)
+            tools.append(tool)
+        return renamed
+
     def tools_for(self, role: str, job_id: str, **context: Any) -> tuple[list[BaseTool], list[str]]:
         """Open every server bound to ``role`` and concatenate their tools.
 
@@ -300,15 +376,45 @@ class ServerRegistry:
                 if reason not in self.degradation_reasons:
                     self.degradation_reasons.append(reason)
                 continue
-            renamed = 0
-            for tool in handle.tools():
-                name = str(getattr(tool, "name", ""))
-                if name in seen:
-                    tool = tool.model_copy(update={"name": f"{handle.name}__{name}"})
-                    name = str(tool.name)
-                    renamed += 1
-                seen.add(name)
-                tools.append(tool)
+            renamed = self._merge(handle, tools, seen)
+            if renamed:
+                logger.info(
+                    "mcp server '%s': %d tool name(s) already taken, prefixed with '%s__'.",
+                    handle.name,
+                    renamed,
+                    handle.name,
+                )
+        return tools, reasons
+
+    async def atools_for(
+        self, role: str, job_id: str, **context: Any
+    ) -> tuple[list[BaseTool], list[str]]:
+        """``tools_for``, but ``await``ed on the caller's own loop.
+
+        For a caller already inside an event loop (the judge's graph node),
+        where handing the attach to the shared agent loop would bind the
+        toolkit's transport to a loop other than the one that later awaits
+        its tool calls.
+        """
+        tools: list[BaseTool] = []
+        reasons: list[str] = []
+        seen: set[str] = set()
+        for handle in self.for_agent(role):
+            try:
+                await handle.aopen(job_id, **context)
+            except Exception as exc:  # noqa: BLE001 — a registry server always degrades
+                logger.warning(
+                    "mcp server '%s' could not be attached for the %s analyst: %s",
+                    handle.name,
+                    role,
+                    exc,
+                )
+                reason = UNAVAILABLE_REASON.format(name=handle.name)
+                reasons.append(reason)
+                if reason not in self.degradation_reasons:
+                    self.degradation_reasons.append(reason)
+                continue
+            renamed = self._merge(handle, tools, seen)
             if renamed:
                 logger.info(
                     "mcp server '%s': %d tool name(s) already taken, prefixed with '%s__'.",

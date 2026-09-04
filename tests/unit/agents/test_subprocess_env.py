@@ -148,19 +148,24 @@ class TestDynamicAnalystEnv:
 
 
 class TestNetworkAnalystEnv:
-    def test_network_sidecar_env_carries_no_api_key(
-        self, mock_llm: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_network_sidecar_env_carries_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The child-environment filtering moved into ``ServerHandle.open()``
+        (tool-server registry refactor, Task 7): the network analyst no longer
+        builds ``StdioServerParameters`` itself, so this exercises the
+        registry's ``network`` built-in directly rather than
+        ``NetworkAnalyst._initialize_mcp_client`` (now a thin ask-the-registry
+        call with nothing left to patch ``get_settings()`` into)."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-not-for-the-sidecar")
 
         recorder = MagicMock()
         monkeypatch.setattr("mcp.StdioServerParameters", recorder)
         monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
 
-        from maljan.agents.network_analyst import NetworkAnalyst
+        from maljan.core.config import Settings
+        from maljan.providers.servers import ServerRegistry
 
-        agent = NetworkAnalyst(llm=mock_llm, name="NetworkAnalyst")
-        agent._initialize_mcp_client()
+        registry = ServerRegistry(Settings(_env_file=None))
+        registry.get("network").open("test-job")
 
         assert recorder.called, "StdioServerParameters was never constructed"
         env = recorder.call_args.kwargs["env"]
@@ -169,8 +174,12 @@ class TestNetworkAnalystEnv:
 
 class TestJudgeAgentEnv:
     def test_threatintel_sidecar_env_carries_only_the_two_intel_keys(
-        self, mock_llm: MagicMock, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Same move as the network analyst above, into ``ServerHandle.open()``
+        for the ``threatintel`` built-in, whose ``env_allow`` now carries the
+        two intel keys ``JudgeAgent._initialize_mcp_client`` used to allow-list
+        inline (Task 2's ``_builtin_servers``)."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-not-for-the-sidecar")
         monkeypatch.setenv("VIRUSTOTAL_API_KEY", "vt-real")
         monkeypatch.setenv("ABUSEIPDB_API_KEY", "ab-real")
@@ -179,13 +188,11 @@ class TestJudgeAgentEnv:
         monkeypatch.setattr("mcp.StdioServerParameters", recorder)
         monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from maljan.core.config import Settings
+        from maljan.providers.servers import ServerRegistry
 
-        agent = JudgeAgent(llm=mock_llm)
-
-        import asyncio
-
-        asyncio.run(agent._initialize_mcp_client())
+        registry = ServerRegistry(Settings(_env_file=None))
+        registry.get("threatintel").open("test-job")
 
         assert recorder.called, "StdioServerParameters was never constructed"
         env = recorder.call_args.kwargs["env"]

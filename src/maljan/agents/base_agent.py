@@ -823,6 +823,21 @@ class BaseAnalyst(ABC):
         """The provider's degrade policy, or None for an analyst without one."""
         return None
 
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this agent runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _job_key(self) -> str:
+        """A per-job identity for the handles' same-job short circuit."""
+        return str(getattr(self, "_job_id", "") or "job")
+
+    # Reasons the run summary should carry, filled in by whoever attaches
+    # tool servers. Empty for an agent that attached none.
+    degradation_reasons: list[str] = []
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 

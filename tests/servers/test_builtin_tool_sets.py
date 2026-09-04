@@ -91,3 +91,27 @@ def test_the_registry_opens_the_real_network_built_in_with_the_pinned_tools() ->
         assert sorted(handle.all_tool_names()) == load_golden("network")
     finally:
         registry.close_all()
+
+
+def test_the_registry_attaches_exactly_the_pinned_tools(monkeypatch):
+    """The move into settings changed no tool the model can see.
+
+    The point of the fixture: ``for_agent`` must hand the network analyst the
+    same names ``NetworkAnalyst._initialize_mcp_client`` handed it before, and
+    the judge the same names the judge had. Names, not schemas.
+    """
+    from maljan.core.config import Settings
+    from maljan.providers.servers import ServerRegistry
+
+    registry = ServerRegistry(Settings(_env_file=None))
+    for role, key in (("network", "network"), ("judge", "threatintel")):
+        handles = registry.for_agent(role)
+        assert [h.name for h in handles] == [key]
+        try:
+            handles[0].open("golden")
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"{key}-mcp did not start in this environment: {exc}")
+        try:
+            assert sorted(t.name for t in handles[0].tools()) == load_golden(key)
+        finally:
+            handles[0].close()

@@ -71,44 +71,23 @@ class NetworkAnalyst(BaseAnalyst):
     # ------------------------------------------------------------------
 
     def _initialize_mcp_client(self) -> None:
+        """Attach every tool server bound to the ``network`` role.
+
+        With default settings that is exactly ``mcp.servers["network"]`` — the
+        same ``network-mcp`` sidecar, the same command, cwd and environment
+        this method used to spell out inline — so the tool names are
+        unchanged, and ``tests/servers/test_builtin_tool_sets.py`` says so.
+        An operator who adds a second network server gets both.
+        """
         if getattr(self, "tools", None):
             return
-
-        import sys
-
-        from mcp import StdioServerParameters
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.paths import get_project_root
-
-        project_root = get_project_root()
-        server_script = str(project_root / "network-mcp" / "server.py")
-
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=[server_script],
-            env=child_env(),
-            cwd=str(project_root / "network-mcp"),
-        )
-
-        toolkit = MCPLangChainToolkit(server_params)
-
-        # Init the MCP toolkit on the shared agent loop so its session/transport
-        # is bound to the SAME loop the ReAct tool calls later run on. Running it
-        # on a throwaway ``new_event_loop()`` (LangGraph runs sync nodes in a
-        # worker thread with no running loop) bound the toolkit to a different
-        # loop, so the first PCAP MCP tool call raised "<Event> is bound to a
-        # different event loop" (see static_analyst._run_async for the full
-        # rationale). Always called from the sync analyze path, never from within
-        # the agent loop, so blocking on the result cannot deadlock.
-        from maljan.agents.base_agent import _run_coro_blocking
-
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="network-mcp-init")
-
-        self.toolkit = toolkit
-        self.tools = toolkit.get_tools()
-        self.logger.info("Initialized Network MCP toolkit with %d tools", len(self.tools))
+        registry = self._server_registry()
+        if registry is None:
+            return
+        tools, reasons = registry.tools_for("network", self._job_key())
+        self.tools = tools
+        self.degradation_reasons = reasons
+        self.logger.info("Network tool servers: %d tools attached.", len(self.tools))
 
     # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``
     # unchanged in behaviour and name, because the dynamic analyst needed the
