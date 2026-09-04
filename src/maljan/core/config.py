@@ -21,6 +21,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
 
 import copy
 import json
+import sys
 from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, Field, PrivateAttr, SecretStr, model_validator
@@ -676,6 +677,15 @@ class PreprocessingConfig(BaseModel):
 # MCP (Model Context Protocol) Integration
 # ---------------------------------------------------------------------------
 
+AgentRole = Literal["static", "dynamic", "network", "judge"]
+
+# A server key is a slug: lowercase, starts with a letter, at most 32 chars.
+# It is a path segment in the probe URL and a prefix in a renamed tool name,
+# so it is validated in the model rather than only in the API.
+SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
+BUILTIN_SERVER_KEYS: tuple[str, ...] = ("network", "threatintel")
+RESERVED_SERVER_KEYS: tuple[str, ...] = ("network", "threatintel", "ghidra", "cape")
+
 
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection.
@@ -693,7 +703,7 @@ class MCPServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     # http transport settings
     url: str = ""
-    auth_token: str = ""
+    auth_token: SecretStr = SecretStr("")
     # 2026-07 round 3: how many Ghidra MCP tools the static analyst exposes to the
     # model (MCP__GHIDRA__TOOL_SELECTION):
     #   "curated" — fixed ~20-tool allowlist (fastest, narrowest).
@@ -705,17 +715,65 @@ class MCPServerConfig(BaseModel):
     tool_selection: Literal["curated", "dynamic", "all"] = "dynamic"
     # Back-compat: MCP__GHIDRA__USE_ALL_TOOLS=true still forces "all".
     use_all_tools: bool = False
+    # New in sub-project B.
+    # Working directory for the stdio child; empty means the repository root.
+    cwd: str = ""
+    # Names copied out of the API process's own environment into the child.
+    # The only way a credential reaches a sidecar: ``env`` below is a visible
+    # setting, so a token written there would be readable in the UI.
+    env_allow: list[str] = Field(default_factory=list)
+    # Allow-list. ``None`` exposes every tool the server advertises (what the
+    # built-ins do today); ``[]`` exposes nothing, which is what a freshly
+    # added custom server does until the operator ticks tools from its probe.
+    tools: list[str] | None = None
+    # Which analysts receive this server's tools.
+    agents: list[AgentRole] = Field(default_factory=list)
+    # Display name; empty means "use the key".
+    label: str = ""
+
+
+def _builtin_servers() -> dict[str, MCPServerConfig]:
+    """The two sidecars every run depends on, as settings rather than constants.
+
+    Byte-for-byte the launch parameters ``NetworkAnalyst._initialize_mcp_client``
+    and ``JudgeAgent._initialize_mcp_client`` used before sub-project B:
+    ``sys.executable`` running ``<dir>/server.py`` with ``<dir>`` as cwd, the
+    threat-intel one alone allowed to see the two intel keys. ``tools=None``
+    keeps the whole manifest, which is what those agents did, and what
+    ``tests/fixtures/golden/mcp_tools/*.json`` pins.
+    """
+    return {
+        "network": MCPServerConfig(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["network-mcp/server.py"],
+            cwd="network-mcp",
+            agents=["network"],
+            label="Network MCP",
+        ),
+        "threatintel": MCPServerConfig(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["threatintel-mcp/server.py"],
+            cwd="threatintel-mcp",
+            env_allow=["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"],
+            agents=["judge"],
+            label="Threat intel MCP",
+        ),
+    }
 
 
 class MCPConfig(BaseModel):
-    """Generic MCP server registry — empty until sub-project B.
+    """The operator-visible registry of tool servers, and a compatibility view.
 
     ``ghidra`` and ``cape`` used to live here as a transitional mirror of
     ``static.ghidra`` / ``sandbox.cape2.mcp`` for readers that had not yet
     moved onto the provider layer; Task 12 moved the last of them, so the
-    mirror is gone. Sub-project B fills this back in with a real
-    ``servers: dict[str, MCPServerConfig]`` for operator-configured MCP tools
-    that are not one of the built-in providers.
+    mirror was gone until this task filled ``servers`` back in with a real
+    ``dict[str, MCPServerConfig]`` for operator-configured MCP tools that are
+    not one of the built-in providers.
 
     ``ghidra`` and ``cape`` below are a **deprecated read-only compatibility
     view**, for ``tests/evaluation/``'s reproduction scripts alone (final
@@ -732,6 +790,24 @@ class MCPConfig(BaseModel):
 
     _ghidra_view: MCPServerConfig | None = PrivateAttr(default=None)
     _cape_view: MCPServerConfig | None = PrivateAttr(default=None)
+
+    # The operator-visible registry of tool servers, keyed by slug. Built-in
+    # entries are re-seeded on load, so "delete" in the UI means enabled=False
+    # for them and a real removal for a custom key.
+    servers: dict[str, MCPServerConfig] = Field(default_factory=_builtin_servers)
+
+    @model_validator(mode="after")
+    def _reseed_builtins(self) -> "MCPConfig":
+        """A built-in key that is absent comes back; one that is present is kept.
+
+        An operator who disables ``threatintel`` stores ``enabled=False`` and
+        keeps every other field they set. An override written before a built-in
+        existed simply gains it. Neither can end with a run silently missing a
+        sidecar the pipeline assumes.
+        """
+        for key, default in _builtin_servers().items():
+            self.servers.setdefault(key, default)
+        return self
 
     @property
     def ghidra(self) -> MCPServerConfig:
@@ -797,6 +873,19 @@ class StaticYaraConfig(BaseModel):
     timeout_seconds: Annotated[int, Field(ge=1)] = 60
 
 
+class StaticGenericConfig(BaseModel):
+    """Which entry of ``mcp.servers`` the ``generic_mcp`` static provider drives.
+
+    Sub-project A gave this provider its own copy of an ``MCPServerConfig``.
+    One server can now serve several analysts, so the configuration lives in
+    ``mcp.servers`` and this is only the name of the one the static provider
+    owns. Empty means the provider has nothing to attach, and its probe says
+    exactly that rather than failing obscurely.
+    """
+
+    server: str = ""
+
+
 class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
@@ -811,7 +900,7 @@ class StaticConfig(BaseModel):
     r2: StaticR2Config = Field(default_factory=StaticR2Config)
     capa: StaticCapaConfig = Field(default_factory=StaticCapaConfig)
     yara: StaticYaraConfig = Field(default_factory=StaticYaraConfig)
-    generic: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    generic: StaticGenericConfig = Field(default_factory=StaticGenericConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -852,6 +941,81 @@ class SandboxUploadConfig(BaseModel):
     allowed_formats: list[str] = Field(default_factory=lambda: ["cape2", "cuckoo", "triage"])
 
 
+class RestAuthConfig(BaseModel):
+    """How the credential is presented to the sandbox's API."""
+
+    header: str = "Authorization"
+    scheme: str = "Bearer"  # empty sends the token as the raw header value
+    token: SecretStr = SecretStr("")
+
+
+class RestSubmitConfig(BaseModel):
+    """The multipart submission and where the task id is read from its answer."""
+
+    method: Literal["POST", "PUT"] = "POST"
+    path: str = "/samples"
+    file_field: str = "file"
+    extra_fields: dict[str, str] = Field(default_factory=dict)
+    task_id_path: str = "$.id"
+
+
+class RestStatusConfig(BaseModel):
+    """The poll endpoint and the two terminal state sets."""
+
+    path: str = "/samples/{task_id}"
+    state_path: str = "$.status"
+    done_values: list[str] = Field(default_factory=lambda: ["reported", "completed", "finished"])
+    failed_values: list[str] = Field(default_factory=lambda: ["failed", "error"])
+
+
+class RestReportConfig(BaseModel):
+    """Where the report is, what shape it is in, and the optional capture."""
+
+    path: str = "/samples/{task_id}/report"
+    format: Literal["cape2", "cuckoo", "triage", "generic"] = "generic"
+    pcap_path: str = ""
+
+
+class RestMappingConfig(BaseModel):
+    """RFC 9535 JSONPaths selecting each consumer channel out of a report.
+
+    Read only when ``report.format`` is ``generic``. An empty path is not a
+    mistake: it says the sandbox does not publish that channel, and the
+    provider lists it in ``SandboxReport.unavailable`` so a rendered report
+    never reads like a clean sample by omission.
+    """
+
+    target_sha256: str = "$.target.sha256"
+    processes: str = ""  # each match: {pid, ppid, name, command_line}
+    calls: str = ""  # each match: {pid, api, args, timestamp}
+    signatures: str = ""  # each match: {name, description, severity, ttps}
+    dns: str = ""  # each match: {request, type, answers[]}
+    http: str = ""
+    tcp: str = ""  # each match: {dst, dport}
+    udp: str = ""
+    hosts: str = ""  # each match: a string
+    domains: str = ""
+    dropped_files: str = ""  # each match: {name, sha256, size}
+    registry: str = ""  # each match: a string
+    # "<channel>.<consumer field>" -> the field name this sandbox uses,
+    # e.g. {"processes.command_line": "cmdline"}.
+    field_names: dict[str, str] = Field(default_factory=dict)
+
+
+class SandboxRestConfig(BaseModel):
+    """Any HTTP sandbox, described rather than coded."""
+
+    base_url: str = ""
+    auth: RestAuthConfig = Field(default_factory=RestAuthConfig)
+    submit: RestSubmitConfig = Field(default_factory=RestSubmitConfig)
+    status: RestStatusConfig = Field(default_factory=RestStatusConfig)
+    report: RestReportConfig = Field(default_factory=RestReportConfig)
+    mapping: RestMappingConfig = Field(default_factory=RestMappingConfig)
+    timeout_seconds: Annotated[int, Field(ge=1)] = 900
+    poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
+    verify_tls: bool = True
+
+
 class SandboxConfig(BaseModel):
     """Which sandbox produces the dynamic evidence, and how to reach it.
 
@@ -860,15 +1024,17 @@ class SandboxConfig(BaseModel):
         "cape2"  — a live CAPEv2 instance over its REST API.
         "upload" — no detonation: an operator-uploaded report is attached to the job.
         "triage" — Hatching Triage cloud sandbox.
+        "rest"   — any HTTP sandbox, described by sandbox.rest.*
 
     The legacy flat names (``SANDBOX__BACKEND``, ``SANDBOX__CAPE2_BASE_URL``, …)
     keep working through the alias table on ``Settings``.
     """
 
-    provider: Literal["mock", "cape2", "upload", "triage"] = "mock"
+    provider: Literal["mock", "cape2", "upload", "triage", "rest"] = "mock"
     cape2: SandboxCape2Config = Field(default_factory=SandboxCape2Config)
     triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
     upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)
+    rest: SandboxRestConfig = Field(default_factory=SandboxRestConfig)
 
     @model_validator(mode="before")
     @classmethod

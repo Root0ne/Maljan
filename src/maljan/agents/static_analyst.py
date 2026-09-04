@@ -214,7 +214,7 @@ class StaticAnalyst(BaseAnalyst):
             from maljan.analysis.sink_reachability import build_priority_hint
 
             base = cfg.static.ghidra.url.rstrip("/")
-            token = cfg.static.ghidra.auth_token
+            token = cfg.static.ghidra.auth_token.get_secret_value()
             headers = {"Authorization": f"Bearer {token}"} if token else {}
             from maljan.analysis.ghidra_program import (
                 SWITCH_PARAM,

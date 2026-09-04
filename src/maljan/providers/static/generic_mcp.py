@@ -75,7 +75,11 @@ class GenericMCPStaticProvider(StaticProvider):
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> GenericMCPStaticProvider:
-        return cls(cfg.static.generic)
+        # `static.generic` is now a `StaticGenericConfig` reference (the name
+        # of an entry in `mcp.servers`) rather than its own `MCPServerConfig`
+        # copy; resolving the reference into the server it names is Task 4/5's
+        # job. Left as-is (and mypy-silenced) so this task stays settings-only.
+        return cls(cfg.static.generic)  # type: ignore[arg-type]
 
     @property
     def capabilities(self) -> StaticCapabilities:

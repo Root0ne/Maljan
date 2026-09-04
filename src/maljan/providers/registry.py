@@ -59,6 +59,7 @@ def discover_providers() -> None:
             return
         import maljan.providers.sandbox.cape2  # noqa: F401
         import maljan.providers.sandbox.mock  # noqa: F401
+        import maljan.providers.sandbox.rest  # noqa: F401
         import maljan.providers.sandbox.triage  # noqa: F401
         import maljan.providers.sandbox.upload  # noqa: F401
         import maljan.providers.static.capa_yara  # noqa: F401
