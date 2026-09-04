@@ -19,6 +19,7 @@ added is never the evidence the run was measured on.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -210,7 +211,18 @@ class ServerHandle:
         )
 
     async def aopen(self, job_id: str, **context: Any) -> None:
-        """Attach on the caller's own loop; the exit stack stays where it was wound."""
+        """Attach on the caller's own loop; the exit stack stays where it was wound.
+
+        ``initialize`` is guarded the way the synchronous ``open`` guards
+        ``_run_async(toolkit.initialize(), ...)``: a transport or subprocess
+        can be partly up (a socket connected, a child process spawned) before
+        ``initialize`` itself fails or is cancelled — e.g. ``handshake_tools``'s
+        ``asyncio.wait_for`` timing out mid-handshake. ``_toolkit`` is never
+        assigned until ``initialize`` succeeds, so if this does not close the
+        partial attach, nothing does; the original exception (cancellation
+        included) is what the caller needs to see, so it is re-raised
+        unchanged after teardown.
+        """
         if self._toolkit is not None:
             if job_id == self._job_id:
                 return
@@ -224,18 +236,25 @@ class ServerHandle:
             int(context.get("max_output_chars", 8000)),
             context.get("truncation_ledger"),
         )
-        await toolkit.initialize()
+        try:
+            await toolkit.initialize()
+        except (Exception, asyncio.CancelledError):
+            logger.warning(
+                "mcp server '%s' failed to initialize; closing the partial attach.",
+                self.name,
+            )
+            await self._acleanup(toolkit)
+            raise
         self._toolkit = toolkit
         self._all_tools = list(toolkit.get_tools())
 
-    async def aclose(self) -> None:
-        """Close on the caller's own loop. Bounded, and never raises."""
-        import asyncio
+    async def _acleanup(self, toolkit: Any) -> None:
+        """Best-effort async close of ``toolkit``. Bounded, and never raises.
 
-        toolkit, self._toolkit = self._toolkit, None
-        self._all_tools = []
-        if toolkit is None:
-            return
+        Shared by ``aclose`` (a healthy, attached toolkit) and ``aopen``'s own
+        exception handler (a toolkit that never made it into ``_toolkit``) —
+        one teardown path so a partial attach and a normal close cannot drift.
+        """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
             return
@@ -252,6 +271,14 @@ class ServerHandle:
             )
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
+
+    async def aclose(self) -> None:
+        """Close on the caller's own loop. Bounded, and never raises."""
+        toolkit, self._toolkit = self._toolkit, None
+        self._all_tools = []
+        if toolkit is None:
+            return
+        await self._acleanup(toolkit)
 
     def all_tool_names(self) -> list[str]:
         """Every tool the server advertises, allow-list ignored."""

@@ -88,6 +88,52 @@ async def test_run_mcp_probe_layers_staged_values_over_the_stored_map():
 
 
 @pytest.mark.asyncio
+async def test_run_mcp_probe_merges_fields_a_staged_url_keeps_the_stored_token():
+    result = await run_mcp_probe(
+        "r2custom",
+        {"core.mcp.servers": {"r2custom": {"url": "http://new-host"}}},
+        {
+            "core.mcp.servers": {
+                "r2custom": {
+                    "enabled": True,
+                    "transport": "http",
+                    "url": "http://old-host",
+                    "auth_token": "s3cr3t-token",
+                }
+            }
+        },
+    )
+    assert result.ok is True
+    config = _Handle.made[-1].config
+    assert config.url == "http://new-host"
+    assert config.auth_token.get_secret_value() == "s3cr3t-token"
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_probe_treats_a_staged_mask_as_unchanged():
+    result = await run_mcp_probe(
+        "r2custom",
+        {"core.mcp.servers": {"r2custom": {"enabled": True, "auth_token": "**********"}}},
+        {"core.mcp.servers": {"r2custom": {"enabled": True, "auth_token": "s3cr3t-token"}}},
+    )
+    assert result.ok is True
+    assert _Handle.made[-1].config.auth_token.get_secret_value() == "s3cr3t-token"
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_probe_uses_a_staged_real_token_and_never_echoes_it():
+    result = await run_mcp_probe(
+        "r2custom",
+        {"core.mcp.servers": {"r2custom": {"enabled": True, "auth_token": "brand-new-token"}}},
+        {"core.mcp.servers": {"r2custom": {"enabled": True, "auth_token": "old-token"}}},
+    )
+    assert result.ok is True
+    assert _Handle.made[-1].config.auth_token.get_secret_value() == "brand-new-token"
+    assert "brand-new-token" not in result.detail
+    assert "old-token" not in result.detail
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_server_is_a_legible_failure():
     result = await run_mcp_probe("nope", {}, {})
     assert result.ok is False and "nope" in result.detail

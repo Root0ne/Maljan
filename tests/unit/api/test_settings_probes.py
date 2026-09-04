@@ -450,3 +450,34 @@ async def test_r2_probe_reads_the_static_block(monkeypatch):
     monkeypatch.setitem(probes.PROBES, "r2", fake)
     await probes.run_probe("r2", {"core.static.r2.binary_path": "/opt/r2/bin/r2mcp"}, {})
     assert seen["binary_path"] == "/opt/r2/bin/r2mcp"
+
+
+@pytest.mark.asyncio
+async def test_probe_mcp_closes_a_real_handle_that_hangs_mid_handshake(monkeypatch):
+    """End-to-end through the real ``ServerHandle`` — not the fake used by
+    ``test_mcp_probe.py`` — a toolkit whose ``initialize`` never returns must
+    still be torn down when the probe's budget expires, and the probe must
+    report the timeout rather than hanging itself."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    cleaned: list[MagicMock] = []
+
+    def hanging_factory(*args, **kwargs):
+        instance = MagicMock()
+
+        async def hang() -> None:
+            await asyncio.sleep(100)
+
+        instance.initialize = hang
+        instance.get_tools = MagicMock(return_value=[])
+        instance.cleanup = AsyncMock(return_value=None)
+        cleaned.append(instance)
+        return instance
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", hanging_factory)
+    monkeypatch.setattr(probes, "PROBE_BUDGET_SECONDS", 0.05)
+    result = await probes.probe_mcp({"name": "x", "entry": {"enabled": True, "command": "mcp"}})
+    assert result.ok is False
+    assert "no MCP handshake" in result.detail
+    cleaned[0].cleanup.assert_called_once()

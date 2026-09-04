@@ -220,30 +220,63 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(True, _ms(t0), f"{len(names)} tools: {listed}", None, names)
 
 
+# settings_service.py's mask for a stored secret the editor never receives in
+# the clear (pydantic's own ``SecretStr`` JSON dump: ten literal asterisks,
+# regardless of the real value's length). No shared constant exists for it
+# today, so it is defined once, here, next to the one place that needs to
+# recognise it rather than echo it back as a real token.
+_MASKED_SECRET = "**********"
+
+
+def _merge_server_entry(
+    stored_entry: dict[str, Any], staged_entry: dict[str, Any]
+) -> dict[str, Any]:
+    """Layer a staged edit over the stored entry, field by field.
+
+    A staged edit carries only the fields the editor's form touched; replacing
+    the whole entry (rather than merging into it) would drop every field the
+    operator left alone — most commonly ``args``/``env`` when only ``command``
+    was edited. ``auth_token`` gets one more rule: the editor never receives a
+    stored secret in the clear, so a staged value that is the settings
+    service's mask — or empty, the value an untouched password field posts —
+    means "left alone," not "cleared." Either way the stored token, already in
+    ``merged`` from the copy below, is what reaches the handshake.
+    """
+    merged = dict(stored_entry)
+    for key, value in staged_entry.items():
+        if key == "auth_token" and value in (_MASKED_SECRET, ""):
+            continue
+        merged[key] = value
+    return merged
+
+
 async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
-    """Probe one entry of the server map, staged values winning over stored ones.
+    """Probe one entry of the server map, staged fields winning over stored ones.
 
     Separate from ``run_probe`` because this probe is addressed to a *key*
     inside one setting rather than to a set of settings: ``_INPUTS`` maps
     catalog keys to short names, and there is no catalog key for "the r2custom
     entry".
     """
-    servers: dict[str, Any] = {}
-    for layer in (stored, values):
-        candidate = layer.get("core.mcp.servers")
-        if isinstance(candidate, dict):
-            servers.update(candidate)
-    if server not in servers:
+    stored_candidate = stored.get("core.mcp.servers")
+    staged_candidate = values.get("core.mcp.servers")
+    stored_map = stored_candidate if isinstance(stored_candidate, dict) else {}
+    staged_map = staged_candidate if isinstance(staged_candidate, dict) else {}
+    if server not in stored_map and server not in staged_map:
         # Fall back to the effective settings: a built-in the operator has
         # never edited has no stored row at all.
         from maljan.core.config import Settings
 
         effective = Settings().mcp.servers
         if server not in effective:
-            available = ", ".join(sorted(set(servers) | set(effective))) or "(none)"
+            available = (
+                ", ".join(sorted(set(stored_map) | set(staged_map) | set(effective))) or "(none)"
+            )
             return ProbeResult(False, 0, f"unknown server: {server!r}. Available: {available}")
-        servers[server] = effective[server].model_dump(mode="json")
-    return await probe_mcp({"name": server, "entry": servers[server]})
+        entry = effective[server].model_dump(mode="json")
+    else:
+        entry = _merge_server_entry(stored_map.get(server) or {}, staged_map.get(server) or {})
+    return await probe_mcp({"name": server, "entry": entry})
 
 
 async def probe_r2(v: dict[str, Any]) -> ProbeResult:

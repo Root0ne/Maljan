@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
@@ -214,6 +215,33 @@ def test_a_failed_initialize_closes_the_partial_toolkit_and_a_later_open_works(m
     handle.open("job-2")
     assert handle.is_open is True
     assert [t.name for t in handle.tools()] == ["alpha"]
+
+
+@pytest.mark.asyncio
+async def test_aopen_closes_the_partial_toolkit_when_wait_for_cancels_it(monkeypatch):
+    """``asyncio.wait_for`` cancelling ``aopen`` mid-``initialize`` must still tear
+    the partly spawned toolkit down — the same guarantee the synchronous ``open``
+    gives its own caller, now for a caller (``handshake_tools``) that awaits on its
+    own loop instead of handing the coroutine to ``_run_async``.
+    """
+    instance = MagicMock()
+
+    async def hang() -> None:
+        await asyncio.sleep(100)
+
+    instance.initialize = hang
+    instance.get_tools = MagicMock(return_value=[])
+    instance.cleanup = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", lambda *a, **kw: instance)
+
+    handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp"))
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(handle.aopen("job-1"), timeout=0.05)
+
+    instance.cleanup.assert_called_once()
+    assert handle.is_open is False
+    assert handle._toolkit is None
 
 
 def test_an_allow_listed_name_the_server_does_not_offer_logs_one_warning(patched, caplog):
