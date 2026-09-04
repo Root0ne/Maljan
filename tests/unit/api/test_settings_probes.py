@@ -377,3 +377,63 @@ async def test_cape_probe_resolves_from_the_live_settings_object_with_nothing_st
     live = Settings()
     assert seen["base_url"] == live.sandbox.cape2.base_url
     assert isinstance(seen["api_token"], str)
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reports_a_missing_binary_by_name():
+    r = await probes.probe_r2({"binary_path": "definitely-not-a-real-r2mcp-binary-xyz"})
+    assert r.ok is False
+    assert "definitely-not-a-real-r2mcp-binary-xyz" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
+    import asyncio
+
+    killed: list[int] = []
+
+    async def hangs_forever(_command):
+        try:
+            await asyncio.sleep(100)
+        except asyncio.CancelledError:
+            killed.append(1)
+            raise
+
+    monkeypatch.setattr("maljan.providers.static.r2.enumerate_r2_tools", hangs_forever)
+    r = await probes.probe_r2({"binary_path": "r2mcp"})
+    assert r.ok is False
+    assert "5 s" in r.detail
+    assert killed == [1], "the hung handshake must be cancelled, not left running"
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reports_the_tool_count_on_success(monkeypatch):
+    class _Tool:
+        def __init__(self, name):
+            self.name = name
+
+    async def fake_enumerate(_command):
+        return [_Tool(n) for n in ("open_file", "analyze")]
+
+    monkeypatch.setattr("maljan.providers.static.r2.enumerate_r2_tools", fake_enumerate)
+    r = await probes.probe_r2({"binary_path": "r2mcp"})
+    assert r.ok is True
+    assert "2 tools" in r.detail
+
+
+def test_the_r2_probe_is_registered():
+    assert probes.PROBES["r2"] is probes.probe_r2
+    assert probes._INPUTS["r2"] == {"core.static.r2.binary_path": "binary_path"}
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reads_the_static_block(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake(v):
+        seen.update(v)
+        return probes.ProbeResult(True, 1, "32 tools")
+
+    monkeypatch.setitem(probes.PROBES, "r2", fake)
+    await probes.run_probe("r2", {"core.static.r2.binary_path": "/opt/r2/bin/r2mcp"}, {})
+    assert seen["binary_path"] == "/opt/r2/bin/r2mcp"

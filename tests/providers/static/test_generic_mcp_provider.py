@@ -207,3 +207,108 @@ def test_prompt_fragment_text_overrides_the_generated_paragraph():
         _cfg().static.generic, prompt_fragment_text="Use the custom tool exactly as documented."
     )
     assert provider.prompt_fragment() == "Use the custom tool exactly as documented."
+
+
+# ---------------------------------------------------------------------------
+# Task 13's carried finding: close()/_close_toolkit() and open()'s different-job
+# reattach branch had no direct test, only the Ghidra equivalents. A fake
+# toolkit stands in so these never spawn a real subprocess.
+# ---------------------------------------------------------------------------
+
+
+def _fake_toolkit_class(closed: list[int], tool_names: tuple[str, ...] = ("keep",)):
+    class _FakeToolkit:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def initialize(self) -> None:
+            return None
+
+        def get_tools(self):
+            return [_T(n) for n in tool_names]
+
+        async def aclose(self) -> None:
+            closed.append(1)
+
+    return _FakeToolkit
+
+
+def test_opening_the_same_job_twice_is_a_no_op(monkeypatch):
+    from maljan.agents import mcp_client
+
+    constructions: list[int] = []
+    closed: list[int] = []
+
+    class _FakeToolkit:
+        def __init__(self, *args, **kwargs):
+            constructions.append(1)
+
+        async def initialize(self) -> None:
+            return None
+
+        def get_tools(self):
+            return [_T("keep")]
+
+        async def aclose(self) -> None:
+            closed.append(1)
+
+    monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _FakeToolkit)
+
+    provider = GenericMCPStaticProvider.from_settings(_cfg())
+    job_1 = StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe")
+    job_2 = StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe")
+    assert job_1 == job_2 and job_1 is not job_2
+
+    provider.open(job_1)
+    toolkit_after_first_open = provider._toolkit
+    provider.open(job_2)
+
+    assert len(constructions) == 1, "an equal job must not rebuild the toolkit"
+    assert closed == [], "a same-job repeat call must not close anything"
+    assert provider._toolkit is toolkit_after_first_open
+
+
+def test_opening_a_different_job_closes_the_first_toolkit_before_attaching_the_new_one(
+    monkeypatch,
+):
+    from maljan.agents import mcp_client
+
+    constructions: list[int] = []
+    closed: list[int] = []
+    _Base = _fake_toolkit_class(closed, ("keep",))
+
+    class _CountingToolkit(_Base):
+        def __init__(self, *args, **kwargs):
+            constructions.append(1)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _CountingToolkit)
+
+    provider = GenericMCPStaticProvider.from_settings(_cfg())
+    provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/a.exe"))
+    first_toolkit = provider._toolkit
+
+    provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/b.exe"))
+
+    assert len(constructions) == 2, "a genuinely different job must rebuild the toolkit"
+    assert closed == [1], "the stale toolkit must be closed before the new one replaces it"
+    assert provider._toolkit is not first_toolkit
+
+
+def test_close_tears_down_the_toolkit_and_is_idempotent(monkeypatch):
+    from maljan.agents import mcp_client
+
+    closed: list[int] = []
+    monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _fake_toolkit_class(closed, ("keep",)))
+
+    provider = GenericMCPStaticProvider.from_settings(_cfg())
+    provider.open(StaticJobContext())
+    assert provider._toolkit is not None
+
+    provider.close()
+    assert provider._toolkit is None
+    assert provider.get_tools() == []
+    assert closed == [1]
+
+    provider.close()  # idempotent: nothing to tear down, no error, no second close call
+    assert closed == [1]

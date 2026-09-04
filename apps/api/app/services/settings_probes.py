@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -158,6 +159,28 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+async def probe_r2(v: dict[str, Any]) -> ProbeResult:
+    """Launch the configured r2mcp and count the tools it offers, in 5 seconds.
+
+    A stdio handshake is the only honest test of a subprocess-backed server: a
+    binary that exists but cannot serve MCP is exactly the failure an operator
+    needs named before a job fails on it.
+    """
+    t0 = time.perf_counter()
+    command = str(v.get("binary_path") or "r2mcp")
+    try:
+        from maljan.providers.static.r2 import enumerate_r2_tools
+
+        names = await asyncio.wait_for(enumerate_r2_tools(command), timeout=5.0)
+    except FileNotFoundError:
+        return ProbeResult(False, _ms(t0), f"{command!r} not found on PATH")
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), "no MCP handshake within 5 s")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools offered by {command!r}")
+
+
 async def probe_cape2(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     headers = {"Authorization": f"Token {v['api_token']}"} if v.get("api_token") else None
@@ -230,6 +253,7 @@ async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
 PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "llm": probe_llm,
     "ghidra": probe_ghidra,
+    "r2": probe_r2,
     "cape2": probe_cape2,
     # "cape" is kept for one release: a stored annotation may still name it.
     "cape": probe_cape2,
@@ -261,6 +285,9 @@ _INPUTS: dict[str, dict[str, str]] = {
     "ghidra": {
         "core.static.ghidra.url": "url",
         "core.static.ghidra.auth_token": "auth_token",
+    },
+    "r2": {
+        "core.static.r2.binary_path": "binary_path",
     },
     "cape2": {
         "core.sandbox.cape2.base_url": "base_url",
