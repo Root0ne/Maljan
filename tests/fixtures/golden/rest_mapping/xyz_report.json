@@ -15,8 +15,8 @@
     {"description": "unnamed rule", "score": 1}
   ],
   "net": {
-    "lookups": [{"qname": "c2.example", "type": "A", "answers": ["203.0.113.9"]}],
-    "streams": [{"peer": "203.0.113.9", "peer_port": 443}]
+    "lookups": [{"qname": "telemetry-sync-71ad.net", "type": "A", "answers": ["185.220.101.42"]}],
+    "streams": [{"peer": "185.220.101.42", "peer_port": 443}]
   },
   "artifacts": [{"filename": "svc.exe", "sha256": "0f", "size": 2048}]
 }

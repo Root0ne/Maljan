@@ -34,8 +34,10 @@
   ],
   "unavailable": [
     "domains",
+    "generic_events",
     "hosts",
     "http",
+    "screenshots",
     "udp"
   ]
 }

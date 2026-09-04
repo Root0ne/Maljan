@@ -19,9 +19,9 @@
     "dns": [
       {
         "answers": [
-          "203.0.113.9"
+          "185.220.101.42"
         ],
-        "request": "c2.example",
+        "request": "telemetry-sync-71ad.net",
         "type": "A"
       }
     ],
@@ -32,7 +32,7 @@
     "tcp": [
       {
         "dport": 443,
-        "dst": "203.0.113.9"
+        "dst": "185.220.101.42"
       }
     ],
     "tls": [],
@@ -98,15 +98,15 @@
       "lookups": [
         {
           "answers": [
-            "203.0.113.9"
+            "185.220.101.42"
           ],
-          "qname": "c2.example",
+          "qname": "telemetry-sync-71ad.net",
           "type": "A"
         }
       ],
       "streams": [
         {
-          "peer": "203.0.113.9",
+          "peer": "185.220.101.42",
           "peer_port": 443
         }
       ]
@@ -187,8 +187,10 @@
   "task_id": "xyz-1",
   "unavailable": [
     "domains",
+    "generic_events",
     "hosts",
     "http",
+    "screenshots",
     "udp"
   ]
 }

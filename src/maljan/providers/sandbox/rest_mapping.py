@@ -16,12 +16,27 @@ Three rules make that safe to run against a report nobody has seen:
   a rendered report, and only one of them means the sample was quiet.
 * Every channel is capped at ``MAX_ROWS_PER_CHANNEL``. A JSONPath over a
   200 MB report can select a million rows, and a report nobody can render is
-  not more evidence than one that stops at five thousand and says so.
+  not more evidence than one that stops at five thousand and says so; a
+  truncated channel says so too (``ChannelStats.truncated``), rather than
+  quietly looking like a sandbox with exactly five thousand rows of data.
+
+Three channels are not settings the operator can point anywhere:
+
+* ``apistats`` has no path of its own — it is tallied from ``calls`` as calls
+  are attached to their process, so it is populated exactly when ``calls``
+  is, and named unavailable exactly when ``calls`` is.
+* ``generic_events`` and ``screenshots`` have no ``RestMappingConfig`` field
+  at all. No REST sandbox this mapping has been built against publishes
+  either through a documented API, so both are named unavailable
+  unconditionally — the same call Triage's own adapter makes for the same
+  two channels.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -63,6 +78,12 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
 # Channels whose rows are plain strings rather than mappings.
 _STRING_CHANNELS = frozenset({"hosts", "domains", "registry"})
 
+# A sha256 candidate that survives normalisation: lower-cased, 64 hex digits.
+# Anything else is not a hash this project can key CTI lookups on, so it is
+# dropped rather than carried through half-formed (a "0x"-prefixed value, an
+# md5, a truncated copy-paste).
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
 # The fields each mapping-shaped channel carries into its consumer row.
 _FIELDS: dict[str, tuple[str, ...]] = {
     "processes": ("pid", "ppid", "name", "command_line"),
@@ -84,6 +105,7 @@ class ChannelStats:
     dropped: int = 0
     sample_rows: list[Any] = field(default_factory=list)
     error: str = ""
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -147,19 +169,40 @@ def _coerce(channel: str, names: dict[str, str], raw: Any) -> Any | None:
     return row
 
 
+def _normalize_sha256(value: Any) -> tuple[str, str]:
+    """A lower-cased 64-hex sha256, or an empty string and the reason it is not one."""
+    text = value.strip().lower() if isinstance(value, str) else ""
+    if _SHA256_RE.match(text):
+        return text, ""
+    return "", f"{value!r} is not a 64-character lowercase hex sha256"
+
+
 def _select(compiled: CompiledMapping, channel: str, payload: dict[str, Any]) -> ChannelStats:
-    """Run one channel's path and coerce what it selected."""
+    """Run one channel's path and coerce what it selected.
+
+    ``finditer`` is only ever pulled through ``islice(..., MAX_ROWS_PER_CHANNEL
+    + 1)`` — one past the cap, never the whole thing — so a path that selects
+    a million rows never materialises more than 5001 of them before this
+    function knows to stop and say ``truncated``.
+    """
     path = compiled.paths.get(channel)
     if path is None:
         return ChannelStats()
     try:
-        matches = [node.value for node in path.finditer(payload)]
+        values = (node.value for node in path.finditer(payload))
+        peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
     except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
         return ChannelStats(error=f"{type(exc).__name__}: {exc}")
+    truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
+    matches = peeked[:MAX_ROWS_PER_CHANNEL]
+    if truncated:
+        logger.warning(
+            "rest mapping: %s: more than %d rows, truncated", channel, MAX_ROWS_PER_CHANNEL
+        )
     names = compiled.config.field_names
     kept: list[Any] = []
     dropped = 0
-    for raw in matches[:MAX_ROWS_PER_CHANNEL]:
+    for raw in matches:
         row = _coerce(channel, names, raw)
         if row is None:
             dropped += 1
@@ -170,6 +213,7 @@ def _select(compiled: CompiledMapping, channel: str, payload: dict[str, Any]) ->
         kept=len(kept),
         dropped=dropped,
         sample_rows=kept[:3],
+        truncated=truncated,
     )
     object.__setattr__(stats, "_rows", kept)  # carried to the builder, not part of the wire shape
     return stats
@@ -218,6 +262,7 @@ def apply_mapping(
             kept=stats["calls"].kept - orphaned,
             dropped=stats["calls"].dropped + orphaned,
             sample_rows=stats["calls"].sample_rows,
+            truncated=stats["calls"].truncated,
         )
 
     signatures = [
@@ -244,10 +289,24 @@ def apply_mapping(
     sha256 = ""
     if compiled.target_sha256 is not None:
         found = [node.value for node in compiled.target_sha256.finditer(payload)]
-        if found and isinstance(found[0], str):
-            sha256 = found[0]
+        if found:
+            sha256, reason = _normalize_sha256(found[0])
+            if reason:
+                # ``target.sha256`` stays empty rather than carry a value that
+                # cannot key a CTI lookup. The REST provider (Task 11) reads
+                # this same field into ``SandboxRun.sample_sha256`` — with it
+                # empty, that provider falls back to the sha256 of the file it
+                # itself submitted rather than trust an unmatched value.
+                stats["target_sha256"] = ChannelStats(matched=1, dropped=1, error=reason)
 
-    unavailable = sorted(c for c in CHANNELS if c not in compiled.paths)
+    unavailable_set = {c for c in CHANNELS if c not in compiled.paths}
+    # ``generic_events``/``screenshots`` have no path of their own — this
+    # mapping can never produce them — and ``apistats`` is only ever derived
+    # from ``calls``, so it is unavailable exactly when ``calls`` is.
+    unavailable_set.update({"generic_events", "screenshots"})
+    if "calls" in unavailable_set:
+        unavailable_set.add("apistats")
+    unavailable = sorted(unavailable_set)
     for channel, stat in stats.items():
         if stat.error:
             logger.warning(
