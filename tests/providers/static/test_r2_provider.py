@@ -66,3 +66,43 @@ def test_the_mirror_spec_uses_the_configured_directory():
     cfg.static.r2.mirror_dir = "data/samples/.work"
     spec = R2StaticProvider.from_settings(cfg).mirror_spec()
     assert spec is not None and spec.work_subdir == ".work"
+
+
+def test_the_mirror_spec_has_no_container_prefix():
+    """A co-located r2mcp opens the sample by its host path; there is no
+    container mount to translate the mirrored path into."""
+    spec = R2StaticProvider.from_settings(_cfg()).mirror_spec()
+    assert spec is not None and spec.container_prefix == ""
+
+
+def test_opening_never_writes_the_resolved_command_back_into_the_config(monkeypatch):
+    """Regression: ``open()`` must resolve ``binary_path`` into the launched
+    command without mutating ``self._cfg`` — that object is the shared,
+    user-editable ``Settings`` leaf ``settings_snapshot()`` later persists into
+    the job's run summary, so a write here would show the operator a
+    ``command`` they never set."""
+    from maljan.agents import mcp_client
+    from maljan.providers.base import StaticJobContext
+
+    recorded: dict[str, object] = {}
+
+    class _FakeToolkit:
+        def __init__(self, server_params, **kwargs):
+            recorded["command"] = server_params.command
+
+        async def initialize(self) -> None:
+            return None
+
+        def get_tools(self):
+            return []
+
+    monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _FakeToolkit)
+
+    cfg = _cfg()
+    original_command = cfg.static.r2.command
+    provider = R2StaticProvider.from_settings(cfg)
+
+    provider.open(StaticJobContext())
+
+    assert recorded["command"] == "r2mcp", "the fake toolkit must receive binary_path as command"
+    assert cfg.static.r2.command == original_command, "open() must not mutate the shared config"

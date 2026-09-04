@@ -106,6 +106,20 @@ class GenericMCPStaticProvider(StaticProvider):
             "Prefer one summarising call over many narrow ones.\n"
         )
 
+    def server_command(self) -> str:
+        """The executable to launch for the stdio transport.
+
+        A plain read of the configured command; a subclass whose config names
+        the executable under a different field (``R2StaticProvider``'s
+        ``binary_path``, since ``StaticR2Config`` reads better in the settings
+        UI than a bare ``command``) overrides only this method rather than
+        mutating ``self._cfg`` — the config object is the shared, user-editable
+        ``Settings`` leaf that ``settings_snapshot()`` later persists into the
+        job's run summary, so writing to it here would show the operator a
+        value they never set.
+        """
+        return self._cfg.command
+
     def open(self, job: StaticJobContext) -> None:
         """Attach to the configured MCP server for ``job``. Idempotent, per the base contract.
 
@@ -146,7 +160,7 @@ class GenericMCPStaticProvider(StaticProvider):
             env = child_env(self._cfg.env)
             env.setdefault("PYTHONIOENCODING", "utf-8")
             args = resolve_mcp_args(self._cfg.args)
-            server_params = StdioServerParameters(command=self._cfg.command, args=args, env=env)
+            server_params = StdioServerParameters(command=self.server_command(), args=args, env=env)
             toolkit = MCPLangChainToolkit(
                 server_params,
                 output_guardrail=output_guardrail,

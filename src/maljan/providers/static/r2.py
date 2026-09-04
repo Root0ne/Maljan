@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
-from maljan.providers.base import MirrorSpec, StaticJobContext
+from maljan.providers.base import MirrorSpec
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
 
@@ -126,21 +126,19 @@ class R2StaticProvider(GenericMCPStaticProvider):
         return cast("StaticR2Config", self._cfg)
 
     def server_command(self) -> str:
-        cfg = self._r2_cfg
-        return cfg.command or cfg.binary_path
-
-    def open(self, job: StaticJobContext) -> None:
-        """Same as the generic adapter's ``open``, with the command resolved from ``binary_path``.
+        """The configured ``command``, falling back to ``binary_path``.
 
         ``StaticR2Config`` carries the executable under its own
         ``binary_path`` field rather than the base ``MCPServerConfig.command``
-        one (the r2-specific name reads better in the settings UI); syncing it
-        here, once, keeps ``GenericMCPStaticProvider.open`` unmodified for
-        Ghidra and ``generic_mcp``, both of which still use ``command``
-        directly.
+        one (the r2-specific name reads better in the settings UI).
+        ``GenericMCPStaticProvider.open`` calls this method rather than
+        reading ``self._cfg.command`` directly, so no attribute of the
+        shared, user-editable config is ever written here — a config
+        mutation would show up as a phantom ``command`` value in the job's
+        persisted settings snapshot.
         """
-        self._cfg.command = self.server_command()
-        super().open(job)
+        cfg = self._r2_cfg
+        return cfg.command or cfg.binary_path
 
     def mirror_spec(self) -> MirrorSpec:
         return MirrorSpec(work_subdir=Path(self._r2_cfg.mirror_dir).name, container_prefix="")

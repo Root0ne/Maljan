@@ -82,6 +82,11 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     if spec is None:
         return None
     host = sample_files.work_dir() / f"{sha256}{extension}"
+    if not spec.container_prefix:
+        # An empty prefix means the analyst-facing tool is co-located with the
+        # worker (e.g. a stdio r2mcp) and opens the sample by its host path
+        # directly — there is no separate container mount to translate into.
+        return host, str(host)
     prefix = settings.ghidra_container_samples_path.rstrip("/")
     container = f"{prefix}/{spec.work_subdir}/{sha256}{extension}"
     return host, container
