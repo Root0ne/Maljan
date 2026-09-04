@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.core.config import Settings
+from maljan.core.config import MCPServerConfig, Settings
 from maljan.providers.base import StaticJobContext
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
 
@@ -193,6 +193,38 @@ def test_http_transport_builds_the_toolkit_with_the_configured_url(monkeypatch):
     assert kwargs["transport"] == "http"
     assert kwargs["http_url"] == "http://mcp.example:9999"
     assert kwargs["http_headers"] == {"Authorization": "Bearer tok"}
+
+
+def test_the_http_bearer_header_carries_the_real_token_not_its_mask(monkeypatch):
+    """Regression: ``auth_token`` is a ``SecretStr``; ``f"...{token}"`` on the
+    field itself (rather than ``.get_secret_value()``) renders as the fixed
+    ``**********`` mask, so the sidecar would see a header it can never
+    accept. Built directly from ``MCPServerConfig`` — not ``from_settings`` —
+    because ``static.generic`` is only a reference to an ``mcp.servers`` key
+    until Task 5 resolves it, and every ``from_settings``-based test in this
+    module is red for that unrelated reason.
+    """
+    import secrets
+
+    from maljan.agents import mcp_client
+
+    token = secrets.token_hex(16)
+    factory = _toolkit_factory()
+    monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", factory)
+
+    cfg = MCPServerConfig(
+        enabled=True,
+        transport="http",
+        url="http://mcp.example:9999",
+        auth_token=token,
+    )
+    provider = GenericMCPStaticProvider(cfg, label="Test MCP")
+    provider.open(StaticJobContext())
+
+    assert factory.called
+    headers = factory.call_args.kwargs["http_headers"]
+    assert headers == {"Authorization": f"Bearer {token}"}
+    assert "*" not in headers["Authorization"]
 
 
 def test_prompt_fragment_defaults_to_a_generated_paragraph_naming_the_label():

@@ -172,9 +172,8 @@ class GenericMCPStaticProvider(StaticProvider):
                 truncation_ledger=job.truncation_ledger,
             )
         else:
-            headers = (
-                {"Authorization": f"Bearer {self._cfg.auth_token}"} if self._cfg.auth_token else {}
-            )
+            token = self._cfg.auth_token.get_secret_value()
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
             toolkit = MCPLangChainToolkit(
                 transport=self._cfg.transport,
                 http_url=self._cfg.url,

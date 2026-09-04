@@ -148,9 +148,11 @@ class CAPE2SandboxProvider(SandboxProvider):
                 )
                 return []
             headers: dict[str, str] = {}
-            token = getattr(self._cfg.mcp, "auth_token", "")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            raw_token = getattr(self._cfg.mcp, "auth_token", "")
+            if hasattr(raw_token, "get_secret_value"):
+                raw_token = raw_token.get_secret_value()
+            if raw_token:
+                headers["Authorization"] = f"Bearer {raw_token}"
             logger.info("Initializing CAPEv2 MCP over %s: %s", transport, url)
             toolkit = MCPLangChainToolkit(transport=transport, http_url=url, http_headers=headers)
         else:
