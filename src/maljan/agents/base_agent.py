@@ -758,9 +758,12 @@ class BaseAnalyst(ABC):
         from finishing.
         """
         # ``toolkit`` is an MCPLangChainToolkit (``cleanup``) for the stdio and
-        # streamable-http analysts, and a GhidraHTTPClient (``aclose``) when the
-        # static analyst talks to Ghidra over plain HTTP. Both leak; accept
-        # either.
+        # streamable-http analysts, or a client exposing ``aclose`` directly.
+        # The static analyst no longer sets ``self.toolkit`` at all: its
+        # provider owns the client/subprocess and closes it itself
+        # (``ServiceContainer.aclose`` calls ``get_static_provider().close()``
+        # alongside this loop), so this being a no-op for it is by design, not
+        # a gap. Both closer shapes can leak on a hang; accept either name.
         toolkit = getattr(self, "toolkit", None)
         closers: list[Any] = []
         for closer_name in ("cleanup", "aclose"):

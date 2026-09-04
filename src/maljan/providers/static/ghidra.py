@@ -208,6 +208,34 @@ class GhidraStaticProvider(StaticProvider):
         return GHIDRA_PROMPT_FRAGMENT
 
     def open(self, job: StaticJobContext) -> None:
+        """Attach to Ghidra for ``job``. Idempotent, per the base contract.
+
+        The expected repeat call is for the *same* sample: a multi-chunk
+        static run calls ``analyze_isr`` once per chunk on one cached agent,
+        ``ServiceContainer`` hands back the same memoized provider instance
+        each time, and the analyst re-derives an equal ``StaticJobContext``
+        per chunk. Before this guard, every one of those calls rebuilt the
+        transport from scratch — a fresh ``GhidraHTTPClient.initialize()``
+        round trip (up to the 120s hard cap) on http, a fresh subprocess on
+        stdio — and the previous client was only dereferenced, never closed:
+        N-1 leaked clients or subprocesses per N-chunk sample, for the life
+        of the worker. A call whose job compares equal to the one already
+        attached now returns immediately instead.
+
+        A call with a job that differs from the one already attached — which
+        the current per-job container lifecycle never produces, since each
+        job gets its own provider instance — closes the stale toolkit first
+        and attaches fresh for the new job, rather than leaking the old one
+        silently or refusing the new attach outright.
+        """
+        if self._toolkit is not None:
+            if job == self._job:
+                return
+            logger.warning(
+                "Ghidra provider re-opened for a job different from the one "
+                "already attached; closing the stale toolkit before re-attaching."
+            )
+            self._close_toolkit()
         self._job = job
         if not self._cfg.enabled:
             logger.info("Ghidra MCP is disabled in config.")
@@ -453,9 +481,16 @@ class GhidraStaticProvider(StaticProvider):
             latency_ms=int((time.perf_counter() - t0) * 1000),
         )
 
-    def close(self) -> None:
-        """Release the toolkit or the HTTP client. Teardown that can throw is
-        teardown nobody calls, so every failure here is a warning."""
+    def _close_toolkit(self) -> None:
+        """Release whatever client or subprocess is currently attached, if any.
+
+        The one release path, shared by ``close()`` (job-end teardown) and
+        ``open()`` (mid-life re-attach for a job that differs from the one
+        already open) — so there is never a point where two toolkits are
+        live at once, and never a point where releasing one is written twice.
+        Teardown that can throw is teardown nobody calls, so every failure
+        here is a warning.
+        """
         from maljan.agents.base_agent import _run_coro_blocking
 
         toolkit, self._toolkit = self._toolkit, None
@@ -469,3 +504,6 @@ class GhidraStaticProvider(StaticProvider):
             _run_coro_blocking(closer(), hard_timeout=20.0, label="ghidra-close")
         except Exception as exc:  # noqa: BLE001 - teardown never propagates
             logger.warning("Ghidra provider teardown failed (non-fatal): %s", exc)
+
+    def close(self) -> None:
+        self._close_toolkit()

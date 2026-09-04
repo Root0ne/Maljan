@@ -220,3 +220,77 @@ def test_static_still_fails_loudly_and_a_degrading_provider_does_not(monkeypatch
         analyst, "_static_capabilities", lambda: StaticCapabilities(degrade_on_failure=True)
     )
     assert analyst._try_initialize_mcp() is False
+
+
+def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
+    """Regression for the multi-chunk leak: chunk 2 must not rebuild chunk 1's client.
+
+    ``safe_analyze_isr_chunked`` calls ``analyze_isr`` once per chunk on one
+    cached agent, and each call derives a *fresh but equal* ``StaticJobContext``
+    (same sample, same categories) — never the literal same object. Passing two
+    separate, merely-``==``-equal instances is what actually exercises the
+    value comparison ``open()`` relies on, rather than trivially passing an
+    identity check.
+    """
+    from maljan.agents import ghidra_http_client
+
+    constructions: list[int] = []
+
+    class _FakeHTTPClient:
+        def __init__(self, **kwargs):
+            constructions.append(1)
+
+        async def initialize(self) -> None:
+            return None
+
+        def get_tools(self):
+            return [_Tool("load_program"), _Tool("list_imports")]
+
+    monkeypatch.setattr(ghidra_http_client, "GhidraHTTPClient", _FakeHTTPClient)
+
+    provider = _provider()
+    job_1 = StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe")
+    job_2 = StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe")
+    assert job_1 == job_2 and job_1 is not job_2, "the test must exercise value equality"
+
+    provider.open(job_1)
+    toolkit_after_first_open = provider._toolkit
+    tools_after_first_open = provider.get_tools()
+
+    provider.open(job_2)
+
+    assert len(constructions) == 1, "a same-job repeat call must not rebuild the client"
+    assert provider._toolkit is toolkit_after_first_open
+    assert provider.get_tools() == tools_after_first_open
+
+
+def test_open_for_a_different_job_closes_the_stale_toolkit_before_reattaching(monkeypatch):
+    from maljan.agents import ghidra_http_client
+
+    constructions: list[int] = []
+    closed: list[int] = []
+
+    class _FakeHTTPClient:
+        def __init__(self, **kwargs):
+            constructions.append(1)
+
+        async def initialize(self) -> None:
+            return None
+
+        def get_tools(self):
+            return [_Tool("load_program")]
+
+        async def aclose(self) -> None:
+            closed.append(1)
+
+    monkeypatch.setattr(ghidra_http_client, "GhidraHTTPClient", _FakeHTTPClient)
+
+    provider = _provider()
+    provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/a.exe"))
+    first_toolkit = provider._toolkit
+
+    provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/b.exe"))
+
+    assert len(constructions) == 2, "a genuinely different job must rebuild"
+    assert closed == [1], "the stale toolkit must be closed before the new one replaces it"
+    assert provider._toolkit is not first_toolkit
