@@ -3,9 +3,12 @@
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { SampleDTO } from "@/lib/api";
+import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/report-utils";
+
+const STATIC_PROVIDERS = ["ghidra", "r2", "capa_yara", "generic_mcp", "none"] as const;
+const SANDBOX_PROVIDERS = ["mock", "cape2", "upload", "triage"] as const;
 
 /* ── Display interface (maps from SampleDTO) ───────── */
 interface SampleRow {
@@ -45,6 +48,66 @@ function SamplesPageContent() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  /* ── Task 22: the submit dialog ─────────────────────── */
+  const [submitFor, setSubmitFor] = useState<SampleRow | null>(null);
+  const [staticProvider, setStaticProvider] = useState("");
+  const [sandboxProvider, setSandboxProvider] = useState("");
+  const [attachedReport, setAttachedReport] = useState<SandboxReportDTO | null>(null);
+  const [reportUploading, setReportUploading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const firstFieldRef = useRef<HTMLSelectElement>(null);
+
+  function closeSubmitDialog() {
+    setSubmitFor(null);
+    setStaticProvider("");
+    setSandboxProvider("");
+    setAttachedReport(null);
+    setReportError(null);
+    setSubmitError(null);
+  }
+
+  async function handleReportChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !submitFor) return;
+    setReportUploading(true);
+    setReportError(null);
+    try {
+      const report = await api.uploadSandboxReport(submitFor.id, file);
+      setAttachedReport(report);
+    } catch (err) {
+      setReportError(getErrorMessage(err) || "Failed to upload the report.");
+    } finally {
+      setReportUploading(false);
+    }
+  }
+
+  async function startAnalysis(sampleId: string) {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      // Omitted keys mean "inherit from settings", so a submission that
+      // touches nothing sends the payload this page has always sent.
+      const config: Record<string, unknown> = {};
+      if (staticProvider) config.static_provider = staticProvider;
+      if (attachedReport) {
+        config.sandbox_report_id = attachedReport.id;
+        config.sandbox_provider = "upload";
+      } else if (sandboxProvider) {
+        config.sandbox_provider = sandboxProvider;
+      }
+      const job = await api.createJob(
+        sampleId,
+        Object.keys(config).length > 0 ? config : undefined
+      );
+      window.location.href = `/analysis/${job.id}/live`;
+    } catch (err) {
+      setSubmitError(getErrorMessage(err) || "Failed to start analysis.");
+      setSubmitting(false);
+    }
+  }
   const searchParams = useSearchParams();
   const sampleParam = searchParams.get("sample");
 
@@ -115,6 +178,19 @@ function SamplesPageContent() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detailSample]);
+
+  /* Escape closes the submit dialog, and focus lands on its first field. */
+  useEffect(() => {
+    if (!submitFor) return;
+    firstFieldRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeSubmitDialog();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [submitFor]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -261,14 +337,9 @@ function SamplesPageContent() {
                         Details
                       </button>
                       <button
-                        onClick={async () => {
+                        onClick={() => {
                           setActionError(null);
-                          try {
-                            const job = await api.createJob(s.id);
-                            window.location.href = `/analysis/${job.id}/live`;
-                          } catch (err) {
-                            setActionError(getErrorMessage(err) || "Failed to start analysis.");
-                          }
+                          setSubmitFor(s);
                         }}
                         className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
                       >
@@ -340,6 +411,142 @@ function SamplesPageContent() {
               <div>
                 <span className="text-text-muted uppercase tracking-wider">Uploaded</span>
                 <p className="text-text-primary mt-0.5">{formatDateTime(detailSample.uploaded_at)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submit-analysis dialog */}
+      {submitFor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={closeSubmitDialog}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="submit-analysis-title"
+            className="bg-bg-surface border border-border rounded w-full max-w-lg p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 id="submit-analysis-title" className="text-sm font-semibold text-text-primary">
+                Analyze {submitFor.filename}
+              </h3>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={closeSubmitDialog}
+                className="text-text-muted hover:text-text-primary"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {submitError && (
+                <div
+                  role="alert"
+                  className="text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+                >
+                  {submitError}
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="static-provider" className="block text-text-muted uppercase tracking-wider mb-1">
+                  Static provider
+                </label>
+                <select
+                  id="static-provider"
+                  ref={firstFieldRef}
+                  value={staticProvider}
+                  onChange={(e) => setStaticProvider(e.target.value)}
+                  className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary"
+                >
+                  <option value="">Inherit from settings</option>
+                  {STATIC_PROVIDERS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="sandbox-provider" className="block text-text-muted uppercase tracking-wider mb-1">
+                  Sandbox provider
+                </label>
+                <select
+                  id="sandbox-provider"
+                  value={sandboxProvider}
+                  onChange={(e) => setSandboxProvider(e.target.value)}
+                  disabled={!!attachedReport}
+                  className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary disabled:opacity-50"
+                >
+                  <option value="">Inherit from settings</option>
+                  {SANDBOX_PROVIDERS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                {attachedReport && (
+                  <p className="text-text-muted mt-1">
+                    Sandbox: upload (from the attached report)
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="sandbox-report" className="block text-text-muted uppercase tracking-wider mb-1">
+                  Attach sandbox report
+                </label>
+                <input
+                  id="sandbox-report"
+                  type="file"
+                  accept=".json,.json.gz"
+                  onChange={handleReportChange}
+                  disabled={reportUploading}
+                  className="w-full text-text-secondary"
+                />
+                {reportUploading && (
+                  <p className="text-text-muted mt-1">Uploading...</p>
+                )}
+                {reportError && (
+                  <p className="text-status-red mt-1">{reportError}</p>
+                )}
+                {attachedReport && (
+                  <p className="text-text-secondary mt-1">
+                    {attachedReport.format} · task {attachedReport.task_id ?? "unknown"}
+                  </p>
+                )}
+                {attachedReport && !attachedReport.sample_sha256_match && attachedReport.warning && (
+                  <div
+                    role="alert"
+                    className="mt-2 text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
+                  >
+                    {attachedReport.warning}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeSubmitDialog}
+                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => startAnalysis(submitFor.id)}
+                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+                >
+                  Start analysis
+                </button>
               </div>
             </div>
           </div>

@@ -133,6 +133,16 @@ export const MOCK_SAMPLE = {
   uploaded_at: "2026-07-26T10:00:00Z",
 };
 
+export const MOCK_SANDBOX_REPORT = {
+  id: "sandbox-report-1",
+  format: "cape2",
+  task_id: "1000",
+  size_bytes: 512,
+  sample_sha256_match: true,
+  warning: null,
+  uploaded_at: "2026-07-26T10:05:00Z",
+};
+
 export const MOCK_REPORT_SUMMARY = {
   id: "report-1",
   job_id: "job-1",
@@ -511,6 +521,18 @@ export async function installApiMocks(
   await page.route("**/api/v1/samples/*", (route) => json(route, MOCK_SAMPLE));
   // After `samples/*`, which also matches this path — last registration wins.
   await page.route("**/api/v1/samples/upload", (route) => json(route, MOCK_SAMPLE));
+  // A single `*` never crosses a slash, so `samples/*` above cannot match this
+  // extra segment — order does not matter here, but it is grouped with the
+  // other samples routes for readability. POST uploads a report; GET lists
+  // the ones already attached to the sample (empty by default).
+  await page.route("**/api/v1/samples/*/sandbox-reports", (route) =>
+    route.request().method() === "POST"
+      ? json(route, MOCK_SANDBOX_REPORT, 201)
+      : json(route, { items: [], total: 0 })
+  );
+  await page.route("**/api/v1/samples/*/sandbox-reports/*", (route) =>
+    route.fulfill({ status: 204, body: "" })
+  );
 
   /* ── Runtime settings (admin) ─────────────────────────
    * Route precedence matters here more than elsewhere: `/settings/schema`,
