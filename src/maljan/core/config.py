@@ -1059,6 +1059,9 @@ class SandboxConfig(BaseModel):
 # and one written for the new shape both produce the same Settings. One warning
 # per process names the file to edit; nothing is removed in this release.
 
+# Where a sub-project A ``static.generic.*`` block lands in the registry.
+GENERIC_SERVER_KEY = "custom"
+
 SETTINGS_ALIASES: tuple[tuple[str, str], ...] = (
     ("mcp.ghidra", "static.ghidra"),
     ("mcp.cape", "sandbox.cape2.mcp"),
@@ -1067,6 +1070,15 @@ SETTINGS_ALIASES: tuple[tuple[str, str], ...] = (
     ("sandbox.cape2_api_token", "sandbox.cape2.api_token"),
     ("sandbox.cape2_timeout_seconds", "sandbox.cape2.timeout_seconds"),
     ("sandbox.cape2_poll_interval_seconds", "sandbox.cape2.poll_interval_seconds"),
+    ("static.generic.enabled", f"mcp.servers.{GENERIC_SERVER_KEY}.enabled"),
+    ("static.generic.transport", f"mcp.servers.{GENERIC_SERVER_KEY}.transport"),
+    ("static.generic.command", f"mcp.servers.{GENERIC_SERVER_KEY}.command"),
+    ("static.generic.args", f"mcp.servers.{GENERIC_SERVER_KEY}.args"),
+    ("static.generic.env", f"mcp.servers.{GENERIC_SERVER_KEY}.env"),
+    ("static.generic.url", f"mcp.servers.{GENERIC_SERVER_KEY}.url"),
+    ("static.generic.auth_token", f"mcp.servers.{GENERIC_SERVER_KEY}.auth_token"),
+    ("static.generic.tool_selection", f"mcp.servers.{GENERIC_SERVER_KEY}.tool_selection"),
+    ("static.generic.use_all_tools", f"mcp.servers.{GENERIC_SERVER_KEY}.use_all_tools"),
 )
 
 # The subset that a bare ``SandboxConfig(...)`` can carry (paths relative to it).
@@ -1160,25 +1172,31 @@ def _warn_once(paths: list[str]) -> None:
 _MCP_ALIAS_JSON_LEAVES = ("args", "env")  # the only list-/dict-typed MCPServerConfig fields
 
 
-def _redecode_json_leaves_stranded_by_the_mcp_alias(data: dict[str, Any]) -> None:
-    """JSON-decode ``args``/``env`` a legacy ``mcp.*`` env var left as raw text.
+def _redecode_json_leaves_stranded_by_an_alias(data: dict[str, Any]) -> None:
+    """JSON-decode an ``args``/``env`` an alias left as raw text.
 
-    ``mcp.ghidra``/``mcp.cape`` used to be real ``MCPServerConfig`` fields, so
-    pydantic-settings' own nested-env decoder resolved ``MCP__GHIDRA__ARGS``
-    against that field's ``list[str]`` annotation and JSON-decoded it before
-    this module ever saw the assembled dict. ``MCPConfig`` is empty now (Task
-    12): the decoder can no longer find a type along the legacy path, so it
-    hands back the raw JSON text under the *new* path instead — one
-    validation error away from a silently broken ``.env``. A value that
-    already decoded correctly (set via the new ``STATIC__GHIDRA__ARGS`` name,
-    say, where the schema is real) is already a list/dict and is left alone.
+    pydantic-settings' nested-env decoder resolves ``MCP__GHIDRA__ARGS``
+    against whatever type it finds along that path. When the legacy path no
+    longer has a type — ``MCPConfig`` has no ``ghidra`` field, and
+    ``StaticGenericConfig`` has no ``args`` — it hands back the raw JSON text
+    under the *new* path instead, one validation error away from a silently
+    broken ``.env``. A value that already decoded correctly (set under the new
+    name, where the schema is real) is a list or dict and is left alone.
     Mutates ``data`` in place.
     """
     for old, new in SETTINGS_ALIASES:
-        if old.partition(".")[0] != "mcp":
+        head, _, _tail = old.partition(".")
+        last = old.rsplit(".", 1)[-1]
+        if head == "mcp":
+            # A whole-block alias: the JSON leaves hang one level below it.
+            paths = [f"{new}.{leaf}" for leaf in _MCP_ALIAS_JSON_LEAVES]
+        elif old.startswith("static.generic.") and last in _MCP_ALIAS_JSON_LEAVES:
+            # A per-leaf alias: the new path already names the leaf.
+            paths = [new]
+        else:
             continue
-        for leaf in _MCP_ALIAS_JSON_LEAVES:
-            owner, key = _dig(data, f"{new}.{leaf}")
+        for path in paths:
+            owner, key = _dig(data, path)
             if owner is None:
                 continue
             value = owner.get(key)
@@ -1189,10 +1207,32 @@ def _redecode_json_leaves_stranded_by_the_mcp_alias(data: dict[str, Any]) -> Non
                     pass  # let ordinary model validation raise on the bad value
 
 
+def _finish_generic_server_move(data: dict[str, Any]) -> None:
+    """Point ``static.generic.server`` at the migrated block and bind it to static.
+
+    The alias table can move a value; it cannot say that moving it also means
+    "and this is the server the static provider drives, and its tools go to
+    the static analyst". A legacy ``.env`` set neither, because neither
+    existed — so both are filled in here, and only when the move actually
+    happened and the new keys are not already set explicitly.
+    """
+    servers = data.get("mcp", {}).get("servers")
+    if not isinstance(servers, dict):
+        return
+    entry = servers.get(GENERIC_SERVER_KEY)
+    if not isinstance(entry, dict):
+        return
+    entry.setdefault("agents", ["static"])
+    generic = data.setdefault("static", {}).setdefault("generic", {})
+    if isinstance(generic, dict):
+        generic.setdefault("server", GENERIC_SERVER_KEY)
+
+
 def apply_settings_aliases(data: dict[str, Any]) -> dict[str, Any]:
     """Public, pure form of the alias pass — used by the validator and by tests."""
     out = _alias_within(data, SETTINGS_ALIASES)
-    _redecode_json_leaves_stranded_by_the_mcp_alias(out)
+    _redecode_json_leaves_stranded_by_an_alias(out)
+    _finish_generic_server_move(out)
     return out
 
 
