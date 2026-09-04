@@ -163,7 +163,8 @@ services:
       MEMORY__QDRANT_URL: http://qdrant:6333
       MEMORY__QDRANT_API_KEY: ${QDRANT_API_KEY}
       MINIO_ENDPOINT: minio:9000
-      MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # Old name: MCP__GHIDRA__URL
+      STATIC__GHIDRA__URL: http://ghidra-mcp:8089
       # F1 (2026-07-05): make the ``maljan`` core package importable from the
       # API process (the on-demand markdown re-render imports it). The worker
       # inserts ``src`` into sys.path at runtime; the API had no such path, so
@@ -181,22 +182,28 @@ services:
       # wrong inside the container — same leak class as MEMORY__QDRANT_URL.
       # token_auth is disabled on this instance (empty token). MCP path stays
       # off (:9004 wrapper not running on the VM); the REST report is enough.
-      SANDBOX__BACKEND: ${SANDBOX_BACKEND:-cape2}
+      #
+      # The ${SANDBOX_BACKEND:-cape2} style host-side variable names below are
+      # docker/.env's own names, not the application's — they stay as they
+      # are; only the container-side key (left of the colon) is the renamed
+      # application setting. Old names: SANDBOX__BACKEND, SANDBOX__CAPE2_*.
+      SANDBOX__PROVIDER: ${SANDBOX_BACKEND:-cape2}
       # Container reaches CAPE (<sandbox-host>) through the host-side proxy
       # (maljan-cape-proxy.service): the bridge can hit host.docker.internal
       # but not the on-link WiFi peer directly. Host CLI uses <sandbox-host>
       # directly via .env. 18000->CAPE:8000 (REST), 19004->CAPE:9004 (MCP).
-      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
-      SANDBOX__CAPE2_API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
-      SANDBOX__CAPE2_TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
-      SANDBOX__CAPE2_POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
+      SANDBOX__CAPE2__BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
+      SANDBOX__CAPE2__API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
+      SANDBOX__CAPE2__TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
+      SANDBOX__CAPE2__POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
       # CAPE MCP over HTTP — interactive tools for the dynamic analyst's ReAct
       # loop (search_task, get_task_iocs, get_task_config, ...). Additive on
       # top of the REST report. Reached via the same proxy (19004->CAPE:9004).
-      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-true}
-      MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
-      MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
-      MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
+      # Old prefix: MCP__CAPE__*
+      SANDBOX__CAPE2__MCP__ENABLED: ${MCP_CAPE_ENABLED:-true}
+      SANDBOX__CAPE2__MCP__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
+      SANDBOX__CAPE2__MCP__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
+      SANDBOX__CAPE2__MCP__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
     # F8 (2026-07-05): on Linux ``host.docker.internal`` does not resolve
     # unless mapped to the host gateway (Docker Desktop on Win/Mac provides
     # it natively, where this is a harmless no-op). Lets the container reach
@@ -244,13 +251,14 @@ services:
       MEMORY__QDRANT_URL: http://qdrant:6333
       MEMORY__QDRANT_API_KEY: ${QDRANT_API_KEY}
       MINIO_ENDPOINT: minio:9000
-      MCP__GHIDRA__URL: http://ghidra-mcp:8089
+      # Old name: MCP__GHIDRA__URL
+      STATIC__GHIDRA__URL: http://ghidra-mcp:8089
       # 2026-07 round 3: per-sample dynamic Ghidra tool selection — CORE triage
       # set + tools relevant to the sample's capability categories (~30-40 of
       # ~165). All tools stay reachable; only the relevant subset is shown per
       # run. Measured far faster + less hallucination than "all". Options:
-      # curated | dynamic | all.
-      MCP__GHIDRA__TOOL_SELECTION: "dynamic"
+      # curated | dynamic | all. Old name: MCP__GHIDRA__TOOL_SELECTION.
+      STATIC__GHIDRA__TOOL_SELECTION: "dynamic"
       # F1 (2026-07-05): make ``maljan`` importable (parity with API); the
       # worker also inserts src at runtime, this makes it explicit/robust.
       PYTHONPATH: /app/apps/api:/app/src
@@ -260,22 +268,28 @@ services:
       # CAPEv2 dynamic-analysis backend (remote Ubuntu VM). See backend-api
       # block for the rationale; the worker is the process that actually
       # submits + polls CAPE, so this env is what enables real detonation.
-      SANDBOX__BACKEND: ${SANDBOX_BACKEND:-cape2}
+      #
+      # The ${SANDBOX_BACKEND:-cape2} style host-side variable names below are
+      # docker/.env's own names, not the application's — they stay as they
+      # are; only the container-side key (left of the colon) is the renamed
+      # application setting. Old names: SANDBOX__BACKEND, SANDBOX__CAPE2_*.
+      SANDBOX__PROVIDER: ${SANDBOX_BACKEND:-cape2}
       # Container reaches CAPE (<sandbox-host>) through the host-side proxy
       # (maljan-cape-proxy.service): the bridge can hit host.docker.internal
       # but not the on-link WiFi peer directly. Host CLI uses <sandbox-host>
       # directly via .env. 18000->CAPE:8000 (REST), 19004->CAPE:9004 (MCP).
-      SANDBOX__CAPE2_BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
-      SANDBOX__CAPE2_API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
-      SANDBOX__CAPE2_TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
-      SANDBOX__CAPE2_POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
+      SANDBOX__CAPE2__BASE_URL: ${SANDBOX_CAPE2_BASE_URL:-http://host.docker.internal:18000}
+      SANDBOX__CAPE2__API_TOKEN: ${SANDBOX_CAPE2_API_TOKEN:-}
+      SANDBOX__CAPE2__TIMEOUT_SECONDS: ${SANDBOX_CAPE2_TIMEOUT_SECONDS:-1200}
+      SANDBOX__CAPE2__POLL_INTERVAL_SECONDS: ${SANDBOX_CAPE2_POLL_INTERVAL_SECONDS:-15}
       # CAPE MCP over HTTP — interactive tools for the dynamic analyst's ReAct
       # loop (search_task, get_task_iocs, get_task_config, ...). Additive on
       # top of the REST report. Reached via the same proxy (19004->CAPE:9004).
-      MCP__CAPE__ENABLED: ${MCP_CAPE_ENABLED:-true}
-      MCP__CAPE__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
-      MCP__CAPE__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
-      MCP__CAPE__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
+      # Old prefix: MCP__CAPE__*
+      SANDBOX__CAPE2__MCP__ENABLED: ${MCP_CAPE_ENABLED:-true}
+      SANDBOX__CAPE2__MCP__TRANSPORT: ${MCP_CAPE_TRANSPORT:-http}
+      SANDBOX__CAPE2__MCP__URL: ${MCP_CAPE_URL:-http://host.docker.internal:19004/mcp}
+      SANDBOX__CAPE2__MCP__AUTH_TOKEN: ${MCP_CAPE_AUTH_TOKEN:-}
       # glibc allocator (2026-07-26 memory audit). The image is python:3.13-slim
       # (glibc) and the host has 32 cores, so the default arena cap is 8 x ncores
       # = 256 arenas of 64 MB each. This process is genuinely multi-threaded —

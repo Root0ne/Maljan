@@ -61,3 +61,20 @@ def test_the_html_report_names_the_gaps():
     html = HtmlRenderer().render(report)
     assert "Not provided by this sandbox" in html
     assert "apistats" in html and "registry" in html
+
+
+def test_a_cape_shaped_report_names_no_gaps_in_markdown():
+    """CAPE fills every section: no ``unavailable`` key, nothing to disclaim."""
+    cape_report = {
+        "behavior": {"processes": [{"pid": 4, "process_name": "x.exe"}], "apistats": {}},
+        "signatures": [],
+        "network": {},
+    }
+    behavior = build_dynamic_behavior(cape_report)
+    assert behavior is not None
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        dynamic=behavior,
+    )
+    text = MarkdownRenderer().render(report)
+    assert "Not provided by this sandbox" not in text
