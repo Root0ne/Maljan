@@ -280,3 +280,60 @@ async def test_qdrant_probe_omits_the_header_when_no_api_key(monkeypatch):
     )
     r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c"})
     assert r.ok
+
+
+def test_the_cape_probe_is_registered_under_both_names():
+    assert probes.PROBES["cape2"] is probes.probe_cape2
+    assert probes.PROBES["cape"] is probes.probe_cape2
+
+
+def test_probe_inputs_name_only_existing_settings_keys():
+    from app.services.settings_catalog_api import catalog_index
+
+    index = catalog_index()
+    for name, inputs in probes._INPUTS.items():
+        for key in inputs:
+            assert key in index, f"probe {name!r} reads unknown setting {key}"
+
+
+@pytest.mark.asyncio
+async def test_ghidra_probe_reads_the_static_block(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake(v):
+        seen.update(v)
+        return probes.ProbeResult(True, 1, "HTTP 200")
+
+    monkeypatch.setitem(probes.PROBES, "ghidra", fake)
+    await probes.run_probe("ghidra", {"core.static.ghidra.url": "http://ghidra.example:8089"}, {})
+    assert seen["url"] == "http://ghidra.example:8089"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["cape2", "cape"])
+async def test_cape_probe_resolves_from_the_live_settings_object_with_nothing_staged(
+    monkeypatch, name
+):
+    """Regression: with no candidate value and no stored override, every
+    ``_INPUTS[name]`` key is resolved by walking attributes off the live
+    ``Settings`` object (``run_probe``'s fallback branch, exercised by neither
+    of the two tests above). A flat ``cape2_base_url``/``cape2_api_token``
+    here raised ``AttributeError`` against the nested ``SandboxConfig.cape2``
+    block the provider rename introduced -- the actual failure mode behind
+    the settings UI's "Test CAPE connection" button returning a 500.
+    """
+    from maljan.core.config import Settings
+
+    seen: dict[str, object] = {}
+
+    async def fake(v):
+        seen.update(v)
+        return probes.ProbeResult(True, 1, "HTTP 200")
+
+    monkeypatch.setitem(probes.PROBES, name, fake)
+    result = await probes.run_probe(name, {}, {})
+
+    assert result.ok is True
+    live = Settings()
+    assert seen["base_url"] == live.sandbox.cape2.base_url
+    assert isinstance(seen["api_token"], str)

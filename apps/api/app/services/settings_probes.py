@@ -158,7 +158,7 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
-async def probe_cape(v: dict[str, Any]) -> ProbeResult:
+async def probe_cape2(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     headers = {"Authorization": f"Token {v['api_token']}"} if v.get("api_token") else None
     ok, detail, _ = await _get(
@@ -218,7 +218,9 @@ async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
 PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "llm": probe_llm,
     "ghidra": probe_ghidra,
-    "cape": probe_cape,
+    "cape2": probe_cape2,
+    # "cape" is kept for one release: a stored annotation may still name it.
+    "cape": probe_cape2,
     "qdrant": probe_qdrant,
     "redis": probe_redis,
     "virustotal": probe_virustotal,
@@ -243,10 +245,17 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",
     },
-    "ghidra": {"core.mcp.ghidra.url": "url", "core.mcp.ghidra.auth_token": "auth_token"},
+    "ghidra": {
+        "core.static.ghidra.url": "url",
+        "core.static.ghidra.auth_token": "auth_token",
+    },
+    "cape2": {
+        "core.sandbox.cape2.base_url": "base_url",
+        "core.sandbox.cape2.api_token": "api_token",
+    },
     "cape": {
-        "core.sandbox.cape2_base_url": "base_url",
-        "core.sandbox.cape2_api_token": "api_token",
+        "core.sandbox.cape2.base_url": "base_url",
+        "core.sandbox.cape2.api_token": "api_token",
     },
     "qdrant": {
         "core.memory.qdrant_url": "url",
