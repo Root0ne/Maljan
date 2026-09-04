@@ -79,39 +79,6 @@ def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
     return data
 
 
-# Moved to maljan.providers.static.ghidra in the provider layer (2026-09-03).
-# Re-exported so the modules and tests that import them from here keep working;
-# removed in the last task of the provider plan.
-from maljan.providers.static.ghidra import (  # noqa: E402
-    GHIDRA_ALLOWED_TOOLS as _GHIDRA_ALLOWED_TOOLS_MODULE,
-)
-from maljan.providers.static.ghidra import GhidraStaticProvider  # noqa: E402
-
-
-class _LegacyGhidraJob:
-    """Live job view for the deprecated per-analyst delegations below.
-
-    ``nodes.py`` still mutates ``_analysis_file_path`` / ``_sample_categories``
-    on the agent instance itself (Task 10 moves this to a real
-    ``StaticJobContext`` passed through ``open()``); wrapping the agent instead
-    of snapshotting its attributes keeps the classic late-binding behaviour
-    that ``tests/unit/test_load_program_pinning.py`` pins — a tool wrapped
-    before a later path reassignment must still read the reassigned value at
-    call time.
-    """
-
-    def __init__(self, agent: StaticAnalyst) -> None:
-        self._agent = agent
-
-    @property
-    def mirror_sample_path(self) -> str | None:
-        return getattr(self._agent, "_analysis_file_path", None)
-
-    @property
-    def capability_categories(self) -> Any:
-        return getattr(self._agent, "_sample_categories", None)
-
-
 @register_agent("static")
 class StaticAnalyst(BaseAnalyst):
     """Specialized agent for evaluating decompiled code and strings via the configured static provider."""
@@ -120,63 +87,20 @@ class StaticAnalyst(BaseAnalyst):
     # MCP Tool Interface
     # ------------------------------------------------------------------
 
-    # Moved to maljan.providers.static.ghidra in the provider layer (2026-09-03).
-    _GHIDRA_ALLOWED_TOOLS: frozenset[str] = _GHIDRA_ALLOWED_TOOLS_MODULE
-
     # Container-visible path of the current sample, assigned per-run by the
     # pipeline (nodes.py) alongside ``_sample_categories``. Read at CALL time
     # by the load_program wrapper (late binding — the agent is cached across
     # samples and tools may be selected before the pipeline sets the path).
     _analysis_file_path: str | None = None
 
-    def _resolve_ghidra_provider(self) -> GhidraStaticProvider:
-        """The provider that now owns this logic, for the four delegations below.
-
-        Prefers the job's container-cached provider when it actually is
-        Ghidra; otherwise builds a standalone instance from today's settings,
-        which is what keeps a bare analyst — ``tests/unit/test_load_program_pinning.py``
-        constructs one with ``StaticAnalyst.__new__`` — working. ``memory`` is
-        never read by any of the four delegated methods, so the fallback does
-        not need a real one. Reads ``static.ghidra`` directly: the transitional
-        ``mcp``-namespaced mirror this shim used to prefer is gone (Task 12).
-        """
-        from maljan.core.config import MemoryConfig, get_settings
-
-        container = getattr(self, "_container", None)
-        provider = container.get_static_provider() if container is not None else None
-        if not isinstance(provider, GhidraStaticProvider):
-            cfg = get_settings()
-            provider = GhidraStaticProvider(cfg.static.ghidra, cfg.preprocessing, MemoryConfig())
-        provider._job = _LegacyGhidraJob(self)  # type: ignore[assignment]
-        return provider
-
-    def _ghidra_tool_mode(self) -> str:
-        """Deprecated: the mode logic now lives on ``GhidraStaticProvider._tool_mode``."""
-        return self._resolve_ghidra_provider()._tool_mode()
-
-    def _select_ghidra_tools(
-        self, tools: list[Any], categories: set[str] | None = None
-    ) -> list[Any]:
-        """Deprecated: the selection logic now lives on ``GhidraStaticProvider.select_tools``."""
-        return self._resolve_ghidra_provider().select_tools(tools, categories)
-
-    def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
-        """Deprecated: the pinning logic now lives on ``GhidraStaticProvider``."""
-        return self._resolve_ghidra_provider()._pin_load_program_path(tools)
-
-    def _wrap_load_program(self, tool: Any) -> Any:
-        """Deprecated: the wrapping logic now lives on ``GhidraStaticProvider``."""
-        return self._resolve_ghidra_provider()._wrap_load_program(tool)
-
     def _refine_tools_for_sample(self, host_path: str | None) -> None:
-        """In dynamic mode, narrow ``self.tools`` to the sample's relevant tools.
+        """Narrow ``self.tools`` to this sample's relevant tools.
 
         Cheaply derives capability categories from the PE import classification
-        (no Ghidra call) and re-selects from the full pool. No-op unless dynamic
-        mode is active and the full pool was captured. Fail-safe.
+        (no Ghidra call) and lets the provider re-select from the full pool it
+        already selected once at attach time. No-op unless the full pool was
+        captured. Fail-safe.
         """
-        if self._ghidra_tool_mode() != "dynamic":
-            return
         pool = getattr(self, "_all_ghidra_tools", None)
         if not pool or not host_path:
             return
@@ -186,7 +110,7 @@ class StaticAnalyst(BaseAnalyst):
 
             static = build_static_analysis(sample_path=host_path)
             categories = set(_imports_by_category(static).keys()) if static else set()
-            self.tools = self._select_ghidra_tools(pool, categories)
+            self.tools = self._provider().select_tools(pool, categories)
         except Exception as e:  # noqa: BLE001
             self.logger.warning("Dynamic tool selection failed (%s); keeping current set.", e)
 

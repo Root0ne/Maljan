@@ -37,12 +37,6 @@ def test_the_allow_list_is_the_golden_one():
     assert sorted(GHIDRA_ALLOWED_TOOLS) == golden["ghidra_allowed_tools"]
 
 
-def test_the_analyst_still_exports_the_allow_list_under_its_old_name():
-    from maljan.agents.static_analyst import StaticAnalyst
-
-    assert StaticAnalyst._GHIDRA_ALLOWED_TOOLS is GHIDRA_ALLOWED_TOOLS
-
-
 def test_capabilities_track_the_transport():
     http = _provider().capabilities
     assert http.provides_tools and http.supports_tool_curation and http.needs_sample_mirror

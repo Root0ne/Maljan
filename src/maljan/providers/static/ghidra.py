@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
-from maljan.agents.ghidra_tool_selector import select_relevant_ghidra_tools
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from maljan.providers.base import (
@@ -24,6 +23,7 @@ from maljan.providers.base import (
     StaticProvider,
 )
 from maljan.providers.registry import register_static_provider
+from maljan.providers.static.ghidra_tool_selector import select_relevant_ghidra_tools
 
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig, Settings

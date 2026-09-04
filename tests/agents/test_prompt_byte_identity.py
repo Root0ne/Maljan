@@ -33,11 +33,11 @@ def test_dynamic_cape2_system_prompt_is_byte_identical():
 
 
 def test_ghidra_allow_list_and_core_set_are_unchanged():
-    from maljan.agents.ghidra_tool_selector import _CORE_TOOLS
-    from maljan.agents.static_analyst import StaticAnalyst
+    from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS
+    from maljan.providers.static.ghidra_tool_selector import _CORE_TOOLS
 
     expected = json.loads((GOLDEN / "allowlists.json").read_text(encoding="utf-8"))
-    assert sorted(StaticAnalyst._GHIDRA_ALLOWED_TOOLS) == expected["ghidra_allowed_tools"]
+    assert sorted(GHIDRA_ALLOWED_TOOLS) == expected["ghidra_allowed_tools"]
     assert len(expected["ghidra_allowed_tools"]) == 20
     assert sorted(_CORE_TOOLS) == expected["ghidra_core_tools"]
 
