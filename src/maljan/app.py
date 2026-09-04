@@ -166,8 +166,8 @@ class MaljanApp:
                 # to static-only. All SandboxClient impls share this signature.
                 status = client.wait_for_completion(
                     task_id,
-                    timeout_seconds=self.config.sandbox.cape2_timeout_seconds,
-                    poll_interval_seconds=self.config.sandbox.cape2_poll_interval_seconds,
+                    timeout_seconds=self.config.sandbox.cape2.timeout_seconds,
+                    poll_interval_seconds=self.config.sandbox.cape2.poll_interval_seconds,
                 )
                 if status == "reported":
                     result = client.fetch_report(task_id)

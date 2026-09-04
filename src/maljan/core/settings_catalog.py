@@ -143,9 +143,18 @@ def _json_default(value: Any) -> Any:
 
 
 def core_catalog() -> list[CatalogEntry]:
+    """Every leaf of ``Settings``, annotated where ``settings_annotations`` covers it.
+
+    A leaf with no entry yet in ``ANNOTATIONS`` (a setting added in one commit
+    and annotated in the next, e.g. the provider-layer migration) falls back to
+    its dotted path as the title and an empty description instead of raising —
+    this is called at import time by the worker to build its secret-redaction
+    list, and ``secret`` is derived from the field's own type/name below, not
+    from the annotation, so an unannotated credential field is still redacted.
+    """
     entries: list[CatalogEntry] = []
     for leaf in core_leaves():
-        ann = ANNOTATIONS[leaf.path]
+        ann = ANNOTATIONS.get(leaf.path)
         ftype, choices, nullable = _field_type(leaf)
         lo, hi = _bounds(leaf.field)
         entries.append(
@@ -160,13 +169,13 @@ def core_catalog() -> list[CatalogEntry]:
                 minimum=lo,
                 maximum=hi,
                 secret=ftype == "secret",
-                group=ann.get("group") or group_for(leaf.path),
-                title=ann["title"],
-                description=ann["description"],
-                applies=ann.get("applies", "next_job"),
+                group=(ann.get("group") if ann else None) or group_for(leaf.path),
+                title=ann["title"] if ann else leaf.path,
+                description=ann["description"] if ann else "",
+                applies=(ann.get("applies", "next_job") if ann else "next_job"),
                 editable=True,
                 reason=None,
-                probe=ann.get("probe"),
+                probe=ann.get("probe") if ann else None,
             )
         )
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}

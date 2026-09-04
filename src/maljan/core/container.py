@@ -236,17 +236,17 @@ class ServiceContainer:
                 )
                 return self._sandbox_client_cache
 
-            backend = self.config.sandbox.backend
+            backend = self.config.sandbox.provider
             if backend == "cape2":
                 from maljan.loaders.cape2_client import CAPEv2Client
 
                 self._sandbox_client_cache = CAPEv2Client(
-                    base_url=self.config.sandbox.cape2_base_url,
-                    api_token=self.config.sandbox.cape2_api_token,
+                    base_url=self.config.sandbox.cape2.base_url,
+                    api_token=self.config.sandbox.cape2.api_token,
                 )
                 logger.info(
                     "Sandbox backend: CAPEv2Client (url=%s).",
-                    self.config.sandbox.cape2_base_url,
+                    self.config.sandbox.cape2.base_url,
                 )
             else:
                 from maljan.loaders.mock_sandbox_client import MockSandboxClient

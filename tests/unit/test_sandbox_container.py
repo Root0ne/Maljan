@@ -43,38 +43,39 @@ class TestSandboxConfig:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig()
-        assert cfg.backend == "mock"
+        assert cfg.provider == "mock"
 
     def test_default_cape2_base_url(self) -> None:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig()
-        assert cfg.cape2_base_url == "http://localhost:8000"
+        assert cfg.cape2.base_url == "http://localhost:8000"
 
     def test_default_api_token_empty(self) -> None:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig()
-        # ``cape2_api_token`` is now ``SecretStr`` so we have to unwrap it.
-        assert cfg.cape2_api_token.get_secret_value() == ""
+        # ``cape2.api_token`` is now ``SecretStr`` so we have to unwrap it.
+        assert cfg.cape2.api_token.get_secret_value() == ""
 
     def test_default_timeout_seconds(self) -> None:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig()
-        assert cfg.cape2_timeout_seconds == 300
+        assert cfg.cape2.timeout_seconds == 300
 
     def test_default_poll_interval_seconds(self) -> None:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig()
-        assert cfg.cape2_poll_interval_seconds == 10
+        assert cfg.cape2.poll_interval_seconds == 10
 
     def test_backend_override(self) -> None:
         from maljan.core.config import SandboxConfig
 
         cfg = SandboxConfig(backend="cape2")
-        assert cfg.backend == "cape2"
+        assert cfg.provider == "cape2"
+        assert SandboxConfig(provider="cape2").provider == "cape2"
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ class TestSettingsSandbox:
         from maljan.core.config import Settings
 
         settings = Settings(_env_file=None)
-        assert settings.sandbox.backend == "mock"
+        assert settings.sandbox.provider == "mock"
 
     def test_sandbox_config_type(self) -> None:
         from maljan.core.config import SandboxConfig, Settings
