@@ -390,35 +390,48 @@ async def test_r2_probe_reports_a_missing_binary_by_name():
 async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
     import asyncio
 
-    killed: list[int] = []
+    closed: list[bool] = []
 
-    async def hangs_forever(_command):
-        try:
+    class _HangingHandle:
+        def __init__(self, name, config):
+            self.name = name
+            self.config = config
+
+        async def aopen(self, job_id, **kw):
             await asyncio.sleep(100)
-        except asyncio.CancelledError:
-            killed.append(1)
-            raise
 
-    monkeypatch.setattr("maljan.providers.static.r2.enumerate_r2_tools", hangs_forever)
+        async def aclose(self):
+            closed.append(True)
+
+    monkeypatch.setattr(probes, "ServerHandle", _HangingHandle)
+    monkeypatch.setattr(probes, "PROBE_BUDGET_SECONDS", 0.05)
     r = await probes.probe_r2({"binary_path": "r2mcp"})
     assert r.ok is False
-    assert "5 s" in r.detail
-    assert killed == [1], "the hung handshake must be cancelled, not left running"
+    assert "no MCP handshake" in r.detail
+    assert closed == [True], "the hung handshake must be closed, not left running"
 
 
 @pytest.mark.asyncio
 async def test_r2_probe_reports_the_tool_count_on_success(monkeypatch):
-    class _Tool:
-        def __init__(self, name):
+    class _Handle:
+        def __init__(self, name, config):
             self.name = name
+            self.config = config
 
-    async def fake_enumerate(_command):
-        return [_Tool(n) for n in ("open_file", "analyze")]
+        async def aopen(self, job_id, **kw):
+            return None
 
-    monkeypatch.setattr("maljan.providers.static.r2.enumerate_r2_tools", fake_enumerate)
+        async def aclose(self):
+            return None
+
+        def all_tool_names(self):
+            return ["open_file", "analyze"]
+
+    monkeypatch.setattr(probes, "ServerHandle", _Handle)
     r = await probes.probe_r2({"binary_path": "r2mcp"})
     assert r.ok is True
-    assert "2 tools" in r.detail
+    assert "2 tools offered by 'r2mcp'" in r.detail
+    assert r.tools == ["open_file", "analyze"]
 
 
 def test_the_r2_probe_is_registered():

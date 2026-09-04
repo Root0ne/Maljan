@@ -11,14 +11,21 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from maljan.core.config import MCPServerConfig
 from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
+from maljan.providers.servers import ServerHandle
 from pydantic import ValidationError
 from redis.asyncio import Redis
 
 from app.config import settings as api_settings
 
 TIMEOUT = 10.0
+
+# A connection test is a person waiting at a button. Five seconds is long
+# enough for a local stdio server to answer tools/list and short enough that a
+# wedged one is reported rather than endured.
+PROBE_BUDGET_SECONDS = 5.0
 
 
 @dataclass
@@ -27,6 +34,7 @@ class ProbeResult:
     latency_ms: int
     detail: str
     models: list[str] | None = None
+    tools: list[str] | None = None
 
 
 def _client() -> httpx.AsyncClient:
@@ -162,6 +170,82 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
+    """Attach ``config`` long enough to read its manifest, then let go.
+
+    The only stdio handshake in the project besides a job's own: it is
+    ``ServerHandle``, so a server that answers here answers the same way in a
+    run. Whatever happens, the handle is closed — a probe that leaves a child
+    process behind turns a mis-typed command into a slow leak of subprocesses,
+    which is exactly what a person clicking "Test" twice would produce.
+    """
+    handle = ServerHandle(name, config)
+    try:
+        await asyncio.wait_for(handle.aopen(f"probe-{name}"), timeout=PROBE_BUDGET_SECONDS)
+        return handle.all_tool_names()
+    finally:
+        await handle.aclose()
+
+
+def _probe_config(entry: dict[str, Any]) -> MCPServerConfig:
+    """The entry as configured, forced on and un-narrowed.
+
+    A probe answers "what does this server offer"; a disabled entry or an
+    empty allow-list are answers to a different question ("what may the model
+    call"), and applying them here would make the manifest unreadable exactly
+    when the operator needs it to pick from.
+    """
+    config = MCPServerConfig.model_validate(entry)
+    return config.model_copy(update={"enabled": True, "tools": None})
+
+
+async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
+    """Launch one configured MCP server and list the tools it offers."""
+    t0 = time.perf_counter()
+    name = str(v.get("name") or "server")
+    try:
+        config = _probe_config(dict(v.get("entry") or {}))
+    except ValidationError as exc:
+        fields = "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+        return ProbeResult(False, _ms(t0), f"invalid server settings: {fields}")
+    try:
+        names = await handshake_tools(config, name)
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    except FileNotFoundError as exc:
+        return ProbeResult(False, _ms(t0), f"{exc} not found on PATH")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    listed = ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools: {listed}", None, names)
+
+
+async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
+    """Probe one entry of the server map, staged values winning over stored ones.
+
+    Separate from ``run_probe`` because this probe is addressed to a *key*
+    inside one setting rather than to a set of settings: ``_INPUTS`` maps
+    catalog keys to short names, and there is no catalog key for "the r2custom
+    entry".
+    """
+    servers: dict[str, Any] = {}
+    for layer in (stored, values):
+        candidate = layer.get("core.mcp.servers")
+        if isinstance(candidate, dict):
+            servers.update(candidate)
+    if server not in servers:
+        # Fall back to the effective settings: a built-in the operator has
+        # never edited has no stored row at all.
+        from maljan.core.config import Settings
+
+        effective = Settings().mcp.servers
+        if server not in effective:
+            available = ", ".join(sorted(set(servers) | set(effective))) or "(none)"
+            return ProbeResult(False, 0, f"unknown server: {server!r}. Available: {available}")
+        servers[server] = effective[server].model_dump(mode="json")
+    return await probe_mcp({"name": server, "entry": servers[server]})
+
+
 async def probe_r2(v: dict[str, Any]) -> ProbeResult:
     """Launch the configured r2mcp and count the tools it offers, in 5 seconds.
 
@@ -171,17 +255,16 @@ async def probe_r2(v: dict[str, Any]) -> ProbeResult:
     """
     t0 = time.perf_counter()
     command = str(v.get("binary_path") or "r2mcp")
+    config = MCPServerConfig(enabled=True, transport="stdio", command=command)
     try:
-        from maljan.providers.static.r2 import enumerate_r2_tools
-
-        names = await asyncio.wait_for(enumerate_r2_tools(command), timeout=5.0)
+        names = await handshake_tools(config, "r2")
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
     except FileNotFoundError:
         return ProbeResult(False, _ms(t0), f"{command!r} not found on PATH")
-    except TimeoutError:
-        return ProbeResult(False, _ms(t0), "no MCP handshake within 5 s")
     except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
         return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
-    return ProbeResult(True, _ms(t0), f"{len(names)} tools offered by {command!r}")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools offered by {command!r}", None, names)
 
 
 async def probe_capa(v: dict[str, Any]) -> ProbeResult:
@@ -295,6 +378,7 @@ PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "llm": probe_llm,
     "ghidra": probe_ghidra,
     "r2": probe_r2,
+    "mcp": probe_mcp,
     "capa_yara": probe_capa,
     # "capa" aliases "capa_yara" the way "cape" aliases "cape2": an older
     # stored annotation may still name the tool rather than the provider id.
@@ -334,6 +418,7 @@ _INPUTS: dict[str, dict[str, str]] = {
     "r2": {
         "core.static.r2.binary_path": "binary_path",
     },
+    "mcp": {},
     "capa_yara": {
         "core.static.capa.rules_dir": "capa_rules_dir",
         "core.static.yara.rules_dir": "yara_rules_dir",

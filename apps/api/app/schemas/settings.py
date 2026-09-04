@@ -83,3 +83,5 @@ class ProbeResponse(BaseModel):
     latency_ms: int
     detail: str
     models: list[str] | None = None
+    # the server's whole manifest, so the editor can render it as tick boxes
+    tools: list[str] | None = None
