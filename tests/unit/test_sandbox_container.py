@@ -11,11 +11,11 @@ Tests:
     - sandbox field uses SandboxConfig defaults
 
   ServiceContainer.get_sandbox_client():
-    - Returns MockSandboxClient by default
+    - Selects the mock provider by default
     - Returns cached instance on second call
-    - SandboxConfig backend="mock" -> MockSandboxClient
+    - SandboxConfig backend="mock" -> the mock provider
     - Raises SandboxNotAvailableError for backend="cape2" without httpx
-    - _samples_dir is forwarded to MockSandboxClient
+    - _samples_dir is forwarded to the mock provider's fixtures_dir
     - SandboxClient Protocol isinstance check
 
   End-to-end:
@@ -30,7 +30,6 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.loaders.mock_sandbox_client import MockSandboxClient
 from maljan.loaders.sandbox_client import SandboxClient, SandboxNotAvailableError
 
 # ---------------------------------------------------------------------------
@@ -115,7 +114,8 @@ class TestContainerGetSandboxClient:
 
         container = ServiceContainer(config=Settings(_env_file=None), mock=True)
         client = container.get_sandbox_client()
-        assert isinstance(client, MockSandboxClient)
+        assert isinstance(client, SandboxClient)
+        assert container.get_sandbox_provider().id == "mock"
 
     def test_returns_cached_instance_on_second_call(self) -> None:
         from maljan.core.config import Settings
@@ -142,9 +142,9 @@ class TestContainerGetSandboxClient:
             config=Settings(_env_file=None), mock=True, samples_dir=str(tmp_path)
         )
         client = container.get_sandbox_client()
-        assert isinstance(client, MockSandboxClient)
-        # Verify the client uses the correct fixtures directory
-        assert client._fixtures_dir == tmp_path
+        assert isinstance(client, SandboxClient)
+        # Verify the mock provider uses the correct fixtures directory
+        assert container.get_sandbox_provider().fixtures_dir == str(tmp_path)
 
     def test_cape2_backend_raises_without_httpx(self) -> None:
         from maljan.core.config import SandboxConfig, Settings
@@ -156,8 +156,10 @@ class TestContainerGetSandboxClient:
         with patch.dict("sys.modules", {"httpx": None}):
             # Reset cache to force rebuild
             container._sandbox_client_cache = None
+            # The provider builds CAPEv2Client lazily inside submit/fetch now,
+            # so the client itself only raises once a call reaches that import.
             with pytest.raises((SandboxNotAvailableError, ImportError)):
-                container.get_sandbox_client()
+                container.get_sandbox_client().submit("sample.exe")
 
     def test_mock_config_selects_mock_client(self) -> None:
         from maljan.core.config import SandboxConfig, Settings
@@ -166,7 +168,8 @@ class TestContainerGetSandboxClient:
         cfg = Settings(sandbox=SandboxConfig(backend="mock"))
         container = ServiceContainer(config=cfg, mock=True)
         client = container.get_sandbox_client()
-        assert isinstance(client, MockSandboxClient)
+        assert isinstance(client, SandboxClient)
+        assert container.get_sandbox_provider().id == "mock"
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +190,8 @@ class TestMaljanAppSandboxClient:
 
         app = MaljanApp(mock=True)
         client = app.container.get_sandbox_client()
-        assert isinstance(client, MockSandboxClient)
+        assert isinstance(client, SandboxClient)
+        assert app.container.get_sandbox_provider().id == "mock"
 
     def test_load_from_sandbox_via_container(self, tmp_path: Path) -> None:
         """End-to-end: container provides sandbox client, loader uses it."""

@@ -20,8 +20,10 @@ LangSmith Observability:
     sets the env vars LangChain reads automatically.
 
 Sandbox Backend:
-    ``get_sandbox_client()`` returns the configured sandbox client (mock,
-    cape2) and caches it for the lifetime of the container.
+    ``get_sandbox_provider()`` builds the configured ``SandboxProvider`` from
+    the registry (``mock`` when the container's own ``mock`` flag is set);
+    ``get_sandbox_client()`` wraps it as the legacy client. Both are cached
+    for the lifetime of the container.
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
     from maljan.loaders.sandbox_client import SandboxClient
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
+    from maljan.providers.base import SandboxProvider, StaticProvider
 
 
 # Per-closer budget in ``aclose``. Each toolkit is already bounded internally;
@@ -106,6 +109,8 @@ class ServiceContainer:
         self._data_cache: dict[tuple[str, str], str] = {}
         self._memory_store_cache: MemoryStore | None = None
         self._sandbox_client_cache: SandboxClient | None = None
+        self._sandbox_provider_cache: SandboxProvider | None = None
+        self._static_provider_cache: StaticProvider | None = None
         self._yara_layer_cache: YaraLayer | None = None
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
@@ -221,41 +226,46 @@ class ServiceContainer:
                     logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
             return self._memory_store_cache
 
-    def get_sandbox_client(self) -> SandboxClient:
+    def get_sandbox_provider(self) -> SandboxProvider:
+        """The configured sandbox adapter, or the mock one in mock mode.
+
+        ``mock=True`` is the container's own switch (the CLI's ``--mock``, the
+        API's mock jobs) and outranks the setting, exactly as it did when this
+        method built clients directly.
+        """
         with self._lock:
-            if self._sandbox_client_cache is not None:
-                return self._sandbox_client_cache
+            if self._sandbox_provider_cache is not None:
+                return self._sandbox_provider_cache
+            from maljan.providers.registry import get_sandbox_provider as build
 
-            if self.mock:
-                from maljan.loaders.mock_sandbox_client import MockSandboxClient
+            cfg = self.config
+            if self.mock and cfg.sandbox.provider != "mock":
+                cfg = cfg.model_copy(deep=True)
+                cfg.sandbox.provider = "mock"
+            provider = build(cfg)
+            fixtures = getattr(provider, "fixtures_dir", None)
+            if fixtures is not None:
+                provider.fixtures_dir = self._samples_dir  # type: ignore[attr-defined]
+            logger.info("Sandbox provider: %s.", provider.id)
+            self._sandbox_provider_cache = provider
+            return provider
 
-                self._sandbox_client_cache = MockSandboxClient(fixtures_dir=self._samples_dir)
-                logger.info(
-                    "Sandbox backend: MockSandboxClient (mock=True, fixtures_dir=%s).",
-                    self._samples_dir,
-                )
-                return self._sandbox_client_cache
+    def get_static_provider(self) -> StaticProvider:
+        with self._lock:
+            if self._static_provider_cache is None:
+                from maljan.providers.registry import get_static_provider as build
 
-            backend = self.config.sandbox.provider
-            if backend == "cape2":
-                from maljan.loaders.cape2_client import CAPEv2Client
+                self._static_provider_cache = build(self.config)
+                logger.info("Static provider: %s.", self._static_provider_cache.id)
+            return self._static_provider_cache
 
-                self._sandbox_client_cache = CAPEv2Client(
-                    base_url=self.config.sandbox.cape2.base_url,
-                    api_token=self.config.sandbox.cape2.api_token,
-                )
-                logger.info(
-                    "Sandbox backend: CAPEv2Client (url=%s).",
-                    self.config.sandbox.cape2.base_url,
-                )
-            else:
-                from maljan.loaders.mock_sandbox_client import MockSandboxClient
+    def get_sandbox_client(self) -> SandboxClient:
+        """The provider, dressed as the client the pipeline already speaks."""
+        with self._lock:
+            if self._sandbox_client_cache is None:
+                from maljan.providers.sandbox._legacy import as_sandbox_client
 
-                self._sandbox_client_cache = MockSandboxClient(fixtures_dir=self._samples_dir)
-                logger.info(
-                    "Sandbox backend: MockSandboxClient (fixtures_dir=%s).",
-                    self._samples_dir,
-                )
+                self._sandbox_client_cache = as_sandbox_client(self.get_sandbox_provider())
             return self._sandbox_client_cache
 
     def get_token_ledger(self) -> TokenLedger:
@@ -345,6 +355,19 @@ class ServiceContainer:
                 logger.warning("Closing judge tools timed out; abandoning.")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Closing judge tools failed (non-fatal): %s", exc)
+
+        # The static/sandbox providers may hold a subprocess or an HTTP pool of
+        # their own (a CAPE REST client, an MCP stdio child); release them here
+        # too, alongside the agents' and judges' toolkits above.
+        try:
+            self.get_static_provider().close()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("Closing static provider failed (non-fatal): %s", exc)
+
+        try:
+            self.get_sandbox_provider().close()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
 
         # The sample's parsed text and the per-job analysis layers. Not a leak
         # on their own — the container dies with the job — but dropping them
