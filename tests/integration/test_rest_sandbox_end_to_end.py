@@ -155,8 +155,23 @@ async def test_the_rest_provider_polls_on_its_own_budget(stub, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_job_reports_the_provider_error_without_a_traceback(stub, tmp_path):
-    """A terminal ``failed`` state must degrade the run, not crash it."""
+async def test_a_failed_job_reports_the_provider_error_without_a_traceback(stub, tmp_path, caplog):
+    """A terminal ``failed`` state must degrade the run, not crash it.
+
+    ``RestSandboxProvider.wait_for_completion`` never raises for a *terminal*
+    failure — only a timeout or an HTTP error does that — it returns the
+    string ``"failed"``, and ``_submit_to_sandbox`` folds that into the
+    warning below via ``SubmissionResult.error``. So "the provider error" a
+    caller sees for this path is that log line, not a raised
+    ``ProviderError``; this test pins its exact shape rather than just the
+    ``None`` return, so a future change that let a traceback leak into it (or
+    dropped the state name from it) would fail here. ``_submit_to_sandbox``
+    has no other channel — no run summary, no degradation-reasons list — that
+    a caller could read this message from; that plumbing is filled in later,
+    by graph nodes that only ever see ``sandbox_report is None``.
+    """
+    import logging
+
     from maljan.app import MaljanApp
 
     stub.states = ["queued", "failed"]
@@ -164,8 +179,23 @@ async def test_a_failed_job_reports_the_provider_error_without_a_traceback(stub,
     sample.write_bytes(b"MZ" + b"\0" * 128)
     app = MaljanApp(config=_settings(), mock=False)
 
-    report = await app._submit_to_sandbox(str(sample))
+    with caplog.at_level(logging.WARNING, logger="maljan"):
+        report = await app._submit_to_sandbox(str(sample))
     assert report is None, "a failed sandbox task degrades the run rather than raising"
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings, "the degrade path must leave a legible trace in the logs"
+    outcome = [r for r in warnings if "Sandbox task ended with status=failed" in r.getMessage()]
+    assert len(outcome) == 1, [r.getMessage() for r in warnings]
+    message = outcome[0].getMessage()
+    # The failed state the stub returned, and the provider's own error text
+    # for it, both present and readable — not swallowed into "something
+    # failed".
+    assert "failed" in message
+    assert "Sandbox status: failed" in message
+    for record in warnings:
+        assert "Traceback" not in record.getMessage()
+        assert record.exc_info is None
     await app.aclose()
 
 
