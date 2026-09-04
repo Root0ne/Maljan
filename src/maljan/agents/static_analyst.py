@@ -119,6 +119,39 @@ def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
     return data
 
 
+# Moved to maljan.providers.static.ghidra in the provider layer (2026-09-03).
+# Re-exported so the modules and tests that import them from here keep working;
+# removed in the last task of the provider plan.
+from maljan.providers.static.ghidra import (  # noqa: E402, I001
+    GHIDRA_ALLOWED_TOOLS as _GHIDRA_ALLOWED_TOOLS_MODULE,
+    GhidraStaticProvider,
+)
+
+
+class _LegacyGhidraJob:
+    """Live job view for the deprecated per-analyst delegations below.
+
+    ``nodes.py`` still mutates ``_analysis_file_path`` / ``_sample_categories``
+    on the agent instance itself (Task 10 moves this to a real
+    ``StaticJobContext`` passed through ``open()``); wrapping the agent instead
+    of snapshotting its attributes keeps the classic late-binding behaviour
+    that ``tests/unit/test_load_program_pinning.py`` pins — a tool wrapped
+    before a later path reassignment must still read the reassigned value at
+    call time.
+    """
+
+    def __init__(self, agent: StaticAnalyst) -> None:
+        self._agent = agent
+
+    @property
+    def mirror_sample_path(self) -> str | None:
+        return getattr(self._agent, "_analysis_file_path", None)
+
+    @property
+    def capability_categories(self) -> Any:
+        return getattr(self._agent, "_sample_categories", None)
+
+
 @register_agent("static")
 class StaticAnalyst(BaseAnalyst):
     """Specialized agent for evaluating decompiled code and strings via Ghidra MCP."""
@@ -127,56 +160,8 @@ class StaticAnalyst(BaseAnalyst):
     # MCP Tool Interface
     # ------------------------------------------------------------------
 
-    # Allowlist of Ghidra MCP tools exposed to the ReAct agent.
-    #
-    # Rationale: Ghidra MCP advertises ~225 tools, of which ~165 reach our
-    # client. Past runs loaded 123 tools after a denylist filter, but each
-    # ReAct step then carries that entire catalogue in the prompt — for a
-    # 9B-parameter local model with a 32k context window this is the single
-    # largest contributor to per-step latency (3–5 minutes per round). The
-    # allowlist below covers everything a static malware analyst actually
-    # needs (load + enumerate + decompile + xrefs + malware-specific
-    # detectors) and nothing else, cutting the catalog ~5x.
-    _GHIDRA_ALLOWED_TOOLS: frozenset[str] = frozenset(
-        {
-            # Program lifecycle (load_program MUST run first).
-            "load_program",
-            "get_current_program_info",
-            # Pre-digested high-value analyzers — give the LLM curated
-            # triage signals in one tool call instead of forcing it to
-            # walk the function graph by hand.
-            "detect_malware_behaviors",
-            "analyze_api_call_chains",
-            "find_anti_analysis_techniques",
-            "extract_iocs_with_context",
-            # Compact enumeration tools the model uses to corroborate
-            # behavior calls without exploding the prompt.
-            "list_imports",
-            "list_strings",
-            "list_segments",
-            "get_entry_points",
-            # Targeted deep-dive when the analyzers point at a function.
-            "decompile_function",
-            "get_xrefs_to",
-            # 2026-05-31: high-value malware analyzers surfaced by the
-            # ghidra-mcp v5.6.0 audit (we were using 12/165 tools). These
-            # close the evasion / crypto / dynamic-emulation gaps.
-            "emulate_hash_batch",  # resolve API-hash obfuscation (ROR13/CRC32/djb2/FNV)
-            "emulate_function",  # run a hash/crypto/deobfuscation routine in isolation
-            "detect_crypto_constants",  # AES/RC4/etc. constants (ransomware/packing)
-            "analyze_dataflow",  # PCode taint: trace keys / C2 config / decode chains
-            "get_function_hash",  # normalized opcode hash for family attribution
-            "search_byte_patterns",  # masked in-binary signature hunt
-            "find_code_gaps",  # surface missed functions in packed/obfuscated code
-            "analyze_function_complete",  # one-call comprehensive function analysis
-        }
-    )
-    # 31 → 12 (audit 2026-05-17, A-01). The dropped tools were redundant
-    # call-graph traversals and function-listing variants that bloated
-    # the prompt and pushed each ReAct round into the 180-600 s range.
-    # 2026-05-31: 12 → 20 — added 8 high-value malware analyzers (emulate /
-    # crypto / dataflow / code-gap). The sink-reachability pre-pass focuses
-    # the loop, offsetting the larger tool manifest.
+    # Moved to maljan.providers.static.ghidra in the provider layer (2026-09-03).
+    _GHIDRA_ALLOWED_TOOLS: frozenset[str] = _GHIDRA_ALLOWED_TOOLS_MODULE
 
     # Container-visible path of the current sample, assigned per-run by the
     # pipeline (nodes.py) alongside ``_sample_categories``. Read at CALL time
@@ -184,115 +169,46 @@ class StaticAnalyst(BaseAnalyst):
     # samples and tools may be selected before the pipeline sets the path).
     _analysis_file_path: str | None = None
 
-    def _ghidra_tool_mode(self) -> str:
-        """Resolve the effective tool-selection mode from config (back-compat)."""
-        from maljan.core.config import get_settings
+    def _resolve_ghidra_provider(self) -> GhidraStaticProvider:
+        """The provider that now owns this logic, for the four delegations below.
 
-        ghidra = get_settings().mcp.ghidra
-        if getattr(ghidra, "use_all_tools", False):
-            return "all"
-        return str(getattr(ghidra, "tool_selection", "dynamic"))
+        Prefers the job's container-cached provider when it actually is
+        Ghidra; otherwise builds a standalone instance from today's settings,
+        which is what keeps a bare analyst — ``tests/unit/test_load_program_pinning.py``
+        constructs one with ``StaticAnalyst.__new__`` — working. ``memory`` is
+        never read by any of the four delegated methods, so the fallback does
+        not need a real one. Reads ``mcp.ghidra`` rather than the newer
+        ``static.ghidra`` on purpose: this shim preserves the pre-provider
+        behaviour byte for byte, including for callers that still fake only
+        the old path.
+        """
+        from maljan.core.config import MemoryConfig, get_settings
+
+        container = getattr(self, "_container", None)
+        provider = container.get_static_provider() if container is not None else None
+        if not isinstance(provider, GhidraStaticProvider):
+            cfg = get_settings()
+            provider = GhidraStaticProvider(cfg.mcp.ghidra, cfg.preprocessing, MemoryConfig())
+        provider._job = _LegacyGhidraJob(self)  # type: ignore[assignment]
+        return provider
+
+    def _ghidra_tool_mode(self) -> str:
+        """Deprecated: the mode logic now lives on ``GhidraStaticProvider._tool_mode``."""
+        return self._resolve_ghidra_provider()._tool_mode()
 
     def _select_ghidra_tools(
         self, tools: list[Any], categories: set[str] | None = None
     ) -> list[Any]:
-        """Pick the tool manifest to expose to the model per the configured mode.
-
-        - ``curated`` — the fixed ~20-tool allowlist (fastest, narrowest).
-        - ``dynamic`` — CORE triage set + tools relevant to the sample's
-          capability ``categories`` (~30-40). All tools stay reachable; only the
-          relevant subset is shown (2026-07 round 3, tool-RAG). Without
-          categories (init time) it falls back to the curated allowlist.
-        - ``all`` — every tool the server offers (measured 5-6x slower + noisier).
-        """
-        mode = self._ghidra_tool_mode()
-        if mode == "all":
-            self.logger.info("Ghidra MCP [all]: exposing all %d tools.", len(tools))
-            return self._pin_load_program_path(list(tools))
-
-        # Fall back to categories set by the pipeline (nodes.py) when the caller
-        # didn't pass any — this is the reliable path (state["sample_path"]).
-        if categories is None:
-            categories = getattr(self, "_sample_categories", None)
-
-        if mode == "dynamic" and categories is not None:
-            from maljan.agents.ghidra_tool_selector import select_relevant_ghidra_tools
-
-            selected = select_relevant_ghidra_tools(tools, categories)
-            self.logger.info(
-                "Ghidra MCP [dynamic]: selected %d/%d tools for categories %s.",
-                len(selected),
-                len(tools),
-                sorted(categories) or "{}",
-            )
-            return self._pin_load_program_path(selected)
-
-        # curated (or dynamic before a sample is known)
-        kept = [t for t in tools if getattr(t, "name", "").lower() in self._GHIDRA_ALLOWED_TOOLS]
-        self.logger.info(
-            "Ghidra MCP [%s]: kept %d/%d tools via curated allowlist.",
-            mode,
-            len(kept),
-            len(tools),
-        )
-        return self._pin_load_program_path(kept)
+        """Deprecated: the selection logic now lives on ``GhidraStaticProvider.select_tools``."""
+        return self._resolve_ghidra_provider().select_tools(tools, categories)
 
     def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
-        """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
-
-        Ghidra-path fix (2026-07-12, job 60df48cb): on a fresh sample whose
-        chunk lacked ``analysis_file_path`` the LLM invented
-        ``/home/user/data/bin.<sha>`` and load_program failed with
-        "File not found" even though the mirror to ``/data/samples/`` had
-        succeeded. The wrapper deterministically substitutes the known
-        container path (``self._analysis_file_path``, set per-sample by
-        nodes.py) whenever the model supplies a different one. Fail-safe:
-        any wrapping error keeps the original tool.
-        """
-        out: list[Any] = []
-        for tool in tools:
-            if getattr(tool, "name", "") == "load_program":
-                try:
-                    tool = self._wrap_load_program(tool)
-                except Exception as e:  # noqa: BLE001
-                    self.logger.warning("load_program pin skipped: %s", e)
-            out.append(tool)
-        return out
+        """Deprecated: the pinning logic now lives on ``GhidraStaticProvider``."""
+        return self._resolve_ghidra_provider()._pin_load_program_path(tools)
 
     def _wrap_load_program(self, tool: Any) -> Any:
-        """Rebuild the load_program StructuredTool with a path-pinning coroutine.
-
-        A fresh tool is built rather than mutating ``tool.coroutine`` in
-        place — the original lives in the shared ``_all_ghidra_tools`` pool
-        and the HTTP client's tool list; in-place mutation would leak the
-        wrapper across selections.
-        """
-        from langchain_core.tools import StructuredTool
-
-        inner = getattr(tool, "coroutine", None)
-        if inner is None:
-            return tool  # sync/stdio tool variant — leave untouched
-
-        agent = self
-
-        async def pinned_load_program(**kwargs: Any) -> str:
-            pinned = getattr(agent, "_analysis_file_path", None)
-            if isinstance(pinned, str) and pinned and kwargs.get("file") != pinned:
-                agent.logger.warning(
-                    "load_program: overriding model-supplied path %r with known container path %r.",
-                    kwargs.get("file"),
-                    pinned,
-                )
-                kwargs["file"] = pinned
-            return str(await inner(**kwargs))
-
-        return StructuredTool.from_function(
-            func=None,
-            coroutine=pinned_load_program,
-            name=tool.name,
-            description=tool.description,
-            args_schema=tool.args_schema,
-        )
+        """Deprecated: the wrapping logic now lives on ``GhidraStaticProvider``."""
+        return self._resolve_ghidra_provider()._wrap_load_program(tool)
 
     def _refine_tools_for_sample(self, host_path: str | None) -> None:
         """In dynamic mode, narrow ``self.tools`` to the sample's relevant tools.
