@@ -16,9 +16,9 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, SkipValidation
+from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler, field_validator
 
 
 def _int(value: Any) -> int:
@@ -39,6 +39,22 @@ def _as_str_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(v) for v in value if v not in (None, "")]
     return [str(value)] if value else []
+
+
+def _dict_identity_or_validate(value: Any, handler: ValidatorFunctionWrapHandler) -> dict[str, Any]:
+    """Return ``value`` unchanged when it is already a dict; otherwise validate normally.
+
+    This is the narrow fix a bare ``SkipValidation[dict[str, Any]]`` does not
+    give: identity (``rendered is raw``) is what ``to_cape_shaped_dict``'s
+    short circuit depends on, but ``SkipValidation`` accepts *anything* —
+    a string, a list, ``None`` — and would hand it to every consumer as if it
+    were the CAPE dict. A dict still passes through untouched (same object,
+    no pydantic-core rebuild); anything else still goes through the ordinary
+    ``dict[str, Any]`` validator and still raises ``ValidationError``.
+    """
+    if isinstance(value, dict):
+        return value
+    return cast("dict[str, Any]", handler(value))
 
 
 class SandboxTarget(BaseModel):
@@ -116,22 +132,27 @@ class SandboxReport(BaseModel):
     signatures: list[SandboxSignatureRow] = Field(default_factory=list)
     network: SandboxNetwork = Field(default_factory=SandboxNetwork)
     dropped_files: list[dict[str, Any]] = Field(default_factory=list)
-    registry: list[dict[str, Any]] = Field(default_factory=list)
+    # list[str], not list[dict]: the real shape is behavior.summary.keys, a
+    # flat array of registry-path strings (confirmed against every one of the
+    # 97 real reports under data/cape_reports/ — 139,056 string entries, zero
+    # dicts). A dict-only filter here would silently drop all of it, the same
+    # mistake ``file_writes`` had below.
+    registry: list[str] = Field(default_factory=list)
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     unavailable: list[str] = Field(default_factory=list)
-    # SkipValidation, not plain dict[str, Any]: pydantic-core rebuilds a fresh
-    # dict container for an ordinary dict field even when every value is
-    # already valid, which would silently break the one invariant this whole
-    # provider layer leans on — ``to_cape_shaped_dict`` returning
-    # ``report.raw`` as *the same object* the CAPE client fetched, not a copy.
-    raw: SkipValidation[dict[str, Any]] = Field(default_factory=dict)
+    raw: dict[str, Any] = Field(default_factory=dict)
+    _validate_raw = field_validator("raw", mode="wrap")(_dict_identity_or_validate)
     # Ruled in during the pre-flight scan, beyond the brief's own field list:
     # persistence_extractor's Linux path rules read both of these directly
     # (``behavior.summary.{files,write_files,modified_files,wrote_files}`` and
-    # the top-level ``file_writes``/``files_written`` arrays).
+    # the top-level ``file_writes``/``files_written`` arrays) and keep only
+    # the string entries of each (its own ``isinstance(p, str)`` guard) — a
+    # dict-shaped entry is not richer data, it is a shape the consumer already
+    # discards, so both are coerced to ``list[str]`` here rather than filtered
+    # to dicts only.
     summary: dict[str, list[str]] = Field(default_factory=dict)
-    file_writes: list[dict[str, Any]] = Field(default_factory=list)
+    file_writes: list[str] = Field(default_factory=list)
 
 
 class SandboxRun(BaseModel):
@@ -148,7 +169,16 @@ class SandboxRun(BaseModel):
     sample_name: str = ""
     status: str = "reported"
     report: SandboxReport
+    # Same wrap-validator identity fix as SandboxReport.raw above, and for the
+    # same reason: a sandbox provider's ``fetch()`` sets both
+    # ``SandboxRun.raw`` and ``SandboxReport.raw`` to the very same
+    # client-returned dict, and ``test_fetch_keeps_the_raw_report_by_identity``
+    # depends on ``run.raw is <that dict>`` holding exactly as it does for the
+    # report — a plain ``dict[str, Any]`` field does not hold that (confirmed
+    # empirically: pydantic-core rebuilds the container even when every value
+    # already validates), so this field needs the same protection.
     raw: dict[str, Any]
+    _validate_raw = field_validator("raw", mode="wrap")(_dict_identity_or_validate)
     error: str = ""
 
 
@@ -240,11 +270,11 @@ def cape_report_to_sandbox_report(
             pcap_local_path=net.get("pcap_local_path") or None,
         ),
         dropped_files=_rows(raw.get("dropped")),
-        registry=_rows((behavior.get("summary") or {}).get("keys")),
+        registry=_as_str_list((behavior.get("summary") or {}).get("keys")),
         screenshots=_rows(raw.get("screenshots")),
         cti=cti_field if isinstance(cti_field, dict) else {},
         unavailable=[],
         raw=raw,
         summary={key: _as_str_list(summary_raw.get(key)) for key in _SUMMARY_KEYS},
-        file_writes=_rows(raw.get("file_writes") or raw.get("files_written")),
+        file_writes=_as_str_list(raw.get("file_writes") or raw.get("files_written")),
     )

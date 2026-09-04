@@ -14,6 +14,7 @@ import pytest
 
 from maljan.extractors.dynamic_extractor import build_dynamic_behavior
 from maljan.extractors.network_extractor import build_network_iocs
+from maljan.extractors.persistence_extractor import build_persistence_list
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
 from tests.providers.test_extractor_golden import cape_reports, dump
@@ -37,9 +38,12 @@ _IDS = [n for n, _ in _REPORTS]
 #
 # Not listed: ``network.pcap_local_path`` has its own dedicated test below
 # (it is only ever present conditionally, never an empty placeholder), and
-# ``behavior.notable_apis`` / ``dynamic.notable_apis`` is a known, accepted
-# gap — out of scope for this task's two ruled additions — see the task
-# report's concerns section.
+# ``behavior.notable_apis`` / ``dynamic.notable_apis`` stays unmodeled here —
+# Task 7 resolved that carried finding by showing neither provider it built
+# ever takes this full-render path with a real report (see
+# tests/providers/sandbox/test_cape2_provider.py and the task report), so
+# this file's own scope — the render used when ``raw`` is empty — is
+# unchanged by that resolution.
 CONSUMER_KEYS: tuple[tuple[str, str], ...] = (
     ("target.sha256", "scalar"),
     ("target.md5", "scalar"),
@@ -134,3 +138,30 @@ def test_pcap_path_and_unavailable_survive_the_render():
     rendered = to_cape_shaped_dict(report)
     assert rendered["network"]["pcap_local_path"] == "/tmp/x.pcap"
     assert rendered["unavailable"] == ["apistats", "calls"]
+
+
+def test_file_writes_reaches_persistence_extractor_the_same_from_raw_and_rendered():
+    """Review finding: ``file_writes``/``registry`` were filtered with ``_rows``
+    (dict entries only), but the real shape — and the only shape
+    ``persistence_extractor`` reads (its own ``isinstance(p, str)`` guard) —
+    is a flat list of path strings. The dict-only filter silently dropped
+    every real entry on the non-short-circuit render path. Asserted through
+    the real consumer rather than a shape check, per the review: the set of
+    persistence mechanisms ``build_persistence_list`` finds must be identical
+    whether it is fed the raw dict or the rendered one.
+    """
+    raw = {
+        "target": {"sha256": "a" * 64},
+        "file_writes": ["/etc/rc.local", "/etc/ld.so.preload"],
+    }
+    report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(update={"raw": {}})
+    rendered = to_cape_shaped_dict(report)
+    assert rendered is not raw
+    assert rendered["file_writes"] == ["/etc/rc.local", "/etc/ld.so.preload"]
+
+    raw_mechanisms = build_persistence_list(raw, sample_platform="linux")
+    rendered_mechanisms = build_persistence_list(rendered, sample_platform="linux")
+    assert len(raw_mechanisms) == 2
+    assert {(m.kind, m.target) for m in rendered_mechanisms} == {
+        (m.kind, m.target) for m in raw_mechanisms
+    }

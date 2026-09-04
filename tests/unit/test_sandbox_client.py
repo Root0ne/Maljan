@@ -38,6 +38,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from maljan.loaders.mock_sandbox_client import MockSandboxClient
@@ -244,6 +245,89 @@ class TestCAPEv2Client:
 
         # Should not raise
         CAPEv2Client._raise_for_status(mock_response, "test_op")
+
+
+class TestCAPEv2ClientFetchReportSampleIdentity:
+    """A real CAPEv2 report nests sample identity under target.file.*.
+
+    Confirmed empirically against all 97 reports under data/cape_reports/ on
+    2026-09-04: ``target`` there carries only "category" and "file" — never a
+    flat "sha256" or "name" — while ``target.file.sha256``/``target.file.name``
+    are present on every one of the 97. ``fetch_report`` read only the flat
+    shape, so ``sample_sha256``/``sample_name`` were silently empty for every
+    real report. A wrong sha256 here is a wrong sample identity, so this is a
+    correctness fix, not a cleanup, and gets its own test rather than folding
+    into the existing HTTP-mocked CAPEv2Client tests above.
+    """
+
+    @staticmethod
+    def _client_with_transport(handler: object) -> object:
+        from maljan.loaders.cape2_client import CAPEv2Client
+
+        client = CAPEv2Client(base_url="http://cape.invalid:8000", api_token="t")
+        # base_url is required here too: CAPEv2Client.fetch_report() issues a
+        # relative GET ("/apiv2/tasks/get/report/<id>/") against self._http,
+        # and an httpx.Client with no base_url cannot resolve that to a real
+        # request even against a MockTransport.
+        client._http = httpx.Client(  # type: ignore[attr-defined]
+            base_url="http://cape.invalid:8000", transport=httpx.MockTransport(handler)
+        )
+        return client
+
+    def test_fetch_report_reads_the_real_nested_shape(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "target": {
+                        "category": "file",
+                        "file": {"sha256": "b" * 64, "md5": "c" * 32, "name": "sample.exe"},
+                    },
+                    "behavior": {},
+                },
+            )
+
+        client = self._client_with_transport(handler)
+        result = client.fetch_report("42")  # type: ignore[attr-defined]
+
+        assert result.sample_sha256 == "b" * 64
+        assert result.sample_name == "sample.exe"
+
+    def test_fetch_report_still_reads_a_flat_target_as_a_fallback(self) -> None:
+        """The simplified fixtures under data/samples/dynamic/ are flat; keep them working."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"target": {"sha256": "d" * 64, "name": "flat.exe"}, "behavior": {}},
+            )
+
+        client = self._client_with_transport(handler)
+        result = client.fetch_report("43")  # type: ignore[attr-defined]
+
+        assert result.sample_sha256 == "d" * 64
+        assert result.sample_name == "flat.exe"
+
+    def test_a_nested_file_block_wins_over_a_flat_target(self) -> None:
+        """When both shapes are present, the real (nested) one is authoritative."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "target": {
+                        "sha256": "stale-flat-value",
+                        "file": {"sha256": "f" * 64, "name": "real.exe"},
+                    },
+                    "behavior": {},
+                },
+            )
+
+        client = self._client_with_transport(handler)
+        result = client.fetch_report("44")  # type: ignore[attr-defined]
+
+        assert result.sample_sha256 == "f" * 64
+        assert result.sample_name == "real.exe"
 
 
 # ---------------------------------------------------------------------------
