@@ -1,0 +1,9 @@
+{
+  "server": "network",
+  "source": "live handshake",
+  "tools": [
+    "extract_dns",
+    "extract_http",
+    "read_pcap_summary"
+  ]
+}
