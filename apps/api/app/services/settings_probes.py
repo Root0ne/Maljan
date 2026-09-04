@@ -409,22 +409,80 @@ async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+def _str(v: dict[str, Any], key: str, default: str) -> str:
+    """``v[key]`` as a string, or ``default`` when the key is absent.
+
+    Not ``v.get(key) or default``: an operator-set empty string is a real
+    value for several of these fields (an empty auth scheme sends the token
+    raw; an empty mapping path means "this channel is not published"), and
+    coercing it to the default would silently discard that choice.
+    """
+    value = v.get(key)
+    return str(value) if value is not None else default
+
+
 async def probe_rest(v: dict[str, Any]) -> ProbeResult:
-    """Ask the configured sandbox's status endpoint about a task that does not exist."""
+    """Ask the configured sandbox's status endpoint about a task that does not exist.
+
+    Every leaf ``_INPUTS["rest"]`` reads is folded into the ``SandboxRestConfig``
+    handed to the provider — not just the four the HTTP call itself touches —
+    so a staged auth header/scheme or mapping edit is what "Test" actually
+    exercises, the same as saving and running a job would use.
+    """
     t0 = time.perf_counter()
-    from maljan.core.config import Settings
+    from maljan.core.config import (
+        RestAuthConfig,
+        RestMappingConfig,
+        RestReportConfig,
+        RestStatusConfig,
+        SandboxRestConfig,
+    )
     from maljan.providers.sandbox.rest import RestSandboxProvider
 
-    cfg = Settings()
-    rest = cfg.sandbox.rest.model_copy(deep=True)
-    rest.base_url = str(v.get("base_url") or rest.base_url)
-    rest.auth.token = SecretStr(str(v.get("token") or rest.auth.token.get_secret_value()))
-    rest.status.path = str(v.get("status_path") or rest.status.path)
-    rest.verify_tls = bool(v.get("verify_tls", rest.verify_tls))
+    field_names = v.get("mapping_field_names")
     try:
+        rest = SandboxRestConfig(
+            base_url=_str(v, "base_url", ""),
+            auth=RestAuthConfig(
+                header=_str(v, "auth_header", "Authorization"),
+                scheme=_str(v, "auth_scheme", "Bearer"),
+                token=SecretStr(_str(v, "token", "")),
+            ),
+            status=RestStatusConfig(
+                path=_str(v, "status_path", "/samples/{task_id}"),
+                state_path=_str(v, "status_state_path", "$.status"),
+            ),
+            report=RestReportConfig(
+                path=_str(v, "report_path", "/samples/{task_id}/report"),
+                format=_str(v, "report_format", "generic"),  # type: ignore[arg-type]
+            ),
+            mapping=RestMappingConfig(
+                target_sha256=_str(v, "mapping_target_sha256", "$.target.sha256"),
+                processes=_str(v, "mapping_processes", ""),
+                calls=_str(v, "mapping_calls", ""),
+                signatures=_str(v, "mapping_signatures", ""),
+                dns=_str(v, "mapping_dns", ""),
+                http=_str(v, "mapping_http", ""),
+                tcp=_str(v, "mapping_tcp", ""),
+                udp=_str(v, "mapping_udp", ""),
+                hosts=_str(v, "mapping_hosts", ""),
+                domains=_str(v, "mapping_domains", ""),
+                dropped_files=_str(v, "mapping_dropped_files", ""),
+                registry=_str(v, "mapping_registry", ""),
+                field_names=field_names if isinstance(field_names, dict) else {},
+            ),
+            timeout_seconds=int(v.get("timeout_seconds") or 900),
+            poll_interval_seconds=int(v.get("poll_interval_seconds") or 15),
+            verify_tls=bool(v.get("verify_tls", True)),
+        )
         provider = RestSandboxProvider(rest, compile_mapping(rest.mapping))
-    except ProviderConfigurationError as exc:
-        return ProbeResult(False, _ms(t0), str(exc))
+    except (ProviderConfigurationError, ValidationError) as exc:
+        fields = (
+            "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+            if isinstance(exc, ValidationError)
+            else str(exc)
+        )
+        return ProbeResult(False, _ms(t0), fields)
     result = await provider.probe()
     return ProbeResult(result.ok, result.latency_ms or _ms(t0), result.detail)
 
@@ -505,9 +563,29 @@ _INPUTS: dict[str, dict[str, str]] = {
     "abuseipdb": {"api.abuseipdb_api_key": "api_key"},
     "rest": {
         "core.sandbox.rest.base_url": "base_url",
+        "core.sandbox.rest.auth.header": "auth_header",
+        "core.sandbox.rest.auth.scheme": "auth_scheme",
         "core.sandbox.rest.auth.token": "token",
         "core.sandbox.rest.status.path": "status_path",
+        "core.sandbox.rest.status.state_path": "status_state_path",
+        "core.sandbox.rest.report.path": "report_path",
+        "core.sandbox.rest.report.format": "report_format",
         "core.sandbox.rest.verify_tls": "verify_tls",
+        "core.sandbox.rest.timeout_seconds": "timeout_seconds",
+        "core.sandbox.rest.poll_interval_seconds": "poll_interval_seconds",
+        "core.sandbox.rest.mapping.target_sha256": "mapping_target_sha256",
+        "core.sandbox.rest.mapping.processes": "mapping_processes",
+        "core.sandbox.rest.mapping.calls": "mapping_calls",
+        "core.sandbox.rest.mapping.signatures": "mapping_signatures",
+        "core.sandbox.rest.mapping.dns": "mapping_dns",
+        "core.sandbox.rest.mapping.http": "mapping_http",
+        "core.sandbox.rest.mapping.tcp": "mapping_tcp",
+        "core.sandbox.rest.mapping.udp": "mapping_udp",
+        "core.sandbox.rest.mapping.hosts": "mapping_hosts",
+        "core.sandbox.rest.mapping.domains": "mapping_domains",
+        "core.sandbox.rest.mapping.dropped_files": "mapping_dropped_files",
+        "core.sandbox.rest.mapping.registry": "mapping_registry",
+        "core.sandbox.rest.mapping.field_names": "mapping_field_names",
     },
 }
 

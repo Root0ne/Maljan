@@ -31,6 +31,7 @@ def test_an_unmapped_channel_is_reported_as_zero_rather_than_missing():
         "matched": 0,
         "kept": 0,
         "dropped": 0,
+        "truncated": False,
         "sample_rows": [],
         "error": None,
     }
@@ -88,14 +89,13 @@ def test_a_good_mapping_over_the_xyz_fixture_matches_task_10s_golden():
 
     out = preview_mapping(payload, mapping)
 
-    # "calls" is excluded: the real mapping attaches each call to its process
-    # (Task 10's cross-channel step), so its "kept" count depends on
-    # "processes" being mapped in the same pass. A per-channel preview has no
-    # such pass — it names that limitation for "calls" by design — so its
-    # count is compared to the un-orphaned "matched" figure instead.
-    for channel in ("processes", "signatures", "dns", "tcp", "dropped_files", "registry"):
+    # "calls" is included: the preview now maps every compiled channel
+    # together in one ``apply_mapping`` call, the same call a job would make,
+    # so a call's attachment to its process — and the orphan count that
+    # attachment produces — matches Task 10's golden exactly, not just the
+    # unattached "matched" figure.
+    for channel in ("processes", "calls", "signatures", "dns", "tcp", "dropped_files", "registry"):
         assert out["channels"][channel]["matched"] == expected.stats[channel].matched
         assert out["channels"][channel]["kept"] == expected.stats[channel].kept
         assert out["channels"][channel]["dropped"] == expected.stats[channel].dropped
-    assert out["channels"]["calls"]["matched"] == expected.stats["calls"].matched
     assert out["target_sha256"] == expected.report.target.sha256

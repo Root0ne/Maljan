@@ -96,6 +96,7 @@ class ChannelPreview(BaseModel):
     matched: int
     kept: int
     dropped: int
+    truncated: bool = False
     sample_rows: list[Any]
     error: str | None = None
 

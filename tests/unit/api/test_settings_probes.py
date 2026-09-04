@@ -481,3 +481,122 @@ async def test_probe_mcp_closes_a_real_handle_that_hangs_mid_handshake(monkeypat
     assert result.ok is False
     assert "no MCP handshake" in result.detail
     cleaned[0].cleanup.assert_called_once()
+
+
+def _fake_rest_async_client(handler):
+    """A drop-in ``httpx.AsyncClient`` factory whose requests never leave the
+    process, patched onto the ``rest`` module the same way Task 11/12's own
+    ``TriageSandboxProvider`` probe test patches ``triage.httpx.AsyncClient``."""
+    real_async_client = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        return real_async_client(transport=httpx.MockTransport(handler), timeout=10)
+
+    return factory
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_ok_on_200_and_carries_the_staged_auth(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["auth"] = request.headers.get("x-api-key")
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(rest_module.httpx, "AsyncClient", _fake_rest_async_client(handler))
+    r = await probes.probe_rest(
+        {
+            "base_url": "https://xyz.example/api",
+            "auth_header": "X-API-Key",
+            "auth_scheme": "",
+            "token": "s3cr3t",
+        }
+    )
+    assert r.ok is True
+    assert seen["path"] == "/api/samples/probe"
+    assert seen["auth"] == "s3cr3t"  # empty scheme: the raw token, unprefixed
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_ok_on_a_404_for_the_fake_task(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    monkeypatch.setattr(
+        rest_module.httpx,
+        "AsyncClient",
+        _fake_rest_async_client(lambda r: httpx.Response(404)),
+    )
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api"})
+    assert r.ok is True
+    assert r.detail == "reachable, status endpoint answered 404 for a fake task"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_rest_probe_reports_the_credential_was_refused(monkeypatch, status):
+    import maljan.providers.sandbox.rest as rest_module
+
+    monkeypatch.setattr(
+        rest_module.httpx,
+        "AsyncClient",
+        _fake_rest_async_client(lambda r: httpx.Response(status)),
+    )
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api", "token": "s3cr3t-token"})
+    assert r.ok is False
+    assert str(status) in r.detail
+    assert "s3cr3t-token" not in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_a_connection_error_legibly(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    monkeypatch.setattr(rest_module.httpx, "AsyncClient", _fake_rest_async_client(handler))
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api"})
+    assert r.ok is False
+    assert "ConnectError" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_a_bad_mapping_path_naming_the_channel():
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api", "mapping_dns": "$[["})
+    assert r.ok is False
+    assert "dns" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_notes_tls_verification_is_off(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    monkeypatch.setattr(
+        rest_module.httpx,
+        "AsyncClient",
+        _fake_rest_async_client(lambda r: httpx.Response(200)),
+    )
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api", "verify_tls": False})
+    assert r.ok is True
+    assert "TLS verification is off" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_never_puts_the_token_in_the_url_or_detail(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(rest_module.httpx, "AsyncClient", _fake_rest_async_client(handler))
+    r = await probes.probe_rest(
+        {"base_url": "https://xyz.example/api", "token": "super-secret-rest-token"}
+    )
+    assert "super-secret-rest-token" not in r.detail
+    assert "super-secret-rest-token" not in str(seen["url"])

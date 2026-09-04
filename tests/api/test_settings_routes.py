@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -149,6 +150,26 @@ def test_the_preview_route_caps_the_pasted_sample(client):
     assert r.status_code == 413
 
 
+def test_the_preview_route_caps_a_streamed_body_with_no_content_length(client):
+    """A body sent without a declared length (chunked transfer, or a lying
+    header) must still be capped — the streamed guard, not ``Content-Length``,
+    is what catches it."""
+    from app.services.mapping_preview import PREVIEW_MAX_BYTES
+
+    body = json.dumps({"sample": {"pad": "x" * (PREVIEW_MAX_BYTES + 1)}, "mapping": {}}).encode()
+
+    def chunks():
+        for i in range(0, len(body), 65536):
+            yield body[i : i + 65536]
+
+    r = client.post(
+        "/api/v1/settings/sandbox-rest/preview",
+        content=chunks(),
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 413
+
+
 def test_the_preview_route_counts_rows_per_channel(client):
     r = client.post(
         "/api/v1/settings/sandbox-rest/preview",
@@ -159,6 +180,7 @@ def test_the_preview_route_counts_rows_per_channel(client):
         "matched": 2,
         "kept": 1,
         "dropped": 1,
+        "truncated": False,
         "sample_rows": [{"pid": 1}],
         "error": None,
     }

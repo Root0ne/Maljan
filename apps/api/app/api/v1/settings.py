@@ -170,7 +170,11 @@ async def _capped_body(request: Request) -> dict[str, Any]:
 
     ``Content-Length`` catches an honest client without reading a byte; the
     streamed guard catches a body sent without one (chunked transfer) or a
-    header that understates the real size, so the cap holds either way.
+    header that understates the real size, so the cap holds either way. The
+    streamed read never buffers past ``PREVIEW_MAX_BYTES + 1`` — a chunk that
+    would cross the limit is sliced down to the bytes needed to prove it does,
+    not appended whole, so one oversized chunk cannot balloon memory use past
+    the cap it is here to enforce.
     """
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -180,16 +184,20 @@ async def _capped_body(request: Request) -> dict[str, Any]:
                     status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                     f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
                 )
+    limit = PREVIEW_MAX_BYTES + 1
     chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():
-        size += len(chunk)
-        if size > PREVIEW_MAX_BYTES:
-            raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
-            )
-        chunks.append(chunk)
+        if size >= limit:
+            break
+        piece = chunk[: limit - size]
+        chunks.append(piece)
+        size += len(piece)
+    if size > PREVIEW_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
+        )
     try:
         parsed: dict[str, Any] = json.loads(b"".join(chunks) or b"{}")
         return parsed
