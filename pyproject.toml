@@ -73,6 +73,9 @@ packages = ["src/maljan"]
 yara = [
     "yara-python>=4.5.4",
 ]
+capa = [
+    "flare-capa>=9.0.0",
+]
 
 [dependency-groups]
 dev = [

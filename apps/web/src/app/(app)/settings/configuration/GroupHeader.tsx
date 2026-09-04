@@ -1,30 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import type { ProbeResult, SettingValue, SettingsGroup } from "@/types/settings";
+import type { ProbeResult, SettingsGroup } from "@/types/settings";
 
 const PROBE_LABEL: Record<string, string> = {
   llm: "Test connection & fetch models",
+  r2: "Test radare2 MCP",
+  ghidra: "Test Ghidra MCP",
+  capa_yara: "Test capa + YARA rules",
+  cape2: "Test CAPE connection",
+  triage: "Test Triage connection",
 };
 
 export default function GroupHeader({
   group,
-  values,
   probes,
+  overridden,
   onProbe,
   onResetGroup,
 }: {
   group: SettingsGroup;
-  values: Record<string, SettingValue>;
   probes: string[];
+  // "editable" only says a UI-override is *permitted*; it does not mean one
+  // exists. Computed by the caller from the group's *full* entry list, not
+  // whatever subset `group` renders here — a currently hidden entry can hold
+  // the only override, and reset must still be offered for it.
+  overridden: boolean;
   onProbe: (name: string) => Promise<ProbeResult>;
   onResetGroup: () => Promise<void>;
 }) {
   const [results, setResults] = useState<Record<string, ProbeResult | "running" | undefined>>({});
-  // "editable" only says a UI-override is *permitted*; it does not mean one
-  // exists. The reset action must only appear once a row actually carries a
-  // ui-sourced override to reset away.
-  const overridden = group.entries.some((e) => values[e.key]?.source === "ui");
   return (
     <div className="flex items-center justify-between gap-4 mb-2 flex-wrap">
       <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">

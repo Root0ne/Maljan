@@ -1,0 +1,1408 @@
+{
+  "dynamic_behavior": {
+    "file_operations": [],
+    "notable_apis": [],
+    "process_tree": [],
+    "registry_mods": [],
+    "sandbox_signatures": [
+      {
+        "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
+        "marks": [],
+        "name": "hardware_id_profiling",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
+        "marks": [],
+        "name": "mountpoint_manager_access",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Inter-process communication via named shared memory (file mappings), possibly for routing local C2 traffic or injection",
+        "marks": [],
+        "name": "interprocess_comms_shared_memory",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Creates a thread executing from dynamically allocated (unbacked) memory rather than a file on disk, likely to execute shellcode",
+        "marks": [],
+        "name": "thread_unbacked_memory",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Installs itself for autorun at Windows startup",
+        "marks": [],
+        "name": "persistence_autorun",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "The PE entry point is located unusually far into its section, indicative of an appended packer stub",
+        "marks": [],
+        "name": "pe_deep_entrypoint",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Yara detections observed in process dumps, payloads or dropped files",
+        "marks": [],
+        "name": "procmem_yara",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Operates on local firewall's policies and settings",
+        "marks": [],
+        "name": "bypass_firewall",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Accessed credential storage registry keys",
+        "marks": [],
+        "name": "registry_credential_store_access",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Deletes executed files from disk",
+        "marks": [],
+        "name": "deletes_executed_files",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Attempts to disable UAC",
+        "marks": [],
+        "name": "disables_uac",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Sniffs keystrokes",
+        "marks": [],
+        "name": "infostealer_keylog",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Uses csc.exe C# compiler to build and execute code",
+        "marks": [],
+        "name": "dotnet_csc_build",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Uses suspicious command line tools or Windows utilities",
+        "marks": [],
+        "name": "suspicious_command_tools",
+        "severity": 3,
+        "technique_ids": []
+      },
+      {
+        "description": "Anomalous file deletion behavior detected (10+)",
+        "marks": [],
+        "name": "anomalous_deletefile",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
+        "marks": [],
+        "name": "privilege_elevation_check",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
+        "marks": [],
+        "name": "query_fips_reconnaissance",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
+        "marks": [],
+        "name": "mountpoints_volume_discovery",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "A DLL was loaded from a suspicious directory",
+        "marks": [],
+        "name": "dllload_suspicious_directory",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Creates a process in a suspended state, likely for injection",
+        "marks": [],
+        "name": "creates_suspended_process",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Resumed a thread in another process",
+        "marks": [],
+        "name": "resumethread_remote_process",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Writes to the memory another process",
+        "marks": [],
+        "name": "injection_write_process",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Attempts to make a network connection via suspicious process",
+        "marks": [],
+        "name": "network_connection_via_suspicious_process",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "A process created a hidden window",
+        "marks": [],
+        "name": "stealth_window",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Terminates another process",
+        "marks": [],
+        "name": "terminates_remote_process",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Connects to a Dynamic DNS Domain",
+        "marks": [],
+        "name": "network_dyndns",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "The PE file contains TLS callbacks which execute before the entry point and before debugger attachment, commonly used by packers for anti-analysis or pre-EP decryption",
+        "marks": [],
+        "name": "pe_tls_callbacks",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "A PE section has both write and execute permissions (W+X), indicating a self-modifying stub or in-place unpacker",
+        "marks": [],
+        "name": "pe_writable_executable_section",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "The binary contains an unknown PE section name indicative of packing",
+        "marks": [],
+        "name": "packer_unknown_pe_section_name",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "The binary likely contains encrypted or compressed data",
+        "marks": [],
+        "name": "packer_entropy",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Queries registry mount points to identify historical or connected removable/network drives",
+        "marks": [],
+        "name": "discover_registry_mount_points",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Creates RWX memory",
+        "marks": [],
+        "name": "injection_rwx",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Uses Windows utilities for basic functionality",
+        "marks": [],
+        "name": "uses_windows_utilities",
+        "severity": 2,
+        "technique_ids": []
+      },
+      {
+        "description": "Queries the keyboard layout",
+        "marks": [],
+        "name": "queries_keyboard_layout",
+        "severity": 1,
+        "technique_ids": []
+      },
+      {
+        "description": "Queries the computer locale (possible geofencing)",
+        "marks": [],
+        "name": "queries_locale_api",
+        "severity": 1,
+        "technique_ids": []
+      },
+      {
+        "description": "Communicates with IPs located across a large number of unique countries",
+        "marks": [],
+        "name": "network_country_distribution",
+        "severity": 1,
+        "technique_ids": []
+      },
+      {
+        "description": "Possible date expiration check, exits too soon after checking local time",
+        "marks": [],
+        "name": "stealth_timeout",
+        "severity": 1,
+        "technique_ids": []
+      },
+      {
+        "description": "Checks system language via registry key (possible geofencing)",
+        "marks": [],
+        "name": "language_check_registry",
+        "severity": 1,
+        "technique_ids": []
+      }
+    ],
+    "unavailable": []
+  },
+  "network_iocs": {
+    "domains": [
+      {
+        "dga_score": null,
+        "fqdn": "nemoneyron.ddns.net",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": true,
+        "queried_pids": [],
+        "reason": "contains 'ddns.net'",
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/nemoneyron.ddns.net"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.603,
+        "fqdn": "wps-docer-property.ks3-cn-beijing.ksyun.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": true,
+        "queried_pids": [],
+        "reason": "DGA-like (score 0.60: entropy 0.89, bigram-rarity 0.70)",
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/wps-docer-property.ks3-cn-beijing.ksyun.com"
+        },
+        "resolved_ips": [
+          "access-domain.ks3-cn-beijing-wan-wps.ksyun.com"
+        ]
+      },
+      {
+        "dga_score": 0.603,
+        "fqdn": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": true,
+        "queried_pids": [],
+        "reason": "DGA-like (score 0.60: entropy 0.89, bigram-rarity 0.70)",
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/wps-docer-property.ks3-cn-beijing.ksyuncs.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "365.kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/365.kdocs.cn"
+        },
+        "resolved_ips": [
+          "365.wpsdns.com",
+          "43.175.235.132",
+          "enterprise-hw-prod.2gcwjsz1js5u.eo.dnse1.com",
+          "43.175.234.132"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "account.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/account.wps.cn"
+        },
+        "resolved_ips": [
+          "113.57.57.42",
+          "111.48.60.183",
+          "98.98.145.231",
+          "156.59.42.135",
+          "119.96.49.220",
+          "172.96.115.151",
+          "199.182.237.71",
+          "98.98.78.135",
+          "64.6.174.19",
+          "192.169.115.103",
+          "98.98.18.103",
+          "23.90.180.167"
+        ]
+      },
+      {
+        "dga_score": 0.383,
+        "fqdn": "ap-dw-collect.ksord.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/ap-dw-collect.ksord.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.327,
+        "fqdn": "ap-dw-parameters.ksord.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/ap-dw-parameters.ksord.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.369,
+        "fqdn": "api-ad-adapter.wps.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/api-ad-adapter.wps.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "api.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/api.wps.cn"
+        },
+        "resolved_ips": [
+          "98.98.145.226",
+          "klbv3.wpsdns.com",
+          "163.53.19.88"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "api.wps.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/api.wps.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "avatar.qwps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/avatar.qwps.cn"
+        },
+        "resolved_ips": [
+          "101.126.24.87",
+          "101.126.24.53"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "bitbucket.org",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/bitbucket.org"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.412,
+        "fqdn": "client-update.steamstatic.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/client-update.steamstatic.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "discord.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/discord.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "dl.vas.wpscdn.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/dl.vas.wpscdn.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "docer-api.kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/docer-api.kdocs.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "docer.kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/docer.kdocs.cn"
+        },
+        "resolved_ips": [
+          "71.18.157.246",
+          "accelerator-cname-4krzo5bapdwvgzyuehna2u.c.vecdnlb.com",
+          "101.47.98.213",
+          "klbv2.wpsdns.com",
+          "veen-auto-global-0011766483193.s.vegalb.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "docer.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/docer.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "drive.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/drive.wps.cn"
+        },
+        "resolved_ips": [
+          "98.98.145.232"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "entry.wpscdn.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/entry.wpscdn.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "geo.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/geo.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "gitlab.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/gitlab.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "global.wps.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/global.wps.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "home.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/home.wps.cn"
+        },
+        "resolved_ips": [
+          "home.vas.wpsdns.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "httpd.apache.org",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/httpd.apache.org"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "hwc-bj.ag.kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/hwc-bj.ag.kdocs.cn"
+        },
+        "resolved_ips": [
+          "hwc-bj.ag.wpsdns.com",
+          "171.15.136.254",
+          "171.15.136.245",
+          "171.15.136.244",
+          "171.15.136.252",
+          "171.15.136.246",
+          "171.15.136.248"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "iaas.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/iaas.wps.cn"
+        },
+        "resolved_ips": [
+          "accelerator-cname-frxv7q2rs5dvpxegc3i3xz.c.vecdnlb.com",
+          "71.18.160.102",
+          "101.47.98.223",
+          "veen-auto-117651-01769748568.s.vegalb.com",
+          "accountv2.wpsdns.com",
+          "71.18.160.60"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/kdocs.cn"
+        },
+        "resolved_ips": [
+          "weboffice.wpsdns.com",
+          "accelerator-cname-n9tte32bdbmezs5rwq9q4q.c.vecdnlb.com",
+          "veen-auto-117653-01769748579.s.vegalb.com",
+          "98.98.145.230"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "ksc-bj.ag.kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/ksc-bj.ag.kdocs.cn"
+        },
+        "resolved_ips": [
+          "110.43.89.94",
+          "111.31.6.142",
+          "wpsfile-beijing.ksyunjiasu.cn",
+          "60.28.214.185",
+          "ksc-bj.ag.wpsdns.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "le.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/le.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "lucky.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/lucky.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "medium.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/medium.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "params.wps.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/params.wps.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "pay.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/pay.wps.cn"
+        },
+        "resolved_ips": [
+          "pay-prod.2gcwjsz1js5u.eo.dnse1.com",
+          "43.175.252.84",
+          "43.175.253.84",
+          "pay.wpsdns.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "qing.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/qing.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "qr.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/qr.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "roaming.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/roaming.wps.cn"
+        },
+        "resolved_ips": [
+          "qing.wpsdns.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "sms.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/sms.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.455,
+        "fqdn": "stackoverflow.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/stackoverflow.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "vas.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/vas.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "vasapi.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/vasapi.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "vimeo.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/vimeo.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "vip.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/vip.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "vipapi.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/vipapi.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "wdl1.cache.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/wdl1.cache.wps.cn"
+        },
+        "resolved_ips": [
+          "k1-ipv6.gslb.ksyuncdn.com",
+          "162.128.226.1",
+          "wdl1.cache.wps.cn.download.ks-cdn.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "wdl1.file.cache.docer.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/wdl1.file.cache.docer.com"
+        },
+        "resolved_ips": [
+          "111.172.211.147",
+          "111.6.201.217",
+          "111.48.138.69",
+          "171.15.110.242",
+          "122.191.142.70",
+          "wdl1.file.cache.docer.com.wps.volcfake.com.volcgslb.com",
+          "123.6.179.122",
+          "111.6.202.217",
+          "111.174.12.68",
+          "ct-common-all.volcgtm.com",
+          "118.252.196.73",
+          "111.7.66.219",
+          "wdl1.file.cache.wpscdn.cn"
+        ]
+      },
+      {
+        "dga_score": 0.452,
+        "fqdn": "wps-docer-property.file.docer.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/wps-docer-property.file.docer.com"
+        },
+        "resolved_ips": [
+          "access-domain.ks3-cn-beijing-wan-wps.ksyuncs.com",
+          "121.228.170.122",
+          "110.43.121.118",
+          "121.228.170.164",
+          "110.43.121.19",
+          "wps-docer-property.ks3-cn-beijing.ksyuncs.com"
+        ]
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "www.amazon.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.amazon.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "www.espn.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.espn.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "www.heroku.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.heroku.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "www.kdocs.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.kdocs.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": null,
+        "fqdn": "www.msftconnecttest.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.msftconnecttest.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "www.mysql.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.mysql.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.243,
+        "fqdn": "www.sciencedirect.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.sciencedirect.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.433,
+        "fqdn": "www.theguardian.com",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/www.theguardian.com"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.441,
+        "fqdn": "zj-roaming.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/zj-roaming.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.0,
+        "fqdn": "zt.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/zt.wps.cn"
+        },
+        "resolved_ips": []
+      },
+      {
+        "dga_score": 0.441,
+        "fqdn": "zw-roaming.wps.cn",
+        "homograph_target": null,
+        "is_punycode": false,
+        "is_suspicious": false,
+        "queried_pids": [],
+        "reason": null,
+        "reputation": {
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/domain/zw-roaming.wps.cn"
+        },
+        "resolved_ips": [
+          "drive.wpsdns.com",
+          "veen-auto-117650-01769748550.s.vegalb.com",
+          "accelerator-cname-qqgzkjqannhie6jgqwzhom.c.vecdnlb.com",
+          "101.47.98.83",
+          "71.18.160.37"
+        ]
+      }
+    ],
+    "ips": [
+      {
+        "address": "172.217.16.142",
+        "asn": "AS15169 Google LLC",
+        "geo": "Italy",
+        "is_suspicious": false,
+        "port": 443,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            443
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/172.217.16.142"
+        },
+        "transport": "tcp"
+      },
+      {
+        "address": "8.211.55.206",
+        "asn": "AS45102 Alibaba (US) Technology Co., Ltd.",
+        "geo": "Germany",
+        "is_suspicious": false,
+        "port": 443,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            443
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/8.211.55.206"
+        },
+        "transport": "tcp"
+      },
+      {
+        "address": "98.66.133.185",
+        "asn": "AS8075 Microsoft Corporation",
+        "geo": "France",
+        "is_suspicious": false,
+        "port": 443,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            443
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/98.66.133.185"
+        },
+        "transport": "tcp"
+      },
+      {
+        "address": "119.29.29.29",
+        "asn": "AS132203 Shenzhen Tencent Computer Systems Company Limited",
+        "geo": "United States",
+        "is_suspicious": false,
+        "port": 53,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            53
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/119.29.29.29"
+        },
+        "transport": "udp"
+      },
+      {
+        "address": "223.5.5.5",
+        "asn": "AS37963 Hangzhou Alibaba Advertising Co.,Ltd.",
+        "geo": "China",
+        "is_suspicious": false,
+        "port": 53,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            53
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/223.5.5.5"
+        },
+        "transport": "udp"
+      },
+      {
+        "address": "223.6.6.6",
+        "asn": "AS37963 Hangzhou Alibaba Advertising Co.,Ltd.",
+        "geo": "China",
+        "is_suspicious": false,
+        "port": 53,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            53
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/223.6.6.6"
+        },
+        "transport": "udp"
+      },
+      {
+        "address": "223.6.6.6",
+        "asn": "AS37963 Hangzhou Alibaba Advertising Co.,Ltd.",
+        "geo": "China",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            53
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/223.6.6.6"
+        },
+        "transport": null
+      },
+      {
+        "address": "223.5.5.5",
+        "asn": "AS37963 Hangzhou Alibaba Advertising Co.,Ltd.",
+        "geo": "China",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            53
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/223.5.5.5"
+        },
+        "transport": null
+      },
+      {
+        "address": "119.29.29.29",
+        "asn": "AS132203 Shenzhen Tencent Computer Systems Company Limited",
+        "geo": "United States",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            53
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/119.29.29.29"
+        },
+        "transport": null
+      },
+      {
+        "address": "98.66.133.185",
+        "asn": "AS8075 Microsoft Corporation",
+        "geo": "France",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            443
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/98.66.133.185"
+        },
+        "transport": null
+      },
+      {
+        "address": "8.211.55.206",
+        "asn": "AS45102 Alibaba (US) Technology Co., Ltd.",
+        "geo": "Germany",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            443
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/8.211.55.206"
+        },
+        "transport": null
+      },
+      {
+        "address": "172.217.16.142",
+        "asn": "AS15169 Google LLC",
+        "geo": "Italy",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            443
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/172.217.16.142"
+        },
+        "transport": null
+      },
+      {
+        "address": "23.58.222.96",
+        "asn": "AS20940 Akamai International B.V.",
+        "geo": "Turkey",
+        "is_suspicious": false,
+        "port": null,
+        "reputation": {
+          "_heuristic_reason": "public_address",
+          "contacted_ports": [
+            80
+          ],
+          "source": "cape",
+          "virustotal_url": "https://www.virustotal.com/gui/ip-address/23.58.222.96"
+        },
+        "transport": null
+      }
+    ],
+    "ja3_fingerprints": [],
+    "ja3s_fingerprints": [],
+    "urls": [],
+    "user_agents": []
+  }
+}

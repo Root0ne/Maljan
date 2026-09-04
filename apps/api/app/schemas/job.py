@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Job Schemas ──────────────────────────────────────────────────
 
@@ -22,6 +22,18 @@ class _KnownJobConfig(BaseModel):
     max_iterations: Annotated[int, Field(ge=1)] | None = None
     llm_provider: Literal["openai", "anthropic", "ollama", "gemini"] | None = None
     mock_mode: bool | None = None
+    # Static-analysis provider for this job; repeats StaticConfig.provider's choices.
+    static_provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] | None = None
+    # Sandbox provider for this job; repeats SandboxConfig.provider's choices.
+    sandbox_provider: Literal["mock", "cape2", "upload", "triage"] | None = None
+    # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".
+    sandbox_report_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _mock_mode_cannot_consume_an_uploaded_report(self) -> "_KnownJobConfig":
+        if self.mock_mode and self.sandbox_report_id is not None:
+            raise ValueError("a mock run cannot consume an uploaded report")
+        return self
 
 
 class JobCreateRequest(BaseModel):
@@ -99,6 +111,31 @@ class SampleListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ── Sandbox Report Schemas ───────────────────────────────────────
+
+
+class SandboxReportResponse(BaseModel):
+    """An operator-uploaded sandbox report attached to a sample."""
+
+    id: uuid.UUID
+    format: str
+    task_id: str | None
+    size_bytes: int
+    # Set once at upload time and never recomputed — see SandboxReportRow.
+    sample_sha256_match: bool
+    warning: str | None = None
+    uploaded_at: datetime = Field(validation_alias="created_at")
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class SandboxReportListResponse(BaseModel):
+    """Every sandbox report attached to one sample."""
+
+    items: list[SandboxReportResponse]
+    total: int
 
 
 # ── Report Schemas ───────────────────────────────────────────────

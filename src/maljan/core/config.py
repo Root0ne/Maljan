@@ -19,10 +19,13 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
-from typing import Annotated, Any, Literal
+import copy
+import json
+from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, PrivateAttr, SecretStr, model_validator
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -391,34 +394,6 @@ class MemoryConfig(BaseModel):
     qdrant_api_key: SecretStr | None = None
 
 
-class SandboxConfig(BaseModel):
-    """Sandbox backend configuration.
-
-    Controls which backend is used for dynamic sample analysis. The sandbox
-    client is exposed via ServiceContainer.get_sandbox_client() and can be
-    passed to FileDataLoader.load_from_sandbox().
-
-    backend:
-        "mock"  (default) — MockSandboxClient loads fixture JSON files from
-                the samples directory. Requires no network access or external
-                services. Safe for CI, tests, and local development.
-        "cape2" — CAPEv2Client submits samples to a live CAPEv2 instance via
-                its REST API. Requires httpx and a running CAPEv2 server.
-                Recommended for production / private samples.
-
-    cape2_base_url, cape2_api_token, cape2_timeout_seconds,
-    cape2_poll_interval_seconds:
-        CAPEv2 endpoint, optional bearer token, completion timeout and poll
-        interval. Token can be empty for unauthenticated local instances.
-    """
-
-    backend: Literal["mock", "cape2"] = "mock"
-    cape2_base_url: str = "http://localhost:8000"
-    cape2_api_token: SecretStr = SecretStr("")
-    cape2_timeout_seconds: int = 300
-    cape2_poll_interval_seconds: int = 10
-
-
 class AnalysisConfig(BaseModel):
     """Analysis layer configuration.
 
@@ -733,10 +708,326 @@ class MCPServerConfig(BaseModel):
 
 
 class MCPConfig(BaseModel):
-    """MCP integration configurations for external tools."""
+    """Generic MCP server registry — empty until sub-project B.
 
+    ``ghidra`` and ``cape`` used to live here as a transitional mirror of
+    ``static.ghidra`` / ``sandbox.cape2.mcp`` for readers that had not yet
+    moved onto the provider layer; Task 12 moved the last of them, so the
+    mirror is gone. Sub-project B fills this back in with a real
+    ``servers: dict[str, MCPServerConfig]`` for operator-configured MCP tools
+    that are not one of the built-in providers.
+
+    ``ghidra`` and ``cape`` below are a **deprecated read-only compatibility
+    view**, for ``tests/evaluation/``'s reproduction scripts alone (final
+    review I5) — that harness predates the provider layer and reads
+    ``cfg.mcp.ghidra`` / ``cfg.mcp.cape`` directly, and the plan-wide
+    constraint forbids editing it. ``Settings.model_validator(mode="after")``
+    populates the two private attributes with the *same objects* as
+    ``settings.static.ghidra`` / ``settings.sandbox.cape2.mcp`` (not copies),
+    so a mutation through either name is visible through the other. Nothing
+    in ``src/`` or ``apps/`` reads these properties, and they are not
+    ``Settings`` fields — the catalog and every new caller belong on the
+    provider-layer paths instead.
+    """
+
+    _ghidra_view: MCPServerConfig | None = PrivateAttr(default=None)
+    _cape_view: MCPServerConfig | None = PrivateAttr(default=None)
+
+    @property
+    def ghidra(self) -> MCPServerConfig:
+        """Deprecated: the same object as ``settings.static.ghidra``."""
+        if self._ghidra_view is None:
+            # Only reachable for an ``MCPConfig`` built outside a validated
+            # ``Settings`` (e.g. constructed bare in a test); a real
+            # ``Settings`` always populates this in its after-validator.
+            self._ghidra_view = MCPServerConfig()
+        return self._ghidra_view
+
+    @property
+    def cape(self) -> MCPServerConfig:
+        """Deprecated: the same object as ``settings.sandbox.cape2.mcp``."""
+        if self._cape_view is None:
+            self._cape_view = MCPServerConfig()
+        return self._cape_view
+
+
+# ---------------------------------------------------------------------------
+# Static-analysis provider settings
+# ---------------------------------------------------------------------------
+
+
+class StaticR2Config(MCPServerConfig):
+    """radare2 MCP server, plus where the sample has to be for r2 to read it.
+
+    ``mirror_dir`` is **advisory only** (M1, final review): the worker's
+    private per-job mirror always lives under the security-hardened (0o700,
+    per-file 0o600) ``.work`` subdirectory of ``samples_dir`` — see
+    ``apps/api/app/worker/sample_files.work_dir()`` — regardless of this
+    value, because that is also where the H3 hardening removes the copy from
+    when the job ends. With r2's own ``container_prefix=""`` (a co-located
+    r2mcp reads the host path directly, with no separate container mount to
+    translate into), this setting changes nothing an operator can observe
+    today. It is kept, rather than removed, as the documented seam a future
+    provider that genuinely needs a distinct host mirror directory would
+    read.
+    """
+
+    binary_path: str = "r2mcp"
+    mirror_dir: str = "data/samples/.work"
+
+
+class StaticCapaConfig(BaseModel):
+    """flare-capa rule sources and its execution budget."""
+
+    rules_dir: str = "data/capa-rules"
+    signatures_dir: str = "data/capa-signatures"
+    timeout_seconds: Annotated[int, Field(ge=1)] = 300
+    backend: Literal["auto", "vivisect", "pefile", "binja"] = "auto"
+
+
+class StaticYaraConfig(BaseModel):
+    """Rule directory for the evidence-only YARA pass of the capa_yara provider.
+
+    The deterministic YARA *layer* (``analysis/yara_layer.py``) keeps its own
+    vendored corpus; this is the operator's own rule directory, scanned only by
+    the capa_yara static provider.
+    """
+
+    rules_dir: str = "data/yara_rules"
+    timeout_seconds: Annotated[int, Field(ge=1)] = 60
+
+
+class StaticConfig(BaseModel):
+    """Which static-analysis tool the static analyst attaches, and its settings.
+
+    ``provider`` is the single switch; every block below is the configuration of
+    one provider and is inert unless that provider is selected. ``ghidra`` is
+    the default and is byte-for-byte the configuration that used to live at
+    ``mcp.ghidra``.
+    """
+
+    provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
     ghidra: MCPServerConfig = Field(default_factory=MCPServerConfig)
-    cape: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    r2: StaticR2Config = Field(default_factory=StaticR2Config)
+    capa: StaticCapaConfig = Field(default_factory=StaticCapaConfig)
+    yara: StaticYaraConfig = Field(default_factory=StaticYaraConfig)
+    generic: MCPServerConfig = Field(default_factory=MCPServerConfig)
+
+
+# ---------------------------------------------------------------------------
+# Sandbox provider settings
+# ---------------------------------------------------------------------------
+
+
+class SandboxCape2Config(BaseModel):
+    """CAPEv2 REST endpoint plus the optional CAPE MCP server beside it."""
+
+    base_url: str = "http://localhost:8000"
+    api_token: SecretStr = SecretStr("")
+    timeout_seconds: Annotated[int, Field(ge=1)] = 300
+    poll_interval_seconds: Annotated[int, Field(ge=1)] = 10
+    mcp: MCPServerConfig = Field(default_factory=MCPServerConfig)
+
+
+class SandboxTriageConfig(BaseModel):
+    """Hatching Triage cloud API.
+
+    ``profile`` names a Triage VM profile; empty means the account default.
+    ``timeout_seconds`` is generous because a Triage run queues behind other
+    tenants' work.
+    """
+
+    base_url: str = "https://tria.ge/api/v0"
+    api_token: SecretStr = SecretStr("")
+    profile: str = ""
+    timeout_seconds: Annotated[int, Field(ge=1)] = 900
+    poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
+    fetch_pcap: bool = True
+
+
+class SandboxUploadConfig(BaseModel):
+    """Limits for operator-uploaded sandbox reports (no detonation of our own)."""
+
+    max_report_bytes: Annotated[int, Field(ge=1)] = 67_108_864  # 64 MiB
+    allowed_formats: list[str] = Field(default_factory=lambda: ["cape2", "cuckoo", "triage"])
+
+
+class SandboxConfig(BaseModel):
+    """Which sandbox produces the dynamic evidence, and how to reach it.
+
+    provider:
+        "mock"   (default) — fixture JSON from the samples directory, no network.
+        "cape2"  — a live CAPEv2 instance over its REST API.
+        "upload" — no detonation: an operator-uploaded report is attached to the job.
+        "triage" — Hatching Triage cloud sandbox.
+
+    The legacy flat names (``SANDBOX__BACKEND``, ``SANDBOX__CAPE2_BASE_URL``, …)
+    keep working through the alias table on ``Settings``.
+    """
+
+    provider: Literal["mock", "cape2", "upload", "triage"] = "mock"
+    cape2: SandboxCape2Config = Field(default_factory=SandboxCape2Config)
+    triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
+    upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _alias_flat_keys(cls, data: Any) -> Any:
+        """Accept ``SandboxConfig(backend=..., cape2_base_url=...)`` directly.
+
+        The table on ``Settings`` covers values arriving through the environment;
+        this covers direct construction, which tests and the container do.
+        """
+        if not isinstance(data, dict):
+            return data
+        return _alias_within(data, _SANDBOX_LOCAL_ALIASES)
+
+
+# ---------------------------------------------------------------------------
+# Legacy key aliases
+# ---------------------------------------------------------------------------
+#
+# The provider layer moved four groups of settings. Every legacy name keeps
+# working: the table below is applied to the assembled input before validation,
+# and only where the new key is absent, so a `.env` written for the old shape
+# and one written for the new shape both produce the same Settings. One warning
+# per process names the file to edit; nothing is removed in this release.
+
+SETTINGS_ALIASES: tuple[tuple[str, str], ...] = (
+    ("mcp.ghidra", "static.ghidra"),
+    ("mcp.cape", "sandbox.cape2.mcp"),
+    ("sandbox.backend", "sandbox.provider"),
+    ("sandbox.cape2_base_url", "sandbox.cape2.base_url"),
+    ("sandbox.cape2_api_token", "sandbox.cape2.api_token"),
+    ("sandbox.cape2_timeout_seconds", "sandbox.cape2.timeout_seconds"),
+    ("sandbox.cape2_poll_interval_seconds", "sandbox.cape2.poll_interval_seconds"),
+)
+
+# The subset that a bare ``SandboxConfig(...)`` can carry (paths relative to it).
+_SANDBOX_LOCAL_ALIASES: tuple[tuple[str, str], ...] = (
+    ("backend", "provider"),
+    ("cape2_base_url", "cape2.base_url"),
+    ("cape2_api_token", "cape2.api_token"),
+    ("cape2_timeout_seconds", "cape2.timeout_seconds"),
+    ("cape2_poll_interval_seconds", "cape2.poll_interval_seconds"),
+)
+
+_ALIAS_WARNED = False
+
+
+def _dig(data: dict[str, Any], path: str) -> tuple[dict[str, Any] | None, str]:
+    """Return (owning mapping, last segment) for ``path``, or (None, ...) if absent."""
+    cursor: Any = data
+    parts = path.split(".")
+    for part in parts[:-1]:
+        if not isinstance(cursor, dict) or part not in cursor:
+            return None, parts[-1]
+        cursor = cursor[part]
+    return (cursor if isinstance(cursor, dict) else None), parts[-1]
+
+
+def _ensure(data: dict[str, Any], path: str) -> tuple[dict[str, Any], str]:
+    """Return (owning mapping, last segment) for ``path``, creating dicts as needed."""
+    cursor = data
+    parts = path.split(".")
+    for part in parts[:-1]:
+        nxt = cursor.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cursor[part] = nxt
+        cursor = nxt
+    return cursor, parts[-1]
+
+
+def _alias_within(data: dict[str, Any], table: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    """Move every legacy path in ``table`` onto its new path, new key wins.
+
+    Sub-mappings are merged key by key (``mcp.ghidra`` -> ``static.ghidra``
+    keeps a ``static.ghidra.url`` that was set explicitly), scalars are moved
+    only when the target is absent. The legacy key is removed either way so the
+    model never sees an unknown field.
+
+    ``data`` is deep-copied before anything is popped from it: a shallow copy
+    would still share the nested per-key dicts with the caller, so popping a
+    legacy leaf out of one of them (e.g. ``sandbox.backend``) would mutate the
+    caller's own mapping too — this is the plain-dict-in, plain-dict-out
+    contract ``apply_settings_aliases`` documents.
+    """
+    out = copy.deepcopy(data)
+    used: list[str] = []
+    for old, new in table:
+        src_owner, src_key = _dig(out, old)
+        if src_owner is None or src_key not in src_owner:
+            continue
+        value = src_owner.pop(src_key)
+        used.append(old)
+        dst_owner, dst_key = _ensure(out, new)
+        if isinstance(value, dict):
+            target = dst_owner.get(dst_key)
+            merged = dict(value)
+            if isinstance(target, dict):
+                merged.update(target)  # explicit new keys win
+            dst_owner[dst_key] = merged
+        elif dst_key not in dst_owner:
+            dst_owner[dst_key] = value
+    if used:
+        _warn_once(used)
+    return out
+
+
+def _warn_once(paths: list[str]) -> None:
+    global _ALIAS_WARNED
+    if _ALIAS_WARNED:
+        return
+    _ALIAS_WARNED = True
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "Reading legacy setting name(s) %s; they now live under static.* / sandbox.* "
+        "(MCP__GHIDRA__* -> STATIC__GHIDRA__*, MCP__CAPE__* -> SANDBOX__CAPE2__MCP__*, "
+        "SANDBOX__BACKEND -> SANDBOX__PROVIDER, SANDBOX__CAPE2_* -> SANDBOX__CAPE2__*). "
+        "The old names keep working; update .env when convenient.",
+        ", ".join(sorted(paths)),
+    )
+
+
+_MCP_ALIAS_JSON_LEAVES = ("args", "env")  # the only list-/dict-typed MCPServerConfig fields
+
+
+def _redecode_json_leaves_stranded_by_the_mcp_alias(data: dict[str, Any]) -> None:
+    """JSON-decode ``args``/``env`` a legacy ``mcp.*`` env var left as raw text.
+
+    ``mcp.ghidra``/``mcp.cape`` used to be real ``MCPServerConfig`` fields, so
+    pydantic-settings' own nested-env decoder resolved ``MCP__GHIDRA__ARGS``
+    against that field's ``list[str]`` annotation and JSON-decoded it before
+    this module ever saw the assembled dict. ``MCPConfig`` is empty now (Task
+    12): the decoder can no longer find a type along the legacy path, so it
+    hands back the raw JSON text under the *new* path instead — one
+    validation error away from a silently broken ``.env``. A value that
+    already decoded correctly (set via the new ``STATIC__GHIDRA__ARGS`` name,
+    say, where the schema is real) is already a list/dict and is left alone.
+    Mutates ``data`` in place.
+    """
+    for old, new in SETTINGS_ALIASES:
+        if old.partition(".")[0] != "mcp":
+            continue
+        for leaf in _MCP_ALIAS_JSON_LEAVES:
+            owner, key = _dig(data, f"{new}.{leaf}")
+            if owner is None:
+                continue
+            value = owner.get(key)
+            if isinstance(value, str):
+                try:
+                    owner[key] = json.loads(value)
+                except ValueError:
+                    pass  # let ordinary model validation raise on the bad value
+
+
+def apply_settings_aliases(data: dict[str, Any]) -> dict[str, Any]:
+    """Public, pure form of the alias pass — used by the validator and by tests."""
+    out = _alias_within(data, SETTINGS_ALIASES)
+    _redecode_json_leaves_stranded_by_the_mcp_alias(out)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -825,11 +1116,81 @@ class Settings(BaseSettings):
     negotiation: NegotiationConfig = Field(default_factory=NegotiationConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    static: StaticConfig = Field(default_factory=StaticConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    # Empty until sub-project B (see ``MCPConfig``'s own docstring); the
+    # transitional ``static.ghidra`` / ``sandbox.cape2.mcp`` mirror that used
+    # to live here for not-yet-migrated readers is gone as of Task 12.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+
+    @classmethod
+    def _alias_legacy_keys(cls, data: Any) -> Any:
+        """Translate the pre-provider setting names before validation.
+
+        Called from ``settings_customise_sources`` against each assembled
+        source in turn (init kwargs, environment nested by the ``__``
+        delimiter, dotenv, file secrets) — the probe test in
+        ``tests/unit/core/test_settings_aliases.py`` proved that a
+        ``model_validator(mode="before")`` here is compiled into the
+        pydantic-core schema by reference at class-definition time, so a
+        test that monkeypatches this classmethod afterwards never observes
+        the call; the source pre-pass calls ``cls._alias_legacy_keys``
+        through ordinary attribute lookup on every construction instead,
+        which a monkeypatch does reach.
+
+        Used to also mirror the translated value back onto the deprecated
+        ``mcp.ghidra`` / ``mcp.cape`` paths for readers that had not yet moved
+        onto the provider layer; Task 12 moved the last of them, so the
+        mirror-back is gone and this is a straight translation now.
+        """
+        if not isinstance(data, dict):
+            return data
+        return apply_settings_aliases(data)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Alias legacy names inside each source, before they are merged.
+
+        The merge is a deep dict update, so aliasing per source is equivalent to
+        aliasing the merged mapping as long as a source never contributes half
+        of an aliased sub-mapping — and a source is one file or one environment,
+        so it cannot.
+        """
+
+        class _Aliased(PydanticBaseSettingsSource):
+            def __init__(self, inner: PydanticBaseSettingsSource) -> None:
+                super().__init__(settings_cls)
+                self._inner = inner
+
+            def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+                return self._inner.get_field_value(field, field_name)
+
+            def __call__(self) -> dict[str, Any]:
+                data = self._inner()
+                # An empty source has nothing to alias; skip the call so the
+                # (harmless) no-op does not show up as a call on a source that
+                # never carried a legacy name — e.g. init kwargs when the
+                # settings are built from the environment alone.
+                if not data:
+                    return data
+                return cast("dict[str, Any]", cls._alias_legacy_keys(data))
+
+        return (
+            _Aliased(init_settings),
+            _Aliased(env_settings),
+            _Aliased(dotenv_settings),
+            _Aliased(file_secret_settings),
+        )
 
     # Token overflow protection (128K is conservative for Gemini 1M+ context)
     max_token_limit: Annotated[int, Field(ge=1)] = 128_000
@@ -961,6 +1322,22 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
+
+    @model_validator(mode="after")
+    def _populate_deprecated_mcp_view(self) -> "Settings":
+        """Wire ``mcp.ghidra`` / ``mcp.cape`` to the real provider-layer objects.
+
+        See ``MCPConfig``'s docstring (final review I5): this is a read-only
+        compatibility view for ``tests/evaluation/``'s scripts, which predate
+        the provider layer and cannot be edited under the plan-wide
+        constraint. The views share the *same* ``MCPServerConfig`` instances
+        as ``static.ghidra`` and ``sandbox.cape2.mcp`` — never copies — so
+        this must run after those sub-configs exist, which an "after"
+        validator guarantees.
+        """
+        self.mcp._ghidra_view = self.static.ghidra
+        self.mcp._cape_view = self.sandbox.cape2.mcp
+        return self
 
 
 # ---------------------------------------------------------------------------

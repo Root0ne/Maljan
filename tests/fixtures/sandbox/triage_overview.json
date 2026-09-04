@@ -1,0 +1,58 @@
+{
+  "version": "0.3.0",
+  "sample": {
+    "id": "260904-abcdefgh1",
+    "target": "invoice.exe",
+    "size": 245760,
+    "md5": "d41d8cd98f00b204e9800998ecf8427",
+    "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "sha256": "bdf5c1c92e40f0d3f5e1d3f3e33aef14fcbcf65cb0d2a0c9d8b2b3d9f1e2a3b4",
+    "sha512": "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3",
+    "type": "file",
+    "kind": "file",
+    "created": "2026-09-04T10:00:00Z",
+    "completed": "2026-09-04T10:09:00Z"
+  },
+  "tasks": [
+    {
+      "sample": "260904-abcdefgh1",
+      "name": "behavioral1",
+      "status": "reported",
+      "kind": "behavioral",
+      "score": 10,
+      "target": "win10",
+      "backend": "cape",
+      "tags": ["persistence", "network"],
+      "ttp": ["t1055", "t1547"]
+    }
+  ],
+  "analysis": {
+    "score": 10,
+    "family": ["qakbot"],
+    "tags": ["trojan", "banker"]
+  },
+  "targets": [],
+  "errors": [],
+  "signatures": [
+    {
+      "name": "persistence_registry_run_key",
+      "score": 8,
+      "desc": "Adds itself to a registry Run key for persistence.",
+      "ttp": ["t1547.001"],
+      "tags": ["persistence"],
+      "indicators": [
+        {"ioc": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater", "type": "registry"}
+      ]
+    },
+    {
+      "name": "network_http_beacon",
+      "score": 6,
+      "desc": "Periodic HTTP beaconing to a hardcoded host.",
+      "ttp": ["t1071.001"],
+      "tags": ["network"],
+      "indicators": [
+        {"ioc": "http://198.51.100.23/gate.php", "type": "url"}
+      ]
+    }
+  ]
+}

@@ -35,6 +35,12 @@ export interface CatalogEntry {
   editable: boolean;
   reason: string | null;
   probe: string | null;
+  /** Show this entry only while every listed key holds one of the listed
+   *  values. Null means "always". The API never hides anything: a setting the
+   *  form does not show is still in effect, and the values endpoint says so. */
+  applies_when: Record<string, string[]> | null;
+  /** Rank inside the group; lower first. Provider selectors use -1. */
+  order: number;
 }
 
 export interface SettingsGroup {

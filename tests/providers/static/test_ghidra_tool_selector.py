@@ -7,7 +7,7 @@ overwhelmed (measured: all 165 tools -> 5-6x slower + more hallucination).
 
 from __future__ import annotations
 
-from maljan.agents.ghidra_tool_selector import (
+from maljan.providers.static.ghidra_tool_selector import (
     _CORE_TOOLS,
     select_relevant_ghidra_tools,
 )

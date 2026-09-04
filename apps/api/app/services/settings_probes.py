@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
+from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
 from pydantic import ValidationError
 from redis.asyncio import Redis
@@ -158,12 +162,84 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
-async def probe_cape(v: dict[str, Any]) -> ProbeResult:
+async def probe_r2(v: dict[str, Any]) -> ProbeResult:
+    """Launch the configured r2mcp and count the tools it offers, in 5 seconds.
+
+    A stdio handshake is the only honest test of a subprocess-backed server: a
+    binary that exists but cannot serve MCP is exactly the failure an operator
+    needs named before a job fails on it.
+    """
+    t0 = time.perf_counter()
+    command = str(v.get("binary_path") or "r2mcp")
+    try:
+        from maljan.providers.static.r2 import enumerate_r2_tools
+
+        names = await asyncio.wait_for(enumerate_r2_tools(command), timeout=5.0)
+    except FileNotFoundError:
+        return ProbeResult(False, _ms(t0), f"{command!r} not found on PATH")
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), "no MCP handshake within 5 s")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools offered by {command!r}")
+
+
+async def probe_capa(v: dict[str, Any]) -> ProbeResult:
+    """Count capa + YARA rule files without touching a sample.
+
+    No live handshake exists for either — both are local libraries reading
+    local rule directories — so the connection test is the same check the
+    provider itself makes before a run: is the library importable, and does
+    each configured directory hold rule files. Naming which of the two is
+    missing here is exactly what stops an operator from discovering an empty
+    ``provides_evidence=False`` run only after a job finishes.
+    """
+    t0 = time.perf_counter()
+    parts: list[str] = []
+    capa_ok = False
+    if importlib.util.find_spec("capa") is None:
+        parts.append("capa library is not installed (uv sync --extra capa)")
+    else:
+        capa_dir = Path(resolve_data(str(v.get("capa_rules_dir") or "")))
+        capa_rules = list(capa_dir.rglob("*.yml")) if capa_dir.is_dir() else []
+        if not capa_dir.is_dir():
+            parts.append(f"capa rules directory {capa_dir} does not exist")
+        elif not capa_rules:
+            parts.append(f"capa rules directory {capa_dir} has no *.yml rules")
+        else:
+            capa_ok = True
+            parts.append(f"{len(capa_rules)} rules under {capa_dir}")
+
+    yara_dir = Path(resolve_data(str(v.get("yara_rules_dir") or "")))
+    yara_files = [*yara_dir.glob("*.yml"), *yara_dir.glob("*.yaml")] if yara_dir.is_dir() else []
+    if not yara_dir.is_dir():
+        parts.append(f"YARA rules directory {yara_dir} does not exist")
+    elif not yara_files:
+        parts.append(f"YARA rules directory {yara_dir} has no rule file")
+    else:
+        parts.append(f"{len(yara_files)} YARA rule file(s) under {yara_dir}")
+
+    return ProbeResult(capa_ok, _ms(t0), "; ".join(parts))
+
+
+async def probe_cape2(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     headers = {"Authorization": f"Token {v['api_token']}"} if v.get("api_token") else None
     ok, detail, _ = await _get(
         f"{str(v.get('base_url') or '').rstrip('/')}/apiv2/tasks/view/1/", headers
     )
+    return ProbeResult(ok, _ms(t0), detail)
+
+
+async def probe_triage(v: dict[str, Any]) -> ProbeResult:
+    token = v.get("api_token")
+    if not token:
+        # No point building a client for a call the token would refuse: a
+        # missing key is reported for what it is, without touching the network.
+        return ProbeResult(False, 0, "no API token configured")
+    t0 = time.perf_counter()
+    headers = {"Authorization": f"Bearer {token}"}
+    ok, detail, _ = await _get(f"{str(v.get('base_url') or '').rstrip('/')}/resources", headers)
     return ProbeResult(ok, _ms(t0), detail)
 
 
@@ -218,7 +294,15 @@ async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
 PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "llm": probe_llm,
     "ghidra": probe_ghidra,
-    "cape": probe_cape,
+    "r2": probe_r2,
+    "capa_yara": probe_capa,
+    # "capa" aliases "capa_yara" the way "cape" aliases "cape2": an older
+    # stored annotation may still name the tool rather than the provider id.
+    "capa": probe_capa,
+    "cape2": probe_cape2,
+    # "cape" is kept for one release: a stored annotation may still name it.
+    "cape": probe_cape2,
+    "triage": probe_triage,
     "qdrant": probe_qdrant,
     "redis": probe_redis,
     "virustotal": probe_virustotal,
@@ -243,10 +327,32 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",
     },
-    "ghidra": {"core.mcp.ghidra.url": "url", "core.mcp.ghidra.auth_token": "auth_token"},
+    "ghidra": {
+        "core.static.ghidra.url": "url",
+        "core.static.ghidra.auth_token": "auth_token",
+    },
+    "r2": {
+        "core.static.r2.binary_path": "binary_path",
+    },
+    "capa_yara": {
+        "core.static.capa.rules_dir": "capa_rules_dir",
+        "core.static.yara.rules_dir": "yara_rules_dir",
+    },
+    "capa": {
+        "core.static.capa.rules_dir": "capa_rules_dir",
+        "core.static.yara.rules_dir": "yara_rules_dir",
+    },
+    "cape2": {
+        "core.sandbox.cape2.base_url": "base_url",
+        "core.sandbox.cape2.api_token": "api_token",
+    },
     "cape": {
-        "core.sandbox.cape2_base_url": "base_url",
-        "core.sandbox.cape2_api_token": "api_token",
+        "core.sandbox.cape2.base_url": "base_url",
+        "core.sandbox.cape2.api_token": "api_token",
+    },
+    "triage": {
+        "core.sandbox.triage.base_url": "base_url",
+        "core.sandbox.triage.api_token": "api_token",
     },
     "qdrant": {
         "core.memory.qdrant_url": "url",

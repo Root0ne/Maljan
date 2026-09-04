@@ -39,6 +39,12 @@ export default function DynamicTab() {
 
   return (
     <div className="space-y-4">
+      {dyn.unavailable && dyn.unavailable.length > 0 && (
+        <div className="text-xs text-text-muted border border-border rounded px-4 py-3 bg-bg-surface">
+          Not provided by this sandbox: {dyn.unavailable.join(", ")}.
+        </div>
+      )}
+
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">

@@ -44,8 +44,8 @@ def test_export_literals_survive_a_round_trip_through_pydantic_settings(tmp_path
     env = tmp_path / ".env"
     env.write_text("".join(f"{k}={_env_literal(False, v)}\n" for k, v in cases.items()))
     s = Settings(_env_file=env)
-    assert s.mcp.ghidra.args == cases["MCP__GHIDRA__ARGS"]
-    assert s.mcp.cape.env == cases["MCP__CAPE__ENV"]
+    assert s.static.ghidra.args == cases["MCP__GHIDRA__ARGS"]
+    assert s.sandbox.cape2.mcp.env == cases["MCP__CAPE__ENV"]
     assert s.reporting.publisher == "Team #1"
     assert s.reporting.report_number_prefix == ""
     assert s.llm.parallel_analysts is True

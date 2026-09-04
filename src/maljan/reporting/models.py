@@ -262,6 +262,13 @@ class DynamicBehavior(BaseModel):
     file_operations: list[dict[str, Any]] = Field(default_factory=list)
     notable_apis: list[dict[str, Any]] = Field(default_factory=list)
     sandbox_signatures: list[SandboxSignature] = Field(default_factory=list)
+    # Sections this sandbox structurally cannot produce, e.g. ["apistats",
+    # "calls", "registry", "generic_events"] for Hatching Triage. Named rather
+    # than left empty: an empty API-call table reads as "the sample did
+    # nothing", which is the opposite of "we could not see". Every renderer
+    # prints "Not provided by this sandbox" for these, and no detection layer
+    # treats them as negative evidence.
+    unavailable: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

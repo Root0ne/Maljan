@@ -412,22 +412,21 @@ class TestHttpTransport:
 
 
 class TestDynamicAnalystMcpTransportWiring:
-    """DynamicAnalyst._initialize_mcp_client picks the transport from config:
+    """``CAPE2SandboxProvider.dynamic_tools()`` picks the transport from config:
     transport='http' must build an HTTP toolkit (url + Bearer header), never
-    a stdio subprocess."""
+    a stdio subprocess.
 
-    def _make_analyst(self):
-        import logging
-
-        from maljan.agents.dynamic_analyst import DynamicAnalyst
-
-        inst = DynamicAnalyst.__new__(DynamicAnalyst)
-        inst.logger = logging.getLogger("test.dynamic_analyst")
-        return inst
+    This wiring moved out of ``DynamicAnalyst._initialize_mcp_client`` and into
+    the provider in the provider-layer refactor (Task 11) — the analyst now
+    only asks the configured sandbox provider for tools, so there is nothing
+    left in ``DynamicAnalyst`` to patch ``get_settings()`` into; these tests
+    exercise ``CAPE2SandboxProvider`` directly instead.
+    """
 
     def test_http_transport_builds_http_toolkit(self, monkeypatch) -> None:
         import maljan.agents.mcp_client as mc
-        import maljan.core.config as cfgmod
+        from maljan.core.config import Settings
+        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         captured: dict[str, Any] = {}
 
@@ -455,18 +454,14 @@ class TestDynamicAnalystMcpTransportWiring:
 
         monkeypatch.setattr(mc, "MCPLangChainToolkit", _FakeToolkit)
 
-        cape = MagicMock()
-        cape.enabled = True
-        cape.transport = "http"
-        cape.url = "http://vm:9004/mcp/"
-        cape.auth_token = "secret"
-        cape.tools = []
-        cfg = MagicMock()
-        cfg.mcp.cape = cape
-        monkeypatch.setattr(cfgmod, "get_settings", lambda: cfg)
+        cfg = Settings(_env_file=None)
+        cfg.sandbox.cape2.mcp.enabled = True
+        cfg.sandbox.cape2.mcp.transport = "http"
+        cfg.sandbox.cape2.mcp.url = "http://vm:9004/mcp/"
+        cfg.sandbox.cape2.mcp.auth_token = "secret"
+        provider = CAPE2SandboxProvider.from_settings(cfg)
 
-        analyst = self._make_analyst()
-        analyst._initialize_mcp_client()
+        provider.dynamic_tools()
 
         assert captured["transport"] == "http"
         assert captured["http_url"] == "http://vm:9004/mcp/"
@@ -476,24 +471,22 @@ class TestDynamicAnalystMcpTransportWiring:
 
     def test_http_transport_without_url_skips(self, monkeypatch) -> None:
         import maljan.agents.mcp_client as mc
-        import maljan.core.config as cfgmod
+        from maljan.core.config import Settings
+        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         def _boom(*a, **k):
             raise AssertionError("toolkit must not be built when url is empty")
 
         monkeypatch.setattr(mc, "MCPLangChainToolkit", _boom)
 
-        cape = MagicMock()
-        cape.enabled = True
-        cape.transport = "http"
-        cape.url = ""
-        cape.auth_token = ""
-        cape.tools = []
-        cfg = MagicMock()
-        cfg.mcp.cape = cape
-        monkeypatch.setattr(cfgmod, "get_settings", lambda: cfg)
+        cfg = Settings(_env_file=None)
+        cfg.sandbox.cape2.mcp.enabled = True
+        cfg.sandbox.cape2.mcp.transport = "http"
+        cfg.sandbox.cape2.mcp.url = ""
+        provider = CAPE2SandboxProvider.from_settings(cfg)
 
-        analyst = self._make_analyst()
-        # Should log a warning and return without raising.
-        analyst._initialize_mcp_client()
-        assert getattr(analyst, "toolkit", None) is None
+        # Should log a warning and return without raising, and without
+        # attaching a toolkit.
+        tools = provider.dynamic_tools()
+        assert tools == []
+        assert provider._toolkit is None
