@@ -31,6 +31,7 @@ from maljan.reporting.models import (
     MalwareReport,
     ReportFrontMatter,
     SeverityAssessment,
+    StaticAnalysis,
     VersionHistoryEntry,
 )
 
@@ -107,10 +108,16 @@ class MalwareReportBuilder:
             file_name=self.file_name,
         )
         static = build_static_analysis(sample_path=self.sample_path)
-        if self.static_evidence is not None and static is not None:
+        if self.static_evidence is not None:
             from maljan.providers.static.capa_yara import merge_static_evidence
 
-            static = merge_static_evidence(static, self.static_evidence)
+            # M5 (final review): a non-PE sample, or one pefile could not
+            # parse, made ``build_static_analysis`` return None — and this
+            # used to drop the capa/YARA bundle on the floor right there,
+            # precisely when capa is the *only* static evidence there is.
+            # An empty ``StaticAnalysis`` (every field defaults) is the same
+            # shell the merge would otherwise start folding evidence into.
+            static = merge_static_evidence(static or StaticAnalysis(), self.static_evidence)
         dynamic = build_dynamic_behavior(self.sandbox_report)
         network = build_network_iocs(self.sandbox_report)
         persistence = build_persistence_list(self.sandbox_report, self.sample_platform)

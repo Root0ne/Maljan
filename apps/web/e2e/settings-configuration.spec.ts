@@ -444,7 +444,7 @@ test.describe("Settings → Configuration (admin)", () => {
 
     await expect(page.getByText("core.sandbox.cape2.base_url")).toHaveCount(0);
     await expect(page.getByText("2 changes pending")).toBeVisible();
-    await expect(page.getByText("1 in a hidden field")).toBeVisible();
+    await expect(page.getByText("1 hidden field")).toBeVisible();
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {

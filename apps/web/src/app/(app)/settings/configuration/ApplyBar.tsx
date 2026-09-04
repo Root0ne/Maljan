@@ -56,7 +56,7 @@ export default function ApplyBar({
           {keys.length} change{keys.length === 1 ? "" : "s"} pending
           {hidden.length > 0 && (
             <span className="text-text-muted">
-              {" "}· {hidden.length} in a hidden field{hidden.length === 1 ? "" : "s"}
+              {" "}· {hidden.length} hidden field{hidden.length === 1 ? "" : "s"}
             </span>
           )}
         </span>

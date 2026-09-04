@@ -60,7 +60,9 @@ field names.
 from __future__ import annotations
 
 import json
+import re
 import time
+import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -98,6 +100,23 @@ RESOURCES_PATH = "/resources"
 
 _BACKOFF_FACTOR = 1.5
 _MAX_INTERVAL_SECONDS = 60.0
+
+_SAFE_PATH_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _safe_path_component(value: str) -> str:
+    """Keep only characters safe in a filename and a URL path segment.
+
+    M12 (final review): ``task_id`` comes from Triage's own submit response
+    and the task name from its overview — both are interpolated into a
+    destination path and a URL path. The trust boundary is the operator's
+    own configured Triage instance, so the exposure is small, but a
+    ``Path(...).name``-style guard costs nothing. A value that sanitises to
+    nothing (empty, or e.g. all ``..``/``/``) falls back to a fresh uuid
+    rather than producing an empty or traversal-prone path segment.
+    """
+    cleaned = _SAFE_PATH_COMPONENT_RE.sub("_", value).strip("._")
+    return cleaned or uuid.uuid4().hex
 
 
 def _parse_retry_after(value: str, now: float) -> float | None:
@@ -342,8 +361,10 @@ class TriageSandboxProvider(SandboxProvider):
 
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
-        out = dest / f"triage_{task_id}.pcap"
-        url = PCAP_PATH.format(sample_id=task_id, task=names[0])
+        safe_task_id = _safe_path_component(str(task_id))
+        safe_task_name = _safe_path_component(names[0])
+        out = dest / f"triage_{safe_task_id}.pcap"
+        url = PCAP_PATH.format(sample_id=safe_task_id, task=safe_task_name)
         try:
             with http.stream("GET", url, headers=headers) as response:
                 if response.status_code >= 400:

@@ -194,7 +194,18 @@ class StaticAnalyst(BaseAnalyst):
         # Ghidra REST API directly (load_program / call graph), not a
         # capability any other static provider could satisfy. Generalising it
         # behind a capability flag is sub-project C's, not this one's.
-        if cfg.static.ghidra.transport != "http":
+        #
+        # L3 (live-run finding): ``cfg.static.ghidra`` is Ghidra's own
+        # sub-config and keeps its "http" default regardless of which static
+        # provider is actually selected, so gating on its transport alone let
+        # this run its Ghidra-only REST calls against an r2/generic_mcp
+        # profile too — no ``load_program`` tool exists there, so every call
+        # logged "load_program did not yield a program" at WARNING for a
+        # provider this pre-pass was never meant to touch. The provider
+        # selector is the real gate; the transport check stays underneath it
+        # for the one case that still matters — Ghidra itself configured for
+        # stdio, which this REST-only pre-pass cannot speak either.
+        if cfg.static.provider != "ghidra" or cfg.static.ghidra.transport != "http":
             return ""  # the pre-pass speaks the headless REST API directly
 
         try:

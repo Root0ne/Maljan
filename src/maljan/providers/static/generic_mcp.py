@@ -245,6 +245,11 @@ class GenericMCPStaticProvider(StaticProvider):
 
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
+        # M8 (final review): ``_all_tools`` was cleared but ``self.tools``
+        # (the curated/selected subset ``get_tools()`` hands the analyst)
+        # was not, so a closed provider kept advertising tool objects whose
+        # transport was already gone.
+        self.tools = []
         if toolkit is None:
             return
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)

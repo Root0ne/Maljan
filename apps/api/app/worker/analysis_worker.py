@@ -625,6 +625,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # ``samples_dir`` — never the operator's own corpus directory
                 # itself — and is removed by the ``finally`` below when the
                 # job ends, whichever way it ends.
+                _mirror_target_path: Path | str = sample_files.work_dir()
                 try:
                     target = mirror_target_for(
                         app.container.get_static_provider(),
@@ -638,6 +639,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         )
                     else:
                         host_mirror, static_sample_path = target
+                        _mirror_target_path = host_mirror
                         sample_files.private_copy(Path(temp_path), host_mirror)
                         logger.info(
                             "Mirrored sample to %s for the static provider (%s).",
@@ -646,12 +648,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                             extra={"job_id": job_id, "component": "sample-mirror"},
                         )
                 except Exception as mirror_exc:
+                    # M2: this used to hard-code "for Ghidra" and log
+                    # settings.samples_dir (the samples root, not the mirror
+                    # target that actually failed) — a leftover from before
+                    # the mirror step was generalised to any static provider.
                     logger.warning(
-                        "Failed to mirror sample to %s for Ghidra: %s. "
+                        "Failed to mirror sample to %s for the static provider: %s. "
                         "Static analyst will fall back to metadata-only prompt.",
-                        settings.samples_dir,
+                        _mirror_target_path,
                         mirror_exc,
-                        extra={"job_id": job_id, "component": "ghidra-mirror"},
+                        extra={"job_id": job_id, "component": "sample-mirror"},
                     )
             except Exception as exc:
                 logger.warning(

@@ -396,6 +396,43 @@ def test_the_pcap_is_fetched_from_the_discovered_task_not_a_hardcoded_name(tmp_p
     assert not any("behavioral8" in p or "static1" in p for p in seen_paths)
 
 
+def test_a_traversal_shaped_task_id_is_sanitised_in_the_destination_path(tmp_path):
+    """M12: task_id comes from Triage's own submit response, unsanitised.
+
+    A malicious or misbehaving Triage instance answering with a task id like
+    ``../../etc/passwd`` must not be able to walk the destination path out of
+    ``dest_dir``.
+    """
+    overview = {"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}
+
+    def handler(request):
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if request.url.path.endswith("dump.pcap"):
+            return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+        return httpx.Response(404, json={})
+
+    path = _provider(handler).fetch_pcap("../../etc/passwd", tmp_path)
+    assert path is not None
+    written = Path(path)
+    assert written.parent == tmp_path, written
+    assert ".." not in written.name
+
+
+def test_a_traversal_shaped_task_name_is_sanitised_in_the_request_url(tmp_path):
+    seen_paths: list[str] = []
+    overview = {"tasks": [{"name": "../../secrets", "kind": "behavioral"}]}
+
+    def handler(request):
+        seen_paths.append(request.url.path)
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+
+    _provider(handler).fetch_pcap("s1", tmp_path)
+    assert not any("/../" in p or p.count("..") for p in seen_paths), seen_paths
+
+
 def test_no_behavioral_task_means_no_pcap_and_no_pcap_request(tmp_path):
     def handler(request):
         if request.url.path.endswith("overview.json"):

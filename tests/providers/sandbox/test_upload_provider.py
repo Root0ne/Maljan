@@ -31,6 +31,21 @@ def test_capabilities():
     assert caps.accepts_uploaded_report is True and caps.can_fetch_report is True
     assert caps.can_submit is False and caps.can_poll is False and caps.can_fetch_pcap is False
     assert caps.provides_tools is False
+    assert caps.report_format == "generic", "no blob attached yet — nothing to sniff"
+
+
+def test_report_format_reflects_the_sniffed_blob_once_attached():
+    """M3: the ledger ruling says report_format is computed per instance from
+    the sniffed format, not a hard-coded 'generic'."""
+    provider = _provider()
+    provider.set_pending_blob(_blob(), filename="report.json")
+    assert provider.capabilities.report_format == "cape2"
+
+
+def test_report_format_falls_back_to_generic_for_an_unparseable_blob():
+    provider = _provider()
+    provider.set_pending_blob(b"not json", filename="report.json")
+    assert provider.capabilities.report_format == "generic"
 
 
 def test_submitting_is_refused_with_a_legible_message():

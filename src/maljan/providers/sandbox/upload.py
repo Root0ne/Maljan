@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from maljan.providers.base import SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
@@ -42,6 +42,14 @@ class UploadSandboxProvider(SandboxProvider):
         self._cfg = cfg
         self._blob: bytes | None = None
         self._filename = "report.json"
+        # M3 (final review): the ledger ruling says report_format is computed
+        # per instance from the sniffed format, not hard-coded. Sniffed
+        # eagerly in set_pending_blob so it is known by the time anything
+        # reads capabilities, without requiring a successful fetch() first;
+        # a blob that fails to parse or sniff leaves this None and
+        # capabilities falls back to "generic" exactly as before — the real
+        # error still surfaces from attach_report()/fetch() when read.
+        self._sniffed_format: Literal["cape2", "cuckoo", "triage"] | None = None
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> UploadSandboxProvider:
@@ -56,7 +64,7 @@ class UploadSandboxProvider(SandboxProvider):
             can_fetch_pcap=False,
             accepts_uploaded_report=True,
             provides_tools=False,
-            report_format="generic",
+            report_format=self._sniffed_format or "generic",
             degrade_on_failure=True,
         )
 
@@ -68,6 +76,15 @@ class UploadSandboxProvider(SandboxProvider):
         blob rather than layering state on top of it.
         """
         self._blob, self._filename = blob, filename
+        try:
+            fmt = sniff_format(self._parse(blob))
+        except ProviderError:
+            fmt = "unknown"
+        # "unknown" is not one of SandboxCapabilities.report_format's Literal
+        # members; attach_report()/fetch() already refuse an unknown format
+        # with a worded ProviderError, so capabilities just falls back to
+        # "generic" for it rather than raising here, ahead of that message.
+        self._sniffed_format = fmt if fmt in ("cape2", "cuckoo", "triage") else None
 
     def submit(self, sample_path: str | Path) -> str:
         raise ProviderError(

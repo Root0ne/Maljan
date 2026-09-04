@@ -359,15 +359,24 @@ class ServiceContainer:
         # The static/sandbox providers may hold a subprocess or an HTTP pool of
         # their own (a CAPE REST client, an MCP stdio child); release them here
         # too, alongside the agents' and judges' toolkits above.
-        try:
-            self.get_static_provider().close()
-        except Exception as exc:  # noqa: BLE001 — teardown never propagates
-            logger.warning("Closing static provider failed (non-fatal): %s", exc)
+        #
+        # M6 (final review): close the *cached* provider, never
+        # ``get_static_provider()``/``get_sandbox_provider()`` — those build
+        # one on demand, so a job that never touched a provider built one
+        # here for the sole purpose of closing it, and a misconfigured
+        # ``provider`` id turned a harmless teardown into a
+        # ``ProviderConfigurationError`` landing in this warning handler.
+        if self._static_provider_cache is not None:
+            try:
+                self._static_provider_cache.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing static provider failed (non-fatal): %s", exc)
 
-        try:
-            self.get_sandbox_provider().close()
-        except Exception as exc:  # noqa: BLE001 — teardown never propagates
-            logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
+        if self._sandbox_provider_cache is not None:
+            try:
+                self._sandbox_provider_cache.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
 
         # The sample's parsed text and the per-job analysis layers. Not a leak
         # on their own — the container dies with the job — but dropping them

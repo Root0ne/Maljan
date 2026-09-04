@@ -308,6 +308,10 @@ def test_close_tears_down_the_toolkit_and_is_idempotent(monkeypatch):
     provider.close()
     assert provider._toolkit is None
     assert provider.get_tools() == []
+    # M8 (final review): _all_tools was cleared but the curated/selected
+    # subset in provider.tools was not, so a closed provider still
+    # advertised tool objects whose transport was already gone.
+    assert provider.tools == []
     assert closed == [1]
 
     provider.close()  # idempotent: nothing to tear down, no error, no second close call

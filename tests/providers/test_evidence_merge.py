@@ -132,3 +132,23 @@ def test_no_bundle_leaves_the_report_untouched(tmp_path):
     report = _builder(sample_path=str(sample), static_evidence=None).build_deterministic()
     assert report.static is not None
     assert report.static.api_capabilities == {}
+
+
+def test_evidence_survives_a_sample_the_pe_extractor_cannot_read(tmp_path):
+    """M5 regression: a non-PE sample (or a failed pefile parse) makes
+    ``build_static_analysis`` return None — precisely the case where capa's
+    evidence bundle is the *only* static evidence there is, and it used to
+    be dropped on the floor rather than folded into a fresh, empty
+    ``StaticAnalysis``.
+    """
+    non_pe_sample = tmp_path / "not_a_pe.bin"
+    non_pe_sample.write_bytes(b"this is not a PE file at all")
+    bundle = StaticEvidenceBundle(
+        api_capabilities={"data-manipulation": 1},
+        technique_hits=[_CAPA_HIT],
+        technical_evidence={"capa": "| rule | namespace |\n| encrypt data using RC4 | x |"},
+    )
+    report = _builder(sample_path=str(non_pe_sample), static_evidence=bundle).build_deterministic()
+    assert report.static is not None
+    assert report.static.api_capabilities.get("data-manipulation") == 1
+    assert any(h["technique_id"] == "T1027" for h in report.static.api_technique_hits)

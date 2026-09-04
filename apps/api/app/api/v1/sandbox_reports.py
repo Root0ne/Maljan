@@ -107,8 +107,15 @@ def get_object(path: str) -> bytes:
         response.release_conn()
 
 
-def _read_payload(file: UploadFile, filename: str) -> tuple[bytes, dict[str, Any]]:
-    """Stream, size-cap, inflate and parse. Returns (canonical json bytes, payload)."""
+def _read_payload(file: UploadFile) -> tuple[bytes, dict[str, Any]]:
+    """Stream, size-cap, inflate and parse. Returns (canonical json bytes, payload).
+
+    M7 (final review): this used to take a ``filename`` parameter that was
+    never read — gzip is detected from the magic bytes at the top of the
+    body, never the extension, so there was nothing left for a filename to
+    do here. Dropped rather than wired up to avoid a second, redundant way
+    to decide the same thing.
+    """
     limit = _max_report_bytes()
     raw = bytearray()
     while True:
@@ -230,7 +237,7 @@ async def upload_sandbox_report(
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportResponse:
     sample = await _maybe_await(_load_sample(db, sample_id, user))
-    body, payload = _read_payload(file, file.filename or "report.json")
+    body, payload = _read_payload(file)
     fmt = sniff_format(payload)
     allowed = _allowed_formats()
     if fmt not in allowed:

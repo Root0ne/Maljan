@@ -92,6 +92,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _S:
         class static:  # noqa: N801
+            provider = "ghidra"
             ghidra = _G()
 
         preprocessing = _P()
@@ -121,3 +122,79 @@ class TestThePrePassStopsOnAFailedLoad:
 
         analyst._compute_sink_priority_hint("/data/samples/x.exe")
         assert client.paths == ["load_program"], client.paths
+
+
+class TestThePrePassIsGhidraOnly:
+    """L3 (live-run finding): the pre-pass drives Ghidra's headless REST API
+    directly, but ``cfg.static.ghidra`` keeps its own "http" default
+    regardless of which static provider is actually selected — gating on
+    the transport alone let this run its Ghidra-only calls against an
+    r2/generic_mcp profile too, logging a "load_program did not yield a
+    program" warning for a provider that offers no such tool at all."""
+
+    def test_an_r2_provider_never_calls_load_program_and_logs_nothing(
+        self, analyst: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        class _G:
+            transport = "http"
+            url = "http://ghidra.invalid"
+            auth_token = ""
+
+        class _P:
+            use_sink_reachability = True
+            sink_reachability_max_funcs = 12
+
+        class _S:
+            class static:  # noqa: N801
+                provider = "r2"
+                ghidra = _G()
+
+            preprocessing = _P()
+
+        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _S())
+        client = _Client("{}")
+        monkeypatch.setattr("httpx.Client", lambda **kw: client)
+
+        with caplog.at_level("WARNING"):
+            assert analyst._compute_sink_priority_hint("/data/samples/x.exe") == ""
+        assert client.paths == [], client.paths
+        assert not any("load_program" in r.getMessage() for r in caplog.records)
+
+    def test_a_generic_mcp_provider_is_skipped_the_same_way(
+        self, analyst: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _G:
+            transport = "http"
+            url = "http://ghidra.invalid"
+            auth_token = ""
+
+        class _P:
+            use_sink_reachability = True
+            sink_reachability_max_funcs = 12
+
+        class _S:
+            class static:  # noqa: N801
+                provider = "generic_mcp"
+                ghidra = _G()
+
+            preprocessing = _P()
+
+        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _S())
+        client = _Client("{}")
+        monkeypatch.setattr("httpx.Client", lambda **kw: client)
+
+        assert analyst._compute_sink_priority_hint("/data/samples/x.exe") == ""
+        assert client.paths == [], client.paths
+
+    def test_the_ghidra_path_is_unchanged(
+        self, analyst: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same fixture as TestThePrePassStopsOnAFailedLoad, spelled out here
+        to pin that adding the provider gate did not also change Ghidra's
+        own behaviour: it still reaches ``load_program``."""
+        _patch_settings(monkeypatch)
+        client = _Client(json.dumps({"success": True, "program": "x.exe"}))
+        monkeypatch.setattr("httpx.Client", lambda **kw: client)
+
+        analyst._compute_sink_priority_hint("/data/samples/x.exe")
+        assert client.paths[0] == "load_program", client.paths

@@ -59,28 +59,54 @@ function SamplesPageContent() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
+  /* M9 (final review): the target sample of the *in-flight* report upload,
+   * updated synchronously (a ref, not state) wherever the dialog's target
+   * sample changes — opened, reopened for a different sample, or closed —
+   * so a response that resolves after the target moved on can tell it is
+   * stale instead of attaching the previous sample's report to this one. */
+  const activeSubmitSampleIdRef = useRef<string | null>(null);
 
-  function closeSubmitDialog() {
-    setSubmitFor(null);
+  const resetSubmitDialogFields = useCallback(() => {
     setStaticProvider("");
     setSandboxProvider("");
     setAttachedReport(null);
     setReportError(null);
     setSubmitError(null);
-  }
+  }, []);
+
+  const openSubmitDialog = useCallback(
+    (sample: SampleRow) => {
+      activeSubmitSampleIdRef.current = sample.id;
+      resetSubmitDialogFields();
+      setSubmitFor(sample);
+    },
+    [resetSubmitDialogFields]
+  );
+
+  const closeSubmitDialog = useCallback(() => {
+    activeSubmitSampleIdRef.current = null;
+    setSubmitFor(null);
+    resetSubmitDialogFields();
+  }, [resetSubmitDialogFields]);
 
   async function handleReportChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !submitFor) return;
+    const requestSampleId = submitFor.id;
     setReportUploading(true);
     setReportError(null);
     try {
-      const report = await api.uploadSandboxReport(submitFor.id, file);
+      const report = await api.uploadSandboxReport(requestSampleId, file);
+      // The dialog may have closed, or reopened for a different sample,
+      // while this request was in flight — a stale response must not
+      // attach the previous sample's report to whatever is open now.
+      if (activeSubmitSampleIdRef.current !== requestSampleId) return;
       setAttachedReport(report);
     } catch (err) {
+      if (activeSubmitSampleIdRef.current !== requestSampleId) return;
       setReportError(getErrorMessage(err) || "Failed to upload the report.");
     } finally {
-      setReportUploading(false);
+      if (activeSubmitSampleIdRef.current === requestSampleId) setReportUploading(false);
     }
   }
 
@@ -190,7 +216,7 @@ function SamplesPageContent() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [submitFor]);
+  }, [submitFor, closeSubmitDialog]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -339,7 +365,7 @@ function SamplesPageContent() {
                       <button
                         onClick={() => {
                           setActionError(null);
-                          setSubmitFor(s);
+                          openSubmitDialog(s);
                         }}
                         className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
                       >

@@ -16,11 +16,11 @@ import json
 from pathlib import Path
 
 from maljan.agents.dynamic_analyst import _ISR_SYSTEM as DYNAMIC_ISR_SYSTEM
-from maljan.agents.ghidra_tool_selector import _CORE_TOOLS
 from maljan.agents.static_analyst import _ISR_SYSTEM as STATIC_ISR_SYSTEM
-from maljan.agents.static_analyst import StaticAnalyst
 from maljan.extractors.dynamic_extractor import build_dynamic_behavior
 from maljan.extractors.network_extractor import build_network_iocs
+from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS
+from maljan.providers.static.ghidra_tool_selector import _CORE_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"
@@ -56,7 +56,7 @@ def main() -> None:
     (GOLDEN / "allowlists.json").write_text(
         json.dumps(
             {
-                "ghidra_allowed_tools": sorted(StaticAnalyst._GHIDRA_ALLOWED_TOOLS),
+                "ghidra_allowed_tools": sorted(GHIDRA_ALLOWED_TOOLS),
                 "ghidra_core_tools": sorted(_CORE_TOOLS),
                 "cape_essential_tools": sorted(CAPE_ESSENTIALS),
             },

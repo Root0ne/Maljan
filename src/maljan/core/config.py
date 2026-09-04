@@ -759,10 +759,17 @@ class MCPConfig(BaseModel):
 class StaticR2Config(MCPServerConfig):
     """radare2 MCP server, plus where the sample has to be for r2 to read it.
 
-    ``mirror_dir`` is the host directory the worker copies the sample into when
-    the provider declares ``needs_sample_mirror``; it defaults to the same
-    ``.work`` subdirectory the Ghidra mirror already uses, because a co-located
-    r2mcp reads the host path directly.
+    ``mirror_dir`` is **advisory only** (M1, final review): the worker's
+    private per-job mirror always lives under the security-hardened (0o700,
+    per-file 0o600) ``.work`` subdirectory of ``samples_dir`` — see
+    ``apps/api/app/worker/sample_files.work_dir()`` — regardless of this
+    value, because that is also where the H3 hardening removes the copy from
+    when the job ends. With r2's own ``container_prefix=""`` (a co-located
+    r2mcp reads the host path directly, with no separate container mount to
+    translate into), this setting changes nothing an operator can observe
+    today. It is kept, rather than removed, as the documented seam a future
+    provider that genuinely needs a distinct host mirror directory would
+    read.
     """
 
     binary_path: str = "r2mcp"

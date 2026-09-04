@@ -31,7 +31,7 @@ def _upload(data: bytes, filename: str) -> UploadFile:
 def test_a_dot_gz_filename_with_non_gzip_bytes_is_read_as_plain_json():
     payload = {"info": {"version": "CAPEv2"}, "target": {"sha256": "a" * 64}}
     raw = json.dumps(payload).encode()
-    body, parsed = module._read_payload(_upload(raw, "report.json.gz"), "report.json.gz")
+    body, parsed = module._read_payload(_upload(raw, "report.json.gz"))
     assert parsed == payload
     assert body == raw
 
@@ -39,11 +39,11 @@ def test_a_dot_gz_filename_with_non_gzip_bytes_is_read_as_plain_json():
 def test_a_utf8_bom_is_tolerated():
     payload = {"info": {"version": "CAPEv2"}, "target": {"sha256": "b" * 64}}
     raw = b"\xef\xbb\xbf" + json.dumps(payload).encode()
-    _, parsed = module._read_payload(_upload(raw, "report.json"), "report.json")
+    _, parsed = module._read_payload(_upload(raw, "report.json"))
     assert parsed == payload
 
 
 def test_a_top_level_json_list_is_refused_with_400():
     with pytest.raises(HTTPException) as exc_info:
-        module._read_payload(_upload(b"[1, 2, 3]", "report.json"), "report.json")
+        module._read_payload(_upload(b"[1, 2, 3]", "report.json"))
     assert exc_info.value.status_code == 400
