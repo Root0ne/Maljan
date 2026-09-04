@@ -55,6 +55,14 @@ def build_job_settings(
             merged["negotiation.max_iterations"] = job_config["max_iterations"]
         if job_config.get("llm_provider") is not None:
             merged["llm.provider"] = job_config["llm_provider"]
+        if job_config.get("static_provider") is not None:
+            merged["static.provider"] = job_config["static_provider"]
+        if job_config.get("sandbox_provider") is not None:
+            merged["sandbox.provider"] = job_config["sandbox_provider"]
+        if job_config.get("sandbox_report_id") is not None:
+            # An attached report is the strongest statement of intent there is:
+            # it names the evidence, so it also names the provider that reads it.
+            merged["sandbox.provider"] = "upload"
     return build_settings(merged)
 
 
@@ -447,6 +455,33 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     recorder=transcript,
                 ),
             )
+
+            # A job that names an attached report hands its bytes to the
+            # sandbox provider before anything else runs: build_job_settings
+            # already forced sandbox.provider="upload" above, so the provider
+            # this container builds is the one that reads what the operator
+            # brought instead of detonating anything. The ownership check
+            # (row.sample_id == sample.id) keeps one job from reading a report
+            # attached to somebody else's sample by guessing a UUID.
+            report_id = (job.config or {}).get("sandbox_report_id")
+            if report_id:
+                from app.api.v1.sandbox_reports import get_object
+                from app.models.sandbox_report import SandboxReportRow
+
+                row = (
+                    await db.execute(
+                        select(SandboxReportRow).where(
+                            SandboxReportRow.id == uuid.UUID(str(report_id))
+                        )
+                    )
+                ).scalar_one_or_none()
+                if row is None or row.sample_id != sample.id:
+                    raise ValueError("The attached sandbox report does not belong to this sample.")
+                sandbox_provider = app.container.get_sandbox_provider()
+                sandbox_provider.set_pending_blob(
+                    await asyncio.to_thread(get_object, row.storage_path),
+                    filename=f"{row.id}.json",
+                )
 
             # Announce which agents are about to run so the frontend can show them
             registered_agents = app.container.agent_registry.list_agents()
