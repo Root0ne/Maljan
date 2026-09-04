@@ -158,9 +158,35 @@ class ServerHandle:
                 truncation_ledger=truncation_ledger,
             )
 
-        _run_async(toolkit.initialize(), label=f"{self.name}-mcp-init")
+        try:
+            _run_async(toolkit.initialize(), label=f"{self.name}-mcp-init")
+        except Exception:
+            # A transport or subprocess can be partly up (a socket connected,
+            # a child process spawned) before ``initialize`` itself fails —
+            # e.g. the handshake times out or the server rejects the token.
+            # Nothing else ever gets a reference to this toolkit (``_toolkit``
+            # is not assigned until initialize succeeds), so if this does not
+            # close it, nothing does. The original exception is what the
+            # caller (and the registry's degrade path) needs to see, so it is
+            # re-raised unchanged after teardown.
+            logger.warning(
+                "mcp server '%s' failed to initialize; closing the partial attach.",
+                self.name,
+            )
+            self._teardown(toolkit)
+            raise
         self._toolkit = toolkit
         self._all_tools = list(toolkit.get_tools())
+        allowed = self.config.tools
+        if allowed:
+            manifest = {str(getattr(t, "name", "")) for t in self._all_tools}
+            missing = [name for name in allowed if name not in manifest]
+            if missing:
+                logger.warning(
+                    "mcp server '%s': allow-listed tool(s) not offered by the server: %s",
+                    self.name,
+                    ", ".join(missing),
+                )
         logger.info(
             "mcp server '%s': %d/%d tools exposed.",
             self.name,
@@ -188,12 +214,8 @@ class ServerHandle:
         keep = set(allowed)
         return [t for t in self._all_tools if str(getattr(t, "name", "")) in keep]
 
-    def close(self) -> None:
-        """Release the client or subprocess. Never raises."""
-        toolkit, self._toolkit = self._toolkit, None
-        self._all_tools = []
-        if toolkit is None:
-            return
+    def _teardown(self, toolkit: Any) -> None:
+        """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises."""
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
             return
@@ -203,6 +225,14 @@ class ServerHandle:
             _run_coro_blocking(closer(), hard_timeout=20.0, label=f"{self.name}-mcp-close")
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
+
+    def close(self) -> None:
+        """Release the client or subprocess. Never raises."""
+        toolkit, self._toolkit = self._toolkit, None
+        self._all_tools = []
+        if toolkit is None:
+            return
+        self._teardown(toolkit)
 
 
 class ServerRegistry:

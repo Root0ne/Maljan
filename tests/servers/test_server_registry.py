@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,6 +30,14 @@ def _toolkit(names: list[str]) -> MagicMock:
     return instance
 
 
+def _run_async_stub(coro, label):
+    """Skip the real event-loop hop, and close the coroutine so it is never
+    reported as "never awaited" — ``initialize()`` on an ``AsyncMock`` returns
+    a real coroutine object whether or not anything runs it.
+    """
+    coro.close()
+
+
 @pytest.fixture()
 def patched(monkeypatch):
     """Attach without a live MCP server, and without a real event loop hop."""
@@ -40,7 +49,7 @@ def patched(monkeypatch):
 
     factory.names = ["alpha", "beta"]
     monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
-    monkeypatch.setattr("maljan.providers.servers._run_async", lambda coro, label: None)
+    monkeypatch.setattr("maljan.providers.servers._run_async", _run_async_stub)
     return factory, made
 
 
@@ -159,3 +168,102 @@ def test_close_all_closes_every_opened_handle(patched):
     registry.tools_for("network", "job-1")
     registry.close_all()
     assert made[0].cleanup.await_count + made[0].cleanup.call_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: a toolkit that starts (a socket, a subprocess) but never
+# finishes ``initialize`` must not be left dangling, an allow-list entry the
+# server does not offer must say so, and ``_resolve_cwd`` gets its positive
+# and its other negative cases alongside the one the brief already covers.
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_initialize_closes_the_partial_toolkit_and_a_later_open_works(monkeypatch):
+    """``initialize`` can fail after the transport is partly up; nothing else holds a
+    reference to that toolkit, so ``open`` itself must tear it down before re-raising.
+    """
+    constructed: list[MagicMock] = []
+
+    def failing_factory(*args, **kwargs):
+        instance = MagicMock()
+        instance.initialize = AsyncMock(side_effect=RuntimeError("handshake failed"))
+        instance.get_tools = MagicMock(return_value=[_T("alpha")])
+        instance.cleanup = AsyncMock(return_value=None)
+        constructed.append(instance)
+        return instance
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", failing_factory)
+
+    handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp"))
+    with pytest.raises(RuntimeError, match="handshake failed"):
+        handle.open("job-1")
+
+    assert handle.is_open is False
+    assert handle._toolkit is None
+    constructed[0].cleanup.assert_called_once()
+
+    def working_factory(*args, **kwargs):
+        instance = MagicMock()
+        instance.initialize = AsyncMock(return_value=None)
+        instance.get_tools = MagicMock(return_value=[_T("alpha")])
+        instance.cleanup = AsyncMock(return_value=None)
+        constructed.append(instance)
+        return instance
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", working_factory)
+    handle.open("job-2")
+    assert handle.is_open is True
+    assert [t.name for t in handle.tools()] == ["alpha"]
+
+
+def test_an_allow_listed_name_the_server_does_not_offer_logs_one_warning(patched, caplog):
+    factory, _ = patched
+    factory.names = ["alpha"]
+    handle = ServerHandle(
+        "x", MCPServerConfig(enabled=True, command="mcp", tools=["alpha", "nope", "also-missing"])
+    )
+    with caplog.at_level(logging.WARNING, logger="maljan"):
+        handle.open("job-1")
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    matches = [r for r in warnings if "nope" in r.getMessage() and "also-missing" in r.getMessage()]
+    assert len(matches) == 1, f"expected exactly one warning naming the misses, got {warnings}"
+    assert "x" in matches[0].getMessage()
+
+
+def test_a_relative_cwd_inside_the_repository_resolves(tmp_path, monkeypatch):
+    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: tmp_path)
+    (tmp_path / "sub").mkdir()
+    handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp", cwd="sub"))
+    assert handle._resolve_cwd() == str((tmp_path / "sub").resolve())
+
+
+def test_an_existing_absolute_cwd_resolves(tmp_path):
+    handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp", cwd=str(tmp_path)))
+    assert handle._resolve_cwd() == str(tmp_path.resolve())
+
+
+def test_an_absolute_cwd_that_does_not_exist_is_refused(tmp_path):
+    missing = tmp_path / "does-not-exist"
+    handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp", cwd=str(missing)))
+    with pytest.raises(ProviderConfigurationError) as exc:
+        handle.open("job-1")
+    assert "cwd" in str(exc.value) and "x" in str(exc.value)
+
+
+def test_a_symlink_escaping_the_repository_root_is_refused(tmp_path, monkeypatch):
+    """``_resolve_cwd`` takes no root argument, so the root is faked by pointing
+    ``get_project_root`` (imported locally inside the method, so patchable here)
+    at a throwaway directory rather than the real repository.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "escape").symlink_to(outside)
+    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+
+    handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp", cwd="escape"))
+    with pytest.raises(ProviderConfigurationError) as exc:
+        handle.open("job-1")
+    assert "cwd" in str(exc.value) and "x" in str(exc.value)
