@@ -234,6 +234,8 @@ def api_catalog() -> list[CatalogEntry]:
                 editable=True,
                 reason=None,
                 probe=ann.get("probe"),
+                applies_when=None,
+                order=0,
             )
         )
     for name, ann in API_READONLY.items():
@@ -258,6 +260,8 @@ def api_catalog() -> list[CatalogEntry]:
                 editable=False,
                 reason="set in .env; restart required",
                 probe=ann.get("probe"),
+                applies_when=None,
+                order=0,
             )
         )
     return entries

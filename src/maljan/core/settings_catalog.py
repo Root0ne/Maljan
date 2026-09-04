@@ -54,6 +54,13 @@ class CatalogEntry:
     editable: bool
     reason: str | None
     probe: str | None
+    # Conditional visibility: {settings key: values of that key which reveal this
+    # entry}. The UI filters on the staged-or-current value; the API never
+    # hides anything, because a hidden setting is still an effective setting.
+    applies_when: dict[str, list[str]] | None = None
+    # Rank within the group; lower first, ties broken by path. Provider
+    # selectors use -1 so the switch sits above the fields it governs.
+    order: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -176,8 +183,10 @@ def core_catalog() -> list[CatalogEntry]:
                 editable=True,
                 reason=None,
                 probe=ann.get("probe") if ann else None,
+                applies_when=(ann.get("applies_when") if ann else None),
+                order=(ann.get("order", 0) if ann else 0),
             )
         )
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}
-    entries.sort(key=lambda e: (order[e.group], e.path))
+    entries.sort(key=lambda e: (order[e.group], e.order, e.path))
     return entries

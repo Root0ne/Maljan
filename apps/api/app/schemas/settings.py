@@ -31,6 +31,8 @@ class CatalogEntryDTO(BaseModel):
     editable: bool
     reason: str | None = None
     probe: str | None = None
+    applies_when: dict[str, list[str]] | None = None
+    order: int = 0
 
 
 class GroupDTO(BaseModel):

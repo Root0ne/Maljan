@@ -28,3 +28,11 @@ def test_qdrant_api_key_types_as_secret():
     by_path = {e.path: e for e in api_catalog()}
     assert by_path["qdrant_api_key"].type == "secret"
     assert by_path["qdrant_api_key"].secret
+
+
+def test_api_entries_carry_the_two_new_fields_with_neutral_defaults():
+    from app.services.settings_catalog_api import api_catalog
+
+    for e in api_catalog():
+        assert e.applies_when is None
+        assert e.order == 0
