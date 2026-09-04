@@ -73,11 +73,13 @@ class DynamicAnalyst(BaseAnalyst):
         if getattr(self, "tools", None):
             return
         provider = self._sandbox_provider()
-        if not provider.capabilities.provides_tools:
+        sandbox_tools: list[Any] = []
+        if provider.capabilities.provides_tools:
+            sandbox_tools = list(provider.dynamic_tools())
+            self.toolkit = getattr(provider, "_toolkit", None)
+        else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)
-            return
-        self.tools = provider.dynamic_tools()
-        self.toolkit = getattr(provider, "_toolkit", None)
+        self.tools = [*sandbox_tools, *self._attach_registry_tools("dynamic")]
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

@@ -280,6 +280,16 @@ class ServiceContainer:
                 )
             return self._server_registry_cache
 
+    def server_degradation_reasons(self) -> list[str]:
+        """Tool servers that could not be attached this job, or an empty list.
+
+        Reads the *cached* registry only: a job that never attached a tool
+        server has nothing to report and must not build a registry here to
+        discover that.
+        """
+        registry = self._server_registry_cache
+        return list(registry.degradation_reasons) if registry is not None else []
+
     def get_sandbox_client(self) -> SandboxClient:
         """The provider, dressed as the client the pipeline already speaks."""
         with self._lock:

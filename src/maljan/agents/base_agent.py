@@ -834,6 +834,27 @@ class BaseAnalyst(ABC):
         """A per-job identity for the handles' same-job short circuit."""
         return str(getattr(self, "_job_id", "") or "job")
 
+    def _attach_registry_tools(self, role: str, *, exclude: str = "", **context: Any) -> list[Any]:
+        """Tools from every server bound to ``role``, minus one this agent owns.
+
+        ``exclude`` is the static provider's own server: a ``generic_mcp``
+        provider driving ``mcp.servers["mine"]`` and an ``agents: ["static"]``
+        binding on that same entry are two ways of saying the same thing, and
+        attaching it twice would show the model two copies of every tool.
+
+        A failure here never raises. Whether a *provider* failure degrades or
+        fails is the provider's capability flag; a registry server is always
+        an addition, so it always degrades, and the reason travels to the run
+        summary through ``degradation_reasons``.
+        """
+        registry = self._server_registry()
+        if registry is None:
+            return []
+        tools, reasons = registry.tools_for(role, self._job_key(), exclude=exclude, **context)
+        if reasons:
+            self.degradation_reasons = [*self.degradation_reasons, *reasons]
+        return list(tools)
+
     # Reasons the run summary should carry, filled in by whoever attaches
     # tool servers. Empty for an agent that attached none.
     degradation_reasons: list[str] = []

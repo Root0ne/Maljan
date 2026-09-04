@@ -1391,6 +1391,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     _degradation_reasons.append(_container_reason)
             except Exception as _e:  # noqa: BLE001
                 logger.debug("container-format check skipped (%s)", _e)
+            # A tool server an operator added is never the evidence a verdict
+            # rests on, so it degrades rather than failing — but the reader of
+            # the report is entitled to know the judge ran without its
+            # threat-intel lookups.
+            _degradation_reasons.extend(container.server_degradation_reasons())
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             if _empty_analysts:

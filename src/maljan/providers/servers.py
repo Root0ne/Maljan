@@ -316,20 +316,23 @@ class ServerRegistry:
             )
         return handle
 
-    def for_agent(self, role: str) -> list[ServerHandle]:
+    def for_agent(self, role: str, *, exclude: str = "") -> list[ServerHandle]:
         """Enabled servers bound to ``role``, built-ins first then by key.
 
         Order is what makes the collision rule predictable: a built-in is
         attached before any custom server, so a custom server that happens to
         name a tool ``extract_dns`` is the one that gets renamed, and the
         pinned built-in tool names never move.
+
+        ``exclude`` drops one handle by name — the server a provider already
+        opened itself, so the registry does not hand the same tools out twice.
         """
         from maljan.core.config import BUILTIN_SERVER_KEYS
 
         bound = [
             handle
             for handle in self._handles.values()
-            if handle.config.enabled and role in handle.config.agents
+            if handle.config.enabled and role in handle.config.agents and handle.name != exclude
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
@@ -350,7 +353,9 @@ class ServerRegistry:
             tools.append(tool)
         return renamed
 
-    def tools_for(self, role: str, job_id: str, **context: Any) -> tuple[list[BaseTool], list[str]]:
+    def tools_for(
+        self, role: str, job_id: str, *, exclude: str = "", **context: Any
+    ) -> tuple[list[BaseTool], list[str]]:
         """Open every server bound to ``role`` and concatenate their tools.
 
         Returns the tools and the degradation reasons: one per server that
@@ -361,7 +366,7 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen: set[str] = set()
-        for handle in self.for_agent(role):
+        for handle in self.for_agent(role, exclude=exclude):
             try:
                 handle.open(job_id, **context)
             except Exception as exc:  # noqa: BLE001 — a registry server always degrades
@@ -387,7 +392,7 @@ class ServerRegistry:
         return tools, reasons
 
     async def atools_for(
-        self, role: str, job_id: str, **context: Any
+        self, role: str, job_id: str, *, exclude: str = "", **context: Any
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for``, but ``await``ed on the caller's own loop.
 
@@ -399,7 +404,7 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen: set[str] = set()
-        for handle in self.for_agent(role):
+        for handle in self.for_agent(role, exclude=exclude):
             try:
                 await handle.aopen(job_id, **context)
             except Exception as exc:  # noqa: BLE001 — a registry server always degrades

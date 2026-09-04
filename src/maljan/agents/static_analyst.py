@@ -134,7 +134,7 @@ class StaticAnalyst(BaseAnalyst):
         provider = self._provider()
         if not provider.capabilities.provides_tools:
             self.logger.info("Static provider '%s' exposes no tools.", provider.id)
-            self.tools = []
+            self.tools = self._attach_registry_tools("static")
             return
         provider.open(self._job_context())
         pool = provider.get_tools()
@@ -143,7 +143,12 @@ class StaticAnalyst(BaseAnalyst):
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
         # analyst's ``close_tools()`` to release on the static path.
-        self.tools = provider.select_tools(pool, getattr(self, "_sample_categories", None))
+        self.tools = [
+            *provider.select_tools(pool, getattr(self, "_sample_categories", None)),
+            *self._attach_registry_tools(
+                "static", exclude=str(getattr(provider, "server_name", ""))
+            ),
+        ]
         self.logger.info(
             "Static provider '%s': %d/%d tools attached.", provider.id, len(self.tools), len(pool)
         )
