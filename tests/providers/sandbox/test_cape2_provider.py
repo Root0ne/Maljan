@@ -130,3 +130,82 @@ def test_notable_apis_survives_the_identity_short_circuit_for_persistence_extrac
 
     mechanisms = build_persistence_list(rendered, sample_platform="linux")
     assert any(m.kind == "ld_preload" for m in mechanisms)
+
+
+def test_dynamic_tools_are_the_thirteen_essentials():
+    class _T:
+        def __init__(self, name):
+            self.name = name
+
+    class _Toolkit:
+        def get_tools(self):
+            return [_T(n) for n in CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS] + [_T("extra_tool")]
+
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.cape2.mcp.enabled = True
+    provider = CAPE2SandboxProvider.from_settings(cfg)
+    provider._toolkit = _Toolkit()
+    assert {t.name for t in provider.dynamic_tools()} == set(
+        CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS
+    )
+
+
+def test_a_disabled_cape_mcp_yields_no_tools_and_no_workflow():
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.cape2.mcp.enabled = False
+    provider = CAPE2SandboxProvider.from_settings(cfg)
+    assert provider.dynamic_tools() == []
+    # The prompt fragment is a property of the sandbox, not of its MCP server:
+    # the workflow text is what the analyst was measured with either way.
+    assert provider.dynamic_prompt_fragment() == CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT
+
+
+def test_the_mock_provider_offers_no_tool_workflow():
+    from maljan.providers.sandbox.mock import MockSandboxProvider
+
+    provider = MockSandboxProvider.from_settings(Settings(_env_file=None))
+    assert provider.dynamic_tools() == []
+    assert provider.dynamic_prompt_fragment() == ""
+
+
+def test_dynamic_tools_is_idempotent_for_a_repeat_call(monkeypatch):
+    """A second call must reuse the attached toolkit rather than rebuild it.
+
+    The static side's equivalent work (the Ghidra provider's ``open()``) found
+    this the hard way: a provider that owns a client and opens it twice on a
+    repeat call leaks the first transport/subprocess instead of replacing it.
+    ``dynamic_tools()`` guards the same way, via ``_toolkit``.
+    """
+    import maljan.agents.mcp_client as mc
+
+    class _T:
+        def __init__(self, name):
+            self.name = name
+
+    constructions: list[int] = []
+
+    class _FakeToolkit:
+        def __init__(self, *args, **kwargs):
+            constructions.append(1)
+
+        async def initialize(self):
+            return None
+
+        def get_tools(self):
+            return [_T(n) for n in CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS]
+
+    monkeypatch.setattr(mc, "MCPLangChainToolkit", _FakeToolkit)
+
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.cape2.mcp.enabled = True
+    provider = CAPE2SandboxProvider.from_settings(cfg)
+
+    first = provider.dynamic_tools()
+    toolkit_after_first_call = provider._toolkit
+    second = provider.dynamic_tools()
+
+    assert len(constructions) == 1, "a repeat call must not rebuild the toolkit"
+    assert provider._toolkit is toolkit_after_first_call
+    expected_names = set(CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS)
+    assert {t.name for t in first} == expected_names
+    assert {t.name for t in second} == expected_names

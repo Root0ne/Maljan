@@ -43,21 +43,18 @@ def test_ghidra_allow_list_and_core_set_are_unchanged():
 
 
 def test_cape_essential_tool_names_are_unchanged():
-    """The 13 names the dynamic analyst keeps when ``mcp.cape.tools`` is empty.
+    """The 13 names the dynamic analyst keeps when the CAPE MCP toolkit attaches.
 
-    Read out of the module source rather than a constant, because today the set
-    is an inline literal inside ``_initialize_mcp_client``. Task 11 turns it
-    into ``CAPE_ESSENTIAL_TOOLS`` in the provider and this test then compares
-    against that name; until then the literal is what ships.
+    Before Task 11 this was an inline literal inside
+    ``DynamicAnalyst._initialize_mcp_client`` and this test read it out of the
+    method's source. The essential-tool list now lives on the provider as
+    ``CAPE_ESSENTIAL_TOOLS``, so the guard compares against that name instead,
+    exactly as planned.
     """
-    import inspect
-
-    from maljan.agents.dynamic_analyst import DynamicAnalyst
+    from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 
     expected = json.loads((GOLDEN / "allowlists.json").read_text(encoding="utf-8"))
-    source = inspect.getsource(DynamicAnalyst._initialize_mcp_client)
-    for name in expected["cape_essential_tools"]:
-        assert f'"{name}"' in source, name
+    assert sorted(CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS) == expected["cape_essential_tools"]
     assert len(expected["cape_essential_tools"]) == 13
 
 
@@ -75,3 +72,14 @@ def test_the_module_constant_is_still_the_assembled_prompt():
     from maljan.agents.static_analyst import _ISR_SYSTEM
 
     assert _ISR_SYSTEM == _golden("static_isr_system_ghidra.txt")
+
+
+def test_the_assembled_dynamic_prompt_equals_the_golden():
+    from maljan.agents.dynamic_analyst import _DYN_HEAD, _DYN_TAIL
+    from maljan.core.config import Settings
+    from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+
+    provider = CAPE2SandboxProvider.from_settings(Settings(_env_file=None))
+    assert _DYN_HEAD + provider.dynamic_prompt_fragment() + _DYN_TAIL == _golden(
+        "dynamic_system_cape2.txt"
+    )

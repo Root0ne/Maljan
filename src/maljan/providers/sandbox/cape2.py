@@ -12,7 +12,10 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from langchain_core.tools import BaseTool
+
 from maljan.agents.base_agent import _run_coro_blocking
+from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.registry import register_sandbox_provider
@@ -48,7 +51,29 @@ class CAPE2SandboxProvider(SandboxProvider):
         "get_latest_tasks",
         "verify_auth",
     )
-    CAPE_PROMPT_FRAGMENT: ClassVar[str] = ""  # filled by Task 11's verbatim move
+    # The tool-facing body of the dynamic system prompt: verbatim lines 25-36 of
+    # the old ``_ISR_SYSTEM`` in ``dynamic_analyst.py``, moved rather than
+    # retyped so a golden test can pin the assembled prompt byte for byte.
+    # ``_DYN_HEAD`` in the analyst supplies the provider-independent opening
+    # this fragment completes. A property of the sandbox, not of its MCP
+    # server: it is what the analyst was measured against whether or not the
+    # CAPE MCP server is actually enabled today (see ``dynamic_prompt_fragment``).
+    CAPE_PROMPT_FRAGMENT: ClassVar[str] = (
+        "=== TOOL USAGE WORKFLOW ===\n"
+        "Follow this sequence when given a file path or hash:\n"
+        "1. Call `get_cuckoo_status` to verify the sandbox is online.\n"
+        "2. Call `search_task(hash_value=<sha256>)` to check if this sample was already analyzed.\n"
+        "3. If no existing task: call `submit_file(file_path=<path>)` to submit for analysis.\n"
+        "4. After submission, POLL with `get_task_status(task_id=<id>)` until status "
+        "is 'reported'.\n"
+        "5. Once reported: call `get_task_report(task_id=<id>, format='lean')` for a "
+        "summarized report.\n"
+        "6. Call `get_task_iocs(task_id=<id>)` for IOCs (domains, IPs, mutexes).\n"
+        "7. Optionally call `get_task_config(task_id=<id>)` for extracted malware configs.\n\n"
+        "IMPORTANT: Always use format='lean' for reports to avoid context overflow. "
+        "The lean format filters 50MB reports down to key findings.\n"
+        "If given a Task ID directly, skip to step 5."
+    )
 
     def __init__(self, cfg: SandboxCape2Config) -> None:
         self._cfg = cfg
@@ -70,6 +95,102 @@ class CAPE2SandboxProvider(SandboxProvider):
             report_format="cape2",
             degrade_on_failure=True,
         )
+
+    def dynamic_prompt_fragment(self) -> str:
+        """The tool-usage workflow text, whether or not the MCP server is up.
+
+        A property of the sandbox report shape, not of the MCP toggle: the
+        dynamic analyst was measured against this workflow description either
+        way, and a disabled/unreachable MCP server degrades the *tools*
+        (``dynamic_tools`` below), never the prompt.
+        """
+        return self.CAPE_PROMPT_FRAGMENT
+
+    def dynamic_tools(self) -> list[BaseTool]:
+        """The 13 essential CAPE MCP tools, or none while MCP is disabled.
+
+        Moved from ``DynamicAnalyst._initialize_mcp_client`` unchanged apart
+        from reading ``self._cfg.mcp`` (this provider's own config slice)
+        instead of a module-level ``get_settings().mcp.cape``, and the
+        allow-list itself, which is always ``CAPE_ESSENTIAL_TOOLS`` now — the
+        dead ``mcp.cape.tools`` config-driven branch is not carried forward
+        (``MCPServerConfig`` has no such field; it arrives in sub-project B).
+
+        Idempotent: a toolkit already attached — by an earlier call, or by a
+        caller that assigned ``_toolkit`` directly, as tests do — is reused
+        rather than rebuilt. The static provider's ``open()`` learned this the
+        hard way: a live subprocess or transport opened a second time leaks
+        the first one instead of replacing it.
+        """
+        essential = set(self.CAPE_ESSENTIAL_TOOLS)
+        if self._toolkit is not None:
+            return [t for t in self._toolkit.get_tools() if t.name in essential]
+
+        if not self._cfg.mcp.enabled:
+            logger.info("CAPEv2 MCP is disabled in config.")
+            return []
+
+        from mcp import StdioServerParameters
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        transport = (getattr(self._cfg.mcp, "transport", "stdio") or "stdio").lower()
+
+        if transport in ("http", "streamable-http", "sse"):
+            # Remote CAPE MCP server (e.g. cape_mcp_wrapper.py running on a
+            # separate Ubuntu VM with --transport streamable-http). There is no
+            # local subprocess to launch; connect over HTTP.
+            url = self._cfg.mcp.url
+            if not url:
+                logger.warning(
+                    "CAPE MCP transport=%s but mcp.cape.url is empty; skipping MCP init.",
+                    transport,
+                )
+                return []
+            headers: dict[str, str] = {}
+            token = getattr(self._cfg.mcp, "auth_token", "")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            logger.info("Initializing CAPEv2 MCP over %s: %s", transport, url)
+            toolkit = MCPLangChainToolkit(transport=transport, http_url=url, http_headers=headers)
+        else:
+            command = self._cfg.mcp.command
+            args = self._cfg.mcp.args
+
+            from maljan.agents.subprocess_env import child_env
+
+            env = child_env(self._cfg.mcp.env)
+
+            from maljan.core.paths import get_project_root, resolve_mcp_args
+
+            project_root = str(get_project_root())
+            args = resolve_mcp_args(args)
+            server_params = StdioServerParameters(
+                command=command, args=args, env=env, cwd=project_root
+            )
+
+            toolkit = MCPLangChainToolkit(server_params)
+
+        # Init the MCP toolkit on the shared agent loop so its session/transport
+        # is bound to the SAME loop the ReAct tool calls later run on. Running it
+        # on a throwaway ``new_event_loop()`` (LangGraph runs sync nodes in a
+        # worker thread with no running loop) bound the toolkit to a different
+        # loop, so the first CAPE MCP tool call raised "<Event> is bound to a
+        # different event loop" (see static_analyst._run_async for the full
+        # rationale). Always called from the sync analyze path, never from within
+        # the agent loop, so blocking on the result cannot deadlock.
+        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
+
+        self._toolkit = toolkit
+        all_tools = toolkit.get_tools()
+        tools = [t for t in all_tools if t.name in essential]
+        logger.info(
+            "Initialized CAPEv2 MCP tools: %d/%d (essential only): %s",
+            len(tools),
+            len(all_tools),
+            [t.name for t in tools],
+        )
+        return tools
 
     def _get_client(self) -> Any:
         if self._client is None:
