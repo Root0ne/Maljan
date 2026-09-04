@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_active_user
 from app.logging_config import get_logger
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
@@ -44,6 +44,11 @@ logger = get_logger("api.sandbox_reports")
 router = APIRouter(prefix="/samples", tags=["Sandbox reports"])
 
 _CHUNK = 64 * 1024
+# Matches SandboxReportRow.task_id's column width (String(128)). Truncated, not
+# rejected: the id is a correlation key back to the source sandbox's own task,
+# not load-bearing for the analysis, and an over-long one is far more likely to
+# be a quirky producer than a reason to refuse an otherwise-valid report.
+_TASK_ID_MAX_LENGTH = 128
 
 
 def _max_report_bytes() -> int:
@@ -147,9 +152,11 @@ def _read_payload(file: UploadFile, filename: str) -> tuple[bytes, dict[str, Any
 def _task_id_of(payload: dict[str, Any], fmt: str) -> str | None:
     if fmt == "triage":
         sample = payload.get("sample")
-        return str(sample.get("id")) if isinstance(sample, dict) and sample.get("id") else None
-    info = payload.get("info")
-    return str(info.get("id")) if isinstance(info, dict) and info.get("id") is not None else None
+        raw = str(sample.get("id")) if isinstance(sample, dict) and sample.get("id") else None
+    else:
+        info = payload.get("info")
+        raw = str(info.get("id")) if isinstance(info, dict) and info.get("id") is not None else None
+    return raw[:_TASK_ID_MAX_LENGTH] if raw is not None else None
 
 
 def _target_sha(payload: dict[str, Any], fmt: str) -> str:
@@ -200,7 +207,7 @@ async def _persist(db: AsyncSession, row: SandboxReportRow) -> SandboxReportRow:
 async def upload_sandbox_report(
     sample_id: uuid.UUID,
     file: UploadFile,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportResponse:
     sample = await _maybe_await(_load_sample(db, sample_id, user))
@@ -214,10 +221,15 @@ async def upload_sandbox_report(
         )
     report_id = uuid.uuid4()
     storage_path = f"sandbox-reports/{sample.sha256[:2]}/{sample.sha256}/{report_id}.json"
-    _put_object(storage_path, body)
     target_sha = _target_sha(payload, fmt)
     matches = bool(target_sha) and target_sha.lower() == sample.sha256.lower()
     now = datetime.now(UTC)
+    # Insert before the storage write, not after: a row that fails to persist
+    # (a width violation, a constraint, anything) must never leave an object in
+    # MinIO that nothing will ever reference. In this order, a storage failure
+    # after a successful insert instead leaves an uncommitted row for get_db's
+    # own rollback to undo — the same ordering upload_sample uses in
+    # samples.py. Mirrored in the tests below via a forced persist failure.
     row = await _maybe_await(
         _persist(
             db,
@@ -236,6 +248,7 @@ async def upload_sandbox_report(
             ),
         )
     )
+    _put_object(storage_path, body)
     warning = _match_warning(matches=matches, sample_sha256=sample.sha256)
     if warning is not None:
         logger.warning(
@@ -291,7 +304,7 @@ async def list_sandbox_reports(
 async def delete_sandbox_report(
     sample_id: uuid.UUID,
     report_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     sample = await _maybe_await(_load_sample(db, sample_id, user))

@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 
 _API = Path(__file__).resolve().parents[3] / "apps" / "api"
@@ -44,21 +44,27 @@ def _build_client(db: MagicMock, sample: MagicMock, user: MagicMock) -> TestClie
     delete that actually reaches ``db.execute``) instead of the shared
     fixture's bare ``MagicMock``, which is never awaited because ``_load_sample``
     and ``_persist`` are the only DB-touching seams the upload path exercises.
+
+    Overrides ``require_active_user`` the same way ``get_current_user`` is
+    overridden — the delete route depends on it now, and this app's ``db`` is a
+    stand-in for the *route's own* queries, not a real session that could answer
+    ``require_active_user``'s own re-validation query too.
     """
     from app.database import get_db
-    from app.deps import get_current_user
+    from app.deps import get_current_user, require_active_user
 
     app = FastAPI()
     app.include_router(module.router, prefix="/api/v1")
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_active_user] = lambda: user
     return TestClient(app)
 
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     from app.database import get_db
-    from app.deps import get_current_user
+    from app.deps import get_current_user, require_active_user
 
     app = FastAPI()
     app.include_router(module.router, prefix="/api/v1")
@@ -73,6 +79,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "_persist", MagicMock(side_effect=lambda db, row: row))
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_user] = lambda: user
+    # upload_sandbox_report depends on require_active_user, not get_current_user
+    # directly (SEC-TOCTOU-AUTHZ-01) — override it the same trivial way so these
+    # tests keep exercising upload behavior, not the re-validation query itself.
+    app.dependency_overrides[require_active_user] = lambda: user
     yield TestClient(app), sample, stored
 
 
@@ -158,6 +168,94 @@ def test_the_inflated_size_cap_is_enforced_too(client, monkeypatch):
     )
     assert r.status_code == 413
     assert stored == {}
+
+
+# ── Fix round 1, Important 1: a crafted ``info.id`` longer than the
+# ``task_id`` column's width (128) must be bounded before it is ever
+# persisted. The pre-fix code stored the report object in MinIO *before*
+# inserting the row, so a width violation on insert (which only Postgres, not
+# this suite's SQLite, would actually raise) left an object nothing would ever
+# reference and surfaced as an uncontrolled 500. Both tests below assert on
+# the code path — bounding the value, and ordering the insert before the
+# storage write — rather than on a database enforcing anything, since SQLite
+# does not.
+
+
+def test_an_overlong_task_id_is_truncated_before_it_is_stored(client):
+    api, sample, _ = client
+    payload = {
+        "info": {"version": "CAPEv2 2.4", "id": "X" * 500},
+        "target": {"sha256": sample.sha256, "name": "x.exe", "md5": "b" * 32},
+        "behavior": {"processes": [], "apistats": {}, "generic": []},
+        "signatures": [],
+        "network": {},
+        "CAPE": {"payloads": []},
+    }
+    r = api.post(
+        f"/api/v1/samples/{sample.id}/sandbox-reports",
+        files={"file": ("report.json", json.dumps(payload).encode(), "application/json")},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["task_id"] == "X" * module._TASK_ID_MAX_LENGTH
+
+
+def test_a_persist_failure_leaves_no_orphaned_storage_object(client, monkeypatch):
+    api, sample, stored = client
+
+    def _boom(db, row):
+        raise RuntimeError("simulated persist failure")
+
+    monkeypatch.setattr(module, "_persist", MagicMock(side_effect=_boom))
+    with pytest.raises(RuntimeError):
+        api.post(
+            f"/api/v1/samples/{sample.id}/sandbox-reports",
+            files={"file": ("report.json", _cape_blob(), "application/json")},
+        )
+    assert stored == {}
+
+
+# ── Fix round 1, Important 2: the mutating routes must re-validate that the
+# account is still active (SEC-TOCTOU-AUTHZ-01, ``require_active_user`` in
+# ``app/deps.py``) rather than trust the JWT/API-key lookup alone. The
+# read-only listing route correctly does not carry this cost.
+
+
+def test_mutating_routes_require_an_active_user_but_listing_does_not(monkeypatch):
+    from app.database import get_db
+    from app.deps import get_current_user, require_active_user
+
+    def _deactivated() -> None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "User account is deactivated")
+
+    user = MagicMock(id=uuid.uuid4())
+    sample = MagicMock(id=uuid.uuid4(), sha256=SHA, uploaded_by=user.id)
+    monkeypatch.setattr(module, "_load_sample", MagicMock(return_value=sample))
+
+    app = FastAPI()
+    app.include_router(module.router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_active_user] = _deactivated
+    api = TestClient(app)
+
+    upload_r = api.post(
+        f"/api/v1/samples/{sample.id}/sandbox-reports",
+        files={"file": ("report.json", _cape_blob(), "application/json")},
+    )
+    assert upload_r.status_code == 403
+
+    delete_r = api.delete(f"/api/v1/samples/{sample.id}/sandbox-reports/{uuid.uuid4()}")
+    assert delete_r.status_code == 403
+
+    # Listing depends on get_current_user only — require_active_user staying
+    # broken above must not affect it.
+    list_result = MagicMock()
+    list_result.scalars.return_value.all.return_value = []
+    list_db = MagicMock()
+    list_db.execute = AsyncMock(return_value=list_result)
+    app.dependency_overrides[get_db] = lambda: list_db
+    list_r = api.get(f"/api/v1/samples/{sample.id}/sandbox-reports")
+    assert list_r.status_code == 200
 
 
 # ── Beyond the brief's literal listing: the pre-flight ruling in the task's
