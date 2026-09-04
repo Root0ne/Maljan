@@ -65,3 +65,29 @@ def test_the_live_sidecar_still_offers_exactly_the_pinned_tools(name: str) -> No
         )
     )
     assert sorted(live) == load_golden(name)
+
+
+@pytest.mark.skipif(
+    _INTERPRETER_MISSING, reason="no python interpreter available to launch the sidecar"
+)
+def test_the_registry_opens_the_real_network_built_in_with_the_pinned_tools() -> None:
+    """Live proof that moving the launch parameters into ``ServerHandle`` changed nothing.
+
+    Sub-project B moved the transport/``child_env``/toolkit wiring that used
+    to live inside ``NetworkAnalyst._initialize_mcp_client`` into
+    ``ServerHandle.open``. This opens the real ``network`` built-in the way a
+    job now would — through ``ServerRegistry``, no mocks — and checks its
+    live manifest against the same golden the raw handshake above pins, so a
+    parameter dropped in the move (a missing ``cwd``, a stripped ``env_allow``
+    entry) shows up here even before any analyst is wired to the registry.
+    """
+    from maljan.core.config import Settings
+    from maljan.providers.servers import ServerRegistry
+
+    registry = ServerRegistry(Settings(_env_file=None))
+    handle = registry.get("network")
+    try:
+        handle.open("test-job")
+        assert sorted(handle.all_tool_names()) == load_golden("network")
+    finally:
+        registry.close_all()

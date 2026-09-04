@@ -2,19 +2,20 @@
 
 This is the whole point of the provider layer — how somebody plugs in a
 reverse-engineering (or any other) MCP tool Maljan has never heard of, with
-nothing more than ``static.generic.*`` settings. It is also the class Task
-18's ``R2StaticProvider`` subclasses with radare2-specific defaults (command,
-allow-list, prompt fragment): everything below is deliberately ignorant of
-what its server's tools are called.
+nothing more than ``static.generic.server`` naming an entry in
+``mcp.servers``. It is also the class ``R2StaticProvider`` subclasses with
+radare2-specific defaults (command, allow-list, prompt fragment): everything
+below is deliberately ignorant of what its server's tools are called.
 
-The tool allow-list is a constructor argument, not a setting:
-``MCPServerConfig`` (and therefore ``static.generic``) has no ``tools`` field
-yet — that arrives with the operator-configured MCP registry in sub-project
-B. Until then, ``from_settings`` always passes ``allowed_tools=None``, so a
-server attached purely from ``static.generic.*`` keeps every tool it
-advertises in curated mode too; only a caller that constructs this class
-directly (a subclass with its own default manifest, or a future settings
-path) narrows it.
+The tool allow-list is ``MCPServerConfig.tools`` now: ``None`` exposes every
+tool the server advertises (what the built-ins do, and what a server attached
+purely from ``static.generic.server`` keeps until the operator narrows it
+from its probe result), and a list narrows to those names.
+``ServerHandle.tools()`` applies that setting; the constructor's own
+``allowed_tools`` is a second, class-level allow-list a subclass (like
+``R2StaticProvider``) supplies as its own default, applied on top by
+``select_tools`` — a belt the operator's own setting does not need to know
+about.
 
 Unlike Ghidra, this provider degrades rather than raising
 (``StaticCapabilities.degrade_on_failure=True``): an operator's own MCP
@@ -40,6 +41,7 @@ from maljan.providers.base import (
     StaticProvider,
 )
 from maljan.providers.registry import register_static_provider
+from maljan.providers.servers import ServerHandle
 
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, Settings
@@ -47,39 +49,81 @@ if TYPE_CHECKING:
 
 @register_static_provider("generic_mcp")
 class GenericMCPStaticProvider(StaticProvider):
-    """Any MCP tool server, attached from ``MCPServerConfig`` alone.
+    """Any MCP tool server, attached through a ``ServerHandle``.
 
     ``label`` names the server in logs and in the generated prompt fragment.
-    ``allowed_tools`` is the curated/dynamic-mode allow-list — empty or
-    ``None`` keeps every tool the server advertises. ``prompt_fragment_text``
-    lets a caller supply real tool-specific guidance instead of the generated,
-    tool-name-listing paragraph.
+    ``allowed_tools`` is the curated/dynamic-mode allow-list a subclass
+    supplies as its own default — empty or ``None`` applies no extra
+    narrowing beyond the handle's own ``MCPServerConfig.tools`` setting.
+    ``prompt_fragment_text`` lets a caller supply real tool-specific guidance
+    instead of the generated, tool-name-listing paragraph.
+
+    The constructor accepts either a ready ``ServerHandle`` (the normal path,
+    built by ``from_settings`` from an ``mcp.servers`` entry) or a bare
+    ``MCPServerConfig`` (the path ``R2StaticProvider`` and the header tests
+    still use, since ``static.r2`` is its own config leaf rather than a
+    registry entry) — the latter is wrapped in a handle this class builds and
+    owns.
     """
 
     def __init__(
         self,
-        cfg: MCPServerConfig,
+        cfg: MCPServerConfig | ServerHandle,
         *,
         label: str = "MCP",
         allowed_tools: frozenset[str] | None = None,
         prompt_fragment_text: str = "",
     ) -> None:
-        self._cfg = cfg
+        if isinstance(cfg, ServerHandle):
+            self._handle = cfg
+            self._cfg = cfg.config
+        else:
+            self._cfg = cfg
+            self._handle = self._build_handle(label or "generic", cfg)
         self._label = label
         self._allowed_tools = allowed_tools or frozenset()
         self._prompt_fragment_text = prompt_fragment_text
         self._job = StaticJobContext()
-        self._toolkit: Any = None
-        self._all_tools: list[Any] = []
         self.tools: list[Any] = []
+
+    def _build_handle(self, name: str, cfg: MCPServerConfig) -> ServerHandle:
+        """Wrap a directly-supplied config in a handle, honouring ``server_command``.
+
+        ``R2StaticProvider`` (and any future subclass that names its
+        executable under its own field, like ``binary_path``) overrides
+        ``server_command`` rather than writing to ``MCPServerConfig.command``
+        itself — the config is the shared, user-editable ``Settings`` leaf
+        that ``settings_snapshot()`` persists into the job's run summary, so
+        writing to it here would show the operator a value they never set.
+        The handle gets a private copy with ``command`` resolved instead.
+        """
+        command = self.server_command()
+        if command == cfg.command:
+            return ServerHandle(name, cfg)
+        return ServerHandle(name, cfg.model_copy(update={"command": command}))
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> GenericMCPStaticProvider:
-        # `static.generic` is now a `StaticGenericConfig` reference (the name
-        # of an entry in `mcp.servers`) rather than its own `MCPServerConfig`
-        # copy; resolving the reference into the server it names is Task 4/5's
-        # job. Left as-is (and mypy-silenced) so this task stays settings-only.
-        return cls(cfg.static.generic)  # type: ignore[arg-type]
+        """The registry entry ``static.generic.server`` names, or an inert handle.
+
+        An unset (or unknown) reference is not an error here: the provider is
+        constructed eagerly by the container, and an operator who selected
+        generic_mcp without picking a server should learn that from the probe,
+        not from a container that refuses to build.
+        """
+        from maljan.core.config import MCPServerConfig
+
+        name = cfg.static.generic.server
+        entry = cfg.mcp.servers.get(name) if name else None
+        if entry is None:
+            if name:
+                logger.warning(
+                    "static.generic.server names %r, which is not in mcp.servers; "
+                    "the generic_mcp provider has nothing to attach.",
+                    name,
+                )
+            return cls(ServerHandle(name or "generic", MCPServerConfig()))
+        return cls(ServerHandle(name, entry), label=entry.label or name)
 
     @property
     def capabilities(self) -> StaticCapabilities:
@@ -124,6 +168,11 @@ class GenericMCPStaticProvider(StaticProvider):
         """
         return self._cfg.command
 
+    @property
+    def server_name(self) -> str:
+        """The registry key this provider owns; the static analyst excludes it."""
+        return self._handle.name
+
     def open(self, job: StaticJobContext) -> None:
         """Attach to the configured MCP server for ``job``. Idempotent, per the base contract.
 
@@ -136,80 +185,21 @@ class GenericMCPStaticProvider(StaticProvider):
         previous toolkit before reattaching, so there is never a point where
         two toolkits — two clients or subprocesses — are live at once.
         """
-        if self._toolkit is not None:
+        if self._handle.is_open:
             if job == self._job:
                 return
-            logger.warning(
-                "%s provider re-opened for a job different from the one already "
-                "attached; closing the stale toolkit before re-attaching.",
-                self._label,
-            )
-            self._close_toolkit()
+            self._handle.close()
         self._job = job
-        if not self._cfg.enabled:
-            logger.info("%s is disabled in config.", self._label)
-            return
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-
-        output_guardrail = job.output_guardrail
-        max_chars = job.max_output_chars
-
-        if self._cfg.transport == "stdio":
-            from mcp import StdioServerParameters
-
-            from maljan.agents.subprocess_env import child_env
-            from maljan.core.paths import resolve_mcp_args
-
-            env = child_env(self._cfg.env)
-            env.setdefault("PYTHONIOENCODING", "utf-8")
-            args = resolve_mcp_args(self._cfg.args)
-            server_params = StdioServerParameters(command=self.server_command(), args=args, env=env)
-            toolkit = MCPLangChainToolkit(
-                server_params,
-                output_guardrail=output_guardrail,
-                max_output_chars=max_chars,
-                truncation_ledger=job.truncation_ledger,
-            )
-        else:
-            token = self._cfg.auth_token.get_secret_value()
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            toolkit = MCPLangChainToolkit(
-                transport=self._cfg.transport,
-                http_url=self._cfg.url,
-                http_headers=headers,
-                output_guardrail=output_guardrail,
-                max_output_chars=max_chars,
-                truncation_ledger=job.truncation_ledger,
-            )
-
-        self._run_async(toolkit.initialize())
-        self._toolkit = toolkit
-        all_tools = list(toolkit.get_tools())
-        self._all_tools = all_tools
-        self.tools = self.select_tools(all_tools)
-        logger.info(
-            "%s: %d/%d tools attached (mode=%s).",
-            self._label,
-            len(self.tools),
-            len(all_tools),
-            self._tool_mode(),
+        self._handle.open(
+            job.sha256 or "static",
+            output_guardrail=job.output_guardrail,
+            max_output_chars=job.max_output_chars,
+            truncation_ledger=job.truncation_ledger,
         )
-
-    def _run_async(self, coro: Any) -> None:
-        """Run the MCP-client init coroutine on the shared agent loop.
-
-        Same rationale as ``GhidraStaticProvider._run_async``: the toolkit's
-        transport binds its async primitives to whichever loop first creates
-        it, and the ReAct tool calls later run on the process-wide agent loop,
-        so init has to run there too rather than on a throwaway loop.
-        """
-        from maljan.agents.base_agent import _run_coro_blocking
-
-        _run_coro_blocking(coro, hard_timeout=120.0, label=f"{self._label}-mcp-init")
+        self.tools = self.select_tools(self._handle.tools())
 
     def get_tools(self) -> list[BaseTool]:
-        return self._all_tools
+        return self._handle.tools()
 
     def select_tools(self, tools: list[Any], categories: set[str] | None = None) -> list[Any]:
         """``all`` keeps everything; ``curated`` and ``dynamic`` apply the allow-list.
@@ -218,8 +208,9 @@ class GenericMCPStaticProvider(StaticProvider):
         key off — that map is specific to Ghidra's own tool names — so
         ``dynamic`` falls back to the same allow-list narrowing as
         ``curated``. The allow-list is empty unless the caller supplied one
-        (``static.generic`` has nowhere to configure it yet), so both modes
-        keep everything by default.
+        (a subclass default; ``static.generic``'s own narrowing already
+        happened in ``ServerHandle.tools()``), so both modes keep everything
+        by default.
         """
         if self._tool_mode() == "all":
             return list(tools)
@@ -229,39 +220,14 @@ class GenericMCPStaticProvider(StaticProvider):
 
     def _tool_mode(self) -> str:
         """Resolve the effective tool-selection mode from config (back-compat)."""
-        if getattr(self._cfg, "use_all_tools", False):
+        cfg = self._handle.config
+        if getattr(cfg, "use_all_tools", False):
             return "all"
-        return str(getattr(self._cfg, "tool_selection", "curated"))
+        return str(getattr(cfg, "tool_selection", "curated"))
 
     def mirror_spec(self) -> MirrorSpec:
         return MirrorSpec(work_subdir=".work", container_prefix="/data/samples")
 
-    def _close_toolkit(self) -> None:
-        """Release whatever client or subprocess is currently attached, if any.
-
-        The one release path, shared by ``close()`` and by ``open()``'s
-        mid-life re-attach — see ``GhidraStaticProvider._close_toolkit``, whose
-        shape this copies. Teardown that can throw is teardown nobody calls,
-        so every failure here is a warning, not a raise.
-        """
-        from maljan.agents.base_agent import _run_coro_blocking
-
-        toolkit, self._toolkit = self._toolkit, None
-        self._all_tools = []
-        # M8 (final review): ``_all_tools`` was cleared but ``self.tools``
-        # (the curated/selected subset ``get_tools()`` hands the analyst)
-        # was not, so a closed provider kept advertising tool objects whose
-        # transport was already gone.
-        self.tools = []
-        if toolkit is None:
-            return
-        closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
-        if closer is None:
-            return
-        try:
-            _run_coro_blocking(closer(), hard_timeout=20.0, label=f"{self._label}-close")
-        except Exception as exc:  # noqa: BLE001 - teardown never propagates
-            logger.warning("%s provider teardown failed (non-fatal): %s", self._label, exc)
-
     def close(self) -> None:
-        self._close_toolkit()
+        self.tools = []
+        self._handle.close()

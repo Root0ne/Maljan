@@ -17,13 +17,18 @@ class _T:
 
 
 def _cfg(**over):
+    """A ``Settings`` whose ``static.generic.server`` names a real ``mcp.servers`` entry.
+
+    ``static.generic`` moved from carrying its own ``MCPServerConfig`` to a
+    bare reference (``StaticGenericConfig.server``); the config itself now
+    lives at ``mcp.servers["custom"]``, the key the config-layer migration
+    also uses for the legacy ``static.generic.*`` values.
+    """
     cfg = Settings(_env_file=None)
     cfg.static.provider = "generic_mcp"
-    cfg.static.generic.enabled = True
-    cfg.static.generic.command = "my-mcp"
-    cfg.static.generic.args = ["--stdio"]
-    for k, v in over.items():
-        setattr(cfg.static.generic, k, v)
+    fields = {"enabled": True, "command": "my-mcp", "args": ["--stdio"], **over}
+    cfg.mcp.servers["custom"] = MCPServerConfig(**fields)
+    cfg.static.generic.server = "custom"
     return cfg
 
 
@@ -42,7 +47,9 @@ def test_curated_mode_without_an_allow_list_keeps_everything():
 
 def test_an_allow_list_narrows_the_manifest():
     provider = GenericMCPStaticProvider(
-        _cfg().static.generic, label="Test MCP", allowed_tools=frozenset({"keep"})
+        MCPServerConfig(enabled=True, command="my-mcp"),
+        label="Test MCP",
+        allowed_tools=frozenset({"keep"}),
     )
     assert [t.name for t in provider.select_tools([_T("keep"), _T("drop")])] == ["keep"]
 
@@ -104,12 +111,12 @@ def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
     assert job_1 == job_2 and job_1 is not job_2, "the test must exercise value equality"
 
     provider.open(job_1)
-    toolkit_after_first_open = provider._toolkit
+    toolkit_after_first_open = provider._handle._toolkit
 
     provider.open(job_2)
 
     assert len(constructions) == 1, "a same-job repeat call must not rebuild the client"
-    assert provider._toolkit is toolkit_after_first_open
+    assert provider._handle._toolkit is toolkit_after_first_open
 
 
 def test_a_failed_attach_raises_instead_of_silently_degrading():
@@ -200,9 +207,9 @@ def test_the_http_bearer_header_carries_the_real_token_not_its_mask(monkeypatch)
     field itself (rather than ``.get_secret_value()``) renders as the fixed
     ``**********`` mask, so the sidecar would see a header it can never
     accept. Built directly from ``MCPServerConfig`` — not ``from_settings`` —
-    because ``static.generic`` is only a reference to an ``mcp.servers`` key
-    until Task 5 resolves it, and every ``from_settings``-based test in this
-    module is red for that unrelated reason.
+    to prove the constructor still accepts a bare config, the path
+    ``R2StaticProvider`` (whose ``static.r2`` is its own config leaf, not an
+    ``mcp.servers`` entry) still uses.
     """
     import secrets
 
@@ -228,7 +235,9 @@ def test_the_http_bearer_header_carries_the_real_token_not_its_mask(monkeypatch)
 
 
 def test_prompt_fragment_defaults_to_a_generated_paragraph_naming_the_label():
-    provider = GenericMCPStaticProvider(_cfg().static.generic, label="Test MCP")
+    provider = GenericMCPStaticProvider(
+        MCPServerConfig(enabled=True, command="my-mcp"), label="Test MCP"
+    )
     fragment = provider.prompt_fragment()
     assert "Test MCP" in fragment
     assert "cite a concrete artifact" in fragment
@@ -236,7 +245,8 @@ def test_prompt_fragment_defaults_to_a_generated_paragraph_naming_the_label():
 
 def test_prompt_fragment_text_overrides_the_generated_paragraph():
     provider = GenericMCPStaticProvider(
-        _cfg().static.generic, prompt_fragment_text="Use the custom tool exactly as documented."
+        MCPServerConfig(enabled=True, command="my-mcp"),
+        prompt_fragment_text="Use the custom tool exactly as documented.",
     )
     assert provider.prompt_fragment() == "Use the custom tool exactly as documented."
 
@@ -292,12 +302,12 @@ def test_opening_the_same_job_twice_is_a_no_op(monkeypatch):
     assert job_1 == job_2 and job_1 is not job_2
 
     provider.open(job_1)
-    toolkit_after_first_open = provider._toolkit
+    toolkit_after_first_open = provider._handle._toolkit
     provider.open(job_2)
 
     assert len(constructions) == 1, "an equal job must not rebuild the toolkit"
     assert closed == [], "a same-job repeat call must not close anything"
-    assert provider._toolkit is toolkit_after_first_open
+    assert provider._handle._toolkit is toolkit_after_first_open
 
 
 def test_opening_a_different_job_closes_the_first_toolkit_before_attaching_the_new_one(
@@ -318,13 +328,13 @@ def test_opening_a_different_job_closes_the_first_toolkit_before_attaching_the_n
 
     provider = GenericMCPStaticProvider.from_settings(_cfg())
     provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/a.exe"))
-    first_toolkit = provider._toolkit
+    first_toolkit = provider._handle._toolkit
 
     provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/b.exe"))
 
     assert len(constructions) == 2, "a genuinely different job must rebuild the toolkit"
     assert closed == [1], "the stale toolkit must be closed before the new one replaces it"
-    assert provider._toolkit is not first_toolkit
+    assert provider._handle._toolkit is not first_toolkit
 
 
 def test_close_tears_down_the_toolkit_and_is_idempotent(monkeypatch):
@@ -335,10 +345,10 @@ def test_close_tears_down_the_toolkit_and_is_idempotent(monkeypatch):
 
     provider = GenericMCPStaticProvider.from_settings(_cfg())
     provider.open(StaticJobContext())
-    assert provider._toolkit is not None
+    assert provider._handle._toolkit is not None
 
     provider.close()
-    assert provider._toolkit is None
+    assert provider._handle._toolkit is None
     assert provider.get_tools() == []
     # M8 (final review): _all_tools was cleared but the curated/selected
     # subset in provider.tools was not, so a closed provider still
