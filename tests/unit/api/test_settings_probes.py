@@ -287,6 +287,46 @@ def test_the_cape_probe_is_registered_under_both_names():
     assert probes.PROBES["cape"] is probes.probe_cape2
 
 
+@pytest.mark.asyncio
+async def test_triage_probe_reports_ok(monkeypatch):
+    def handler(req: httpx.Request):
+        assert req.url.path.endswith("/resources")
+        assert req.headers["authorization"] == "Bearer tok"
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_triage({"base_url": "https://tria.ge/api/v0", "api_token": "tok"})
+    assert r.ok is True
+
+
+@pytest.mark.asyncio
+async def test_triage_probe_reports_401_without_the_token_value(monkeypatch):
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda: httpx.AsyncClient(transport=transport(lambda r: httpx.Response(401)), timeout=10),
+    )
+    r = await probes.probe_triage(
+        {"base_url": "https://tria.ge/api/v0", "api_token": "super-secret-triage-token"}
+    )
+    assert r.ok is False
+    assert "401" in r.detail
+    assert "super-secret-triage-token" not in r.detail
+
+
+@pytest.mark.asyncio
+async def test_triage_probe_with_a_missing_token_makes_no_request(monkeypatch):
+    def must_not_be_called():
+        raise AssertionError("no HTTP client should be built without a token")
+
+    monkeypatch.setattr(probes, "_client", must_not_be_called)
+    r = await probes.probe_triage({"base_url": "https://tria.ge/api/v0", "api_token": ""})
+    assert r.ok is False
+    assert "no API token configured" in r.detail
+
+
 def test_probe_inputs_name_only_existing_settings_keys():
     from app.services.settings_catalog_api import catalog_index
 

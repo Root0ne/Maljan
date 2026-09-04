@@ -278,3 +278,89 @@ def cape_report_to_sandbox_report(
         summary={key: _as_str_list(summary_raw.get(key)) for key in _SUMMARY_KEYS},
         file_writes=_as_str_list(raw.get("file_writes") or raw.get("files_written")),
     )
+
+
+def triage_overview_to_sandbox_report(
+    overview: dict[str, Any],
+    *,
+    provider: str = "triage",
+    task_reports: dict[str, dict[str, Any]] | None = None,
+    task_id: str = "",
+) -> SandboxReport:
+    """Map a Triage overview (plus its behavioural task reports) onto the model.
+
+    Triage reports what it observed, not every API call: there is no per-call
+    log, no apistats and no registry timeline. Those four sections are listed in
+    ``unavailable`` rather than left empty and silent, because an empty dynamic
+    section reads exactly like a clean sample — and the report renderers say so
+    out loud (Task 17).
+
+    ``TriageSandboxProvider`` is imported here, inside the function body rather
+    than at module scope, because it is the one caller: the provider module
+    imports this function at import time, so a module-level import back would
+    be circular. By the time anything actually calls this function, both
+    modules have finished loading regardless of which one a caller reached
+    first.
+    """
+    from maljan.providers.sandbox.triage import TriageSandboxProvider
+
+    sample_field, analysis_field = overview.get("sample"), overview.get("analysis")
+    sample = sample_field if isinstance(sample_field, dict) else {}
+    analysis = analysis_field if isinstance(analysis_field, dict) else {}
+    processes: list[SandboxProcess] = []
+    network = SandboxNetwork()
+    for task in (task_reports or {}).values():
+        for proc in task.get("processes") or []:
+            if not isinstance(proc, dict):
+                continue
+            processes.append(
+                SandboxProcess(
+                    pid=_int(proc.get("procid") or proc.get("pid")),
+                    ppid=_int(proc.get("procid_parent") or proc.get("ppid")),
+                    name=str(proc.get("image") or proc.get("name") or ""),
+                    command_line=str(proc.get("cmd") or ""),
+                    first_seen=str(proc.get("started") or ""),
+                    calls=[],
+                )
+            )
+        net_field = task.get("network")
+        net = net_field if isinstance(net_field, dict) else {}
+        network.dns.extend(_rows(net.get("requests")))
+        network.http.extend(_rows(net.get("flows")))
+        network.domains.extend(
+            [str(r.get("domain")) for r in _rows(net.get("requests")) if r.get("domain")]
+        )
+    return SandboxReport(
+        provider=provider,
+        source_format="triage",
+        task_id=str(task_id or sample.get("id") or ""),
+        target=SandboxTarget(
+            sha256=str(sample.get("sha256") or ""),
+            md5=str(sample.get("md5") or ""),
+            name=str(sample.get("target") or ""),
+            file_type=str(sample.get("kind") or ""),
+            mime_type=str(sample.get("kind") or ""),
+            size=_int(sample.get("size")),
+        ),
+        processes=processes,
+        apistats={},
+        generic_events=[],
+        signatures=[
+            SandboxSignatureRow(
+                name=str(s.get("name") or ""),
+                description=str(s.get("desc") or s.get("name") or ""),
+                severity=_int(s.get("score")),
+                marks=list(s.get("indicators") or []),
+                ttp_tags=_as_str_list(s.get("ttp")),
+            )
+            for s in (overview.get("signatures") or [])
+            if isinstance(s, dict)
+        ],
+        network=network,
+        dropped_files=[],
+        registry=[],
+        screenshots=[],
+        cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},
+        unavailable=list(TriageSandboxProvider.UNAVAILABLE),
+        raw=overview,
+    )

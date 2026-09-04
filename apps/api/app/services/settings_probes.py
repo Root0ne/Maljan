@@ -167,6 +167,18 @@ async def probe_cape2(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+async def probe_triage(v: dict[str, Any]) -> ProbeResult:
+    token = v.get("api_token")
+    if not token:
+        # No point building a client for a call the token would refuse: a
+        # missing key is reported for what it is, without touching the network.
+        return ProbeResult(False, 0, "no API token configured")
+    t0 = time.perf_counter()
+    headers = {"Authorization": f"Bearer {token}"}
+    ok, detail, _ = await _get(f"{str(v.get('base_url') or '').rstrip('/')}/resources", headers)
+    return ProbeResult(ok, _ms(t0), detail)
+
+
 async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     base = str(v.get("url") or "").rstrip("/")
@@ -221,6 +233,7 @@ PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "cape2": probe_cape2,
     # "cape" is kept for one release: a stored annotation may still name it.
     "cape": probe_cape2,
+    "triage": probe_triage,
     "qdrant": probe_qdrant,
     "redis": probe_redis,
     "virustotal": probe_virustotal,
@@ -256,6 +269,10 @@ _INPUTS: dict[str, dict[str, str]] = {
     "cape": {
         "core.sandbox.cape2.base_url": "base_url",
         "core.sandbox.cape2.api_token": "api_token",
+    },
+    "triage": {
+        "core.sandbox.triage.base_url": "base_url",
+        "core.sandbox.triage.api_token": "api_token",
     },
     "qdrant": {
         "core.memory.qdrant_url": "url",

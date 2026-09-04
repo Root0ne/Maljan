@@ -75,9 +75,9 @@ def test_an_unrecognisable_payload_is_refused_even_with_a_misconfigured_allow_li
     assert "Could not recognise" in str(exc.value)
 
 
-def test_a_triage_upload_is_refused_narrowly_until_task_16():
-    """The refusal names only the triage format; a cape2 upload right after
-    still succeeds, so the gate is not accidentally catching every upload."""
+def test_a_triage_upload_is_mapped_instead_of_refused():
+    """The old placeholder refusal is gone; a cape2 upload right after still
+    succeeds too, so the triage path is not accidentally catching every upload."""
     payload = {
         "version": "0.3.0",
         "sample": {"id": "260903-abcdef", "target": "x.exe", "sha256": "a" * 64},
@@ -86,9 +86,13 @@ def test_a_triage_upload_is_refused_narrowly_until_task_16():
         "signatures": [{"name": "s", "score": 10}],
     }
     provider = _provider()
-    with pytest.raises(ProviderError) as exc:
-        provider.attach_report(json.dumps(payload).encode(), filename="triage.json")
-    assert "the Triage reader lands in the next task" in str(exc.value)
+    run = provider.attach_report(json.dumps(payload).encode(), filename="triage.json")
+    assert run.report.source_format == "triage"
+    assert run.report.target.sha256 == "a" * 64
+    assert run.report.cti["family"] == ["qakbot"]
+    assert [s.name for s in run.report.signatures] == ["s"]
+    assert sorted(run.report.unavailable) == ["apistats", "calls", "generic_events", "registry"]
+    assert run.status == "reported"
     assert provider.attach_report(_blob()).report.source_format == "cape2"
 
 

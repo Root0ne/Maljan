@@ -18,7 +18,10 @@ from maljan.providers.base import SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.formats import sniff_format
-from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+from maljan.schemas.sandbox_report import (
+    cape_report_to_sandbox_report,
+    triage_overview_to_sandbox_report,
+)
 
 if TYPE_CHECKING:
     from maljan.core.config import SandboxUploadConfig, Settings
@@ -116,19 +119,17 @@ class UploadSandboxProvider(SandboxProvider):
                 f"Uploaded report sniffed as {fmt!r}; accepted formats are "
                 f"{', '.join(sorted(self._cfg.allowed_formats))}."
             )
+        # ``fmt`` is narrowed to Literal["cape2", "cuckoo", "triage"] here:
+        # "unknown" raised above is the only member neither reader accepts.
         if fmt == "triage":
-            # Task 16 removes this refusal once `triage_overview_to_sandbox_report`
-            # exists — the allow-list check above is what actually gates access;
-            # this is only a placeholder for a format the allow-list still lets in.
-            # Checked before any conversion runs, so nothing is built only to be
-            # discarded.
-            raise ProviderError(
-                "Uploaded report sniffed as 'triage'; the Triage reader lands in the next task."
-            )
-        # ``fmt`` is narrowed to Literal["cape2", "cuckoo"] here: "unknown" and
-        # "triage" both raised above, so this always names a format
-        # ``SandboxReport.source_format`` actually accepts — no type: ignore.
-        report = cape_report_to_sandbox_report(payload, provider="upload", source_format=fmt)
+            # An uploaded Triage report is an overview.json alone — no
+            # per-task behavioural reports rode along with it, so
+            # ``task_reports`` stays empty and processes/network are thinner
+            # than a fetched run's. Still every key the mapper can fill from
+            # the overview itself: target, signatures, cti, unavailable.
+            report = triage_overview_to_sandbox_report(payload, provider="upload")
+        else:
+            report = cape_report_to_sandbox_report(payload, provider="upload", source_format=fmt)
         return SandboxRun(
             task_id=report.task_id or "uploaded",
             sample_sha256=report.target.sha256,
