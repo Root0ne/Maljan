@@ -33,6 +33,8 @@ class CatalogEntryDTO(BaseModel):
     probe: str | None = None
     applies_when: dict[str, list[str]] | None = None
     order: int = 0
+    choices_from: str | None = None
+    editor: str | None = None
 
 
 class GroupDTO(BaseModel):

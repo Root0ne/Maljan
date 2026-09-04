@@ -236,6 +236,8 @@ def api_catalog() -> list[CatalogEntry]:
                 probe=ann.get("probe"),
                 applies_when=None,
                 order=0,
+                choices_from=None,
+                editor=None,
             )
         )
     for name, ann in API_READONLY.items():
@@ -262,6 +264,8 @@ def api_catalog() -> list[CatalogEntry]:
                 probe=ann.get("probe"),
                 applies_when=None,
                 order=0,
+                choices_from=None,
+                editor=None,
             )
         )
     return entries
