@@ -424,8 +424,8 @@ test.describe("Settings → Configuration (admin)", () => {
 
     await expect(page.getByText("core.sandbox.triage.base_url")).toBeVisible();
     await expect(page.getByText("core.sandbox.cape2.base_url")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Test triage" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Test cape2" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Test Triage connection" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Test CAPE connection" })).toHaveCount(0);
   });
 
   test("an edit that a provider switch hides is still staged and is counted", async ({

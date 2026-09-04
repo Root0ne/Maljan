@@ -93,6 +93,19 @@ export default function ConfigurationTab() {
       .filter((g) => g.entries.length > 0 && (q || !active || g.key === active));
   }, [s.schema, query, active, s.values, s.pending]);
 
+  // Whether a group has a ui-sourced override anywhere in its *full* entry
+  // list, independent of the search/visibility filter above — a group whose
+  // only override sits on a currently hidden entry (e.g. the CAPE URL while
+  // the sandbox provider is set to Triage) must still offer "Reset group to
+  // env", the same way its rail dirty-dot survives filtering.
+  const hasUiOverride = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    s.schema?.groups.forEach((g) => {
+      m[g.key] = g.entries.some((e) => s.values[e.key]?.source === "ui");
+    });
+    return m;
+  }, [s.schema, s.values]);
+
   // Staged keys whose owning entry is currently hidden by a governing
   // selector elsewhere in the group — still sent on Apply, just not visible
   // to point at, so the apply bar names them instead of silently dropping them.
@@ -237,8 +250,8 @@ export default function ConfigurationTab() {
               <section key={g.key} className="mb-8">
                 <GroupHeader
                   group={g}
-                  values={s.values}
                   probes={probes}
+                  overridden={hasUiOverride[g.key] ?? false}
                   onProbe={async (name) => {
                     const keys = g.entries.filter((e) => e.probe === name).map((e) => e.key);
                     const r = await s.probe(name, keys);
