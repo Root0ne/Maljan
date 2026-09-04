@@ -11,13 +11,13 @@ from maljan.core.config import Settings
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.errors import ProviderError
 from maljan.providers.sandbox.upload import UploadSandboxProvider
+from tests.providers._cape_fixture import first_cape_report_path
 
 ROOT = Path(__file__).resolve().parents[3]
 
 
 def _blob() -> bytes:
-    path = sorted((ROOT / "data" / "cape_reports").glob("*.json"))[0]
-    return path.read_bytes()
+    return first_cape_report_path().read_bytes()
 
 
 def _provider() -> UploadSandboxProvider:

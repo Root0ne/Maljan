@@ -10,6 +10,7 @@ import pytest
 from maljan.core.config import Settings
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+from tests.providers._cape_fixture import first_cape_report
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -51,8 +52,7 @@ class _FakeClient:
 
 @pytest.fixture
 def raw_report():
-    path = sorted((ROOT / "data" / "cape_reports").glob("*.json"))[0]
-    return json.loads(path.read_text(encoding="utf-8"))
+    return first_cape_report()
 
 
 def test_capabilities(raw_report):

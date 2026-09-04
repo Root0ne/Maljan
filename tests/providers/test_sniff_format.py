@@ -12,13 +12,20 @@ import json
 from pathlib import Path
 
 from maljan.providers.sandbox.formats import sniff_format
+from tests.providers._cape_fixture import FIXTURE_PATH, first_cape_report
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_a_real_cape_report_sniffs_as_cape2():
-    path = sorted((ROOT / "data" / "cape_reports").glob("*.json"))[0]
-    assert sniff_format(json.loads(path.read_text(encoding="utf-8"))) == "cape2"
+    assert sniff_format(first_cape_report()) == "cape2"
+
+
+def test_the_committed_fixture_itself_sniffs_as_cape2():
+    """Exercises the fallback shape directly, even on a machine that has the
+    real reports and would otherwise never touch the committed fixture."""
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    assert sniff_format(payload) == "cape2"
 
 
 def test_a_triage_overview_sniffs_as_triage():
