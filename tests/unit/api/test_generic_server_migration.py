@@ -153,3 +153,80 @@ def test_a_secret_auth_token_row_is_dropped_not_folded_in_clear(caplog):
     assert "core.static.generic.auth_token" not in rows
     assert "core.static.generic.auth_token" in caplog.text
     assert "SECRET" not in caplog.text
+
+
+def test_an_unrelated_server_already_in_the_map_is_left_byte_for_byte_alone():
+    """The registry leaf is one JSON document shared by every server.
+
+    Folding ``custom`` in must not touch a sibling key already sitting in
+    that same document -- an operator-configured ``netmon`` entry here,
+    standing in for any server the catalog already knows about.
+    """
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _module()
+    conn = _connect()
+    netmon = {"enabled": True, "agents": ["network"], "command": "netmon-mcp"}
+    _insert(conn, "core.mcp.servers", {"netmon": netmon})
+    _insert(conn, "core.static.generic.enabled", True)
+    _insert(conn, "core.static.generic.transport", "stdio")
+    _insert(conn, "core.static.generic.command", "my-mcp")
+    _insert(conn, "core.static.generic.args", ["--stdio"])
+    _insert(conn, "core.static.generic.env", {"A": "b"})
+    _insert(conn, "core.static.generic.url", "")
+    _insert(conn, "core.static.generic.tool_selection", "dynamic")
+    _insert(conn, "core.static.generic.use_all_tools", False)
+    conn.commit()
+
+    ctx = MigrationContext.configure(conn)
+    with Operations.context(ctx):
+        mod.upgrade()
+
+    servers = _rows(conn)["core.mcp.servers"]
+    assert servers["netmon"] == netmon, "the unrelated entry must be unchanged, byte for byte"
+    custom = servers["custom"]
+    assert custom["command"] == "my-mcp"
+    assert custom["args"] == ["--stdio"]
+    assert custom["env"] == {"A": "b"}
+    assert custom["transport"] == "stdio"
+    assert custom["tool_selection"] == "dynamic"
+    assert custom["agents"] == ["static"]
+    assert _rows(conn)["core.static.generic.server"] == "custom"
+
+
+def test_an_existing_custom_entry_is_merged_not_replaced():
+    """A ``custom`` server already carries operator state (``label``, probed
+    ``tools``) the legacy block never had a slot for; the migration must not
+    clobber it. On the nine folded fields themselves, the legacy row is the
+    operator's most recent UI state (set through the old static.generic form,
+    after whatever produced the existing ``custom`` entry), so it wins over
+    what the ``custom`` entry already held for the same field.
+    """
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _module()
+    conn = _connect()
+    existing_custom = {
+        "label": "Mine",
+        "tools": ["a"],
+        "command": "old-mcp",
+        "enabled": False,
+    }
+    _insert(conn, "core.mcp.servers", {"custom": existing_custom})
+    _insert(conn, "core.static.generic.enabled", True)
+    _insert(conn, "core.static.generic.command", "new-mcp")
+    conn.commit()
+
+    ctx = MigrationContext.configure(conn)
+    with Operations.context(ctx):
+        mod.upgrade()
+
+    custom = _rows(conn)["core.mcp.servers"]["custom"]
+    # Not touched by the fold: kept from the pre-existing entry.
+    assert custom["label"] == "Mine"
+    assert custom["tools"] == ["a"]
+    # Folded fields: the legacy row wins over the pre-existing entry's value.
+    assert custom["command"] == "new-mcp"
+    assert custom["enabled"] is True
