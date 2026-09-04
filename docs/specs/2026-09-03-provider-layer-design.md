@@ -1,7 +1,7 @@
 # Provider layer design — Maljan sub-project A
 
-Status: approved by the user on 2026-09-03 (plan mode); implemented on branch `feat/provider-layer`,
-PR into `dev`. Companion plan: `docs/plans/2026-09-03-provider-layer.md`.
+Status: implemented on branch feat/provider-layer; PR into dev pending final review. Companion plan:
+`docs/plans/2026-09-03-provider-layer.md`.
 
 ## 1. Problem
 
