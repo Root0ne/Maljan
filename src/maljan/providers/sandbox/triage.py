@@ -62,6 +62,8 @@ from __future__ import annotations
 import json
 import time
 from contextlib import suppress
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -96,6 +98,29 @@ RESOURCES_PATH = "/resources"
 
 _BACKOFF_FACTOR = 1.5
 _MAX_INTERVAL_SECONDS = 60.0
+
+
+def _parse_retry_after(value: str, now: float) -> float | None:
+    """RFC 9110 permits delta-seconds or an HTTP-date; a server may send either.
+
+    Returns seconds to wait, or ``None`` when the header is present but
+    unparseable in both forms (the caller falls back to its own backoff
+    rather than raising, and than crashing the poll loop on a header from a
+    third party this provider does not control).
+    """
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        # RFC 9110 HTTP-dates are always GMT; treat a naive value as such
+        # rather than comparing it against a UTC "now" as if it were local.
+        when = when.replace(tzinfo=UTC)
+    return (when - datetime.now(UTC)).total_seconds()
 
 
 @register_sandbox_provider("triage")
@@ -221,10 +246,20 @@ class TriageSandboxProvider(SandboxProvider):
                 # "Come back later" — no documented rate limit was reachable
                 # (see the module docstring), so a Retry-After header is
                 # honoured when present and the ordinary backoff otherwise.
+                # The header may be delta-seconds or an HTTP-date (RFC 9110);
+                # either way the wait is clamped to what remains of this
+                # call's own deadline, since the top-of-loop check above
+                # cannot interrupt a sleep already in progress — a server
+                # answering e.g. "Retry-After: 86400" must not park this
+                # call for a day.
                 retry_after = response.headers.get("Retry-After")
-                wait_seconds = float(retry_after) if retry_after else interval
-                self._sleep(wait_seconds)
-                if not retry_after:
+                parsed = _parse_retry_after(retry_after, self._now()) if retry_after else None
+                wait_seconds = parsed if parsed is not None else interval
+                remaining = deadline - self._now()
+                clamped = min(wait_seconds, _MAX_INTERVAL_SECONDS, remaining)
+                if clamped > 0:
+                    self._sleep(clamped)
+                if parsed is None:
                     interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
                 continue
             self._raise_for_status(response, "status check")

@@ -160,8 +160,27 @@ def _task_id_of(payload: dict[str, Any], fmt: str) -> str | None:
 
 
 def _target_sha(payload: dict[str, Any], fmt: str) -> str:
-    block = payload.get("sample") if fmt == "triage" else payload.get("target")
-    return str(block.get("sha256") or "") if isinstance(block, dict) else ""
+    """The target's own claimed sha256, read from whichever shape carries it.
+
+    Triage's ``sample.sha256`` is always flat. A real CAPE report nests
+    sample identity under ``target.file.sha256`` — ``target`` itself carries
+    only ``category`` and ``file`` (the same shape ``CAPEv2Client.fetch_report``
+    reads in ``loaders/cape2_client.py``, empirically confirmed against every
+    report under ``data/cape_reports/``) — so the nested form is read first,
+    with the flat ``target.sha256`` kept as a fallback for a report that
+    genuinely carries it flat (e.g. the simplified fixtures under
+    ``data/samples/dynamic/``).
+    """
+    if fmt == "triage":
+        block = payload.get("sample")
+        return str(block.get("sha256") or "") if isinstance(block, dict) else ""
+    target = payload.get("target")
+    if not isinstance(target, dict):
+        return ""
+    file_block = target.get("file")
+    if isinstance(file_block, dict) and file_block.get("sha256"):
+        return str(file_block["sha256"])
+    return str(target.get("sha256") or "")
 
 
 def _match_warning(*, matches: bool, sample_sha256: str) -> str | None:

@@ -216,6 +216,53 @@ def test_static_still_fails_loudly_and_a_degrading_provider_does_not(monkeypatch
     assert analyst._try_initialize_mcp() is False
 
 
+def test_analyze_isr_degrades_for_a_degrading_provider_but_raises_for_ghidra():
+    """I2 regression: the entry points must go through ``_try_initialize_mcp``.
+
+    Both ``analyze`` and ``analyze_isr`` used to call the bare
+    ``_initialize_mcp_client``, so ``degrade_on_failure`` was dead code on the
+    static path: an unreachable r2/generic_mcp server aborted the whole
+    analyst instead of the degraded-but-completed run its own capabilities
+    promise. A non-existent-looking filename short-circuits ``analyze_isr``
+    to an empty ISR right after the MCP attach, so this exercises the real
+    entry point without needing a live LLM.
+    """
+    from unittest.mock import MagicMock
+
+    from maljan.agents.static_analyst import StaticAnalyst
+    from maljan.providers.base import StaticCapabilities
+
+    missing_sample = "/nonexistent/path/does-not-exist.exe"
+
+    class _DegradingProvider:
+        id = "r2"
+        capabilities = StaticCapabilities(provides_tools=True, degrade_on_failure=True)
+
+        def open(self, job):
+            raise RuntimeError("r2mcp is unreachable")
+
+    class _LoudProvider:
+        id = "ghidra"
+        capabilities = StaticCapabilities(provides_tools=True, degrade_on_failure=False)
+
+        def open(self, job):
+            raise RuntimeError("ghidra is unreachable")
+
+    degrading_analyst = StaticAnalyst(llm=MagicMock(), name="static")
+    degrading_container = MagicMock()
+    degrading_container.get_static_provider.return_value = _DegradingProvider()
+    degrading_analyst._container = degrading_container
+    isr = degrading_analyst.analyze_isr(missing_sample)
+    assert isr.claims == []
+
+    loud_analyst = StaticAnalyst(llm=MagicMock(), name="static")
+    loud_container = MagicMock()
+    loud_container.get_static_provider.return_value = _LoudProvider()
+    loud_analyst._container = loud_container
+    with pytest.raises(RuntimeError):
+        loud_analyst.analyze_isr(missing_sample)
+
+
 def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
     """Regression for the multi-chunk leak: chunk 2 must not rebuild chunk 1's client.
 

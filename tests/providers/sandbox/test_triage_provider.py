@@ -102,6 +102,87 @@ def test_a_retry_after_header_is_honoured():
     assert slept == [7.0]
 
 
+def test_a_float_retry_after_header_is_honoured():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "2.5"}, json={})
+        return httpx.Response(200, json={"id": "s1", "status": "reported"})
+
+    slept: list[float] = []
+    provider = _provider(handler)
+    provider._sleep = slept.append
+    assert provider.wait_for_completion("s1", timeout_seconds=600) == "reported"
+    assert slept == [2.5]
+
+
+def test_an_http_date_retry_after_header_is_parsed_not_a_bare_valueerror():
+    """RFC 9110 permits an HTTP-date as well as delta-seconds.
+
+    I4 regression: ``float(retry_after)`` used to raise a bare ``ValueError``
+    straight out of ``wait_for_completion`` on this form instead of the
+    provider's own ``ProviderError``.
+    """
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            future = datetime.now(UTC) + timedelta(seconds=3)
+            return httpx.Response(
+                429, headers={"Retry-After": format_datetime(future, usegmt=True)}, json={}
+            )
+        return httpx.Response(200, json={"id": "s1", "status": "reported"})
+
+    slept: list[float] = []
+    provider = _provider(handler)
+    provider._sleep = slept.append
+    assert provider.wait_for_completion("s1", timeout_seconds=600) == "reported"
+    assert len(slept) == 1
+    assert 0 < slept[0] <= 3.5, slept
+
+
+def test_an_unparseable_retry_after_header_falls_back_to_the_ordinary_backoff():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "not-a-date-or-a-number"}, json={})
+        return httpx.Response(200, json={"id": "s1", "status": "reported"})
+
+    slept: list[float] = []
+    provider = _provider(handler, poll_interval_seconds=2)
+    provider._sleep = slept.append
+    assert provider.wait_for_completion("s1", timeout_seconds=600) == "reported"
+    assert slept == [2.0], "an unparseable header must not crash the loop; it degrades to backoff"
+
+
+def test_a_huge_retry_after_is_clamped_to_the_remaining_deadline():
+    """A server answering ``Retry-After: 86400`` must not park the call for a day.
+
+    The top-of-loop deadline check cannot interrupt a sleep already in
+    progress, so the sleep itself must be clamped.
+    """
+
+    def handler(request):
+        return httpx.Response(429, headers={"Retry-After": "86400"}, json={})
+
+    slept: list[float] = []
+    provider = _provider(handler)
+    provider._sleep = slept.append
+    provider._now = _Clock(step=50.0)
+    with pytest.raises(ProviderError):
+        provider.wait_for_completion("s1", timeout_seconds=600)
+    assert slept, "the loop must still sleep, just not for the full header value"
+    assert all(s <= 60.0 for s in slept), slept
+
+
 class _Clock:
     """A monotonic clock that always has another value, unlike a bounded iterator.
 

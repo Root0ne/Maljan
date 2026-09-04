@@ -145,3 +145,41 @@ def test_a_capa_run_past_its_budget_is_killed_not_waited_out(tmp_path):
     # to join or wait on later.
     assert elapsed < 15
     assert mp.active_children() == []
+
+
+def _big_result_worker(sample_path, rules_dir, signatures_dir, backend_name, queue):
+    """Module-level (picklable) stand-in that puts a result over the pipe buffer.
+
+    I3 regression: a real capa ``ResultDocument`` is routinely well over the
+    64 KiB OS pipe buffer. A child that has put such an item blocks in its
+    feeder thread until the parent drains the queue — joining before reading
+    deadlocks the parent's wait on a child that already produced its result,
+    the join times out, the child is killed as a false "exceeded its budget",
+    and the real result is thrown away. This worker reproduces the size class
+    that triggers it.
+    """
+    big_namespace = "x" * 200
+    rules = {
+        f"rule_{i}": {
+            "meta": {"namespace": big_namespace, "attack": []},
+            "matches": [[{"type": "absolute", "value": i}, {}]],
+        }
+        for i in range(2000)
+    }
+    queue.put(("ok", {"rules": rules}))
+
+
+def test_a_large_capa_result_arrives_intact_within_the_budget(tmp_path):
+    provider = _provider(tmp_path)
+    provider._capa.timeout_seconds = 10
+    started = time.monotonic()
+    result = provider._run_capa_bounded(
+        str(tmp_path / "s.exe"), tmp_path, target=_big_result_worker
+    )
+    elapsed = time.monotonic() - started
+    assert result is not None
+    assert len(result["rules"]) == 2000
+    # Comfortably inside the 10s budget: draining before joining lets the
+    # child's feeder thread unblock and the child exit on its own.
+    assert elapsed < 10
+    assert mp.active_children() == []

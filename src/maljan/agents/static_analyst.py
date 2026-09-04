@@ -475,7 +475,7 @@ class StaticAnalyst(BaseAnalyst):
         """Translates binary file paths or raw disassembly into a focused malware analysis report."""
         self.logger.info("Executing static evaluation...")
 
-        self._initialize_mcp_client()
+        self._try_initialize_mcp()
 
         # Phase 4: If data looks like a file path and exists, use PELoader
         # for structural PE analysis instead of passing raw path to LLM.
@@ -573,7 +573,7 @@ class StaticAnalyst(BaseAnalyst):
         """Return a structured AgentISR with evidence-backed claims."""
         self.logger.info("Executing static ISR analysis...")
 
-        self._initialize_mcp_client()
+        self._try_initialize_mcp()
 
         # PIPE-ANA-01 (audit 2026-05-19): when the supplied target *looks*
         # like a filename but doesn't exist on disk (e.g. a sandbox sent

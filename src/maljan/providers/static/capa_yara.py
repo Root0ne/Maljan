@@ -284,8 +284,18 @@ class CapaYaraStaticProvider(StaticProvider):
             daemon=True,
         )
         process.start()
-        process.join(self._capa.timeout_seconds)
-        if process.is_alive():
+        try:
+            # Read before joining: the child's result is routinely well over
+            # the OS pipe buffer (a full capa ResultDocument), and a child
+            # that has put a large item blocks in its feeder thread until the
+            # parent drains the queue. Joining first therefore deadlocks the
+            # parent's wait on a child that has *already* produced its
+            # result — the join times out, the child is killed as a false
+            # "exceeded its budget", and a real result is thrown away.
+            # Draining the queue first lets that feeder thread unblock and
+            # the child exit on its own well within the same budget.
+            kind, payload = queue.get(timeout=self._capa.timeout_seconds)
+        except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
             logger.warning(
                 "capa on %s exceeded its %ss budget; terminating the worker process.",
                 sample_path,
@@ -298,13 +308,16 @@ class CapaYaraStaticProvider(StaticProvider):
                 process.join(5.0)
             queue.close()
             return None
-        try:
-            kind, payload = queue.get_nowait()
-        except Exception:  # noqa: BLE001 - an empty queue is a crashed/killed child
-            logger.warning("capa on %s exited without a result.", sample_path)
-            return None
-        finally:
-            queue.close()
+        # The result is already in hand; give the child a short grace period
+        # to exit on its own now that the queue is drained, then reap it.
+        process.join(5.0)
+        if process.is_alive():
+            process.terminate()
+            process.join(5.0)
+            if process.is_alive():
+                process.kill()
+                process.join(5.0)
+        queue.close()
         if kind != "ok":
             logger.warning(
                 "capa failed on %s (%s); continuing without capa evidence.", sample_path, payload

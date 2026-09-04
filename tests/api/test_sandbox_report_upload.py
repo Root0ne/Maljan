@@ -125,6 +125,53 @@ def test_a_hash_mismatch_is_a_warning_and_not_a_refusal(client):
     assert "does not match" in r.json()["warning"]
 
 
+def _cape_blob_nested_target(sha: str = SHA) -> bytes:
+    """A real CAPEv2 report: sample identity nested under ``target.file``.
+
+    ``target`` itself carries only ``category``/``file`` — empirically the
+    only shape every report under ``data/cape_reports/`` actually has (see
+    ``loaders/cape2_client.py``); ``_cape_blob`` above is the simplified flat
+    shape the older fixtures use.
+    """
+    return json.dumps(
+        {
+            "info": {"version": "CAPEv2 2.4", "id": 4243},
+            "target": {
+                "category": "file",
+                "file": {"sha256": sha, "name": "x.exe", "md5": "b" * 32, "type": "PE32"},
+            },
+            "behavior": {"processes": [], "apistats": {}, "generic": []},
+            "signatures": [],
+            "network": {},
+            "CAPE": {"payloads": []},
+        }
+    ).encode()
+
+
+def test_a_nested_cape_target_hash_is_read_and_matched(client):
+    """L1 regression: CAPE nests the hash at ``target.file.sha256``."""
+    api, sample, stored = client
+    r = api.post(
+        f"/api/v1/samples/{sample.id}/sandbox-reports",
+        files={"file": ("report.json", _cape_blob_nested_target(), "application/json")},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["sample_sha256_match"] is True
+    assert body["warning"] is None
+
+
+def test_a_nested_cape_target_hash_mismatch_still_warns(client):
+    api, sample, _ = client
+    r = api.post(
+        f"/api/v1/samples/{sample.id}/sandbox-reports",
+        files={"file": ("report.json", _cape_blob_nested_target("c" * 64), "application/json")},
+    )
+    assert r.status_code == 201
+    assert r.json()["sample_sha256_match"] is False
+    assert "does not match" in r.json()["warning"]
+
+
 def test_an_unrecognised_format_is_refused(client):
     api, sample, _ = client
     r = api.post(
