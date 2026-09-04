@@ -228,3 +228,42 @@ class TestTheJudgeCloseIsBounded:
         await asyncio.wait_for(handle.aclose(), timeout=5)
         assert toolkit.close_started
         assert handle._toolkit is None
+
+    @pytest.mark.asyncio
+    async def test_judge_aclose_itself_is_bounded_by_a_hanging_handle(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The handle-level bound above is necessary but not sufficient: this
+        proves the judge-level property again, that ``JudgeAgent.aclose()``
+        itself returns quickly when one of its registry-bound handles hangs
+        on close, exactly as the single-``toolkit`` version of this test did
+        before the tool-server registry refactor (Task 7).
+        """
+        from maljan.agents.judge_agent import JudgeAgent
+        from maljan.core.config import Settings
+        from maljan.providers.servers import ServerRegistry
+
+        real_wait_for = asyncio.wait_for
+
+        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
+            if timeout == 20.0:
+                timeout = 0.1
+            return await real_wait_for(coro, timeout=timeout)
+
+        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+
+        registry = ServerRegistry(Settings(_env_file=None))
+        handle = registry.get("threatintel")
+        toolkit: Any = _NeverReturns()
+        handle._toolkit = toolkit
+        handle._job_id = "job"
+
+        judge = JudgeAgent(llm=MagicMock())
+        container = MagicMock()
+        container.get_server_registry.return_value = registry
+        judge._container = container
+
+        await asyncio.wait_for(judge.aclose(), timeout=5)
+        assert toolkit.close_started
+        assert handle._toolkit is None
+        assert judge.tools == []

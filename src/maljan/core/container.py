@@ -330,6 +330,13 @@ class ServiceContainer:
                 )
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
+                # Hand the judge a way back to this container, the same way
+                # ``get_agent`` does above. Without this, ``_server_registry()``
+                # always read ``None`` and the judge ran with zero threat-intel
+                # tools in production, silently — the guard on the caller is
+                # ``if self.tools: return``, so a degraded judge looked exactly
+                # like a healthy one that had already attached.
+                cached._container = self
                 self._judge_agent_cache[role] = cached
             return cached
 
