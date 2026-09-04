@@ -257,7 +257,8 @@
         "severity": 1,
         "technique_ids": []
       }
-    ]
+    ],
+    "unavailable": []
   },
   "network_iocs": {
     "domains": [

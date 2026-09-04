@@ -335,6 +335,11 @@ class MarkdownRenderer:
             lines.append("_No sandbox dynamic data available._")
             return "\n".join(lines)
 
+        if dyn.unavailable:
+            names = ", ".join(f"`{name}`" for name in dyn.unavailable)
+            lines.append(f"_Not provided by this sandbox: {names}._")
+            lines.append("")
+
         if dyn.process_tree:
             lines.append("### Process Tree")
             lines.append("")

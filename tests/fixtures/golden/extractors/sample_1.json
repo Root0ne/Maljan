@@ -35,7 +35,8 @@
     ],
     "process_tree": [],
     "registry_mods": [],
-    "sandbox_signatures": []
+    "sandbox_signatures": [],
+    "unavailable": []
   },
   "network_iocs": null
 }

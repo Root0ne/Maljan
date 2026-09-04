@@ -80,6 +80,13 @@ def build_dynamic_behavior(
     if not (process_tree or registry_mods or file_ops or notable or signatures):
         return None
 
+    raw_unavailable = sandbox_report.get("unavailable")
+    unavailable = (
+        [item for item in raw_unavailable if isinstance(item, str)]
+        if isinstance(raw_unavailable, list)
+        else []
+    )
+
     logger.info(
         "dynamic_extractor: processes=%d registry=%d file_ops=%d apis=%d sigs=%d",
         len(process_tree),
@@ -94,6 +101,7 @@ def build_dynamic_behavior(
         file_operations=file_ops,
         notable_apis=notable,
         sandbox_signatures=signatures,
+        unavailable=unavailable,
     )
 
 
