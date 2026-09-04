@@ -133,26 +133,24 @@ class MaljanApp:
         platform = _infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
-    def _poll_budget(self) -> tuple[int, int]:
-        """``(timeout_seconds, poll_interval_seconds)`` for the active sandbox provider.
+    def _poll_budget(self, provider: Any) -> tuple[int, int]:
+        """How long to wait for this provider, and how often to ask.
 
-        Each provider carries its own pair (CAPE's 300s/10s, Triage's
-        900s/15s, or the REST provider's config-driven pair); reading
-        ``sandbox.cape2.*`` unconditionally here — as this used to do —
-        threaded CAPE's budget into a poll loop for whichever sandbox was
-        actually configured. CAPE's own numbers are unchanged by this: they
-        are still read from the same ``sandbox.cape2`` block, only now
-        behind the branch that names it.
+        Sub-project A threaded ``sandbox.cape2.*`` into every provider's poll
+        loop, which was harmless while every provider that polled was CAPE.
+        A provider with its own configured budget reads it; everything else
+        keeps CAPE's values, so the cape2, mock, upload and triage paths are
+        byte-for-byte what they were.
         """
-        provider_id = self.config.sandbox.provider
-        cfg: Any
-        if provider_id == "triage":
-            cfg = self.config.sandbox.triage
-        elif provider_id == "rest":
-            cfg = self.config.sandbox.rest
-        else:
-            cfg = self.config.sandbox.cape2
-        return cfg.timeout_seconds, cfg.poll_interval_seconds
+        block = getattr(self.config.sandbox, str(provider.id), None)
+        timeout = getattr(block, "timeout_seconds", None)
+        interval = getattr(block, "poll_interval_seconds", None)
+        if timeout is None or interval is None:
+            return (
+                self.config.sandbox.cape2.timeout_seconds,
+                self.config.sandbox.cape2.poll_interval_seconds,
+            )
+        return int(timeout), int(interval)
 
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return normalized report.
@@ -198,7 +196,7 @@ class MaljanApp:
                 # (win10 guest run alone is ~280s + processing) timed out
                 # before the report was ready — silently degrading every run
                 # to static-only. All SandboxClient impls share this signature.
-                timeout_seconds, poll_interval_seconds = self._poll_budget()
+                timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
                 status = client.wait_for_completion(
                     task_id,
                     timeout_seconds=timeout_seconds,
