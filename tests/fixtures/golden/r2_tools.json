@@ -1,0 +1,136 @@
+{
+  "command": "r2mcp",
+  "source": "live handshake",
+  "r2mcp_version": "1.8.6",
+  "radare2_version": "6.0.7",
+  "tools": [
+    {
+      "name": "analyze",
+      "description": "Runs binary analysis with optional depth level"
+    },
+    {
+      "name": "calculate",
+      "description": "Evaluate a math expression using core->num (r_num_math). Usecases: do proper 64-bit math, resolve addresses for flag names/symbols, and avoid hallucinated results."
+    },
+    {
+      "name": "close_file",
+      "description": "Close the currently open file"
+    },
+    {
+      "name": "decompile_function",
+      "description": "Show C-like pseudocode of the function in the given address. <think>Use this to inspect the code in a function, do not run multiple times in the same offset</think>"
+    },
+    {
+      "name": "disassemble",
+      "description": "Disassembles a specific number of instructions from an address <think>Use this tool to inspect a portion of memory as code without depending on function analysis boundaries. Use this tool when functio"
+    },
+    {
+      "name": "disassemble_function",
+      "description": "Shows assembly listing of the function at the specified address"
+    },
+    {
+      "name": "get_current_address",
+      "description": "Shows the current position and function name"
+    },
+    {
+      "name": "get_function_prototype",
+      "description": "Retrieves the function signature at the specified address"
+    },
+    {
+      "name": "list_all_strings",
+      "description": "Scans the entire binary for strings with optional regex filter"
+    },
+    {
+      "name": "list_classes",
+      "description": "Lists class names from various languages (C++, ObjC, Swift, Java, Dalvik)"
+    },
+    {
+      "name": "list_decompilers",
+      "description": "Shows all available decompiler backends"
+    },
+    {
+      "name": "list_entrypoints",
+      "description": "Displays program entrypoints, constructors and main function"
+    },
+    {
+      "name": "list_exports",
+      "description": "Lists exported symbols from the binary or process"
+    },
+    {
+      "name": "list_files",
+      "description": "Lists files in the specified path using radare2's ls -q command. Files ending with / are directories, otherwise they are files."
+    },
+    {
+      "name": "list_functions",
+      "description": "Lists all functions discovered during analysis"
+    },
+    {
+      "name": "list_functions_tree",
+      "description": "Lists functions and successors (aflmu)"
+    },
+    {
+      "name": "list_imports",
+      "description": "Lists imported symbols (note: use list_symbols for addresses with sym.imp. prefix)"
+    },
+    {
+      "name": "list_libraries",
+      "description": "Lists all shared libraries linked to the binary"
+    },
+    {
+      "name": "list_memory_maps",
+      "description": "Lists memory regions of the process with addresses and permissions"
+    },
+    {
+      "name": "list_methods",
+      "description": "Lists all methods belonging to the specified class"
+    },
+    {
+      "name": "list_sections",
+      "description": "Displays memory sections and segments from the binary"
+    },
+    {
+      "name": "list_strings",
+      "description": "Lists strings from data sections with optional regex filter"
+    },
+    {
+      "name": "list_symbols",
+      "description": "Shows all symbols (functions, variables, imports) with addresses"
+    },
+    {
+      "name": "open_file",
+      "description": "Opens a binary file with radare2 for analysis <think>Call this tool before any other one from r2mcp. Use an absolute file_path</think>"
+    },
+    {
+      "name": "rename_flag",
+      "description": "Renames a local variable or data reference within the specified address"
+    },
+    {
+      "name": "rename_function",
+      "description": "Renames the function at the specified address"
+    },
+    {
+      "name": "set_comment",
+      "description": "Adds a comment at the specified address"
+    },
+    {
+      "name": "set_function_prototype",
+      "description": "Sets the function signature (return type, name, arguments)"
+    },
+    {
+      "name": "show_function_details",
+      "description": "Displays detailed information about the current function"
+    },
+    {
+      "name": "show_info",
+      "description": "Displays information about the binary or target process"
+    },
+    {
+      "name": "use_decompiler",
+      "description": "Selects which decompiler backend to use (default: pdc)"
+    },
+    {
+      "name": "xrefs_to",
+      "description": "Finds all code references to the specified address"
+    }
+  ]
+}
