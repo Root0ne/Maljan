@@ -54,6 +54,7 @@ export default function GroupHeader({
                     detail: String(e),
                     models: null,
                     tools: null,
+                    details: null,
                   }));
                   setResults((s) => ({ ...s, [name]: res }));
                 }}

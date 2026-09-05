@@ -17,9 +17,14 @@ export type FieldType =
 
 export type Applies = "next_job" | "live" | "restart";
 
-export type ChoicesFrom = "static_providers" | "sandbox_providers" | "mcp_servers" | "agent_roles";
+export type ChoicesFrom =
+  | "static_providers"
+  | "sandbox_providers"
+  | "mcp_servers"
+  | "agent_roles"
+  | "profiles";
 
-export type Editor = "server_map" | "rest_sandbox";
+export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "profiles";
 
 export interface CatalogEntry {
   key: string;
@@ -86,6 +91,52 @@ export interface McpServerEntry {
   label: string;
 }
 
+/**
+ * One tool source an agent definition asks for, mirroring
+ * `maljan.core.config.ToolRef`. `kind: "mcp"` names a server and, optionally,
+ * one of its tools — `name: null` means the server's whole allow-listed set.
+ * `kind: "provider"` means "this agent's static provider's tools" and carries
+ * nothing else.
+ */
+export interface ToolRefEntry {
+  kind: "mcp" | "provider";
+  server: string | null;
+  name: string | null;
+}
+
+/**
+ * One entry of the `agents.definitions` map, keyed by a short agent name.
+ *
+ * `prompt: null` on a built-in role means "the built-in prompt", which the
+ * editor renders read-only from the agent probe rather than inventing here —
+ * the assembly depends on the agent's static provider and only the API knows
+ * it. Nothing in this shape is a secret: prompts are operator text and are
+ * exported as-is.
+ */
+export interface AgentDefinitionEntry {
+  role: "static" | "dynamic" | "network" | "judge" | "generic";
+  label: string;
+  prompt: string | null;
+  tools: ToolRefEntry[];
+  static_provider: string | null;
+  enabled: boolean;
+}
+
+/** One entry of the `agents.profiles` map: an ordered list of analyst keys. */
+export interface ProfileEntry {
+  label: string;
+  analysts: string[];
+}
+
+/** `ProbeResult.details` as the agent probe fills it in. */
+export interface AgentProbeDetails {
+  prompt_chars: number;
+  prompt_sha256: string;
+  llm: { provider: string; model: string };
+  static_provider: string;
+  servers: { key: string; tools: string[]; status: string }[];
+}
+
 export interface SettingsGroup {
   key: string;
   title: string;
@@ -122,6 +173,8 @@ export interface ProbeResult {
   models: string[] | null;
   /** The probed server's whole manifest, for the allow-list tick boxes. */
   tools: string[] | null;
+  /** Probe-specific structured facts; the agent probe fills this in. */
+  details: AgentProbeDetails | Record<string, unknown> | null;
 }
 
 export interface ChannelPreview {

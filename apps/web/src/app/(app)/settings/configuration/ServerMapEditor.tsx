@@ -121,7 +121,7 @@ export default function ServerMapEditor({
     } catch (e) {
       setProbes((p) => ({
         ...p,
-        [key]: { ok: false, latency_ms: 0, detail: getErrorMessage(e), models: null, tools: null },
+        [key]: { ok: false, latency_ms: 0, detail: getErrorMessage(e), models: null, tools: null, details: null },
       }));
     }
   };
