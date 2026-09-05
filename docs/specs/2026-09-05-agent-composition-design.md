@@ -75,7 +75,7 @@ The built-in analyst order is the order `AgentRegistry.list_agents()` returns to
 ### 3.2 Validation (in `Settings`, repeated by the API's `save`)
 
 - Keys match `AGENT_KEY_PATTERN`; `agents.profile` names an existing profile.
-- Built-in definitions and the `default` profile are compared field by field against their seeds; any difference is rejected with `"'<key>' is built in; clone it to change it"`. `enabled: false` is the one permitted edit on a built-in analyst definition, and a profile that lists a disabled analyst is rejected.
+- Built-in definitions and the `default` profile are compared field by field against their seeds; any difference is rejected with `"'<key>' is built in; clone it to change it"`. `enabled: false` is the one permitted edit on a built-in analyst definition. A profile that lists a disabled analyst is rejected, with one exception: a built-in profile (immutable, so it cannot drop the member) is tolerated while it is not the active `agents.profile`; a per-job `profile` override naming such a profile is refused at submit.
 - Every `analysts` entry names an existing, enabled definition whose role is not `judge`; no duplicates; at least one analyst.
 - `role == "generic"` requires a non-empty `prompt`; built-in roles accept a prompt (that is how a clone differs from its source).
 - `ToolRef(kind="mcp")` requires `server` present in `mcp.servers`; when `name` is set and the server carries an allow-list (`tools` not null), `name` must be in it, and when the server exposes all tools (`tools` null, built-ins only) the name is checked at resolution and a miss is a degradation reason, not a save error; `ToolRef(kind="provider")` requires `server is None and name is None`.
