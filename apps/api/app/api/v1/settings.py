@@ -32,7 +32,7 @@ from app.schemas.settings import (
 )
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
-from app.services.settings_probes import PROBES, run_probe
+from app.services.settings_probes import PROBES, run_mcp_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -162,6 +162,25 @@ async def export_overrides(
         env_name = entry.path.upper().replace(".", "__")
         lines.append(f"{env_name}={_env_literal(entry.secret, info.value)}")
     return "\n".join(lines) + "\n"
+
+
+@router.post("/test/mcp", response_model=ProbeResponse)
+async def test_mcp_server(
+    body: ProbeRequest,
+    server: str = Query(..., description="key in mcp.servers"),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ProbeResponse:
+    """Launch one configured MCP server and report the tools it offers.
+
+    Takes staged values so an operator can test a server they have not saved
+    yet — the same contract as every other probe, addressed to one key of one
+    setting rather than to a set of settings. Registered ahead of
+    ``/test/{probe}`` so the fixed path wins the match.
+    """
+    stored = await SettingsService(db).load_overrides()
+    result = await run_mcp_probe(server, body.values, stored)
+    return ProbeResponse(**vars(result))
 
 
 @router.post("/test/{probe}", response_model=ProbeResponse)

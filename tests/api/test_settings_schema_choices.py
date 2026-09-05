@@ -62,3 +62,26 @@ def test_a_patch_to_the_server_map_is_validated_and_reported_per_key(client):
         )
     assert response.status_code == 422
     assert "core.mcp.servers.Bad Key" in response.json()["errors"]
+
+
+def test_the_mcp_probe_route_addresses_one_server(client, monkeypatch):
+    from app.services.settings_probes import ProbeResult
+
+    async def fake(server, values, stored):
+        assert server == "network"
+        assert values == {"core.mcp.servers": {"network": {"command": "python"}}}
+        return ProbeResult(True, 12, "3 tools: a, b, c", None, ["a", "b", "c"])
+
+    monkeypatch.setattr("app.api.v1.settings.run_mcp_probe", fake)
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        response = client.post(
+            "/api/v1/settings/test/mcp?server=network",
+            json={"values": {"core.mcp.servers": {"network": {"command": "python"}}}},
+        )
+    assert response.status_code == 200
+    assert response.json()["tools"] == ["a", "b", "c"]
+
+
+def test_the_mcp_probe_route_needs_a_server(client):
+    response = client.post("/api/v1/settings/test/mcp", json={"values": {}})
+    assert response.status_code == 422
