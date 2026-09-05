@@ -1947,13 +1947,17 @@ class BaseAnalyst(ABC):
         "network": "network",
     }
 
-    def _infer_domain(self) -> Literal["static", "dynamic", "network"]:
+    def _infer_domain(self) -> str:
         """Infer the ISR domain from the agent's registered name.
 
         Falls back to a clearly-marked default and emits a warning rather than
         silently mislabelling unknown agents. The previous behaviour silently
         mapped *any* unrecognised name to "network", which broke cascade
         weighting for new agent kinds.
+
+        Returns ``str`` rather than the three-way Literal since sub-project C:
+        a custom analyst's domain is its own definition key, and ``AgentISR``
+        has always accepted a free string there.
         """
         name_lower = self.name.lower()
         for keyword, domain in self._DOMAIN_KEYWORDS.items():
