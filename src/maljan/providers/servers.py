@@ -20,6 +20,7 @@ added is never the evidence the run was measured on.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -565,11 +566,67 @@ class ServerRegistry:
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # A handle is bound to the loop that opened it, so a caller on another
+        # running loop cannot be handed it — see ``_handle_for``. These are
+        # the extra handles that answer for those callers, keyed by server and
+        # loop identity. Empty in the default profile, where every attach
+        # happens on the shared agent loop.
+        self._loop_handles: dict[tuple[str, int], ServerHandle] = {}
+        # ``_loop_handles`` is reached from the agent loop's thread and the
+        # graph loop's thread, which is the whole point of it existing.
+        self._lock = threading.Lock()
         # Every reason ``tools_for`` has produced this job, in order and
         # without duplicates. The judge node reads it into
         # ``degradation_reasons`` so the run summary says which server was
         # missing, rather than the report simply being thinner than the last.
         self.degradation_reasons: list[str] = []
+
+    def _handle_for(self, handle: ServerHandle, loop: asyncio.AbstractEventLoop) -> ServerHandle:
+        """The handle ``loop`` may use for this server, its own if need be.
+
+        A ``ClientSession`` and the anyio scopes under it belong to the loop
+        that opened them; handing the same handle to a second live loop is how
+        a tool call ends up awaiting a future the calling loop can never
+        complete — the call-time twin of the teardown hang, and a property the
+        pre-branch judge had for free because every ``JudgeAgent`` built its
+        own toolkit and its own subprocess.
+
+        So: an unopened handle, or one already bound to ``loop``, is shared as
+        before. A handle bound elsewhere is replaced for this caller by a
+        second handle over the same config — its own transport, its own child,
+        the same name, the same allow-list, so the tool set and the
+        degradation reasons are unchanged.
+        """
+        with self._lock:
+            owner = handle._owner_loop
+            if owner is None or owner is loop:
+                return handle
+            key = (handle.name, id(loop))
+            replica = self._loop_handles.get(key)
+            if replica is None or replica._owner_loop not in (None, loop):
+                replica = ServerHandle(handle.name, handle.config)
+                self._loop_handles[key] = replica
+                logger.info(
+                    "mcp server '%s' is attached on another loop; the caller gets "
+                    "its own handle rather than sharing a session across loops.",
+                    handle.name,
+                )
+            return replica
+
+    def _all_handles(self) -> list[ServerHandle]:
+        """Every handle this registry has handed out, per-loop ones included."""
+        with self._lock:
+            return [*self._handles.values(), *self._loop_handles.values()]
+
+    def handles_for(self, role: str, *, exclude: str = "") -> list[ServerHandle]:
+        """``for_agent``, plus the per-loop handles for the same servers.
+
+        For a caller that has to release a role's servers without knowing
+        which loop attached them — ``JudgeAgent.aclose``. Each handle closes
+        on its own loop, so the caller does not have to care.
+        """
+        names = {handle.name for handle in self.for_agent(role, exclude=exclude)}
+        return [handle for handle in self._all_handles() if handle.name in names]
 
     def get(self, name: str) -> ServerHandle:
         handle = self._handles.get(name)
@@ -630,7 +687,13 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen: set[str] = set()
-        for handle in self.for_agent(role, exclude=exclude):
+        from maljan.agents.base_agent import _get_agent_loop
+
+        # ``open`` hands ``initialize`` to the shared agent loop, so that is
+        # the loop this caller is really attaching on.
+        agent_loop = _get_agent_loop()
+        for bound in self.for_agent(role, exclude=exclude):
+            handle = self._handle_for(bound, agent_loop)
             try:
                 handle.open(job_id, **context)
             except Exception as exc:  # noqa: BLE001 — a registry server always degrades
@@ -668,7 +731,9 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen: set[str] = set()
-        for handle in self.for_agent(role, exclude=exclude):
+        loop = asyncio.get_running_loop()
+        for bound in self.for_agent(role, exclude=exclude):
+            handle = self._handle_for(bound, loop)
             try:
                 await handle.aopen(job_id, **context)
             except Exception as exc:  # noqa: BLE001 — a registry server always degrades
@@ -698,11 +763,13 @@ class ServerRegistry:
 
         Returns the handles ``close()`` could not touch because ``aopen``
         attached them (F6) — still open, so the caller must ``await
-        handle.aclose()`` on the loop that opened them (the judge's graph
-        loop); ``ServiceContainer.aclose`` does exactly that.
+        handle.aclose()``, which routes each one back to the loop that opened
+        it; ``ServiceContainer.aclose`` does exactly that. Per-loop handles
+        are included: a job that attached the same server from two loops has
+        two children to release, on two loops.
         """
         skipped = []
-        for handle in self._handles.values():
+        for handle in self._all_handles():
             handle.close()
             if handle.is_open:
                 skipped.append(handle)

@@ -185,7 +185,11 @@ class JudgeAgent:
         registry = self._server_registry()
         if registry is None:
             return
-        for handle in registry.for_agent("judge"):
+        # ``handles_for`` rather than ``for_agent``: a server the registry
+        # attached on a second loop has a handle of its own, and this judge
+        # cannot tell which of them is the one it was handed. Each closes on
+        # the loop that opened it, so it does not need to.
+        for handle in registry.handles_for("judge"):
             await handle.aclose()
 
     async def execute_tool_loop(self, prompt_messages: list) -> str:
