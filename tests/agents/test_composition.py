@@ -163,6 +163,39 @@ def test_a_provider_reference_is_the_only_way_a_generic_agent_gets_provider_tool
     assert [t.name for t in resolved.tools] == ["r2_open", "r2_analyze"]
 
 
+def test_a_built_in_role_never_opens_its_provider_during_resolution():
+    """Defence in depth for the rule ``AgentsConfig`` already enforces.
+
+    A provider reference on a built-in role is refused at config validation
+    time (spec §4: resolution never opens a provider for a built-in role,
+    only a ``generic`` definition's class-less agent needs the reference
+    path). This constructs a definition that is valid as ``generic`` and
+    then mutates its role to ``static`` afterwards, the way a bug elsewhere
+    that skipped validation would produce one — and checks ``resolve_agent``
+    still never touches the provider.
+    """
+    cfg = Settings(
+        _env_file=None,
+        agents={
+            "definitions": {
+                "strings": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "static_provider": "r2",
+                    "tools": [{"kind": "provider"}],
+                }
+            },
+            "profiles": {"one": {"analysts": ["strings"]}},
+            "profile": "one",
+        },
+    )
+    cfg.agents.definitions["strings"].role = "static"
+    provider = _Provider()
+    resolved = resolve_agent("strings", _Container(cfg, provider=provider))
+    assert resolved.tools == []
+    assert not hasattr(provider, "opened")
+
+
 def test_a_bound_server_and_an_explicit_reference_to_it_produce_one_copy_of_each_tool():
     cfg = Settings(
         _env_file=None,

@@ -148,7 +148,18 @@ def _dedupe(tools: list[BaseTool]) -> list[BaseTool]:
 
 
 def _provider_tools(container: Any, definition: AgentDefinition, provider_id: str) -> list[Any]:
-    """The agent's static provider's tools, for a definition that asked for them."""
+    """The agent's static provider's tools, for a definition that asked for them.
+
+    Gated on ``role == "generic"`` in addition to the ``AgentsConfig``
+    validator that already refuses a provider reference on a built-in role:
+    a built-in role opens its own provider lazily, inside its own class
+    (``StaticAnalyst._initialize_mcp_client`` and friends), so resolution
+    must never open one itself — spec §4. The validator is the primary
+    defence; this is defence in depth for a definition that reached here by
+    some other path than validated ``Settings``.
+    """
+    if definition.role != "generic":
+        return []
     if not any(ref.kind == "provider" for ref in definition.tools):
         return []
     from maljan.providers.base import StaticJobContext

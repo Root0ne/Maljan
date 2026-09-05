@@ -1015,6 +1015,12 @@ class AgentsConfig(BaseModel):
         for key, definition in self.definitions.items():
             if definition.role == "generic" and not (definition.prompt or "").strip():
                 raise ValueError(f"{key!r}: a generic agent needs a prompt")
+            has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)
+            if has_provider_ref and definition.role != "generic":
+                raise ValueError(
+                    f"{key!r}: provider tool references are only valid on generic "
+                    "definitions; built-in roles open their provider themselves"
+                )
 
         for name, profile in self.profiles.items():
             if not profile.analysts:

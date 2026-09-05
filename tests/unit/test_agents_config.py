@@ -295,6 +295,43 @@ def test_a_bare_provider_reference_is_accepted():
     assert ToolRef(kind="provider").server is None
 
 
+def test_a_generic_definition_with_a_provider_reference_is_accepted():
+    cfg = _settings(
+        definitions={
+            "strings": {
+                "role": "generic",
+                "prompt": "p",
+                "static_provider": "r2",
+                "tools": [{"kind": "provider"}],
+            }
+        }
+    )
+    assert cfg.agents.definitions["strings"].tools[0].kind == "provider"
+
+
+def test_a_provider_reference_on_a_built_in_role_is_refused():
+    """Resolution never opens a provider for a built-in role (spec §4).
+
+    Only a ``generic`` definition has no class of its own to open one
+    lazily, so a provider reference is meaningful only there.
+    """
+    with pytest.raises(
+        ValidationError,
+        match=("'static_r2': provider tool references are only valid on generic definitions"),
+    ):
+        _settings(
+            definitions={
+                "static_r2": {
+                    "role": "static",
+                    "static_provider": "r2",
+                    "tools": [{"kind": "provider"}],
+                }
+            },
+            profiles={"two": {"analysts": ["static", "static_r2"]}},
+            profile="two",
+        )
+
+
 # ── static providers ───────────────────────────────────────────────────
 
 
