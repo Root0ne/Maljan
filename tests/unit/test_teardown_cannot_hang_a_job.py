@@ -26,6 +26,7 @@ below it to return.
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -204,18 +205,22 @@ class TestTheJudgeCloseIsBounded:
         refactor, Task 7): the judge no longer owns a single ``toolkit`` to
         close, it closes every handle bound to its role through
         ``JudgeAgent.aclose``, and each handle's own fixed 20s budget is what
-        stands between a hung child process and a stuck job. The 20s itself
-        is a literal inside ``ServerHandle.aclose``, not a setting, so this
-        shortens only that specific call rather than every ``wait_for`` in
-        the test.
+        stands between a hung child process and a stuck job. That budget is
+        ``servers.CLEANUP_TIMEOUT``, a module constant rather than a setting,
+        so this shortens only that specific call rather than every
+        ``wait_for`` in the test — and reads the constant rather than
+        repeating its value, which is how this test broke when the budgets
+        were made coherent with the container's.
         """
         from maljan.core.config import MCPServerConfig
+        from maljan.providers import servers
         from maljan.providers.servers import ServerHandle
 
         real_wait_for = asyncio.wait_for
+        budget = servers.CLEANUP_TIMEOUT
 
         async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
-            if timeout == 20.0:
+            if timeout == budget:
                 timeout = 0.1
             return await real_wait_for(coro, timeout=timeout)
 
@@ -241,12 +246,14 @@ class TestTheJudgeCloseIsBounded:
         """
         from maljan.agents.judge_agent import JudgeAgent
         from maljan.core.config import Settings
+        from maljan.providers import servers
         from maljan.providers.servers import ServerRegistry
 
         real_wait_for = asyncio.wait_for
+        budget = servers.CLEANUP_TIMEOUT
 
         async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
-            if timeout == 20.0:
+            if timeout == budget:
                 timeout = 0.1
             return await real_wait_for(coro, timeout=timeout)
 
@@ -417,3 +424,148 @@ class TestACrossLoopCloseIsRoutedBack:
         assert toolkit.child_running is False
         assert handle._toolkit is None
         assert handle._owner_loop is None
+
+
+# ---------------------------------------------------------------------------
+# Fix wave 2c: what happens when the close cannot be made to work.
+#
+# Wave 2 routes the close to the loop that opened the handle. Two cases sit
+# outside that: the owning loop is gone, and the caller's own budget expires
+# while the routed close is still stalled. Both used to end with a live child
+# and nobody left to kill it — the first by re-entering the unwind-on-the-
+# wrong-loop shape the fix exists to prevent, the second because the reap sat
+# after the `await` the outer fence cancelled.
+# ---------------------------------------------------------------------------
+
+
+class _StoppedOwnerToolkit:
+    """A toolkit whose cleanup must never be entered from a foreign loop."""
+
+    def __init__(self) -> None:
+        self.cleanup_entered = False
+
+    async def cleanup(self) -> None:
+        self.cleanup_entered = True
+        await asyncio.sleep(3600)
+
+
+class TestADeadOwningLoopIsNotUnwoundHere:
+    def test_the_cleanup_is_skipped_and_the_child_is_reaped(self) -> None:
+        """A handle whose loop has stopped is reaped, not unwound in place."""
+        import threading
+
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        owner = asyncio.new_event_loop()
+        running = threading.Event()
+
+        def serve() -> None:
+            asyncio.set_event_loop(owner)
+            owner.call_soon(running.set)
+            owner.run_forever()
+
+        thread = threading.Thread(target=serve, daemon=True, name="doomed-owner")
+        thread.start()
+        assert running.wait(60)
+        owner.call_soon_threadsafe(owner.stop)
+        thread.join(timeout=30)
+
+        toolkit = _StoppedOwnerToolkit()
+        handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+        handle._toolkit = toolkit
+        handle._owner_loop = owner
+        handle._opened_async = True
+
+        reaped: list[str] = []
+        handle._areap_children = lambda: _record(reaped, "reaped")  # type: ignore[method-assign]
+
+        async def scenario() -> None:
+            await asyncio.wait_for(handle.aclose(), timeout=10)
+
+        _run_isolated(scenario, timeout=60)
+
+        assert toolkit.cleanup_entered is False, "the stack must not be unwound on a foreign loop"
+        assert reaped == ["reaped"]
+        assert handle._toolkit is None
+        owner.close()
+
+
+async def _record(sink: list[str], what: str) -> None:
+    sink.append(what)
+
+
+class TestTheReapSurvivesTheCallersBudget:
+    @pytest.mark.asyncio
+    async def test_an_expiring_outer_fence_still_kills_the_child(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The container's fence must not cancel the handle's own reap.
+
+        `ServiceContainer.aclose` bounds every closer, and `run_analysis`
+        bounds the lot. A reap that sits after the `await` those fences cancel
+        is a reap that is skipped on exactly the runs that need it, which is
+        how a stalled cross-loop close used to orphan its sidecar.
+        """
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers import servers
+        from maljan.providers.servers import ServerHandle
+
+        monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 30.0)
+
+        handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+        handle._toolkit = _NeverReturns()
+
+        reaped: list[str] = []
+        handle._areap_children = lambda: _record(reaped, "reaped")  # type: ignore[method-assign]
+
+        # The caller gives up long before the close does — the L2 shape.
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(handle.aclose(), timeout=0.3)
+
+        # The reap is shielded, so it lands on this loop even though the await
+        # on it was cancelled. One turn is enough for a scheduled shield.
+        for _ in range(5):
+            if reaped:
+                break
+            await asyncio.sleep(0.05)
+        assert reaped == ["reaped"], "the child must be reaped despite the cancellation"
+
+
+class TestTheSynchronousSweepCannotBlockTheFence:
+    @pytest.mark.asyncio
+    async def test_a_hanging_close_all_still_lets_wait_for_fire(self) -> None:
+        """`close_all` blocks its thread; it must not block the worker's loop.
+
+        Before this it ran on the loop thread, and a blocking call cannot be
+        interrupted by the fence above it — the last remaining way teardown
+        could outlast its 60s budget without the budget being able to fire.
+        """
+        import time
+
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True)
+
+        class _BlockingRegistry:
+            def __init__(self) -> None:
+                self.entered = threading.Event()
+
+            def close_all(self) -> list:
+                self.entered.set()
+                time.sleep(5)
+                return []
+
+            def still_open(self) -> list:
+                return []
+
+        registry = _BlockingRegistry()
+        container._server_registry_cache = registry  # type: ignore[assignment]
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(container.aclose(), timeout=1.0)
+        assert registry.entered.wait(5), "the sweep should have started in a worker thread"
+        # The fence fired on time: the loop was free the whole way through.
+        assert time.monotonic() - started < 10
