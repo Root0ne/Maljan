@@ -117,29 +117,59 @@ export default function AgentDefinitionsEditor({
   const [keyError, setKeyError] = useState<string | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "running">>({});
   const [manifests, setManifests] = useState<Record<string, string[]>>({});
+  /** Set only for a model-only edit with no effective global provider to
+   *  fall back to — see `putLlm` below. */
+  const [llmErrors, setLlmErrors] = useState<Record<string, string>>({});
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) =>
     onChange({ ...value, [key]: { ...value[key], ...next } });
+
+  const clearLlmError = (agentKey: string) =>
+    setLlmErrors((e) => {
+      if (!(agentKey in e)) return e;
+      const n = { ...e };
+      delete n[agentKey];
+      return n;
+    });
 
   /** Merges `next` into one agent's LLM override and stages the whole
    *  `core.llm.agents` map — removing the entry once provider and model are
    *  both empty, since an override with neither is nothing to keep (and
    *  `AgentLLMConfig` requires both when present). Temperature is omitted
-   *  from the entry, not stored as `null`, when blank. */
+   *  from the entry, not stored as `null`, when blank.
+   *
+   *  A model-only edit would otherwise stage `provider: ""`, which
+   *  `AgentLLMConfig` rejects: the effective global `llm.provider` (staged
+   *  over saved) fills in instead, and if even that is unavailable nothing
+   *  is staged — an inline message asks for a provider rather than sending
+   *  a request the API would only reject. */
   const putLlm = (agentKey: string, next: Partial<AgentLLMOverride>) => {
     const base: AgentLLMOverride = llmAgents[agentKey] ?? { provider: "", model: "" };
     const merged: AgentLLMOverride = { ...base, ...next };
-    const map = { ...llmAgents };
     if (!merged.provider && !merged.model) {
+      clearLlmError(agentKey);
+      const map = { ...llmAgents };
       delete map[agentKey];
-    } else {
-      const stored: AgentLLMOverride = { provider: merged.provider, model: merged.model };
-      if (merged.temperature !== null && merged.temperature !== undefined) {
-        stored.temperature = merged.temperature;
-      }
-      map[agentKey] = stored;
+      onChangeLlmAgents(map);
+      return;
     }
-    onChangeLlmAgents(map);
+    let provider = merged.provider;
+    if (!provider && merged.model) {
+      provider = llmGlobal.providerValue ?? "";
+      if (!provider) {
+        setLlmErrors((e) => ({
+          ...e,
+          [agentKey]: "set a provider — the global provider isn't configured either",
+        }));
+        return;
+      }
+    }
+    clearLlmError(agentKey);
+    const stored: AgentLLMOverride = { provider, model: merged.model };
+    if (merged.temperature !== null && merged.temperature !== undefined) {
+      stored.temperature = merged.temperature;
+    }
+    onChangeLlmAgents({ ...llmAgents, [agentKey]: stored });
   };
 
   const add = (from?: string) => {
@@ -155,9 +185,10 @@ export default function AgentDefinitionsEditor({
     setKeyError(null);
     setNewKey("");
     const source = from ? value[from] : undefined;
-    const resolvedPrompt =
-      from && (probes[from] as ProbeResult | undefined)?.ok
-        ? ((probes[from] as ProbeResult).details as AgentProbeDetails | null)
+    const sourceProbe = from ? probes[from] : undefined;
+    const resolvedDetails =
+      sourceProbe && sourceProbe !== "running" && sourceProbe.ok
+        ? (sourceProbe.details as AgentProbeDetails | null)
         : null;
     onChange({
       ...value,
@@ -167,9 +198,11 @@ export default function AgentDefinitionsEditor({
             label: source.label ? `${source.label} (copy)` : key,
             // A clone starts from what its source *resolves to*, so an
             // operator can see and edit the built-in prompt rather than
-            // guessing it. Left null when the source has not been resolved
-            // yet, which still means "the built-in prompt".
-            prompt: source.prompt ?? (resolvedPrompt ? null : null),
+            // guessing it: the source's own `prompt` when it has one, else
+            // the probe's resolved text once the source has been resolved,
+            // else `null` — still "the built-in prompt" — with the editor's
+            // usual hint to press Resolve first.
+            prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
             tools: source.tools.map((t) => ({ ...t })),
           }
         : { ...EMPTY_DEFINITION },
@@ -339,9 +372,8 @@ export default function AgentDefinitionsEditor({
                   }
                   value={
                     locked
-                      ? details
-                        ? `built-in prompt, ${details.prompt_chars} characters (sha256 ${details.prompt_sha256.slice(0, 12)}…)`
-                        : "press Resolve to see the built-in prompt this agent receives"
+                      ? (details?.prompt ??
+                        "press Resolve to see the built-in prompt this agent receives")
                       : (agent.prompt ?? "")
                   }
                   onChange={(e) => put(key, { prompt: e.target.value })}
@@ -424,14 +456,20 @@ export default function AgentDefinitionsEditor({
                 />
               </label>
             </fieldset>
+            {llmErrors[key] && (
+              <p className="text-[11px] text-status-red mt-1" role="alert">
+                {llmErrors[key]}
+              </p>
+            )}
 
             <fieldset className="mt-2">
               <legend className="text-xs text-text-muted">Tools</legend>
-              {agent.role === "generic" && (
+              {agent.role === "generic" && !locked && (
                 <label className="text-xs text-text-secondary flex items-center gap-1">
                   <input
                     type="checkbox"
                     aria-label={`${key} provider tools`}
+                    disabled={locked}
                     checked={hasRef(key, { kind: "provider", server: null, name: null })}
                     onChange={(e) =>
                       toggleRef(key, { kind: "provider", server: null, name: null }, e.target.checked)

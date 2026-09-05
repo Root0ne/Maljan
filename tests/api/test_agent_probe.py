@@ -70,6 +70,7 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     assert result.ok is True
     assert result.tools == ["extract_dns", "read_pcap_summary"]
     assert result.details["prompt_chars"] > 0
+    assert len(result.details["prompt"]) == result.details["prompt_chars"]
     assert len(result.details["prompt_sha256"]) == 64
     assert result.details["static_provider"] == "ghidra"
     assert result.details["llm"]["provider"] == "openai"

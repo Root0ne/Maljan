@@ -459,6 +459,11 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
             {
                 "prompt_chars": len(resolved.prompt),
                 "prompt_sha256": hashlib.sha256(resolved.prompt.encode("utf-8")).hexdigest(),
+                # Prompts are operator-authored text, not secrets (spec §11),
+                # so the probe returns it in full: the settings UI shows a
+                # built-in's resolved prompt read-only, and a clone seeds its
+                # copy from this text rather than guessing it.
+                "prompt": resolved.prompt,
                 "llm": {
                     "provider": agent_llm.provider if agent_llm else settings.llm.provider,
                     "model": agent_llm.model if agent_llm else "",

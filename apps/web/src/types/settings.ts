@@ -132,6 +132,10 @@ export interface ProfileEntry {
 export interface AgentProbeDetails {
   prompt_chars: number;
   prompt_sha256: string;
+  /** The full resolved prompt. Operator text, not a secret (spec §11) — the
+   *  settings UI shows it read-only on a built-in card and a clone seeds its
+   *  copy from it. */
+  prompt: string;
   llm: { provider: string; model: string };
   static_provider: string;
   servers: { key: string; tools: string[]; status: string }[];

@@ -890,19 +890,26 @@ export async function installApiMocks(
     })
   );
   // Task C12: the agent probe, resolving a definition without an LLM call.
-  await page.route("**/api/v1/settings/test/agent?**", (route) =>
-    json(route, {
+  await page.route("**/api/v1/settings/test/agent?**", (route) => {
+    // Task C14 fix: the probe returns the full resolved prompt, not just its
+    // length — operator text, not a secret (spec §11) — so a built-in card
+    // can show it read-only and a clone can seed its copy from it.
+    const prompt =
+      "You are the static analyst. Inspect the binary's headers, imports " +
+      "and embedded strings, and report structural findings.";
+    return json(route, {
       ok: true, latency_ms: 8, detail: "2 tools: extract_dns, read_pcap_summary",
       models: null, tools: ["extract_dns", "read_pcap_summary"],
       details: {
-        prompt_chars: 412,
+        prompt_chars: prompt.length,
         prompt_sha256: "a".repeat(64),
+        prompt,
         llm: { provider: "openai", model: "" },
         static_provider: "ghidra",
         servers: [{ key: "network", tools: ["extract_dns"], status: "ok" }],
       },
-    })
-  );
+    });
+  });
   // Task B18: what `RestSandboxEditor`'s "Preview mapping" button calls —
   // one channel with rows, one with none, one carrying a channel-local error.
   await page.route("**/api/v1/settings/sandbox-rest/preview", (route) =>

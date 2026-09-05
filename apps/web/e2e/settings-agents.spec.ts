@@ -73,8 +73,13 @@ test.describe("agent definitions and profiles", () => {
     expect(sent.static.static_provider).toBeNull();
     expect(sent.static.prompt).toBeNull();
     // The typed model lands in the `core.llm.agents` map under the clone's
-    // own key, not folded into the definitions map.
+    // own key, not folded into the definitions map. A model-only edit fills
+    // in the effective global provider (the fixture's `core.llm.provider`,
+    // "openai") rather than staging an invalid `provider: ""`.
     expect(Object.keys(body.changes)).toContain("core.llm.agents");
-    expect(body.changes["core.llm.agents"].static_r2.model).toBe("gpt-4o-mini");
+    expect(body.changes["core.llm.agents"].static_r2).toEqual({
+      provider: "openai",
+      model: "gpt-4o-mini",
+    });
   });
 });
