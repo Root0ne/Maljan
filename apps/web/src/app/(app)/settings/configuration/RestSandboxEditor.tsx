@@ -147,8 +147,18 @@ export default function RestSandboxEditor({
                 const name = entry.key.slice(MAPPING_PREFIX.length);
                 const isTarget = name === "target_sha256";
                 const stats = preview?.channels[name];
+                // These twelve rows are ordinary catalog leaves too (spec
+                // §6): staging, reset and per-key error text apply here the
+                // same as every field ``FieldRow`` renders (F13) — the input
+                // is just a table cell instead of a full field layout.
+                const dirty = entry.key in pending;
+                const source = values[entry.key]?.source ?? "default";
+                const error = errors[entry.key];
                 return (
-                  <tr key={entry.key} className="border-b border-border align-top">
+                  <tr
+                    key={entry.key}
+                    className={`border-b border-border align-top ${dirty ? "bg-accent/5" : ""}`}
+                  >
                     <td className="py-1 text-text-secondary">{name}</td>
                     <td className="py-1">
                       <input
@@ -157,6 +167,31 @@ export default function RestSandboxEditor({
                         value={String(effective(entry.key) ?? "")}
                         onChange={(e) => onChange(entry.key, e.target.value)}
                       />
+                      {error && (
+                        <div className="text-[11px] text-status-red mt-1" role="alert">
+                          {error}
+                        </div>
+                      )}
+                      <div className="flex gap-3 mt-1">
+                        {dirty && (
+                          <button
+                            type="button"
+                            className="text-[11px] text-text-secondary"
+                            onClick={() => onUnstage(entry.key)}
+                          >
+                            Discard change
+                          </button>
+                        )}
+                        {source === "ui" && entry.editable && (
+                          <button
+                            type="button"
+                            className="text-[11px] text-text-secondary"
+                            onClick={() => onReset(entry.key)}
+                          >
+                            Reset to env
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="py-1 text-text-muted" data-channel={name}>
                       {isTarget
