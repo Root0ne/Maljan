@@ -34,9 +34,10 @@ test.describe("agent definitions and profiles", () => {
     await expect(clone.getByLabel("static_r2 prompt")).toBeEnabled();
     await clone.getByLabel("static_r2 static provider").selectOption("r2");
 
-    // The per-agent LLM override is a setting of its own
-    // (`core.llm.agents.<key>.*`), staged alongside — not inside — the
-    // definitions map, so it shows up as a second pending change.
+    // The per-agent LLM override lives on its own catalog leaf,
+    // `core.llm.agents` (`dict[str, AgentLLMConfig]`, one JSON map staged as
+    // a whole exactly like `core.mcp.servers`) — not inside the definitions
+    // map — so typing a model here stages one further pending change.
     await clone.getByLabel("static_r2 llm model").fill("gpt-4o-mini");
     await expect(page.getByText("2 changes pending")).toBeVisible();
 
@@ -46,7 +47,7 @@ test.describe("agent definitions and profiles", () => {
         patches.push(r.request().postDataJSON());
         return r.fulfill({
           json: {
-            applied: ["core.agents.definitions", "core.llm.agents.static_r2.model"],
+            applied: ["core.agents.definitions", "core.llm.agents"],
             applies: { next_job: 1 },
           },
         });
@@ -62,6 +63,7 @@ test.describe("agent definitions and profiles", () => {
           string,
           { role: string; static_provider: string | null; prompt: string | null }
         >;
+        "core.llm.agents": Record<string, { provider: string; model: string }>;
       };
     };
     const sent = body.changes["core.agents.definitions"];
@@ -70,9 +72,9 @@ test.describe("agent definitions and profiles", () => {
     // The source is sent back untouched: a clone must not edit what it copied.
     expect(sent.static.static_provider).toBeNull();
     expect(sent.static.prompt).toBeNull();
-    // The typed model is staged as its own leaf, not folded into the
-    // definitions map.
-    expect(Object.keys(body.changes)).toContain("core.llm.agents.static_r2.model");
-    expect(body.changes["core.llm.agents.static_r2.model"]).toBe("gpt-4o-mini");
+    // The typed model lands in the `core.llm.agents` map under the clone's
+    // own key, not folded into the definitions map.
+    expect(Object.keys(body.changes)).toContain("core.llm.agents");
+    expect(body.changes["core.llm.agents"].static_r2.model).toBe("gpt-4o-mini");
   });
 });

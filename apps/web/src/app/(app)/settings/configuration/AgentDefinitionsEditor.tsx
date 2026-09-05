@@ -32,6 +32,38 @@ export const EMPTY_DEFINITION: AgentDefinitionEntry = {
 };
 
 /**
+ * One entry of `llm.agents`, mirroring `maljan.core.config.AgentLLMConfig`.
+ * Absent from the map means "inherit `llm.provider`/the provider's own
+ * `expert_model`/`judge_model`" — there is no per-definition storage for
+ * this, `llm.agents` is a single JSON leaf of its own (`core.llm.agents`),
+ * exactly like `core.mcp.servers`.
+ */
+export interface AgentLLMOverride {
+  provider: string;
+  model: string;
+  temperature?: number | null;
+}
+
+/** What the card's LLM section needs to know about the two *global* leaves
+ *  it falls back to display when a field is left blank. Both are computed
+ *  once by the caller from `core_catalog()`'s actual keys: `llm.provider`
+ *  is a real leaf, `llm.model` is not (models live per-provider, e.g.
+ *  `llm.openai.expert_model`) — so `modelValue` is always `null` today, and
+ *  the model field always shows the generic "inherits the global model"
+ *  text. Kept symmetric rather than hard-coded so a future `llm.model`
+ *  leaf needs no change here. */
+export interface LlmGlobalFallback {
+  /** `null` when `core.llm.provider` is not in the catalog; otherwise its
+   *  choices (possibly empty), which switches the field from free text to
+   *  a select. */
+  providerChoices: string[] | null;
+  /** The effective global provider, or `null` when the leaf doesn't exist. */
+  providerValue: string | null;
+  /** The effective global model, or `null` when no such leaf exists. */
+  modelValue: string | null;
+}
+
+/**
  * The whole `core.agents.definitions` leaf, as a list of cards.
  *
  * One staged value for the whole map, exactly as `ServerMapEditor` stages the
@@ -51,10 +83,10 @@ export default function AgentDefinitionsEditor({
   staged,
   servers,
   staticProviders,
-  settingsValues,
-  settingsPending,
-  onStageSetting,
-  llmProviders,
+  llmAgentsCurrent,
+  llmAgentsStaged,
+  llmGlobal,
+  onChangeLlmAgents,
   onChange,
 }: {
   entry: CatalogEntry;
@@ -62,23 +94,24 @@ export default function AgentDefinitionsEditor({
   staged: unknown;
   servers: Record<string, McpServerEntry>;
   staticProviders: string[];
-  /** The whole values/pending maps: the per-agent LLM override lives on its
-   *  own top-level keys (`core.llm.agents.<key>.*`), staged through the same
-   *  `pending` flow as every other setting but outside the `definitions` map
-   *  itself (spec §2: "not stored on the definition"). */
-  settingsValues: Record<string, SettingValue>;
-  settingsPending: Record<string, unknown>;
-  onStageSetting: (key: string, value: unknown) => void;
-  /** Choices for the global `core.llm.provider` leaf, if the catalog carries
-   *  one — an enum select mirrors that leaf's rendering; an empty list means
-   *  no such catalog entry exists yet, so the field falls back to free text,
-   *  same as the global leaf would with no `choices_from`. */
-  llmProviders: string[];
+  /** `core.llm.agents`'s own current/staged value — one JSON leaf for every
+   *  agent's LLM override, staged as a whole exactly like `core.mcp.servers`
+   *  (spec §2: "not stored on the definition"; §9: "LLM fields bound to
+   *  llm.agents.<key>.*"). Distinct from `current`/`staged` above, which are
+   *  `core.agents.definitions`'s own. */
+  llmAgentsCurrent: SettingValue | undefined;
+  llmAgentsStaged: unknown;
+  llmGlobal: LlmGlobalFallback;
+  onChangeLlmAgents: (value: Record<string, AgentLLMOverride>) => void;
   onChange: (value: Record<string, AgentDefinitionEntry>) => void;
 }) {
   const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<
     string,
     AgentDefinitionEntry
+  >;
+  const llmAgents = (llmAgentsStaged ?? llmAgentsCurrent?.value ?? {}) as Record<
+    string,
+    AgentLLMOverride
   >;
   const [newKey, setNewKey] = useState("");
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -88,21 +121,26 @@ export default function AgentDefinitionsEditor({
   const put = (key: string, next: Partial<AgentDefinitionEntry>) =>
     onChange({ ...value, [key]: { ...value[key], ...next } });
 
-  /** The full key of one agent's per-field LLM override — a setting in its
-   *  own right, not part of the `definitions` map (spec §2). */
-  const llmKey = (agentKey: string, field: "provider" | "model" | "temperature") =>
-    `core.llm.agents.${agentKey}.${field}`;
-
-  /** What that override currently holds: staged wins, else the live value,
-   *  else `null` — "empty" — which means "inherit the global LLM". */
-  const llmValue = (agentKey: string, field: "provider" | "model" | "temperature"): unknown => {
-    const k = llmKey(agentKey, field);
-    if (k in settingsPending) return settingsPending[k];
-    return settingsValues[k]?.value ?? null;
+  /** Merges `next` into one agent's LLM override and stages the whole
+   *  `core.llm.agents` map — removing the entry once provider and model are
+   *  both empty, since an override with neither is nothing to keep (and
+   *  `AgentLLMConfig` requires both when present). Temperature is omitted
+   *  from the entry, not stored as `null`, when blank. */
+  const putLlm = (agentKey: string, next: Partial<AgentLLMOverride>) => {
+    const base: AgentLLMOverride = llmAgents[agentKey] ?? { provider: "", model: "" };
+    const merged: AgentLLMOverride = { ...base, ...next };
+    const map = { ...llmAgents };
+    if (!merged.provider && !merged.model) {
+      delete map[agentKey];
+    } else {
+      const stored: AgentLLMOverride = { provider: merged.provider, model: merged.model };
+      if (merged.temperature !== null && merged.temperature !== undefined) {
+        stored.temperature = merged.temperature;
+      }
+      map[agentKey] = stored;
+    }
+    onChangeLlmAgents(map);
   };
-
-  const stageLlm = (agentKey: string, field: "provider" | "model" | "temperature", v: unknown) =>
-    onStageSetting(llmKey(agentKey, field), v);
 
   const add = (from?: string) => {
     const key = newKey.trim();
@@ -136,14 +174,11 @@ export default function AgentDefinitionsEditor({
           }
         : { ...EMPTY_DEFINITION },
     });
-    // A clone starts with the source's LLM values too, if it has any — the
+    // A clone starts with the source's LLM override too, if it has one — the
     // override lives outside the definition, so cloning the definition alone
     // would silently drop it and leave the clone on the global default.
-    if (from) {
-      (["provider", "model", "temperature"] as const).forEach((field) => {
-        const v = llmValue(from, field);
-        if (v !== null && v !== undefined) stageLlm(key, field, v);
-      });
+    if (from && llmAgents[from]) {
+      onChangeLlmAgents({ ...llmAgents, [key]: { ...llmAgents[from] } });
     }
   };
 
@@ -323,17 +358,17 @@ export default function AgentDefinitionsEditor({
               </legend>
               <label className="block">
                 <span className="text-text-muted">Provider</span>
-                {llmProviders.length > 0 ? (
+                {llmGlobal.providerChoices !== null ? (
                   <select
                     className={input}
                     aria-label={`${key} llm provider`}
-                    value={(llmValue(key, "provider") as string | null) ?? ""}
-                    onChange={(e) =>
-                      stageLlm(key, "provider", e.target.value === "" ? null : e.target.value)
-                    }
+                    value={llmAgents[key]?.provider ?? ""}
+                    onChange={(e) => putLlm(key, { provider: e.target.value })}
                   >
-                    <option value="">Inherit</option>
-                    {llmProviders.map((p) => (
+                    <option value="">
+                      {llmGlobal.providerValue ? `Inherit (${llmGlobal.providerValue})` : "Inherit"}
+                    </option>
+                    {llmGlobal.providerChoices.map((p) => (
                       <option key={p} value={p}>
                         {p}
                       </option>
@@ -343,11 +378,9 @@ export default function AgentDefinitionsEditor({
                   <input
                     className={input}
                     aria-label={`${key} llm provider`}
-                    placeholder="inherit"
-                    value={(llmValue(key, "provider") as string | null) ?? ""}
-                    onChange={(e) =>
-                      stageLlm(key, "provider", e.target.value === "" ? null : e.target.value)
-                    }
+                    placeholder="inherits the global provider"
+                    value={llmAgents[key]?.provider ?? ""}
+                    onChange={(e) => putLlm(key, { provider: e.target.value })}
                   />
                 )}
               </label>
@@ -356,11 +389,13 @@ export default function AgentDefinitionsEditor({
                 <input
                   className={input}
                   aria-label={`${key} llm model`}
-                  placeholder="inherit"
-                  value={(llmValue(key, "model") as string | null) ?? ""}
-                  onChange={(e) =>
-                    stageLlm(key, "model", e.target.value === "" ? null : e.target.value)
+                  placeholder={
+                    llmGlobal.modelValue
+                      ? `inherits ${llmGlobal.modelValue}`
+                      : "inherits the global model"
                   }
+                  value={llmAgents[key]?.model ?? ""}
+                  onChange={(e) => putLlm(key, { model: e.target.value })}
                 />
               </label>
               <label className="block">
@@ -372,19 +407,19 @@ export default function AgentDefinitionsEditor({
                   aria-label={`${key} llm temperature`}
                   placeholder="inherit"
                   value={
-                    llmValue(key, "temperature") === null ||
-                    llmValue(key, "temperature") === undefined
+                    llmAgents[key]?.temperature === null ||
+                    llmAgents[key]?.temperature === undefined
                       ? ""
-                      : String(llmValue(key, "temperature"))
+                      : String(llmAgents[key]!.temperature)
                   }
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (raw === "") {
-                      stageLlm(key, "temperature", null);
+                      putLlm(key, { temperature: null });
                       return;
                     }
                     const parsed = parseFloat(raw);
-                    if (!Number.isNaN(parsed)) stageLlm(key, "temperature", parsed);
+                    if (!Number.isNaN(parsed)) putLlm(key, { temperature: parsed });
                   }}
                 />
               </label>

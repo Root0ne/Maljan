@@ -119,6 +119,24 @@ export default function ConfigurationTab() {
     });
   }, [s.schema, s.pending, s.values]);
 
+  // What the agent-definitions editor's LLM section falls back to display
+  // when a field is left blank. Both leaves are looked up rather than
+  // assumed: `llm.provider` is a real `core_catalog()` leaf, `llm.model` is
+  // not (models live per-provider, e.g. `llm.openai.expert_model`) — so an
+  // absent entry here means "show the generic inherit text", not "render
+  // nothing".
+  const llmGlobal = useMemo(() => {
+    const providerEntry = s.entries.get("core.llm.provider");
+    const modelEntry = s.entries.get("core.llm.model");
+    const effective = (key: string) =>
+      key in s.pending ? s.pending[key] : s.values[key]?.value;
+    return {
+      providerChoices: providerEntry ? (providerEntry.choices ?? []) : null,
+      providerValue: providerEntry ? String(effective("core.llm.provider") ?? "") || null : null,
+      modelValue: modelEntry ? String(effective("core.llm.model") ?? "") || null : null,
+    };
+  }, [s.entries, s.pending, s.values]);
+
   if (s.loading) {
     return <div className="text-sm text-text-secondary">Loading configuration…</div>;
   }
@@ -282,10 +300,10 @@ export default function ConfigurationTab() {
                           staticProviders={
                             s.entries.get("core.static.provider")?.choices ?? []
                           }
-                          settingsValues={s.values}
-                          settingsPending={s.pending}
-                          onStageSetting={s.stage}
-                          llmProviders={s.entries.get("core.llm.provider")?.choices ?? []}
+                          llmAgentsCurrent={s.values["core.llm.agents"]}
+                          llmAgentsStaged={s.pending["core.llm.agents"]}
+                          llmGlobal={llmGlobal}
+                          onChangeLlmAgents={(v) => s.stage("core.llm.agents", v)}
                           onChange={(v) => s.stage(e.key, v)}
                           onUnstage={() => s.unstage(e.key)}
                           onReset={() => void s.reset(e.key)}

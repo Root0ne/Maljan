@@ -299,6 +299,32 @@ export const MOCK_SETTINGS_SCHEMA = {
           choices_from: null,
           editor: null,
         },
+        // Task C14 fix: real `core_catalog()` leaves the agent-definitions
+        // editor's LLM section falls back to — `llm.provider` exists (an
+        // enum), `llm.model` does not (models are per-provider, e.g.
+        // `llm.openai.expert_model`), so only the provider entry is mocked.
+        {
+          key: "core.llm.provider", namespace: "core", path: "llm.provider",
+          type: "enum", default: "openai", nullable: false,
+          choices: ["openai", "anthropic", "ollama", "gemini"],
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
+        // `llm.agents` (`dict[str, AgentLLMConfig]`) is one JSON leaf, staged
+        // as a whole exactly like `core.mcp.servers` — the agent-definitions
+        // editor's LLM section reads and writes this map directly, one entry
+        // per agent key.
+        {
+          key: "core.llm.agents", namespace: "core", path: "llm.agents",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Per-agent LLM overrides",
+          description: "Per-agent LLM overrides for the heterogeneous model ensemble.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
       ],
     },
     // Task A21: `applies_when` drives conditional visibility; `order: -1`
@@ -508,6 +534,22 @@ export const MOCK_SETTINGS_VALUES = {
       is_set: true,
       hint: "1234",
       source: "env",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.provider": {
+      value: "openai",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.agents": {
+      value: {},
+      is_set: null,
+      hint: null,
+      source: "default",
       updated_at: null,
       updated_by: null,
     },

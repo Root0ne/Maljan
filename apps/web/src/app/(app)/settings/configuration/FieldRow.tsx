@@ -1,7 +1,10 @@
 "use client";
 
 import type { CatalogEntry, McpServerEntry, SettingValue } from "@/types/settings";
-import AgentDefinitionsEditor from "./AgentDefinitionsEditor";
+import AgentDefinitionsEditor, {
+  type AgentLLMOverride,
+  type LlmGlobalFallback,
+} from "./AgentDefinitionsEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import { Widget } from "./widgets";
 
@@ -24,10 +27,10 @@ export default function FieldRow({
   models,
   servers,
   staticProviders,
-  settingsValues,
-  settingsPending,
-  onStageSetting,
-  llmProviders,
+  llmAgentsCurrent,
+  llmAgentsStaged,
+  llmGlobal,
+  onChangeLlmAgents,
 }: {
   entry: CatalogEntry;
   current?: SettingValue;
@@ -36,14 +39,14 @@ export default function FieldRow({
   models?: string[];
   servers?: Record<string, McpServerEntry>;
   staticProviders?: string[];
-  /** The whole values/pending maps, distinct from `current`/`staged` above
-   *  which are scoped to this one row: the agent-definitions editor stages
-   *  extra keys of its own (`core.llm.agents.<key>.*`) alongside the
-   *  definitions map, and needs to read and write those directly. */
-  settingsValues?: Record<string, SettingValue>;
-  settingsPending?: Record<string, unknown>;
-  onStageSetting?: (key: string, value: unknown) => void;
-  llmProviders?: string[];
+  /** `core.llm.agents`'s own current/staged value, distinct from
+   *  `current`/`staged` above which are this row's own entry: the
+   *  agent-definitions editor stages that leaf as a whole, separately from
+   *  `core.agents.definitions`. */
+  llmAgentsCurrent?: SettingValue;
+  llmAgentsStaged?: unknown;
+  llmGlobal?: LlmGlobalFallback;
+  onChangeLlmAgents?: (value: Record<string, AgentLLMOverride>) => void;
   onChange: (v: unknown) => void;
   onUnstage: () => void;
   onReset: () => void;
@@ -112,10 +115,10 @@ export default function FieldRow({
               staged={staged}
               servers={servers ?? {}}
               staticProviders={staticProviders ?? []}
-              settingsValues={settingsValues ?? {}}
-              settingsPending={settingsPending ?? {}}
-              onStageSetting={onStageSetting ?? (() => undefined)}
-              llmProviders={llmProviders ?? []}
+              llmAgentsCurrent={llmAgentsCurrent}
+              llmAgentsStaged={llmAgentsStaged}
+              llmGlobal={llmGlobal ?? { providerChoices: null, providerValue: null, modelValue: null }}
+              onChangeLlmAgents={onChangeLlmAgents ?? (() => undefined)}
               onChange={onChange}
             />
           ) : (
