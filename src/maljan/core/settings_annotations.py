@@ -1125,6 +1125,7 @@ ANNOTATIONS.update(
                 "leaves the static analyst with no tools at all."
             ),
             "order": -1,
+            "choices_from": "static_providers",
         },
         "sandbox.provider": {
             "title": "Sandbox provider",
@@ -1137,6 +1138,7 @@ ANNOTATIONS.update(
                 "endpoints and JSONPaths you describe."
             ),
             "order": -1,
+            "choices_from": "sandbox_providers",
         },
         "static.r2.binary_path": {
             "title": "radare2 MCP binary",

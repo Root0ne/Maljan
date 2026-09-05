@@ -32,21 +32,20 @@ def client() -> TestClient:
 
 
 def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
+    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+
     with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
         response = client.get("/api/v1/settings/schema")
     entries = {e["key"]: e for g in response.json()["groups"] for e in g["entries"]}
-    # No ``choices_from`` on the two provider selectors: their choices come
-    # from the settings ``Literal`` and keep its declaration order, which is
-    # what the submit dialog renders. The registry sources exist for a leaf
-    # that needs them; the parity test is what keeps the two lists equal.
-    assert entries["core.static.provider"]["choices"] == [
-        "ghidra",
-        "r2",
-        "capa_yara",
-        "generic_mcp",
-        "none",
-    ]
-    assert entries["core.static.provider"]["choices_from"] is None
+    # Both provider selectors are registry-backed (spec 6): the settings
+    # ``Literal`` is what pydantic validates against, but the choice *list* an
+    # operator picks from is resolved here, against the same registry a job
+    # actually dispatches through, so a provider module registered after the
+    # ``Literal`` was last edited still shows up.
+    assert entries["core.static.provider"]["choices_from"] == "static_providers"
+    assert entries["core.static.provider"]["choices"] == static_provider_ids()
+    assert entries["core.sandbox.provider"]["choices_from"] == "sandbox_providers"
+    assert entries["core.sandbox.provider"]["choices"] == sandbox_provider_ids()
     assert "rest" in entries["core.sandbox.provider"]["choices"]
     generic = entries["core.static.generic.server"]
     assert generic["choices_from"] == "mcp_servers"
@@ -85,3 +84,39 @@ def test_the_mcp_probe_route_addresses_one_server(client, monkeypatch):
 def test_the_mcp_probe_route_needs_a_server(client):
     response = client.post("/api/v1/settings/test/mcp", json={"values": {}})
     assert response.status_code == 422
+
+
+def test_the_mcp_probe_route_refuses_a_non_admin():
+    """Same guard as every other admin route -- built with no ``require_admin``
+    override at all, the way ``test_non_admin_is_rejected`` checks ``/schema``."""
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    response = TestClient(app).post("/api/v1/settings/test/mcp?server=network", json={"values": {}})
+    assert response.status_code in (401, 403)
+
+
+def test_the_mcp_probe_route_never_echoes_a_staged_token(client, monkeypatch):
+    """A staged ``auth_token`` reaches the probe, and nothing else reaches back."""
+    from app.services.settings_probes import ProbeResult
+
+    token = "-".join(["s3cr3t", "runtime", "built", "token"])
+
+    async def fake(server, values, stored):
+        assert values["core.mcp.servers"]["network"]["auth_token"] == token
+        return ProbeResult(False, 5, "no MCP handshake within 5 s", None, None)
+
+    monkeypatch.setattr("app.api.v1.settings.run_mcp_probe", fake)
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        response = client.post(
+            "/api/v1/settings/test/mcp?server=network",
+            json={
+                "values": {
+                    "core.mcp.servers": {
+                        "network": {"transport": "http", "url": "https://h", "auth_token": token}
+                    }
+                }
+            },
+        )
+    assert response.status_code == 200
+    assert token not in response.text

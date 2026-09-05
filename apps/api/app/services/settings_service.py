@@ -260,33 +260,42 @@ class SettingsService:
         current = await self.load_overrides()
         changes = dict(changes)
         tokens: dict[str, str | None] = {}
+        server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
-            # The map is one non-secret row and the tokens are not in it. Split
-            # first so neither validation nor the audit trail ever sees one.
-            # A malformed map is reported here, before the generic pydantic
-            # validation below, with one message per offending key.
-            stored_map = current.get(SERVER_MAP_KEY)
-            try:
-                changes[SERVER_MAP_KEY], tokens = split_server_secrets(
-                    changes[SERVER_MAP_KEY],
-                    stored=stored_map if isinstance(stored_map, dict) else None,
-                )
-            except ServerMapError as exc:
-                raise SettingsValidationError(
-                    {f"{SERVER_MAP_KEY}.{k}": v for k, v in exc.errors.items()}
-                ) from exc
-            unstorable = [
-                server_token_key(name)
-                for name, token in tokens.items()
-                if token and not box.is_available()
-            ]
-            if unstorable:
-                raise SettingsValidationError(
-                    {
-                        key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
-                        for key in unstorable
-                    }
-                )
+            if changes[SERVER_MAP_KEY] is None:
+                # An explicit null drops the override like every other key
+                # (handled below); every per-server token row goes with it --
+                # ``split_server_secrets`` never runs, there is no map left to
+                # validate against.
+                server_map_kept = set()
+            else:
+                # The map is one non-secret row and the tokens are not in it. Split
+                # first so neither validation nor the audit trail ever sees one.
+                # A malformed map is reported here, before the generic pydantic
+                # validation below, with one message per offending key.
+                stored_map = current.get(SERVER_MAP_KEY)
+                try:
+                    changes[SERVER_MAP_KEY], tokens = split_server_secrets(
+                        changes[SERVER_MAP_KEY],
+                        stored=stored_map if isinstance(stored_map, dict) else None,
+                    )
+                except ServerMapError as exc:
+                    raise SettingsValidationError(
+                        {f"{SERVER_MAP_KEY}.{k}": v for k, v in exc.errors.items()}
+                    ) from exc
+                unstorable = [
+                    server_token_key(name)
+                    for name, token in tokens.items()
+                    if token and not box.is_available()
+                ]
+                if unstorable:
+                    raise SettingsValidationError(
+                        {
+                            key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                            for key in unstorable
+                        }
+                    )
+                server_map_kept = set(changes[SERVER_MAP_KEY])
         merged = {**current}
         for key, value in changes.items():
             # ``null`` means "drop the override" for every key, secrets
@@ -331,8 +340,8 @@ class SettingsService:
                 after[key] = "set" if entry.secret else value
             result.applied.append(key)
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
-        if SERVER_MAP_KEY in changes:
-            await self._save_server_tokens(tokens, set(changes[SERVER_MAP_KEY]))
+        if server_map_kept is not None:
+            await self._save_server_tokens(tokens, server_map_kept)
         await self.db.commit()
         details = {"changed": list(changes), "before": before, "after": after}
         await _audit(user_id, "settings.update", details, ip)

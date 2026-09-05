@@ -121,6 +121,36 @@ async def test_a_null_token_deletes_the_row_and_a_removed_server_deletes_its_row
 
 
 @pytest.mark.asyncio
+async def test_an_explicit_null_for_the_whole_map_drops_it_and_every_token_row(encryption_key):
+    """``null`` clears an override for every key (settings_service.save's own
+    rule); the server map is no exception, and dropping it must not leave a
+    per-server token orphaned with no map entry to belong to.
+    """
+    from app.models import RuntimeSetting
+
+    existing = [
+        RuntimeSetting(key="core.mcp.servers", value={"x": {"command": "mcp"}}, is_secret=False),
+        RuntimeSetting(key=server_token_key("x"), value=box.encrypt("s3cr3t"), is_secret=True),
+    ]
+    service, session = _service(existing)
+    service.load_overrides = AsyncMock(return_value={"core.mcp.servers": {"x": {"command": "mcp"}}})  # type: ignore[method-assign]
+    await service.save({"core.mcp.servers": None}, user_id=None, ip=None)
+    deleted = {r.key for r in session.deleted}
+    assert "core.mcp.servers" in deleted, "the map row itself is dropped like any other key"
+    assert server_token_key("x") in deleted, "its token has nothing left to belong to"
+
+    # With every row gone, the values endpoint falls back to the built-ins --
+    # the same shape ``test_an_unset_token_shows_empty_and_a_dot_env_token_shows_env``
+    # exercises for a map that was never stored at all.
+    empty_service, _ = _service()
+    values = await empty_service.values()
+    shown = values["core.mcp.servers"].value
+    assert set(shown) == {"network", "threatintel"}
+    assert shown["network"]["auth_token"] == ""
+    assert shown["network"]["auth_token_source"] == "default"
+
+
+@pytest.mark.asyncio
 async def test_the_effective_overrides_carry_the_plain_token_to_the_worker(encryption_key):
     from app.models import RuntimeSetting
 
