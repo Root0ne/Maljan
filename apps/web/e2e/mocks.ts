@@ -439,6 +439,41 @@ export const MOCK_SETTINGS_SCHEMA = {
         },
       ],
     },
+    // Task C14/C15: named profiles and operator-defined analysts, both
+    // composite `json` leaves the way the server map is one.
+    {
+      key: "agents",
+      title: "Agents",
+      entries: [
+        {
+          key: "core.agents.profile", namespace: "core", path: "agents.profile",
+          type: "enum", default: "default", nullable: false,
+          choices: ["default", "lean"],
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Active profile", description: "Which analyst profile a new job runs.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "profiles", editor: null,
+        },
+        {
+          key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Agent definitions",
+          description: "Every analyst Maljan can run, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "agent_definitions",
+        },
+        {
+          key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Profiles",
+          description: "Named analyst line-ups a job can select.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "profiles",
+        },
+      ],
+    },
   ],
 };
 
@@ -574,6 +609,49 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.static.generic.server": {
       value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.profile": {
+      value: "default",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.definitions": {
+      value: {
+        static: {
+          role: "static", label: "Static analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        dynamic: {
+          role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        network: {
+          role: "network", label: "Network analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        judge: {
+          role: "judge", label: "Judge", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+      },
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.profiles": {
+      value: {
+        default: { label: "Default", analysts: ["static", "dynamic", "network"] },
+      },
       is_set: null,
       hint: null,
       source: "default",
@@ -767,6 +845,20 @@ export async function installApiMocks(
     json(route, {
       ok: true, latency_ms: 12, detail: "3 tools: open_file, analyze, list_imports",
       models: null, tools: ["open_file", "analyze", "list_imports"],
+    })
+  );
+  // Task C12: the agent probe, resolving a definition without an LLM call.
+  await page.route("**/api/v1/settings/test/agent?**", (route) =>
+    json(route, {
+      ok: true, latency_ms: 8, detail: "2 tools: extract_dns, read_pcap_summary",
+      models: null, tools: ["extract_dns", "read_pcap_summary"],
+      details: {
+        prompt_chars: 412,
+        prompt_sha256: "a".repeat(64),
+        llm: { provider: "openai", model: "" },
+        static_provider: "ghidra",
+        servers: [{ key: "network", tools: ["extract_dns"], status: "ok" }],
+      },
     })
   );
   // Task B18: what `RestSandboxEditor`'s "Preview mapping" button calls —

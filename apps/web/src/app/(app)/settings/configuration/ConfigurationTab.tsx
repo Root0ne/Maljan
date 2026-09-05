@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import type { CatalogEntry, SettingValue } from "@/types/settings";
+import type { CatalogEntry, McpServerEntry, SettingValue } from "@/types/settings";
 import ApplyBar from "./ApplyBar";
 import FieldRow from "./FieldRow";
 import GroupHeader from "./GroupHeader";
@@ -274,6 +274,14 @@ export default function ConfigurationTab() {
                           staged={s.pending[e.key]}
                           error={s.errors[e.key]}
                           models={e.probe === "llm" ? models : undefined}
+                          servers={
+                            (s.pending["core.mcp.servers"] ??
+                              s.values["core.mcp.servers"]?.value ??
+                              {}) as Record<string, McpServerEntry>
+                          }
+                          staticProviders={
+                            s.entries.get("core.static.provider")?.choices ?? []
+                          }
                           onChange={(v) => s.stage(e.key, v)}
                           onUnstage={() => s.unstage(e.key)}
                           onReset={() => void s.reset(e.key)}

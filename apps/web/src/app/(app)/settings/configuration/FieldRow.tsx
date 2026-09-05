@@ -1,6 +1,7 @@
 "use client";
 
-import type { CatalogEntry, SettingValue } from "@/types/settings";
+import type { CatalogEntry, McpServerEntry, SettingValue } from "@/types/settings";
+import AgentDefinitionsEditor from "./AgentDefinitionsEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import { Widget } from "./widgets";
 
@@ -21,12 +22,16 @@ export default function FieldRow({
   onUnstage,
   onReset,
   models,
+  servers,
+  staticProviders,
 }: {
   entry: CatalogEntry;
   current?: SettingValue;
   staged: unknown;
   error?: string;
   models?: string[];
+  servers?: Record<string, McpServerEntry>;
+  staticProviders?: string[];
   onChange: (v: unknown) => void;
   onUnstage: () => void;
   onReset: () => void;
@@ -86,6 +91,15 @@ export default function FieldRow({
               entry={entry}
               current={current}
               staged={staged}
+              onChange={onChange}
+            />
+          ) : entry.editor === "agent_definitions" ? (
+            <AgentDefinitionsEditor
+              entry={entry}
+              current={current}
+              staged={staged}
+              servers={servers ?? {}}
+              staticProviders={staticProviders ?? []}
               onChange={onChange}
             />
           ) : (
