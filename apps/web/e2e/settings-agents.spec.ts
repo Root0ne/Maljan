@@ -82,4 +82,56 @@ test.describe("agent definitions and profiles", () => {
       model: "gpt-4o-mini",
     });
   });
+
+  test("a profile is built from enabled analysts, ordered, set active and applied", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await expect(page.locator('[data-profile="default"]').getByText("built in")).toBeVisible();
+    await expect(
+      page.locator('[data-profile="default"]').getByLabel("default label")
+    ).toBeDisabled();
+
+    await page.getByLabel("new profile name").fill("lean");
+    await page.getByRole("button", { name: "Add profile" }).click();
+
+    const lean = page.locator('[data-profile="lean"]');
+    await lean.getByLabel("lean add analyst").selectOption("network");
+    await lean.getByLabel("lean add analyst").selectOption("static");
+    await expect(lean.getByText("1. network")).toBeVisible();
+    await lean.getByLabel("lean move static up").click();
+    await expect(lean.getByText("1. static")).toBeVisible();
+    await lean.getByRole("button", { name: "Set active" }).click();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({
+          json: {
+            applied: ["core.agents.profiles", "core.agents.profile"],
+            applies: { next_job: 2 },
+          },
+        });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: {
+        "core.agents.profiles": Record<string, { analysts: string[] }>;
+        "core.agents.profile": string;
+      };
+    };
+    expect(body.changes["core.agents.profiles"].lean.analysts).toEqual(["static", "network"]);
+    expect(body.changes["core.agents.profile"]).toBe("lean");
+    expect(body.changes["core.agents.profiles"].default.analysts).toEqual([
+      "static", "dynamic", "network",
+    ]);
+  });
 });

@@ -34,7 +34,7 @@ function formatSize(bytes: number): string {
 }
 
 function SamplesPageContent() {
-  const { staticProviders, sandboxProviders } = useProviderChoices();
+  const { staticProviders, sandboxProviders, profiles } = useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +52,7 @@ function SamplesPageContent() {
   const [submitFor, setSubmitFor] = useState<SampleRow | null>(null);
   const [staticProvider, setStaticProvider] = useState("");
   const [sandboxProvider, setSandboxProvider] = useState("");
+  const [profile, setProfile] = useState("");
   const [attachedReport, setAttachedReport] = useState<SandboxReportDTO | null>(null);
   const [reportUploading, setReportUploading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -68,6 +69,7 @@ function SamplesPageContent() {
   const resetSubmitDialogFields = useCallback(() => {
     setStaticProvider("");
     setSandboxProvider("");
+    setProfile("");
     setAttachedReport(null);
     setReportError(null);
     setSubmitError(null);
@@ -117,6 +119,7 @@ function SamplesPageContent() {
       // touches nothing sends the payload this page has always sent.
       const config: Record<string, unknown> = {};
       if (staticProvider) config.static_provider = staticProvider;
+      if (profile) config.profile = profile;
       if (attachedReport) {
         config.sandbox_report_id = attachedReport.id;
         config.sandbox_provider = "upload";
@@ -521,6 +524,23 @@ function SamplesPageContent() {
                     Sandbox: upload (from the attached report)
                   </p>
                 )}
+              </div>
+
+              <div>
+                <label htmlFor="agent-profile" className="block text-text-muted uppercase tracking-wider mb-1">
+                  Profile
+                </label>
+                <select
+                  id="agent-profile"
+                  value={profile}
+                  onChange={(e) => setProfile(e.target.value)}
+                  className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary"
+                >
+                  <option value="">Inherit from settings</option>
+                  {profiles.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
               </div>
 
               <div>

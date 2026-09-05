@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import type { CatalogEntry, McpServerEntry, SettingValue } from "@/types/settings";
+import type {
+  AgentDefinitionEntry,
+  CatalogEntry,
+  McpServerEntry,
+  SettingValue,
+} from "@/types/settings";
 import ApplyBar from "./ApplyBar";
 import FieldRow from "./FieldRow";
 import GroupHeader from "./GroupHeader";
@@ -304,6 +309,17 @@ export default function ConfigurationTab() {
                           llmAgentsStaged={s.pending["core.llm.agents"]}
                           llmGlobal={llmGlobal}
                           onChangeLlmAgents={(v) => s.stage("core.llm.agents", v)}
+                          definitions={
+                            (s.pending["core.agents.definitions"] ??
+                              s.values["core.agents.definitions"]?.value ??
+                              {}) as Record<string, AgentDefinitionEntry>
+                          }
+                          activeProfile={
+                            (s.pending["core.agents.profile"] ??
+                              s.values["core.agents.profile"]?.value ??
+                              "default") as string
+                          }
+                          onSetActive={(name) => s.stage("core.agents.profile", name)}
                           onChange={(v) => s.stage(e.key, v)}
                           onUnstage={() => s.unstage(e.key)}
                           onReset={() => void s.reset(e.key)}

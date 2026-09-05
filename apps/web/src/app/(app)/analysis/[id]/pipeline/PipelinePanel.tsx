@@ -50,38 +50,65 @@ interface NegotiationLog {
 
 /* ── Step config ─────────────────────────────────────── */
 
-const PIPELINE_STEPS = [
-  {
-    id: "ingestion",
-    title: "Sample Ingestion",
-    description: "File loaded and prepared for analysis.",
-  },
-  {
-    id: "static",
-    title: "Static Analysis",
-    description: "PE/ELF structure, strings, imports, entropy, YARA rules.",
-  },
-  {
-    id: "dynamic",
-    title: "Dynamic Analysis",
-    description: "Sandbox execution, behavioral indicators, API calls.",
-  },
-  {
-    id: "network",
-    title: "Network Analysis",
-    description: "DNS, HTTP, C2 communication patterns, IOC extraction.",
-  },
+const INGESTION_STEP = {
+  id: "ingestion",
+  title: "Sample Ingestion",
+  description: "File loaded and prepared for analysis.",
+  custom: false,
+};
+const TAIL_STEPS = [
   {
     id: "negotiation",
     title: "Multi-Agent Negotiation",
     description: "Agents debate findings, resolve dissents, converge on consensus.",
+    custom: false,
   },
   {
     id: "judge",
     title: "Judge Verdict",
     description: "Final classification with STIX 2.1 threat intelligence bundle.",
+    custom: false,
   },
 ];
+/** What each built-in analyst step said before the profile decided the list. */
+const BUILTIN_ANALYST_STEPS: Record<string, { title: string; description: string }> = {
+  static: {
+    title: "Static Analysis",
+    description: "PE/ELF structure, strings, imports, entropy, YARA rules.",
+  },
+  dynamic: {
+    title: "Dynamic Analysis",
+    description: "Sandbox execution, behavioral indicators, API calls.",
+  },
+  network: {
+    title: "Network Analysis",
+    description: "DNS, HTTP, C2 communication patterns, IOC extraction.",
+  },
+};
+
+/**
+ * The analyst steps this run actually had.
+ *
+ * `run_summary.profile` says which analysts ran and which of them are not
+ * built in. A report written before profiles existed has no such key, so the
+ * three built-in ids are the fallback and every old report renders exactly as
+ * it did.
+ */
+function analystSteps(
+  runSummary: unknown
+): { id: string; title: string; description: string; custom: boolean }[] {
+  const profile = (runSummary as { profile?: { analysts?: string[]; custom?: string[] } } | null)
+    ?.profile;
+  const analysts = profile?.analysts ?? ["static", "dynamic", "network"];
+  const custom = new Set(profile?.custom ?? []);
+  return analysts.map((id) => ({
+    id,
+    title: BUILTIN_ANALYST_STEPS[id]?.title ?? `${id} analysis`,
+    description:
+      BUILTIN_ANALYST_STEPS[id]?.description ?? "A custom analyst declared in the settings.",
+    custom: custom.has(id),
+  }));
+}
 
 /* ── Helpers ─────────────────────────────────────────── */
 
@@ -208,16 +235,12 @@ export default function PipelineTab() {
   );
   const runSummary = report?.run_summary ?? null;
 
-  // Map agents to steps
-  const staticFinding = findings.find((f) =>
-    f.agent_name.toLowerCase().includes("static")
-  );
-  const dynamicFinding = findings.find((f) =>
-    f.agent_name.toLowerCase().includes("dynamic")
-  );
-  const networkFinding = findings.find((f) =>
-    f.agent_name.toLowerCase().includes("network")
-  );
+  const analysts = analystSteps(runSummary);
+  const steps = [INGESTION_STEP, ...analysts, ...TAIL_STEPS];
+  const analystIds = new Set(analysts.map((a) => a.id));
+  const findingFor = (id: string) =>
+    findings.find((f) => f.agent_name.toLowerCase() === id.toLowerCase()) ??
+    findings.find((f) => f.agent_name.toLowerCase().includes(id.toLowerCase()));
 
   const hasNegotiation =
     negotiation &&
@@ -249,22 +272,16 @@ export default function PipelineTab() {
     switch (stepId) {
       case "ingestion":
         return "done";
-      // An analyst that crashed still leaves a findings row, so "a row exists"
-      // was never the same question as "the step succeeded". Dynamic has failed
-      // on every run in this deployment and this panel drew it green each time.
-      case "static":
-        return findingStatus(staticFinding);
-      case "dynamic":
-        return findingStatus(dynamicFinding);
-      case "network":
-        return findingStatus(networkFinding);
       case "negotiation":
         if (negotiationFailed) return "failed";
         return hasNegotiation ? "done" : "pending";
       case "judge":
         return report.verdict ? "done" : "pending";
+      // An analyst that crashed still leaves a findings row, so "a row exists"
+      // was never the same question as "the step succeeded". Dynamic has failed
+      // on every run in this deployment and this panel drew it green each time.
       default:
-        return "pending";
+        return findingStatus(findingFor(stepId));
     }
   };
 
@@ -278,7 +295,7 @@ export default function PipelineTab() {
           </h2>
         </div>
         <div className="p-4 space-y-2">
-          {PIPELINE_STEPS.map((step, idx) => {
+          {steps.map((step, idx) => {
             const status = stepStatus(step.id);
             const isActive = activeStep === step.id;
             return (
@@ -313,6 +330,11 @@ export default function PipelineTab() {
                       <span className="text-xs font-medium text-text-primary">
                         {step.title}
                       </span>
+                      {step.custom && (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/20 text-accent-strong">
+                          custom
+                        </span>
+                      )}
                       {status === "done" && (
                         <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-green/10 text-status-green uppercase tracking-wider">
                           Done
@@ -351,85 +373,47 @@ export default function PipelineTab() {
                       </div>
                     )}
 
-                    {step.id === "static" && staticFinding && (
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-xs text-text-muted">Agent:</span>
-                          <span className="text-xs font-medium text-text-primary">
-                            {staticFinding.agent_name}
-                          </span>
-                          <span className="text-xs text-text-muted">Confidence:</span>
-                          <span className="text-xs font-mono text-text-primary">
-                            {Math.round(staticFinding.final_confidence * 100)}%
-                          </span>
-                        </div>
-                        <CollapsibleSection title={`Claims (${staticFinding.claims?.length ?? 0})`} defaultOpen>
-                          {staticFinding.claims && staticFinding.claims.length > 0 ? (
-                            staticFinding.claims.map((c, i) => (
-                              <ClaimCard key={i} claim={c as Claim} index={i} />
-                            ))
-                          ) : (
-                            <p className="text-xs text-text-muted">No claims recorded.</p>
-                          )}
-                        </CollapsibleSection>
-                        {staticFinding.dissent_items &&
-                          staticFinding.dissent_items.length > 0 && (
-                            <CollapsibleSection title={`Dissents (${staticFinding.dissent_items.length})`}>
-                              <pre className="text-[11px] text-text-muted overflow-auto">
-                                {JSON.stringify(staticFinding.dissent_items, null, 2)}
-                              </pre>
+                    {step.id !== "ingestion" &&
+                      step.id !== "negotiation" &&
+                      step.id !== "judge" &&
+                      analystIds.has(step.id) &&
+                      (() => {
+                        const finding = findingFor(step.id);
+                        if (!finding) return null;
+                        return (
+                          <div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <span className="text-xs text-text-muted">Agent:</span>
+                              <span className="text-xs font-medium text-text-primary">
+                                {finding.agent_name}
+                              </span>
+                              <span className="text-xs text-text-muted">Confidence:</span>
+                              <span className="text-xs font-mono text-text-primary">
+                                {Math.round(finding.final_confidence * 100)}%
+                              </span>
+                            </div>
+                            <CollapsibleSection
+                              title={`Claims (${finding.claims?.length ?? 0})`}
+                              defaultOpen
+                            >
+                              {finding.claims && finding.claims.length > 0 ? (
+                                finding.claims.map((c, i) => (
+                                  <ClaimCard key={i} claim={c as Claim} index={i} />
+                                ))
+                              ) : (
+                                <p className="text-xs text-text-muted">No claims recorded.</p>
+                              )}
                             </CollapsibleSection>
-                          )}
-                      </div>
-                    )}
-
-                    {step.id === "dynamic" && dynamicFinding && (
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-xs text-text-muted">Agent:</span>
-                          <span className="text-xs font-medium text-text-primary">
-                            {dynamicFinding.agent_name}
-                          </span>
-                          <span className="text-xs text-text-muted">Confidence:</span>
-                          <span className="text-xs font-mono text-text-primary">
-                            {Math.round(dynamicFinding.final_confidence * 100)}%
-                          </span>
-                        </div>
-                        <CollapsibleSection title={`Claims (${dynamicFinding.claims?.length ?? 0})`} defaultOpen>
-                          {dynamicFinding.claims && dynamicFinding.claims.length > 0 ? (
-                            dynamicFinding.claims.map((c, i) => (
-                              <ClaimCard key={i} claim={c as Claim} index={i} />
-                            ))
-                          ) : (
-                            <p className="text-xs text-text-muted">No claims recorded.</p>
-                          )}
-                        </CollapsibleSection>
-                      </div>
-                    )}
-
-                    {step.id === "network" && networkFinding && (
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-xs text-text-muted">Agent:</span>
-                          <span className="text-xs font-medium text-text-primary">
-                            {networkFinding.agent_name}
-                          </span>
-                          <span className="text-xs text-text-muted">Confidence:</span>
-                          <span className="text-xs font-mono text-text-primary">
-                            {Math.round(networkFinding.final_confidence * 100)}%
-                          </span>
-                        </div>
-                        <CollapsibleSection title={`Claims (${networkFinding.claims?.length ?? 0})`} defaultOpen>
-                          {networkFinding.claims && networkFinding.claims.length > 0 ? (
-                            networkFinding.claims.map((c, i) => (
-                              <ClaimCard key={i} claim={c as Claim} index={i} />
-                            ))
-                          ) : (
-                            <p className="text-xs text-text-muted">No claims recorded.</p>
-                          )}
-                        </CollapsibleSection>
-                      </div>
-                    )}
+                            {finding.dissent_items && finding.dissent_items.length > 0 && (
+                              <CollapsibleSection title={`Dissents (${finding.dissent_items.length})`}>
+                                <pre className="text-[11px] text-text-muted overflow-auto">
+                                  {JSON.stringify(finding.dissent_items, null, 2)}
+                                </pre>
+                              </CollapsibleSection>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                     {step.id === "negotiation" && negotiation && (
                       <div className="space-y-3">

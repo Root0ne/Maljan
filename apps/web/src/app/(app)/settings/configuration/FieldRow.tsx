@@ -1,10 +1,16 @@
 "use client";
 
-import type { CatalogEntry, McpServerEntry, SettingValue } from "@/types/settings";
+import type {
+  AgentDefinitionEntry,
+  CatalogEntry,
+  McpServerEntry,
+  SettingValue,
+} from "@/types/settings";
 import AgentDefinitionsEditor, {
   type AgentLLMOverride,
   type LlmGlobalFallback,
 } from "./AgentDefinitionsEditor";
+import ProfilesEditor from "./ProfilesEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import { Widget } from "./widgets";
 
@@ -31,6 +37,9 @@ export default function FieldRow({
   llmAgentsStaged,
   llmGlobal,
   onChangeLlmAgents,
+  definitions,
+  activeProfile,
+  onSetActive,
 }: {
   entry: CatalogEntry;
   current?: SettingValue;
@@ -47,6 +56,14 @@ export default function FieldRow({
   llmAgentsStaged?: unknown;
   llmGlobal?: LlmGlobalFallback;
   onChangeLlmAgents?: (value: Record<string, AgentLLMOverride>) => void;
+  /** `core.agents.definitions`'s effective value, read-only here — the
+   *  profiles editor only offers enabled, non-judge definitions. */
+  definitions?: Record<string, AgentDefinitionEntry>;
+  /** `core.agents.profile`'s effective value, for the "active" badge. */
+  activeProfile?: string;
+  /** Stages `core.agents.profile` — a "Set active" click, distinct from this
+   *  row's own `onChange` which stages `core.agents.profiles`. */
+  onSetActive?: (name: string) => void;
   onChange: (v: unknown) => void;
   onUnstage: () => void;
   onReset: () => void;
@@ -120,6 +137,16 @@ export default function FieldRow({
               llmGlobal={llmGlobal ?? { providerChoices: null, providerValue: null, modelValue: null }}
               onChangeLlmAgents={onChangeLlmAgents ?? (() => undefined)}
               onChange={onChange}
+            />
+          ) : entry.editor === "profiles" ? (
+            <ProfilesEditor
+              entry={entry}
+              current={current}
+              staged={staged}
+              definitions={definitions ?? {}}
+              activeProfile={activeProfile ?? "default"}
+              onChange={onChange}
+              onSetActive={onSetActive ?? (() => undefined)}
             />
           ) : (
             <Widget
