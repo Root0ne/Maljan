@@ -8,7 +8,9 @@ server to a malware pipeline is a considered act rather than a reckless one.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -31,18 +33,109 @@ def test_a_server_token_never_appears_in_a_run_summary():
     # plain string assigned to a ``SecretStr`` field, not the literal wrapped
     # at construction time.
     cfg.sandbox.rest.auth.token = SecretStr("r3st")
-    snap = json.dumps(settings_snapshot(cfg))
-    assert "s3cr3t" not in snap and "r3st" not in snap
+    snap = settings_snapshot(cfg)
+    dumped = json.dumps(snap)
+    assert "s3cr3t" not in dumped and "r3st" not in dumped
+    # Not merely absent — masked in the specific shape each field's type
+    # produces: a nested server token by ``SecretStr``'s own serializer (ten
+    # asterisks), a catalog leaf by ``public_snapshot``'s own convention.
+    assert snap["mcp.servers.custom.auth_token"] == "**********"
+    assert snap["sandbox.rest.auth.token"] == "***"
 
 
-def test_a_server_token_never_appears_in_a_repr_or_a_log_line(caplog):
-    server = MCPServerConfig(enabled=True, transport="http", url="https://h", auth_token="s3cr3t")
+def test_a_server_token_never_appears_in_a_repr(monkeypatch, caplog):
+    """Repr, a registry degrade, and a failed open all name the server, never its token."""
+    from maljan.providers.servers import UNAVAILABLE_REASON, ServerRegistry
+
+    token = f"s3cr3t-{uuid.uuid4().hex}"
+    server = MCPServerConfig(
+        enabled=True, transport="http", url="https://h", auth_token=token, agents=["network"]
+    )
     handle = ServerHandle("custom", server)
-    assert "s3cr3t" not in repr(server)
-    assert "s3cr3t" not in repr(handle.config)
-    with caplog.at_level("DEBUG"):
-        handle.close()
-    assert "s3cr3t" not in caplog.text
+    assert token not in repr(server)
+    assert token not in repr(handle.config)
+
+    class _BoomToolkit:
+        """A toolkit whose handshake always fails, never touching the token."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def initialize(self) -> None:
+            raise RuntimeError("boom")
+
+        def get_tools(self) -> list[object]:
+            return []
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _BoomToolkit)
+    # ``_run_async`` normally hands off to the shared agent loop; run it
+    # inline here so the real ``ServerHandle.open`` failure log — and the
+    # registry's own degrade log around it — both fire on this thread, where
+    # caplog can see them.
+    monkeypatch.setattr(
+        "maljan.providers.servers._run_async", lambda coro, label: asyncio.run(coro)
+    )
+
+    cfg = Settings(_env_file=None)
+    # Only the server under test: the default map also carries the built-in
+    # "network" server bound to this same role, which would degrade too once
+    # every handshake is stubbed to fail, muddying the assertion below.
+    cfg.mcp.servers = {"custom": server}
+    registry = ServerRegistry(cfg)
+
+    with caplog.at_level("DEBUG", logger="maljan"):
+        tools, reasons = registry.tools_for("network", "job-1")
+
+    assert tools == []
+    assert reasons == [UNAVAILABLE_REASON.format(name="custom")]
+    for record in caplog.records:
+        assert token not in record.getMessage()
+        assert token not in str(record.args)
+    assert token not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_server_token_never_appears_in_a_probe_timeout(monkeypatch, caplog):
+    """The probe's own timeout path — a server that never answers the handshake."""
+    from app.services.settings_probes import probe_mcp
+
+    token = f"s3cr3t-{uuid.uuid4().hex}"
+
+    class _HangingToolkit:
+        """A toolkit whose handshake never returns inside the probe budget."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def initialize(self) -> None:
+            await asyncio.sleep(30)
+
+        def get_tools(self) -> list[object]:
+            return []
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _HangingToolkit)
+    monkeypatch.setattr("app.services.settings_probes.PROBE_BUDGET_SECONDS", 0.05)
+
+    with caplog.at_level("DEBUG", logger="maljan"):
+        result = await probe_mcp(
+            {
+                "name": "x",
+                "entry": {
+                    "enabled": True,
+                    "transport": "http",
+                    "url": "https://h",
+                    "auth_token": token,
+                },
+            }
+        )
+
+    assert result.ok is False
+    assert "no MCP handshake" in result.detail
+    assert token not in result.detail
+    for record in caplog.records:
+        assert token not in record.getMessage()
+        assert token not in str(record.args)
+    assert token not in caplog.text
 
 
 def test_a_child_sees_the_base_keys_plus_only_the_names_it_was_allowed():
