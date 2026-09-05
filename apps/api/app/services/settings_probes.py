@@ -422,41 +422,55 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         await container.aclose()
         return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
 
-    tools = [str(getattr(t, "name", "")) for t in resolved.tools]
-    reasons = set(resolved.degradation_reasons)
-    registry = container.get_server_registry()
-    servers = []
-    for key in bound:
-        server_tools, _server_reasons = await registry.atools_for_ref(
-            ToolRef(kind="mcp", server=key), job_key
-        )
-        servers.append(
+    # From here on, the container is open and must close on every exit —
+    # a successful report, an unexpected failure while assembling one, or a
+    # single server's listing blowing up. ``finally`` is what makes that true
+    # regardless of which of those three happens; a bare ``await
+    # container.aclose()`` after the loop, as before, skipped entirely on an
+    # exception and leaked every server the resolve above had just opened.
+    try:
+        tools = [str(getattr(t, "name", "")) for t in resolved.tools]
+        reasons = set(resolved.degradation_reasons)
+        registry = container.get_server_registry()
+        servers = []
+        for key in bound:
+            try:
+                server_tools, _server_reasons = await registry.atools_for_ref(
+                    ToolRef(kind="mcp", server=key), job_key
+                )
+            except Exception as exc:  # noqa: BLE001 — degrades this server, not the probe
+                servers.append({"key": key, "tools": [], "status": f"{type(exc).__name__}: {exc}"})
+                continue
+            servers.append(
+                {
+                    "key": key,
+                    "tools": [str(getattr(t, "name", "")) for t in server_tools],
+                    "status": next((r for r in reasons if f"'{key}" in r), "ok"),
+                }
+            )
+        agent_llm = settings.llm.agents.get(name)
+        listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
+        return ProbeResult(
+            True,
+            _ms(t0),
+            f"{len(tools)} tools: {listed}" if tools else "resolved; no tools",
+            None,
+            tools,
             {
-                "key": key,
-                "tools": [str(getattr(t, "name", "")) for t in server_tools],
-                "status": next((r for r in reasons if f"'{key}" in r), "ok"),
-            }
-        )
-    await container.aclose()
-    agent_llm = settings.llm.agents.get(name)
-    listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
-    return ProbeResult(
-        True,
-        _ms(t0),
-        f"{len(tools)} tools: {listed}" if tools else "resolved; no tools",
-        None,
-        tools,
-        {
-            "prompt_chars": len(resolved.prompt),
-            "prompt_sha256": hashlib.sha256(resolved.prompt.encode("utf-8")).hexdigest(),
-            "llm": {
-                "provider": agent_llm.provider if agent_llm else settings.llm.provider,
-                "model": agent_llm.model if agent_llm else "",
+                "prompt_chars": len(resolved.prompt),
+                "prompt_sha256": hashlib.sha256(resolved.prompt.encode("utf-8")).hexdigest(),
+                "llm": {
+                    "provider": agent_llm.provider if agent_llm else settings.llm.provider,
+                    "model": agent_llm.model if agent_llm else "",
+                },
+                "static_provider": resolved.static_provider_id,
+                "servers": servers,
             },
-            "static_provider": resolved.static_provider_id,
-            "servers": servers,
-        },
-    )
+        )
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    finally:
+        await container.aclose()
 
 
 async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:

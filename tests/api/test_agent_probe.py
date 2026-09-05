@@ -199,6 +199,62 @@ async def test_each_bound_server_reports_only_its_own_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_server_that_blows_up_while_listed_degrades_only_its_own_entry(monkeypatch):
+    """A per-server listing failure is that server's problem, not the probe's.
+
+    Neither of the two servers here is the one the resolve itself opened —
+    both are only asked about afterwards, for the per-server ``tools`` list —
+    so a ``RuntimeError`` from one of them must not escape ``probe_agent`` as
+    a 500, must not blank out the other server's already-fetched tools, and
+    must not skip closing the container the successful resolve opened.
+    """
+    from maljan.core.container import ServiceContainer
+
+    # Bound via ``agents`` (role-bound), not an explicit ``ToolRef`` — the
+    # initial resolve then reads them through ``atools_for`` (already stubbed
+    # empty by ``_no_servers`` for a role other than "network"), so the only
+    # caller of ``atools_for_ref`` in this test is the post-resolve per-server
+    # listing this finding is about.
+    staged = {
+        "mcp.servers": {
+            "serverA": {"enabled": True, "agents": ["multi"]},
+            "serverB": {"enabled": True, "agents": ["multi"]},
+        },
+        "agents.definitions": {"multi": {"role": "generic", "prompt": "multi"}},
+        "agents.profiles": {"multi_profile": {"analysts": ["multi"]}},
+        "agents.profile": "multi_profile",
+    }
+
+    async def _atools_for_ref(self, ref, job_id, **ctx):  # type: ignore[no-untyped-def]
+        from langchain_core.tools import StructuredTool
+
+        if str(ref.server) == "serverA":
+            raise RuntimeError("serverA blew up")
+        name = f"{ref.server}_tool"
+        return [StructuredTool.from_function(func=lambda: "x", name=name, description=name)], []
+
+    close_calls: list[None] = []
+    original_aclose = ServiceContainer.aclose
+
+    async def _counted_aclose(self):  # type: ignore[no-untyped-def]
+        close_calls.append(None)
+        await original_aclose(self)
+
+    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
+    monkeypatch.setattr(ServiceContainer, "aclose", _counted_aclose)
+
+    result = await probe_agent({"name": "multi", "settings": staged})
+
+    assert result.ok is True
+    by_key = {s["key"]: s for s in result.details["servers"]}
+    assert by_key["serverA"]["tools"] == []
+    assert "serverA blew up" in by_key["serverA"]["status"]
+    assert by_key["serverB"]["tools"] == ["serverB_tool"]
+    assert by_key["serverB"]["status"] == "ok"
+    assert len(close_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_staged_values_win_over_stored_ones():
     stored = {"core.agents.definitions": {"strings": {"role": "generic", "prompt": "stored"}}}
     staged = {"core.agents.definitions": {"strings": {"role": "generic", "prompt": "staged"}}}
