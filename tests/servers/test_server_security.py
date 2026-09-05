@@ -162,7 +162,15 @@ def test_a_server_is_launched_with_an_argv_list_and_never_through_a_shell(monkey
             seen.update({"command": command, "args": args, "env": env, "cwd": cwd})
 
     monkeypatch.setattr("mcp.StdioServerParameters", _Params)
-    monkeypatch.setattr("maljan.providers.servers._run_async", lambda coro, label: None)
+
+    def _run_async_stub(coro, label):
+        # Skip the real event-loop hop, and close the coroutine so it is
+        # never reported as "never awaited" (F14): ``initialize()`` on the
+        # fake toolkit below returns a real coroutine object whether or not
+        # anything runs it.
+        coro.close()
+
+    monkeypatch.setattr("maljan.providers.servers._run_async", _run_async_stub)
 
     class _Toolkit:
         def __init__(self, *a, **k):

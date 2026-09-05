@@ -271,10 +271,12 @@ already trust.
 
 **Known limits.** Every job still uses whichever server `mcp.servers` says
 serves its analyst — there is no per-job server selection yet. And
-`resolve_mcp_args` roots any argument containing a `/` under the repository,
-which is convenient for a relative script path but means an absolute path
-outside the repo has to be passed a different way; both are open follow-ups
-for a later sub-project.
+`resolve_mcp_args` roots a *relative* argument containing a `/` under the
+repository — a flag (anything starting with `-`) and an already-absolute path
+are both left untouched — so the residual is a non-path value that happens to
+contain a slash and is passed positionally (e.g. `https://x/y`), which is
+rewritten when it should not be; both are open follow-ups for a later
+sub-project.
 
 CAPE itself is somebody else's platform and nothing here installs, builds or
 packages it. It wants a Linux host of its own with KVM and its own Windows
