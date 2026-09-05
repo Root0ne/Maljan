@@ -33,7 +33,7 @@ from app.schemas.settings import (
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
-from app.services.settings_probes import PROBES, run_mcp_probe, run_probe
+from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -219,6 +219,24 @@ async def test_mcp_server(
     """
     stored = await SettingsService(db).load_overrides()
     result = await run_mcp_probe(server, body.values, stored)
+    return ProbeResponse(**vars(result))
+
+
+@router.post("/test/agent", response_model=ProbeResponse)
+async def test_agent(
+    body: ProbeRequest,
+    name: str = Query(..., description="key in agents.definitions"),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ProbeResponse:
+    """Resolve one agent definition and report what it would get.
+
+    Takes staged values so an operator can resolve a definition they have not
+    saved yet — the same contract every other probe has. No LLM call is made:
+    this reports the model that *would* be used, never a completion.
+    """
+    stored = await SettingsService(db).load_overrides()
+    result = await run_agent_probe(name, body.values, stored)
     return ProbeResponse(**vars(result))
 
 

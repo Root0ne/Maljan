@@ -39,6 +39,10 @@ class ProbeResult:
     detail: str
     models: list[str] | None = None
     tools: list[str] | None = None
+    # Structured, probe-specific facts the generic renderer ignores and a
+    # dedicated editor reads. The agent probe is the first user: a prompt hash
+    # and a per-server status do not fit in a sentence.
+    details: dict[str, Any] | None = None
 
 
 def _client() -> httpx.AsyncClient:
@@ -339,6 +343,105 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
     return await probe_mcp({"name": server, "entry": entry})
 
 
+async def probe_agent(v: dict[str, Any]) -> ProbeResult:
+    """Resolve one agent definition against the given settings, without running it.
+
+    A dry resolution: the prompt is assembled, the tool servers are opened on
+    the ordinary probe budget and their manifests read, and the LLM is
+    *named* rather than built — the whole point of a probe is that an operator
+    can see what an agent would get before paying for a job. ``aresolve_agent``
+    is the same function a run calls, so what this reports is what that run
+    receives.
+    """
+    import hashlib
+
+    t0 = time.perf_counter()
+    name = str(v.get("name") or "")
+    try:
+        core = dict(v.get("settings") or {})
+        settings = build_settings(core)
+    except ValidationError as exc:
+        fields = "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+        return ProbeResult(False, _ms(t0), f"invalid agent settings: {fields}")
+    if name not in settings.agents.definitions:
+        available = ", ".join(sorted(settings.agents.definitions)) or "(none)"
+        return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
+
+    from maljan.agents.composition import aresolve_agent
+    from maljan.core.container import ServiceContainer
+
+    # ``mock=True`` is what makes this cheap and safe: the container builds no
+    # LLM registry at all, so ``get_agent_llm`` would raise rather than reach a
+    # provider. The model is reported from the settings instead, below.
+    container = ServiceContainer(settings, mock=True)
+    try:
+        resolved = await asyncio.wait_for(
+            aresolve_agent(name, container, job_key=f"probe-{name}"),
+            timeout=PROBE_BUDGET_SECONDS * 4,
+        )
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), "the agent's servers did not answer in time")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    finally:
+        await container.aclose()
+
+    tools = [str(getattr(t, "name", "")) for t in resolved.tools]
+    reasons = set(resolved.degradation_reasons)
+    bound = [
+        key
+        for key, server in settings.mcp.servers.items()
+        if server.enabled and name in server.agents
+    ]
+    bound += [
+        str(ref.server)
+        for ref in settings.agents.definitions[name].tools
+        if ref.kind == "mcp" and str(ref.server) not in bound
+    ]
+    servers = [
+        {
+            "key": key,
+            "tools": [t for t in tools if t.startswith(f"{key}__")] or tools,
+            "status": next((r for r in reasons if f"'{key}" in r), "ok"),
+        }
+        for key in dict.fromkeys(bound)
+    ]
+    agent_llm = settings.llm.agents.get(name)
+    listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
+    return ProbeResult(
+        True,
+        _ms(t0),
+        f"{len(tools)} tools: {listed}" if tools else "resolved; no tools",
+        None,
+        tools,
+        {
+            "prompt_chars": len(resolved.prompt),
+            "prompt_sha256": hashlib.sha256(resolved.prompt.encode("utf-8")).hexdigest(),
+            "llm": {
+                "provider": agent_llm.provider if agent_llm else settings.llm.provider,
+                "model": agent_llm.model if agent_llm else "",
+            },
+            "static_provider": resolved.static_provider_id,
+            "servers": servers,
+        },
+    )
+
+
+async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
+    """Probe one agent definition, staged values winning over stored ones.
+
+    Separate from ``run_probe`` for the reason ``run_mcp_probe`` is: the probe
+    is addressed to a *key* inside a setting, and ``_INPUTS`` maps catalog keys
+    to short names with no entry for "the strings definition".
+    """
+    merged: dict[str, Any] = {}
+    for layer in (stored, values):
+        for key, value in layer.items():
+            if key.startswith("core."):
+                merged[key[len("core.") :]] = value
+    return await probe_agent({"name": name, "settings": merged})
+
+
 async def probe_r2(v: dict[str, Any]) -> ProbeResult:
     """Launch the configured r2mcp and count the tools it offers, in 5 seconds.
 
@@ -563,6 +666,7 @@ PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "virustotal": probe_virustotal,
     "abuseipdb": probe_abuseipdb,
     "rest": probe_rest,
+    "agent": probe_agent,
 }
 
 # Which settings each probe reads, and the short name it gets them under.
@@ -645,6 +749,7 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.sandbox.rest.mapping.registry": "mapping_registry",
         "core.sandbox.rest.mapping.field_names": "mapping_field_names",
     },
+    "agent": {},
 }
 
 

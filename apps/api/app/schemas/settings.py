@@ -85,6 +85,10 @@ class ProbeResponse(BaseModel):
     models: list[str] | None = None
     # the server's whole manifest, so the editor can render it as tick boxes
     tools: list[str] | None = None
+    # Structured, probe-specific facts the generic renderer ignores and a
+    # dedicated editor reads. The agent probe is the first user: a prompt hash
+    # and a per-server status do not fit in a sentence.
+    details: dict[str, Any] | None = None
 
 
 class MappingPreviewRequest(BaseModel):
