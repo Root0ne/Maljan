@@ -24,6 +24,10 @@ export default function FieldRow({
   models,
   servers,
   staticProviders,
+  settingsValues,
+  settingsPending,
+  onStageSetting,
+  llmProviders,
 }: {
   entry: CatalogEntry;
   current?: SettingValue;
@@ -32,6 +36,14 @@ export default function FieldRow({
   models?: string[];
   servers?: Record<string, McpServerEntry>;
   staticProviders?: string[];
+  /** The whole values/pending maps, distinct from `current`/`staged` above
+   *  which are scoped to this one row: the agent-definitions editor stages
+   *  extra keys of its own (`core.llm.agents.<key>.*`) alongside the
+   *  definitions map, and needs to read and write those directly. */
+  settingsValues?: Record<string, SettingValue>;
+  settingsPending?: Record<string, unknown>;
+  onStageSetting?: (key: string, value: unknown) => void;
+  llmProviders?: string[];
   onChange: (v: unknown) => void;
   onUnstage: () => void;
   onReset: () => void;
@@ -100,6 +112,10 @@ export default function FieldRow({
               staged={staged}
               servers={servers ?? {}}
               staticProviders={staticProviders ?? []}
+              settingsValues={settingsValues ?? {}}
+              settingsPending={settingsPending ?? {}}
+              onStageSetting={onStageSetting ?? (() => undefined)}
+              llmProviders={llmProviders ?? []}
               onChange={onChange}
             />
           ) : (

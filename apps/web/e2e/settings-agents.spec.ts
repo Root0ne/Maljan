@@ -34,12 +34,21 @@ test.describe("agent definitions and profiles", () => {
     await expect(clone.getByLabel("static_r2 prompt")).toBeEnabled();
     await clone.getByLabel("static_r2 static provider").selectOption("r2");
 
+    // The per-agent LLM override is a setting of its own
+    // (`core.llm.agents.<key>.*`), staged alongside — not inside — the
+    // definitions map, so it shows up as a second pending change.
+    await clone.getByLabel("static_r2 llm model").fill("gpt-4o-mini");
+    await expect(page.getByText("2 changes pending")).toBeVisible();
+
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
       if (r.request().method() === "PATCH") {
         patches.push(r.request().postDataJSON());
         return r.fulfill({
-          json: { applied: ["core.agents.definitions"], applies: { next_job: 1 } },
+          json: {
+            applied: ["core.agents.definitions", "core.llm.agents.static_r2.model"],
+            applies: { next_job: 1 },
+          },
         });
       }
       return r.fallback();
@@ -48,7 +57,12 @@ test.describe("agent definitions and profiles", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
-      changes: Record<string, Record<string, { role: string; static_provider: string | null; prompt: string | null }>>;
+      changes: Record<string, unknown> & {
+        "core.agents.definitions": Record<
+          string,
+          { role: string; static_provider: string | null; prompt: string | null }
+        >;
+      };
     };
     const sent = body.changes["core.agents.definitions"];
     expect(sent.static_r2.role).toBe("static");
@@ -56,5 +70,9 @@ test.describe("agent definitions and profiles", () => {
     // The source is sent back untouched: a clone must not edit what it copied.
     expect(sent.static.static_provider).toBeNull();
     expect(sent.static.prompt).toBeNull();
+    // The typed model is staged as its own leaf, not folded into the
+    // definitions map.
+    expect(Object.keys(body.changes)).toContain("core.llm.agents.static_r2.model");
+    expect(body.changes["core.llm.agents.static_r2.model"]).toBe("gpt-4o-mini");
   });
 });

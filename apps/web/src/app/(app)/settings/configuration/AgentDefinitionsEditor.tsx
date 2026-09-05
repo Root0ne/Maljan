@@ -51,6 +51,10 @@ export default function AgentDefinitionsEditor({
   staged,
   servers,
   staticProviders,
+  settingsValues,
+  settingsPending,
+  onStageSetting,
+  llmProviders,
   onChange,
 }: {
   entry: CatalogEntry;
@@ -58,6 +62,18 @@ export default function AgentDefinitionsEditor({
   staged: unknown;
   servers: Record<string, McpServerEntry>;
   staticProviders: string[];
+  /** The whole values/pending maps: the per-agent LLM override lives on its
+   *  own top-level keys (`core.llm.agents.<key>.*`), staged through the same
+   *  `pending` flow as every other setting but outside the `definitions` map
+   *  itself (spec §2: "not stored on the definition"). */
+  settingsValues: Record<string, SettingValue>;
+  settingsPending: Record<string, unknown>;
+  onStageSetting: (key: string, value: unknown) => void;
+  /** Choices for the global `core.llm.provider` leaf, if the catalog carries
+   *  one — an enum select mirrors that leaf's rendering; an empty list means
+   *  no such catalog entry exists yet, so the field falls back to free text,
+   *  same as the global leaf would with no `choices_from`. */
+  llmProviders: string[];
   onChange: (value: Record<string, AgentDefinitionEntry>) => void;
 }) {
   const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<
@@ -71,6 +87,22 @@ export default function AgentDefinitionsEditor({
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) =>
     onChange({ ...value, [key]: { ...value[key], ...next } });
+
+  /** The full key of one agent's per-field LLM override — a setting in its
+   *  own right, not part of the `definitions` map (spec §2). */
+  const llmKey = (agentKey: string, field: "provider" | "model" | "temperature") =>
+    `core.llm.agents.${agentKey}.${field}`;
+
+  /** What that override currently holds: staged wins, else the live value,
+   *  else `null` — "empty" — which means "inherit the global LLM". */
+  const llmValue = (agentKey: string, field: "provider" | "model" | "temperature"): unknown => {
+    const k = llmKey(agentKey, field);
+    if (k in settingsPending) return settingsPending[k];
+    return settingsValues[k]?.value ?? null;
+  };
+
+  const stageLlm = (agentKey: string, field: "provider" | "model" | "temperature", v: unknown) =>
+    onStageSetting(llmKey(agentKey, field), v);
 
   const add = (from?: string) => {
     const key = newKey.trim();
@@ -104,6 +136,15 @@ export default function AgentDefinitionsEditor({
           }
         : { ...EMPTY_DEFINITION },
     });
+    // A clone starts with the source's LLM values too, if it has any — the
+    // override lives outside the definition, so cloning the definition alone
+    // would silently drop it and leave the clone on the global default.
+    if (from) {
+      (["provider", "model", "temperature"] as const).forEach((field) => {
+        const v = llmValue(from, field);
+        if (v !== null && v !== undefined) stageLlm(key, field, v);
+      });
+    }
   };
 
   const remove = (key: string) => {
@@ -271,27 +312,83 @@ export default function AgentDefinitionsEditor({
                   onChange={(e) => put(key, { prompt: e.target.value })}
                 />
               </label>
+            </div>
+
+            {/* The LLM lives outside the definition (`llm.agents.<key>.*`),
+               so the built-in lock never applies here — even a built-in role
+               may run on a different model than the global default. */}
+            <fieldset className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              <legend className="text-text-muted col-span-full">
+                LLM override (blank = inherit the global settings)
+              </legend>
               <label className="block">
-                <span className="text-text-muted">LLM provider</span>
-                <input
-                  className={input}
-                  aria-label={`${key} llm provider`}
-                  placeholder="inherit"
-                  defaultValue={details?.llm.provider ?? ""}
-                  readOnly
-                />
+                <span className="text-text-muted">Provider</span>
+                {llmProviders.length > 0 ? (
+                  <select
+                    className={input}
+                    aria-label={`${key} llm provider`}
+                    value={(llmValue(key, "provider") as string | null) ?? ""}
+                    onChange={(e) =>
+                      stageLlm(key, "provider", e.target.value === "" ? null : e.target.value)
+                    }
+                  >
+                    <option value="">Inherit</option>
+                    {llmProviders.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className={input}
+                    aria-label={`${key} llm provider`}
+                    placeholder="inherit"
+                    value={(llmValue(key, "provider") as string | null) ?? ""}
+                    onChange={(e) =>
+                      stageLlm(key, "provider", e.target.value === "" ? null : e.target.value)
+                    }
+                  />
+                )}
               </label>
               <label className="block">
-                <span className="text-text-muted">LLM model</span>
+                <span className="text-text-muted">Model</span>
                 <input
                   className={input}
                   aria-label={`${key} llm model`}
-                  placeholder={`set llm.agents.${key}.model to override`}
-                  defaultValue={details?.llm.model ?? ""}
-                  readOnly
+                  placeholder="inherit"
+                  value={(llmValue(key, "model") as string | null) ?? ""}
+                  onChange={(e) =>
+                    stageLlm(key, "model", e.target.value === "" ? null : e.target.value)
+                  }
                 />
               </label>
-            </div>
+              <label className="block">
+                <span className="text-text-muted">Temperature</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  className={input}
+                  aria-label={`${key} llm temperature`}
+                  placeholder="inherit"
+                  value={
+                    llmValue(key, "temperature") === null ||
+                    llmValue(key, "temperature") === undefined
+                      ? ""
+                      : String(llmValue(key, "temperature"))
+                  }
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") {
+                      stageLlm(key, "temperature", null);
+                      return;
+                    }
+                    const parsed = parseFloat(raw);
+                    if (!Number.isNaN(parsed)) stageLlm(key, "temperature", parsed);
+                  }}
+                />
+              </label>
+            </fieldset>
 
             <fieldset className="mt-2">
               <legend className="text-xs text-text-muted">Tools</legend>

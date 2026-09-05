@@ -282,6 +282,10 @@ export default function ConfigurationTab() {
                           staticProviders={
                             s.entries.get("core.static.provider")?.choices ?? []
                           }
+                          settingsValues={s.values}
+                          settingsPending={s.pending}
+                          onStageSetting={s.stage}
+                          llmProviders={s.entries.get("core.llm.provider")?.choices ?? []}
                           onChange={(v) => s.stage(e.key, v)}
                           onUnstage={() => s.unstage(e.key)}
                           onReset={() => void s.reset(e.key)}
