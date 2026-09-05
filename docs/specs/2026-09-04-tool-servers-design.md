@@ -1,6 +1,6 @@
 # Tool servers design — Maljan sub-project B
 
-Status: approved design; plan `docs/plans/2026-09-04-tool-servers.md` (22 tasks). Builds on sub-project A (`docs/specs/2026-09-03-provider-layer-design.md`,
+Status: implemented on branch feat/tool-servers; PR into dev pending final review. Plan `docs/plans/2026-09-04-tool-servers.md` (22 tasks). Builds on sub-project A (`docs/specs/2026-09-03-provider-layer-design.md`,
 PR #5 into `dev`). Companion plan: `docs/plans/2026-09-04-tool-servers.md`.
 
 ## 1. Problem
