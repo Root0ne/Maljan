@@ -404,13 +404,18 @@ export default function PipelineTab() {
                                 <p className="text-xs text-text-muted">No claims recorded.</p>
                               )}
                             </CollapsibleSection>
-                            {finding.dissent_items && finding.dissent_items.length > 0 && (
-                              <CollapsibleSection title={`Dissents (${finding.dissent_items.length})`}>
-                                <pre className="text-[11px] text-text-muted overflow-auto">
-                                  {JSON.stringify(finding.dissent_items, null, 2)}
-                                </pre>
-                              </CollapsibleSection>
-                            )}
+                            {/* Only static ever showed this pre-profile; keeping dynamic
+                               and network silent here preserves the built-in report's
+                               presentation exactly, while a custom analyst still gets it. */}
+                            {(step.id === "static" || step.custom) &&
+                              finding.dissent_items &&
+                              finding.dissent_items.length > 0 && (
+                                <CollapsibleSection title={`Dissents (${finding.dissent_items.length})`}>
+                                  <pre className="text-[11px] text-text-muted overflow-auto">
+                                    {JSON.stringify(finding.dissent_items, null, 2)}
+                                  </pre>
+                                </CollapsibleSection>
+                              )}
                           </div>
                         );
                       })()}
