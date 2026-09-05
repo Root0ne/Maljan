@@ -1013,6 +1013,11 @@ class AgentsConfig(BaseModel):
                 raise ValueError(f"{key!r} is built in; clone it to change it")
 
         for key, definition in self.definitions.items():
+            # Spec §3.1: one judge, and it cannot be cloned. A second judge
+            # definition is inert — no profile may name it — so the operator
+            # would get a card that can never run anything.
+            if definition.role == "judge" and key != "judge":
+                raise ValueError(f"{key!r}: only the built-in judge may have role judge")
             if definition.role == "generic" and not (definition.prompt or "").strip():
                 raise ValueError(f"{key!r}: a generic agent needs a prompt")
             has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)

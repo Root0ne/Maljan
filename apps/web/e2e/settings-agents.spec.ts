@@ -264,6 +264,21 @@ test.describe("agent definitions and profiles", () => {
     expect(sent.prompt).toBeNull();
   });
 
+  test("the judge card offers no Clone, because the judge cannot be cloned", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    const judge = page.locator('[data-agent="judge"]');
+    await expect(judge).toBeVisible();
+    await expect(judge.getByRole("button", { name: "Clone" })).toHaveCount(0);
+    await expect(
+      page.locator('[data-agent="static"]').getByRole("button", { name: "Clone" })
+    ).toHaveCount(1);
+  });
+
   test("a validation error lands on the card that caused it", async ({
     authenticatedPage: page,
   }) => {

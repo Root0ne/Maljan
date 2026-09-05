@@ -317,13 +317,17 @@ export default function AgentDefinitionsEditor({
                 >
                   Resolve
                 </button>
-                <button
-                  type="button"
-                  className="text-xs text-accent-strong"
-                  onClick={() => add(key)}
-                >
-                  Clone
-                </button>
+                {/* Spec §3.1: there is one judge and it cannot be cloned, so
+                    the card that offers it does not offer Clone either. */}
+                {agent.role !== "judge" && (
+                  <button
+                    type="button"
+                    className="text-xs text-accent-strong"
+                    onClick={() => add(key)}
+                  >
+                    Clone
+                  </button>
+                )}
                 {!locked && (
                   <button
                     type="button"

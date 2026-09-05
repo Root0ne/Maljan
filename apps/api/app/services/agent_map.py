@@ -127,6 +127,11 @@ def validate_definitions(
                 errors[name] = f"{name!r} is built in; clone it to change it"
                 continue
 
+        # Spec §3.1: the judge cannot be cloned, so ``role: "judge"`` belongs
+        # to the built-in key alone — the same rule ``AgentsConfig`` applies.
+        if model.role == "judge" and name != "judge":
+            errors[name] = f"{name!r}: only the built-in judge may have role judge"
+            continue
         if model.role == "generic" and not (model.prompt or "").strip():
             errors[f"{name}.prompt"] = "a generic agent needs a prompt"
         if model.static_provider and model.static_provider not in provider_ids:

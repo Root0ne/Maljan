@@ -257,9 +257,9 @@ Each carries a role (`static`, `dynamic`, `network`, `judge` or `generic`), a
 prompt, the tool servers it receives and, for the static-flavoured roles, the
 static provider it reads. The three built-in analysts (`static`, `dynamic`,
 `network`) can be disabled through their enabled switch and are otherwise
-read-only; the judge is read-only in full and always runs. To change one,
-clone it. A clone keeps its source's class and its ISR extraction, so a
-`static` clone pointed at radare2 is a real static analyst reading r2 — the
+read-only; the judge is read-only in full, always runs and cannot be cloned.
+To change an analyst, clone it. A clone keeps its source's class and its ISR
+extraction, so a `static` clone pointed at radare2 is a real static analyst reading r2 — the
 prompt is reassembled with radare2's fragment in the middle and nothing else
 moves. A `generic` definition runs a plain ReAct
 analyst with the prompt you write and the tools you tick; a probe of it

@@ -372,6 +372,11 @@ _SYMMETRY_CASES = [
         },
     ),
     (
+        "a second definition with the judge role",
+        _defs(judge_2={"role": "judge", "prompt": "p"}),
+        {},
+    ),
+    (
         "a provider tool reference on a built-in role",
         _defs(strings={"role": "static", "tools": [{"kind": "provider"}]}),
         {},
@@ -425,3 +430,9 @@ def test_the_api_layer_and_settings_agree_on_accept_or_reject(label, changes, st
     from it later, or a PATCH refused for a reason ``Settings`` does not share.
     """
     assert _api_accepts(changes, stored) == _settings_accepts(changes, stored), label
+
+
+def test_a_cloned_judge_is_refused_with_the_rule_that_names_it():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(_defs(judge_2={"role": "judge", "prompt": "p"}), stored={})
+    assert exc.value.errors["judge_2"] == "'judge_2': only the built-in judge may have role judge"

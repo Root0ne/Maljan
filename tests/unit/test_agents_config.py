@@ -385,3 +385,9 @@ def test_every_new_leaf_is_annotated_and_grouped():
     assert ANNOTATIONS["agents.profiles"]["editor"] == "profiles"
     assert ANNOTATIONS["agents.definitions"]["editor"] == "agent_definitions"
     assert dict(GROUP_ORDER)["agents"] == "Agents"
+
+
+def test_a_second_definition_with_the_judge_role_is_refused():
+    """Spec §3.1: there is one judge and it cannot be cloned."""
+    with pytest.raises(ValidationError, match="only the built-in judge may have role judge"):
+        _settings(definitions={"judge_2": {"role": "judge", "prompt": "p"}})
