@@ -61,7 +61,19 @@ if TYPE_CHECKING:
 # Per-closer budget in ``aclose``. Each toolkit is already bounded internally;
 # this is the second fence, because a teardown that hangs holds the whole job
 # open and — with ``max_jobs = 1`` — every job after it.
+#
+# It has to be strictly larger than what a single handle's close can take, or
+# this fence cancels the handle's own abandonment handling mid-flight and the
+# child is never reaped: ``ServerHandle`` spends at most 14s routing the close
+# and 4s reaping, and the numbers are kept coherent there (see the budget
+# table at the top of ``providers/servers.py``).
 _ACLOSE_BUDGET = 20.0
+
+# The synchronous sweep's budget. Larger than ``_ACLOSE_BUDGET`` because it
+# closes every synchronously-opened handle in one call, each with its own
+# 20s bound — and because it runs in an executor, so the time it spends is a
+# worker thread's, not the event loop's.
+_CLOSE_ALL_BUDGET = 45.0
 
 
 class ServiceContainer:
@@ -420,18 +432,35 @@ class ServiceContainer:
         # ``get_server_registry()`` — a job that never attached a tool server
         # must not build one here for the sole purpose of closing it.
         if self._server_registry_cache is not None:
-            skipped = []
+            registry = self._server_registry_cache
+            # ``close_all`` is synchronous and blocks its thread: each handle
+            # it closes hands the toolkit's exit stack to the agent loop and
+            # waits for it. Run on the loop thread, that blocks the loop — and
+            # a blocked loop cannot fire the worker's 60s fence, which is
+            # precisely the way a teardown outlasts a budget nobody can
+            # enforce. In an executor it costs a worker thread instead, and
+            # every fence above stays live.
+            loop = asyncio.get_running_loop()
             try:
-                skipped = self._server_registry_cache.close_all()
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, registry.close_all), timeout=_CLOSE_ALL_BUDGET
+                )
+            except TimeoutError:
+                logger.warning(
+                    "The synchronous tool-server sweep exceeded %.0fs; leaving it to "
+                    "finish in its thread and closing whatever is still attached.",
+                    _CLOSE_ALL_BUDGET,
+                )
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 logger.warning("Closing the tool-server registry failed (non-fatal): %s", exc)
-            # F6: a handle the judge attached with ``aopen`` was wound on this
-            # same graph loop (``aclose`` is itself awaited from it), so it is
-            # unwound here too rather than through close_all()'s synchronous,
-            # cross-loop path -- normally a no-op, because JudgeAgent.aclose
-            # already closed it; this only fires when the judge raised before
-            # reaching its own aclose().
-            for handle in skipped:
+            # F6: a handle ``aopen`` attached is unwound on the loop that
+            # opened it (``ServerHandle.aclose`` routes it there) rather than
+            # through the synchronous sweep, which skips it. Read from the
+            # registry rather than from the sweep's return value, so a sweep
+            # that was abandoned above still leaves nothing attached. Normally
+            # a no-op: ``JudgeAgent.aclose`` has closed these already, and this
+            # only fires when the judge raised before reaching its own aclose.
+            for handle in registry.still_open():
                 try:
                     await asyncio.wait_for(handle.aclose(), timeout=_ACLOSE_BUDGET)
                 except TimeoutError:

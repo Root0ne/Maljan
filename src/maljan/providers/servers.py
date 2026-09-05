@@ -36,17 +36,42 @@ if TYPE_CHECKING:
 # The reason string a failed server contributes to ``degradation_reasons``.
 UNAVAILABLE_REASON = "mcp server '{name}' unavailable"
 
+# The teardown budgets, and why they are these numbers.
+#
+# Every one of them has to fit strictly inside the budget of whoever is
+# waiting, or the outer fence cancels the inner one mid-flight and the work
+# the inner fence exists to do — reaping an abandoned child — never happens.
+# The chain a job's teardown actually walks:
+#
+#     run_analysis        60.0s   (analysis_worker._TEARDOWN_BUDGET)
+#     └ container.aclose  20.0s   per closer (container._ACLOSE_BUDGET)
+#       └ handle.aclose   14.0s   routed close, then
+#                          4.0s   the reap, shielded
+#
+# So a routed close plus its reap is 18s against the container's 20s, and the
+# container's own fence is what ends a handle that misbehaves beyond that.
+#
 # How long one toolkit's own cleanup may take before it is abandoned. An
 # ``mcp`` stdio exit stack closes the child's stdin, waits, then escalates
-# SIGTERM -> SIGKILL; 20s is comfortably past that escalation.
-CLEANUP_TIMEOUT = 20.0
+# SIGTERM -> SIGKILL; this is comfortably past that escalation.
+CLEANUP_TIMEOUT = 12.0
 
 # Extra headroom for a cleanup routed to another loop: the owning loop still
 # applies ``CLEANUP_TIMEOUT`` itself, so this only has to outlast the hop.
-CROSS_LOOP_GRACE = 5.0
+CROSS_LOOP_GRACE = 2.0
 
 # How long a child gets between SIGTERM and SIGKILL in the backstop reap.
 CHILD_TERM_GRACE = 2.0
+
+# The whole reap, signals and grace included. Small on purpose: it runs in a
+# ``finally`` while the caller's own budget may already be expiring.
+REAP_BUDGET = CHILD_TERM_GRACE + 2.0
+
+# The synchronous close path's budget. It blocks the calling thread, so it is
+# kept at the value it had before the loop-routing work rather than inheriting
+# the routed budget: ``ServiceContainer.aclose`` runs it in an executor, and a
+# thread that blocks for 20s is 20s of a worker thread, not of the loop.
+SYNC_CLOSE_TIMEOUT = 20.0
 
 
 def _own_child_pids() -> set[int]:
@@ -110,6 +135,9 @@ class ServerHandle:
         # The child this handle spawned, for the backstop reap when the
         # transport's own SIGTERM -> SIGKILL shutdown never gets to run.
         self._child_pids: tuple[int, ...] = ()
+        # The argv that child was launched with, which is what makes the pid
+        # above this handle's rather than merely contemporaneous.
+        self._launch_argv: tuple[str, ...] = ()
 
     @property
     def is_open(self) -> bool:
@@ -186,9 +214,14 @@ class ServerHandle:
                 # operator adds through the catalog gets the more predictable
                 # default instead.
                 env.setdefault("PYTHONIOENCODING", "utf-8")
+            args = resolve_mcp_args(list(self.config.args))
+            # Kept so the backstop reap can tell this handle's child from any
+            # other subprocess that happened to start in the same window; see
+            # ``_child_matches``.
+            self._launch_argv = (self.config.command, *args)
             params = StdioServerParameters(
                 command=self.config.command,
-                args=resolve_mcp_args(list(self.config.args)),
+                args=args,
                 env=env,
                 cwd=self._resolve_cwd(),
             )
@@ -198,6 +231,8 @@ class ServerHandle:
                 max_output_chars=max_output_chars,
                 truncation_ledger=truncation_ledger,
             )
+        # An http/sse transport has no child of ours to reap.
+        self._launch_argv = ()
         token = self.config.auth_token.get_secret_value()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         return MCPLangChainToolkit(
@@ -258,7 +293,7 @@ class ServerHandle:
         from maljan.agents.base_agent import _get_agent_loop
 
         self._owner_loop = _get_agent_loop()
-        self._child_pids = tuple(sorted(_own_child_pids() - before))
+        self._note_child_pids(before)
         self._all_tools = list(toolkit.get_tools())
         allowed = self.config.tools
         if allowed:
@@ -314,14 +349,19 @@ class ServerHandle:
                 "mcp server '%s' failed to initialize; closing the partial attach.",
                 self.name,
             )
-            await self._acleanup(toolkit)
+            # The child a half-open transport already spawned is this handle's
+            # too, and nothing else knows about it.
+            self._note_child_pids(before)
+            if not await self._acleanup(toolkit):
+                await self._reap_after_abandon()
+            self._child_pids = ()
             raise
         self._toolkit = toolkit
         self._opened_async = True
-        self._child_pids = tuple(sorted(_own_child_pids() - before))
+        self._note_child_pids(before)
         self._all_tools = list(toolkit.get_tools())
 
-    async def _acleanup(self, toolkit: Any) -> None:
+    async def _acleanup(self, toolkit: Any) -> bool:
         """Best-effort async close of ``toolkit`` **on the caller's loop**.
 
         Shared by ``aclose`` (a healthy, attached toolkit) and ``aopen``'s own
@@ -330,10 +370,14 @@ class ServerHandle:
 
         The caller is responsible for being on the owning loop:
         ``_close_on_owner`` is what guarantees that.
+
+        Returns True when the toolkit closed itself, False when it was
+        abandoned — the caller reaps the child in that case, once, from a
+        place a cancellation cannot skip.
         """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
-            return
+            return True
         try:
             # A stdio transport's exit stack waits on the child process, and a
             # child that does not exit waits forever — the 42-minute teardown
@@ -341,16 +385,17 @@ class ServerHandle:
             await asyncio.wait_for(closer(), timeout=CLEANUP_TIMEOUT)
         except TimeoutError:
             logger.warning(
-                "mcp server '%s' cleanup did not finish in %.0fs; abandoning it "
-                "and reaping the child directly.",
+                "mcp server '%s' cleanup did not finish in %.0fs; abandoning it.",
                 self.name,
                 CLEANUP_TIMEOUT,
             )
-            await self._areap_children()
+            return False
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
+            return False
+        return True
 
-    async def _close_on_owner(self, toolkit: Any) -> None:
+    async def _close_on_owner(self, toolkit: Any) -> bool:
         """Unwind ``toolkit`` on the loop that wound it. Bounded, never raises.
 
         The Critical this exists for: a handle the mediator judge attached ran
@@ -370,33 +415,80 @@ class ServerHandle:
         is cross-loop safe in both directions: the wait is a real ``await`` (no
         busy poll, no blocked loop) and cancelling it cancels the task on the
         owning loop rather than being silently discarded.
+
+        Returns True when the toolkit closed itself; False leaves the child to
+        the caller's reap.
         """
         owner = self._owner_loop
         running = asyncio.get_running_loop()
-        if owner is None or owner is running or owner.is_closed():
-            await self._acleanup(toolkit)
-            return
+        if owner is None or owner is running:
+            # ``None`` means nothing here opened the toolkit — a probe or a
+            # test that set it directly — so there is no other loop to route
+            # to and the caller's is the only one there is.
+            return await self._acleanup(toolkit)
+        if owner.is_closed() or not owner.is_running():
+            # The one thing never worth doing: unwinding an exit stack on a
+            # loop that did not wind it. That is the Critical this method
+            # exists to prevent, and a dead owner is no licence to re-enter it
+            # — a stack awaiting a future of a stopped loop parks forever, and
+            # the fence around it cannot end a task nothing will resume. Leave
+            # the stack where it is and take the child directly instead.
+            logger.warning(
+                "mcp server '%s' cannot be unwound: the loop that opened it is gone. "
+                "Skipping the cleanup and reaping the child instead.",
+                self.name,
+            )
+            return False
         future = asyncio.run_coroutine_threadsafe(self._acleanup(toolkit), owner)
         try:
-            await asyncio.wait_for(
+            return await asyncio.wait_for(
                 asyncio.wrap_future(future), timeout=CLEANUP_TIMEOUT + CROSS_LOOP_GRACE
             )
         except TimeoutError:
             future.cancel()
             logger.warning(
-                "mcp server '%s' cleanup did not finish on its own loop in %.0fs; "
-                "abandoning it and reaping the child directly.",
+                "mcp server '%s' cleanup did not finish on its own loop in %.0fs; abandoning it.",
                 self.name,
                 CLEANUP_TIMEOUT + CROSS_LOOP_GRACE,
             )
-            await self._areap_children()
+            return False
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
+            return False
+
+    def _child_matches(self, pid: int) -> bool:
+        """True when ``pid`` is still running the argv this handle launched.
+
+        The pid itself comes from a before/after snapshot of our direct
+        children (``_note_child_pids``), which on its own would attribute any
+        subprocess another thread happened to start in that window to this
+        handle — and the reap sends signals. The argv check is what makes the
+        attribution real, and it doubles as protection against pid reuse
+        between the snapshot and the kill.
+
+        The alternative, taking the pid from the transport, is not available:
+        ``mcp``'s ``stdio_client`` keeps its anyio ``Process`` in a generator
+        frame inside the exit stack and exposes it nowhere.
+        """
+        if not self._launch_argv:
+            return False
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                argv = fh.read().split(b"\0")
+        except OSError:
+            return False
+        expected = [part.encode() for part in self._launch_argv]
+        return argv[: len(expected)] == expected
+
+    def _note_child_pids(self, before: set[int]) -> None:
+        """Record the children that appeared while ``initialize`` ran."""
+        appeared = _own_child_pids() - before
+        self._child_pids = tuple(sorted(pid for pid in appeared if self._child_matches(pid)))
 
     def _live_children(self) -> list[int]:
         """The pids this handle spawned that are still our children."""
         live = _own_child_pids()
-        return [pid for pid in self._child_pids if pid in live]
+        return [pid for pid in self._child_pids if pid in live and self._child_matches(pid)]
 
     def _signal_children(self, pids: list[int], sig: int) -> None:
         """Send ``sig`` to recorded pids only, never to a name or a pattern."""
@@ -450,20 +542,43 @@ class ServerHandle:
         time.sleep(CHILD_TERM_GRACE)
         self._kill_survivors(pids)
 
+    def _forget_attachment(self) -> None:
+        """Drop what only an attached handle carries. Call after the reap."""
+        self._owner_loop = None
+        self._child_pids = ()
+        self._launch_argv = ()
+
+    async def _reap_after_abandon(self) -> None:
+        """Reap the child of a cleanup that did not finish. Never raises.
+
+        Shielded, and that is the point. This runs from a ``finally`` while
+        the caller's own budget may already be cancelling us —
+        ``ServiceContainer.aclose`` bounds each closer, and ``run_analysis``
+        bounds the lot — and a reap that is skipped because the fence above it
+        fired first is a reap that never happens on precisely the runs that
+        need it. ``shield`` keeps the kill running on this loop even when the
+        ``await`` on it is cancelled; the loop outlives the job, so it lands.
+        """
+        import contextlib
+
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await asyncio.shield(asyncio.wait_for(self._areap_children(), timeout=REAP_BUDGET))
+
     async def aclose(self) -> None:
         """Close on the loop that opened this handle. Bounded, and never raises."""
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         self._opened_async = False
         if toolkit is None:
-            self._owner_loop = None
-            self._child_pids = ()
+            self._forget_attachment()
             return
+        closed = False
         try:
-            await self._close_on_owner(toolkit)
+            closed = await self._close_on_owner(toolkit)
         finally:
-            self._owner_loop = None
-            self._child_pids = ()
+            if not closed:
+                await self._reap_after_abandon()
+            self._forget_attachment()
 
     def all_tool_names(self) -> list[str]:
         """Every tool the server advertises, allow-list ignored."""
@@ -500,7 +615,7 @@ class ServerHandle:
         from maljan.agents.base_agent import _get_agent_loop, _run_coro_blocking
 
         owner = self._owner_loop
-        budget = CLEANUP_TIMEOUT + CROSS_LOOP_GRACE
+        budget = SYNC_CLOSE_TIMEOUT
         try:
             if owner is None or owner is _get_agent_loop():
                 _run_coro_blocking(closer(), hard_timeout=budget, label=f"{self.name}-mcp-close")
@@ -549,14 +664,12 @@ class ServerHandle:
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         if toolkit is None:
-            self._owner_loop = None
-            self._child_pids = ()
+            self._forget_attachment()
             return
         try:
             self._teardown(toolkit)
         finally:
-            self._owner_loop = None
-            self._child_pids = ()
+            self._forget_attachment()
 
 
 class ServerRegistry:
@@ -757,6 +870,16 @@ class ServerRegistry:
                     handle.name,
                 )
         return tools, reasons
+
+    def still_open(self) -> list[ServerHandle]:
+        """Every handle still attached, per-loop ones included.
+
+        What ``ServiceContainer.aclose`` awaits after the synchronous sweep,
+        rather than the sweep's return value: the sweep now runs in an
+        executor and may be abandoned, and a handle that is still open needs
+        closing whether or not the call that should have closed it came back.
+        """
+        return [handle for handle in self._all_handles() if handle.is_open]
 
     def close_all(self) -> list[ServerHandle]:
         """Close every handle this job attached synchronously.
