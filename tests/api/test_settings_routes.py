@@ -35,7 +35,8 @@ def client() -> TestClient:
 
 
 def test_schema_lists_groups_in_order_and_entries(client):
-    r = client.get("/api/v1/settings/schema")
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        r = client.get("/api/v1/settings/schema")
     assert r.status_code == 200
     groups = r.json()["groups"]
     assert groups[0]["key"] == "llm"

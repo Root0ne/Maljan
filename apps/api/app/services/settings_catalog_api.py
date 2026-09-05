@@ -8,6 +8,8 @@ in APISettings that is in neither list is not shown at all.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
@@ -279,3 +281,34 @@ def full_catalog() -> list[CatalogEntry]:
 @lru_cache(maxsize=1)
 def catalog_index() -> dict[str, CatalogEntry]:
     return {e.key: e for e in full_catalog()}
+
+
+def resolved_catalog(servers: Iterable[str]) -> list[CatalogEntry]:
+    """``full_catalog`` with every ``choices_from`` turned into real ``choices``.
+
+    The core catalog is a pure function of the models and cannot know which
+    servers exist right now; the web must not decide either, or "what is a
+    valid provider" has two answers. So it happens exactly here, once, on the
+    way out.
+    """
+    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+
+    keys = sorted(servers)
+    sources: dict[str, list[str]] = {
+        # Declared for completeness and for sub-project C's agent definitions.
+        # Neither provider selector uses them today: those two are enum leaves
+        # whose choices already come from the settings Literal, in its own
+        # order, and re-deriving them here would only re-sort the dropdown.
+        "static_providers": static_provider_ids(),
+        "sandbox_providers": sandbox_provider_ids(),
+        # The empty string is a real choice: it is how an operator says the
+        # generic provider has no server yet.
+        "mcp_servers": ["", *keys],
+        "agent_roles": ["static", "dynamic", "network", "judge"],
+    }
+    out: list[CatalogEntry] = []
+    for entry in full_catalog():
+        if entry.choices_from and entry.choices_from in sources:
+            entry = replace(entry, choices=sources[entry.choices_from])
+        out.append(entry)
+    return out

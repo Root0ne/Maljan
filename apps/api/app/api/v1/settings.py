@@ -31,7 +31,7 @@ from app.schemas.settings import (
     ValuesResponse,
 )
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
-from app.services.settings_catalog_api import catalog_index, full_catalog
+from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import PROBES, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
 
@@ -42,11 +42,24 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+async def _effective_servers(db: AsyncSession) -> list[str]:
+    """Server keys as they stand: the stored map if there is one, else the defaults."""
+    stored = await SettingsService(db).load_overrides()
+    servers = stored.get("core.mcp.servers")
+    if isinstance(servers, dict) and servers:
+        return list(servers)
+    from maljan.core.config import Settings
+
+    return list(Settings().mcp.servers)
+
+
 @router.get("/schema", response_model=SchemaResponse)
-async def get_schema(_: User = Depends(require_admin)) -> SchemaResponse:
+async def get_schema(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> SchemaResponse:
     available = box.is_available()
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in full_catalog():
+    for e in resolved_catalog(await _effective_servers(db)):
         d = e.to_dict()
         if e.secret and e.editable and not available:
             d["editable"] = False

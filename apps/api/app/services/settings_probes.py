@@ -21,6 +21,7 @@ from pydantic import SecretStr, ValidationError
 from redis.asyncio import Redis
 
 from app.config import settings as api_settings
+from app.services.server_map import TOKEN_MASK as _TOKEN_MASK
 
 TIMEOUT = 10.0
 
@@ -224,10 +225,11 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
 
 # settings_service.py's mask for a stored secret the editor never receives in
 # the clear (pydantic's own ``SecretStr`` JSON dump: ten literal asterisks,
-# regardless of the real value's length). No shared constant exists for it
-# today, so it is defined once, here, next to the one place that needs to
-# recognise it rather than echo it back as a real token.
-_MASKED_SECRET = "**********"
+# regardless of the real value's length). Defined once, in ``server_map``
+# (the per-server registry needed a name for it too); kept under this old
+# name here so the one place that needs to recognise it, rather than echo it
+# back as a real token, does not change.
+_MASKED_SECRET = _TOKEN_MASK
 
 
 def _merge_server_entry(
