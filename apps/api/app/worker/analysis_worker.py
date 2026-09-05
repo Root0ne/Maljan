@@ -94,6 +94,28 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     return host, container
 
 
+def profile_static_providers(container: Any) -> list[str]:
+    """The distinct static provider ids this job needs, the global one first.
+
+    "First" matters: the first entry backs ``state["static_sample_path"]``,
+    which is the key sub-project A froze and every single-provider reader still
+    uses. The globally configured provider is always in the list even when no
+    analyst names it, because that key must exist for a profile that runs no
+    static analyst at all.
+    """
+    from maljan.agents.composition import static_provider_id_for
+
+    settings = container.config
+    ids = [str(settings.static.provider)]
+    for key in container.analyst_keys():
+        if container.agent_role(key) != "static":
+            continue
+        provider_id = static_provider_id_for(settings, key)
+        if provider_id not in ids:
+            ids.append(provider_id)
+    return ids
+
+
 def settings_snapshot(
     core_settings: _CoreSettings, overridden_keys: Iterable[str] | None = None
 ) -> dict[str, Any]:
@@ -265,7 +287,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # cancelled) — those paths never reach the download but still run
         # this function's one ``finally``, which references both names.
         temp_path: str | None = None
-        host_mirror: Path | None = None
+        # One entry per provider actually mirrored (Task 9: a profile with two
+        # static analysts on two providers mirrors twice); the ``finally``
+        # below removes every one of them, symmetric with today's single-path
+        # cleanup.
+        host_mirrors: list[Path] = []
         # L2 (live-run finding): set below when an attached sandbox report's
         # own claimed hash disagreed with the sample at upload time, so the
         # degradation makes it into both run_summary and the report banner
@@ -550,9 +576,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
 
             # Download sample from MinIO for sandbox submission
-            # (temp_path / host_mirror are declared above, before the early
+            # (temp_path / host_mirrors are declared above, before the early
             # returns, so the outer finally can always find them)
             static_sample_path: str | None = None
+            static_sample_paths: dict[str, str] = {}
             try:
                 from minio import Minio
                 from pydantic import SecretStr as _SecretStr
@@ -631,24 +658,34 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # job ends, whichever way it ends.
                 _mirror_target_path: Path | str = sample_files.work_dir()
                 try:
-                    target = mirror_target_for(
-                        app.container.get_static_provider(),
-                        sha256=sample.sha256,
-                        extension=_orig_ext,
-                    )
-                    if target is None:
-                        logger.info(
-                            "Static provider needs no sample mirror; skipping the copy.",
-                            extra={"job_id": job_id, "component": "sample-mirror"},
+                    for _provider_id in profile_static_providers(app.container):
+                        target = mirror_target_for(
+                            app.container.get_static_provider(_provider_id),
+                            sha256=sample.sha256,
+                            extension=_orig_ext,
                         )
-                    else:
-                        host_mirror, static_sample_path = target
+                        if target is None:
+                            logger.info(
+                                "Static provider '%s' needs no sample mirror; skipping the copy.",
+                                _provider_id,
+                                extra={"job_id": job_id, "component": "sample-mirror"},
+                            )
+                            continue
+                        host_mirror, container_path = target
                         _mirror_target_path = host_mirror
                         sample_files.private_copy(Path(temp_path), host_mirror)
+                        host_mirrors.append(host_mirror)
+                        static_sample_paths[_provider_id] = container_path
+                        if static_sample_path is None:
+                            # The first id is the globally configured provider,
+                            # so this is the same value this variable has always
+                            # carried on a single-provider run.
+                            static_sample_path = container_path
                         logger.info(
-                            "Mirrored sample to %s for the static provider (%s).",
+                            "Mirrored sample to %s for static provider '%s' (%s).",
                             host_mirror,
-                            static_sample_path,
+                            _provider_id,
+                            container_path,
                             extra={"job_id": job_id, "component": "sample-mirror"},
                         )
                 except Exception as mirror_exc:
@@ -729,6 +766,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         file_name=sample.original_filename,
                         sample_path=temp_path,
                         static_sample_path=static_sample_path,
+                        static_sample_paths=static_sample_paths,
                     )
                 )
                 pipeline_result = await pipeline_task
@@ -1168,7 +1206,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             from app.worker import sample_files
 
             sample_files.remove_quietly(temp_path, job_id=job_id)
-            sample_files.remove_quietly(host_mirror, job_id=job_id)
+            for _host_mirror in host_mirrors:
+                sample_files.remove_quietly(_host_mirror, job_id=job_id)
 
             # Release the agents' MCP toolkits, their stdio subprocesses and the
             # per-job caches. A ``finally`` rather than ``async with`` because

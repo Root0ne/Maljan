@@ -69,6 +69,14 @@ class AnalysisState(TypedDict):
     # ISR via the existing PIPE-ANA-01 guard.
     static_sample_path: str | None
 
+    # Sub-project C: one container-visible path per static provider a profile
+    # uses, keyed by provider id. ``static_sample_path`` above stays exactly
+    # what it was — the *globally configured* provider's path, which is what
+    # sub-project A's contract promises and what every single-provider run
+    # reads — and this is the second and later entries a profile with two
+    # static analysts needs. Empty on every default-profile run.
+    static_sample_paths: dict[str, str]
+
     # Per-agent text reports
     reports: Annotated[dict[str, str], _merge_dicts]
     revised_reports: Annotated[dict[str, str], _merge_dicts]

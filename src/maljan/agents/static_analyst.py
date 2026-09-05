@@ -115,9 +115,20 @@ class StaticAnalyst(BaseAnalyst):
             self.logger.warning("Dynamic tool selection failed (%s); keeping current set.", e)
 
     def _provider(self) -> Any:
-        """The static provider for this run: the container's, or one built ad hoc."""
+        """The static provider for *this agent*: its own, the container's, or an ad hoc one.
+
+        A definition may name a static provider (a clone of ``static`` on
+        radare2), in which case that is the one this analyst reads; the
+        container caches one object per id, so two static analysts on two
+        providers are two providers and not one with two opinions. Without a
+        resolution — a bare analyst in a test or a script — this is exactly the
+        globally configured provider it always was.
+        """
         container = getattr(self, "_container", None)
+        resolved = getattr(self, "_resolved", None)
         if container is not None:
+            if resolved is not None:
+                return container.get_static_provider(resolved.static_provider_id)
             return container.get_static_provider()
         from maljan.core.config import get_settings
         from maljan.providers.registry import get_static_provider
