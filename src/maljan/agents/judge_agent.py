@@ -96,6 +96,31 @@ _AGREEMENT_RE = re.compile(
 )
 
 
+# The judge's system prompt. A module constant since sub-project C so that
+# ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
+# about what the judge is told; the text is unchanged from the inline literal
+# it replaces, and ``tests/agents/test_prompt_byte_identity.py`` says so.
+JUDGE_VERDICT_SYSTEM = (
+    "You are the Chief Malware Judge. Based on the expert reports below, "
+    "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
+    "RULES:\n"
+    "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
+    "- Omit technique ID if unsure.\n"
+    "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
+    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
+    "and x_maljan_contributing_agents list.\n"
+    "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
+    "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
+    "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
+    "- DO NOT emit Indicator objects whose pattern values are inferred, "
+    "hypothetical, or example. Every Indicator's pattern value MUST "
+    "appear verbatim in the deterministic evidence (static strings, "
+    "sandbox observations, or network IOCs). When in doubt, emit zero "
+    "Indicators — the deterministic renderer will fill them in.\n"
+    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
+)
+
+
 class JudgeAgent:
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
@@ -531,25 +556,7 @@ class JudgeAgent:
         if memory_block:
             reports_text = f"{reports_text}\n\n{memory_block}"
 
-        verdict_system = (
-            "You are the Chief Malware Judge. Based on the expert reports below, "
-            "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
-            "RULES:\n"
-            "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
-            "- Omit technique ID if unsure.\n"
-            "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
-            "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
-            "and x_maljan_contributing_agents list.\n"
-            "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
-            "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
-            "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
-            "- DO NOT emit Indicator objects whose pattern values are inferred, "
-            "hypothetical, or example. Every Indicator's pattern value MUST "
-            "appear verbatim in the deterministic evidence (static strings, "
-            "sandbox observations, or network IOCs). When in doubt, emit zero "
-            "Indicators — the deterministic renderer will fill them in.\n"
-            "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
-        )
+        verdict_system = JUDGE_VERDICT_SYSTEM
 
         prompt = ChatPromptTemplate.from_messages(
             [

@@ -36,6 +36,11 @@ if TYPE_CHECKING:
 # The reason string a failed server contributes to ``degradation_reasons``.
 UNAVAILABLE_REASON = "mcp server '{name}' unavailable"
 
+# A server that answered but does not offer the tool a definition asked for by
+# name. Distinct from ``UNAVAILABLE_REASON``: the server is fine, the
+# *reference* is stale, and an operator fixes those two things differently.
+AGENT_TOOL_UNAVAILABLE_REASON = "agent tool '{server}.{name}' unavailable"
+
 # The teardown budgets, and why they are these numbers.
 #
 # Every one of them has to fit strictly inside the budget of whoever is
@@ -869,6 +874,86 @@ class ServerRegistry:
                     renamed,
                     handle.name,
                 )
+        return tools, reasons
+
+    def _ref_tools(self, handle: ServerHandle, ref: Any) -> tuple[list[BaseTool], list[str]]:
+        """The tools one open handle contributes for ``ref``, and any reason it did not.
+
+        ``ref.name is None`` is the whole allow-listed set — the same list
+        ``tools_for`` would have merged had the server been bound by ``agents``.
+        A name is one tool of it, matched after B's collision prefixing, so a
+        renamed tool is still findable under the name the model actually sees.
+        """
+        available = handle.tools()
+        if ref.name is None:
+            return list(available), []
+        wanted = str(ref.name)
+        picked = [
+            tool
+            for tool in available
+            if str(getattr(tool, "name", "")) in (wanted, f"{handle.name}__{wanted}")
+        ]
+        if not picked:
+            return [], [AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)]
+        return picked, []
+
+    def _record(self, reasons: list[str]) -> None:
+        for reason in reasons:
+            if reason not in self.degradation_reasons:
+                self.degradation_reasons.append(reason)
+
+    def tools_for_ref(
+        self, ref: Any, job_id: str, **context: Any
+    ) -> tuple[list[BaseTool], list[str]]:
+        """One ``ToolRef(kind="mcp")``'s tools, opened on the shared agent loop.
+
+        The reference half of an agent's tool set. Never raises, for the same
+        reason ``tools_for`` never does: a definition that points at a server
+        which is down costs the agent depth, not the job.
+        """
+        from maljan.agents.base_agent import _get_agent_loop
+
+        try:
+            handle = self._handle_for(self.get(str(ref.server)), _get_agent_loop())
+        except ProviderConfigurationError:
+            reasons = [
+                AGENT_TOOL_UNAVAILABLE_REASON.format(server=ref.server, name=ref.name or "*")
+            ]
+            self._record(reasons)
+            return [], reasons
+        try:
+            handle.open(job_id, **context)
+        except Exception as exc:  # noqa: BLE001 — a referenced server always degrades
+            logger.warning("mcp server '%s' could not be attached: %s", handle.name, exc)
+            reasons = [UNAVAILABLE_REASON.format(name=handle.name)]
+            self._record(reasons)
+            return [], reasons
+        tools, reasons = self._ref_tools(handle, ref)
+        self._record(reasons)
+        return tools, reasons
+
+    async def atools_for_ref(
+        self, ref: Any, job_id: str, **context: Any
+    ) -> tuple[list[BaseTool], list[str]]:
+        """``tools_for_ref``, awaited on the caller's own loop."""
+        loop = asyncio.get_running_loop()
+        try:
+            handle = self._handle_for(self.get(str(ref.server)), loop)
+        except ProviderConfigurationError:
+            reasons = [
+                AGENT_TOOL_UNAVAILABLE_REASON.format(server=ref.server, name=ref.name or "*")
+            ]
+            self._record(reasons)
+            return [], reasons
+        try:
+            await handle.aopen(job_id, **context)
+        except Exception as exc:  # noqa: BLE001 — a referenced server always degrades
+            logger.warning("mcp server '%s' could not be attached: %s", handle.name, exc)
+            reasons = [UNAVAILABLE_REASON.format(name=handle.name)]
+            self._record(reasons)
+            return [], reasons
+        tools, reasons = self._ref_tools(handle, ref)
+        self._record(reasons)
         return tools, reasons
 
     def still_open(self) -> list[ServerHandle]:
