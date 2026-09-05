@@ -1,0 +1,196 @@
+{
+  "apistats": {
+    "100": {
+      "NtCreateFile": 1,
+      "NtWriteFile": 1
+    }
+  },
+  "cti": {},
+  "dropped_files": [
+    {
+      "name": "svc.exe",
+      "sha256": "0f",
+      "size": 2048
+    }
+  ],
+  "file_writes": [],
+  "generic_events": [],
+  "network": {
+    "dns": [
+      {
+        "answers": [
+          "185.220.101.42"
+        ],
+        "request": "telemetry-sync-71ad.net",
+        "type": "A"
+      }
+    ],
+    "domains": [],
+    "hosts": [],
+    "http": [],
+    "pcap_local_path": null,
+    "tcp": [
+      {
+        "dport": 443,
+        "dst": "185.220.101.42"
+      }
+    ],
+    "tls": [],
+    "udp": []
+  },
+  "processes": [
+    {
+      "calls": [
+        {
+          "api": "NtCreateFile",
+          "args": {
+            "path": "C:\\t"
+          },
+          "pid": 100,
+          "timestamp": 1
+        },
+        {
+          "api": "NtWriteFile",
+          "args": {},
+          "pid": 100,
+          "timestamp": 2
+        }
+      ],
+      "command_line": "loader.exe /q",
+      "first_seen": "",
+      "name": "loader.exe",
+      "pid": 100,
+      "ppid": 4
+    },
+    {
+      "calls": [],
+      "command_line": "svc.exe",
+      "first_seen": "",
+      "name": "svc.exe",
+      "pid": 101,
+      "ppid": 100
+    }
+  ],
+  "provider": "rest",
+  "raw": {
+    "artifacts": [
+      {
+        "filename": "svc.exe",
+        "sha256": "0f",
+        "size": 2048
+      }
+    ],
+    "detections": [
+      {
+        "attack": [
+          "T1547.001"
+        ],
+        "description": "Writes a Run key",
+        "name": "persistence_run_key",
+        "score": 3
+      },
+      {
+        "description": "unnamed rule",
+        "score": 1
+      }
+    ],
+    "net": {
+      "lookups": [
+        {
+          "answers": [
+            "185.220.101.42"
+          ],
+          "qname": "telemetry-sync-71ad.net",
+          "type": "A"
+        }
+      ],
+      "streams": [
+        {
+          "peer": "185.220.101.42",
+          "peer_port": 443
+        }
+      ]
+    },
+    "run": {
+      "processes": [
+        {
+          "cmdline": "loader.exe /q",
+          "image": "loader.exe",
+          "pid": 100,
+          "ppid": 4,
+          "syscalls": [
+            {
+              "args": {
+                "path": "C:\\t"
+              },
+              "pid": 100,
+              "syscall": "NtCreateFile",
+              "timestamp": 1
+            },
+            {
+              "args": {},
+              "pid": 100,
+              "syscall": "NtWriteFile",
+              "timestamp": 2
+            }
+          ]
+        },
+        {
+          "cmdline": "svc.exe",
+          "image": "svc.exe",
+          "pid": 101,
+          "ppid": 100,
+          "syscalls": [
+            {
+              "syscall": "NtOpenKey",
+              "timestamp": 3
+            }
+          ]
+        }
+      ],
+      "registry": [
+        "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc",
+        ""
+      ]
+    },
+    "sample": {
+      "hashes": {
+        "sha256": "b1946ac92492d2347c6235b4d2611184b1946ac92492d2347c6235b4d2611184"
+      }
+    }
+  },
+  "registry": [
+    "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc"
+  ],
+  "screenshots": [],
+  "signatures": [
+    {
+      "description": "Writes a Run key",
+      "marks": [],
+      "name": "persistence_run_key",
+      "severity": 3,
+      "ttp_tags": [
+        "T1547.001"
+      ]
+    }
+  ],
+  "source_format": "generic",
+  "summary": {},
+  "target": {
+    "file_type": "",
+    "md5": "",
+    "mime_type": "",
+    "name": "",
+    "sha256": "b1946ac92492d2347c6235b4d2611184b1946ac92492d2347c6235b4d2611184",
+    "size": 0
+  },
+  "task_id": "xyz-1",
+  "unavailable": [
+    "domains",
+    "generic_events",
+    "hosts",
+    "http",
+    "screenshots",
+    "udp"
+  ]
+}

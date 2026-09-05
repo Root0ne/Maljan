@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "dev"]
   pull_request:
-    branches: ["main", "dev"]
+    branches: ["main", "dev", "feat/**"]
 
 # The workflow reads the repository and nothing else; it references no secrets.
 permissions:
@@ -40,8 +40,9 @@ jobs:
         if: github.ref != 'refs/heads/main'
         run: |
           set -euo pipefail
-          # Sub-project A is a refactor: the measured numbers in the paper come
-          # from tests/evaluation/, and nothing on this branch may change them.
+          # The measured numbers in the paper come from tests/evaluation/, and
+          # no provider or tool-server branch may change them. Sub-project B
+          # adds servers and a sandbox; it does not re-measure anything.
           # actions/checkout@v4 defaults to a depth-1 clone of this ref, which
           # shares no history with a depth-50 fetch of dev's tip, so unshallow
           # this ref first to give origin/dev a usable merge base. A plain

@@ -21,6 +21,10 @@ class Annotation(TypedDict):
     group: NotRequired[str]
     applies_when: NotRequired[dict[str, list[str]]]  # key -> values that reveal this entry
     order: NotRequired[int]  # within the group; default 0
+    choices_from: NotRequired[
+        Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles"]
+    ]
+    editor: NotRequired[Literal["server_map", "rest_sandbox"]]
 
 
 GROUP_ORDER: list[tuple[str, str]] = [
@@ -29,7 +33,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("frontier", "Frontier arms"),
     ("static", "Static analysis provider"),
     ("sandbox", "Sandbox provider"),
-    ("mcp", "MCP servers (Ghidra, CAPE)"),
+    ("mcp", "Tool servers (MCP)"),
     ("memory", "Memory / LTM (Qdrant)"),
     ("analysis", "Analysis layers"),
     ("negotiation", "Negotiation"),
@@ -960,12 +964,23 @@ def mcp_server_annotations(
     probe: str | None = None,
     applies_when: dict[str, list[str]] | None = None,
     order: int = 0,
+    provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The nine leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The fourteen leaves of an ``MCPServerConfig`` block, described for ``label``.
 
-    Every MCP server in the settings has the same nine knobs; writing them out
-    six times invites drift between blocks that must behave identically. The
-    per-field wording is fixed, the server's name is the only variable.
+    Every MCP server in the settings has the same nine transport/tool-selection
+    knobs, plus five sub-project-B fields (``cwd``, ``env_allow``, ``tools``,
+    ``agents``, ``label``); writing them out six times invites drift between
+    blocks that must behave identically. The per-field wording is fixed, the
+    server's name is the only variable.
+
+    ``provider_owned`` marks a block whose ``tools``/``agents``/``label`` a
+    static or sandbox provider (Ghidra, radare2, the CAPE MCP sidecar)
+    computes for itself and ignores if set: those three leaves get
+    ``applies_when`` pinned to the block's own governing key with an empty
+    allowed list, which the settings tab can never satisfy, so they are never
+    shown. ``cwd`` and ``env_allow`` stay visible under the block's ordinary
+    ``applies_when`` — a stdio launch of that server still reads them.
     """
     common: Annotation = {"title": "", "description": ""}
     del common  # documented shape; each entry below is built explicitly
@@ -978,7 +993,15 @@ def mcp_server_annotations(
             a["probe"] = probe
         return a
 
-    return {
+    never_shown: dict[str, list[str]] = {key: [] for key in (applies_when or {})}
+
+    def owned_ann(title: str, description: str) -> Annotation:
+        a: Annotation = {"title": title, "description": description, "order": order}
+        if never_shown:
+            a["applies_when"] = never_shown
+        return a
+
+    entries: dict[str, Annotation] = {
         f"{prefix}.enabled": ann(
             f"{label} enabled",
             f"Turns on the {label} integration. When off the analyst runs on the "
@@ -1028,7 +1051,51 @@ def mcp_server_annotations(
             "Back-compat flag: when true, forces tool selection to all regardless "
             "of its own value.",
         ),
+        f"{prefix}.cwd": ann(
+            f"{label} working directory",
+            "Working directory for the stdio subprocess; empty means the repository root.",
+        ),
+        f"{prefix}.env_allow": ann(
+            f"{label} inherited environment names",
+            "Names copied out of the API process's own environment into the "
+            "stdio subprocess — the only way a credential reaches this sidecar, "
+            "since the environment field above is visible in the UI.",
+        ),
     }
+
+    if provider_owned:
+        entries[f"{prefix}.tools"] = owned_ann(
+            f"{label} tool allow-list",
+            f"Ignored: {label} is a provider-owned server and computes its own tool exposure.",
+        )
+        entries[f"{prefix}.agents"] = owned_ann(
+            f"{label} receiving analysts",
+            f"Ignored: {label} is a provider-owned server and routes to its "
+            "provider's own analyst, not a configurable list.",
+        )
+        entries[f"{prefix}.label"] = owned_ann(
+            f"{label} display name",
+            f"Ignored: {label} is a provider-owned server; its display name "
+            "comes from the provider, not this field.",
+        )
+    else:
+        entries[f"{prefix}.tools"] = ann(
+            f"{label} tool allow-list",
+            "Allow-list of tool names exposed to the model. Empty exposes "
+            "nothing until tools are ticked from the server's probe; null "
+            "exposes every tool the server advertises.",
+        )
+        entries[f"{prefix}.agents"] = ann(
+            f"{label} receiving analysts",
+            "Which analysts (static, dynamic, network, judge) receive this "
+            "server's tools. Empty means none.",
+        )
+        entries[f"{prefix}.label"] = ann(
+            f"{label} display name",
+            "Display name shown in the tool-server registry; empty uses the server's key.",
+        )
+
+    return entries
 
 
 _STATIC_GHIDRA = {"core.static.provider": ["ghidra"]}
@@ -1038,6 +1105,11 @@ _STATIC_GENERIC = {"core.static.provider": ["generic_mcp"]}
 _SANDBOX_CAPE2 = {"core.sandbox.provider": ["cape2"]}
 _SANDBOX_TRIAGE = {"core.sandbox.provider": ["triage"]}
 _SANDBOX_UPLOAD = {"core.sandbox.provider": ["upload"]}
+_SANDBOX_REST = {"core.sandbox.provider": ["rest"]}
+_SANDBOX_REST_GENERIC = {
+    "core.sandbox.provider": ["rest"],
+    "core.sandbox.rest.report.format": ["generic"],
+}
 
 
 ANNOTATIONS.update(
@@ -1053,6 +1125,7 @@ ANNOTATIONS.update(
                 "leaves the static analyst with no tools at all."
             ),
             "order": -1,
+            "choices_from": "static_providers",
         },
         "sandbox.provider": {
             "title": "Sandbox provider",
@@ -1061,9 +1134,11 @@ ANNOTATIONS.update(
                 "reports from the samples directory with no network access; cape2 "
                 "submits to a live CAPEv2 instance; upload runs no detonation and "
                 "uses the report attached to the job; triage submits to the Hatching "
-                "Triage cloud sandbox."
+                "Triage cloud sandbox; rest drives any HTTP sandbox from the "
+                "endpoints and JSONPaths you describe."
             ),
             "order": -1,
+            "choices_from": "sandbox_providers",
         },
         "static.r2.binary_path": {
             "title": "radare2 MCP binary",
@@ -1239,15 +1314,204 @@ ANNOTATIONS.update(
 
 ANNOTATIONS.update(
     mcp_server_annotations(
-        "static.ghidra", "Ghidra MCP", probe="ghidra", applies_when=_STATIC_GHIDRA
+        "static.ghidra",
+        "Ghidra MCP",
+        probe="ghidra",
+        applies_when=_STATIC_GHIDRA,
+        provider_owned=True,
     )
 )
 ANNOTATIONS.update(
-    mcp_server_annotations("static.r2", "radare2 MCP", probe="r2", applies_when=_STATIC_R2)
+    mcp_server_annotations(
+        "static.r2", "radare2 MCP", probe="r2", applies_when=_STATIC_R2, provider_owned=True
+    )
 )
 ANNOTATIONS.update(
-    mcp_server_annotations("static.generic", "Custom MCP", applies_when=_STATIC_GENERIC)
+    mcp_server_annotations(
+        "sandbox.cape2.mcp", "CAPE MCP", applies_when=_SANDBOX_CAPE2, provider_owned=True
+    )
 )
+
 ANNOTATIONS.update(
-    mcp_server_annotations("sandbox.cape2.mcp", "CAPE MCP", applies_when=_SANDBOX_CAPE2)
+    {
+        "mcp.servers": {
+            "title": "Tool servers",
+            "description": (
+                "Every MCP server Maljan can attach, keyed by a short name. Each "
+                "entry says how to reach the server, which of its tools the model "
+                "may call, and which analysts receive them. A newly added server "
+                "exposes nothing until its tools are ticked."
+            ),
+            "group": "mcp",
+            "editor": "server_map",
+            "order": -1,
+        },
+        "static.generic.server": {
+            "title": "Custom MCP server",
+            "description": (
+                "Which entry of the tool-server registry the generic_mcp static "
+                "provider drives. Empty leaves that provider with nothing to attach."
+            ),
+            "applies_when": _STATIC_GENERIC,
+            "choices_from": "mcp_servers",
+        },
+    }
+)
+
+
+def _rest(
+    title: str, description: str, *, generic_only: bool = False, probe: str | None = None
+) -> Annotation:
+    """One ``sandbox.rest.*`` leaf: gated on the provider, drawn by one editor.
+
+    ``generic_only`` adds the second gate the mapping leaves need — the
+    catalog's ``applies_when`` is a conjunction of key/value sets, so two keys
+    in one dict is exactly "the REST provider AND the generic report format".
+    ``probe`` names the connection test the group header's button runs; only
+    one leaf per group needs it.
+    """
+    annotation: Annotation = {
+        "title": title,
+        "description": description,
+        "applies_when": _SANDBOX_REST_GENERIC if generic_only else _SANDBOX_REST,
+        "editor": "rest_sandbox",
+    }
+    if probe is not None:
+        annotation["probe"] = probe
+    return annotation
+
+
+ANNOTATIONS.update(
+    {
+        "sandbox.rest.base_url": _rest(
+            "Sandbox API base URL",
+            "Root of the sandbox's HTTP API; every path below is appended to it.",
+            probe="rest",
+        ),
+        "sandbox.rest.auth.header": _rest(
+            "Auth header", "Header carrying the credential, e.g. Authorization or X-API-Key."
+        ),
+        "sandbox.rest.auth.scheme": _rest(
+            "Auth scheme",
+            "Prefix written before the token, e.g. Bearer. Empty sends the token alone.",
+        ),
+        "sandbox.rest.auth.token": _rest(
+            "Sandbox API token", "Credential sent in the configured header. Stored encrypted."
+        ),
+        "sandbox.rest.submit.method": _rest(
+            "Submit method", "HTTP method for the submission, POST or PUT."
+        ),
+        "sandbox.rest.submit.path": _rest(
+            "Submit path", "Path the sample is uploaded to, appended to the base URL."
+        ),
+        "sandbox.rest.submit.file_field": _rest(
+            "Submit file field", "Name of the multipart field carrying the sample bytes."
+        ),
+        "sandbox.rest.submit.extra_fields": _rest(
+            "Submit extra fields",
+            "Additional multipart fields sent with the sample, as name/value pairs.",
+        ),
+        "sandbox.rest.submit.task_id_path": _rest(
+            "Task id path",
+            "JSONPath selecting the task identifier out of the submit response, e.g. $.id.",
+        ),
+        "sandbox.rest.status.path": _rest(
+            "Status path", "Poll path; {task_id} is replaced by the submitted task's id."
+        ),
+        "sandbox.rest.status.state_path": _rest(
+            "Status field path", "JSONPath selecting the state value out of the status response."
+        ),
+        "sandbox.rest.status.done_values": _rest(
+            "Completed states",
+            "State values that mean the run finished, compared case-insensitively.",
+        ),
+        "sandbox.rest.status.failed_values": _rest(
+            "Failed states", "State values that mean the run failed and must not be polled further."
+        ),
+        "sandbox.rest.report.path": _rest(
+            "Report path", "Path the finished report is fetched from; {task_id} is substituted."
+        ),
+        "sandbox.rest.report.format": _rest(
+            "Report format",
+            "Shape of the fetched report. cape2, cuckoo and triage reuse the mappers the "
+            "report-upload provider already uses; generic maps the response with the "
+            "JSONPaths below.",
+        ),
+        "sandbox.rest.report.pcap_path": _rest(
+            "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
+        ),
+        "sandbox.rest.mapping.target_sha256": _rest(
+            "Mapping: sample hash", "JSONPath to the detonated sample's SHA-256.", generic_only=True
+        ),
+        "sandbox.rest.mapping.processes": _rest(
+            "Mapping: processes",
+            "JSONPath to the process rows; each match supplies pid, ppid, name and command_line.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.calls": _rest(
+            "Mapping: API calls",
+            "JSONPath to the API-call rows; each match supplies pid, api, args and timestamp.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.signatures": _rest(
+            "Mapping: signatures",
+            "JSONPath to the signature hits; each match supplies name, description, "
+            "severity and ttps.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.dns": _rest(
+            "Mapping: DNS",
+            "JSONPath to the DNS rows; each match supplies request, type and answers.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.http": _rest(
+            "Mapping: HTTP", "JSONPath to the HTTP request rows.", generic_only=True
+        ),
+        "sandbox.rest.mapping.tcp": _rest(
+            "Mapping: TCP",
+            "JSONPath to the TCP flows; each match supplies dst and dport.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.udp": _rest(
+            "Mapping: UDP",
+            "JSONPath to the UDP flows; each match supplies dst and dport.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.hosts": _rest(
+            "Mapping: hosts",
+            "JSONPath to the contacted hosts, one string per match.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.domains": _rest(
+            "Mapping: domains",
+            "JSONPath to the resolved domains, one string per match.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.dropped_files": _rest(
+            "Mapping: dropped files",
+            "JSONPath to the dropped files; each match supplies name, sha256 and size.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.registry": _rest(
+            "Mapping: registry",
+            "JSONPath to the touched registry paths, one string per match.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.field_names": _rest(
+            "Mapping: field renames",
+            "Per-row field renames, keyed 'channel.field', e.g. processes.command_line -> cmdline.",
+            generic_only=True,
+        ),
+        "sandbox.rest.timeout_seconds": _rest(
+            "Sandbox timeout (s)", "How long a detonation may take before the run is abandoned."
+        ),
+        "sandbox.rest.poll_interval_seconds": _rest(
+            "Poll interval (s)", "Delay between status checks; backs off to 60 s under pressure."
+        ),
+        "sandbox.rest.verify_tls": _rest(
+            "Verify TLS",
+            "Check the sandbox's certificate. Turning this off is reported in the "
+            "connection test's detail.",
+        ),
+    }
 )

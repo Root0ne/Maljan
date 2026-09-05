@@ -181,7 +181,7 @@ make external     # or: make setup, which runs it for you
 
 The static analyst attaches to one of `ghidra`, `r2`, `capa_yara`, `generic_mcp`
 or `none`; the dynamic path pulls its evidence from one of `mock`, `cape2`,
-`upload` or `triage`. Pick either pair from Settings → Static analysis
+`upload`, `triage` or `rest`. Pick either pair from Settings → Static analysis
 provider / Sandbox provider in the web UI, per job at submit time, or with
 `STATIC__PROVIDER` / `SANDBOX__PROVIDER` in `.env`. Ghidra plus CAPEv2 is the
 profile this project's evaluation was measured on and stays the default for
@@ -199,10 +199,84 @@ What each optional tool costs to turn on:
 - **Hatching Triage (`triage`)** — a Triage API key; no host of your own.
 - **Uploaded report (`upload`)** — nothing to install: an operator attaches
   a report from any supported sandbox when submitting a sample.
-- **generic_mcp** — any MCP server you already run. There is no tool
-  allow-list on this path until sub-project B: the connected server's entire
-  tool manifest is handed to the model as-is, so connect only a server you
-  control.
+- **generic_mcp** — any MCP server you already run. A custom server exposes
+  nothing until you tick tools from its probe's manifest in Settings → Tool
+  servers, and even so the model can call whatever is ticked, so connect only
+  a server you control.
+
+### Connecting your own tool servers
+
+Every MCP server Maljan can attach lives in one place, `mcp.servers`, keyed by
+a short name you choose. Two entries are there by default — `network` and
+`threatintel`, the two sidecars that ship with the project — and you add your
+own from Settings → Tool servers: a name, how to reach the server (a command
+for stdio, a URL for HTTP), which analysts it serves, and which of its tools
+the model may call.
+
+**A server you add exposes nothing until you say what it may run.** That is
+the trust boundary, and it is worth being exact about where it sits. Pressing
+"Test" performs one MCP handshake and lists the tools the server advertises;
+nothing is called. Ticking a tool adds its name to that entry's allow-list, and
+only allow-listed tools are ever handed to the model. An entry with an empty
+allow-list is connected and inert. The two built-in sidecars carry no
+allow-list at all, which means "every tool they offer" — they are in this
+repository, their tool sets are pinned by a test, and narrowing them would
+change the profile the evaluation was measured on. Both built-ins can be
+disabled from the same screen but not deleted; a run resumes seeing their
+full manifest the moment they are re-enabled.
+
+What a tool server's process can see is equally explicit. It is started with an
+argument list, never through a shell. Its environment is a fixed base set
+(`PATH`, `HOME`, locale, `TMPDIR`, `JAVA_HOME`, and a handful more) plus
+exactly the variable names you list under "Environment names passed through" —
+so `threatintel-mcp` sees `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` and
+nothing else, and no server sees the database URL, the settings encryption key
+or any LLM credential. Listing a name under `env_allow` is the only way a
+credential from the process's own environment reaches a tool server; a value
+you type into the server's own `env` field is an ordinary, UI-readable
+setting, not a secret. A working directory, if you set one, has to resolve
+inside the repository or to an absolute directory that already exists — it is
+never created for you. A bearer token for an HTTP server is typed once and
+stored the way every other secret in Maljan is stored: encrypted with
+`SETTINGS_ENCRYPTION_KEY`, in a row of its own (`core.mcp.servers.<key>.auth_token`)
+rather than in the server list's JSON, never returned by the API and never
+written into a run summary. Without that key set, the UI refuses a token the
+same way it refuses every other secret, and `MCP__SERVERS__<KEY>__AUTH_TOKEN`
+in `.env` stays the way to supply one from the environment instead. A server
+bound to the static or dynamic analyst degrades rather than failing a job: if
+it cannot be reached, the run says so in its degradation reasons and
+continues on the evidence it has.
+
+### A sandbox Maljan has never heard of
+
+`SANDBOX__PROVIDER=rest` drives an HTTP sandbox you describe rather than one
+this project has an adapter for. You give it a base URL, the path a sample is
+POSTed to, where the task id is in the reply, where to poll and which state
+values are terminal, and where the finished report is. If that report is
+CAPE-, Cuckoo- or Triage-shaped, say so and it goes through the same reader the
+matching adapter uses; a dedicated Triage sandbox provider still exists
+separately for the Triage cloud service itself; the REST provider's own
+`triage` report format only maps a single report body shaped like one, and
+does not replace it as the path for Triage. If the report is in its own
+shape, describe where each channel lives with an
+[RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) JSONPath. Paste one
+real response into the settings editor and press "Preview mapping" to see, in
+one pass over that response, per channel how many rows each path selected and
+how many survived — before a sample is ever detonated. A channel you leave
+empty is reported as unavailable in the finished report, so a sandbox that
+publishes no DNS log never reads as a sample that made no DNS requests. A
+`verify_tls=false` setting is flagged as a warning, not refused, since some
+operator-run sandboxes sit behind a self-signed certificate on a network you
+already trust.
+
+**Known limits.** Every job still uses whichever server `mcp.servers` says
+serves its analyst — there is no per-job server selection yet. And
+`resolve_mcp_args` roots a *relative* argument containing a `/` under the
+repository — a flag (anything starting with `-`) and an already-absolute path
+are both left untouched — so the residual is a non-path value that happens to
+contain a slash and is passed positionally (e.g. `https://x/y`), which is
+rewritten when it should not be; both are open follow-ups for a later
+sub-project.
 
 CAPE itself is somebody else's platform and nothing here installs, builds or
 packages it. It wants a Linux host of its own with KVM and its own Windows
@@ -512,7 +586,11 @@ services: it counts rule files locally. The indicator reports ok when capa
 itself imports and its rules directory holds rules; the YARA half is checked
 too, but only ever named in the detail text — a missing or empty YARA rules
 directory does not flip the indicator, since capa evidence alone is enough
-for the provider to run. Exporting the current UI overrides produces a
+for the provider to run. "Test MCP server" launches one configured tool
+server and lists what it offers; "Test sandbox API" asks a REST sandbox's
+status endpoint about a task that does not exist, so any answer other than a
+refused credential means the endpoint and the token are right. Exporting the
+current UI overrides produces a
 `.env`-formatted file with secret values masked as `***`. Every analysis
 records the settings that were actually in effect, and which of them came
 from a UI override, in its run summary.

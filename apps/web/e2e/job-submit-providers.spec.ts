@@ -7,6 +7,22 @@ import { test, expect } from "./fixtures";
  * providers once never sees the difference.
  */
 test.describe("Job submission with providers", () => {
+  test("the provider selects come from the settings catalog, not from a constant", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/samples");
+    await page.getByRole("button", { name: "Analyze" }).first().click();
+
+    const sandbox = page.locator("#sandbox-provider");
+    await expect(sandbox.locator("option")).toHaveText([
+      "Inherit from settings", "mock", "cape2", "upload", "triage", "rest",
+    ]);
+    const staticSelect = page.locator("#static-provider");
+    await expect(staticSelect.locator("option")).toHaveText([
+      "Inherit from settings", "ghidra", "r2", "capa_yara", "generic_mcp", "none",
+    ]);
+  });
+
   test("submitting without touching the selects sends today's payload", async ({
     authenticatedPage: page,
   }) => {

@@ -58,7 +58,7 @@ def test_provider_selectors_lead_their_groups_and_have_the_registry_choices():
     assert static.type == "enum" and static.order == -1
     assert static.choices == ["ghidra", "r2", "capa_yara", "generic_mcp", "none"]
     assert sandbox.type == "enum" and sandbox.order == -1
-    assert sandbox.choices == ["mock", "cape2", "upload", "triage"]
+    assert sandbox.choices == ["mock", "cape2", "upload", "triage", "rest"]
     assert static.applies_when is None and sandbox.applies_when is None
 
 
@@ -68,7 +68,7 @@ def test_provider_specific_leaves_declare_when_they_apply():
     assert by_path["static.r2.binary_path"].applies_when == {"core.static.provider": ["r2"]}
     assert by_path["static.capa.rules_dir"].applies_when == {"core.static.provider": ["capa_yara"]}
     assert by_path["static.yara.rules_dir"].applies_when == {"core.static.provider": ["capa_yara"]}
-    assert by_path["static.generic.command"].applies_when == {
+    assert by_path["static.generic.server"].applies_when == {
         "core.static.provider": ["generic_mcp"]
     }
     assert by_path["sandbox.cape2.base_url"].applies_when == {"core.sandbox.provider": ["cape2"]}
@@ -109,6 +109,40 @@ def test_the_deprecated_mcp_view_is_not_in_the_catalog():
     walks ``model_fields`` and must never surface them as settings an
     operator can configure through the UI."""
     paths = {e.path for e in cat.core_catalog()}
-    assert not any(p.startswith("mcp.") for p in paths), sorted(
+    assert not any(p.startswith("mcp.") and p != "mcp.servers" for p in paths), sorted(
         p for p in paths if p.startswith("mcp.")
     )
+
+
+def test_the_server_map_is_one_leaf_with_its_own_editor():
+    by_path = {e.path: e for e in cat.core_catalog()}
+    servers = by_path["mcp.servers"]
+    assert servers.type == "json"
+    assert servers.editor == "server_map"
+    assert servers.group == "mcp"
+    assert servers.applies_when is None
+
+
+def test_the_generic_static_provider_points_at_a_server_key():
+    by_path = {e.path: e for e in cat.core_catalog()}
+    entry = by_path["static.generic.server"]
+    assert entry.type == "str"
+    assert entry.choices_from == "mcp_servers"
+    assert entry.applies_when == {"core.static.provider": ["generic_mcp"]}
+
+
+def test_the_rest_sandbox_leaves_are_gated_and_the_mapping_twice_over():
+    by_path = {e.path: e for e in cat.core_catalog()}
+    assert by_path["sandbox.rest.base_url"].applies_when == {"core.sandbox.provider": ["rest"]}
+    assert by_path["sandbox.rest.base_url"].editor == "rest_sandbox"
+    assert by_path["sandbox.rest.auth.token"].type == "secret"
+    assert by_path["sandbox.rest.mapping.processes"].applies_when == {
+        "core.sandbox.provider": ["rest"],
+        "core.sandbox.rest.report.format": ["generic"],
+    }
+    assert by_path["sandbox.rest.report.format"].applies_when == {"core.sandbox.provider": ["rest"]}
+
+
+def test_the_sandbox_selector_offers_rest():
+    by_path = {e.path: e for e in cat.core_catalog()}
+    assert by_path["sandbox.provider"].choices == ["mock", "cape2", "upload", "triage", "rest"]

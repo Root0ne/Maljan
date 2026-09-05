@@ -103,6 +103,43 @@ def test_the_overridden_providers_show_up_in_the_snapshot():
     assert snap["sandbox.provider"] == "upload"
 
 
+def test_the_ids_agree_exactly_in_all_three_places():
+    """A provider id exists in the registry, the settings model and this schema.
+
+    Two of the three agreeing is how the UI ends up offering a choice that
+    422s at submit time, so the assertion is equality rather than containment.
+    """
+    from typing import get_args
+
+    from maljan.core.config import SandboxConfig, StaticConfig
+    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+
+    static_settings = set(get_args(StaticConfig.model_fields["provider"].annotation))
+    sandbox_settings = set(get_args(SandboxConfig.model_fields["provider"].annotation))
+    static_job = set(_literal_choices(_KnownJobConfig.model_fields["static_provider"].annotation))
+    sandbox_job = set(_literal_choices(_KnownJobConfig.model_fields["sandbox_provider"].annotation))
+
+    assert set(static_provider_ids()) == static_settings == static_job
+    assert set(sandbox_provider_ids()) == sandbox_settings == sandbox_job
+
+
+def test_the_rest_sandbox_is_an_accepted_per_job_override():
+    from typing import get_args
+
+    from maljan.core.config import SandboxConfig
+
+    assert "rest" in get_args(SandboxConfig.model_fields["provider"].annotation)
+    assert "rest" in _literal_choices(_KnownJobConfig.model_fields["sandbox_provider"].annotation)
+    JobCreateRequest(sample_id=uuid.uuid4(), config={"sandbox_provider": "rest"})
+
+
+def test_a_rest_job_override_reaches_the_settings():
+    from app.worker.analysis_worker import build_job_settings
+
+    cfg = build_job_settings({}, {"sandbox_provider": "rest"})
+    assert cfg.sandbox.provider == "rest"
+
+
 def test_a_mock_run_cannot_consume_an_uploaded_report():
     with pytest.raises(ValidationError) as exc:
         JobCreateRequest(

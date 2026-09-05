@@ -10,6 +10,8 @@ const PROBE_LABEL: Record<string, string> = {
   capa_yara: "Test capa + YARA rules",
   cape2: "Test CAPE connection",
   triage: "Test Triage connection",
+  rest: "Test sandbox API",
+  mcp: "Test MCP server",
 };
 
 export default function GroupHeader({
@@ -51,6 +53,7 @@ export default function GroupHeader({
                     latency_ms: 0,
                     detail: String(e),
                     models: null,
+                    tools: null,
                   }));
                   setResults((s) => ({ ...s, [name]: res }));
                 }}

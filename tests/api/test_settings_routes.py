@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,7 +35,8 @@ def client() -> TestClient:
 
 
 def test_schema_lists_groups_in_order_and_entries(client):
-    r = client.get("/api/v1/settings/schema")
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        r = client.get("/api/v1/settings/schema")
     assert r.status_code == 200
     groups = r.json()["groups"]
     assert groups[0]["key"] == "llm"
@@ -121,6 +123,49 @@ def test_export_is_env_syntax_with_secrets_masked(client):
     assert "CHUNKING__OVERLAP_TOKENS" not in r.text  # only overrides are exported
 
 
+def test_export_of_the_server_map_strips_the_token_mask_and_comments_it_out(client, tmp_path):
+    """Regression (F8): the exported ``MCP__SERVERS`` line used to embed the
+    ten-asterisk token mask as a literal value, so reading the export back
+    configured that mask as the real credential rather than leaving the
+    operator a placeholder to fill in."""
+    from maljan.core.config import Settings
+
+    fake = {
+        "core.mcp.servers": ValueInfo(
+            {
+                "custom": {
+                    "enabled": True,
+                    "command": "my-mcp",
+                    "auth_token": "**********",
+                    "auth_token_source": "ui",
+                }
+            },
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    assert r.status_code == 200
+    text = r.text
+    assert "**********" not in text
+    raw = next(
+        line.split("=", 1)[1] for line in text.splitlines() if line.startswith("MCP__SERVERS=")
+    )
+    decoded = json.loads(json.loads(raw))
+    assert "auth_token" not in decoded["custom"]
+    assert "auth_token_source" not in decoded["custom"]
+    assert "# MCP__SERVERS__CUSTOM__AUTH_TOKEN=***" in text
+
+    env_lines = [line for line in text.splitlines() if not line.startswith("#")]
+    env_file = tmp_path / ".env"
+    env_file.write_text("\n".join(env_lines) + "\n")
+    settings = Settings(_env_file=env_file)
+    assert settings.mcp.servers["custom"].command == "my-mcp"
+    assert settings.mcp.servers["custom"].auth_token.get_secret_value() == ""
+
+
 def test_reset_group_unknown_is_404(client):
     r = client.delete("/api/v1/settings?group=does-not-exist")
     assert r.status_code == 404
@@ -136,4 +181,64 @@ def test_non_admin_is_rejected():
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_db] = lambda: MagicMock()
     r = TestClient(app).get("/api/v1/settings/schema")
+    assert r.status_code in (401, 403)
+
+
+def test_the_preview_route_caps_the_pasted_sample(client):
+    from app.services.mapping_preview import PREVIEW_MAX_BYTES
+
+    r = client.post(
+        "/api/v1/settings/sandbox-rest/preview",
+        json={"sample": {"pad": "x" * (PREVIEW_MAX_BYTES + 1)}, "mapping": {}},
+    )
+    assert r.status_code == 413
+
+
+def test_the_preview_route_caps_a_streamed_body_with_no_content_length(client):
+    """A body sent without a declared length (chunked transfer, or a lying
+    header) must still be capped — the streamed guard, not ``Content-Length``,
+    is what catches it."""
+    from app.services.mapping_preview import PREVIEW_MAX_BYTES
+
+    body = json.dumps({"sample": {"pad": "x" * (PREVIEW_MAX_BYTES + 1)}, "mapping": {}}).encode()
+
+    def chunks():
+        for i in range(0, len(body), 65536):
+            yield body[i : i + 65536]
+
+    r = client.post(
+        "/api/v1/settings/sandbox-rest/preview",
+        content=chunks(),
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 413
+
+
+def test_the_preview_route_counts_rows_per_channel(client):
+    r = client.post(
+        "/api/v1/settings/sandbox-rest/preview",
+        json={"sample": {"p": [{"pid": 1}, {"nope": 2}]}, "mapping": {"processes": "$.p[*]"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["channels"]["processes"] == {
+        "matched": 2,
+        "kept": 1,
+        "dropped": 1,
+        "truncated": False,
+        "sample_rows": [{"pid": 1}],
+        "error": None,
+    }
+
+
+def test_the_preview_route_is_admin_only():
+    """Without the ``require_admin`` override the real dependency runs and refuses."""
+    from app.api.v1.settings import router
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    r = TestClient(app).post(
+        "/api/v1/settings/sandbox-rest/preview", json={"sample": {}, "mapping": {}}
+    )
     assert r.status_code in (401, 403)

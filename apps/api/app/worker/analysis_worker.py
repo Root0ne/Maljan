@@ -47,7 +47,9 @@ def build_job_settings(
 
     The job's values are folded into the override dict rather than assigned
     afterwards, so the model's Literal choices and bounds apply to them too
-    (``Settings`` does not validate on assignment).
+    (``Settings`` does not validate on assignment). Which provider ids are
+    legal here stays in step with the registry and ``Settings`` themselves via
+    ``test_job_provider_overrides.py::test_the_ids_agree_exactly_in_all_three_places``.
     """
     merged = dict(overrides)
     if job_config:

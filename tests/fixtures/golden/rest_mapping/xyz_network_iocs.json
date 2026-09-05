@@ -1,0 +1,37 @@
+{
+  "domains": [
+    {
+      "dga_score": 0.4,
+      "fqdn": "telemetry-sync-71ad.net",
+      "homograph_target": null,
+      "is_punycode": false,
+      "is_suspicious": false,
+      "queried_pids": [],
+      "reason": null,
+      "reputation": {
+        "source": "cape",
+        "virustotal_url": "https://www.virustotal.com/gui/domain/telemetry-sync-71ad.net"
+      },
+      "resolved_ips": []
+    }
+  ],
+  "ips": [
+    {
+      "address": "185.220.101.42",
+      "asn": null,
+      "geo": null,
+      "is_suspicious": false,
+      "port": 443,
+      "reputation": {
+        "_heuristic_reason": "public_address",
+        "source": "cape",
+        "virustotal_url": "https://www.virustotal.com/gui/ip-address/185.220.101.42"
+      },
+      "transport": "tcp"
+    }
+  ],
+  "ja3_fingerprints": [],
+  "ja3s_fingerprints": [],
+  "urls": [],
+  "user_agents": []
+}

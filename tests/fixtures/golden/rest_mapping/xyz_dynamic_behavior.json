@@ -1,0 +1,43 @@
+{
+  "file_operations": [],
+  "notable_apis": [],
+  "process_tree": [
+    {
+      "children": [
+        {
+          "children": [],
+          "command_line": "svc.exe",
+          "injected_into": [],
+          "name": "svc.exe",
+          "pid": 101,
+          "ppid": 100
+        }
+      ],
+      "command_line": "loader.exe /q",
+      "injected_into": [],
+      "name": "loader.exe",
+      "pid": 100,
+      "ppid": 4
+    }
+  ],
+  "registry_mods": [],
+  "sandbox_signatures": [
+    {
+      "description": "Writes a Run key",
+      "marks": [],
+      "name": "persistence_run_key",
+      "severity": 3,
+      "technique_ids": [
+        "T1547.001"
+      ]
+    }
+  ],
+  "unavailable": [
+    "domains",
+    "generic_events",
+    "hosts",
+    "http",
+    "screenshots",
+    "udp"
+  ]
+}

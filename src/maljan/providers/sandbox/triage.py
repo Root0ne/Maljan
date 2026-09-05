@@ -273,12 +273,17 @@ class TriageSandboxProvider(SandboxProvider):
                 # call for a day.
                 retry_after = response.headers.get("Retry-After")
                 parsed = _parse_retry_after(retry_after, self._now()) if retry_after else None
-                wait_seconds = parsed if parsed is not None else interval
+                # A sustained ``Retry-After: 0`` (or a negative/expired
+                # HTTP-date) must not spin the loop: floor the wait at the
+                # current backoff interval whenever the header does not ask
+                # for a positive wait, the same as when it is absent.
+                honoured = parsed is not None and parsed > 0
+                wait_seconds: float = parsed if parsed is not None and honoured else interval
                 remaining = deadline - self._now()
                 clamped = min(wait_seconds, _MAX_INTERVAL_SECONDS, remaining)
                 if clamped > 0:
                     self._sleep(clamped)
-                if parsed is None:
+                if not honoured:
                     interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
                 continue
             self._raise_for_status(response, "status check")

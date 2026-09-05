@@ -209,3 +209,64 @@ def test_dynamic_tools_is_idempotent_for_a_repeat_call(monkeypatch):
     expected_names = set(CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS)
     assert {t.name for t in first} == expected_names
     assert {t.name for t in second} == expected_names
+
+
+def _http_toolkit_factory():
+    """A stand-in ``MCPLangChainToolkit`` class recording its constructor kwargs."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    instance = MagicMock()
+    instance.initialize = AsyncMock(return_value=None)
+    instance.get_tools = MagicMock(return_value=[])
+    return MagicMock(return_value=instance)
+
+
+def test_the_http_bearer_header_carries_the_real_token_not_its_mask(monkeypatch):
+    """Regression, same class of bug as the generic_mcp provider's: ``mcp.auth_token``
+    is a ``SecretStr``, so building the header from the field itself (rather than
+    ``get_secret_value()``) would render the fixed ``**********`` mask and the
+    remote CAPE MCP server could never authenticate.
+    """
+    import secrets
+
+    import maljan.agents.mcp_client as mc
+
+    token = secrets.token_hex(16)
+    factory = _http_toolkit_factory()
+    monkeypatch.setattr(mc, "MCPLangChainToolkit", factory)
+
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.cape2.mcp.enabled = True
+    cfg.sandbox.cape2.mcp.transport = "http"
+    cfg.sandbox.cape2.mcp.url = "http://cape-mcp.example:9999"
+    cfg.sandbox.cape2.mcp.auth_token = token
+    provider = CAPE2SandboxProvider.from_settings(cfg)
+
+    provider.dynamic_tools()
+
+    assert factory.called
+    headers = factory.call_args.kwargs["http_headers"]
+    assert headers == {"Authorization": f"Bearer {token}"}
+    assert "*" not in headers["Authorization"]
+
+
+def test_the_http_branch_sends_no_auth_header_for_an_empty_token(monkeypatch):
+    """The counterpart: an empty token must not become ``Bearer `` (or ``Bearer
+    **********``); the header is omitted entirely, same as before the SecretStr
+    change."""
+    import maljan.agents.mcp_client as mc
+
+    factory = _http_toolkit_factory()
+    monkeypatch.setattr(mc, "MCPLangChainToolkit", factory)
+
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.cape2.mcp.enabled = True
+    cfg.sandbox.cape2.mcp.transport = "http"
+    cfg.sandbox.cape2.mcp.url = "http://cape-mcp.example:9999"
+    provider = CAPE2SandboxProvider.from_settings(cfg)
+
+    provider.dynamic_tools()
+
+    assert factory.called
+    headers = factory.call_args.kwargs["http_headers"]
+    assert headers == {}

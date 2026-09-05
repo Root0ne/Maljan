@@ -25,7 +25,7 @@ class _KnownJobConfig(BaseModel):
     # Static-analysis provider for this job; repeats StaticConfig.provider's choices.
     static_provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] | None = None
     # Sandbox provider for this job; repeats SandboxConfig.provider's choices.
-    sandbox_provider: Literal["mock", "cape2", "upload", "triage"] | None = None
+    sandbox_provider: Literal["mock", "cape2", "upload", "triage", "rest"] | None = None
     # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".
     sandbox_report_id: uuid.UUID | None = None
 

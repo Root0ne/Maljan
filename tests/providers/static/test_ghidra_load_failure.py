@@ -23,6 +23,7 @@ import json
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from maljan.analysis.ghidra_program import program_name_from_load
 
@@ -84,7 +85,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     class _G:
         transport = "http"
         url = "http://ghidra.invalid"
-        auth_token = ""
+        auth_token = SecretStr("")
 
     class _P:
         use_sink_reachability = True
@@ -138,7 +139,7 @@ class TestThePrePassIsGhidraOnly:
         class _G:
             transport = "http"
             url = "http://ghidra.invalid"
-            auth_token = ""
+            auth_token = SecretStr("")
 
         class _P:
             use_sink_reachability = True
@@ -166,7 +167,7 @@ class TestThePrePassIsGhidraOnly:
         class _G:
             transport = "http"
             url = "http://ghidra.invalid"
-            auth_token = ""
+            auth_token = SecretStr("")
 
         class _P:
             use_sink_reachability = True

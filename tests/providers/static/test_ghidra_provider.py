@@ -165,6 +165,7 @@ def test_the_analyst_asks_the_provider_for_tools(monkeypatch):
     analyst = StaticAnalyst(llm=MagicMock(), name="static")
     container = MagicMock()
     container.get_static_provider.return_value = _Provider()
+    container.get_server_registry.return_value = None
     analyst._container = container
     analyst._initialize_mcp_client()
     assert calls == ["open", "get_tools", "select_tools"]
@@ -187,6 +188,7 @@ def test_a_provider_without_tools_leaves_the_analyst_toolless():
     analyst = StaticAnalyst(llm=MagicMock(), name="static")
     container = MagicMock()
     container.get_static_provider.return_value = _Evidence()
+    container.get_server_registry.return_value = None
     analyst._container = container
     analyst._initialize_mcp_client()
     assert analyst.tools == []

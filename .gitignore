@@ -47,6 +47,8 @@ data/uploads/
 
 # Real malware samples (must never be committed to a public repo)
 samples/
+# ...but not the web app's own samples route, which is source, not a payload drop.
+!apps/web/src/app/(app)/samples/
 
 # Local LLM model weights (large, downloaded separately)
 /models/

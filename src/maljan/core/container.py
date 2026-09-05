@@ -55,12 +55,25 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
     from maljan.providers.base import SandboxProvider, StaticProvider
+    from maljan.providers.servers import ServerRegistry
 
 
 # Per-closer budget in ``aclose``. Each toolkit is already bounded internally;
 # this is the second fence, because a teardown that hangs holds the whole job
 # open and — with ``max_jobs = 1`` — every job after it.
+#
+# It has to be strictly larger than what a single handle's close can take, or
+# this fence cancels the handle's own abandonment handling mid-flight and the
+# child is never reaped: ``ServerHandle`` spends at most 14s routing the close
+# and 4s reaping, and the numbers are kept coherent there (see the budget
+# table at the top of ``providers/servers.py``).
 _ACLOSE_BUDGET = 20.0
+
+# The synchronous sweep's budget. Larger than ``_ACLOSE_BUDGET`` because it
+# closes every synchronously-opened handle in one call, each with its own
+# 20s bound — and because it runs in an executor, so the time it spends is a
+# worker thread's, not the event loop's.
+_CLOSE_ALL_BUDGET = 45.0
 
 
 class ServiceContainer:
@@ -111,6 +124,7 @@ class ServiceContainer:
         self._sandbox_client_cache: SandboxClient | None = None
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: StaticProvider | None = None
+        self._server_registry_cache: ServerRegistry | None = None
         self._yara_layer_cache: YaraLayer | None = None
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
@@ -259,6 +273,35 @@ class ServiceContainer:
                 logger.info("Static provider: %s.", self._static_provider_cache.id)
             return self._static_provider_cache
 
+    def get_server_registry(self) -> ServerRegistry:
+        """The tool servers this job may attach, built from the job's settings.
+
+        One registry per container, and the container is per job, so a stdio
+        server's subprocess lives for exactly one analysis and is closed by
+        ``aclose`` at the end of it — the same lifetime the static and sandbox
+        providers already have.
+        """
+        with self._lock:
+            if self._server_registry_cache is None:
+                from maljan.providers.servers import ServerRegistry
+
+                self._server_registry_cache = ServerRegistry(self.config)
+                logger.info(
+                    "Tool servers: %s.",
+                    ", ".join(sorted(self.config.mcp.servers)) or "(none)",
+                )
+            return self._server_registry_cache
+
+    def server_degradation_reasons(self) -> list[str]:
+        """Tool servers that could not be attached this job, or an empty list.
+
+        Reads the *cached* registry only: a job that never attached a tool
+        server has nothing to report and must not build a registry here to
+        discover that.
+        """
+        registry = self._server_registry_cache
+        return list(registry.degradation_reasons) if registry is not None else []
+
     def get_sandbox_client(self) -> SandboxClient:
         """The provider, dressed as the client the pipeline already speaks."""
         with self._lock:
@@ -309,6 +352,13 @@ class ServiceContainer:
                 )
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
+                # Hand the judge a way back to this container, the same way
+                # ``get_agent`` does above. Without this, ``_server_registry()``
+                # always read ``None`` and the judge ran with zero threat-intel
+                # tools in production, silently — the guard on the caller is
+                # ``if self.tools: return``, so a degraded judge looked exactly
+                # like a healthy one that had already attached.
+                cached._container = self
                 self._judge_agent_cache[role] = cached
             return cached
 
@@ -378,6 +428,53 @@ class ServiceContainer:
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
 
+        # Same rule as the providers above: close the *cached* registry, never
+        # ``get_server_registry()`` — a job that never attached a tool server
+        # must not build one here for the sole purpose of closing it.
+        if self._server_registry_cache is not None:
+            registry = self._server_registry_cache
+            # ``close_all`` is synchronous and blocks its thread: each handle
+            # it closes hands the toolkit's exit stack to the agent loop and
+            # waits for it. Run on the loop thread, that blocks the loop — and
+            # a blocked loop cannot fire the worker's 60s fence, which is
+            # precisely the way a teardown outlasts a budget nobody can
+            # enforce. In an executor it costs a worker thread instead, and
+            # every fence above stays live.
+            loop = asyncio.get_running_loop()
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, registry.close_all), timeout=_CLOSE_ALL_BUDGET
+                )
+            except TimeoutError:
+                logger.warning(
+                    "The synchronous tool-server sweep exceeded %.0fs; leaving it to "
+                    "finish in its thread and closing whatever is still attached.",
+                    _CLOSE_ALL_BUDGET,
+                )
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing the tool-server registry failed (non-fatal): %s", exc)
+            # F6: a handle ``aopen`` attached is unwound on the loop that
+            # opened it (``ServerHandle.aclose`` routes it there) rather than
+            # through the synchronous sweep, which skips it. Read from the
+            # registry rather than from the sweep's return value, so a sweep
+            # that was abandoned above still leaves nothing attached. Normally
+            # a no-op: ``JudgeAgent.aclose`` has closed these already, and this
+            # only fires when the judge raised before reaching its own aclose.
+            for handle in registry.still_open():
+                try:
+                    await asyncio.wait_for(handle.aclose(), timeout=_ACLOSE_BUDGET)
+                except TimeoutError:
+                    logger.warning(
+                        "Closing async-opened mcp server '%s' timed out; abandoning.",
+                        handle.name,
+                    )
+                except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                    logger.warning(
+                        "Closing async-opened mcp server '%s' failed (non-fatal): %s",
+                        handle.name,
+                        exc,
+                    )
+
         # The sample's parsed text and the per-job analysis layers. Not a leak
         # on their own — the container dies with the job — but dropping them
         # here means a worker that is *not* recycled starts the next job with a
@@ -389,6 +486,7 @@ class ServiceContainer:
             self._function_summarizer_cache = None
             self._narrative_agent_cache = None
             self._report_composer_cache = None
+            self._server_registry_cache = None
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.

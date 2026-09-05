@@ -1,6 +1,7 @@
 "use client";
 
 import type { CatalogEntry, SettingValue } from "@/types/settings";
+import ServerMapEditor from "./ServerMapEditor";
 import { Widget } from "./widgets";
 
 const APPLIES: Record<string, string> = {
@@ -80,14 +81,23 @@ export default function FieldRow({
       </div>
       <div>
         <div role="group" aria-labelledby={labelId}>
-          <Widget
-            entry={entry}
-            current={current}
-            staged={staged}
-            onChange={onChange}
-            onUnstage={onUnstage}
-            models={models}
-          />
+          {entry.editor === "server_map" ? (
+            <ServerMapEditor
+              entry={entry}
+              current={current}
+              staged={staged}
+              onChange={onChange}
+            />
+          ) : (
+            <Widget
+              entry={entry}
+              current={current}
+              staged={staged}
+              onChange={onChange}
+              onUnstage={onUnstage}
+              models={models}
+            />
+          )}
         </div>
         {error && (
           <div className="text-[11px] text-status-red mt-1" role="alert">
