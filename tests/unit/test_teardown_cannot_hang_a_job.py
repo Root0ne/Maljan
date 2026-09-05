@@ -267,3 +267,142 @@ class TestTheJudgeCloseIsBounded:
         assert toolkit.close_started
         assert handle._toolkit is None
         assert judge.tools == []
+
+
+# ---------------------------------------------------------------------------
+# Fix wave 2: the bound above is worthless when the close is on the wrong loop.
+#
+# The three fences all assume the same thing: that a `wait_for` around the
+# close can end it. A live run on the tool-servers branch proved that
+# assumption false. The job finished at 05:58:44, logged `job:before_teardown`,
+# and ten minutes later still held `j_ongoing=1` with both stdio sidecars
+# running — the worker's 60s fence had fired and been discarded.
+#
+# The mediator judge attaches its tool servers from inside `run_on_agent_loop`
+# (`pipeline/nodes.py`), so `ServerHandle.aopen` runs on the *shared agent
+# loop* and the toolkit's exit stack — an anyio task group, a child process —
+# belongs there. `JudgeAgent.aclose` and `ServiceContainer.aclose` then await
+# `handle.aclose()` on the graph loop. That parks the teardown task on a Future
+# owned by the agent loop, and such a task can be woken by neither loop:
+# `wait_for`'s timeout raises `CancelledError` into a task nothing will
+# resume, so the timeout is silently lost and teardown never returns.
+#
+# `_opened_async` recorded *that* a handle was opened asynchronously; these
+# tests pin the thing that actually matters, *which loop* it was opened on,
+# and that the close is routed back to it.
+# ---------------------------------------------------------------------------
+
+
+def _run_isolated(coro_factory: Any, timeout: float) -> Any:
+    """Run an async scenario on its own loop in a thread, bounded by a watchdog.
+
+    The failure being tested for is a hang, and a hang inside `pytest-asyncio`
+    would take the whole suite with it. The scenario therefore gets its own
+    thread and its own loop; when the join times out the thread is left behind
+    as a daemon and the test fails with a message instead of the run stopping.
+    """
+    import threading
+
+    box: dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            box["result"] = asyncio.run(coro_factory())
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the main thread
+            box["error"] = exc
+
+    thread = threading.Thread(target=target, name="teardown-scenario", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        pytest.fail(f"the teardown scenario did not finish within {timeout}s — it hung")
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
+
+
+class _OwnerLoopBound:
+    """A toolkit whose close only works on the loop that opened it.
+
+    The two behaviours of an `mcp` stdio exit stack that matter here: it is
+    entered on one loop and its anyio cancel scope refuses to unwind anywhere
+    else, and it owns a child process that nothing else will reap. Closing it
+    from a foreign loop parks on a Future owned by the loop that opened it —
+    which is why the real one is uncancellable, and why this one is too.
+    """
+
+    def __init__(self) -> None:
+        self.owner_loop: asyncio.AbstractEventLoop | None = None
+        self.closed_on: asyncio.AbstractEventLoop | None = None
+        self.child_running = False
+
+    async def initialize(self) -> None:
+        self.owner_loop = asyncio.get_running_loop()
+        self.child_running = True
+
+    def get_tools(self) -> list[Any]:
+        return []
+
+    async def cleanup(self) -> None:
+        loop = asyncio.get_running_loop()
+        if loop is not self.owner_loop:
+            # What the live worker did. The wait belongs to the loop that
+            # entered the stack, so nothing on *this* loop completes it; and
+            # `MCPLangChainToolkit.cleanup` catches `BaseException`, so the
+            # cancellation the fence delivers is swallowed rather than ending
+            # the close. Both halves are needed: a fence that fires and a
+            # close that neither finishes nor dies.
+            parked = loop.create_future()
+            while True:
+                try:
+                    await parked
+                except asyncio.CancelledError:
+                    continue
+        self.closed_on = loop
+        self.child_running = False
+
+
+def _handle_with(toolkit: Any) -> Any:
+    """A handle whose toolkit factory yields ``toolkit``, nothing else patched."""
+    from maljan.core.config import MCPServerConfig
+    from maljan.providers.servers import ServerHandle
+
+    handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+    handle._build_toolkit = lambda *a, **kw: toolkit  # type: ignore[method-assign]
+    return handle
+
+
+class TestACrossLoopCloseIsRoutedBack:
+    def test_a_handle_opened_on_another_loop_still_closes(self) -> None:
+        """The live Critical: `aopen` on loop A, `aclose` on loop B.
+
+        Before the fix this never returned and no `wait_for` could end it —
+        exactly what the worker saw. The assertion is not just that `aclose`
+        returns: it is that the close ran on the loop that opened the handle.
+        """
+        import threading
+
+        owner = asyncio.new_event_loop()
+        thread = threading.Thread(target=owner.run_forever, daemon=True, name="owner-loop")
+        thread.start()
+        toolkit = _OwnerLoopBound()
+        handle = _handle_with(toolkit)
+
+        try:
+            # The mediator's shape: the whole attach runs on the other loop.
+            asyncio.run_coroutine_threadsafe(handle.aopen("job-1"), owner).result(timeout=10)
+            assert handle._owner_loop is owner
+            assert toolkit.child_running
+
+            async def scenario() -> None:
+                await asyncio.wait_for(handle.aclose(), timeout=10)
+
+            _run_isolated(scenario, timeout=20)
+        finally:
+            owner.call_soon_threadsafe(owner.stop)
+            thread.join(timeout=5)
+
+        assert toolkit.closed_on is owner, "the close must run on the loop that opened it"
+        assert toolkit.child_running is False
+        assert handle._toolkit is None
+        assert handle._owner_loop is None
