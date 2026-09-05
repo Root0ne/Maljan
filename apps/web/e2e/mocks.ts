@@ -381,6 +381,19 @@ export const MOCK_SETTINGS_SCHEMA = {
           }, order: 0,
           choices_from: null, editor: "rest_sandbox",
         },
+        {
+          key: "core.sandbox.rest.mapping.target_sha256", namespace: "core",
+          path: "sandbox.rest.mapping.target_sha256",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Mapping: target sha256", description: "JSONPath selecting the sample's hash.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: {
+            "core.sandbox.provider": ["rest"],
+            "core.sandbox.rest.report.format": ["generic"],
+          }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
       ],
     },
     // Task B15: the static provider selector, mirroring the sandbox one
@@ -520,6 +533,14 @@ export const MOCK_SETTINGS_VALUES = {
       updated_by: null,
     },
     "core.sandbox.rest.mapping.dns": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.mapping.target_sha256": {
       value: "",
       is_set: null,
       hint: null,
@@ -754,8 +775,14 @@ export async function installApiMocks(
     json(route, {
       target_sha256: "ab",
       channels: {
-        processes: { matched: 2, kept: 1, dropped: 1, sample_rows: [{ pid: 1 }], error: null },
-        dns: { matched: 0, kept: 0, dropped: 0, sample_rows: [], error: null },
+        processes: {
+          matched: 2, kept: 1, dropped: 1, truncated: true,
+          sample_rows: [{ pid: 1 }], error: null,
+        },
+        dns: {
+          matched: 0, kept: 0, dropped: 0, truncated: false, sample_rows: [],
+          error: "JSONPath syntax error at position 3",
+        },
       },
     })
   );

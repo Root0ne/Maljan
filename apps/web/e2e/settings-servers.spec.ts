@@ -50,28 +50,56 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as { changes: Record<string, Record<string, {
-      tools: string[]; agents: string[]; command: string }>> };
+      enabled: boolean; transport: string; tools: string[]; agents: string[]; command: string }>> };
     const sent = body.changes["core.mcp.servers"].r2custom;
+    expect(sent.enabled).toBe(true);
+    expect(sent.transport).toBe("stdio");
     expect(sent.command).toBe("r2mcp");
     expect(sent.tools).toEqual(["open_file", "analyze"]);
     expect(sent.agents).toEqual(["static"]);
   });
 
-  test("a built-in offers disable rather than remove, and stays in the map", async ({
+  test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Configuration" }).click();
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
-    const network = page.locator('[data-server="network"]');
-    await expect(network.getByRole("button", { name: "Disable" })).toBeVisible();
-    await expect(network.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    const intel = page.locator('[data-server="threatintel"]');
+    await expect(intel.getByRole("button", { name: "Disable" })).toBeVisible();
+    await expect(intel.getByRole("button", { name: "Remove" })).toHaveCount(0);
 
-    await network.getByRole("button", { name: "Disable" }).click();
-    await expect(network).toBeVisible();
-    await expect(network.getByLabel("network enabled")).not.toBeChecked();
+    await intel.getByRole("button", { name: "Disable" }).click();
+    await expect(intel).toBeVisible();
+    await expect(intel.getByLabel("threatintel enabled")).not.toBeChecked();
     await expect(page.getByText("1 change pending")).toBeVisible();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, {
+        enabled: boolean; command: string; args: string[]; agents: string[]; tools: string[] | null;
+      }>>;
+    };
+    // Disabling stages the whole map, not a per-server diff, so the built-in
+    // key stays present with everything but `enabled` unchanged from the
+    // fixture — a disabled server is still a configured one.
+    const sent = body.changes["core.mcp.servers"].threatintel;
+    expect(sent.enabled).toBe(false);
+    expect(sent.command).toBe("python");
+    expect(sent.args).toEqual(["threatintel-mcp/server.py"]);
+    expect(sent.agents).toEqual(["judge"]);
+    expect(sent.tools).toBeNull();
   });
 
   test("a token is typed once, never read back, and an untouched one stays untouched", async ({
@@ -117,7 +145,7 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(page.getByText("s3cr3t")).toHaveCount(0);
   });
 
-  test("the REST editor appears with the provider and its preview counts rows", async ({
+  test("the REST editor previews counts, a channel error, a truncation and the target hash", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/settings");
@@ -134,7 +162,16 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.getByLabel("Paste a sample response").fill('{"procs": [{"pid": 1}, {}]}');
     await editor.getByRole("button", { name: "Preview mapping" }).click();
 
-    await expect(editor.locator('[data-channel="processes"]')).toHaveText("2 / 1 / 1");
+    // `processes` comes back truncated at the server's row ceiling.
+    await expect(editor.locator('[data-channel="processes"]')).toHaveText(
+      "2 / 1 / 1 · truncated at 5000"
+    );
+    // `dns` comes back with a channel-local error instead of counts.
+    await expect(editor.locator('[data-channel="dns"]')).toHaveText(
+      "JSONPath syntax error at position 3"
+    );
+    // The target hash row shows the hash the mocked preview matched against.
+    await expect(editor.locator('[data-channel="target_sha256"]')).toHaveText("ab");
     await expect(editor.getByText("sample hash: ab")).toBeVisible();
   });
 
