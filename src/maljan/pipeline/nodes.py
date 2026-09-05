@@ -153,7 +153,6 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     static: StaticAnalysis | None = None,
-    role: str = "",
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -179,12 +178,6 @@ def _augment_static_chunks_with_path(
 
     The chunk objects are immutable dataclasses; rebuild with the same
     chunker so downstream code (token budget, chunk_text) keeps working.
-
-    ``role`` is threaded through from the caller (``container.agent_role``)
-    rather than an agent key, so a clone running under a different key still
-    gets its static-role treatment; it is not read here today but keeps this
-    function's signature aligned with the role-based dispatch in
-    ``make_analyst_node``.
     """
     import json
 
@@ -355,7 +348,7 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(chunks, state, static=_st, role=role)
+                chunks = _augment_static_chunks_with_path(chunks, state, static=_st)
 
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
