@@ -65,6 +65,8 @@ def build_job_settings(
             # An attached report is the strongest statement of intent there is:
             # it names the evidence, so it also names the provider that reads it.
             merged["sandbox.provider"] = "upload"
+        if job_config.get("profile") is not None:
+            merged["agents.profile"] = job_config["profile"]
     return build_settings(merged)
 
 
