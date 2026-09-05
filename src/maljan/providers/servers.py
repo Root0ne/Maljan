@@ -35,6 +35,42 @@ if TYPE_CHECKING:
 # The reason string a failed server contributes to ``degradation_reasons``.
 UNAVAILABLE_REASON = "mcp server '{name}' unavailable"
 
+# How long one toolkit's own cleanup may take before it is abandoned. An
+# ``mcp`` stdio exit stack closes the child's stdin, waits, then escalates
+# SIGTERM -> SIGKILL; 20s is comfortably past that escalation.
+CLEANUP_TIMEOUT = 20.0
+
+# Extra headroom for a cleanup routed to another loop: the owning loop still
+# applies ``CLEANUP_TIMEOUT`` itself, so this only has to outlast the hop.
+CROSS_LOOP_GRACE = 5.0
+
+# How long a child gets between SIGTERM and SIGKILL in the backstop reap.
+CHILD_TERM_GRACE = 2.0
+
+
+def _own_child_pids() -> set[int]:
+    """The pids of this process's direct children, empty where /proc is absent.
+
+    Read rather than tracked, because the ``mcp`` stdio transport owns the
+    subprocess and never hands it out: ``stdio_client`` keeps the anyio
+    ``Process`` in a generator frame. Snapshotting before and after
+    ``initialize`` names the child a handle spawned precisely enough to signal
+    it — and only it — when the transport's own shutdown never gets to run.
+    """
+    import os
+
+    try:
+        children: set[int] = set()
+        for task in os.listdir("/proc/self/task"):
+            try:
+                with open(f"/proc/self/task/{task}/children") as fh:
+                    children.update(int(pid) for pid in fh.read().split())
+            except (OSError, ValueError):
+                continue
+        return children
+    except OSError:
+        return set()
+
 
 def _run_async(coro: Any, label: str) -> None:
     """Run an MCP-client coroutine on the shared agent loop.
@@ -60,9 +96,19 @@ class ServerHandle:
         self._all_tools: list[Any] = []
         self._job_id: str = ""
         # True once ``aopen`` has attached this handle: its exit stack was
-        # wound on whichever loop called it (the judge's graph loop), so it
-        # must be unwound there too (see F6 / ``close``).
+        # wound on whichever loop called it, so it must be unwound there too
+        # (see F6 / ``close``).
         self._opened_async = False
+        # *Which* loop that was. ``_opened_async`` alone was not enough: it
+        # says "not the synchronous path" and the close paths then assumed the
+        # graph loop, but the mediator judge attaches its servers from inside
+        # ``run_on_agent_loop`` (``pipeline/nodes.py``), so the exit stack is
+        # wound on the shared agent loop and the graph loop's ``await`` on it
+        # can never complete or be cancelled. See ``_close_on_owner``.
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        # The child this handle spawned, for the backstop reap when the
+        # transport's own SIGTERM -> SIGKILL shutdown never gets to run.
+        self._child_pids: tuple[int, ...] = ()
 
     @property
     def is_open(self) -> bool:
@@ -186,6 +232,7 @@ class ServerHandle:
 
         toolkit = self._build_toolkit(output_guardrail, max_output_chars, truncation_ledger)
 
+        before = _own_child_pids()
         try:
             _run_async(toolkit.initialize(), label=f"{self.name}-mcp-init")
         except Exception:
@@ -205,6 +252,12 @@ class ServerHandle:
             raise
         self._toolkit = toolkit
         self._opened_async = False
+        # ``_run_async`` hands the coroutine to the shared agent loop, so that
+        # is the loop this toolkit's exit stack was wound on.
+        from maljan.agents.base_agent import _get_agent_loop
+
+        self._owner_loop = _get_agent_loop()
+        self._child_pids = tuple(sorted(_own_child_pids() - before))
         self._all_tools = list(toolkit.get_tools())
         allowed = self.config.tools
         if allowed:
@@ -249,6 +302,10 @@ class ServerHandle:
             int(context.get("max_output_chars", 8000)),
             context.get("truncation_ledger"),
         )
+        # Recorded *before* ``initialize``, so the failure path below unwinds
+        # on the loop that wound the partial attach too.
+        self._owner_loop = asyncio.get_running_loop()
+        before = _own_child_pids()
         try:
             await toolkit.initialize()
         except (Exception, asyncio.CancelledError):
@@ -260,14 +317,18 @@ class ServerHandle:
             raise
         self._toolkit = toolkit
         self._opened_async = True
+        self._child_pids = tuple(sorted(_own_child_pids() - before))
         self._all_tools = list(toolkit.get_tools())
 
     async def _acleanup(self, toolkit: Any) -> None:
-        """Best-effort async close of ``toolkit``. Bounded, and never raises.
+        """Best-effort async close of ``toolkit`` **on the caller's loop**.
 
         Shared by ``aclose`` (a healthy, attached toolkit) and ``aopen``'s own
         exception handler (a toolkit that never made it into ``_toolkit``) —
         one teardown path so a partial attach and a normal close cannot drift.
+
+        The caller is responsible for being on the owning loop:
+        ``_close_on_owner`` is what guarantees that.
         """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
@@ -276,24 +337,132 @@ class ServerHandle:
             # A stdio transport's exit stack waits on the child process, and a
             # child that does not exit waits forever — the 42-minute teardown
             # ``JudgeAgent.aclose`` was written for.
-            await asyncio.wait_for(closer(), timeout=20.0)
+            await asyncio.wait_for(closer(), timeout=CLEANUP_TIMEOUT)
         except TimeoutError:
             logger.warning(
-                "mcp server '%s' cleanup did not finish in 20s; abandoning it. "
-                "The subprocess may outlive this job.",
+                "mcp server '%s' cleanup did not finish in %.0fs; abandoning it "
+                "and reaping the child directly.",
                 self.name,
+                CLEANUP_TIMEOUT,
             )
+            await self._areap_children()
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
 
+    async def _close_on_owner(self, toolkit: Any) -> None:
+        """Unwind ``toolkit`` on the loop that wound it. Bounded, never raises.
+
+        The Critical this exists for: a handle the mediator judge attached ran
+        its ``aopen`` inside ``run_on_agent_loop``, so its exit stack — an
+        anyio task group and, for stdio, a child process — belongs to the
+        shared agent loop, while ``JudgeAgent.aclose`` and
+        ``ServiceContainer.aclose`` await ``handle.aclose()`` on the graph
+        loop. Awaiting that stack from the graph loop parks the teardown task
+        on a Future owned by the agent loop, and such a task cannot be woken
+        *or cancelled* from here: the worker's 60s ``wait_for`` fires, its
+        cancellation is dropped on the floor, and teardown never returns —
+        live evidence, a job that completed at 05:58:44 and still held
+        ``j_ongoing=1`` ten minutes later with both sidecars still running.
+
+        So the close is submitted to the owning loop with
+        ``run_coroutine_threadsafe`` and awaited through ``wrap_future``, which
+        is cross-loop safe in both directions: the wait is a real ``await`` (no
+        busy poll, no blocked loop) and cancelling it cancels the task on the
+        owning loop rather than being silently discarded.
+        """
+        owner = self._owner_loop
+        running = asyncio.get_running_loop()
+        if owner is None or owner is running or owner.is_closed():
+            await self._acleanup(toolkit)
+            return
+        future = asyncio.run_coroutine_threadsafe(self._acleanup(toolkit), owner)
+        try:
+            await asyncio.wait_for(
+                asyncio.wrap_future(future), timeout=CLEANUP_TIMEOUT + CROSS_LOOP_GRACE
+            )
+        except TimeoutError:
+            future.cancel()
+            logger.warning(
+                "mcp server '%s' cleanup did not finish on its own loop in %.0fs; "
+                "abandoning it and reaping the child directly.",
+                self.name,
+                CLEANUP_TIMEOUT + CROSS_LOOP_GRACE,
+            )
+            await self._areap_children()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
+
+    def _live_children(self) -> list[int]:
+        """The pids this handle spawned that are still our children."""
+        live = _own_child_pids()
+        return [pid for pid in self._child_pids if pid in live]
+
+    def _signal_children(self, pids: list[int], sig: int) -> None:
+        """Send ``sig`` to recorded pids only, never to a name or a pattern."""
+        import contextlib
+        import os
+
+        for pid in pids:
+            with contextlib.suppress(OSError):
+                os.kill(pid, sig)
+
+    def _kill_survivors(self, pids: list[int]) -> None:
+        """SIGKILL whichever of ``pids`` sat through the SIGTERM."""
+        import signal
+
+        survivors = [pid for pid in pids if pid in _own_child_pids()]
+        if not survivors:
+            return
+        self._signal_children(survivors, signal.SIGKILL)
+        logger.warning(
+            "mcp server '%s' child(ren) %s ignored SIGTERM; killed.",
+            self.name,
+            ", ".join(str(pid) for pid in survivors),
+        )
+
+    async def _areap_children(self) -> None:
+        """Terminate, then kill, the child this handle spawned. Never raises.
+
+        The last fence. ``mcp``'s stdio transport escalates SIGTERM -> SIGKILL
+        itself, but only inside the exit stack — the code that does not run
+        when a cleanup is abandoned. Without this the child outlives the job
+        and, with ``max_jobs = 1``, accumulates one sidecar per analysis.
+        """
+        import signal
+
+        pids = self._live_children()
+        if not pids:
+            return
+        self._signal_children(pids, signal.SIGTERM)
+        await asyncio.sleep(CHILD_TERM_GRACE)
+        self._kill_survivors(pids)
+
+    def _reap_children(self) -> None:
+        """``_areap_children`` for the synchronous close path."""
+        import signal
+        import time
+
+        pids = self._live_children()
+        if not pids:
+            return
+        self._signal_children(pids, signal.SIGTERM)
+        time.sleep(CHILD_TERM_GRACE)
+        self._kill_survivors(pids)
+
     async def aclose(self) -> None:
-        """Close on the caller's own loop. Bounded, and never raises."""
+        """Close on the loop that opened this handle. Bounded, and never raises."""
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         self._opened_async = False
         if toolkit is None:
+            self._owner_loop = None
+            self._child_pids = ()
             return
-        await self._acleanup(toolkit)
+        try:
+            await self._close_on_owner(toolkit)
+        finally:
+            self._owner_loop = None
+            self._child_pids = ()
 
     def all_tool_names(self) -> list[str]:
         """Every tool the server advertises, allow-list ignored."""
@@ -316,14 +485,44 @@ class ServerHandle:
         return [t for t in self._all_tools if str(getattr(t, "name", "")) in keep]
 
     def _teardown(self, toolkit: Any) -> None:
-        """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises."""
+        """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises.
+
+        Same rule as ``_close_on_owner``: the exit stack unwinds on the loop
+        that wound it. For this path that is the shared agent loop, because
+        ``open`` runs ``initialize`` through ``_run_async`` — but the owner is
+        read rather than assumed, so a handle that reaches here having been
+        opened elsewhere is routed rather than corrupted.
+        """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
             return
-        try:
-            from maljan.agents.base_agent import _run_coro_blocking
+        from maljan.agents.base_agent import _get_agent_loop, _run_coro_blocking
 
-            _run_coro_blocking(closer(), hard_timeout=20.0, label=f"{self.name}-mcp-close")
+        owner = self._owner_loop
+        budget = CLEANUP_TIMEOUT + CROSS_LOOP_GRACE
+        try:
+            if owner is None or owner is _get_agent_loop():
+                _run_coro_blocking(closer(), hard_timeout=budget, label=f"{self.name}-mcp-close")
+            else:
+                # Blocking on a loop that is running in *this* thread would
+                # deadlock; ``close`` never does that (it skips async-opened
+                # handles), and if some future caller tries, say so and let
+                # the async path reclaim it.
+                closer().close()
+                logger.warning(
+                    "mcp server '%s' was opened on another loop; the synchronous "
+                    "close cannot unwind it, use aclose().",
+                    self.name,
+                )
+                return
+        except TimeoutError:
+            logger.warning(
+                "mcp server '%s' cleanup did not finish in %.0fs; abandoning it "
+                "and reaping the child directly.",
+                self.name,
+                budget,
+            )
+            self._reap_children()
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
 
@@ -349,8 +548,14 @@ class ServerHandle:
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         if toolkit is None:
+            self._owner_loop = None
+            self._child_pids = ()
             return
-        self._teardown(toolkit)
+        try:
+            self._teardown(toolkit)
+        finally:
+            self._owner_loop = None
+            self._child_pids = ()
 
 
 class ServerRegistry:
