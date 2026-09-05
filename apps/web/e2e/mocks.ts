@@ -334,6 +334,53 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null,
         },
+        // Task B17/B18: the REST sandbox's own fields, grouped and rendered by
+        // `RestSandboxEditor` — `editor: "rest_sandbox"` is what routes them
+        // there instead of the plain `FieldRow` the entries above use. The two
+        // mapping rows are additionally gated on the report format: a
+        // structured `cape2`/`triage` report has nothing to map.
+        {
+          key: "core.sandbox.rest.base_url", namespace: "core", path: "sandbox.rest.base_url",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "REST sandbox base URL", description: "Base URL of the REST-flavoured sandbox.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.report.format", namespace: "core", path: "sandbox.rest.report.format",
+          type: "enum", default: "generic", nullable: false, choices: ["generic", "cape2"],
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Report format", description: "Whether the report needs the mapping below.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.mapping.processes", namespace: "core", path: "sandbox.rest.mapping.processes",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Mapping: processes", description: "JSONPath selecting the process rows.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: {
+            "core.sandbox.provider": ["rest"],
+            "core.sandbox.rest.report.format": ["generic"],
+          }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.mapping.dns", namespace: "core", path: "sandbox.rest.mapping.dns",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Mapping: dns", description: "JSONPath selecting the DNS rows.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: {
+            "core.sandbox.provider": ["rest"],
+            "core.sandbox.rest.report.format": ["generic"],
+          }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
       ],
     },
     // Task B15: the static provider selector, mirroring the sandbox one
@@ -442,6 +489,38 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.static.provider": {
       value: "ghidra",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.base_url": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.report.format": {
+      value: "generic",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.mapping.processes": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.mapping.dns": {
+      value: "",
       is_set: null,
       hint: null,
       source: "default",
@@ -667,6 +746,17 @@ export async function installApiMocks(
     json(route, {
       ok: true, latency_ms: 12, detail: "3 tools: open_file, analyze, list_imports",
       models: null, tools: ["open_file", "analyze", "list_imports"],
+    })
+  );
+  // Task B18: what `RestSandboxEditor`'s "Preview mapping" button calls —
+  // one channel with rows, one with none, one carrying a channel-local error.
+  await page.route("**/api/v1/settings/sandbox-rest/preview", (route) =>
+    json(route, {
+      target_sha256: "ab",
+      channels: {
+        processes: { matched: 2, kept: 1, dropped: 1, sample_rows: [{ pid: 1 }], error: null },
+        dns: { matched: 0, kept: 0, dropped: 0, sample_rows: [], error: null },
+      },
     })
   );
   await page.route("**/api/v1/settings", (route) =>
