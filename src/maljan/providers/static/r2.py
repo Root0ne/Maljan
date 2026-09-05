@@ -117,13 +117,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
         r2 = cfg.static.r2
         handle = ServerHandle(
             "r2",
-            MCPServerConfig(
-                enabled=r2.enabled,
-                transport="stdio",
-                command=r2.binary_path,
-                args=r2.args,
-                env=r2.env,
-            ),
+            MCPServerConfig.model_validate({**r2.model_dump(), "command": r2.binary_path}),
         )
         provider = cls(
             handle,

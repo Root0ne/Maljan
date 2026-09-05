@@ -22,13 +22,15 @@ def _module():
 
 
 def test_every_moved_leaf_is_named_and_points_into_the_custom_server():
-    renames = _module().KEY_RENAMES
+    mod = _module()
+    renames = mod.KEY_RENAMES
     assert renames["core.static.generic.command"] == "core.mcp.servers.custom.command"
-    assert renames["core.static.generic.auth_token"] == "core.mcp.servers.custom.auth_token"
     assert renames["core.static.generic.tool_selection"] == (
         "core.mcp.servers.custom.tool_selection"
     )
-    assert len(renames) == 9, "the nine MCPServerConfig leaves sub-project A stored"
+    assert len(renames) == 8, "the eight folded leaves; auth_token is renamed, not folded"
+    assert mod.LEGACY_TOKEN_KEY == "core.static.generic.auth_token"
+    assert mod.NEW_TOKEN_KEY == "core.mcp.servers.custom.auth_token"
 
 
 def test_the_reference_row_is_written_alongside_the_move():
@@ -72,6 +74,15 @@ def _rows(conn):
 
     result = conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall()
     return {k: json.loads(v) for k, v in result}
+
+
+def _is_secret(conn, key):
+    import sqlalchemy as sa
+
+    row = conn.execute(
+        sa.text("SELECT is_secret FROM runtime_settings WHERE key = :k"), {"k": key}
+    ).fetchone()
+    return bool(row[0]) if row is not None else None
 
 
 def test_the_upgrade_folds_the_nine_rows_into_one_json_document_and_is_idempotent(caplog):
@@ -124,13 +135,16 @@ def test_the_upgrade_folds_the_nine_rows_into_one_json_document_and_is_idempoten
     assert "core.static.generic.server" not in reverted
 
 
-def test_a_secret_auth_token_row_is_dropped_not_folded_in_clear(caplog):
-    """Exercises the ``is_secret`` branch of ``upgrade()``.
+def test_an_encrypted_auth_token_row_is_renamed_not_dropped(caplog):
+    """Exercises the ``auth_token`` branch of ``upgrade()`` (F2 regression).
 
     The stored ``auth_token`` is Fernet-encrypted and marked ``is_secret`` --
     exactly the operator data sub-project A produced when the field was
     saved through the UI. It must never land inside the plain
-    ``core.mcp.servers`` document, and the drop is logged by key only.
+    ``core.mcp.servers`` document (a non-secret row could not decrypt it
+    anyway), but it must also survive the upgrade: it moves, value and
+    ``is_secret`` untouched, to its own per-server token row rather than
+    being deleted.
     """
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
@@ -142,7 +156,7 @@ def test_a_secret_auth_token_row_is_dropped_not_folded_in_clear(caplog):
     conn.commit()
 
     ctx = MigrationContext.configure(conn)
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         with Operations.context(ctx):
             mod.upgrade()
 
@@ -151,8 +165,16 @@ def test_a_secret_auth_token_row_is_dropped_not_folded_in_clear(caplog):
     assert server["command"] == "my-mcp"
     assert "auth_token" not in server
     assert "core.static.generic.auth_token" not in rows
-    assert "core.static.generic.auth_token" in caplog.text
+    assert rows["core.mcp.servers.custom.auth_token"] == "enc:v1:SECRET"
+    assert _is_secret(conn, "core.mcp.servers.custom.auth_token") is True
     assert "SECRET" not in caplog.text
+
+    with Operations.context(ctx):
+        mod.downgrade()
+    reverted = _rows(conn)
+    assert reverted["core.static.generic.auth_token"] == "enc:v1:SECRET"
+    assert _is_secret(conn, "core.static.generic.auth_token") is True
+    assert "core.mcp.servers.custom.auth_token" not in reverted
 
 
 def test_an_unrelated_server_already_in_the_map_is_left_byte_for_byte_alone():

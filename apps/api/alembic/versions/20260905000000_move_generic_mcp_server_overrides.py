@@ -17,10 +17,13 @@ The legacy ``auth_token`` row is Fernet-encrypted and marked ``is_secret``
 is not a secret entry, so writing the encrypted payload into it would leave a
 ciphertext this row can never decrypt (the registry has no encryption key of
 its own — only ``is_secret`` rows do) and the settings API refuses plain
-writes to a secret's stored shape either way. The token is therefore dropped
-rather than carried across; a one-line warning names the key and Task 14 gives
-the custom server its own per-server encrypted token row. Until then the
-operator re-enters it.
+writes to a secret's stored shape either way. Task 14 landed on this same
+branch and gives the custom server its own per-server encrypted token row at
+``core.mcp.servers.custom.auth_token`` (``server_token_key("custom")``) — the
+same Fernet box and the same ``is_secret`` flag. The legacy row is therefore
+renamed in place to that key rather than dropped: its ``value`` and
+``is_secret`` travel across untouched, so an operator's existing bearer token
+keeps working after the upgrade with no re-entry step.
 
 Idempotent by construction: a run that finds no legacy row writes nothing.
 
@@ -50,8 +53,13 @@ SERVER_KEY = "custom"
 MAP_KEY = "core.mcp.servers"
 REFERENCE_KEY = "core.static.generic.server"
 REFERENCE_VALUE = SERVER_KEY
+TOKEN_LEAF = "auth_token"
+LEGACY_TOKEN_KEY = f"core.static.generic.{TOKEN_LEAF}"
+NEW_TOKEN_KEY = f"core.mcp.servers.{SERVER_KEY}.{TOKEN_LEAF}"
 
-# The nine leaves an MCPServerConfig block stores.
+# The eight leaves that fold into the ``core.mcp.servers`` JSON document.
+# ``auth_token`` is handled separately: it keeps its own encrypted row (see
+# module docstring) and is renamed, not folded.
 _LEAVES = (
     "enabled",
     "transport",
@@ -59,7 +67,6 @@ _LEAVES = (
     "args",
     "env",
     "url",
-    "auth_token",
     "tool_selection",
     "use_all_tools",
 )
@@ -68,21 +75,33 @@ KEY_RENAMES: dict[str, str] = {
     f"core.static.generic.{leaf}": f"core.mcp.servers.{SERVER_KEY}.{leaf}" for leaf in _LEAVES
 }
 
-
-def _jsonb(conn: sa.engine.Connection, placeholder: str) -> str:
-    """Wrap a bind parameter for a JSONB column, only where the dialect has one.
-
-    Postgres needs the explicit cast so a text-typed bind parameter is not
-    mistaken for the ``json``/``jsonb`` overload ambiguity on ``INSERT``. The
-    throwaway SQLite this revision is exercised against in tests stores
-    ``value`` as plain ``TEXT`` and has no ``JSONB`` type at all — casting to
-    it there does not fail loudly, it silently coerces the text to ``0``
-    (SQLite's affinity rule for a non-numeric cast target it does not
-    recognise), so the cast is applied only on a real Postgres connection.
-    """
-    if conn.dialect.name == "postgresql":
-        return f"CAST({placeholder} AS JSONB)"
-    return placeholder
+# Postgres INSERT ... ON CONFLICT for a JSONB column needs the value cast so a
+# text-typed bind parameter is not mistaken for the json/jsonb overload
+# ambiguity; the throwaway SQLite this revision is exercised against in tests
+# stores ``value`` as plain TEXT and has no JSONB type, so the cast is a
+# literal per-dialect statement rather than something built by interpolating
+# a value into the SQL text.
+_UPSERT_JSON_PG = sa.text(
+    "INSERT INTO runtime_settings (key, value, is_secret) "
+    "VALUES (:k, CAST(:v AS JSONB), false) "
+    "ON CONFLICT (key) DO UPDATE SET value = CAST(:v AS JSONB)"
+)
+_UPSERT_JSON_OTHER = sa.text(
+    "INSERT INTO runtime_settings (key, value, is_secret) "
+    "VALUES (:k, :v, false) "
+    "ON CONFLICT (key) DO UPDATE SET value = :v"
+)
+_INSERT_IF_ABSENT_PG = sa.text(
+    "INSERT INTO runtime_settings (key, value, is_secret) "
+    "VALUES (:k, CAST(:v AS JSONB), false) "
+    "ON CONFLICT (key) DO NOTHING"
+)
+_INSERT_IF_ABSENT_OTHER = sa.text(
+    "INSERT INTO runtime_settings (key, value, is_secret) "
+    "VALUES (:k, :v, false) "
+    "ON CONFLICT (key) DO NOTHING"
+)
+_RENAME_KEY = sa.text("UPDATE runtime_settings SET key = :new_key WHERE key = :old_key")
 
 
 def _load_map(conn: sa.engine.Connection) -> dict:
@@ -96,15 +115,8 @@ def _load_map(conn: sa.engine.Connection) -> dict:
 
 
 def _store_map(conn: sa.engine.Connection, servers: dict) -> None:
-    value_expr = _jsonb(conn, ":v")
-    conn.execute(
-        sa.text(
-            f"INSERT INTO runtime_settings (key, value, is_secret) "
-            f"VALUES (:k, {value_expr}, false) "
-            f"ON CONFLICT (key) DO UPDATE SET value = {value_expr}"
-        ),
-        {"k": MAP_KEY, "v": json.dumps(servers)},
-    )
+    statement = _UPSERT_JSON_PG if conn.dialect.name == "postgresql" else _UPSERT_JSON_OTHER
+    conn.execute(statement, {"k": MAP_KEY, "v": json.dumps(servers)})
 
 
 def upgrade() -> None:
@@ -117,36 +129,32 @@ def upgrade() -> None:
         ).fetchone()
         if row is not None:
             rows.append(row)
-    if not rows:
+    token_row = conn.execute(
+        sa.text("SELECT key, value, is_secret FROM runtime_settings WHERE key = :k"),
+        {"k": LEGACY_TOKEN_KEY},
+    ).fetchone()
+    if not rows and token_row is None:
         return
-    servers = _load_map(conn)
-    entry = dict(servers.get(SERVER_KEY) or {})
-    for key, value, is_secret in rows:
-        leaf = key.rsplit(".", 1)[1]
-        if leaf == "auth_token" and is_secret:
-            # An encrypted token cannot be folded into the registry's single,
-            # non-secret JSON row in clear: leave it out and let the operator
-            # re-enter it (Task 14 gives the custom server its own encrypted
-            # token row). Never log the value, only the key.
-            logger.warning(
-                "runtime_settings: dropping secret %s; the custom server has no "
-                "encrypted token storage yet, re-enter it after upgrading",
-                key,
-            )
-            continue
-        entry[leaf] = json.loads(value) if isinstance(value, str) else value
-    entry.setdefault("agents", ["static"])
-    servers[SERVER_KEY] = entry
-    _store_map(conn, servers)
-    ref_expr = _jsonb(conn, ":v")
-    conn.execute(
-        sa.text(
-            f"INSERT INTO runtime_settings (key, value, is_secret) "
-            f"VALUES (:k, {ref_expr}, false) "
-            f"ON CONFLICT (key) DO NOTHING"
-        ),
-        {"k": REFERENCE_KEY, "v": json.dumps(REFERENCE_VALUE)},
-    )
+    if rows:
+        servers = _load_map(conn)
+        entry = dict(servers.get(SERVER_KEY) or {})
+        for key, value, _is_secret in rows:
+            leaf = key.rsplit(".", 1)[1]
+            entry[leaf] = json.loads(value) if isinstance(value, str) else value
+        entry.setdefault("agents", ["static"])
+        servers[SERVER_KEY] = entry
+        _store_map(conn, servers)
+        insert_if_absent = (
+            _INSERT_IF_ABSENT_PG if conn.dialect.name == "postgresql" else _INSERT_IF_ABSENT_OTHER
+        )
+        conn.execute(insert_if_absent, {"k": REFERENCE_KEY, "v": json.dumps(REFERENCE_VALUE)})
+    if token_row is not None:
+        # The encrypted value and its ``is_secret`` flag travel across
+        # untouched — only the key changes — so the operator's bearer token
+        # keeps decrypting under ``core.mcp.servers.custom.auth_token``
+        # exactly as it did under its legacy name.
+        conn.execute(_RENAME_KEY, {"old_key": LEGACY_TOKEN_KEY, "new_key": NEW_TOKEN_KEY})
+        logger.info("runtime_settings: renamed key %r to %r", LEGACY_TOKEN_KEY, NEW_TOKEN_KEY)
     for key in KEY_RENAMES:
         conn.execute(sa.text("DELETE FROM runtime_settings WHERE key = :k"), {"k": key})
     logger.info("runtime_settings: moved %d static.generic override(s) into %s", len(rows), MAP_KEY)
@@ -156,19 +164,16 @@ def downgrade() -> None:
     conn = op.get_bind()
     servers = _load_map(conn)
     entry = servers.pop(SERVER_KEY, None)
-    if entry is None:
-        return
-    leaf_expr = _jsonb(conn, ":v")
-    for leaf in _LEAVES:
-        if leaf not in entry:
-            continue
-        conn.execute(
-            sa.text(
-                f"INSERT INTO runtime_settings (key, value, is_secret) "
-                f"VALUES (:k, {leaf_expr}, false) "
-                f"ON CONFLICT (key) DO UPDATE SET value = {leaf_expr}"
-            ),
-            {"k": f"core.static.generic.{leaf}", "v": json.dumps(entry[leaf])},
-        )
-    _store_map(conn, servers)
-    conn.execute(sa.text("DELETE FROM runtime_settings WHERE key = :k"), {"k": REFERENCE_KEY})
+    if entry is not None:
+        upsert = _UPSERT_JSON_PG if conn.dialect.name == "postgresql" else _UPSERT_JSON_OTHER
+        for leaf in _LEAVES:
+            if leaf not in entry:
+                continue
+            conn.execute(upsert, {"k": f"core.static.generic.{leaf}", "v": json.dumps(entry[leaf])})
+        _store_map(conn, servers)
+        conn.execute(sa.text("DELETE FROM runtime_settings WHERE key = :k"), {"k": REFERENCE_KEY})
+    token_row = conn.execute(
+        sa.text("SELECT key FROM runtime_settings WHERE key = :k"), {"k": NEW_TOKEN_KEY}
+    ).fetchone()
+    if token_row is not None:
+        conn.execute(_RENAME_KEY, {"old_key": NEW_TOKEN_KEY, "new_key": LEGACY_TOKEN_KEY})
