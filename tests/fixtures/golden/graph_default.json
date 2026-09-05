@@ -1,0 +1,74 @@
+{
+  "parallel": {
+    "analysts": [
+      "static",
+      "dynamic",
+      "network"
+    ],
+    "conditional": {
+      "negotiation": {
+        "judge": "judge",
+        "revision": "revision"
+      }
+    },
+    "edges": [
+      "__start__->dynamic_analyst",
+      "__start__->network_analyst",
+      "__start__->static_analyst",
+      "dynamic_analyst->negotiation",
+      "judge->report",
+      "negotiation->judge",
+      "negotiation->revision",
+      "network_analyst->negotiation",
+      "report->__end__",
+      "revision->negotiation",
+      "static_analyst->negotiation"
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "dynamic_analyst",
+      "judge",
+      "negotiation",
+      "network_analyst",
+      "report",
+      "revision",
+      "static_analyst"
+    ]
+  },
+  "sequential": {
+    "analysts": [
+      "static",
+      "dynamic",
+      "network"
+    ],
+    "conditional": {
+      "negotiation": {
+        "judge": "judge",
+        "revision": "revision"
+      }
+    },
+    "edges": [
+      "__start__->static_analyst",
+      "dynamic_analyst->network_analyst",
+      "judge->report",
+      "negotiation->judge",
+      "negotiation->revision",
+      "network_analyst->negotiation",
+      "report->__end__",
+      "revision->negotiation",
+      "static_analyst->dynamic_analyst"
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "dynamic_analyst",
+      "judge",
+      "negotiation",
+      "network_analyst",
+      "report",
+      "revision",
+      "static_analyst"
+    ]
+  }
+}
