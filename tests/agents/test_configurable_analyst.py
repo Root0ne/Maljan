@@ -139,3 +139,18 @@ def test_the_agent_reports_its_resolved_tools_without_re_resolving(monkeypatch):
 
 def test_the_name_is_the_definition_key():
     assert _agent().name == "strings"
+
+
+def test_a_genuine_answer_starting_with_warn_is_not_mistaken_for_a_degradation():
+    """The degradation signal is explicit, not a sniffed text prefix.
+
+    An operator's prompt could easily make the model open its answer with the
+    word "WARN" — a caution about a false positive, say. That is real analysis
+    and must not be discarded to a zero-claim ISR just because it starts with
+    the same words the loop's own failure report uses.
+    """
+    text = "[WARN] found it\n" + _ISR_TEXT
+    agent = _agent(llm=_llm(text))
+    isr = agent.analyze_isr("EVIDENCE-BLOB")
+    assert isr.claims and isr.claims[0].technique_id == "T1027"
+    assert agent.degradation_reasons == []

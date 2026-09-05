@@ -18,6 +18,8 @@ this morning.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.base_agent import BaseAnalyst, describe_exception, revision_messages
@@ -38,6 +40,20 @@ _ISR_FORMAT_INSTRUCTION = (
     "TECHNIQUE: <T-ID or NONE>\n"
     "---\n\n"
 )
+
+# Prefix on the *report text* shown when a run degraded — cosmetic only. Never
+# inspected: whether a run degraded is carried by ``_Run.degraded``, not by
+# sniffing this prefix, so a custom agent's own model output starting with the
+# same words is never mistaken for a degradation notice.
+_WARN_PREFIX = "[WARN]"
+
+
+@dataclass(frozen=True)
+class _Run:
+    """What one loop invocation produced, plus whether it actually ran."""
+
+    text: str
+    degraded: bool
 
 
 class ConfigurableAnalyst(BaseAnalyst):
@@ -72,20 +88,26 @@ class ConfigurableAnalyst(BaseAnalyst):
     # Text interface
     # ------------------------------------------------------------------
 
-    def _run(self, prompt_messages: list[tuple[str, str]], what: str) -> str:
-        """Run the loop and turn any failure into a report the pipeline can read."""
+    def _run(self, prompt_messages: list[tuple[str, str]], what: str) -> _Run:
+        """Run the loop and turn any failure into a report the pipeline can read.
+
+        ``degraded`` is the signal callers act on; the returned text is only
+        ever shown, never inspected — a custom agent's genuine model output is
+        free to start with the same words as the warning prefix without being
+        mistaken for one.
+        """
         try:
-            return str(self.execute_tool_loop(prompt_messages))
+            return _Run(text=str(self.execute_tool_loop(prompt_messages)), degraded=False)
         except Exception as exc:  # noqa: BLE001 — a custom analyst never fails a job
             reason = f"agent '{self.name}': {describe_exception(exc)}"
             self.logger.warning("%s failed during %s: %s", self.name, what, reason)
             if reason not in self.degradation_reasons:
                 self.degradation_reasons.append(reason)
-            return f"[WARN] {reason}"
+            return _Run(text=f"{_WARN_PREFIX} {reason}", degraded=True)
 
     def analyze(self, data: str) -> str:
         self.logger.info("Executing '%s' analysis (%d tools).", self.name, len(self.tools))
-        return self._run([("system", self._resolved.prompt), ("human", data)], "analysis")
+        return self._run([("system", self._resolved.prompt), ("human", data)], "analysis").text
 
     def revise(
         self,
@@ -105,22 +127,24 @@ class ConfigurableAnalyst(BaseAnalyst):
                 isr=False,
             ),
             "revision",
-        )
+        ).text
 
     # ------------------------------------------------------------------
     # ISR interface
     # ------------------------------------------------------------------
 
-    def _isr_for(self, text: str, revision_round: int) -> AgentISR:
-        """Wrap ``text`` into an ISR — zero-claim when ``_run`` degraded.
+    def _isr_for(self, run: _Run, revision_round: int) -> AgentISR:
+        """Wrap a run's text into an ISR — zero-claim when the run degraded.
 
-        A ``[WARN]`` report is a degradation notice, not analysis; passing it
-        through ``_text_to_isr``'s free-text sentence splitter would mint a
-        fake 0.5-confidence claim out of the warning sentence itself. Short-
-        circuiting here keeps the same rule ``_text_to_isr`` already applies to
-        its own placeholder text: a failure is zero claims, never a claim.
+        A degraded run's text is a warning, not analysis; passing it through
+        ``_text_to_isr``'s free-text sentence splitter would mint a fake
+        0.5-confidence claim out of the warning sentence itself. Short-
+        circuiting on ``run.degraded`` — never on the text — keeps the same
+        rule ``_text_to_isr`` already applies to its own placeholder text: a
+        failure is zero claims, never a claim, and a genuine finding is never
+        mistaken for one because of how it happens to start.
         """
-        if text.startswith("[WARN]"):
+        if run.degraded:
             return AgentISR(
                 agent_id=self.name,
                 domain=self._infer_domain(),
@@ -128,18 +152,18 @@ class ConfigurableAnalyst(BaseAnalyst):
                 dissent_items=[],
                 revision_round=revision_round,
             )
-        return self._text_to_isr(text, revision_round=revision_round)
+        return self._text_to_isr(run.text, revision_round=revision_round)
 
     def analyze_isr(self, data: str) -> AgentISR:
         self.logger.info("Executing '%s' ISR analysis...", self.name)
-        text = self._run(
+        run = self._run(
             [
                 ("system", self._resolved.prompt),
                 ("human", _ISR_FORMAT_INSTRUCTION + data),
             ],
             "ISR analysis",
         )
-        return self._isr_for(text, revision_round=0)
+        return self._isr_for(run, revision_round=0)
 
     def revise_isr(
         self,
@@ -150,7 +174,7 @@ class ConfigurableAnalyst(BaseAnalyst):
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
         self.logger.info("Executing '%s' ISR revision (round %d)...", self.name, revision_round)
-        text = self._run(
+        run = self._run(
             revision_messages(
                 self._resolved.prompt,
                 original_data,
@@ -162,4 +186,4 @@ class ConfigurableAnalyst(BaseAnalyst):
             ),
             "ISR revision",
         )
-        return text, self._isr_for(text, revision_round=revision_round)
+        return run.text, self._isr_for(run, revision_round=revision_round)
