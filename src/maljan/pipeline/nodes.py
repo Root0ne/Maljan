@@ -74,7 +74,7 @@ _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGN
 _MAX_SYNTH_CHUNK_CHARS = 40_000
 
 
-def _is_placeholder_only(chunks: list, agent_name: str = "") -> bool:
+def _is_placeholder_only(chunks: list, role: str = "") -> bool:
     """True when the loader produced nothing but its "no data" sentence.
 
     The graceful no-data path below was unreachable, and had been since it was
@@ -99,7 +99,7 @@ def _is_placeholder_only(chunks: list, agent_name: str = "") -> bool:
       silently delete the primary analyst on exactly the runs that most need
       whatever it can still say.
     """
-    if agent_name == "static" or len(chunks) != 1:
+    if role == "static" or len(chunks) != 1:
         return False
     content = getattr(chunks[0], "content", "") or ""
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
@@ -151,7 +151,9 @@ def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
 def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
+    *,
     static: StaticAnalysis | None = None,
+    role: str = "",
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -177,6 +179,12 @@ def _augment_static_chunks_with_path(
 
     The chunk objects are immutable dataclasses; rebuild with the same
     chunker so downstream code (token budget, chunk_text) keeps working.
+
+    ``role`` is threaded through from the caller (``container.agent_role``)
+    rather than an agent key, so a clone running under a different key still
+    gets its static-role treatment; it is not read here today but keeps this
+    function's signature aligned with the role-based dispatch in
+    ``make_analyst_node``.
     """
     import json
 
@@ -315,6 +323,7 @@ def make_analyst_node(
 
         try:
             agent = container.get_agent(agent_name)
+            role = container.agent_role(agent_name)
 
             sandbox_report = state.get("sandbox_report")
             if sandbox_report:
@@ -332,7 +341,7 @@ def make_analyst_node(
             # ``load_program(file=...)``. Inject it into the chunk's JSON
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
-            if agent_name == "static":
+            if role == "static":
                 # Ghidra-path fix (2026-07-12): compute the deterministic PE
                 # summary ONCE and reuse it for both the synthesized head
                 # chunk and the dynamic-tool-selection categories below.
@@ -346,14 +355,22 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(chunks, state, static=_st)
+                chunks = _augment_static_chunks_with_path(chunks, state, static=_st, role=role)
 
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
-                # a stale path from the previous sample must be cleared.
+                # a stale path from the previous sample must be cleared. The
+                # mirror is looked up by this agent's own static provider id
+                # so two static analysts on two providers each get their own
+                # mirror path (Task 9 fills in the per-provider dict; until
+                # then the fallback below is the only entry).
                 agent._analysis_file_path = (  # type: ignore[attr-defined]
-                    state.get("static_sample_path") or None
+                    (state.get("static_sample_paths") or {}).get(  # type: ignore[attr-defined]
+                        agent._resolved.static_provider_id
+                    )
+                    or state.get("static_sample_path")
+                    or None
                 )
 
                 # 2026-07 round 3: hand the static analyst the sample's capability
@@ -369,7 +386,7 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static category hint skipped: %s", _e)
 
-            if not chunks or _is_placeholder_only(chunks, agent_name):
+            if not chunks or _is_placeholder_only(chunks, role):
                 # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
                 # found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
@@ -434,7 +451,7 @@ def make_analyst_node(
                 # for large static binaries, feed only the behavior-relevant
                 # function chunks instead of every chunk. Default top_k=0 keeps
                 # the full linear path (zero behaviour change).
-                if agent_name == "static":
+                if role == "static":
                     _rag_k = int(
                         getattr(container.config.preprocessing, "static_function_rag_top_k", 0) or 0
                     )
@@ -586,7 +603,7 @@ def _revision_input_is_absent(
             exc,
         )
         return False
-    return not chunks or _is_placeholder_only(chunks, agent_name)
+    return not chunks or _is_placeholder_only(chunks, container.agent_role(agent_name))
 
 
 def _build_revision_context(
@@ -653,7 +670,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         iteration = state.get("iteration_count", 0)
-        agent_names = container.agent_registry.list_agents()
+        agent_names = container.analyst_keys()
 
         revised = state.get("revised_reports") or {}
         original = state.get("reports") or {}
@@ -800,7 +817,7 @@ def make_revision_node(container: ServiceContainer) -> Any:
     """Factory: creates the revision node where all agents revise concurrently."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
-        agent_names = container.agent_registry.list_agents()
+        agent_names = container.analyst_keys()
         iteration = state.get("iteration_count", 0)
 
         history = state.get("discussion_history") or []
@@ -956,7 +973,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             original = state.get("reports") or {}
             reports = {
                 name: revised.get(name) or original.get(name, "")
-                for name in container.agent_registry.list_agents()
+                for name in container.analyst_keys()
             }
 
             attck_validator = None

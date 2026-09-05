@@ -25,6 +25,10 @@ def fake_container() -> Any:
     """Minimal ServiceContainer stub with reporting enabled."""
     container = MagicMock()
     container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
+
+    container.analyst_keys.return_value = ["static", "dynamic", "network"]
+
+    container.agent_role.side_effect = lambda n: n
     container.is_mock = True
     container.config.reporting.enabled = True
     container.config.llm.parallel_analysts = True

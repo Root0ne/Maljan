@@ -523,8 +523,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     filename=f"{row.id}.json",
                 )
 
-            # Announce which agents are about to run so the frontend can show them
-            registered_agents = app.container.agent_registry.list_agents()
+            # Announce which analysts are about to run so the frontend can show
+            # them. The active profile, not the class registry: a job that runs
+            # four analysts must not announce three.
+            registered_agents = app.container.analyst_keys()
             await _publish_event(
                 redis_conn,
                 job_id,

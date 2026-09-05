@@ -24,11 +24,6 @@ SEARCHED = [ROOT / "src" / "maljan", ROOT / "apps" / "api" / "app"]
 # the registry itself plus the parity test that compares it with the seeds.
 TOPOLOGY_SOURCES: set[str] = {
     "src/maljan/agents/registry.py",
-    "src/maljan/pipeline/builder.py",
-    "src/maljan/pipeline/nodes.py",
-    "src/maljan/app.py",
-    "src/maljan/cli.py",
-    "apps/api/app/worker/analysis_worker.py",
 }
 
 # Where an agent's *key* may be compared against a literal built-in name.
@@ -36,7 +31,6 @@ TOPOLOGY_SOURCES: set[str] = {
 # once a clone of ``static`` can run under another key (Task 7).
 NAME_BRANCHES: set[str] = {
     "src/maljan/core/container.py",
-    "src/maljan/pipeline/nodes.py",
 }
 
 _LIST_AGENTS = re.compile(r"\blist_agents\s*\(")

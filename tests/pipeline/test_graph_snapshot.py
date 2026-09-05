@@ -83,3 +83,63 @@ def test_the_negotiation_branch_still_has_exactly_two_destinations(golden):
     assert golden["sequential"]["conditional"] == {
         "negotiation": {"revision": "revision", "judge": "judge"}
     }
+
+
+def test_a_custom_profile_produces_its_own_nodes_and_chain():
+    """Four analysts, one of them generic, in the order the profile lists them."""
+    cfg = Settings(
+        _env_file=None,
+        agents={
+            "definitions": {
+                "static_r2": {"role": "static", "static_provider": "r2"},
+                "strings": {"role": "generic", "prompt": "read strings"},
+            },
+            "profiles": {"wide": {"analysts": ["static", "static_r2", "network", "strings"]}},
+            "profile": "wide",
+        },
+    )
+    cfg.llm.parallel_analysts = False
+    shape = compiled_shape(ServiceContainer(cfg, mock=True))
+    assert shape["analysts"] == ["static", "static_r2", "network", "strings"]
+    assert shape["nodes"] == sorted(
+        [
+            "__start__",
+            "__end__",
+            "static_analyst",
+            "static_r2_analyst",
+            "network_analyst",
+            "strings_analyst",
+            "negotiation",
+            "revision",
+            "judge",
+            "report",
+        ]
+    )
+    assert "static_r2_analyst->network_analyst" in shape["edges"]
+    assert "strings_analyst->negotiation" in shape["edges"]
+    assert shape["conditional"] == {"negotiation": {"revision": "revision", "judge": "judge"}}
+
+
+def test_a_custom_profile_fans_out_from_start_in_parallel_mode():
+    cfg = Settings(
+        _env_file=None,
+        agents={"profiles": {"lean": {"analysts": ["network", "static"]}}, "profile": "lean"},
+    )
+    cfg.llm.parallel_analysts = True
+    shape = compiled_shape(ServiceContainer(cfg, mock=True))
+    assert "__start__->network_analyst" in shape["edges"]
+    assert "__start__->static_analyst" in shape["edges"]
+    assert "network_analyst->negotiation" in shape["edges"]
+    assert "dynamic_analyst" not in " ".join(shape["nodes"])
+
+
+def test_a_profile_of_one_analyst_still_reaches_negotiation():
+    cfg = Settings(
+        _env_file=None,
+        agents={"profiles": {"solo": {"analysts": ["network"]}}, "profile": "solo"},
+    )
+    cfg.llm.parallel_analysts = False
+    shape = compiled_shape(ServiceContainer(cfg, mock=True))
+    assert shape["analysts"] == ["network"]
+    assert "__start__->network_analyst" in shape["edges"]
+    assert "network_analyst->negotiation" in shape["edges"]

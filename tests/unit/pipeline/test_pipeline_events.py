@@ -53,6 +53,10 @@ def _container(sink: Any, agents: list[str] | None = None) -> Any:
     container.is_mock = False
     container.event_sink = sink
     container.agent_registry.list_agents.return_value = agents or ["network"]
+
+    container.analyst_keys.return_value = agents or ["network"]
+
+    container.agent_role.side_effect = lambda n: n
     return container
 
 

@@ -283,7 +283,7 @@ class MaljanApp:
         logger.info("=" * 60)
         logger.info("Sample: %s (%s)", file_hash, file_name or "unnamed")
         logger.info("Mode: %s", "MOCK" if self.container.is_mock else self.config.llm.provider)
-        logger.info("Registered agents: %s", self.container.agent_registry.list_agents())
+        logger.info("Analysts: %s", self.container.analyst_keys())
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
 

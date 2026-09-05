@@ -34,6 +34,10 @@ def fake_container() -> Any:
     container = MagicMock()
     # Three analyst names matches production today (static + dynamic + network).
     container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
+
+    container.analyst_keys.return_value = ["static", "dynamic", "network"]
+
+    container.agent_role.side_effect = lambda n: n
     container.is_mock = True
     container.config.reporting.enabled = False  # keep the topology compact
     container.config.llm.parallel_analysts = True
@@ -95,6 +99,10 @@ def sequential_container() -> Any:
     """``fake_container`` clone with ``parallel_analysts = False``."""
     container = MagicMock()
     container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
+
+    container.analyst_keys.return_value = ["static", "dynamic", "network"]
+
+    container.agent_role.side_effect = lambda n: n
     container.is_mock = True
     container.config.reporting.enabled = False
     container.config.llm.parallel_analysts = False
@@ -171,6 +179,10 @@ def _revision_container(parallel: bool, call_order: list[str]) -> Any:
 
     container = MagicMock()
     container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
+
+    container.analyst_keys.return_value = ["static", "dynamic", "network"]
+
+    container.agent_role.side_effect = lambda n: n
     container.is_mock = False
     container.config.llm.parallel_analysts = parallel
     container.load_chunked.side_effect = RuntimeError("force load_data fallback")
