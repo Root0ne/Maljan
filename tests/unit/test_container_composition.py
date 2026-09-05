@@ -157,3 +157,27 @@ def test_a_clone_gets_the_sandbox_slice_its_role_gets():
 
     assert [c.content for c in clone] == [c.content for c in built_in]
     assert "behavior" not in clone[0].content
+
+
+def test_a_hyphenated_key_loads_through_the_no_sandbox_path(tmp_path):
+    """F2: the key rule every layer accepts is the rule the loader accepts.
+
+    ``AGENT_KEY_PATTERN`` permits a hyphen, so a job with no sandbox report
+    used to fail that analyst with a path-safety error the operator could not
+    connect to the key they chose.
+    """
+    from maljan.loaders.file_loader import FileDataLoader, UnsafePathError
+
+    container = _container(
+        definitions={"static-r2": {"role": "static", "static_provider": "r2"}},
+        profiles={"two": {"analysts": ["static", "static-r2"]}},
+        profile="two",
+    )
+    container.loader = FileDataLoader(samples_dir=str(tmp_path))
+
+    chunks = container.load_chunked("abc123", "static-r2")
+    assert chunks and "abc123" in chunks[0].content
+
+    for unsafe in ("../etc", "a/b", "a\\b", "..", ""):
+        with pytest.raises(UnsafePathError):
+            container.load_chunked("abc123", unsafe)
