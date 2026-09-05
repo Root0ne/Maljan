@@ -53,6 +53,7 @@ export default function GroupHeader({
                     latency_ms: 0,
                     detail: String(e),
                     models: null,
+                    tools: null,
                   }));
                   setResults((s) => ({ ...s, [name]: res }));
                 }}

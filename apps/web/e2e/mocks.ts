@@ -181,14 +181,18 @@ export const MOCK_API_KEY = {
 
 /**
  * Matches `apps/api/app/schemas/settings.py::SchemaResponse` /
- * `apps/web/src/types/settings.ts::SettingsSchema`. Three groups: three field
+ * `apps/web/src/types/settings.ts::SettingsSchema`. Five groups: three field
  * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
  * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
  * — shown only for a `"ui"`-sourced value — has something to contrast
  * against the `"default"`/`"env"` rows that must not show it, and a `list`
  * field defaulting to `[]` for `ListWidget` coverage), one secret in
- * "providers", and "sandbox" — a provider selector (`order: -1`) plus two
- * `applies_when`-gated fields, covering conditional visibility.
+ * "providers", "sandbox" and "static" — a provider selector each
+ * (`order: -1`, `choices_from` naming the registry it was resolved from),
+ * "sandbox" also carrying two `applies_when`-gated fields for conditional
+ * visibility, and "mcp" — the server-map leaf (`editor: "server_map"`) plus
+ * the `generic_mcp` static provider's server picker (`choices_from:
+ * "mcp_servers"`).
  */
 export const MOCK_SETTINGS_SCHEMA = {
   secrets_available: true,
@@ -217,6 +221,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           probe: null,
           applies_when: null,
           order: 0,
+          choices_from: null,
+          editor: null,
         },
         {
           key: "core.negotiation.retry_delay",
@@ -238,6 +244,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           probe: null,
           applies_when: null,
           order: 0,
+          choices_from: null,
+          editor: null,
         },
         {
           key: "core.negotiation.blocked_hosts",
@@ -259,6 +267,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           probe: null,
           applies_when: null,
           order: 0,
+          choices_from: null,
+          editor: null,
         },
       ],
     },
@@ -286,6 +296,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           probe: "llm",
           applies_when: null,
           order: 0,
+          choices_from: null,
+          editor: null,
         },
       ],
     },
@@ -298,11 +310,11 @@ export const MOCK_SETTINGS_SCHEMA = {
         {
           key: "core.sandbox.provider", namespace: "core", path: "sandbox.provider",
           type: "enum", default: "mock", nullable: false,
-          choices: ["mock", "cape2", "upload", "triage"],
+          choices: ["mock", "cape2", "upload", "triage", "rest"],
           minimum: null, maximum: null, secret: false, group: "sandbox",
           title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1,
+          applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null,
         },
         {
           key: "core.sandbox.cape2.base_url", namespace: "core", path: "sandbox.cape2.base_url",
@@ -311,6 +323,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "CAPEv2 base URL", description: "Base URL of the CAPEv2 REST API.",
           applies: "next_job", editable: true, reason: null, probe: "cape2",
           applies_when: { "core.sandbox.provider": ["cape2"] }, order: 0,
+          choices_from: null, editor: null,
         },
         {
           key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
@@ -319,6 +332,50 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Triage API base URL", description: "Hatching Triage cloud API root.",
           applies: "next_job", editable: true, reason: null, probe: "triage",
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null,
+        },
+      ],
+    },
+    // Task B15: the static provider selector, mirroring the sandbox one
+    // above — `choices_from` names where the API resolved the list from.
+    {
+      key: "static",
+      title: "Static provider",
+      entries: [
+        {
+          key: "core.static.provider", namespace: "core", path: "static.provider",
+          type: "enum", default: "ghidra", nullable: false,
+          choices: ["ghidra", "r2", "capa_yara", "generic_mcp", "none"],
+          minimum: null, maximum: null, secret: false, group: "static",
+          title: "Static provider", description: "Which tool the static analyst attaches.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "static_providers", editor: null,
+        },
+      ],
+    },
+    // Task B15/B16: the server map is one leaf with its own editor; its
+    // choices come resolved from the API.
+    {
+      key: "mcp",
+      title: "Tool servers (MCP)",
+      entries: [
+        {
+          key: "core.mcp.servers", namespace: "core", path: "mcp.servers",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "mcp",
+          title: "Tool servers",
+          description: "Every MCP server Maljan can attach, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "server_map",
+        },
+        {
+          key: "core.static.generic.server", namespace: "core", path: "static.generic.server",
+          type: "str", default: "", nullable: false, choices: ["", "network", "threatintel"],
+          minimum: null, maximum: null, secret: false, group: "mcp",
+          title: "Custom MCP server",
+          description: "Which registry entry the generic_mcp static provider drives.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: "mcp_servers", editor: null,
         },
       ],
     },
@@ -377,6 +434,46 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.sandbox.triage.base_url": {
       value: "https://tria.ge/api/v0",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.static.provider": {
+      value: "ghidra",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.mcp.servers": {
+      value: {
+        network: {
+          enabled: true, transport: "stdio", command: "python",
+          args: ["network-mcp/server.py"], env: {}, cwd: "network-mcp",
+          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          tool_selection: "dynamic", use_all_tools: false, tools: null,
+          agents: ["network"], label: "Network MCP",
+        },
+        threatintel: {
+          enabled: true, transport: "stdio", command: "python",
+          args: ["threatintel-mcp/server.py"], env: {}, cwd: "threatintel-mcp",
+          env_allow: ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"], url: "",
+          auth_token: "**********", auth_token_source: "env",
+          tool_selection: "dynamic", use_all_tools: false, tools: null,
+          agents: ["judge"], label: "Threat intel MCP",
+        },
+      },
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.static.generic.server": {
+      value: "",
       is_set: null,
       hint: null,
       source: "default",
@@ -562,7 +659,15 @@ export async function installApiMocks(
     })
   );
   await page.route("**/api/v1/settings/test/*", (route) =>
-    json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null })
+    json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null, tools: null })
+  );
+  // Task B15: registered after the generic `test/*` handler above, so it
+  // wins for the one probe route that carries a query string.
+  await page.route("**/api/v1/settings/test/mcp?**", (route) =>
+    json(route, {
+      ok: true, latency_ms: 12, detail: "3 tools: open_file, analyze, list_imports",
+      models: null, tools: ["open_file", "analyze", "list_imports"],
+    })
   );
   await page.route("**/api/v1/settings", (route) =>
     route.request().method() === "PATCH"
