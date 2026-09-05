@@ -15,10 +15,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
+
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
 
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
@@ -693,6 +696,111 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
         ) from exc
 
 
+# The negotiation-round instructions the ISR revision path appends to whatever
+# system prompt its agent carries. Lifted verbatim out of
+# ``NetworkAnalyst.revise_isr``; ``tests/agents/test_revision_prompt_golden.py``
+# holds it to the byte.
+_REVISION_ISR_FRAMING = (
+    "You are in a negotiation round. You MUST:\n"
+    "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
+    "2. Revise your own claims based on new evidence.\n"
+    "3. If you have NO disputes, write 'DISPUTES: NONE' to signal convergence."
+)
+
+
+def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessage]:
+    """``(role, text)`` pairs as LangChain messages, with no templating step.
+
+    The same construction ``execute_tool_loop`` does inline, and for the same
+    reason: a ``ChatPromptTemplate`` would read a literal ``{...}`` inside a
+    report — JSON, a decompiled struct — as an f-string variable and raise on
+    content the pipeline routinely produces. An unknown role is dropped rather
+    than guessed at.
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    built: list[BaseMessage] = []
+    for role, content in prompt_messages:
+        if role == "system":
+            built.append(SystemMessage(content=content))
+        elif role == "human":
+            built.append(HumanMessage(content=content))
+    return built
+
+
+def revision_messages(
+    system_prompt: str,
+    original_data: str,
+    own_report: str,
+    peer_reports: dict[str, str],
+    mediator_feedback: str,
+    *,
+    isr: bool = False,
+    revision_round: int = 1,
+) -> list[tuple[str, str]]:
+    """The revision prompt every analyst sends, as ``(role, text)`` pairs.
+
+    Extracted from ``NetworkAnalyst`` so the configurable analyst sends the
+    same framing rather than a second copy of it that drifts. The two paths it
+    covers are the two that exist: ``isr=False`` is the plain text revision,
+    which passes ``system_prompt`` through untouched; ``isr=True`` is the
+    negotiation round, which appends ``_REVISION_ISR_FRAMING`` and asks for the
+    CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE plus DISPUTES shape the ISR parsers
+    read. Everything here — the labels, the order of the blocks, the closing
+    sentence — is byte-for-byte what the network analyst sent before.
+
+    ``revision_round`` is not interpolated into the prompt (it never was); it
+    is carried so a caller's log line and the returned ISR agree about which
+    round produced which text.
+    """
+    logger.debug(
+        "Building revision prompt (isr=%s, round=%d, peers=%d).",
+        isr,
+        revision_round,
+        len(peer_reports),
+    )
+    if isr:
+        peer_section = (
+            "\n\n".join(
+                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
+        return [
+            ("system", system_prompt + "\n\n" + _REVISION_ISR_FRAMING),
+            (
+                "human",
+                f"YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+                f"PEER REPORTS:\n{peer_section}\n\n"
+                f"MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
+                f"RAW DATA:\n{original_data}\n\n"
+                "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+                "followed by a DISPUTES section listing peer claims you reject.\n"
+                "Example:\n"
+                "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
+                "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n",
+            ),
+        ]
+
+    peer_section = (
+        "\n\n".join(
+            f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
+        )
+        or "No peer reports available."
+    )
+    return [
+        ("system", system_prompt),
+        (
+            "human",
+            f"YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+            f"PEER ANALYST REPORTS:\n{peer_section}\n\n"
+            f"MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
+            f"ORIGINAL RAW DATA:\n{original_data}\n\n"
+            "Revise your analysis addressing the contradictions above.",
+        ),
+    ]
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
@@ -891,7 +999,7 @@ class BaseAnalyst(ABC):
         analyst is killed at the configured ``react_agent_timeout`` budget
         regardless of which path it takes.
         """
-        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
 
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
