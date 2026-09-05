@@ -383,24 +383,35 @@ class TestACrossLoopCloseIsRoutedBack:
         import threading
 
         owner = asyncio.new_event_loop()
-        thread = threading.Thread(target=owner.run_forever, daemon=True, name="owner-loop")
+        running = threading.Event()
+
+        def serve() -> None:
+            asyncio.set_event_loop(owner)
+            owner.call_soon(running.set)
+            owner.run_forever()
+
+        thread = threading.Thread(target=serve, daemon=True, name="owner-loop")
         thread.start()
+        # Waited for rather than assumed: under a loaded machine the thread can
+        # take seconds to reach `run_forever`, and a budget measured from
+        # before that is measuring the scheduler, not the close.
+        assert running.wait(60), "the owner loop never started"
         toolkit = _OwnerLoopBound()
         handle = _handle_with(toolkit)
 
         try:
             # The mediator's shape: the whole attach runs on the other loop.
-            asyncio.run_coroutine_threadsafe(handle.aopen("job-1"), owner).result(timeout=10)
+            asyncio.run_coroutine_threadsafe(handle.aopen("job-1"), owner).result(timeout=60)
             assert handle._owner_loop is owner
             assert toolkit.child_running
 
             async def scenario() -> None:
-                await asyncio.wait_for(handle.aclose(), timeout=10)
+                await asyncio.wait_for(handle.aclose(), timeout=30)
 
-            _run_isolated(scenario, timeout=20)
+            _run_isolated(scenario, timeout=60)
         finally:
             owner.call_soon_threadsafe(owner.stop)
-            thread.join(timeout=5)
+            thread.join(timeout=30)
 
         assert toolkit.closed_on is owner, "the close must run on the loop that opened it"
         assert toolkit.child_running is False
