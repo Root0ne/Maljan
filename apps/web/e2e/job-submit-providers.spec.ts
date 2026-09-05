@@ -189,4 +189,53 @@ test.describe("Job submission with providers", () => {
     await page.waitForTimeout(500);
     await expect(page.getByText("cape2 · task 1111")).not.toBeVisible();
   });
+
+  test("the profile select offers the settings profiles and sends the chosen one", async ({
+    authenticatedPage: page,
+  }) => {
+    const bodies: unknown[] = [];
+    await page.route("**/api/v1/jobs", (r) => {
+      if (r.request().method() === "POST") {
+        bodies.push(r.request().postDataJSON());
+        return r.fulfill({ status: 201, json: { id: "job-3", status: "pending" } });
+      }
+      return r.fallback();
+    });
+
+    await page.goto("/samples");
+    await page.getByRole("button", { name: "Analyze" }).first().click();
+
+    const profile = page.locator("#agent-profile");
+    await expect(profile.locator("option")).toHaveText([
+      "Inherit from settings", "default", "lean",
+    ]);
+    await profile.selectOption("lean");
+    await page.getByRole("button", { name: "Start analysis" }).click();
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ config: { profile: "lean" } });
+  });
+
+  test("leaving the profile alone sends no profile key at all", async ({
+    authenticatedPage: page,
+  }) => {
+    const bodies: unknown[] = [];
+    await page.route("**/api/v1/jobs", (r) => {
+      if (r.request().method() === "POST") {
+        bodies.push(r.request().postDataJSON());
+        return r.fulfill({ status: 201, json: { id: "job-4", status: "pending" } });
+      }
+      return r.fallback();
+    });
+
+    await page.goto("/samples");
+    await page.getByRole("button", { name: "Analyze" }).first().click();
+    await page.getByLabel("Static provider").selectOption("capa_yara");
+    await page.getByRole("button", { name: "Start analysis" }).click();
+
+    expect(bodies[0]).toMatchObject({ config: { static_provider: "capa_yara" } });
+    expect((bodies[0] as { config: Record<string, unknown> }).config).not.toHaveProperty(
+      "profile"
+    );
+  });
 });

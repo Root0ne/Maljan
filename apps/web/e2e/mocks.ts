@@ -642,6 +642,15 @@ export const MOCK_SETTINGS_VALUES = {
           tool_selection: "dynamic", use_all_tools: false, tools: null,
           agents: ["judge"], label: "Threat intel MCP",
         },
+        // Task 16: a non-built-in server, so the agent-definitions editor has
+        // a server to reference from a generic analyst's tool list.
+        strings: {
+          enabled: true, transport: "stdio", command: "strings-mcp",
+          args: [], env: {}, cwd: "", env_allow: [], url: "",
+          auth_token: "", auth_token_source: "default",
+          tool_selection: "dynamic", use_all_tools: false,
+          tools: ["extract_strings"], agents: [], label: "Strings MCP",
+        },
       },
       is_set: null,
       hint: null,
@@ -883,20 +892,36 @@ export async function installApiMocks(
   );
   // Task B15: registered after the generic `test/*` handler above, so it
   // wins for the one probe route that carries a query string.
-  await page.route("**/api/v1/settings/test/mcp?**", (route) =>
-    json(route, {
-      ok: true, latency_ms: 12, detail: "3 tools: open_file, analyze, list_imports",
-      models: null, tools: ["open_file", "analyze", "list_imports"],
-    })
-  );
+  //
+  // Task 16: the `network` server's manifest matches its real tools
+  // (`extract_dns`, `read_pcap_summary`, see `network-mcp/server.py`) — the
+  // agent-definitions editor's "list tools then check one" flow depends on
+  // this list actually containing the tool it checks.
+  await page.route("**/api/v1/settings/test/mcp?**", (route) => {
+    const server = new URL(route.request().url()).searchParams.get("server");
+    const tools =
+      server === "network" ? ["extract_dns", "read_pcap_summary"] : ["open_file", "analyze", "list_imports"];
+    return json(route, {
+      ok: true, latency_ms: 12, detail: `${tools.length} tools: ${tools.join(", ")}`,
+      models: null, tools,
+    });
+  });
   // Task C12: the agent probe, resolving a definition without an LLM call.
   await page.route("**/api/v1/settings/test/agent?**", (route) => {
     // Task C14 fix: the probe returns the full resolved prompt, not just its
     // length — operator text, not a secret (spec §11) — so a built-in card
-    // can show it read-only and a clone can seed its copy from it.
+    // can show it read-only and a clone can seed its copy from it. The tools
+    // in `detail`/`tools` below are the network analyst's real ones
+    // (`extract_dns`, `read_pcap_summary`), so this prompt describes that
+    // role too — used by the "network" card's Resolve button.
     const prompt =
-      "You are the static analyst. Inspect the binary's headers, imports " +
-      "and embedded strings, and report structural findings.";
+      "You are the network analyst. Inspect captured traffic, DNS queries " +
+      "and contacted hosts for indicators of command-and-control, data " +
+      "exfiltration or malicious downloads, and report only findings the " +
+      "extracted network evidence actually backs, citing the specific " +
+      "packets, hosts or domains involved rather than speculating about " +
+      "traffic the capture does not show. Stay provisional about each " +
+      "claim it cannot confirm.";
     return json(route, {
       ok: true, latency_ms: 8, detail: "2 tools: extract_dns, read_pcap_summary",
       models: null, tools: ["extract_dns", "read_pcap_summary"],

@@ -111,7 +111,15 @@ export function useSettings() {
         // The server validates the whole merged set, so a stored override
         // that stopped validating (a later deploy narrowed its field) blocks
         // every save and blames a row the user never touched. Name it.
-        const foreign = Object.keys(e.errors).filter((k) => !(k in pending));
+        //
+        // A composite leaf (agent definitions, the server map, ...) stages
+        // as one pending key but the server can point at a field nested
+        // inside it (`core.agents.definitions.<key>.prompt`) — that still
+        // belongs to a key the user just edited, not a stored override, so
+        // it is matched by prefix rather than exact key.
+        const foreign = Object.keys(e.errors).filter(
+          (k) => !Object.keys(pending).some((p) => k === p || k.startsWith(`${p}.`))
+        );
         if (foreign.length > 0) {
           setActionError(
             `Stored override${foreign.length > 1 ? "s" : ""} no longer valid: ${foreign.join(

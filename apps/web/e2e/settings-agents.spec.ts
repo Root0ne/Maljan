@@ -134,4 +134,162 @@ test.describe("agent definitions and profiles", () => {
       "static", "dynamic", "network",
     ]);
   });
+
+  test("a generic analyst is created with a prompt and one server tool", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await page.getByLabel("new agent name").fill("strings");
+    await page.getByRole("button", { name: "Add agent" }).click();
+
+    const card = page.locator('[data-agent="strings"]');
+    await expect(card).toBeVisible();
+    await card.getByLabel("strings label").fill("Strings reviewer");
+    await card.getByLabel("strings prompt").fill("Review the extracted strings for IOCs.");
+    await card.getByRole("button", { name: "List tools" }).first().click();
+    await card.getByLabel("strings tool network.extract_dns").check();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({
+          json: { applied: ["core.agents.definitions"], applies: { next_job: 1 } },
+        });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, {
+        role: string; prompt: string; tools: { kind: string; server: string; name: string }[];
+      }>>;
+    };
+    const sent = body.changes["core.agents.definitions"].strings;
+    expect(sent.role).toBe("generic");
+    expect(sent.prompt).toBe("Review the extracted strings for IOCs.");
+    expect(sent.tools).toEqual([{ kind: "mcp", server: "network", name: "extract_dns" }]);
+  });
+
+  test("a generic analyst can be given its static provider's tools", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await page.getByLabel("new agent name").fill("decomp");
+    await page.getByRole("button", { name: "Add agent" }).click();
+    const card = page.locator('[data-agent="decomp"]');
+    await card.getByLabel("decomp prompt").fill("Read the decompiled code.");
+    await card.getByLabel("decomp static provider").selectOption("r2");
+    await card.getByLabel("decomp provider tools").check();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: [], applies: {} } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, {
+        static_provider: string; tools: { kind: string }[];
+      }>>;
+    };
+    const sent = body.changes["core.agents.definitions"].decomp;
+    expect(sent.static_provider).toBe("r2");
+    expect(sent.tools).toEqual([{ kind: "provider", server: null, name: null }]);
+  });
+
+  test("Resolve reports the prompt size and the tools without starting a job", async ({
+    authenticatedPage: page,
+  }) => {
+    const jobPosts: unknown[] = [];
+    await page.route("**/api/v1/jobs", (r) => {
+      if (r.request().method() === "POST") jobPosts.push(r.request().postDataJSON());
+      return r.fallback();
+    });
+
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    const card = page.locator('[data-agent="network"]');
+    await card.getByRole("button", { name: "Resolve" }).click();
+    await expect(card.getByText("2 tools: extract_dns, read_pcap_summary")).toBeVisible();
+    await expect(card.getByText("prompt 412 chars")).toBeVisible();
+    expect(jobPosts).toHaveLength(0);
+  });
+
+  test("a built-in definition offers only its enabled switch", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    const card = page.locator('[data-agent="dynamic"]');
+    await expect(card.getByLabel("dynamic label")).toBeDisabled();
+    await expect(card.getByLabel("dynamic prompt")).toBeDisabled();
+    await expect(card.getByLabel("dynamic enabled")).toBeEnabled();
+    await expect(card.getByRole("button", { name: "Remove" })).toHaveCount(0);
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: [], applies: {} } });
+      }
+      return r.fallback();
+    });
+    await card.getByLabel("dynamic enabled").uncheck();
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, { enabled: boolean; prompt: string | null }>>;
+    };
+    const sent = body.changes["core.agents.definitions"].dynamic;
+    expect(sent.enabled).toBe(false);
+    expect(sent.prompt).toBeNull();
+  });
+
+  test("a validation error lands on the card that caused it", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await page.getByLabel("new agent name").fill("nameless");
+    await page.getByRole("button", { name: "Add agent" }).click();
+
+    // 422 body shape per `app.api.v1.settings`: a top-level `errors` map
+    // keyed by dotted path (`tests/api/test_settings_routes.py`), not
+    // wrapped in a `detail` envelope — `api.patchSettings` reads `body.errors`.
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        return r.fulfill({
+          status: 422,
+          json: {
+            errors: { "core.agents.definitions.nameless.prompt": "a generic agent needs a prompt" },
+          },
+        });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+    await expect(page.getByText("a generic agent needs a prompt")).toBeVisible();
+  });
 });

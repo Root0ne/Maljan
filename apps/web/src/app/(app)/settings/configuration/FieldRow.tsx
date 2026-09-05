@@ -40,6 +40,7 @@ export default function FieldRow({
   definitions,
   activeProfile,
   onSetActive,
+  errors,
 }: {
   entry: CatalogEntry;
   current?: SettingValue;
@@ -67,6 +68,11 @@ export default function FieldRow({
   onChange: (v: unknown) => void;
   onUnstage: () => void;
   onReset: () => void;
+  /** The full validation-error map, keyed by dotted path — not just this
+   *  row's own key — so the agent-definitions editor can find a nested
+   *  error like `core.agents.definitions.<key>.prompt` and land it on the
+   *  card that caused it rather than a leaf-wide banner. */
+  errors?: Record<string, string>;
 }) {
   const dirty = staged !== undefined;
   const source = current?.source ?? "default";
@@ -136,6 +142,7 @@ export default function FieldRow({
               llmAgentsStaged={llmAgentsStaged}
               llmGlobal={llmGlobal ?? { providerChoices: null, providerValue: null, modelValue: null }}
               onChangeLlmAgents={onChangeLlmAgents ?? (() => undefined)}
+              errors={errors ?? {}}
               onChange={onChange}
             />
           ) : entry.editor === "profiles" ? (

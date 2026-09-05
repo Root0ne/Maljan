@@ -87,6 +87,7 @@ export default function AgentDefinitionsEditor({
   llmAgentsStaged,
   llmGlobal,
   onChangeLlmAgents,
+  errors,
   onChange,
 }: {
   entry: CatalogEntry;
@@ -103,6 +104,12 @@ export default function AgentDefinitionsEditor({
   llmAgentsStaged: unknown;
   llmGlobal: LlmGlobalFallback;
   onChangeLlmAgents: (value: Record<string, AgentLLMOverride>) => void;
+  /** Validation errors from the last failed apply, keyed by the server's
+   *  full dotted path (e.g. `core.agents.definitions.nameless.prompt`) —
+   *  finer-grained than this leaf's own `entry.key`, so a bad field on one
+   *  agent lands on that agent's card instead of a leaf-wide banner nobody
+   *  can trace back to the offending definition. */
+  errors: Record<string, string>;
   onChange: (value: Record<string, AgentDefinitionEntry>) => void;
 }) {
   const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<
@@ -275,6 +282,9 @@ export default function AgentDefinitionsEditor({
           result && result !== "running"
             ? ((result.details as AgentProbeDetails | null) ?? null)
             : null;
+        const cardError = Object.entries(errors).find(([k]) =>
+          k.startsWith(`${entry.key}.${key}.`)
+        )?.[1];
         return (
           <div key={key} className="border border-border rounded p-3" data-agent={key}>
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -534,6 +544,11 @@ export default function AgentDefinitionsEditor({
               >
                 {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
                 {details ? ` · prompt ${details.prompt_chars} chars` : ""}
+              </p>
+            )}
+            {cardError && (
+              <p className="text-[11px] text-status-red mt-2" role="alert">
+                {cardError}
               </p>
             )}
           </div>

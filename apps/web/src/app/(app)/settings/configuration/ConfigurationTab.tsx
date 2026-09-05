@@ -296,6 +296,7 @@ export default function ConfigurationTab() {
                           current={s.values[e.key]}
                           staged={s.pending[e.key]}
                           error={s.errors[e.key]}
+                          errors={s.errors}
                           models={e.probe === "llm" ? models : undefined}
                           servers={
                             (s.pending["core.mcp.servers"] ??
