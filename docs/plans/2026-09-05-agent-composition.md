@@ -1441,10 +1441,11 @@ Expected: PASS.
       prompt: str
       tools: list[BaseTool]
       static_provider_id: str
-      llm: Any
+      llm: Any | None
       degradation_reasons: tuple[str, ...] = ()
 
   def builtin_prompt(role: str, container: Any, static_provider_id: str) -> str
+  def _agent_llm(container: Any, key: str) -> Any  # None on a mock container
   def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent
   async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent
   def active_profile(settings: Settings) -> ProfileDefinition
@@ -1954,7 +1955,7 @@ class ResolvedAgent:
     prompt: str
     tools: list["BaseTool"]
     static_provider_id: str
-    llm: Any
+    llm: Any | None
     degradation_reasons: tuple[str, ...] = ()
 
 
@@ -2070,6 +2071,18 @@ def _mcp_refs(definition: AgentDefinition) -> list[ToolRef]:
     return [ref for ref in definition.tools if ref.kind == "mcp"]
 
 
+def _agent_llm(container: Any, key: str) -> Any:
+    """The agent's model, or None on a mock container.
+
+    A mock container (``ServiceContainer(settings, mock=True)``) builds no LLM
+    registry and ``get_agent_llm`` raises there; the agent probe resolves on
+    such a container on purpose, so resolution never asks it for a model.
+    """
+    if getattr(container, "mock", False):
+        return None
+    return container.get_agent_llm(key)
+
+
 def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent:
     """Everything agent ``key`` gets under this container's settings."""
     settings: Settings = container.config
@@ -2096,7 +2109,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         prompt=prompt,
         tools=_dedupe(tools),
         static_provider_id=provider_id,
-        llm=container.get_agent_llm(key),
+        llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
     )
 
@@ -2132,7 +2145,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         prompt=prompt,
         tools=_dedupe(tools),
         static_provider_id=provider_id,
-        llm=container.get_agent_llm(key),
+        llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
     )
 ```
@@ -2714,7 +2727,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.base_agent import BaseAnalyst, revision_messages
 from maljan.agents.composition import ResolvedAgent
-from maljan.core.exceptions import describe_exception
+from maljan.agents.base_agent import describe_exception
 from maljan.schemas.isr_models import AgentISR
 
 # Appended to the agent's own prompt on the ISR paths. The operator writes what
@@ -4908,7 +4921,7 @@ class _Exploding:
 @pytest.fixture(autouse=True)
 def _no_llm(monkeypatch):
     monkeypatch.setattr(
-        "maljan.providers.llm_registry.LLMProviderRegistry",
+        "maljan.llm.registry.LLMProviderRegistry",
         lambda *a, **k: _Exploding(),
         raising=False,
     )
