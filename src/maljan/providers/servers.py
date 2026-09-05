@@ -775,25 +775,53 @@ class ServerRegistry:
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
-    def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: set[str]) -> int:
-        """Append ``handle``'s tools to ``tools``, renaming any name collision.
+    def merge_tools(
+        self,
+        server: str,
+        incoming: list[BaseTool],
+        tools: list[BaseTool],
+        seen: dict[str, str],
+    ) -> int:
+        """Append ``incoming`` to ``tools`` under the collision rule.
+
+        ``seen`` maps a claimed tool name to the server that claimed it, which
+        is what lets the rule span an agent's whole tool set rather than one
+        ``tools_for`` call: a name another server already claimed is taken by
+        this server as ``<server>__<tool>``, while the *same* server's same
+        tool arriving twice — bound by ``agents`` and named again by a
+        ``ToolRef`` — collapses to one copy. Nothing is dropped for a
+        collision; only an exact repeat of one server's own tool is.
 
         Returns how many tools were renamed, so the caller can log it once
-        per handle instead of per tool.
+        per server instead of per tool.
         """
         renamed = 0
-        for tool in handle.tools():
+        for tool in incoming:
             name = str(getattr(tool, "name", ""))
-            if name in seen:
-                tool = tool.model_copy(update={"name": f"{handle.name}__{name}"})
-                name = str(tool.name)
+            owner = seen.get(name)
+            if owner == server:
+                continue
+            if owner is not None:
+                name = f"{server}__{name}"
+                if seen.get(name) == server:
+                    continue
+                tool = tool.model_copy(update={"name": name})
                 renamed += 1
-            seen.add(name)
+            seen[name] = server
             tools.append(tool)
         return renamed
 
+    def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: dict[str, str]) -> int:
+        return self.merge_tools(handle.name, handle.tools(), tools, seen)
+
     def tools_for(
-        self, role: str, job_id: str, *, exclude: str = "", **context: Any
+        self,
+        role: str,
+        job_id: str,
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """Open every server bound to ``role`` and concatenate their tools.
 
@@ -804,7 +832,7 @@ class ServerRegistry:
         """
         tools: list[BaseTool] = []
         reasons: list[str] = []
-        seen: set[str] = set()
+        seen = {} if seen is None else seen
         from maljan.agents.base_agent import _get_agent_loop
 
         # ``open`` hands ``initialize`` to the shared agent loop, so that is
@@ -837,7 +865,13 @@ class ServerRegistry:
         return tools, reasons
 
     async def atools_for(
-        self, role: str, job_id: str, *, exclude: str = "", **context: Any
+        self,
+        role: str,
+        job_id: str,
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for``, but ``await``ed on the caller's own loop.
 
@@ -848,7 +882,7 @@ class ServerRegistry:
         """
         tools: list[BaseTool] = []
         reasons: list[str] = []
-        seen: set[str] = set()
+        seen = {} if seen is None else seen
         loop = asyncio.get_running_loop()
         for bound in self.for_agent(role, exclude=exclude):
             handle = self._handle_for(bound, loop)
@@ -903,7 +937,7 @@ class ServerRegistry:
                 self.degradation_reasons.append(reason)
 
     def tools_for_ref(
-        self, ref: Any, job_id: str, **context: Any
+        self, ref: Any, job_id: str, *, seen: dict[str, str] | None = None, **context: Any
     ) -> tuple[list[BaseTool], list[str]]:
         """One ``ToolRef(kind="mcp")``'s tools, opened on the shared agent loop.
 
@@ -928,12 +962,21 @@ class ServerRegistry:
             reasons = [UNAVAILABLE_REASON.format(name=handle.name)]
             self._record(reasons)
             return [], reasons
-        tools, reasons = self._ref_tools(handle, ref)
+        picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
+        tools: list[BaseTool] = []
+        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        if renamed:
+            logger.info(
+                "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
+                handle.name,
+                renamed,
+                handle.name,
+            )
         return tools, reasons
 
     async def atools_for_ref(
-        self, ref: Any, job_id: str, **context: Any
+        self, ref: Any, job_id: str, *, seen: dict[str, str] | None = None, **context: Any
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for_ref``, awaited on the caller's own loop."""
         loop = asyncio.get_running_loop()
@@ -952,8 +995,17 @@ class ServerRegistry:
             reasons = [UNAVAILABLE_REASON.format(name=handle.name)]
             self._record(reasons)
             return [], reasons
-        tools, reasons = self._ref_tools(handle, ref)
+        picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
+        tools: list[BaseTool] = []
+        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        if renamed:
+            logger.info(
+                "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
+                handle.name,
+                renamed,
+                handle.name,
+            )
         return tools, reasons
 
     def still_open(self) -> list[ServerHandle]:

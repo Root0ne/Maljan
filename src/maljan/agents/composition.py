@@ -173,6 +173,23 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
     return list(provider.select_tools(provider.get_tools(), None))
 
 
+def _claim_provider_tools(
+    incoming: list[Any], provider_id: str, tools: list[Any], seen: dict[str, str]
+) -> None:
+    """Put the provider half into ``tools`` and record what it claimed.
+
+    The provider half is first, so it never renames anything; recording its
+    names under the provider's id is what makes a later server's identically
+    named tool take the prefix rather than vanish into ``_dedupe``.
+    """
+    for tool in incoming:
+        name = str(getattr(tool, "name", ""))
+        if name in seen:
+            continue
+        seen[name] = f"provider:{provider_id}"
+        tools.append(tool)
+
+
 def _mcp_refs(definition: AgentDefinition) -> list[ToolRef]:
     return [ref for ref in definition.tools if ref.kind == "mcp"]
 
@@ -199,13 +216,21 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         prompt = builtin_prompt(definition.role, container, provider_id)
 
     reasons: list[str] = []
-    tools: list[Any] = list(_provider_tools(container, definition, provider_id))
+    # One ``seen`` map across every half, so B's collision rule holds over the
+    # agent's whole tool set: a referenced server's tool whose name a bound
+    # server already claimed arrives as ``<server>__<tool>`` instead of being
+    # dropped as a duplicate of a tool it has nothing to do with.
+    seen: dict[str, str] = {}
+    tools: list[Any] = []
+    _claim_provider_tools(
+        _provider_tools(container, definition, provider_id), provider_id, tools, seen
+    )
     registry = container.get_server_registry()
-    bound, bound_reasons = registry.tools_for(key, job_key)
+    bound, bound_reasons = registry.tools_for(key, job_key, seen=seen)
     tools.extend(bound)
     reasons.extend(bound_reasons)
     for ref in _mcp_refs(definition):
-        referenced, ref_reasons = registry.tools_for_ref(ref, job_key)
+        referenced, ref_reasons = registry.tools_for_ref(ref, job_key, seen=seen)
         tools.extend(referenced)
         reasons.extend(ref_reasons)
 
@@ -235,20 +260,25 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         prompt = builtin_prompt(definition.role, container, provider_id)
 
     reasons: list[str] = []
+    seen: dict[str, str] = {}
+    tools: list[Any] = []
     # The provider handshake is synchronous — for Ghidra it hands ``initialize``
     # to the shared agent loop and blocks on the result — so it runs off this
     # loop. Awaited callers (the judge's node, the settings probe) keep serving
     # everything else, and the probe's ``asyncio.wait`` budget can actually
     # preempt a wedged provider.
-    tools: list[Any] = list(
-        await asyncio.to_thread(_provider_tools, container, definition, provider_id)
+    _claim_provider_tools(
+        await asyncio.to_thread(_provider_tools, container, definition, provider_id),
+        provider_id,
+        tools,
+        seen,
     )
     registry = container.get_server_registry()
-    bound, bound_reasons = await registry.atools_for(key, job_key)
+    bound, bound_reasons = await registry.atools_for(key, job_key, seen=seen)
     tools.extend(bound)
     reasons.extend(bound_reasons)
     for ref in _mcp_refs(definition):
-        referenced, ref_reasons = await registry.atools_for_ref(ref, job_key)
+        referenced, ref_reasons = await registry.atools_for_ref(ref, job_key, seen=seen)
         tools.extend(referenced)
         reasons.extend(ref_reasons)
 

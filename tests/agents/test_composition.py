@@ -348,3 +348,84 @@ def test_an_awaited_resolution_does_not_block_the_callers_loop_past_its_budget()
     assert still_pending
     assert elapsed < 1.0
     assert ticks > 5
+
+
+class _NamedTool:
+    """A stand-in tool: the registry only reads and rewrites ``name``."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def model_copy(self, *, update: dict) -> _NamedTool:
+        return _NamedTool(update.get("name", self.name))
+
+
+@pytest.fixture()
+def real_registry(monkeypatch):
+    """A ``ServerRegistry`` whose every server offers one tool, ``open_file``."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        instance = MagicMock()
+        instance.initialize = AsyncMock(return_value=None)
+        instance.get_tools = MagicMock(return_value=[_NamedTool("open_file")])
+        instance.cleanup = AsyncMock(return_value=None)
+        return instance
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
+    monkeypatch.setattr("maljan.providers.servers._run_async", lambda coro, label: coro.close())
+
+
+def _two_server_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        mcp={
+            "servers": {
+                "s1": {"enabled": True, "command": "mcp", "agents": ["x"]},
+                "s2": {"enabled": True, "command": "mcp"},
+            }
+        },
+        agents={
+            "definitions": {
+                "x": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "tools": [{"kind": "mcp", "server": "s2", "name": "open_file"}],
+                }
+            },
+            "profiles": {"one": {"analysts": ["x"]}},
+            "profile": "one",
+        },
+    )
+
+
+def _registry_container(cfg: Settings) -> Any:
+    from maljan.providers.servers import ServerRegistry
+
+    return _Container(cfg, registry=ServerRegistry(cfg))
+
+
+def test_a_referenced_tool_that_collides_with_a_bound_one_is_prefixed_not_dropped(real_registry):
+    """F4: B's collision rule spans both halves of an agent's tool set.
+
+    The bound half claimed ``open_file`` first, so the referenced server's own
+    ``open_file`` arrives as ``s2__open_file`` — the operator asked for it and
+    gets it, instead of silently receiving s1's tool under that name.
+    """
+    resolved = resolve_agent("x", _registry_container(_two_server_settings()))
+    assert [t.name for t in resolved.tools] == ["open_file", "s2__open_file"]
+    assert resolved.degradation_reasons == ()
+
+
+def test_the_same_server_bound_and_referenced_still_yields_one_copy(real_registry):
+    cfg = _two_server_settings()
+    cfg.agents.definitions["x"].tools[0].server = "s1"
+    resolved = resolve_agent("x", _registry_container(cfg))
+    assert [t.name for t in resolved.tools] == ["open_file"]
+
+
+def test_the_awaited_resolution_prefixes_the_same_way(real_registry):
+    import asyncio
+
+    resolved = asyncio.run(aresolve_agent("x", _registry_container(_two_server_settings())))
+    assert [t.name for t in resolved.tools] == ["open_file", "s2__open_file"]
