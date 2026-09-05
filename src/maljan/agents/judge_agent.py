@@ -1006,6 +1006,10 @@ class JudgeAgent:
             if not top:
                 return ""
 
+            from maljan.agents.composition import current_analyst_keys
+
+            analysts = set(current_analyst_keys())
+
             lines = [
                 "CONFIDENCE REFERENCE TABLE (use these values for x_maljan_confidence):",
                 "Technique ID | Weighted Confidence | Layers | Evidence Basis",
@@ -1014,7 +1018,7 @@ class JudgeAgent:
             for r in top:
                 layers = r.contributing_layers
                 # Map layer set → evidence_basis controlled vocab
-                if set(layers) == {"static", "dynamic", "network"}:
+                if analysts and set(layers) == analysts:
                     basis = "all"
                 elif len(layers) == 2:  # noqa: PLR2004
                     basis = "+".join(sorted(layers))

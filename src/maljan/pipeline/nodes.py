@@ -16,6 +16,7 @@ from maljan.analysis.lolbin_layer import build_lolbin_isr
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.analysis.schema_pruner import infer_malware_category
 from maljan.analysis.ttp_cascade import TTPCascadeEngine
+from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -1329,10 +1330,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # presented at full confidence. (A benign sample still yields at
             # least one observational claim, so a truly empty ISR is a
             # failure signal, not a clean result.)
-            _ANALYST_AGENTS = ("static", "dynamic", "network")
+            _analyst_keys = container.analyst_keys()
             _empty_analysts = [
                 name
-                for name in _ANALYST_AGENTS
+                for name in _analyst_keys
                 if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
             ]
             # D10: surface anti-emulation / anti-VM / sandbox-detection
@@ -1451,6 +1452,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     )
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
+                    .set_profile(
+                        container.config.agents.profile,
+                        _analyst_keys,
+                        [k for k in _analyst_keys if k not in BUILTIN_AGENTS],
+                    )
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_truncation(container.get_truncation_ledger().snapshot())
                     .build()

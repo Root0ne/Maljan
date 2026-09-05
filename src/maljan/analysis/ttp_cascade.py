@@ -139,8 +139,20 @@ class CascadeResult:
 
     @property
     def is_consensus(self) -> bool:
-        """True if all 3 standard layers provide evidence."""
-        return all(d in self.contributing_layers for d in ("static", "dynamic", "network"))
+        """True when every analyst layer of the active profile provided evidence.
+
+        Was the literal triple, which is right for the default profile and
+        wrong for every other: a two-analyst profile could never reach
+        consensus, and a four-analyst one reached it while one analyst was
+        silent.
+        """
+        from maljan.agents.composition import current_analyst_keys
+
+        try:
+            layers = current_analyst_keys()
+        except Exception:  # noqa: BLE001 — a score is computed even without settings
+            layers = ["static", "dynamic", "network"]
+        return bool(layers) and all(d in self.contributing_layers for d in layers)
 
     def corroboration_label(self) -> str:
         """Human-readable corroboration level."""
