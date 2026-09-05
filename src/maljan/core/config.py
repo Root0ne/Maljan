@@ -21,6 +21,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
 
 import copy
 import json
+import re
 import sys
 from typing import Annotated, Any, Literal, cast
 
@@ -677,7 +678,17 @@ class PreprocessingConfig(BaseModel):
 # MCP (Model Context Protocol) Integration
 # ---------------------------------------------------------------------------
 
-AgentRole = Literal["static", "dynamic", "network", "judge"]
+# The role a definition plays in the fixed skeleton. ``generic`` is the one
+# role with no class of its own: it runs as ``ConfigurableAnalyst``.
+AnalystRole = Literal["static", "dynamic", "network", "judge", "generic"]
+
+# Deprecated since sub-project C. ``MCPServerConfig.agents`` used to be a
+# Literal of the four built-in roles; an operator can now bind a server to any
+# definition key, so the field is a plain ``str`` validated against the
+# definition map in ``Settings``. The name stays because sub-project B's
+# modules import it, and it stays a type so an annotation using it still
+# type-checks.
+AgentRole = str
 
 # A server key is a slug: lowercase, starts with a letter, at most 32 chars.
 # It is a path segment in the probe URL and a prefix in a renamed tool name,
@@ -726,8 +737,10 @@ class MCPServerConfig(BaseModel):
     # built-ins do today); ``[]`` exposes nothing, which is what a freshly
     # added custom server does until the operator ticks tools from its probe.
     tools: list[str] | None = None
-    # Which analysts receive this server's tools.
-    agents: list[AgentRole] = Field(default_factory=list)
+    # Which agents receive this server's tools. Definition keys since
+    # sub-project C — the four built-in roles are simply the four built-in
+    # keys — validated against ``agents.definitions`` in ``Settings``.
+    agents: list[str] = Field(default_factory=list)
     # Display name; empty means "use the key".
     label: str = ""
 
@@ -825,6 +838,182 @@ class MCPConfig(BaseModel):
         if self._cape_view is None:
             self._cape_view = MCPServerConfig()
         return self._cape_view
+
+
+# ---------------------------------------------------------------------------
+# Agent composition (sub-project C)
+# ---------------------------------------------------------------------------
+
+# A definition key is a slug, exactly like a server key: it names a graph node
+# (``f"{key}_analyst"``), a path segment in the probe URL, and a key in
+# ``llm.agents``. Sharing the pattern rather than re-declaring it keeps the two
+# maps' rules from drifting apart.
+AGENT_KEY_PATTERN = SERVER_KEY_PATTERN
+BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge")
+BUILTIN_PROFILES: tuple[str, ...] = ("default",)
+
+_AGENT_KEY_RE = re.compile(AGENT_KEY_PATTERN)
+_KEY_RULE = (
+    "an agent name is lowercase, starts with a letter, and is at most 32 "
+    "characters of letters, digits, '-' or '_'"
+)
+
+
+class ToolRef(BaseModel):
+    """One tool source an agent definition asks for by name.
+
+    ``kind="mcp"`` names an entry of ``mcp.servers``; ``name=None`` means that
+    server's whole allow-listed set, and a name means one tool of it.
+    ``kind="provider"`` means "the tools of this agent's static provider" and
+    carries nothing else — the provider is already chosen by
+    ``AgentDefinition.static_provider``, so naming it twice could disagree.
+
+    ``builtin`` is deliberately not a kind: no in-process tool exists in this
+    project, every tool comes from an MCP server or a provider, and the literal
+    grows on the day one does.
+    """
+
+    kind: Literal["mcp", "provider"]
+    server: str | None = None
+    name: str | None = None
+
+    @model_validator(mode="after")
+    def _shape_matches_the_kind(self) -> "ToolRef":
+        if self.kind == "mcp":
+            if not self.server:
+                raise ValueError("an mcp tool reference needs a server")
+        elif self.server is not None or self.name is not None:
+            raise ValueError("a provider tool reference names no server and no tool")
+        return self
+
+
+class AgentDefinition(BaseModel):
+    """One agent, as configuration rather than as a class.
+
+    ``prompt=None`` on a built-in role means the built-in prompt assembled from
+    the agent's own providers (see ``agents.composition.builtin_prompt``), which
+    is what keeps a clone honest: change the provider, keep the prompt null,
+    and the middle of the prompt changes with it.
+
+    The LLM is *not* here. It lives at ``llm.agents.<key>.*``, the location
+    sub-project A froze; two copies of one setting drift.
+    """
+
+    role: AnalystRole
+    label: str = ""
+    prompt: str | None = None
+    tools: list[ToolRef] = Field(default_factory=list)
+    static_provider: str | None = None
+    enabled: bool = True
+
+
+class ProfileDefinition(BaseModel):
+    """An ordered set of analyst keys. The order is the sequential run order."""
+
+    label: str = ""
+    analysts: list[str]
+
+
+def _builtin_definitions() -> dict[str, AgentDefinition]:
+    """The four agents the pipeline has always had, as settings.
+
+    Every field is the neutral value, because "the built-in behaviour" is what
+    a null prompt, an empty tool list and a null static provider *mean*. The
+    judge is here so that its LLM and its tool servers have the same editing
+    surface as the analysts; it can never appear in a profile.
+    """
+    return {
+        "static": AgentDefinition(role="static", label="Static analyst"),
+        "dynamic": AgentDefinition(role="dynamic", label="Dynamic analyst"),
+        "network": AgentDefinition(role="network", label="Network analyst"),
+        "judge": AgentDefinition(role="judge", label="Judge"),
+    }
+
+
+def _builtin_profiles() -> dict[str, ProfileDefinition]:
+    """The paper's architecture, named. The order is the order the graph ran in."""
+    return {
+        "default": ProfileDefinition(label="Default", analysts=["static", "dynamic", "network"]),
+    }
+
+
+class AgentsConfig(BaseModel):
+    """The agent definitions, the profiles, and which profile is active."""
+
+    profile: str = "default"
+    profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
+    definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
+
+    @model_validator(mode="after")
+    def _seed_and_check(self) -> "AgentsConfig":
+        """Re-seed the built-ins, then apply every rule that needs only this model.
+
+        Seeding is ``MCPConfig._reseed_builtins`` again: a stored map holds only
+        what the operator added or disabled, so a missing built-in comes back
+        and a present one is kept. What "kept" may differ by is the next rule.
+        """
+        for key, default_definition in _builtin_definitions().items():
+            self.definitions.setdefault(key, default_definition)
+        for key, default_profile in _builtin_profiles().items():
+            self.profiles.setdefault(key, default_profile)
+
+        for key in self.definitions:
+            if not _AGENT_KEY_RE.match(str(key)):
+                raise ValueError(f"{key!r}: {_KEY_RULE}")
+        for key in self.profiles:
+            if not _AGENT_KEY_RE.match(str(key)):
+                raise ValueError(f"{key!r}: {_KEY_RULE}")
+
+        # A built-in is compared field by field against its seed. ``label`` is
+        # display text, not behaviour, so it is always excluded. ``enabled`` is
+        # excluded on top of that for an analyst — that is the operator's one
+        # lever — and not for the judge, which the skeleton always runs.
+        for key, seed in _builtin_definitions().items():
+            current = self.definitions[key].model_dump()
+            expected = seed.model_dump()
+            current.pop("label", None)
+            expected.pop("label", None)
+            if key != "judge":
+                current.pop("enabled", None)
+                expected.pop("enabled", None)
+            if current != expected:
+                raise ValueError(f"{key!r} is built in; clone it to change it")
+        for key, profile_seed in _builtin_profiles().items():
+            if self.profiles[key].model_dump() != profile_seed.model_dump():
+                raise ValueError(f"{key!r} is built in; clone it to change it")
+
+        for key, definition in self.definitions.items():
+            if definition.role == "generic" and not (definition.prompt or "").strip():
+                raise ValueError(f"{key!r}: a generic agent needs a prompt")
+
+        for name, profile in self.profiles.items():
+            if not profile.analysts:
+                raise ValueError(f"profile {name!r} needs at least one analyst")
+            seen: set[str] = set()
+            for analyst in profile.analysts:
+                if analyst in seen:
+                    raise ValueError(f"profile {name!r} lists {analyst!r} twice")
+                seen.add(analyst)
+                member = self.definitions.get(analyst)
+                if member is None:
+                    raise ValueError(f"profile {name!r} lists unknown analyst {analyst!r}")
+                if member.role == "judge":
+                    raise ValueError(
+                        f"profile {name!r} lists {analyst!r}: the judge cannot be an analyst"
+                    )
+                # A built-in profile's own list is pinned by the identity check
+                # above; disabling one of its members is a definitions-side
+                # decision that a profile the operator did not write should
+                # not be refused for. A custom profile still needs every
+                # member enabled, since naming a disabled one is its author's
+                # own mistake to fix.
+                if name not in BUILTIN_PROFILES and not member.enabled:
+                    raise ValueError(f"profile {name!r} lists disabled analyst {analyst!r}")
+
+        if self.profile not in self.profiles:
+            available = ", ".join(sorted(self.profiles))
+            raise ValueError(f"unknown profile {self.profile!r}. Available: {available}")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -1343,6 +1532,9 @@ class Settings(BaseSettings):
     # to live here for not-yet-migrated readers is gone as of Task 12.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+    # Which analysts exist, in what order, and what each one gets. The
+    # ``default`` profile is the architecture this project measured itself on.
+    agents: AgentsConfig = Field(default_factory=AgentsConfig)
 
     @classmethod
     def _alias_legacy_keys(cls, data: Any) -> Any:
@@ -1555,6 +1747,55 @@ class Settings(BaseSettings):
         """
         self.mcp._ghidra_view = self.static.ghidra
         self.mcp._cape_view = self.sandbox.cape2.mcp
+        return self
+
+    @model_validator(mode="after")
+    def _validate_agent_composition(self) -> "Settings":
+        """The agent rules that need more than ``AgentsConfig`` to check.
+
+        Three references leave the model that owns them: a ``ToolRef`` names a
+        server in ``mcp.servers``, a definition may name a static provider in
+        the provider registry, and a server names the agents it is bound to.
+        Checking them here rather than in ``AgentsConfig`` is what lets a single
+        PATCH that adds a server *and* an agent that uses it validate as one
+        unit instead of failing on whichever half pydantic built first.
+        """
+        from maljan.providers.registry import static_provider_ids
+
+        provider_ids = set(static_provider_ids())
+        for key, definition in self.agents.definitions.items():
+            if definition.static_provider is not None:
+                if definition.static_provider not in provider_ids:
+                    available = ", ".join(sorted(provider_ids))
+                    raise ValueError(
+                        f"{key!r}: unknown static provider "
+                        f"{definition.static_provider!r}. Available: {available}"
+                    )
+            for ref in definition.tools:
+                if ref.kind != "mcp":
+                    continue
+                server = self.mcp.servers.get(str(ref.server))
+                if server is None:
+                    raise ValueError(f"{key!r} references unknown mcp server {ref.server!r}")
+                # ``tools=None`` is "every tool this server advertises", which
+                # is only knowable from a live handshake. A name against such a
+                # server is checked at resolution and a miss degrades there;
+                # refusing it here would make a built-in sidecar unreferenceable.
+                if ref.name is not None and server.tools is not None:
+                    if ref.name not in server.tools:
+                        raise ValueError(
+                            f"{key!r}: {ref.name!r} is not allowed on server {ref.server!r}"
+                        )
+
+        known = set(self.agents.definitions)
+        for name, server in self.mcp.servers.items():
+            for agent in server.agents:
+                if agent not in known:
+                    available = ", ".join(sorted(known))
+                    raise ValueError(
+                        f"server {name!r} is bound to unknown agent {agent!r}. "
+                        f"Available: {available}"
+                    )
         return self
 
 

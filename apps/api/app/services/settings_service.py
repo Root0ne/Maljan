@@ -278,6 +278,7 @@ class SettingsService:
                     changes[SERVER_MAP_KEY], tokens = split_server_secrets(
                         changes[SERVER_MAP_KEY],
                         stored=stored_map if isinstance(stored_map, dict) else None,
+                        stored_settings=current,
                     )
                 except ServerMapError as exc:
                     raise SettingsValidationError(
