@@ -93,9 +93,9 @@ None are renamed. `llm.agents.<name>.*` and the top-level `react_agent_*_overrid
 
 ```
 prompt      = definition.prompt if not None else builtin_prompt(role)      # role in built-ins
-tools       = provider_tools(role or static_provider)                        # for static/dynamic roles, and for
-                                                                              # generic when a ToolRef(kind=provider) exists
-            + registry.tools_for(definition_key, job_key)                    # servers whose agents list names this key (B)
+tools       = registry.tools_for(definition_key, job_key)                     # registry half; built-in roles keep opening
+                                                                              # their provider's tools lazily in the analyst
+            + provider_tools(static_provider)  # generic only, when a ToolRef(kind=provider) exists                    # servers whose agents list names this key (B)
             + [tool for ref in definition.tools if ref.kind == "mcp"
                for tool in registry.tools_for_ref(ref, job_key)]             # explicit references
 llm         = container.get_agent_llm(definition_key)                        # llm.agents.<key> or the global expert LLM
@@ -104,9 +104,9 @@ static_prov = definition.static_provider or settings.static.provider
 
 Rules:
 
-- `builtin_prompt("static")` is `_ISR_HEAD + provider.prompt_fragment() + _ISR_TAIL` with the agent's resolved static provider; `builtin_prompt("dynamic")` uses the sandbox provider's `dynamic_prompt_fragment()`; `network` and `judge` use their constants. A clone of `static` with `static_provider: r2` and `prompt: null` therefore gets the r2 fragment: the same assembly, a different middle.
+- `builtin_prompt("static")` is `_ISR_HEAD + provider.prompt_fragment() + _ISR_TAIL` with the agent's resolved static provider; `builtin_prompt("dynamic")` returns the frozen `dynamic_analyst._ISR_SYSTEM` (the analyst has always used that constant, never the configured sandbox's fragment, and there is no per-agent sandbox); `network` uses its constant and `judge` uses `JUDGE_VERDICT_SYSTEM`, extracted byte for byte from the inline literal in `give_verdict`. A clone of `static` with `static_provider: r2` and `prompt: null` therefore gets the r2 fragment: the same assembly, a different middle.
 - Duplicate tools (a server both bound by `agents` and referenced by a `ToolRef`) are de-duplicated by name; the collision prefixing from B applies before de-duplication.
-- Provider tools for a `generic` agent come only through an explicit `ToolRef(kind="provider")`; a generic agent with no references and no bound servers runs tool-less (the no-tools path in `BaseAnalyst.execute_tool_loop` already exists).
+- `ResolvedAgent.tools` is the registry half (bound servers plus explicit references). Built-in roles keep opening their provider's tools lazily inside the analyst node, as today, so resolution (and the probe) never launches Ghidra or opens a provider on the graph loop. Provider tools for a `generic` agent come only through an explicit `ToolRef(kind="provider")`, resolved there; a generic agent with no references and no bound servers runs tool-less (the no-tools path in `BaseAnalyst.execute_tool_loop` already exists).
 - Resolution is per job and per agent; opening servers still goes through B's `ServerRegistry` on the agent's loop, so the loop-binding rules of B hold unchanged.
 
 ## 5. Graph construction
@@ -142,7 +142,7 @@ Rules:
 The default profile with the default settings is today's system:
 
 1. **Graph snapshot golden** (`tests/pipeline/test_graph_snapshot.py`, fixture `tests/fixtures/golden/graph_default.json`): node names, edges (including the conditional edge's path map) and the analyst order for `parallel_analysts` false and true, captured on `dev`, compared against `build_graph` output on this branch.
-2. **Prompt byte-identity** (`tests/agents/test_prompt_byte_identity.py`) extended: `resolve_agent("static")`, `("dynamic")`, `("network")`, `("judge")` under `Settings(_env_file=None)` return the pinned prompts; `resolve_agent("static").tools` under the mock container equals today's tool set.
+2. **Prompt byte-identity** (`tests/agents/test_prompt_byte_identity.py`) extended: `resolve_agent("static")`, `("dynamic")`, `("network")`, `("judge")` under `Settings(_env_file=None)` return the pinned prompts; `resolve_agent("static").tools` under the mock container equals today's registry half (`ServerRegistry.tools_for("static", ...)`), the provider half being unchanged code.
 3. **Revision prompt golden**: `NetworkAnalyst.revise` message list before and after the extraction of `revision_messages` is identical (captured fixture).
 4. **Parity**: built-in definition keys == `AgentRegistry.list_agents(include_disabled=True)` ∪ `{"judge"}`; `choices_from` `agent_roles` returns the effective definition keys; job-schema `profile` accepts exactly the effective profile keys at submit time.
 5. **Consumers**: with the default profile `run_summary.profile == {"name": "default", "analysts": ["static", "dynamic", "network"], "custom": []}` and every other `run_summary` key is unchanged against a captured run (the existing run-summary fixture).
