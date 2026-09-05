@@ -54,13 +54,22 @@ async def _effective_servers(db: AsyncSession) -> list[str]:
     return list(Settings().mcp.servers)
 
 
+async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
+    """Profile names and definition keys as they stand, for the catalog's choices."""
+    from app.services.agent_map import effective_definitions, effective_profiles
+
+    stored = await SettingsService(db).load_overrides()
+    return sorted(effective_profiles(stored)), sorted(effective_definitions(stored))
+
+
 @router.get("/schema", response_model=SchemaResponse)
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
     available = box.is_available()
+    profiles, agents = await _effective_agents(db)
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in resolved_catalog(await _effective_servers(db)):
+    for e in resolved_catalog(await _effective_servers(db), profiles=profiles, agents=agents):
         d = e.to_dict()
         if e.secret and e.editable and not available:
             d["editable"] = False

@@ -283,18 +283,18 @@ def catalog_index() -> dict[str, CatalogEntry]:
     return {e.key: e for e in full_catalog()}
 
 
-def resolved_catalog(servers: Iterable[str]) -> list[CatalogEntry]:
-    """``full_catalog`` with every ``choices_from`` turned into real ``choices``.
+def _choice_sources(
+    servers: Iterable[str], profiles: Iterable[str], agents: Iterable[str]
+) -> dict[str, list[str]]:
+    """Every ``choices_from`` source, resolved once on the way out.
 
     The core catalog is a pure function of the models and cannot know which
-    servers exist right now; the web must not decide either, or "what is a
-    valid provider" has two answers. So it happens exactly here, once, on the
-    way out.
+    servers, profiles or agents exist right now; the web must not decide
+    either, or "what is a valid profile" has two answers.
     """
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
-    keys = sorted(servers)
-    sources: dict[str, list[str]] = {
+    return {
         # Declared for completeness and for sub-project C's agent definitions.
         # Neither provider selector uses them today: those two are enum leaves
         # whose choices already come from the settings Literal, in its own
@@ -303,9 +303,28 @@ def resolved_catalog(servers: Iterable[str]) -> list[CatalogEntry]:
         "sandbox_providers": sandbox_provider_ids(),
         # The empty string is a real choice: it is how an operator says the
         # generic provider has no server yet.
-        "mcp_servers": ["", *keys],
-        "agent_roles": ["static", "dynamic", "network", "judge"],
+        "mcp_servers": ["", *sorted(servers)],
+        # Definition keys, not the four fixed roles: a server can be bound to
+        # any agent an operator has defined (spec §2, role vocabulary).
+        "agent_roles": list(agents),
+        "profiles": list(profiles),
     }
+
+
+def resolved_catalog(
+    servers: Iterable[str],
+    *,
+    profiles: Iterable[str] = ("default",),
+    agents: Iterable[str] = ("static", "dynamic", "network", "judge"),
+) -> list[CatalogEntry]:
+    """``full_catalog`` with every ``choices_from`` turned into real ``choices``.
+
+    The core catalog is a pure function of the models and cannot know which
+    servers, profiles or agents exist right now; the web must not decide
+    either, or "what is a valid provider" has two answers. So it happens
+    exactly here, once, on the way out.
+    """
+    sources = _choice_sources(servers, profiles, agents)
     out: list[CatalogEntry] = []
     for entry in full_catalog():
         if entry.choices_from and entry.choices_from in sources:
