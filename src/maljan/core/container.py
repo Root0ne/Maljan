@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -123,7 +123,7 @@ class ServiceContainer:
         self._memory_store_cache: MemoryStore | None = None
         self._sandbox_client_cache: SandboxClient | None = None
         self._sandbox_provider_cache: SandboxProvider | None = None
-        self._static_provider_cache: StaticProvider | None = None
+        self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
         self._yara_layer_cache: YaraLayer | None = None
         self._sigma_layer_cache: SigmaLayer | None = None
@@ -141,10 +141,13 @@ class ServiceContainer:
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
 
+        from maljan.agents.composition import analyst_keys
+
         logger.info(
-            "ServiceContainer initialized (mock=%s, agents=%s, parsers=%s)",
+            "ServiceContainer initialized (mock=%s, profile=%s, analysts=%s, parsers=%s)",
             mock,
-            self.agent_registry.list_agents(),
+            config.agents.profile,
+            analyst_keys(config),
             self.parser_registry.list_parsers(),
         )
 
@@ -264,14 +267,33 @@ class ServiceContainer:
             self._sandbox_provider_cache = provider
             return provider
 
-    def get_static_provider(self) -> StaticProvider:
+    def get_static_provider(self, provider_id: str | None = None) -> StaticProvider:
+        """The static provider for ``provider_id``, or the globally configured one.
+
+        Cached per id rather than once, because a profile may hold two static
+        analysts on two providers and each needs its own object: the providers
+        are stateful (an open decompiler session, a loaded program), and
+        sharing one between two analysts would have them fighting over which
+        binary is loaded. ``get_static_provider()`` with no argument is the
+        pre-existing call and returns exactly what it always did.
+        """
+        wanted = str(provider_id or self.config.static.provider)
         with self._lock:
-            if self._static_provider_cache is None:
+            cached = self._static_provider_cache.get(wanted)
+            if cached is None:
                 from maljan.providers.registry import get_static_provider as build
 
-                self._static_provider_cache = build(self.config)
-                logger.info("Static provider: %s.", self._static_provider_cache.id)
-            return self._static_provider_cache
+                cfg = self.config
+                if wanted != str(cfg.static.provider):
+                    # The registry builds from ``cfg.static.provider``; a
+                    # per-agent provider is that same construction against a
+                    # copy, so no provider needs to learn a second entry point.
+                    cfg = cfg.model_copy(deep=True)
+                    cfg.static.provider = wanted  # type: ignore[assignment]
+                cached = build(cfg)
+                logger.info("Static provider: %s.", cached.id)
+                self._static_provider_cache[wanted] = cached
+            return cached
 
     def get_server_registry(self) -> ServerRegistry:
         """The tool servers this job may attach, built from the job's settings.
@@ -319,21 +341,82 @@ class ServiceContainer:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
 
+    # ------------------------------------------------------------------
+    # Composition accessors
+    # ------------------------------------------------------------------
+
+    def active_profile(self) -> Any:
+        """The ``ProfileDefinition`` this job runs."""
+        from maljan.agents.composition import active_profile
+
+        return active_profile(self.config)
+
+    def analyst_keys(self) -> list[str]:
+        """The ordered analyst keys of the active profile.
+
+        The topology source for the builder, the negotiation and revision
+        nodes, the judge node and the worker's roster announcement. It replaced
+        ``agent_registry.list_agents()`` in all of them at once, because a
+        profile that half the pipeline believes in is worse than no profile.
+        """
+        from maljan.agents.composition import analyst_keys
+
+        return analyst_keys(self.config)
+
+    def agent_role(self, key: str) -> str:
+        """The role definition ``key`` plays: what the code may branch on.
+
+        A clone of the static analyst runs under its own key, so ``key ==
+        "static"`` stopped being the question anything should ask; this is the
+        question they meant.
+        """
+        definition = self.config.agents.definitions.get(key)
+        if definition is None:
+            available = ", ".join(sorted(self.config.agents.definitions)) or "(none)"
+            raise KeyError(f"No agent definition named {key!r}. Available: {available}")
+        return str(definition.role)
+
     def get_agent(self, name: str) -> BaseAnalyst:
+        """The agent definition ``name`` names, instantiated and wired.
+
+        A built-in role runs its own class under the definition's key — a clone
+        ``static_r2`` is a ``StaticAnalyst`` named ``static_r2`` — because
+        those classes carry the provider-specific ISR extraction the goldens
+        pin. A ``generic`` role runs ``ConfigurableAnalyst``. Both get the
+        per-run ledgers, a way back to this container, and their
+        ``ResolvedAgent``, so nothing below re-derives a prompt or a tool set.
+        """
         with self._lock:
             cached = self._agent_cache.get(name)
-            if cached is None:
-                cached = self.agent_registry.create(name, self.get_agent_llm(name))
-                # Wire the per-run token ledger so the agent's LLM calls are tallied.
-                cached.token_ledger = getattr(self, "_token_ledger", None)
-                cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
-                # Hand the agent a way back to this container. The static
-                # analyst used to construct a *whole new* ServiceContainer on
-                # every failed MCP init — per chunk, so up to ten of them per
-                # run, each rebuilding the Sigma and YARA layers.
-                cached._container = self
-                self._agent_cache[name] = cached
-            return cached
+            if cached is not None:
+                return cached
+
+            from maljan.agents.composition import resolve_agent
+            from maljan.agents.configurable_analyst import ConfigurableAnalyst
+
+            role = self.agent_role(name)
+            resolved = resolve_agent(name, self)
+            llm = cast(BaseChatModel, resolved.llm)
+            if role == "generic":
+                agent: BaseAnalyst = ConfigurableAnalyst(name, resolved, llm)
+            else:
+                agent = self.agent_registry.create(role, llm)
+                # The class is chosen by role; the *identity* is the key. Every
+                # per-agent lookup downstream — timeout overrides, LLM
+                # overrides, ISR agent_id, the graph node name — reads
+                # ``agent.name``, so this one assignment is what makes a clone
+                # a separate participant rather than a second copy of its source.
+                agent.name = name
+                agent.logger = agent.logger.getChild(name.lower())
+            agent.token_ledger = getattr(self, "_token_ledger", None)
+            agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
+            # Hand the agent a way back to this container. The static analyst
+            # used to construct a *whole new* ServiceContainer on every failed
+            # MCP init — per chunk, so up to ten of them per run.
+            agent._container = self
+            agent._resolved = resolved
+            self._agent_cache[name] = agent
+            return agent
 
     def get_judge_agent(self, role: str = "judge") -> Any:
         with self._lock:
@@ -416,11 +499,11 @@ class ServiceContainer:
         # here for the sole purpose of closing it, and a misconfigured
         # ``provider`` id turned a harmless teardown into a
         # ``ProviderConfigurationError`` landing in this warning handler.
-        if self._static_provider_cache is not None:
+        for provider in list(self._static_provider_cache.values()):
             try:
-                self._static_provider_cache.close()
-            except Exception as exc:  # noqa: BLE001 — teardown never propagates
-                logger.warning("Closing static provider failed (non-fatal): %s", exc)
+                provider.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never raises
+                logger.warning("Static provider '%s' did not close cleanly: %s", provider.id, exc)
 
         if self._sandbox_provider_cache is not None:
             try:

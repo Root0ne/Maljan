@@ -79,12 +79,12 @@ class TestAcloseNeverBuildsAProviderJustToCloseIt:
         # would raise ProviderConfigurationError from inside the registry.
         container.config.static.provider = "not-a-real-provider"  # type: ignore[assignment]
         container.config.sandbox.provider = "also-not-real"  # type: ignore[assignment]
-        assert container._static_provider_cache is None
+        assert container._static_provider_cache == {}
         assert container._sandbox_provider_cache is None
 
         await container.aclose()  # must not raise
 
-        assert container._static_provider_cache is None
+        assert container._static_provider_cache == {}
         assert container._sandbox_provider_cache is None
 
     @pytest.mark.asyncio
@@ -92,7 +92,7 @@ class TestAcloseNeverBuildsAProviderJustToCloseIt:
         container = ServiceContainer(config=Settings(), mock=True)
         static_provider = MagicMock()
         sandbox_provider = MagicMock()
-        container._static_provider_cache = static_provider
+        container._static_provider_cache = {"ghidra": static_provider}
         container._sandbox_provider_cache = sandbox_provider
 
         await container.aclose()

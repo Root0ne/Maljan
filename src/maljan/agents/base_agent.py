@@ -829,6 +829,10 @@ class BaseAnalyst(ABC):
         self.toolkit: Any = None
         self._all_ghidra_tools: list[Any] = []
         self._container: Any = None
+        # The ``ResolvedAgent`` the container built this agent from — its own
+        # prompt, tools and static provider id, so a clone never has to
+        # re-derive what it already knows about itself.
+        self._resolved: Any = None
         # Reasons this agent's own tool-server attachment degraded, filled in
         # by ``_attach_registry_tools``/subclasses. A per-instance list, not a
         # mutable class attribute: the run summary reads

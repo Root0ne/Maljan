@@ -83,3 +83,61 @@ def test_the_assembled_dynamic_prompt_equals_the_golden():
     assert _DYN_HEAD + provider.dynamic_prompt_fragment() + _DYN_TAIL == _golden(
         "dynamic_system_cape2.txt"
     )
+
+
+def _mock_container():
+    from maljan.core.config import Settings
+    from maljan.core.container import ServiceContainer
+
+    return ServiceContainer(Settings(_env_file=None), mock=True)
+
+
+def test_the_resolved_static_prompt_is_the_golden():
+    from maljan.agents.composition import resolve_agent
+
+    assert resolve_agent("static", _mock_container()).prompt == _golden(
+        "static_isr_system_ghidra.txt"
+    )
+
+
+def test_the_resolved_dynamic_prompt_is_the_golden():
+    """Pinned to CAPE2, exactly as ``dynamic_analyst._ISR_SYSTEM`` always was.
+
+    The dynamic analyst has never assembled its prompt from the *configured*
+    sandbox (that field defaults to ``mock``, whose fragment is empty); it
+    sends this frozen constant on every run. Resolution says the same thing,
+    or the default profile would change the day this landed.
+    """
+    from maljan.agents.composition import resolve_agent
+    from maljan.agents.dynamic_analyst import _ISR_SYSTEM
+
+    assert resolve_agent("dynamic", _mock_container()).prompt == _ISR_SYSTEM
+    assert _ISR_SYSTEM == _golden("dynamic_system_cape2.txt")
+
+
+def test_the_resolved_network_and_judge_prompts_are_their_constants():
+    from maljan.agents.composition import resolve_agent
+    from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+    from maljan.agents.network_analyst import _ISR_SYSTEM as NETWORK_SYSTEM
+
+    container = _mock_container()
+    assert resolve_agent("network", container).prompt == NETWORK_SYSTEM
+    assert resolve_agent("judge", container).prompt == JUDGE_VERDICT_SYSTEM
+
+
+def test_the_resolved_static_tool_set_is_todays_registry_tool_set():
+    """Under the default profile nothing is bound to ``static``, and that is the point.
+
+    ``resolve_agent`` composes the *registry* half of an agent's tools; the
+    provider half stays where it has always been, inside
+    ``StaticAnalyst._initialize_mcp_client``, so the Ghidra attach is not
+    pulled forward into resolution. Both halves are unchanged; this pins the
+    half resolution owns.
+    """
+    from maljan.agents.composition import resolve_agent
+    from maljan.core.config import Settings
+    from maljan.providers.servers import ServerRegistry
+
+    container = _mock_container()
+    expected, _ = ServerRegistry(Settings(_env_file=None)).tools_for("static", "job")
+    assert [t.name for t in resolve_agent("static", container).tools] == [t.name for t in expected]
