@@ -132,3 +132,28 @@ def test_a_built_in_agents_logger_is_childed_once_not_twice():
 def test_a_reduced_profile_is_the_only_thing_the_container_reports():
     container = _container(profiles={"lean": {"analysts": ["network"]}}, profile="lean")
     assert container.analyst_keys() == ["network"]
+
+
+def test_a_clone_gets_the_sandbox_slice_its_role_gets():
+    """F1: sandbox data is routed by role, not by the definition key.
+
+    A clone of the static analyst runs ``StaticAnalyst``, which is written
+    against the report's ``target`` block; keyed off its own name it used to
+    fall through to the whole report as JSON.
+    """
+    container = _container(
+        definitions={"static_r2": {"role": "static", "static_provider": "r2"}},
+        profiles={"two": {"analysts": ["static", "static_r2"]}},
+        profile="two",
+    )
+    report = {
+        "target": {"file": {"sha256": "abc123", "name": "test.exe"}},
+        "behavior": {"processes": []},
+        "network": {"dns": [], "http": [], "tcp": [], "hosts": [], "domains": []},
+    }
+
+    built_in = container.load_sandbox_data_for_agent("static", report)
+    clone = container.load_sandbox_data_for_agent("static_r2", report)
+
+    assert [c.content for c in clone] == [c.content for c in built_in]
+    assert "behavior" not in clone[0].content

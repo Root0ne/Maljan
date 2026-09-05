@@ -27,11 +27,9 @@ TOPOLOGY_SOURCES: set[str] = {
 }
 
 # Where an agent's *key* may be compared against a literal built-in name.
-# Every one of these is a static-role branch that must become a role check
-# once a clone of ``static`` can run under another key (Task 7).
-NAME_BRANCHES: set[str] = {
-    "src/maljan/core/container.py",
-}
+# Empty since the final-review fix wave: ``load_sandbox_data_for_agent`` was
+# the last one and it now branches on ``agent_role(key)``.
+NAME_BRANCHES: set[str] = set()
 
 _LIST_AGENTS = re.compile(r"\blist_agents\s*\(")
 _NAME_EQ = re.compile(

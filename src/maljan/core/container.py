@@ -650,20 +650,29 @@ class ServiceContainer:
     def load_sandbox_data_for_agent(
         self, agent_name: str, sandbox_report: dict[str, Any]
     ) -> list[TextChunk]:
-        """Parse and chunk sandbox report data for a specific agent."""
+        """Parse and chunk sandbox report data for a specific agent.
+
+        The slice an agent gets follows its *role*, not its key: a clone of the
+        static analyst runs ``StaticAnalyst``, which is written against the
+        report's ``target`` block, so it must be handed that block under
+        whatever key the operator gave it. The chunker still keys on the agent's
+        own name, which is what the loader's ``data_type`` means.
+        """
         import json
 
-        if agent_name == "static":
+        role = self.agent_role(agent_name)
+
+        if role == "static":
             target = sandbox_report.get("target", {})
             text = json.dumps(target, indent=2, default=str)
-        elif agent_name == "network":
+        elif role == "network":
             network = sandbox_report.get("network", {})
             try:
                 parser = self.parser_registry.create("network")
                 text = parser.parse(network)
             except KeyError:
                 text = json.dumps(network, indent=2, default=str)
-        elif agent_name == "dynamic":
+        elif role == "dynamic":
             try:
                 parser = self.parser_registry.create("dynamic")
                 text = parser.parse(sandbox_report)
