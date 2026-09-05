@@ -12,6 +12,11 @@ const input =
 const BUILTIN = new Set(["network", "threatintel"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
 const SLUG = /^[a-z][a-z0-9_-]{0,31}$/;
+/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Two of these
+ *  (`network`, `threatintel`) are also pre-populated built-ins and never reach
+ *  `add()`; `ghidra` and `cape` are reserved but not pre-populated, so without
+ *  this check they would pass client validation and fail only on apply. */
+export const RESERVED_SERVER_KEYS = new Set(["network", "threatintel", "ghidra", "cape"]);
 /** What a set token looks like from outside; identical to the API's mask. */
 const TOKEN_MASK = "**********";
 
@@ -87,6 +92,10 @@ export default function ServerMapEditor({
     }
     if (key in value) {
       setKeyError("a server with that name already exists");
+      return;
+    }
+    if (RESERVED_SERVER_KEYS.has(key)) {
+      setKeyError(`'${key}' is reserved for a provider-owned server.`);
       return;
     }
     setKeyError(null);
