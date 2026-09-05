@@ -13,6 +13,10 @@ const SECTIONS: { title: string; prefix: string }[] = [
   { title: "Report", prefix: "core.sandbox.rest.report." },
 ];
 const MAPPING_PREFIX = "core.sandbox.rest.mapping.";
+// Mirrors `MAX_ROWS_PER_CHANNEL` in `providers/sandbox/rest_mapping.py` — the
+// preview reports `truncated` as a bare bool, so the row that shows it names
+// the ceiling the server actually applied.
+const MAX_ROWS_PER_CHANNEL = 5000;
 
 /**
  * The `sandbox.rest.*` leaves, grouped, with a mapping table that can be tried.
@@ -50,6 +54,14 @@ export default function RestSandboxEditor({
     () => entries.filter((e) => e.key.startsWith(MAPPING_PREFIX)),
     [entries]
   );
+  const fieldNamesEntry = useMemo(
+    () => mappingEntries.find((e) => e.key === `${MAPPING_PREFIX}field_names`),
+    [mappingEntries]
+  );
+  const tableEntries = useMemo(
+    () => mappingEntries.filter((e) => e.key !== `${MAPPING_PREFIX}field_names`),
+    [mappingEntries]
+  );
   const plain = useMemo(
     () =>
       entries.filter(
@@ -66,13 +78,18 @@ export default function RestSandboxEditor({
     setPreviewError(null);
     try {
       const parsed = JSON.parse(sample);
-      const mapping: Record<string, string> = {};
+      // Every mapping leaf goes in at its effective value — the JSONPath
+      // strings and the `field_names` object alike — so a configured rename
+      // is reflected in the counts exactly as it would be in a real job.
+      const mapping: Record<string, unknown> = {};
       for (const e of mappingEntries) {
         const name = e.key.slice(MAPPING_PREFIX.length);
         const value = effective(e.key);
-        if (typeof value === "string" && value) mapping[name] = value;
+        if (value !== undefined) mapping[name] = value;
       }
-      setPreview(await api.previewSandboxMapping(parsed, mapping));
+      setPreview(
+        await api.previewSandboxMapping(parsed, mapping as unknown as Record<string, string>)
+      );
     } catch (e) {
       setPreview(null);
       setPreviewError(
@@ -126,8 +143,9 @@ export default function RestSandboxEditor({
               </tr>
             </thead>
             <tbody>
-              {mappingEntries.map((entry) => {
+              {tableEntries.map((entry) => {
                 const name = entry.key.slice(MAPPING_PREFIX.length);
+                const isTarget = name === "target_sha256";
                 const stats = preview?.channels[name];
                 return (
                   <tr key={entry.key} className="border-b border-border align-top">
@@ -141,17 +159,27 @@ export default function RestSandboxEditor({
                       />
                     </td>
                     <td className="py-1 text-text-muted" data-channel={name}>
-                      {stats
-                        ? stats.error
+                      {isTarget
+                        ? preview
+                          ? preview.target_sha256 || "not matched"
+                          : "—"
+                        : stats
                           ? stats.error
-                          : `${stats.matched} / ${stats.kept} / ${stats.dropped}`
-                        : "—"}
+                            ? stats.error
+                            : `${stats.matched} / ${stats.kept} / ${stats.dropped}${
+                                stats.truncated ? ` · truncated at ${MAX_ROWS_PER_CHANNEL}` : ""
+                              }`
+                          : "—"}
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+
+          {fieldNamesEntry && (
+            <div className="mt-2">{row(fieldNamesEntry)}</div>
+          )}
 
           <label htmlFor="rest-sample" className="block text-xs text-text-muted mt-3">
             Paste a sample response
