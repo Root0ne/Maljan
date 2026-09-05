@@ -81,5 +81,5 @@ def test_the_sandbox_gains_rest_with_a_full_default_tree():
 def test_a_server_entry_carries_an_allow_list_and_an_agent_binding():
     server = MCPServerConfig(tools=["open_file"], agents=["static"], label="xyz")
     assert server.tools == ["open_file"] and server.agents == ["static"]
-    with pytest.raises(ValueError):
-        MCPServerConfig(agents=["auditor"])
+    with pytest.raises(ValueError, match="'x' is bound to unknown agent 'bogus'"):
+        Settings(_env_file=None, mcp={"servers": {"x": {"agents": ["bogus"]}}})

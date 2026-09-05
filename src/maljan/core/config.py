@@ -944,6 +944,36 @@ class AgentsConfig(BaseModel):
     profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
     definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_builtin_definition_defaults(cls, data: Any) -> Any:
+        """Fill in the seed's values for whatever a built-in override left out.
+
+        An operator overriding ``network`` to flip ``enabled`` writes
+        ``{"role": "network", "enabled": False}``, not a full copy of the
+        seed. Without this, the fields they did not mention would take
+        ``AgentDefinition``'s own bare defaults (``label=""`` and so on)
+        instead of the seed's, and the identity check below — which must
+        compare every field but ``enabled`` — would see a mismatch on
+        ``label`` alone and refuse an edit the operator never made. Merging
+        here, before typed validation, is what lets that check compare
+        without also having to guess which fields were "really" sent.
+        """
+        if not isinstance(data, dict):
+            return data
+        definitions = data.get("definitions")
+        if not isinstance(definitions, dict):
+            return data
+        seeds = _builtin_definitions()
+        merged = {}
+        for key, entry in definitions.items():
+            seed = seeds.get(key)
+            if seed is not None and isinstance(entry, dict):
+                merged[key] = {**seed.model_dump(), **entry}
+            else:
+                merged[key] = entry
+        return {**data, "definitions": merged}
+
     @model_validator(mode="after")
     def _seed_and_check(self) -> "AgentsConfig":
         """Re-seed the built-ins, then apply every rule that needs only this model.
@@ -964,15 +994,15 @@ class AgentsConfig(BaseModel):
             if not _AGENT_KEY_RE.match(str(key)):
                 raise ValueError(f"{key!r}: {_KEY_RULE}")
 
-        # A built-in is compared field by field against its seed. ``label`` is
-        # display text, not behaviour, so it is always excluded. ``enabled`` is
-        # excluded on top of that for an analyst — that is the operator's one
-        # lever — and not for the judge, which the skeleton always runs.
+        # A built-in is compared field by field against its seed. ``enabled``
+        # is the one field excluded, and only for an analyst — that is the
+        # operator's one lever — not for the judge, which the skeleton always
+        # runs. Every other field, ``label`` included, must match the seed
+        # exactly; a field the operator did not mention already reads as the
+        # seed's own value, courtesy of ``_merge_builtin_definition_defaults``.
         for key, seed in _builtin_definitions().items():
             current = self.definitions[key].model_dump()
             expected = seed.model_dump()
-            current.pop("label", None)
-            expected.pop("label", None)
             if key != "judge":
                 current.pop("enabled", None)
                 expected.pop("enabled", None)
@@ -1001,13 +1031,15 @@ class AgentsConfig(BaseModel):
                     raise ValueError(
                         f"profile {name!r} lists {analyst!r}: the judge cannot be an analyst"
                     )
-                # A built-in profile's own list is pinned by the identity check
-                # above; disabling one of its members is a definitions-side
-                # decision that a profile the operator did not write should
-                # not be refused for. A custom profile still needs every
-                # member enabled, since naming a disabled one is its author's
-                # own mistake to fix.
-                if name not in BUILTIN_PROFILES and not member.enabled:
+                # A built-in profile is exempt from this check only while it
+                # is not the active profile: disabling a member of ``default``
+                # is harmless as long as some other profile is actually
+                # running, but the moment ``default`` itself is selected the
+                # disabled member would be asked to run. A custom profile has
+                # no such exemption — its author chose every member, active
+                # or not.
+                exempt = name in BUILTIN_PROFILES and name != self.profile
+                if not exempt and not member.enabled:
                     raise ValueError(f"profile {name!r} lists disabled analyst {analyst!r}")
 
         if self.profile not in self.profiles:

@@ -136,6 +136,11 @@ def test_a_built_in_with_an_edited_prompt_is_refused():
         _settings(definitions={"static": {"role": "static", "prompt": "mine"}})
 
 
+def test_a_built_in_with_an_edited_label_is_refused():
+    with pytest.raises(ValidationError, match="'static' is built in; clone it to change it"):
+        _settings(definitions={"static": {"role": "static", "label": "renamed"}})
+
+
 def test_the_default_profile_may_not_be_edited():
     with pytest.raises(ValidationError, match="'default' is built in; clone it to change it"):
         _settings(profiles={"default": {"analysts": ["network"]}})
@@ -161,6 +166,20 @@ def test_a_profile_of_enabled_non_judge_analysts_is_accepted():
 def test_a_profile_naming_an_unknown_definition_is_refused():
     with pytest.raises(ValidationError, match="'two' lists unknown analyst 'ghost'"):
         _settings(profiles={"two": {"analysts": ["static", "ghost"]}})
+
+
+def test_disabling_a_member_of_the_active_default_profile_is_refused():
+    with pytest.raises(ValidationError, match="'default' lists disabled analyst 'network'"):
+        _settings(definitions={"network": {"role": "network", "enabled": False}})
+
+
+def test_disabling_a_member_of_the_inactive_default_profile_is_accepted():
+    cfg = _settings(
+        definitions={"network": {"role": "network", "enabled": False}},
+        profiles={"lean": {"analysts": ["static", "dynamic"]}},
+        profile="lean",
+    )
+    assert cfg.agents.definitions["network"].enabled is False
 
 
 def test_a_profile_naming_a_disabled_definition_is_refused():
