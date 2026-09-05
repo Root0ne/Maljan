@@ -12,6 +12,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
+from maljan.core.config import Settings
 
 _API = Path(__file__).resolve().parents[2] / "apps" / "api"
 if str(_API) not in sys.path:
@@ -124,6 +127,61 @@ def test_a_named_tool_outside_the_servers_allow_list_is_refused():
     assert "'rm' is not allowed on server 'mine'" in exc.value.errors["strings.tools"]
 
 
+def test_a_provider_tool_reference_on_a_built_in_role_is_refused():
+    """Identical to the ``Settings``-level rule: only a generic agent may
+
+    carry a ``provider`` tool reference; a built-in role opens its own
+    provider's tools itself.
+    """
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _defs(strings={"role": "static", "tools": [{"kind": "provider"}]}), stored={}
+        )
+    assert exc.value.errors["strings"] == (
+        "'strings': provider tool references are only valid on generic "
+        "definitions; built-in roles open their provider themselves"
+    )
+
+
+def test_a_disabled_built_in_profile_member_is_allowed_while_another_profile_is_active():
+    """The exemption ``AgentsConfig`` gives a built-in profile: disabling a
+
+    member of ``default`` is harmless as long as ``default`` itself is not
+    the profile that would run.
+    """
+    out = validate_agent_map(
+        {
+            AGENT_DEFINITIONS_KEY: {"network": {"role": "network", "enabled": False}},
+            AGENT_PROFILES_KEY: {
+                "default": {"label": "Default", "analysts": ["static", "dynamic", "network"]},
+                "lean": {"analysts": ["static", "dynamic"]},
+            },
+            AGENT_PROFILE_KEY: "lean",
+        },
+        stored={},
+    )
+    assert out[AGENT_PROFILE_KEY] == "lean"
+
+
+def test_a_disabled_built_in_profile_member_is_refused_once_that_profile_is_active():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            {
+                AGENT_DEFINITIONS_KEY: {"network": {"role": "network", "enabled": False}},
+                AGENT_PROFILES_KEY: {
+                    "default": {
+                        "label": "Default",
+                        "analysts": ["static", "dynamic", "network"],
+                    },
+                    "lean": {"analysts": ["static", "dynamic"]},
+                },
+                AGENT_PROFILE_KEY: "default",
+            },
+            stored={},
+        )
+    assert "network" in exc.value.errors["default"]
+
+
 def test_a_profile_naming_a_missing_analyst_is_reported_under_the_profile():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(
@@ -221,3 +279,149 @@ def test_a_server_binding_offers_the_effective_definition_keys():
         "static",
         "strings",
     ]
+
+
+def _settings_from_changes(changes: dict, stored: dict) -> Settings:
+    """The ``Settings``-level equivalent of one ``validate_agent_map`` call.
+
+    Built from the same two inputs the API layer sees, so a payload can be
+    run through both without hand-translating it twice.
+    """
+    agents_kwargs: dict = {}
+    definitions = changes.get(AGENT_DEFINITIONS_KEY, stored.get(AGENT_DEFINITIONS_KEY))
+    if definitions is not None:
+        agents_kwargs["definitions"] = definitions
+    profiles = changes.get(AGENT_PROFILES_KEY, stored.get(AGENT_PROFILES_KEY))
+    if profiles is not None:
+        agents_kwargs["profiles"] = profiles
+    profile = changes.get(AGENT_PROFILE_KEY, stored.get(AGENT_PROFILE_KEY))
+    if profile is not None:
+        agents_kwargs["profile"] = profile
+
+    settings_kwargs: dict = {"_env_file": None, "agents": agents_kwargs}
+    servers = stored.get("core.mcp.servers")
+    if isinstance(servers, dict):
+        settings_kwargs["mcp"] = {"servers": servers}
+    return Settings(**settings_kwargs)
+
+
+def _api_accepts(changes: dict, stored: dict) -> bool:
+    try:
+        validate_agent_map(changes, stored)
+        return True
+    except AgentMapError:
+        return False
+
+
+def _settings_accepts(changes: dict, stored: dict) -> bool:
+    try:
+        _settings_from_changes(changes, stored)
+        return True
+    except ValidationError:
+        return False
+
+
+_SYMMETRY_CASES = [
+    ("valid new generic definition", _defs(strings={"role": "generic", "prompt": "p"}), {}),
+    ("non-slug key", _defs(**{"Bad Name": {"role": "generic", "prompt": "p"}}), {}),
+    ("generic without a prompt", _defs(strings={"role": "generic", "prompt": ""}), {}),
+    ("an edited built-in", _defs(static={**BUILTIN_STATIC, "prompt": "mine"}), {}),
+    (
+        "a disabled built-in analyst behind a custom active profile",
+        {
+            AGENT_DEFINITIONS_KEY: {"dynamic": {"role": "dynamic", "enabled": False}},
+            AGENT_PROFILES_KEY: {"lean": {"analysts": ["static", "network"]}},
+            AGENT_PROFILE_KEY: "lean",
+        },
+        {},
+    ),
+    (
+        "an unknown static provider",
+        _defs(static_r2={"role": "static", "static_provider": "idapro"}),
+        {},
+    ),
+    (
+        "a tool reference to an unknown server",
+        _defs(
+            strings={
+                "role": "generic",
+                "prompt": "p",
+                "tools": [{"kind": "mcp", "server": "ghost"}],
+            }
+        ),
+        {},
+    ),
+    (
+        "a named tool outside the server's allow list",
+        _defs(
+            strings={
+                "role": "generic",
+                "prompt": "p",
+                "tools": [{"kind": "mcp", "server": "mine", "name": "rm"}],
+            }
+        ),
+        {
+            "core.mcp.servers": {
+                "mine": {
+                    "enabled": True,
+                    "transport": "stdio",
+                    "command": "x",
+                    "tools": ["grep"],
+                }
+            }
+        },
+    ),
+    (
+        "a provider tool reference on a built-in role",
+        _defs(strings={"role": "static", "tools": [{"kind": "provider"}]}),
+        {},
+    ),
+    (
+        "a profile naming a missing analyst",
+        {AGENT_PROFILES_KEY: {"two": {"analysts": ["static", "ghost"]}}},
+        {},
+    ),
+    (
+        "an edited default profile",
+        {AGENT_PROFILES_KEY: {"default": {"analysts": ["network"]}}},
+        {},
+    ),
+    ("an unknown active profile", {AGENT_PROFILE_KEY: "ghost"}, {}),
+    (
+        "a disabled built-in member, inactive default profile",
+        {
+            AGENT_DEFINITIONS_KEY: {"network": {"role": "network", "enabled": False}},
+            AGENT_PROFILES_KEY: {
+                "default": {"label": "Default", "analysts": ["static", "dynamic", "network"]},
+                "lean": {"analysts": ["static", "dynamic"]},
+            },
+            AGENT_PROFILE_KEY: "lean",
+        },
+        {},
+    ),
+    (
+        "a disabled built-in member, active default profile",
+        {
+            AGENT_DEFINITIONS_KEY: {"network": {"role": "network", "enabled": False}},
+            AGENT_PROFILES_KEY: {
+                "default": {"label": "Default", "analysts": ["static", "dynamic", "network"]},
+                "lean": {"analysts": ["static", "dynamic"]},
+            },
+            AGENT_PROFILE_KEY: "default",
+        },
+        {},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "label,changes,stored", _SYMMETRY_CASES, ids=[c[0] for c in _SYMMETRY_CASES]
+)
+def test_the_api_layer_and_settings_agree_on_accept_or_reject(label, changes, stored):
+    """A payload the API accepts must be one ``Settings`` would also accept, and
+
+    vice versa -- otherwise the two layers have quietly drifted and an
+    operator sees a PATCH succeed only to have a job fail to build ``Settings``
+    from it later, or a PATCH refused for a reason ``Settings`` does not share.
+    """
+    assert _api_accepts(changes, stored) == _settings_accepts(changes, stored), label

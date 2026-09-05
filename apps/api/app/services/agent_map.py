@@ -14,6 +14,7 @@ from typing import Any
 
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
+    BUILTIN_PROFILES,
     AgentDefinition,
     ProfileDefinition,
     Settings,
@@ -133,6 +134,13 @@ def validate_definitions(
                 f"unknown static provider {model.static_provider!r}. "
                 f"Available: {', '.join(sorted(provider_ids))}"
             )
+        has_provider_ref = any(ref.kind == "provider" for ref in model.tools)
+        if has_provider_ref and model.role != "generic":
+            errors[name] = (
+                f"{name!r}: provider tool references are only valid on generic "
+                "definitions; built-in roles open their provider themselves"
+            )
+            continue
         for ref in model.tools:
             if ref.kind != "mcp":
                 continue
@@ -158,8 +166,18 @@ def validate_definitions(
     return out
 
 
-def validate_profiles(value: Any, *, definitions: dict[str, Any]) -> dict[str, Any]:
-    """Return the profile map to store, or raise with one message per offender."""
+def validate_profiles(
+    value: Any, *, definitions: dict[str, Any], active: str = "default"
+) -> dict[str, Any]:
+    """Return the profile map to store, or raise with one message per offender.
+
+    ``active`` is the profile that would actually run if this PATCH is
+    accepted — the staged ``core.agents.profile`` if the PATCH sets one, else
+    the stored one, else ``"default"``. It is what lets a built-in profile
+    keep a disabled member while some other profile is the one selected,
+    exactly as ``AgentsConfig`` allows: disabling a member of ``default`` is
+    harmless as long as ``default`` itself is not the profile that will run.
+    """
     if not isinstance(value, dict):
         raise AgentMapError({"": "the profile map must be an object keyed by profile name"})
 
@@ -204,7 +222,8 @@ def validate_profiles(value: Any, *, definitions: dict[str, Any]) -> dict[str, A
             if definition.get("role") == "judge":
                 errors[name] = f"lists {analyst!r}: the judge cannot be an analyst"
                 break
-            if definition.get("enabled") is False:
+            exempt = name in BUILTIN_PROFILES and name != active
+            if not exempt and definition.get("enabled") is False:
                 errors[name] = f"lists disabled analyst {analyst!r}"
                 break
         out[name] = dumped
@@ -247,14 +266,22 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
         profiles_raw = stored.get(AGENT_PROFILES_KEY) or {}
     elif profiles_raw is None:
         profiles_raw = {}
-    profiles = validate_profiles(profiles_raw, definitions=definitions)
-    if AGENT_PROFILES_KEY in changes and changes[AGENT_PROFILES_KEY] is not None:
-        out[AGENT_PROFILES_KEY] = profiles
 
+    # The profile that would actually run if this PATCH is accepted: the
+    # staged value wins, then the stored one, then "default" -- the same
+    # order ``AgentsConfig.profile`` itself resolves. Computed before
+    # ``validate_profiles`` runs, because the disabled-analyst exemption for
+    # a built-in profile depends on whether it is this profile.
     active = changes.get(AGENT_PROFILE_KEY, ...)
     if active is ... or active is None:
         active = stored.get(AGENT_PROFILE_KEY) or "default"
-    if str(active) not in profiles:
+    active = str(active)
+
+    profiles = validate_profiles(profiles_raw, definitions=definitions, active=active)
+    if AGENT_PROFILES_KEY in changes and changes[AGENT_PROFILES_KEY] is not None:
+        out[AGENT_PROFILES_KEY] = profiles
+
+    if active not in profiles:
         raise AgentMapError(
             {
                 AGENT_PROFILE_KEY: (
