@@ -154,6 +154,7 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     static: StaticAnalysis | None = None,
+    provider_id: str | None = None,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -182,7 +183,14 @@ def _augment_static_chunks_with_path(
     """
     import json
 
-    static_path = state.get("static_sample_path")
+    # ``provider_id`` is the agent's own static provider: with two static
+    # analysts on two providers each is shown the mirror its own tools point
+    # at, not the global provider's. The global key stays the fallback, which
+    # is what a single-provider run has always had.
+    paths = state.get("static_sample_paths") or {}
+    static_path = paths.get(provider_id) if provider_id else None
+    if not static_path:
+        static_path = state.get("static_sample_path")
     if not static_path or not chunks:
         return chunks
 
@@ -349,7 +357,12 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(chunks, state, static=_st)
+                chunks = _augment_static_chunks_with_path(
+                    chunks,
+                    state,
+                    static=_st,
+                    provider_id=agent._resolved.static_provider_id,
+                )
 
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.

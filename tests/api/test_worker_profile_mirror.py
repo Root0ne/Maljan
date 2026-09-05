@@ -82,3 +82,23 @@ def test_the_state_carries_a_path_per_provider_and_keeps_the_global_key():
 
     assert "static_sample_paths" in AnalysisState.__annotations__
     assert "static_sample_path" in AnalysisState.__annotations__
+
+
+def test_the_frozen_key_is_the_global_providers_mirror_not_the_first_one_made():
+    """F5: ``static_sample_path`` means the globally configured provider.
+
+    A global provider that reads in place (capa/YARA, r2) makes no mirror while
+    a clone on Ghidra does; taking the first entry that appeared handed the
+    clone's path to every reader that means the global one.
+    """
+    from app.worker.analysis_worker import global_mirror_path
+
+    settings = Settings(_env_file=None).static
+    assert settings.provider == "ghidra"
+
+    assert global_mirror_path({"ghidra": "/g/abc.exe"}, settings) == "/g/abc.exe"
+    assert global_mirror_path({"r2": "/host/abc.exe", "ghidra": "/g/abc.exe"}, settings) == (
+        "/g/abc.exe"
+    )
+    assert global_mirror_path({"r2": "/host/abc.exe"}, settings) is None
+    assert global_mirror_path({}, settings) is None

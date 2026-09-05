@@ -96,14 +96,27 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     return host, container
 
 
+def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
+    """``state["static_sample_path"]``: the globally configured provider's mirror.
+
+    Sub-project A froze that key as *the* static sample path and every
+    single-provider reader still means the global provider by it, so it is
+    ``None`` when that provider needed no copy — even if a clone on another
+    provider mirrored. Taking whichever provider happened to mirror first
+    handed the clone's path to readers that mean the global one.
+    """
+    return paths.get(str(static_settings.provider))
+
+
 def profile_static_providers(container: Any) -> list[str]:
     """The distinct static provider ids this job needs, the global one first.
 
-    "First" matters: the first entry backs ``state["static_sample_path"]``,
-    which is the key sub-project A froze and every single-provider reader still
-    uses. The globally configured provider is always in the list even when no
-    analyst names it, because that key must exist for a profile that runs no
-    static analyst at all.
+    Order matters for the mirror log and for ``global_mirror_path``, which
+    reads the global provider's entry back out of the per-provider map to fill
+    ``state["static_sample_path"]`` — the key sub-project A froze and every
+    single-provider reader still uses. The globally configured provider is
+    always in the list even when no analyst names it, because that provider is
+    the one that key means.
     """
     from maljan.agents.composition import static_provider_id_for
 
@@ -678,11 +691,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         sample_files.private_copy(Path(temp_path), host_mirror)
                         host_mirrors.append(host_mirror)
                         static_sample_paths[_provider_id] = container_path
-                        if static_sample_path is None:
-                            # The first id is the globally configured provider,
-                            # so this is the same value this variable has always
-                            # carried on a single-provider run.
-                            static_sample_path = container_path
                         logger.info(
                             "Mirrored sample to %s for static provider '%s' (%s).",
                             host_mirror,
@@ -702,6 +710,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         mirror_exc,
                         extra={"job_id": job_id, "component": "sample-mirror"},
                     )
+                static_sample_path = global_mirror_path(
+                    static_sample_paths, app.container.config.static
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to download sample from MinIO: %s. Sandbox submission skipped.",
