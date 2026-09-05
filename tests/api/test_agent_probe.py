@@ -8,7 +8,9 @@ anything reaches for one.
 
 from __future__ import annotations
 
+import asyncio
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ _API = Path(__file__).resolve().parents[2] / "apps" / "api"
 if str(_API) not in sys.path:
     sys.path.insert(0, str(_API))
 
+from app.services import settings_probes  # noqa: E402
 from app.services.settings_probes import PROBES, probe_agent, run_agent_probe  # noqa: E402
 
 
@@ -111,6 +114,88 @@ async def test_a_degraded_server_is_reported_per_server_rather_than_failing_the_
     result = await probe_agent({"name": "network", "settings": {}})
     assert result.ok is True
     assert result.details["servers"][0]["status"] == "mcp server 'network' unavailable"
+
+
+@pytest.mark.asyncio
+async def test_a_wedged_server_open_is_bounded_by_the_probe_budget_not_by_its_own_cleanup(
+    monkeypatch,
+):
+    """F9's own lesson, reused: the probe never waits for a wedged cleanup.
+
+    A server whose ``atools_for`` never returns, and whose cancellation is
+    itself slow to unwind — exactly the shape ``handshake_tools``' own
+    docstring describes for ``aopen`` — must still bound the probe's *visible*
+    latency to the budget, not to however long the server eventually takes to
+    actually stop. The container's own close is picked up in the background
+    once the wedged call finally gives up.
+    """
+    monkeypatch.setattr(settings_probes, "PROBE_BUDGET_SECONDS", 0.05)
+
+    async def _wedged(self, role, job_id, *, exclude="", **ctx):  # type: ignore[no-untyped-def]
+        try:
+            await asyncio.sleep(999)
+        except asyncio.CancelledError:
+            # Cancellation itself is slow to unwind — the wedge F9 describes.
+            await asyncio.sleep(0.2)
+            raise
+
+    cleaned_up = asyncio.Event()
+
+    async def _closed(self) -> None:  # type: ignore[no-untyped-def]
+        cleaned_up.set()
+
+    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for", _wedged)
+    monkeypatch.setattr("maljan.core.container.ServiceContainer.aclose", _closed)
+
+    t0 = time.perf_counter()
+    result = await probe_agent({"name": "network", "settings": {}})
+    elapsed = time.perf_counter() - t0
+
+    assert result.ok is False
+    assert "did not answer within" in result.detail
+    # Bounded by the (monkeypatched) budget plus the fixed cancellation grace,
+    # nowhere near the 999s + 0.2s the wedged server actually takes to unwind.
+    assert elapsed < 1.0
+
+    # The container's close is still scheduled and eventually runs, in the
+    # background, once the wedged cancellation finally gives up.
+    await asyncio.wait_for(cleaned_up.wait(), timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_each_bound_server_reports_only_its_own_tools(monkeypatch):
+    staged = {
+        "mcp.servers": {
+            "serverA": {"enabled": True, "agents": []},
+            "serverB": {"enabled": True, "agents": []},
+        },
+        "agents.definitions": {
+            "multi": {
+                "role": "generic",
+                "prompt": "multi",
+                "tools": [
+                    {"kind": "mcp", "server": "serverA"},
+                    {"kind": "mcp", "server": "serverB"},
+                ],
+            }
+        },
+        "agents.profiles": {"multi_profile": {"analysts": ["multi"]}},
+        "agents.profile": "multi_profile",
+    }
+
+    async def _atools_for_ref(self, ref, job_id, **ctx):  # type: ignore[no-untyped-def]
+        from langchain_core.tools import StructuredTool
+
+        name = f"{ref.server}_tool"
+        return [StructuredTool.from_function(func=lambda: "x", name=name, description=name)], []
+
+    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
+    result = await probe_agent({"name": "multi", "settings": staged})
+
+    assert result.ok is True
+    by_key = {s["key"]: s["tools"] for s in result.details["servers"]}
+    assert by_key["serverA"] == ["serverA_tool"]
+    assert by_key["serverB"] == ["serverB_tool"]
 
 
 @pytest.mark.asyncio

@@ -368,26 +368,10 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
 
     from maljan.agents.composition import aresolve_agent
+    from maljan.core.config import ToolRef
     from maljan.core.container import ServiceContainer
 
-    # ``mock=True`` is what makes this cheap and safe: the container builds no
-    # LLM registry at all, so ``get_agent_llm`` would raise rather than reach a
-    # provider. The model is reported from the settings instead, below.
-    container = ServiceContainer(settings, mock=True)
-    try:
-        resolved = await asyncio.wait_for(
-            aresolve_agent(name, container, job_key=f"probe-{name}"),
-            timeout=PROBE_BUDGET_SECONDS * 4,
-        )
-    except TimeoutError:
-        return ProbeResult(False, _ms(t0), "the agent's servers did not answer in time")
-    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
-        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
-    finally:
-        await container.aclose()
-
-    tools = [str(getattr(t, "name", "")) for t in resolved.tools]
-    reasons = set(resolved.degradation_reasons)
+    definition = settings.agents.definitions[name]
     bound = [
         key
         for key, server in settings.mcp.servers.items()
@@ -395,17 +379,65 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     ]
     bound += [
         str(ref.server)
-        for ref in settings.agents.definitions[name].tools
+        for ref in definition.tools
         if ref.kind == "mcp" and str(ref.server) not in bound
     ]
-    servers = [
-        {
-            "key": key,
-            "tools": [t for t in tools if t.startswith(f"{key}__")] or tools,
-            "status": next((r for r in reasons if f"'{key}" in r), "ok"),
-        }
-        for key in dict.fromkeys(bound)
-    ]
+    bound = list(dict.fromkeys(bound))
+
+    # One server's own open, at B's budget; the whole resolution gets that
+    # budget once per server bound to the agent, never a fixed multiple —
+    # an agent with five servers legitimately needs five times as long as
+    # one with one, and an agent with none should not wait for one either.
+    budget = PROBE_BUDGET_SECONDS * max(1, len(bound))
+    job_key = f"probe-{name}"
+
+    # ``mock=True`` is what makes this cheap and safe: the container builds no
+    # LLM registry at all, so ``get_agent_llm`` would raise rather than reach a
+    # provider. The model is reported from the settings instead, below.
+    container = ServiceContainer(settings, mock=True)
+
+    # F9's own fix, reused rather than re-derived: ``asyncio.wait_for`` waits
+    # for the cancelled coroutine's own cleanup before raising, and a wedged
+    # server open's cleanup is exactly the wait a 5 s-per-server probe budget
+    # cannot afford. ``asyncio.wait`` stops waiting at the budget and lets a
+    # still-running attach (and the container's own teardown) finish in the
+    # background instead — see ``handshake_tools`` for the same shape.
+    task: asyncio.Task[Any] = asyncio.ensure_future(
+        aresolve_agent(name, container, job_key=job_key)
+    )
+    done, _pending = await asyncio.wait({task}, timeout=budget)
+    if task not in done:
+        task.cancel()
+        done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
+        if task in done2:
+            await container.aclose()
+        else:
+            task.add_done_callback(lambda _t: _detach_cleanup(container.aclose(), job_key))
+        return ProbeResult(
+            False, _ms(t0), f"the agent's servers did not answer within {budget:.0f} s"
+        )
+    try:
+        resolved = task.result()
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        await container.aclose()
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+
+    tools = [str(getattr(t, "name", "")) for t in resolved.tools]
+    reasons = set(resolved.degradation_reasons)
+    registry = container.get_server_registry()
+    servers = []
+    for key in bound:
+        server_tools, _server_reasons = await registry.atools_for_ref(
+            ToolRef(kind="mcp", server=key), job_key
+        )
+        servers.append(
+            {
+                "key": key,
+                "tools": [str(getattr(t, "name", "")) for t in server_tools],
+                "status": next((r for r in reasons if f"'{key}" in r), "ok"),
+            }
+        )
+    await container.aclose()
     agent_llm = settings.llm.agents.get(name)
     listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
     return ProbeResult(
