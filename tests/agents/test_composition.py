@@ -19,6 +19,7 @@ from langchain_core.tools import StructuredTool
 from maljan.agents.composition import (
     ResolvedAgent,
     analyst_keys,
+    aresolve_agent,
     builtin_prompt,
     resolve_agent,
 )
@@ -81,6 +82,12 @@ class _Registry:
             self.degradation_reasons.append(reason)
             return [], [reason]
         return list(answer), []
+
+    async def atools_for(self, role, job_id, *, exclude="", **context):  # type: ignore[no-untyped-def]
+        return self.tools_for(role, job_id, exclude=exclude, **context)
+
+    async def atools_for_ref(self, ref, job_id, **context):  # type: ignore[no-untyped-def]
+        return self.tools_for_ref(ref, job_id, **context)
 
 
 class _Container:
@@ -283,3 +290,61 @@ def test_a_tool_ref_for_a_whole_server_asks_the_registry_for_the_whole_set():
     registry = _Registry({}, {"mine.None": [_tool("a"), _tool("b")]})
     tools, reasons = registry.tools_for_ref(ref, "job")
     assert [t.name for t in tools] == ["a", "b"] and reasons == []
+
+
+def test_an_awaited_resolution_does_not_block_the_callers_loop_past_its_budget():
+    """F3: a provider's blocking ``open`` leaves the loop that awaits it.
+
+    The settings probe bounds a resolution with ``asyncio.wait(..., timeout=budget)``.
+    A synchronous provider handshake inside the awaited coroutine never yields,
+    so the budget could not fire and every other request on that worker stalled
+    for the length of the handshake.
+    """
+    import asyncio
+    import time
+
+    class _SlowProvider(_Provider):
+        def open(self, job: Any) -> None:
+            time.sleep(1.0)
+            self.opened = True
+
+    cfg = Settings(
+        _env_file=None,
+        agents={
+            "definitions": {
+                "strings": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "static_provider": "r2",
+                    "tools": [{"kind": "provider"}],
+                }
+            },
+            "profiles": {"one": {"analysts": ["strings"]}},
+            "profile": "one",
+        },
+    )
+
+    async def _run() -> tuple[float, int, bool]:
+        ticks = 0
+
+        async def _tick() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.01)
+                ticks += 1
+
+        ticker = asyncio.ensure_future(_tick())
+        task = asyncio.ensure_future(
+            aresolve_agent("strings", _Container(cfg, provider=_SlowProvider()))
+        )
+        started = time.monotonic()
+        done, pending = await asyncio.wait({task}, timeout=0.3)
+        elapsed = time.monotonic() - started
+        ticker.cancel()
+        task.cancel()
+        return elapsed, ticks, bool(pending)
+
+    elapsed, ticks, still_pending = asyncio.run(_run())
+    assert still_pending
+    assert elapsed < 1.0
+    assert ticks > 5

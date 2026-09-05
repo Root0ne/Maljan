@@ -24,6 +24,7 @@ path *is* resolved here.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -234,7 +235,14 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         prompt = builtin_prompt(definition.role, container, provider_id)
 
     reasons: list[str] = []
-    tools: list[Any] = list(_provider_tools(container, definition, provider_id))
+    # The provider handshake is synchronous — for Ghidra it hands ``initialize``
+    # to the shared agent loop and blocks on the result — so it runs off this
+    # loop. Awaited callers (the judge's node, the settings probe) keep serving
+    # everything else, and the probe's ``asyncio.wait`` budget can actually
+    # preempt a wedged provider.
+    tools: list[Any] = list(
+        await asyncio.to_thread(_provider_tools, container, definition, provider_id)
+    )
     registry = container.get_server_registry()
     bound, bound_reasons = await registry.atools_for(key, job_key)
     tools.extend(bound)
