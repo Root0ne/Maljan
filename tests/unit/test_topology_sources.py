@@ -26,7 +26,6 @@ TOPOLOGY_SOURCES: set[str] = {
     "src/maljan/agents/registry.py",
     "src/maljan/pipeline/builder.py",
     "src/maljan/pipeline/nodes.py",
-    "src/maljan/core/container.py",
     "src/maljan/app.py",
     "src/maljan/cli.py",
     "apps/api/app/worker/analysis_worker.py",

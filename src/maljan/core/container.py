@@ -355,9 +355,9 @@ class ServiceContainer:
         """The ordered analyst keys of the active profile.
 
         The topology source for the builder, the negotiation and revision
-        nodes, the judge node and the worker's roster announcement. It replaced
-        ``agent_registry.list_agents()`` in all of them at once, because a
-        profile that half the pipeline believes in is worse than no profile.
+        nodes, the judge node and the worker's roster announcement — all of
+        them read the profile through this one call, because a profile that
+        half the pipeline believes in is worse than no profile.
         """
         from maljan.agents.composition import analyst_keys
 
@@ -407,7 +407,12 @@ class ServiceContainer:
                 # ``agent.name``, so this one assignment is what makes a clone
                 # a separate participant rather than a second copy of its source.
                 agent.name = name
-                agent.logger = agent.logger.getChild(name.lower())
+                # The base class already childed the logger with the role's
+                # own name at construction time; re-child only when the key
+                # differs from the role, or a default-profile agent would log
+                # as ``...static.static`` instead of ``...static``.
+                if name != role:
+                    agent.logger = agent.logger.getChild(name.lower())
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             # Hand the agent a way back to this container. The static analyst

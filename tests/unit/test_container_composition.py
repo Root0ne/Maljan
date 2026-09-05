@@ -110,6 +110,25 @@ def test_an_unknown_key_says_what_is_available():
         container.get_agent("ghost")
 
 
+def test_a_built_in_agents_logger_is_childed_once_not_twice():
+    """The base class already childs the logger with the role's own name.
+
+    Re-childing again with the definition's key on top of that gave every
+    default-profile agent a doubled logger name (``...static.static``); a
+    clone still needs its own key on the logger, once.
+    """
+    container = _container()
+    assert container.get_agent("static").logger.name.endswith(".static")
+    assert not container.get_agent("static").logger.name.endswith(".static.static")
+
+    cloned = _container(
+        definitions={"static_r2": {"role": "static", "static_provider": "r2"}},
+        profiles={"two": {"analysts": ["static", "static_r2"]}},
+        profile="two",
+    )
+    assert cloned.get_agent("static_r2").logger.name.endswith(".static_r2")
+
+
 def test_a_reduced_profile_is_the_only_thing_the_container_reports():
     container = _container(profiles={"lean": {"analysts": ["network"]}}, profile="lean")
     assert container.analyst_keys() == ["network"]
