@@ -217,3 +217,64 @@ def test_a_server_token_never_lands_in_the_map_row_it_arrived_in():
     assert "s3cr3t" not in str(cleaned)
     assert "auth_token" not in cleaned["x"]
     assert tokens == {"x": "s3cr3t"}
+
+
+def test_a_definition_cannot_widen_a_servers_exposure():
+    """A ``ToolRef.name`` outside the allow-list is refused at save (spec §11)."""
+    import sys
+    from pathlib import Path
+
+    _api = Path(__file__).resolve().parents[2] / "apps" / "api"
+    if str(_api) not in sys.path:
+        sys.path.insert(0, str(_api))
+    from app.services.agent_map import AGENT_DEFINITIONS_KEY, AgentMapError, validate_agent_map
+
+    stored = {
+        "core.mcp.servers": {
+            "mine": {"enabled": True, "transport": "stdio", "command": "x", "tools": ["grep"]}
+        }
+    }
+    with pytest.raises(AgentMapError):
+        validate_agent_map(
+            {
+                AGENT_DEFINITIONS_KEY: {
+                    "x": {
+                        "role": "generic",
+                        "prompt": "p",
+                        "tools": [{"kind": "mcp", "server": "mine", "name": "rm_rf"}],
+                    }
+                }
+            },
+            stored=stored,
+        )
+
+
+def test_a_prompt_is_operator_text_and_reaches_the_snapshot_unmasked():
+    """Prompts are not secrets; a masked prompt would make a report unreadable."""
+    from app.worker.analysis_worker import settings_snapshot
+
+    cfg = Settings(
+        _env_file=None,
+        agents={
+            "definitions": {"x": {"role": "generic", "prompt": "look for PROMPT-MARKER"}},
+            "profiles": {"one": {"analysts": ["x"]}},
+            "profile": "one",
+        },
+    )
+    snap = json.dumps(settings_snapshot(cfg))
+    assert "PROMPT-MARKER" in snap
+
+
+def test_a_job_cannot_inline_an_agent_definition():
+    """Per-job selection picks among operator-defined profiles only (spec §11)."""
+    import sys
+    from pathlib import Path
+
+    _api = Path(__file__).resolve().parents[2] / "apps" / "api"
+    if str(_api) not in sys.path:
+        sys.path.insert(0, str(_api))
+    from app.schemas.job import _KnownJobConfig
+
+    assert "profile" in _KnownJobConfig.model_fields
+    assert "definitions" not in _KnownJobConfig.model_fields
+    assert "profiles" not in _KnownJobConfig.model_fields

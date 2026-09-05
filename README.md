@@ -247,6 +247,44 @@ bound to the static or dynamic analyst degrades rather than failing a job: if
 it cannot be reached, the run says so in its degradation reasons and
 continues on the evidence it has.
 
+### Agents and profiles
+
+The three analysts and the judge are configuration, not code. Settings →
+Agents holds two maps:
+
+**Agent definitions** — every agent Maljan can run, keyed by a short name.
+Each carries a role (`static`, `dynamic`, `network`, `judge` or `generic`), a
+prompt, the tool servers it receives and, for the static-flavoured roles, the
+static provider it reads. The four built-ins are read-only apart from their
+enabled switch; to change one, clone it. A clone keeps its source's class and
+its ISR extraction, so a `static` clone pointed at radare2 is a real static
+analyst reading r2 — the prompt is reassembled with radare2's fragment in the
+middle and nothing else moves. A `generic` definition runs a plain ReAct
+analyst with the prompt you write and the tools you tick; a probe of it
+returns the resolved prompt along with the tool names and the model id, so you
+can read exactly what the model will see before a job spends a token on it.
+
+**Profiles** — named, ordered sets of analysts. The order is the order they
+run in on a single-slot local model. `default` is the three-analyst
+architecture this project was measured on and is read-only; clone it to build
+your own. A job may name a profile at submit time; without one it uses the
+profile in the settings. A profile naming a disabled analyst is refused at
+submit, not partway through the run.
+
+Two things to know before you build one. An agent's model is set through
+`core.llm.agents`, a map keyed by agent name with a provider and a model per
+entry — not on the definition — so the definition and the model it runs on
+cannot drift out of sync with each other. And a definition can only narrow
+what a tool server exposes: a tool outside that server's allow-list is
+refused when you save, so adding an agent never widens the trust boundary the
+server section above describes. A `ToolRef` of kind `provider` — "give this
+agent its static provider's own tools" — is only valid on a `generic`
+definition; a built-in role already opens its provider itself.
+
+The **Resolve** button on a definition card shows exactly what that agent
+would get — the assembled prompt's size and hash, the resolved tool names, the
+model id and the static provider — without running a job or spending a token.
+
 ### A sandbox Maljan has never heard of
 
 `SANDBOX__PROVIDER=rest` drives an HTTP sandbox you describe rather than one

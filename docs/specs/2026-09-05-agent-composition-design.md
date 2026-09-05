@@ -1,6 +1,6 @@
 # Agent composition design — Maljan sub-project C
 
-Status: approved design, not yet implemented. Builds on sub-project A (`docs/specs/2026-09-03-provider-layer-design.md`, PR #5 into `dev`) and sub-project B (`docs/specs/2026-09-04-tool-servers-design.md`, PR #6). Branch `feat/agent-composition` is stacked on `feat/tool-servers` until #5 and #6 merge. Companion plan: `docs/plans/2026-09-05-agent-composition.md` (written after this spec is reviewed).
+Status: implemented on branch feat/agent-composition; PR pending final review. Companion plan: `docs/plans/2026-09-05-agent-composition.md`. Builds on sub-project A (`docs/specs/2026-09-03-provider-layer-design.md`, PR #5 into `dev`) and sub-project B (`docs/specs/2026-09-04-tool-servers-design.md`, PR #6). Branch `feat/agent-composition` is stacked on `feat/tool-servers` until #5 and #6 merge.
 
 ## 1. Problem
 
