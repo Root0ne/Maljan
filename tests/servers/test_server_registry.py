@@ -167,8 +167,29 @@ def test_close_all_closes_every_opened_handle(patched):
     _, made = patched
     registry = ServerRegistry(Settings(_env_file=None))
     registry.tools_for("network", "job-1")
-    registry.close_all()
+    skipped = registry.close_all()
     assert made[0].cleanup.await_count + made[0].cleanup.call_count >= 1
+    assert skipped == []
+
+
+def test_close_all_skips_a_handle_opened_asynchronously_and_reports_it(patched):
+    """Regression (F6): a judge-opened handle's exit stack was wound on the
+    graph loop; the registry's synchronous close_all() must not try to unwind
+    it through the shared agent loop (anyio's cross-loop cancel-scope error),
+    it must skip it and hand it back so the caller closes it the right way."""
+    handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+    asyncio.run(handle.aopen("job-1"))
+    assert handle.is_open is True
+
+    registry = ServerRegistry(Settings(_env_file=None))
+    registry._handles["threatintel"] = handle
+    skipped = registry.close_all()
+
+    assert skipped == [handle]
+    assert handle.is_open is True, "still attached: only aclose() may release it"
+
+    asyncio.run(handle.aclose())
+    assert handle.is_open is False
 
 
 # ---------------------------------------------------------------------------

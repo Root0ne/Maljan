@@ -31,6 +31,7 @@ from app.schemas.settings import (
     ValuesResponse,
 )
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.server_map import SERVER_MAP_KEY
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import PROBES, run_mcp_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
@@ -160,8 +161,37 @@ async def export_overrides(
             continue
         entry = index[key]
         env_name = entry.path.upper().replace(".", "__")
+        if key == SERVER_MAP_KEY:
+            lines.extend(_server_map_env_lines(env_name, dict(info.value or {})))
+            continue
         lines.append(f"{env_name}={_env_literal(entry.secret, info.value)}")
     return "\n".join(lines) + "\n"
+
+
+def _server_map_env_lines(env_name: str, servers: dict[str, Any]) -> list[str]:
+    """``core.mcp.servers`` as ``.env`` lines a plain re-import will not break.
+
+    ``values()`` masks every server's token to ten literal asterisks
+    (``TOKEN_MASK``) so the UI never echoes a real credential; embedding that
+    mask inside the exported ``MCP__SERVERS`` JSON would configure it as the
+    actual token on re-import, a silent auth failure rather than a visible
+    placeholder. The token (and the synthetic ``auth_token_source`` --  not
+    an ``MCPServerConfig`` field) is stripped from the map instead, and a
+    commented placeholder line stands in for it per server that has one, the
+    same visible-but-inert shape ``_env_literal(secret=True, ...)`` gives an
+    ordinary secret leaf.
+    """
+    sanitized: dict[str, Any] = {}
+    lines: list[str] = []
+    for name, entry in servers.items():
+        clean = dict(entry)
+        has_token = bool(clean.pop("auth_token_source", None)) or bool(clean.get("auth_token"))
+        clean.pop("auth_token", None)
+        sanitized[name] = clean
+        if has_token:
+            lines.append(f"# {env_name}__{name.upper()}__AUTH_TOKEN=***")
+    lines.insert(0, f"{env_name}={_env_literal(False, sanitized)}")
+    return lines
 
 
 @router.post("/test/mcp", response_model=ProbeResponse)

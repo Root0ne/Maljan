@@ -59,7 +59,7 @@ async def test_aclose_closes_the_registry_only_when_one_was_built():
 
     container = _container()
     registry = container.get_server_registry()
-    registry.close_all = MagicMock()
+    registry.close_all = MagicMock(return_value=[])
     await container.aclose()
     registry.close_all.assert_called_once()
 

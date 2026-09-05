@@ -64,6 +64,37 @@ async def test_a_hanging_server_is_killed_and_reported(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_wedged_aopen_whose_cancellation_also_hangs_does_not_stretch_the_budget(
+    monkeypatch,
+):
+    """Regression (F9): a probe's 5 s budget used to be able to stretch to
+    ~25 s -- ``wait_for`` cancels a wedged ``aopen`` and then waits for that
+    cancellation to finish, and ``aopen``'s own handler awaits an internal
+    cleanup bounded at 20 s. A fake ``aopen`` that not only hangs but also
+    ignores cancellation (its own ``asyncio.shield``ed sleep) proves the fix
+    does not fall back to waiting for it: the probe returns close to the
+    budget, not close to the internal cleanup's own bound."""
+    import asyncio
+    import time
+
+    async def deaf_to_cancellation(self, job_id, **kw):
+        # Shielded, so ``task.cancel()`` does not interrupt this sleep --
+        # standing in for a real wedged subprocess handshake/cleanup that
+        # does not respond to cancellation quickly either.
+        await asyncio.shield(asyncio.sleep(0.3))
+
+    monkeypatch.setattr(_Handle, "aopen", deaf_to_cancellation)
+    monkeypatch.setattr("app.services.settings_probes.PROBE_BUDGET_SECONDS", 0.05)
+
+    t0 = time.perf_counter()
+    result = await probe_mcp({"name": "x", "entry": {"enabled": True, "command": "mcp"}})
+    elapsed = time.perf_counter() - t0
+
+    assert result.ok is False and "no MCP handshake" in result.detail
+    assert elapsed < 2.0, f"probe took {elapsed:.2f}s, far past its 0.05s+grace budget"
+
+
+@pytest.mark.asyncio
 async def test_a_missing_binary_names_itself(monkeypatch):
     async def boom(self, job_id, **kw):
         raise FileNotFoundError("r2mcp")

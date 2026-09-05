@@ -1046,7 +1046,8 @@ class SandboxConfig(BaseModel):
         """
         if not isinstance(data, dict):
             return data
-        return _alias_within(data, _SANDBOX_LOCAL_ALIASES)
+        out, _used = _alias_within(data, _SANDBOX_LOCAL_ALIASES)
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -1117,7 +1118,9 @@ def _ensure(data: dict[str, Any], path: str) -> tuple[dict[str, Any], str]:
     return cursor, parts[-1]
 
 
-def _alias_within(data: dict[str, Any], table: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+def _alias_within(
+    data: dict[str, Any], table: tuple[tuple[str, str], ...]
+) -> tuple[dict[str, Any], list[str]]:
     """Move every legacy path in ``table`` onto its new path, new key wins.
 
     Sub-mappings are merged key by key (``mcp.ghidra`` -> ``static.ghidra``
@@ -1150,7 +1153,7 @@ def _alias_within(data: dict[str, Any], table: tuple[tuple[str, str], ...]) -> d
             dst_owner[dst_key] = value
     if used:
         _warn_once(used)
-    return out
+    return out, used
 
 
 def _warn_once(paths: list[str]) -> None:
@@ -1207,15 +1210,24 @@ def _redecode_json_leaves_stranded_by_an_alias(data: dict[str, Any]) -> None:
                     pass  # let ordinary model validation raise on the bad value
 
 
-def _finish_generic_server_move(data: dict[str, Any]) -> None:
+def _finish_generic_server_move(data: dict[str, Any], moved: list[str]) -> None:
     """Point ``static.generic.server`` at the migrated block and bind it to static.
 
     The alias table can move a value; it cannot say that moving it also means
     "and this is the server the static provider drives, and its tools go to
     the static analyst". A legacy ``.env`` set neither, because neither
     existed — so both are filled in here, and only when the move actually
-    happened and the new keys are not already set explicitly.
+    happened (``moved`` names at least one ``static.generic.*`` alias this
+    pass fired) and the new keys are not already set explicitly.
+
+    Regression (F3): checking only that ``mcp.servers.custom`` exists as a
+    dict fired on *any* server an operator happened to name ``custom`` —
+    added through the UI or a plain ``MCP__SERVERS__CUSTOM__*`` env var, with
+    no ``static.generic`` alias involved — silently pointing
+    ``static.generic.server`` at it.
     """
+    if not any(path.startswith("static.generic.") for path in moved):
+        return
     servers = data.get("mcp", {}).get("servers")
     if not isinstance(servers, dict):
         return
@@ -1230,9 +1242,9 @@ def _finish_generic_server_move(data: dict[str, Any]) -> None:
 
 def apply_settings_aliases(data: dict[str, Any]) -> dict[str, Any]:
     """Public, pure form of the alias pass — used by the validator and by tests."""
-    out = _alias_within(data, SETTINGS_ALIASES)
+    out, used = _alias_within(data, SETTINGS_ALIASES)
     _redecode_json_leaves_stranded_by_an_alias(out)
-    _finish_generic_server_move(out)
+    _finish_generic_server_move(out, used)
     return out
 
 

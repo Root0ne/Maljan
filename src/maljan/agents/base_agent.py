@@ -721,6 +721,13 @@ class BaseAnalyst(ABC):
         self.toolkit: Any = None
         self._all_ghidra_tools: list[Any] = []
         self._container: Any = None
+        # Reasons this agent's own tool-server attachment degraded, filled in
+        # by ``_attach_registry_tools``/subclasses. A per-instance list, not a
+        # mutable class attribute: the run summary reads
+        # ``container.server_degradation_reasons()`` instead (the registry is
+        # the source of truth across every agent in a job), so this exists
+        # only for an agent inspected directly (tests, scripts).
+        self.degradation_reasons: list[str] = []
 
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
@@ -854,10 +861,6 @@ class BaseAnalyst(ABC):
         if reasons:
             self.degradation_reasons = [*self.degradation_reasons, *reasons]
         return list(tools)
-
-    # Reasons the run summary should carry, filled in by whoever attaches
-    # tool servers. Empty for an agent that attached none.
-    degradation_reasons: list[str] = []
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.

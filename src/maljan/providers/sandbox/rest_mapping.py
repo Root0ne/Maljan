@@ -93,6 +93,12 @@ _FIELDS: dict[str, tuple[str, ...]] = {
     "tcp": ("dst", "dport"),
     "udp": ("dst", "dport"),
     "dropped_files": ("name", "sha256", "size"),
+    # http stays a passthrough channel (an arbitrary sandbox's own field names
+    # ride along unchanged, see ``_coerce``) but a rename must still be able
+    # to land a source field under the canonical name every extractor reads
+    # (``host``, ``uri``, ...) -- the same contract every other channel gives
+    # ``field_names`` (F12).
+    "http": ("host", "uri", "method", "status", "port", "encrypted", "user_agent"),
 }
 
 
@@ -162,7 +168,14 @@ def _coerce(channel: str, names: dict[str, str], raw: Any) -> Any | None:
         return None
     row = {want: _rename(channel, names, raw, want) for want in _FIELDS.get(channel, ())}
     if channel == "http":
-        row = dict(raw)
+        # Passthrough first (every field the sandbox's own payload carries
+        # survives, whatever it calls them), then a configured rename
+        # overlays its canonical field -- a real value only, so an
+        # unconfigured or unmatched rename never blanks a field passthrough
+        # already supplied.
+        merged = dict(raw)
+        merged.update({k: v for k, v in row.items() if v is not None})
+        row = merged
     for required in _REQUIRED.get(channel, ()):
         if row.get(required) in (None, ""):
             return None
@@ -177,22 +190,30 @@ def _normalize_sha256(value: Any) -> tuple[str, str]:
     return "", f"{value!r} is not a 64-character lowercase hex sha256"
 
 
-def _select(compiled: CompiledMapping, channel: str, payload: dict[str, Any]) -> ChannelStats:
+def _select(
+    compiled: CompiledMapping, channel: str, payload: dict[str, Any]
+) -> tuple[ChannelStats, list[Any]]:
     """Run one channel's path and coerce what it selected.
 
     ``finditer`` is only ever pulled through ``islice(..., MAX_ROWS_PER_CHANNEL
     + 1)`` — one past the cap, never the whole thing — so a path that selects
     a million rows never materialises more than 5001 of them before this
     function knows to stop and say ``truncated``.
+
+    Returns ``(stats, kept_rows)`` rather than smuggling the rows onto the
+    frozen ``ChannelStats`` through ``object.__setattr__`` (F15): that hid a
+    second, undeclared field a stats-only rebuild (the calls/orphan case in
+    ``apply_mapping``) would silently drop, and mutating a frozen dataclass at
+    all only works by accident of it not truly being read-only in Python.
     """
     path = compiled.paths.get(channel)
     if path is None:
-        return ChannelStats()
+        return ChannelStats(), []
     try:
         values = (node.value for node in path.finditer(payload))
         peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
     except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
-        return ChannelStats(error=f"{type(exc).__name__}: {exc}")
+        return ChannelStats(error=f"{type(exc).__name__}: {exc}"), []
     truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
     matches = peeked[:MAX_ROWS_PER_CHANNEL]
     if truncated:
@@ -215,8 +236,7 @@ def _select(compiled: CompiledMapping, channel: str, payload: dict[str, Any]) ->
         sample_rows=kept[:3],
         truncated=truncated,
     )
-    object.__setattr__(stats, "_rows", kept)  # carried to the builder, not part of the wire shape
-    return stats
+    return stats, kept
 
 
 def apply_mapping(
@@ -231,8 +251,9 @@ def apply_mapping(
         SandboxTarget,
     )
 
-    stats = {channel: _select(compiled, channel, payload) for channel in CHANNELS}
-    rows: dict[str, list[Any]] = {c: list(getattr(s, "_rows", [])) for c, s in stats.items()}
+    selected = {channel: _select(compiled, channel, payload) for channel in CHANNELS}
+    stats: dict[str, ChannelStats] = {c: s for c, (s, _rows) in selected.items()}
+    rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
 
     processes = [
         SandboxProcess(

@@ -420,10 +420,31 @@ class ServiceContainer:
         # ``get_server_registry()`` — a job that never attached a tool server
         # must not build one here for the sole purpose of closing it.
         if self._server_registry_cache is not None:
+            skipped = []
             try:
-                self._server_registry_cache.close_all()
+                skipped = self._server_registry_cache.close_all()
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 logger.warning("Closing the tool-server registry failed (non-fatal): %s", exc)
+            # F6: a handle the judge attached with ``aopen`` was wound on this
+            # same graph loop (``aclose`` is itself awaited from it), so it is
+            # unwound here too rather than through close_all()'s synchronous,
+            # cross-loop path -- normally a no-op, because JudgeAgent.aclose
+            # already closed it; this only fires when the judge raised before
+            # reaching its own aclose().
+            for handle in skipped:
+                try:
+                    await asyncio.wait_for(handle.aclose(), timeout=_ACLOSE_BUDGET)
+                except TimeoutError:
+                    logger.warning(
+                        "Closing async-opened mcp server '%s' timed out; abandoning.",
+                        handle.name,
+                    )
+                except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                    logger.warning(
+                        "Closing async-opened mcp server '%s' failed (non-fatal): %s",
+                        handle.name,
+                        exc,
+                    )
 
         # The sample's parsed text and the per-job analysis layers. Not a leak
         # on their own — the container dies with the job — but dropping them

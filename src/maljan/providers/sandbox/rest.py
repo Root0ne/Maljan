@@ -42,6 +42,39 @@ if TYPE_CHECKING:
     from maljan.schemas.sandbox_report import SandboxRun
 
 
+def _fill_task_id(template: str, task_id: str) -> str:
+    """Substitute ``{task_id}`` in a path template without ``str.format``.
+
+    Regression (F11): an operator-configured path can carry any other
+    ``{...}`` an unrelated tool left behind (a doc example, a copy-pasted
+    OpenAPI path parameter); ``str.format`` raises ``KeyError``/``IndexError``
+    on those, an uncaught 500 from the probe route and an unwrapped exception
+    on the job path rather than a legible ``ProviderError``. A single
+    ``replace`` only ever touches the one placeholder this project defines,
+    so a stray brace elsewhere in the string passes through untouched.
+    """
+    return template.replace("{task_id}", task_id)
+
+
+def _validate_task_id_template(label: str, template: str) -> None:
+    """Reject a path template with a brace outside the one placeholder.
+
+    Called once, from ``from_settings``, so a mistyped path fails loudly at
+    configuration time rather than mid-job the first time ``_fill_task_id``
+    is asked to fill in a real task id.
+    """
+    if "{" not in template and "}" not in template:
+        return
+    remainder = template.replace("{task_id}", "")
+    if "{" in remainder or "}" in remainder:
+        from maljan.providers.errors import ProviderConfigurationError
+
+        raise ProviderConfigurationError(
+            f"sandbox.rest.{label} {template!r} has a brace outside the single "
+            "{task_id} placeholder"
+        )
+
+
 @register_sandbox_provider("rest")
 class RestSandboxProvider(SandboxProvider):
     """Submit, poll, fetch and (optionally) capture, all from configuration."""
@@ -65,6 +98,10 @@ class RestSandboxProvider(SandboxProvider):
         rest = cfg.sandbox.rest
         if not rest.base_url:
             raise ProviderConfigurationError("sandbox.rest.base_url is required")
+        _validate_task_id_template("status.path", rest.status.path)
+        _validate_task_id_template("report.path", rest.report.path)
+        if rest.report.pcap_path:
+            _validate_task_id_template("report.pcap_path", rest.report.pcap_path)
         return cls(rest, compile_mapping(rest.mapping))
 
     @property
@@ -173,7 +210,7 @@ class RestSandboxProvider(SandboxProvider):
         # interpolated into a URL path here exactly as it is into a filename
         # in ``fetch_pcap``, so it gets the same guard against a server that
         # hands back a path-traversal payload instead of an opaque id.
-        url = self._cfg.status.path.format(task_id=_safe_path_component(str(task_id)))
+        url = _fill_task_id(self._cfg.status.path, _safe_path_component(str(task_id)))
         done = {v.lower() for v in self._cfg.status.done_values}
         failed = {v.lower() for v in self._cfg.status.failed_values}
         while True:
@@ -188,11 +225,16 @@ class RestSandboxProvider(SandboxProvider):
             if response.status_code in (429, 503):
                 retry_after = response.headers.get("Retry-After")
                 parsed = _parse_retry_after(retry_after, self._now()) if retry_after else None
-                wait_seconds = parsed if parsed is not None else interval
+                # A sustained ``Retry-After: 0`` (or a negative/expired
+                # HTTP-date) must not spin the loop: floor the wait at the
+                # current backoff interval whenever the header does not ask
+                # for a positive wait, the same as when it is absent.
+                honoured = parsed is not None and parsed > 0
+                wait_seconds: float = parsed if parsed is not None and honoured else interval
                 clamped = min(wait_seconds, _MAX_INTERVAL_SECONDS, deadline - self._now())
                 if clamped > 0:
                     self._sleep(clamped)
-                if parsed is None:
+                if not honoured:
                     interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
                 continue
             self._raise_for_status(response, "status check")
@@ -212,7 +254,7 @@ class RestSandboxProvider(SandboxProvider):
         )
 
         response = self._get_http().get(
-            self._cfg.report.path.format(task_id=_safe_path_component(str(task_id)))
+            _fill_task_id(self._cfg.report.path, _safe_path_component(str(task_id)))
         )
         self._raise_for_status(response, "report fetch")
         payload = response.json()
@@ -249,7 +291,7 @@ class RestSandboxProvider(SandboxProvider):
         dest.mkdir(parents=True, exist_ok=True)
         safe = _safe_path_component(str(task_id))
         out = dest / f"rest_{safe}.pcap"
-        url = self._cfg.report.pcap_path.format(task_id=safe)
+        url = _fill_task_id(self._cfg.report.pcap_path, safe)
         try:
             with self._get_http().stream("GET", url) as response:
                 if response.status_code >= 400:
@@ -275,7 +317,7 @@ class RestSandboxProvider(SandboxProvider):
         t0 = time.perf_counter()
         if not self._cfg.base_url:
             return ProviderProbe(ok=False, detail="no base URL configured")
-        url = f"{self._cfg.base_url.rstrip('/')}{self._cfg.status.path.format(task_id='probe')}"
+        url = f"{self._cfg.base_url.rstrip('/')}{_fill_task_id(self._cfg.status.path, 'probe')}"
         try:
             async with httpx.AsyncClient(timeout=10.0, verify=self._cfg.verify_tls) as client:
                 response = await client.get(url, headers=self._auth_headers())

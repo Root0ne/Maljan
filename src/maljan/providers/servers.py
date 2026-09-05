@@ -59,6 +59,10 @@ class ServerHandle:
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self._job_id: str = ""
+        # True once ``aopen`` has attached this handle: its exit stack was
+        # wound on whichever loop called it (the judge's graph loop), so it
+        # must be unwound there too (see F6 / ``close``).
+        self._opened_async = False
 
     @property
     def is_open(self) -> bool:
@@ -123,10 +127,18 @@ class ServerHandle:
             from mcp import StdioServerParameters
 
             from maljan.agents.subprocess_env import child_env
+            from maljan.core.config import BUILTIN_SERVER_KEYS
             from maljan.core.paths import resolve_mcp_args
 
             env = child_env(self.config.env, allow=tuple(self.config.env_allow))
-            env.setdefault("PYTHONIOENCODING", "utf-8")
+            if self.name not in BUILTIN_SERVER_KEYS:
+                # Byte-for-byte with the pre-branch built-ins (spec S3.2): the
+                # in-repo network/threatintel sidecars were launched with a
+                # bare ``child_env(...)``, which carries PYTHONIOENCODING only
+                # when the parent process already has it set. A server the
+                # operator adds through the catalog gets the more predictable
+                # default instead.
+                env.setdefault("PYTHONIOENCODING", "utf-8")
             params = StdioServerParameters(
                 command=self.config.command,
                 args=resolve_mcp_args(list(self.config.args)),
@@ -192,6 +204,7 @@ class ServerHandle:
             self._teardown(toolkit)
             raise
         self._toolkit = toolkit
+        self._opened_async = False
         self._all_tools = list(toolkit.get_tools())
         allowed = self.config.tools
         if allowed:
@@ -246,6 +259,7 @@ class ServerHandle:
             await self._acleanup(toolkit)
             raise
         self._toolkit = toolkit
+        self._opened_async = True
         self._all_tools = list(toolkit.get_tools())
 
     async def _acleanup(self, toolkit: Any) -> None:
@@ -276,6 +290,7 @@ class ServerHandle:
         """Close on the caller's own loop. Bounded, and never raises."""
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
+        self._opened_async = False
         if toolkit is None:
             return
         await self._acleanup(toolkit)
@@ -313,7 +328,24 @@ class ServerHandle:
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
 
     def close(self) -> None:
-        """Release the client or subprocess. Never raises."""
+        """Release the client or subprocess. Never raises.
+
+        A handle ``aopen`` attached must be released through ``aclose`` on the
+        loop that opened it (F6): the synchronous path here runs the toolkit's
+        exit stack through ``_run_coro_blocking`` on the *shared agent loop*,
+        which is not the graph loop ``aopen`` wound it on, and produces
+        anyio's "cancel scope in a different task" on unwind. Skip it here and
+        let the async caller (``ServiceContainer.aclose``) close it instead;
+        on the normal path that has already happened by the time this runs.
+        """
+        if self._opened_async and self._toolkit is not None:
+            logger.warning(
+                "mcp server '%s' was opened asynchronously and is still attached; "
+                "it must be closed through aclose() on the loop that opened it, "
+                "skipping the cross-loop teardown here.",
+                self.name,
+            )
+            return
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         if toolkit is None:
@@ -456,6 +488,17 @@ class ServerRegistry:
                 )
         return tools, reasons
 
-    def close_all(self) -> None:
+    def close_all(self) -> list[ServerHandle]:
+        """Close every handle this job attached synchronously.
+
+        Returns the handles ``close()`` could not touch because ``aopen``
+        attached them (F6) — still open, so the caller must ``await
+        handle.aclose()`` on the loop that opened them (the judge's graph
+        loop); ``ServiceContainer.aclose`` does exactly that.
+        """
+        skipped = []
         for handle in self._handles.values():
             handle.close()
+            if handle.is_open:
+                skipped.append(handle)
+        return skipped

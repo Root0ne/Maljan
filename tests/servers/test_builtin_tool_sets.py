@@ -93,6 +93,48 @@ def test_the_registry_opens_the_real_network_built_in_with_the_pinned_tools() ->
         registry.close_all()
 
 
+@pytest.mark.parametrize("name", ["network", "threatintel"])
+def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, monkeypatch):
+    """Regression (F4): ``ServerHandle`` used to force ``PYTHONIOENCODING``.
+
+    Before sub-project B, ``NetworkAnalyst``/``JudgeAgent`` launched their
+    sidecar with a bare ``child_env(...)``, which only carries
+    ``PYTHONIOENCODING`` when the parent process already has it set.
+    ``ServerHandle._build_toolkit`` must reproduce that for the two built-ins
+    exactly -- no ``setdefault`` widening the child's environment -- even
+    though it does apply that default for an operator-added server.
+    """
+    from maljan.agents.subprocess_env import child_env
+    from maljan.core.config import Settings
+    from maljan.providers.servers import ServerRegistry
+
+    monkeypatch.delenv("PYTHONIOENCODING", raising=False)
+
+    captured: dict[str, object] = {}
+
+    class _FakeToolkit:
+        def __init__(self, server_params, **kwargs):
+            captured["env"] = server_params.env
+
+        async def initialize(self) -> None:
+            return None
+
+        def get_tools(self):
+            return []
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+
+    registry = ServerRegistry(Settings(_env_file=None))
+    handle = registry.get(name)
+    handle.open("test-job")
+    try:
+        expected = child_env(allow=tuple(handle.config.env_allow))
+        assert captured["env"] == expected
+        assert "PYTHONIOENCODING" not in captured["env"]
+    finally:
+        handle.close()
+
+
 def test_the_registry_attaches_exactly_the_pinned_tools(monkeypatch):
     """The move into settings changed no tool the model can see.
 

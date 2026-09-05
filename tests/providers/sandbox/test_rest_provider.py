@@ -36,6 +36,38 @@ def _provider(handler, cfg=None):
     return provider
 
 
+def test_a_stray_brace_in_a_path_template_is_rejected_at_from_settings():
+    """Regression (F11): ``str.format(task_id=...)`` used to raise a bare
+    ``KeyError``/``IndexError`` mid-job for any other ``{...}`` in a
+    configured path -- an uncaught 500 from the probe route, an unwrapped
+    exception on the job path. It must instead fail loudly, and legibly, at
+    configuration time."""
+    cfg = _cfg()
+    cfg.sandbox.rest.status.path = "/samples/{task_id}/{oops}"
+    with pytest.raises(ProviderConfigurationError, match="status.path"):
+        RestSandboxProvider.from_settings(cfg)
+
+
+def test_a_stray_brace_in_the_report_path_is_rejected():
+    cfg = _cfg()
+    cfg.sandbox.rest.report.path = "/samples/{task_id}/report}"
+    with pytest.raises(ProviderConfigurationError, match="report.path"):
+        RestSandboxProvider.from_settings(cfg)
+
+
+def test_a_stray_brace_in_the_pcap_path_is_rejected():
+    cfg = _cfg()
+    cfg.sandbox.rest.report.pcap_path = "/samples/{task_id}/{pcap"
+    with pytest.raises(ProviderConfigurationError, match="pcap_path"):
+        RestSandboxProvider.from_settings(cfg)
+
+
+def test_a_well_formed_path_template_with_no_other_braces_is_accepted():
+    cfg = _cfg()
+    cfg.sandbox.rest.status.path = "/samples/{task_id}/status"
+    RestSandboxProvider.from_settings(cfg)  # must not raise
+
+
 def test_capabilities_follow_the_configuration():
     caps = RestSandboxProvider.from_settings(_cfg()).capabilities
     assert caps.can_submit and caps.can_poll and caps.can_fetch_report
@@ -129,6 +161,25 @@ def test_retry_after_is_honoured_and_clamped():
     provider._sleep = slept.append
     assert provider.wait_for_completion("T-9", timeout_seconds=120) == "reported"
     assert slept and max(slept) <= 60.0
+
+
+def test_retry_after_zero_does_not_spin_the_poll_loop():
+    """Regression (F10): ``Retry-After: 0`` used to skip the sleep *and* the
+    backoff (``parsed is not None`` suppressed both), so a server sustaining
+    it hammered the endpoint until the deadline. The wait must floor at the
+    current poll interval instead, same as when the header is absent."""
+    slept: list[float] = []
+    answers = iter(
+        [
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.Response(200, json={"status": "reported"}),
+        ]
+    )
+    provider = _provider(lambda r: next(answers))
+    provider._sleep = slept.append
+    assert provider.wait_for_completion("T-9", timeout_seconds=120) == "reported"
+    assert slept and all(s > 0 for s in slept), "a zero Retry-After must not skip the sleep"
 
 
 def test_a_sustained_429_past_the_deadline_raises_rather_than_looping_forever():

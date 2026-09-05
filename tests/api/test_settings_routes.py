@@ -123,6 +123,49 @@ def test_export_is_env_syntax_with_secrets_masked(client):
     assert "CHUNKING__OVERLAP_TOKENS" not in r.text  # only overrides are exported
 
 
+def test_export_of_the_server_map_strips_the_token_mask_and_comments_it_out(client, tmp_path):
+    """Regression (F8): the exported ``MCP__SERVERS`` line used to embed the
+    ten-asterisk token mask as a literal value, so reading the export back
+    configured that mask as the real credential rather than leaving the
+    operator a placeholder to fill in."""
+    from maljan.core.config import Settings
+
+    fake = {
+        "core.mcp.servers": ValueInfo(
+            {
+                "custom": {
+                    "enabled": True,
+                    "command": "my-mcp",
+                    "auth_token": "**********",
+                    "auth_token_source": "ui",
+                }
+            },
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    assert r.status_code == 200
+    text = r.text
+    assert "**********" not in text
+    raw = next(
+        line.split("=", 1)[1] for line in text.splitlines() if line.startswith("MCP__SERVERS=")
+    )
+    decoded = json.loads(json.loads(raw))
+    assert "auth_token" not in decoded["custom"]
+    assert "auth_token_source" not in decoded["custom"]
+    assert "# MCP__SERVERS__CUSTOM__AUTH_TOKEN=***" in text
+
+    env_lines = [line for line in text.splitlines() if not line.startswith("#")]
+    env_file = tmp_path / ".env"
+    env_file.write_text("\n".join(env_lines) + "\n")
+    settings = Settings(_env_file=env_file)
+    assert settings.mcp.servers["custom"].command == "my-mcp"
+    assert settings.mcp.servers["custom"].auth_token.get_secret_value() == ""
+
+
 def test_reset_group_unknown_is_404(client):
     r = client.delete("/api/v1/settings?group=does-not-exist")
     assert r.status_code == 404

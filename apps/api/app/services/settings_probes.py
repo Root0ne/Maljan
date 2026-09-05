@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from maljan.core.config import MCPServerConfig
+from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
 from maljan.providers.errors import ProviderConfigurationError
@@ -173,19 +174,74 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+_PROBE_CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _detach_cleanup(coro: Any, label: str) -> None:
+    """Run ``coro`` to completion without making the caller wait for it.
+
+    ``handle.aclose()`` is already internally bounded (``_acleanup``'s own
+    20 s timeout); awaiting it here on top of a failed/timed-out ``aopen``
+    re-adds that whole budget to a probe the operator's own click is
+    documented at 5 s (F9). A strong reference is kept in
+    ``_PROBE_CLEANUP_TASKS`` until it finishes so the task is not garbage
+    collected mid-flight.
+    """
+    task = asyncio.ensure_future(coro)
+    _PROBE_CLEANUP_TASKS.add(task)
+
+    def _done(t: asyncio.Task[Any]) -> None:
+        _PROBE_CLEANUP_TASKS.discard(t)
+        if not t.cancelled() and (exc := t.exception()) is not None:
+            logger.warning("probe cleanup for '%s' failed (non-fatal): %s", label, exc)
+
+    task.add_done_callback(_done)
+
+
 async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
     """Attach ``config`` long enough to read its manifest, then let go.
 
     The only stdio handshake in the project besides a job's own: it is
     ``ServerHandle``, so a server that answers here answers the same way in a
-    run. Whatever happens, the handle is closed — a probe that leaves a child
-    process behind turns a mis-typed command into a slow leak of subprocesses,
-    which is exactly what a person clicking "Test" twice would produce.
+    run. Whatever happens, the handle is eventually closed — a probe that
+    leaves a child process behind turns a mis-typed command into a slow leak
+    of subprocesses, which is exactly what a person clicking "Test" twice
+    would produce.
+
+    Regression (F9): a plain ``asyncio.wait_for(handle.aopen(...), 5.0)``
+    does not give up after 5 s when ``aopen`` is wedged. ``wait_for`` cancels
+    the inner coroutine and then *waits for the cancellation to finish* before
+    raising ``TimeoutError`` — and ``aopen``'s own cancellation handler awaits
+    ``_acleanup``, itself bounded at 20 s, so the operator's "Test" click can
+    take ~25 s instead of the documented 5. ``asyncio.wait`` never cancels the
+    handshake: past the budget this simply stops waiting on it and lets it
+    (and its own cleanup) finish in the background, closing the handle once
+    it does.
     """
     handle = ServerHandle(name, config)
-    try:
-        await asyncio.wait_for(handle.aopen(f"probe-{name}"), timeout=PROBE_BUDGET_SECONDS)
+
+    async def _run() -> list[str]:
+        await handle.aopen(f"probe-{name}")
         return handle.all_tool_names()
+
+    task: asyncio.Task[list[str]] = asyncio.ensure_future(_run())
+    done, _pending = await asyncio.wait({task}, timeout=PROBE_BUDGET_SECONDS)
+    if task not in done:
+        # Ask it to stop, but do not wait for that to finish here — that wait
+        # is exactly the ~20 s ``_acleanup`` budget this fix avoids blocking
+        # on. A short, fixed grace period still lets the common case (a
+        # cancellation that responds immediately) close the handle before
+        # this returns; a genuinely wedged server closes later, from the
+        # callback, once its own cancellation finally unwinds.
+        task.cancel()
+        done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
+        if task in done2:
+            await handle.aclose()
+        else:
+            task.add_done_callback(lambda _t: _detach_cleanup(handle.aclose(), f"probe-{name}"))
+        raise TimeoutError(f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    try:
+        return task.result()
     finally:
         await handle.aclose()
 

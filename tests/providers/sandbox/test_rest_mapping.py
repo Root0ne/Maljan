@@ -103,6 +103,41 @@ def test_field_names_rename_per_channel_without_touching_the_others():
     assert result.report.processes[0].command_line == "x.exe /q"
 
 
+def test_field_names_renames_also_apply_to_the_http_channel():
+    """Regression (F12): ``_coerce`` built ``row`` from ``_FIELDS`` (no
+    ``http`` entry, so ``{}``) and then overwrote it wholesale with
+    ``dict(raw)``, so a configured ``field_names["http.host"]`` never took
+    effect and the preview showed the same numbers either way."""
+    compiled = compile_mapping(
+        RestMappingConfig(http="$.h[*]", field_names={"http.host": "hostname"})
+    )
+    result = apply_mapping(
+        compiled,
+        {"h": [{"hostname": "evil.example", "uri": "/beacon"}]},
+        provider="rest",
+        task_id="t",
+    )
+    assert result.report.network.http[0]["host"] == "evil.example"
+    # Passthrough is preserved: the raw field survives alongside the rename.
+    assert result.report.network.http[0]["hostname"] == "evil.example"
+    assert result.report.network.http[0]["uri"] == "/beacon"
+
+
+def test_select_returns_rows_alongside_stats_without_smuggling_them_in():
+    """Regression (F15): ``_select`` used to hand back rows through
+    ``object.__setattr__(stats, "_rows", kept)`` on a ``frozen=True``
+    dataclass -- an undeclared field a stats-only rebuild elsewhere could
+    silently drop. It returns ``(stats, rows)`` instead."""
+    from maljan.providers.sandbox.rest_mapping import ChannelStats, _select
+
+    compiled = compile_mapping(RestMappingConfig(processes="$.p[*]"))
+    stats, rows = _select(compiled, "processes", {"p": [{"pid": 1}, {"pid": 2}]})
+    assert isinstance(stats, ChannelStats)
+    assert stats.kept == 2
+    assert [r["pid"] for r in rows] == [1, 2]
+    assert not hasattr(stats, "_rows")
+
+
 def test_the_stats_carry_at_most_three_sample_rows():
     compiled = compile_mapping(RestMappingConfig(registry="$.r[*]"))
     result = apply_mapping(compiled, {"r": ["a", "b", "c", "d"]}, provider="rest", task_id="t")
