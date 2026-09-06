@@ -234,6 +234,19 @@ export default function AnalysisLayout({
   const family = report?.malware_report?.attribution?.family;
   const headerSubtitle = family || category || "";
 
+  /* C3 (dev audit 2026-09-06): nothing on this page said which analyst
+   * line-up produced the report, so a `lean` run — network only — read as a
+   * full one, the deterministic static layers being present either way. A
+   * report written before profiles existed has no such key and shows nothing,
+   * and neither does the default line-up, which is what "no badge" has always
+   * meant. */
+  const profile = (report?.run_summary as {
+    profile?: { name?: string; analysts?: string[] } | null;
+  } | null)?.profile;
+  const profileName = profile?.name;
+  const profileBadge = profileName && profileName !== "default" ? profileName : null;
+  const profileAnalysts = profile?.analysts ?? [];
+
   if (notFound) {
     return (
       <div className="bg-bg-surface border border-border rounded p-8 text-center">
@@ -295,6 +308,18 @@ export default function AnalysisLayout({
                 {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
                     {headerSubtitle}
+                  </span>
+                )}
+                {profileBadge && (
+                  <span
+                    className="text-xs text-accent-strong bg-accent/10 px-2 py-0.5 rounded"
+                    title={
+                      profileAnalysts.length > 0
+                        ? `Analysts: ${profileAnalysts.join(", ")}`
+                        : undefined
+                    }
+                  >
+                    Profile: {profileBadge}
                   </span>
                 )}
                 {job && (

@@ -149,6 +149,56 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("T1055", { exact: true })).toBeVisible();
   });
 
+  /* C3 (dev audit 2026-09-06): nothing on the page said which analyst line-up
+   * produced the report, so a narrow profile read as a full run — the
+   * deterministic static layers appear either way. */
+  test("a non-default profile is named in the header, with its analysts", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          run_summary: {
+            ...REPORT.run_summary,
+            profile: { name: "lean", analysts: ["network"], custom: [] },
+          },
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}`);
+    const badge = page.getByText("Profile: lean");
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveAttribute("title", "Analysts: network");
+  });
+
+  test("the default profile and an old report show no profile badge", async ({
+    sessionPage: page,
+  }) => {
+    // The fixture's run_summary predates profiles entirely: no key at all.
+    await page.goto(`/analysis/${JOB_ID}`);
+    await expect(page.getByText(/^Profile:/)).toHaveCount(0);
+
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          run_summary: {
+            ...REPORT.run_summary,
+            profile: { name: "default", analysts: ["static", "dynamic", "network"], custom: [] },
+          },
+        }),
+      })
+    );
+    await page.goto(`/analysis/${JOB_ID}`);
+    await expect(page.getByText(/^Profile:/)).toHaveCount(0);
+  });
+
   /* C2 (dev audit 2026-09-06): with no sandbox report this tab showed the
    * "not detonated" notice and nothing else, even on runs where the dynamic
    * analyst executed and reached a stated conclusion — a run that worked
