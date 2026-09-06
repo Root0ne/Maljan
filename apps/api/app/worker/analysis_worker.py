@@ -28,7 +28,7 @@ from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
 from pydantic import ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -38,6 +38,22 @@ from app.runtime_config import runtime_config
 logger = get_logger("worker")
 
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
+
+
+def attached_report_stmt(report_id: uuid.UUID, sample_id: uuid.UUID) -> Select[Any]:
+    """The one attached sandbox report a job may read: its own sample's.
+
+    API-1 (dev audit 2026-09-06): this used to select by report id alone and
+    compare ``row.sample_id`` afterwards. Asking the ownership question in SQL
+    keeps the two from ever drifting apart, and a report belonging to another
+    sample is not read out of the database on the way to being refused.
+    """
+    from app.models.sandbox_report import SandboxReportRow
+
+    return select(SandboxReportRow).where(
+        SandboxReportRow.id == report_id,
+        SandboxReportRow.sample_id == sample_id,
+    )
 
 
 def build_job_settings(
@@ -583,22 +599,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # sandbox provider before anything else runs: build_job_settings
             # already forced sandbox.provider="upload" above, so the provider
             # this container builds is the one that reads what the operator
-            # brought instead of detonating anything. The ownership check
-            # (row.sample_id == sample.id) keeps one job from reading a report
-            # attached to somebody else's sample by guessing a UUID.
+            # brought instead of detonating anything. The ownership is part of
+            # the query (``attached_report_stmt``), so a report attached to
+            # somebody else's sample is never read at all -- guessing a UUID
+            # returns nothing rather than a row this then refuses.
             report_id = (job.config or {}).get("sandbox_report_id")
             if report_id:
                 from app.api.v1.sandbox_reports import get_object
-                from app.models.sandbox_report import SandboxReportRow
 
                 row = (
-                    await db.execute(
-                        select(SandboxReportRow).where(
-                            SandboxReportRow.id == uuid.UUID(str(report_id))
-                        )
-                    )
+                    await db.execute(attached_report_stmt(uuid.UUID(str(report_id)), sample.id))
                 ).scalar_one_or_none()
-                if row is None or row.sample_id != sample.id:
+                if row is None:
                     raise ValueError("The attached sandbox report does not belong to this sample.")
                 # L2: the upload endpoint's mismatch warning promises "The
                 # analysis will still run and will say so in its findings" —
