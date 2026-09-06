@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Maljan" width="112">
+  <img src="docs/assets/logo.svg" alt="Maljan" width="112">
 </p>
 
 <h1 align="center">Maljan</h1>
@@ -24,9 +24,9 @@ or a final set.**
 
 | | |
 |---|---|
-| <img src="assets/ui-dashboard.png" alt="Dashboard"> | <img src="assets/ui-analysis.png" alt="Analysis detail"> |
+| <img src="docs/assets/ui-dashboard.png" alt="Dashboard"> | <img src="docs/assets/ui-analysis.png" alt="Analysis detail"> |
 | **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis detail.** Eleven tabs over one run, with Markdown, PDF, HTML, STIX 2.1 and MISP export. |
-| <img src="assets/ui-detection.png" alt="Detection tab"> | <img src="assets/ui-attack.png" alt="ATT&CK matrix"> |
+| <img src="docs/assets/ui-detection.png" alt="Detection tab"> | <img src="docs/assets/ui-attack.png" alt="ATT&CK matrix"> |
 | **Detection.** The deterministic YARA and Sigma rules that fired, each with the technique it maps to and the pattern that matched. | **ATT&CK.** Each technique carries where it came from: `SINGLE SOURCE` or `CORROBORATED`, and which layers agreed. |
 
 The last image is the corroboration cascade made visible. A technique asserted by
@@ -81,6 +81,40 @@ report  ->  END
 - **ISR (Intermediate Structural Representation).** Agents exchange structured `AgentISR` objects (claims, `evidence_ref`, confidence) rather than raw text.
 - **ServiceContainer (DI).** Agents, LLMs, loaders and stores are created and cached in one composition root. No global state.
 - **AgentRegistry.** New agents are discovered through the `@register_agent` decorator and the builder wires them dynamically.
+
+---
+
+## Repository layout
+
+```
+maljan/
+├── apps/
+│   ├── api/                 FastAPI app + arq worker; workspace member "maljan-api"
+│   └── web/                 Next.js UI; shared analysis panels in src/components/analysis/
+├── src/maljan/              the core package: agents, pipeline, providers, analysis, memory
+├── services/
+│   ├── network-mcp/         PCAP tooling over stdio MCP, bound to the network analyst
+│   └── threatintel-mcp/     VirusTotal and AbuseIPDB over stdio MCP, bound to the judge
+├── scripts/
+│   ├── dev/                 the LLM server launcher, the overnight guard, the Ghidra manager
+│   ├── goldens/             one-off capture scripts that write tests/fixtures/golden/
+│   ├── knowledge/           builders for the data/ assets and the evaluation fixtures
+│   ├── paper/               the paper conformance check and the cohort completer
+│   └── settings/            the settings-annotation seeder
+├── tests/
+│   ├── unit/                mirrors src/maljan, one subdirectory per subpackage
+│   ├── api/  integration/  fixtures/
+│   └── evaluation/          the measured corpus and its analysis scripts
+├── data/                    tracked knowledge assets, loaded lazily, each with a fallback
+├── docker/                  Dockerfiles and the compose stack
+├── docs/                    README.md (this tree explained), assets/, specs/, plans/
+├── Makefile                 every gate and every generator
+└── pyproject.toml uv.lock   one uv workspace: maljan plus apps/api
+```
+
+One `uv sync --all-extras` at the root installs both Python packages. There is no
+`PYTHONPATH` anywhere: `maljan` and `app` are installed, in the venv, in the
+image and in CI alike.
 
 ---
 
@@ -470,7 +504,7 @@ VirusTotal or spent against its quota for an answer that is always
 
 **Static analysis.** `make semgrep` runs the same `p/python` and
 `p/security-audit` rulesets, pinned to the same semgrep version, as the
-CI "Semgrep" job, across `src/`, `apps/api/`, the two MCP sidecars and
+CI "Semgrep" job, across `src/`, `apps/api/`, `services/` and
 `scripts/`.
 
 **Compose secrets and network binding** are documented in the Full-Stack
@@ -526,7 +560,7 @@ make typecheck
 make check
 
 # The gate covers every Python directory in the repo: src/, tests/, apps/api/,
-# the two MCP sidecars and scripts/. It used to be src/ and tests/ only, which
+# services/ and scripts/. It used to be src/ and tests/ only, which
 # meant the FastAPI app and the arq worker were never type-checked anywhere,
 # and a sidecar could sit unformatted for weeks because pre-commit only ever
 # sees staged files.
@@ -541,6 +575,11 @@ uv run pre-commit install
 make benchmark-attck
 make benchmark-tram
 ```
+
+Tests live under `tests/unit/` (mirroring `src/maljan`), `tests/api/`,
+`tests/integration/`, `tests/fixtures/` and `tests/evaluation/`. Generators and
+operator tools live under `scripts/{dev,goldens,knowledge,paper,settings}/`;
+`make -n <target>` shows which one a target runs.
 
 ### Making a code change actually take effect
 
