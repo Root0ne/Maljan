@@ -36,7 +36,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[3]
-_GUARD = _ROOT / "scripts" / "night_guard.sh"
+_GUARD = _ROOT / "scripts" / "dev" / "night_guard.sh"
 
 pytestmark = pytest.mark.skipif(
     not Path("/proc/meminfo").exists(), reason="guard reads /proc directly"

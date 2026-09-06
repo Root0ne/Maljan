@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = "==3.13.*"
 
+[manifest]
+members = [
+    "maljan",
+    "maljan-api",
+]
+
 [[package]]
 name = "aiofile"
 version = "3.9.0"
@@ -1772,6 +1778,65 @@ dev = [
     { name = "pyzipper", specifier = ">=0.3.6" },
     { name = "ruff", specifier = ">=0.15.9" },
     { name = "stix2-validator", specifier = ">=3.3.1" },
+]
+
+[[package]]
+name = "maljan-api"
+version = "0.1.0"
+source = { editable = "apps/api" }
+dependencies = [
+    { name = "alembic" },
+    { name = "argon2-cffi" },
+    { name = "arq" },
+    { name = "asyncpg" },
+    { name = "email-validator" },
+    { name = "fastapi" },
+    { name = "maljan", extra = ["yara"] },
+    { name = "minio" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "python-jose", extra = ["cryptography"] },
+    { name = "python-multipart" },
+    { name = "redis" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.15.0" },
+    { name = "argon2-cffi", specifier = ">=25.1.0" },
+    { name = "arq", specifier = ">=0.26.0" },
+    { name = "asyncpg", specifier = ">=0.30.0" },
+    { name = "email-validator", specifier = ">=2.3.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "maljan", extras = ["yara"], editable = "." },
+    { name = "minio", specifier = ">=7.2.0" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "pydantic-settings", specifier = ">=2.13.1" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "python-jose", extras = ["cryptography"], specifier = ">=3.4.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "redis", specifier = ">=5.2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.25.0" },
+    { name = "ruff", specifier = ">=0.15.9" },
 ]
 
 [[package]]

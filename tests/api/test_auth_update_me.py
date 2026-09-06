@@ -9,27 +9,17 @@ These tests exercise the update path with a mocked AsyncSession and assert:
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pydantic import ValidationError
-
-# apps/api code lives outside the canonical maljan package path; make it
-# importable so the test runner doesn't need a PYTHONPATH hack.
-_API_PATH = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API_PATH) not in sys.path:
-    sys.path.insert(0, str(_API_PATH))
-
-
 from app.api.v1.auth import update_me  # noqa: E402
 from app.auth.password import verify_password  # noqa: E402
 from app.schemas.auth import UserUpdateRequest  # noqa: E402
 from app.services import audit as audit_module  # noqa: E402
+from pydantic import ValidationError
 
 
 class _FakeAuditSession:

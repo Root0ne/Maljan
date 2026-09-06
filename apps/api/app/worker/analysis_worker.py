@@ -457,16 +457,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # ── 3. Run the pipeline ──────────────────────────────
             start_time = time.time()
 
-            # Make sure core package is in sys.path
-            import os
-            import sys
-
-            core_path = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
-            )
-            if core_path not in sys.path:
-                sys.path.insert(0, core_path)
-
             from maljan.app import MaljanApp
 
             logger.info(

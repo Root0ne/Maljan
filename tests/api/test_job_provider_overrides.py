@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from typing import Any, get_args
 
 import pytest
-from pydantic import ValidationError
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 from app.schemas.job import JobCreateRequest, _KnownJobConfig  # noqa: E402
+from pydantic import ValidationError
 
 
 def _literal_choices(annotation: Any) -> tuple[Any, ...]:
@@ -42,7 +35,7 @@ def test_the_job_choices_equal_the_registry_ids():
 
 
 def test_the_job_choices_equal_the_settings_literals():
-    """Registry parity for Settings itself is Task 5's job (tests/providers/test_registry.py);
+    """Registry parity for Settings itself is Task 5's job (tests/unit/providers/test_registry.py);
     this only adds the job-schema leg so all three stay in step.
     """
     from maljan.core.config import SandboxConfig, StaticConfig

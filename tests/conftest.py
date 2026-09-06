@@ -1,18 +1,10 @@
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from app import observability
+from app.auth import throttle
 
 from maljan.app import MaljanApp
-
-# Import observability to reset counters/throttle
-_API_PATH = Path(__file__).resolve().parent.parent / "apps" / "api"
-if str(_API_PATH) not in sys.path:
-    sys.path.insert(0, str(_API_PATH))
-
-from app import observability  # noqa: E402
-from app.auth import throttle  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

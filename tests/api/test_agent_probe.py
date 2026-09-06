@@ -9,17 +9,10 @@ anything reaches for one.
 from __future__ import annotations
 
 import asyncio
-import sys
 import time
-from pathlib import Path
 from typing import Any
 
 import pytest
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 from app.services import settings_probes  # noqa: E402
 from app.services.settings_probes import PROBES, probe_agent, run_agent_probe  # noqa: E402
 

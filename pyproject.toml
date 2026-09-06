@@ -74,6 +74,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/maljan"]
 
+# One workspace, one lockfile. apps/api used to be a separate uv project with its
+# own uv.lock and a path dependency back here, which is why the runtime needed
+# PYTHONPATH in the Makefile, CI, the Dockerfile, compose and a sys.path.insert
+# inside the worker. As a member it is installed alongside maljan by one
+# `uv sync`, and every one of those shortcuts goes away.
+[tool.uv.workspace]
+members = ["apps/api"]
+
 [project.optional-dependencies]
 yara = [
     "yara-python>=4.5.4",
@@ -124,10 +132,9 @@ ignore = []
 
 [tool.mypy]
 python_version = "3.13"
-# Explicit so a single-file run (`uv run mypy <file>`) resolves modules exactly
-# like the whole-tree hook (`mypy src/ apps/api/`); otherwise the two write
-# conflicting entries into one .mypy_cache and the hook reports phantom errors.
-mypy_path = ["src", "apps/api"]
+# No mypy_path: `mypy src/ apps/api/` derives the search roots from its own
+# arguments, and both packages are installed in the environment, so the two
+# halves resolve each other without a hand-maintained path list.
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -150,7 +157,6 @@ module = [
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "apps/api"]
 markers = [
     # The offline re-analysis at its real iteration count takes about half a
     # minute. It runs in `make check`; the marker exists so a tight edit loop can

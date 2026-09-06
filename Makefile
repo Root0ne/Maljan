@@ -19,9 +19,9 @@ test-integration:
 # FastAPI app, the arq worker, the MCP sidecars and scripts/ outside the gate:
 # pre-commit still ran ruff over them because it works on staged files, so the
 # only way to drift was to go a long time without being staged — which is
-# exactly what network-mcp/server.py did, unformatted since 8e3370c and unnoticed
-# because nothing ever looked at the whole tree.
-PY_SOURCES = src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+# exactly what services/network-mcp/server.py did, unformatted since 8e3370c and
+# unnoticed because nothing ever looked at the whole tree.
+PY_SOURCES = src/ tests/ apps/api/ services/ scripts/
 
 lint:
 	uv run ruff check $(PY_SOURCES)
@@ -42,7 +42,7 @@ typecheck:
 
 # Same rulesets CI runs in the semgrep job, pinned to the same version.
 semgrep:
-	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ services/ scripts/
 
 # Full local quality gate (mirrors CI)
 check: lint format-check typecheck test
@@ -51,40 +51,40 @@ check: lint format-check typecheck test
 ci-check: lint format-check test
 
 setup:
-	uv sync
+	uv sync --all-extras --all-packages
 	uv run pre-commit install
-	bash scripts/fetch_external.sh
+	bash scripts/dev/fetch_external.sh
 
 # The third-party trees, at the refs this project was built and measured
 # against. external/ is not in version control: none of it is ours to
 # redistribute, and the ik_llama.cpp commit here is the one the paper pins.
 external:
-	bash scripts/fetch_external.sh
+	bash scripts/dev/fetch_external.sh
 
 pre-commit-run:
 	uv run pre-commit run --all-files
 
 benchmark:
-	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite
+	uv run python -m tests.evaluation.benchmark_suite
 
 prepare-tram:
-	uv run python scripts/prepare_tram_dataset.py
+	uv run python scripts/knowledge/prepare_tram_dataset.py
 
 benchmark-tram:
-	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
+	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
 
 prepare-attck:
-	uv run python scripts/prepare_attck_malware_fixtures.py
+	uv run python scripts/knowledge/prepare_attck_malware_fixtures.py
 
 # Regenerate the Windows API behaviour map and the API->ATT&CK map. The curated
 # lists live in the script, not the JSON — the JSON is the artifact. Validates
 # every technique ID against data/attck_valid_ids.json and refuses to write on
 # any mismatch, so a typo fails loudly here rather than silently never firing.
 prepare-api-db:
-	uv run python scripts/build_api_capability_db.py
+	uv run python scripts/knowledge/build_api_capability_db.py
 
 benchmark-attck:
-	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
+	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
 
 # ── Docker Orchestration ───────────────────────────────────────────
 
@@ -128,16 +128,16 @@ worker-restart:
 # ── Ghidra MCP Manager ─────────────────────────────────────────────
 
 ghidra-status:
-	uv run python scripts/ghidra_manager.py status
+	uv run python scripts/dev/ghidra_manager.py status
 
 ghidra-sync:
-	uv run python scripts/ghidra_manager.py sync
+	uv run python scripts/dev/ghidra_manager.py sync
 
 ghidra-build:
-	uv run python scripts/ghidra_manager.py build
+	uv run python scripts/dev/ghidra_manager.py build
 
 ghidra-watch:
-	uv run python scripts/ghidra_manager.py watch
+	uv run python scripts/dev/ghidra_manager.py watch
 
 # Legacy alias
 rebuild-ghidra: ghidra-build
@@ -157,11 +157,11 @@ facts: reanalyse
 # Recover the three samples the sandbox lost and take the cohort to 100.
 # Needs the sandbox's network; refuses clearly without it.
 cohort-complete:
-	./scripts/complete_cohort.sh
+	./scripts/paper/complete_cohort.sh
 
 # Every rubric item a machine can check, checked by one. Run after `make paper`.
 paper-check:
-	./scripts/check_paper.sh
+	./scripts/paper/check_paper.sh
 
 paper: facts
 	uv run python tests/evaluation/make_paper_figures.py
