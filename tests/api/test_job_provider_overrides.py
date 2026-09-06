@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from typing import Any, get_args
 
 import pytest
-from pydantic import ValidationError
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 from app.schemas.job import JobCreateRequest, _KnownJobConfig  # noqa: E402
+from pydantic import ValidationError
 
 
 def _literal_choices(annotation: Any) -> tuple[Any, ...]:

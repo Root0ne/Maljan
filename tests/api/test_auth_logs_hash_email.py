@@ -1,10 +1,3 @@
-import sys
-from pathlib import Path
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 from app.api.v1.auth import _email_tag  # noqa: E402
 
 

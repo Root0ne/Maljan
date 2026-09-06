@@ -14,27 +14,20 @@ write never turns that 4xx into a 500.
 
 from __future__ import annotations
 
-import sys
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 from app.api.v1 import jobs as jobs_module  # noqa: E402
 from app.api.v1 import samples as samples_module  # noqa: E402
 from app.api.v1 import sandbox_reports as reports_module  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import get_current_user, require_active_user  # noqa: E402
 from app.services import audit as audit_module  # noqa: E402
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class _Recorder:

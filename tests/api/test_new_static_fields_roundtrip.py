@@ -20,18 +20,11 @@ Both directions matter and both are tested here:
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-_API_PATH = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API_PATH) not in sys.path:
-    sys.path.insert(0, str(_API_PATH))
-
 from app.services.report_service import ReportService  # noqa: E402
 
 from maljan.reporting.models import MalwareReport  # noqa: E402

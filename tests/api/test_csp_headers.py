@@ -8,17 +8,9 @@ script, and only ``/docs``, ``/redoc`` and ``/openapi.json`` get the looser
 Swagger-compatible policy.
 """
 
-import sys
-from pathlib import Path
-
+from app.middleware.security_headers_middleware import SecurityHeadersMiddleware  # noqa: E402
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.middleware.security_headers_middleware import SecurityHeadersMiddleware  # noqa: E402
 
 
 def _app() -> TestClient:
