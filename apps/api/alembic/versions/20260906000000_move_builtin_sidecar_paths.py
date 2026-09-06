@@ -51,6 +51,8 @@ ARG_RENAMES: dict[str, str] = {
     "threatintel-mcp/server.py": "services/threatintel-mcp/server.py",
 }
 
+# The INSERT branch exists for symmetry with the 20260905000000 precedent;
+# it is unreachable here because ``_apply`` returns early when no row exists.
 _UPSERT_JSON_PG = sa.text(
     "INSERT INTO runtime_settings (key, value, is_secret) "
     "VALUES (:k, CAST(:v AS JSONB), false) "
