@@ -338,6 +338,8 @@ test.describe("agent definitions and profiles", () => {
     // 422 body shape per `app.api.v1.settings`: a top-level `errors` map
     // keyed by dotted path (`tests/api/test_settings_routes.py`), not
     // wrapped in a `detail` envelope — `api.patchSettings` reads `body.errors`.
+    // Since B2 the agent maps qualify that path with their own leaf, exactly
+    // as the server map always did.
     await page.route("**/api/v1/settings", (r) => {
       if (r.request().method() === "PATCH") {
         return r.fulfill({
@@ -351,6 +353,57 @@ test.describe("agent definitions and profiles", () => {
     });
     await page.getByRole("button", { name: "Apply" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
-    await expect(page.getByText("a generic agent needs a prompt")).toBeVisible();
+    await expect(
+      page.locator('[data-agent="nameless"]').getByRole("alert")
+    ).toContainText("a generic agent needs a prompt");
+    // Not the leaf-wide "stored override" banner: this key belongs to a leaf
+    // the operator just edited.
+    await expect(page.getByText(/Stored override/)).toHaveCount(0);
+  });
+
+  /* B2 (dev audit 2026-09-06): an agent-map error can also name the whole
+   * entry rather than one of its fields, and the profile map speaks the same
+   * shape. Both used to arrive relative (`nameless`), match no card, and show
+   * the generic stored-override banner. */
+  test("an entry-level error lands on its card, for definitions and profiles", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await page.getByLabel("new agent name").fill("nameless");
+    await page.getByRole("button", { name: "Add agent" }).click();
+    await page.getByLabel("new profile name").fill("lean");
+    await page.getByRole("button", { name: "Add profile" }).click();
+
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        return r.fulfill({
+          status: 422,
+          json: {
+            errors: {
+              "core.agents.definitions.nameless": "an agent entry must be an object",
+              "core.agents.profiles.lean": "a profile entry must be an object",
+            },
+          },
+        });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    await expect(
+      page.locator('[data-agent="nameless"]').getByRole("alert")
+    ).toContainText("an agent entry must be an object");
+    await expect(
+      page.locator('[data-profile="lean"]').getByText("a profile entry must be an object")
+    ).toBeVisible();
+    // The message belongs to one card, not to every card in the editor.
+    await expect(
+      page.locator('[data-agent="static"]').getByRole("alert")
+    ).toHaveCount(0);
+    await expect(page.getByText(/Stored override/)).toHaveCount(0);
   });
 });

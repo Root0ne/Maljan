@@ -37,6 +37,7 @@ export default function ProfilesEditor({
   staged,
   definitions,
   activeProfile,
+  errors,
   onChange,
   onSetActive,
 }: {
@@ -45,6 +46,11 @@ export default function ProfilesEditor({
   staged: unknown;
   definitions: Record<string, AgentDefinitionEntry>;
   activeProfile: string;
+  /** Validation errors from the last failed apply, keyed by the server's full
+   *  dotted path (`core.agents.profiles.<key>`) — B2 (dev audit 2026-09-06),
+   *  so a rejected profile is named on its own card rather than in a leaf-wide
+   *  banner that does not say which profile was wrong. */
+  errors: Record<string, string>;
   onChange: (value: Record<string, ProfileEntry>) => void;
   onSetActive: (name: string) => void;
 }) {
@@ -96,6 +102,9 @@ export default function ProfilesEditor({
       {Object.entries(value).map(([key, profile]) => {
         const locked = BUILTIN_PROFILES.has(key);
         const unused = candidates.filter((c) => !profile.analysts.includes(c));
+        const cardError = Object.entries(errors).find(
+          ([k]) => k === `${entry.key}.${key}` || k.startsWith(`${entry.key}.${key}.`)
+        )?.[1];
         return (
           <div key={key} className="border border-border rounded p-3" data-profile={key}>
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -194,6 +203,11 @@ export default function ProfilesEditor({
               )}
             </ol>
 
+            {cardError && (
+              <p className="text-[11px] text-status-red mt-2" role="alert">
+                {cardError}
+              </p>
+            )}
             {keyError?.at === key && (
               <p className="text-[11px] text-status-red mt-2 text-right" role="alert">
                 {keyError.message}

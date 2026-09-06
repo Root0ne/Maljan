@@ -290,8 +290,14 @@ export default function AgentDefinitionsEditor({
           result && result !== "running"
             ? ((result.details as AgentProbeDetails | null) ?? null)
             : null;
-        const cardError = Object.entries(errors).find(([k]) =>
-          k.startsWith(`${entry.key}.${key}.`)
+        /* B2 (dev audit 2026-09-06): the API qualifies an agent-map error with
+         * the leaf it belongs to, and it points either at one field
+         * (`core.agents.definitions.<key>.<field>`) or at the whole entry
+         * (`core.agents.definitions.<key>`, for a name that is not a slug or
+         * an entry that is not an object). Matching the field form alone left
+         * the entry-level message with no card to land on. */
+        const cardError = Object.entries(errors).find(
+          ([k]) => k === `${entry.key}.${key}` || k.startsWith(`${entry.key}.${key}.`)
         )?.[1];
         return (
           <div key={key} className="border border-border rounded p-3" data-agent={key}>

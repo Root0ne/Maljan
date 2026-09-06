@@ -69,9 +69,10 @@ export default function FieldRow({
   onUnstage: () => void;
   onReset: () => void;
   /** The full validation-error map, keyed by dotted path — not just this
-   *  row's own key — so the agent-definitions editor can find a nested
-   *  error like `core.agents.definitions.<key>.prompt` and land it on the
-   *  card that caused it rather than a leaf-wide banner. */
+   *  row's own key — so the agent-definitions and profiles editors can find a
+   *  qualified error like `core.agents.definitions.<key>.prompt` or
+   *  `core.agents.profiles.<key>` and land it on the card that caused it
+   *  rather than a leaf-wide banner. */
   errors?: Record<string, string>;
 }) {
   const dirty = staged !== undefined;
@@ -152,6 +153,7 @@ export default function FieldRow({
               staged={staged}
               definitions={definitions ?? {}}
               activeProfile={activeProfile ?? "default"}
+              errors={errors ?? {}}
               onChange={onChange}
               onSetActive={onSetActive ?? (() => undefined)}
             />
