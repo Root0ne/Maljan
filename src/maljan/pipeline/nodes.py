@@ -99,8 +99,16 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
       intended degraded path, not an absence of data. Skipping it here would
       silently delete the primary analyst on exactly the runs that most need
       whatever it can still say.
+    * **Never for generic either**, live-fix L1 (2026-09-06). A ``generic``
+      agent's input is now built the same way (see ``make_analyst_node``'s
+      generic branch): the static sample context — file path plus
+      sample-profile text — always exists because the sample itself always
+      does, even on the runs where the sandbox carries no report at all. That
+      context can still be the bare placeholder when the sample could not be
+      mirrored for a provider, which is the same degraded-but-intentional
+      path static falls back to, not an absence of data.
     """
-    if role == "static" or len(chunks) != 1:
+    if role in ("static", "generic") or len(chunks) != 1:
         return False
     content = getattr(chunks[0], "content", "") or ""
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
@@ -328,7 +336,54 @@ def make_analyst_node(
             role = container.agent_role(agent_name)
 
             sandbox_report = state.get("sandbox_report")
-            if sandbox_report:
+            if role == "generic":
+                # Live fix L1 (2026-09-06): a generic agent's data surface was
+                # a sandbox slice or nothing — with the mock sandbox carrying
+                # no report for most samples, that slice was routinely the
+                # loader's own "no data available" placeholder for a data
+                # type the file loader has no fixture for, and the "no data"
+                # guards below then skipped the agent outright (round 0 and
+                # every revision round), as observed live: 'strings' ended
+                # no_data with zero claims. A generic agent gets the same
+                # sample context the static role gets — sample path plus
+                # sample-profile text, built through the same helper and the
+                # same per-provider mirror path lookup the static branch
+                # uses below — because the sample itself always exists, then
+                # the sandbox slice on top of it when one exists.
+                _st_generic: StaticAnalysis | None = None
+                try:
+                    from maljan.extractors.pe_extractor import build_static_analysis
+
+                    _sp_generic = state.get("sample_path")
+                    if _sp_generic:
+                        _st_generic = build_static_analysis(sample_path=str(_sp_generic))
+                except Exception as _e:  # noqa: BLE001
+                    logger.debug(
+                        "generic agent '%s': static summary extraction skipped: %s",
+                        agent_name,
+                        _e,
+                    )
+
+                static_context_chunks = _augment_static_chunks_with_path(
+                    container.load_chunked(state["file_hash"], agent_name),
+                    state,
+                    static=_st_generic,
+                    provider_id=agent._resolved.static_provider_id,
+                )
+                sandbox_chunks: list = []
+                if sandbox_report:
+                    sandbox_chunks = container.load_sandbox_data_for_agent(
+                        agent_name, sandbox_report
+                    )
+                    logger.info(
+                        "Agent '%s': using sandbox report data (%d chunks) "
+                        "alongside the static sample context (%d chunks).",
+                        agent_name,
+                        len(sandbox_chunks),
+                        len(static_context_chunks),
+                    )
+                chunks = [*static_context_chunks, *sandbox_chunks]
+            elif sandbox_report:
                 chunks = container.load_sandbox_data_for_agent(agent_name, sandbox_report)
                 logger.info(
                     "Agent '%s': using sandbox report data (%d chunks).",
