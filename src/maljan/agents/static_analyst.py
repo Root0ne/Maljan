@@ -970,6 +970,13 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
             # a finding. An empty finding is worse than none: it reaches the
             # Pipeline tab as a blank row.
             continue
+        # The citation gets the same cleaning as the claim, and this parser
+        # already refuses a block with no EVIDENCE at all -- a citation that
+        # was nothing but a tool call leaves the claim unsourced, which is the
+        # same state, so it fails the same requirement.
+        evidence_text = strip_tool_call_scaffolding(evidence_match.group(1)).strip()
+        if not evidence_text:
+            continue
 
         try:
             confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
@@ -982,7 +989,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=evidence_match.group(1).strip()[:200],
+                evidence_ref=evidence_text[:200],
                 confidence=confidence,
                 technique_id=technique_id,
             )
@@ -1000,11 +1007,16 @@ def _parse_disputes(text: str) -> list[str]:
     match = _DISPUTES_RE.search(text)
     if not match:
         return disputes
-    section = match.group(1).strip()
+    # Stripped over the whole section before it is split: a tool-call block
+    # spans several lines, so a per-line check would never see one and every
+    # line of it would become its own dispute item.
+    section = strip_tool_call_scaffolding(match.group(1)).strip()
     if section.upper().rstrip(".") in {"", "NONE"}:
         return disputes
     for line in section.splitlines():
         cleaned = line.strip().lstrip("-*• ")
+        # A bullet whose whole content was scaffolding is left as an empty
+        # marker by the strip above, and an empty dispute is not a dispute.
         if cleaned:
             disputes.append(cleaned)
     return disputes

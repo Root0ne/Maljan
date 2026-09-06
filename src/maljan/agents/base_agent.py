@@ -311,7 +311,15 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
             # than none at all -- it reaches the operator as a blank row.
             continue
 
+        # The citation is model output too, and a model that writes a tool
+        # call while it is naming an artifact puts the block here rather than
+        # in the claim. Cleaned to nothing it means what a missing EVIDENCE
+        # line already means to this lenient parser: a finding worth keeping,
+        # recorded as unsourced.
         evidence_match = _BLOCK_EVIDENCE_RE.search(block)
+        evidence_text = (
+            strip_tool_call_scaffolding(evidence_match.group(1)).strip() if evidence_match else ""
+        )
         confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
         technique_match = _BLOCK_TECHNIQUE_RE.search(block)
 
@@ -331,7 +339,7 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=(evidence_match.group(1).strip()[:200] if evidence_match else ""),
+                evidence_ref=evidence_text[:200],
                 confidence=confidence,
                 technique_id=technique_id,
             )

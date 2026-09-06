@@ -149,3 +149,90 @@ def test_the_free_text_path_never_turns_a_tool_call_into_a_claim():
 
 def test_a_report_that_is_only_scaffolding_yields_no_claims():
     assert _isr_from_text(f"{CAPTURED}\n{CAPTURED}").claims == []
+
+
+# --- C1 follow-up: every free-text ISR field, not only the claim -------------
+#
+# Re-review of the first C1 commit: the stripping reached ``claim`` and the
+# free-text path, and stopped there. A model that writes a tool call while it
+# is citing an artifact puts the block on the EVIDENCE line instead, and that
+# text went into the ISR untouched -- it reaches the operator on the same card,
+# under the claim it was supposed to support. The DISPUTES section is filled
+# from model output the same way and had the same hole.
+
+
+def test_scaffolding_on_the_evidence_line_does_not_reach_the_isr():
+    text = (
+        "CLAIM: The sample allocates executable memory.\n"
+        f"EVIDENCE: VirtualAlloc with PAGE_EXECUTE_READWRITE {CAPTURED}\n"
+        "CONFIDENCE: 0.9\n"
+        "TECHNIQUE: T1055\n"
+    )
+    for parser in (parse_structured_claims, _parse_claim_blocks):
+        claims = parser(text)
+        assert len(claims) == 1, parser.__name__
+        assert "tool_call" not in claims[0].evidence_ref, parser.__name__
+        assert "arguments" not in claims[0].evidence_ref, parser.__name__
+        assert claims[0].evidence_ref.startswith("VirtualAlloc"), parser.__name__
+        # The claim it supports is untouched by the evidence's own cleaning.
+        assert claims[0].claim == "The sample allocates executable memory."
+
+
+def test_evidence_that_is_only_scaffolding_leaves_the_claim_unsourced():
+    """The two parsers differ, as they already do for a missing EVIDENCE line.
+
+    ``parse_structured_claims`` is the lenient one: a finding without a
+    citation is still a finding, recorded as unsourced. ``_parse_claim_blocks``
+    is the strict one and requires a citation, so a block whose only evidence
+    was a tool call fails the requirement it already had.
+    """
+    text = (
+        "CLAIM: The sample resolves APIs at runtime.\n"
+        f"EVIDENCE: {CAPTURED}\n"
+        "CONFIDENCE: 0.7\n"
+        "TECHNIQUE: T1027\n"
+    )
+    lenient = parse_structured_claims(text)
+    assert len(lenient) == 1
+    assert lenient[0].claim == "The sample resolves APIs at runtime."
+    assert lenient[0].evidence_ref == ""
+
+    assert _parse_claim_blocks(text) == []
+
+
+def test_a_dispute_item_that_is_scaffolding_is_not_a_dispute():
+    from maljan.agents.static_analyst import _parse_disputes
+
+    text = (
+        "DISPUTES:\n"
+        "- The network analyst's C2 attribution is unsupported.\n"
+        f"- {CAPTURED}\n"
+        "- The dropped file is a decoy.\n"
+        "SUMMARY: done\n"
+    )
+    disputes = _parse_disputes(text)
+    assert disputes == [
+        "The network analyst's C2 attribution is unsupported.",
+        "The dropped file is a decoy.",
+    ]
+
+
+def test_a_multi_line_tool_call_inside_disputes_is_removed_whole():
+    """The block spans lines, so a per-line check alone would never see it."""
+    from maljan.agents.static_analyst import _parse_disputes
+
+    text = (
+        "DISPUTES:\n"
+        "- <tool_call>\n"
+        '  {"name": "list_imports", "arguments": {"path": "/x"}}\n'
+        "  </tool_call>\n"
+        "- The dropped file is a decoy.\n"
+    )
+    assert _parse_disputes(text) == ["The dropped file is a decoy."]
+
+
+def test_an_ordinary_disputes_section_is_unchanged():
+    from maljan.agents.static_analyst import _parse_disputes
+
+    text = "DISPUTES:\n- One thing.\n- Another thing.\n"
+    assert _parse_disputes(text) == ["One thing.", "Another thing."]
