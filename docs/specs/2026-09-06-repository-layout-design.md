@@ -1,6 +1,6 @@
 # Repository layout design
 
-Status: approved design, not yet implemented. Branch `chore/repo-layout` from `dev` (7c2d517). Companion plan: `docs/plans/2026-09-06-repository-layout.md`.
+Status: implemented on branch `chore/repo-layout` from `dev` (7c2d517). Companion plan: `docs/plans/2026-09-06-repository-layout.md`.
 
 ## 1. Problem
 
