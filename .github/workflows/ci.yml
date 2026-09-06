@@ -61,10 +61,10 @@ jobs:
       # The same set the Makefile's PY_SOURCES names: the FastAPI app, the arq
       # worker, the two MCP sidecars and scripts/ were outside this gate.
       - name: Ruff lint
-        run: uv run ruff check src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+        run: uv run ruff check src/ tests/ apps/api/ services/ scripts/
 
       - name: Ruff format check
-        run: uv run ruff format --check src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+        run: uv run ruff format --check src/ tests/ apps/api/ services/ scripts/
 
       - name: mypy type check
         run: uv run mypy src/ apps/api/
@@ -83,7 +83,7 @@ jobs:
       - name: Install semgrep
         run: pip install semgrep==1.176.0
       - name: Scan
-        run: semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+        run: semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ services/ scripts/
 
   test:
     name: Test Suite (Python ${{ matrix.python-version }})

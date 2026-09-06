@@ -1,6 +1,6 @@
 """The two built-in sidecars must expose exactly the tools they expose today.
 
-Sub-project B moves ``network-mcp`` and ``threatintel-mcp`` out of constants
+Sub-project B moves ``services/network-mcp`` and ``services/threatintel-mcp`` out
 inside the agents and into ``mcp.servers`` entries. The move is only free if
 the tool names the model sees do not change, so they are pinned here from a
 live handshake before anything moves. Names only, not schemas: the fixture is

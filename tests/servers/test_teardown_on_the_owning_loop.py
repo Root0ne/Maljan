@@ -2,8 +2,8 @@
 
 The fast property tests in `tests/unit/test_teardown_cannot_hang_a_job.py`
 pin the routing rule with a fake toolkit. This one refuses to take the fake's
-word for it: it starts the two in-repo MCP servers — `network-mcp/server.py`
-and `threatintel-mcp/server.py`, both of which come up with no network access
+word for it: it starts the two in-repo MCP servers — `services/network-mcp/server.py`
+and `services/threatintel-mcp/server.py`, both of which come up with no network access
 and no API keys — attaches them exactly the way a job does, and then drives
 `ServiceContainer.aclose()` under the worker's own fence.
 

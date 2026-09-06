@@ -1,7 +1,7 @@
 """ThreatIntel MCP Server — VirusTotal + AbuseIPDB integration with mock fallback.
 
 Usage:
-    uv run python threatintel-mcp/server.py
+    uv run python services/threatintel-mcp/server.py
 
 Environment:
     VIRUSTOTAL_API_KEY — VirusTotal API v3 key (optional, mock fallback if missing)

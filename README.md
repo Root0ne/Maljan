@@ -229,7 +229,7 @@ What a tool server's process can see is equally explicit. It is started with an
 argument list, never through a shell. Its environment is a fixed base set
 (`PATH`, `HOME`, locale, `TMPDIR`, `JAVA_HOME`, and a handful more) plus
 exactly the variable names you list under "Environment names passed through" —
-so `threatintel-mcp` sees `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` and
+so `services/threatintel-mcp` sees `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` and
 nothing else, and no server sees the database URL, the settings encryption key
 or any LLM credential. Listing a name under `env_allow` is the only way a
 credential from the process's own environment reaches a tool server; a value

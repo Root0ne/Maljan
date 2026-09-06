@@ -19,9 +19,9 @@ test-integration:
 # FastAPI app, the arq worker, the MCP sidecars and scripts/ outside the gate:
 # pre-commit still ran ruff over them because it works on staged files, so the
 # only way to drift was to go a long time without being staged — which is
-# exactly what network-mcp/server.py did, unformatted since 8e3370c and unnoticed
-# because nothing ever looked at the whole tree.
-PY_SOURCES = src/ tests/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+# exactly what services/network-mcp/server.py did, unformatted since 8e3370c and
+# unnoticed because nothing ever looked at the whole tree.
+PY_SOURCES = src/ tests/ apps/api/ services/ scripts/
 
 lint:
 	uv run ruff check $(PY_SOURCES)
@@ -42,7 +42,7 @@ typecheck:
 
 # Same rulesets CI runs in the semgrep job, pinned to the same version.
 semgrep:
-	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ network-mcp/ threatintel-mcp/ scripts/
+	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ services/ scripts/
 
 # Full local quality gate (mirrors CI)
 check: lint format-check typecheck test

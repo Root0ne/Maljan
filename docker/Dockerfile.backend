@@ -42,8 +42,7 @@ RUN uv sync --frozen --no-dev --all-packages --extra yara --no-install-workspace
 COPY src/ src/
 COPY apps/ apps/
 COPY data/ data/
-COPY threatintel-mcp/ threatintel-mcp/
-COPY network-mcp/ network-mcp/
+COPY services/ services/
 
 RUN uv sync --frozen --no-dev --all-packages --extra yara
 

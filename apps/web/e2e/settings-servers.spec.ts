@@ -160,7 +160,7 @@ test.describe("tool servers and the REST sandbox", () => {
     const sent = body.changes["core.mcp.servers"].threatintel;
     expect(sent.enabled).toBe(false);
     expect(sent.command).toBe("python");
-    expect(sent.args).toEqual(["threatintel-mcp/server.py"]);
+    expect(sent.args).toEqual(["services/threatintel-mcp/server.py"]);
     expect(sent.agents).toEqual(["judge"]);
     expect(sent.tools).toBeNull();
   });
