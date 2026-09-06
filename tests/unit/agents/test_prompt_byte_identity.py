@@ -1,6 +1,6 @@
 """The default profile's prompts and allow-lists are frozen.
 
-Captured from `dev` by ``scripts/capture_provider_goldens.py`` before the
+Captured from `dev` by ``scripts/goldens/capture_provider_goldens.py`` before the
 provider refactor. Any change to a byte of the static (ghidra) or dynamic
 (cape2) system prompt, or to either tool allow-list, is a behaviour change and
 fails here — which is the point: sub-project A is a refactor.

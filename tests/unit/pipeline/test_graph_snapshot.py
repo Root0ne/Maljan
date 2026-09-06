@@ -4,7 +4,7 @@ Sub-project C moves the builder's topology source from the class registry to
 the active profile. Node names, the edge set, the conditional edge's path map
 and the analyst order are what "the same graph" means, and they are compared
 here against a fixture captured before the move
-(``scripts/capture_graph_golden.py``). Both values of
+(``scripts/goldens/capture_graph_golden.py``). Both values of
 ``llm.parallel_analysts`` are covered: they are two different graphs and only
 one of them is the default.
 """

@@ -4,7 +4,7 @@ Both revision paths are about to be re-expressed through one shared helper
 (``BaseAnalyst.revision_messages``, Task 4) so the configurable analyst can
 send the same framing. The helper is a refactor only if the model receives
 identical bytes, which is what this compares — against a fixture captured
-from the pre-extraction code by ``scripts/capture_revision_prompt_golden.py``.
+from the pre-extraction code by ``scripts/goldens/capture_revision_prompt_golden.py``.
 """
 
 from __future__ import annotations
