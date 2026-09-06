@@ -62,6 +62,7 @@ export default function RegisterPage() {
             <label className="block text-xs text-text-secondary mb-1">Full name</label>
             <input
               type="text"
+              autoComplete="name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
@@ -73,6 +74,7 @@ export default function RegisterPage() {
             <label className="block text-xs text-text-secondary mb-1">Email</label>
             <input
               type="email"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -84,6 +86,7 @@ export default function RegisterPage() {
             <label className="block text-xs text-text-secondary mb-1">Password</label>
             <input
               type="password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
