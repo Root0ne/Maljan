@@ -14,7 +14,7 @@ from functools import lru_cache
 from typing import Any, get_args, get_origin
 
 from maljan.core.settings_annotations import GROUP_ORDER
-from maljan.core.settings_catalog import CatalogEntry, FieldType, core_catalog
+from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
 from pydantic import SecretStr
 
@@ -217,6 +217,11 @@ def api_catalog() -> list[CatalogEntry]:
     for name, ann in API_EDITABLE.items():
         default = fields[name].default
         ftype, secret = _type_of(name, fields[name].annotation, default)
+        # B4 (dev audit 2026-09-06): the bounds a numeric leaf now carries are
+        # read off the field itself, the same way the core catalog reads them,
+        # so the editor can show the range it will be held to rather than
+        # discovering it from a 422.
+        lo, hi = _bounds(fields[name])
         entries.append(
             CatalogEntry(
                 key=f"api.{name}",
@@ -226,8 +231,8 @@ def api_catalog() -> list[CatalogEntry]:
                 default=None if secret else default,
                 nullable=False,
                 choices=None,
-                minimum=None,
-                maximum=None,
+                minimum=lo,
+                maximum=hi,
                 secret=secret,
                 group=ann["group"],
                 title=ann["title"],
@@ -245,6 +250,7 @@ def api_catalog() -> list[CatalogEntry]:
     for name, ann in API_READONLY.items():
         default = fields[name].default
         ftype, secret = _type_of(name, fields[name].annotation, default)
+        lo, hi = _bounds(fields[name])
         entries.append(
             CatalogEntry(
                 key=f"api.{name}",
@@ -254,8 +260,8 @@ def api_catalog() -> list[CatalogEntry]:
                 default=None if secret else _masked(name, default),
                 nullable=False,
                 choices=None,
-                minimum=None,
-                maximum=None,
+                minimum=lo,
+                maximum=hi,
                 secret=secret,
                 group="system",
                 title=ann["title"],
