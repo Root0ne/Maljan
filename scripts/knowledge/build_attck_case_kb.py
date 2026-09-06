@@ -20,7 +20,7 @@ techniques are dropped (nothing useful to recommend), and duplicate ``sample_id`
 the last seen. Output JSON stores TEXT only; the runtime index embeds it on load.
 
 Run:
-    uv run python scripts/build_attck_case_kb.py --qdrant-url http://localhost:6333 \
+    uv run python scripts/knowledge/build_attck_case_kb.py --qdrant-url http://localhost:6333 \
         --out data/attck_case_corpus_v1.json --min-techniques 1
 """
 
@@ -36,7 +36,7 @@ import re
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

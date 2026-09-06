@@ -53,13 +53,13 @@ ci-check: lint format-check test
 setup:
 	uv sync --all-extras --all-packages
 	uv run pre-commit install
-	bash scripts/fetch_external.sh
+	bash scripts/dev/fetch_external.sh
 
 # The third-party trees, at the refs this project was built and measured
 # against. external/ is not in version control: none of it is ours to
 # redistribute, and the ik_llama.cpp commit here is the one the paper pins.
 external:
-	bash scripts/fetch_external.sh
+	bash scripts/dev/fetch_external.sh
 
 pre-commit-run:
 	uv run pre-commit run --all-files
@@ -68,20 +68,20 @@ benchmark:
 	uv run python -m tests.evaluation.benchmark_suite
 
 prepare-tram:
-	uv run python scripts/prepare_tram_dataset.py
+	uv run python scripts/knowledge/prepare_tram_dataset.py
 
 benchmark-tram:
 	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
 
 prepare-attck:
-	uv run python scripts/prepare_attck_malware_fixtures.py
+	uv run python scripts/knowledge/prepare_attck_malware_fixtures.py
 
 # Regenerate the Windows API behaviour map and the API->ATT&CK map. The curated
 # lists live in the script, not the JSON — the JSON is the artifact. Validates
 # every technique ID against data/attck_valid_ids.json and refuses to write on
 # any mismatch, so a typo fails loudly here rather than silently never firing.
 prepare-api-db:
-	uv run python scripts/build_api_capability_db.py
+	uv run python scripts/knowledge/build_api_capability_db.py
 
 benchmark-attck:
 	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
@@ -128,16 +128,16 @@ worker-restart:
 # ── Ghidra MCP Manager ─────────────────────────────────────────────
 
 ghidra-status:
-	uv run python scripts/ghidra_manager.py status
+	uv run python scripts/dev/ghidra_manager.py status
 
 ghidra-sync:
-	uv run python scripts/ghidra_manager.py sync
+	uv run python scripts/dev/ghidra_manager.py sync
 
 ghidra-build:
-	uv run python scripts/ghidra_manager.py build
+	uv run python scripts/dev/ghidra_manager.py build
 
 ghidra-watch:
-	uv run python scripts/ghidra_manager.py watch
+	uv run python scripts/dev/ghidra_manager.py watch
 
 # Legacy alias
 rebuild-ghidra: ghidra-build
@@ -157,11 +157,11 @@ facts: reanalyse
 # Recover the three samples the sandbox lost and take the cohort to 100.
 # Needs the sandbox's network; refuses clearly without it.
 cohort-complete:
-	./scripts/complete_cohort.sh
+	./scripts/paper/complete_cohort.sh
 
 # Every rubric item a machine can check, checked by one. Run after `make paper`.
 paper-check:
-	./scripts/check_paper.sh
+	./scripts/paper/check_paper.sh
 
 paper: facts
 	uv run python tests/evaluation/make_paper_figures.py

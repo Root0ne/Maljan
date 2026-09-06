@@ -13,10 +13,10 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from maljan.core.settings_catalog import core_leaves  # noqa: E402
 
-ENV = Path(__file__).resolve().parents[1] / ".env.example"
+ENV = Path(__file__).resolve().parents[2] / ".env.example"
 KEY = re.compile(r"^#?\s*([A-Z][A-Z0-9_]*)=")
 
 

@@ -20,7 +20,7 @@
 #
 # Run:  make cohort-complete
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 2
+cd "$(dirname "$0")/../.." || exit 2
 
 PY=".venv/bin/python"
 EVAL="tests/evaluation"

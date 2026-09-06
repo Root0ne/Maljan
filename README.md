@@ -602,7 +602,7 @@ REDIS_URL=redis://localhost:6379/0
 JWT_SECRET_KEY=<generate with openssl rand -hex 32>
 ```
 
-For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and point `LLM__OPENAI__BASE_URL` at a local OpenAI-compatible server such as `ik_llama.cpp`'s `llama-server`. `make external` fetches the engine at the pinned commit, and `scripts/llm_server.sh` carries the invocation.
+For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and point `LLM__OPENAI__BASE_URL` at a local OpenAI-compatible server such as `ik_llama.cpp`'s `llama-server`. `make external` fetches the engine at the pinned commit, and `scripts/dev/llm_server.sh` carries the invocation.
 
 See `.env.example` for the full reference.
 

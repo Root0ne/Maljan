@@ -20,7 +20,7 @@ Usage (in .env):
   MCP__CAPE__COMMAND=wsl.exe
   MCP__CAPE__ARGS=["-d","Ubuntu","-u","root","-e",
                    "/path/to/.venv-wsl/bin/python",
-                   "/path/to/Maljan/scripts/cape_mcp_wrapper.py",
+                   "/path/to/Maljan/scripts/dev/cape_mcp_wrapper.py",
                    "--cape-root", "/path/to/CAPEv2"]
 """
 

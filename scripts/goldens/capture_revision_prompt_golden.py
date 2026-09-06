@@ -6,7 +6,7 @@ function. That extraction is a refactor only if the model receives the same
 bytes afterwards, so the bytes are recorded here first, from a fake LLM that
 answers nothing and remembers everything.
 
-Run: ``uv run python scripts/capture_revision_prompt_golden.py``
+Run: ``uv run python scripts/goldens/capture_revision_prompt_golden.py``
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Any
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "revision_prompt_network.json"
 
 # Deliberately boring inputs: the point is the framing around them, and a value

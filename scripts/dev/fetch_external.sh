@@ -15,11 +15,11 @@
 # deployment rather than a dependency. This project talks to one over its REST
 # API; it does not install, build or package it.
 #
-#   scripts/fetch_external.sh
+#   scripts/dev/fetch_external.sh
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXTERNAL="$REPO_ROOT/external"
 
 # name|url|ref  — the ref is what the project was built and measured against.

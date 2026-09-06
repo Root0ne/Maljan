@@ -5,10 +5,10 @@ Automates version sync, smart rebuilds, and file-watching for the
 GhidraMCP headless Docker image.
 
 Usage:
-    python scripts/ghidra_manager.py sync      # Sync pom.xml → Dockerfile
-    python scripts/ghidra_manager.py build     # Smart rebuild (detects changes)
-    python scripts/ghidra_manager.py watch     # Auto-rebuild on file changes
-    python scripts/ghidra_manager.py status    # Show current versions & drift
+    python scripts/dev/ghidra_manager.py sync      # Sync pom.xml → Dockerfile
+    python scripts/dev/ghidra_manager.py build     # Smart rebuild (detects changes)
+    python scripts/dev/ghidra_manager.py watch     # Auto-rebuild on file changes
+    python scripts/dev/ghidra_manager.py status    # Show current versions & drift
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 # ── Paths (relative to repo root) ──────────────────────────────────
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 POM_XML = REPO_ROOT / "external" / "ghidra-mcp" / "pom.xml"
 DOCKERFILE = REPO_ROOT / "external" / "ghidra-mcp" / "docker" / "Dockerfile"
 GHIDRA_SRC = REPO_ROOT / "external" / "ghidra-mcp" / "src"

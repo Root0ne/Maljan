@@ -33,10 +33,11 @@ Cikti:
     data/yara_ttp_rules.yaml — genisletilmis kural seti (version 2.0)
 
 Kullanim:
-    uv run python scripts/expand_yara_rules.py
-    uv run python scripts/expand_yara_rules.py --dry-run
-    uv run python scripts/expand_yara_rules.py --sentences data/attck_labeled_sentences.jsonl
-    uv run python scripts/expand_yara_rules.py --attck-cache ~/.cache/maljan/
+    uv run python scripts/knowledge/expand_yara_rules.py
+    uv run python scripts/knowledge/expand_yara_rules.py --dry-run
+    uv run python scripts/knowledge/expand_yara_rules.py \
+        --sentences data/attck_labeled_sentences.jsonl
+    uv run python scripts/knowledge/expand_yara_rules.py --attck-cache ~/.cache/maljan/
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 
 DEFAULT_SENTENCES = ROOT_DIR / "data" / "attck_labeled_sentences.jsonl"
 DEFAULT_OUTPUT = ROOT_DIR / "data" / "yara_ttp_rules.yaml"
@@ -702,7 +703,7 @@ def expand(
         tech_meta = {}
         print(
             "    [WARN] STIX bundle not found in cache. "
-            "Run: uv run python scripts/prepare_attck_malware_fixtures.py",
+            "Run: uv run python scripts/knowledge/prepare_attck_malware_fixtures.py",
             file=sys.stderr,
         )
 

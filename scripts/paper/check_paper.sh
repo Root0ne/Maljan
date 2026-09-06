@@ -10,7 +10,7 @@
 # Run:  make paper-check
 set -uo pipefail
 
-cd "$(dirname "$0")/.." || exit 2
+cd "$(dirname "$0")/../.." || exit 2
 
 PAPER_DIR="other/docs/academic-article/paper"
 # The manuscript lives under other/, which is local to the authors and not in

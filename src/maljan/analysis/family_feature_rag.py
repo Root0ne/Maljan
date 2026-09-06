@@ -11,7 +11,7 @@ The LLM-centric replacement for the (removed) trained family classifier. Flow:
 No model is trained and nothing here asserts a family — retrieval only surfaces
 candidates as evidence, exactly like the YARA / sink-reachability / ATT&CK-index
 tools. ``build_sample_profile_text`` is shared with the offline catalog builder
-(``scripts/build_family_feature_kb.py``) so the query and the family fingerprints
+(``scripts/knowledge/build_family_feature_kb.py``) so the query and the family fingerprints
 are rendered in one vocabulary (embedding parity).
 
 Everything is fail-safe: a missing catalog or an unreadable binary yields no

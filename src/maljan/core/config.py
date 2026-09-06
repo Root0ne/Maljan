@@ -499,7 +499,7 @@ class PreprocessingConfig(BaseModel):
     # staying LLM-centric: retrieval only surfaces candidates — it never predicts.
     # No trained model and no heavy deps (reuses the fastembed BGE-384 embedder
     # already loaded for LTM). OFF by default: absent a catalog it degrades to a
-    # no-op (fail-safe). Build the catalog with scripts/build_family_feature_kb.py.
+    # no-op (fail-safe). Build the catalog with scripts/knowledge/build_family_feature_kb.py.
     #
     # Evidence so far: the retrieval layer beats chance on a leakage-free split
     # (recall@5 0.199 vs 0.032 random, family_rag_retrieval.json) but the end-to-end
@@ -523,7 +523,7 @@ class PreprocessingConfig(BaseModel):
     # flagging it is not). ON by default and fail-safe in both directions: a
     # missing or malformed catalog logs once and falls back to the built-in
     # table, so the worst case is the behaviour we shipped before it existed.
-    # Build it with scripts/build_api_capability_db.py.
+    # Build it with scripts/knowledge/build_api_capability_db.py.
     use_api_behaviour_map: bool = True
     api_behaviour_map_path: str = "data/api_behaviour_map_v1.json"
 
@@ -580,7 +580,7 @@ class PreprocessingConfig(BaseModel):
     # decides which TTPs apply. Raises static-only TTP precision without a second
     # statistical brain (nothing trained; adding a case is a new corpus row). Reuses
     # the fastembed BGE-384 embedder already loaded for LTM — zero new deps. Build the
-    # corpus with scripts/build_attck_case_kb.py.
+    # corpus with scripts/knowledge/build_attck_case_kb.py.
     #
     # STAYS OFF — measured, not merely undeployed (tests/evaluation/eval_attck_case_rag.py,
     # attck_case_rag_retrieval.json, 2026-08-08). The index itself works; the *query*

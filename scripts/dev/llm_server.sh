@@ -13,9 +13,9 @@
 # Recorded from the process that produced the runs in this repository:
 #   -c 131072 -t 16 -fa on -ctk q8_0 -ctv q8_0 -ngl 999 --context-shift on
 #
-# Run:  scripts/llm_server.sh start | stop | restart | status | wait
+# Run:  scripts/dev/llm_server.sh start | stop | restart | status | wait
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 2
+cd "$(dirname "$0")/../.." || exit 2
 
 BIN="${LLAMA_BIN:-/home/user/maljan-llm-build/ik_llama.cpp/build-cuda/bin/llama-server}"
 MODEL="${LLAMA_MODEL:-$PWD/models/Qwen3.6-35B-A3B-IQ3_K_R4.gguf}"

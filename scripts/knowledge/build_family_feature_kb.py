@@ -24,7 +24,7 @@ fingerprint description (``build_family_fingerprint_text``). Output JSON stores
 TEXT only (no vectors); the runtime index embeds it on load.
 
 Run:
-    uv run python scripts/build_family_feature_kb.py --samples-dir ./rats \
+    uv run python scripts/knowledge/build_family_feature_kb.py --samples-dir ./rats \
         --out data/family_fingerprints_v1.json --min-per-family 3
 """
 
@@ -40,7 +40,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

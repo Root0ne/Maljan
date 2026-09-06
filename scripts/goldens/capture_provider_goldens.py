@@ -2,7 +2,7 @@
 
 Run once, on `dev`, before the provider refactor begins:
 
-    uv run python scripts/capture_provider_goldens.py
+    uv run python scripts/goldens/capture_provider_goldens.py
 
 It imports the live module constants and writes them to tests/fixtures/. It is
 committed so a reviewer can re-run it on `dev` and diff the result against what
@@ -22,7 +22,7 @@ from maljan.extractors.network_extractor import build_network_iocs
 from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS
 from maljan.providers.static.ghidra_tool_selector import _CORE_TOOLS
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"
 GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 CAPE_GLOBS = ("data/cape_reports/*.json", "data/samples/dynamic/sample_1.json")

@@ -7,7 +7,7 @@ edge's path map and the analyst order are captured here from a live
 ``build_graph`` — for both values of ``llm.parallel_analysts``, because the
 two topologies are different graphs and only one of them is the default.
 
-Run: ``uv run python scripts/capture_graph_golden.py``
+Run: ``uv run python scripts/goldens/capture_graph_golden.py``
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "graph_default.json"
 
 

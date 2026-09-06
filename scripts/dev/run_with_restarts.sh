@@ -16,9 +16,9 @@
 # restart it between arms". It is not a workaround for a bug in the eval. It is
 # the shape a measurement takes when the instrument drifts while you use it.
 #
-# Run:  scripts/run_with_restarts.sh <checkpoint> <target-rows> <command...>
+# Run:  scripts/dev/run_with_restarts.sh <checkpoint> <target-rows> <command...>
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 2
+cd "$(dirname "$0")/../.." || exit 2
 
 CHECKPOINT="${1:?usage: run_with_restarts.sh <checkpoint> <target-rows> <command...>}"
 TARGET="${2:?target row count}"
@@ -50,11 +50,11 @@ for cycle in $(seq "$MAX_CYCLES"); do
     # within one poll — reclaiming nothing and looking like the eval had
     # failed. The headroom has to exist before the work begins, not be tested
     # after it. Forty seconds a cycle buys the whole cycle.
-    if ./scripts/llm_server.sh status >/dev/null 2>&1; then
-        ./scripts/llm_server.sh restart || exit 1
+    if ./scripts/dev/llm_server.sh status >/dev/null 2>&1; then
+        ./scripts/dev/llm_server.sh restart || exit 1
     else
-        ./scripts/llm_server.sh start
-        ./scripts/llm_server.sh wait || { echo "the server never came up" >&2; exit 1; }
+        ./scripts/dev/llm_server.sh start
+        ./scripts/dev/llm_server.sh wait || { echo "the server never came up" >&2; exit 1; }
     fi
     say "server fresh, $(avail_mb) MB available"
 
@@ -88,7 +88,7 @@ for cycle in $(seq "$MAX_CYCLES"); do
         exit 1
     fi
     say "cycle $cycle added $((after - have)) rows; restarting the server"
-    ./scripts/llm_server.sh restart || exit 1
+    ./scripts/dev/llm_server.sh restart || exit 1
 done
 
 say "gave up after $MAX_CYCLES cycles at $(rows)/$TARGET rows"

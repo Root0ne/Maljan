@@ -2,7 +2,7 @@
 
 Run once, on the branch point, before the sidecars move into ``mcp.servers``:
 
-    uv run python scripts/capture_builtin_tool_sets.py
+    uv run python scripts/goldens/capture_builtin_tool_sets.py
 
 It speaks raw stdio MCP to each server with exactly the launch parameters the
 agents use today (``network_analyst.py:73-111``, ``judge_agent.py:131-158``)
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from maljan.agents.subprocess_env import child_env
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "mcp_tools"
 
 # key -> (directory holding server.py and used as cwd, env names passed through)

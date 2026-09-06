@@ -1,7 +1,7 @@
 """List the tools an installed r2mcp offers, and pin them for the r2 provider.
 
-    uv run python scripts/probe_r2_tools.py            # uses `r2mcp` on PATH
-    uv run python scripts/probe_r2_tools.py /path/r2mcp
+    uv run python scripts/goldens/probe_r2_tools.py            # uses `r2mcp` on PATH
+    uv run python scripts/goldens/probe_r2_tools.py /path/r2mcp
 
 Writes tests/fixtures/golden/r2_tools.json. The provider's allow-list constant
 is filled from that file; running this again on a newer r2mcp shows, as a diff,
@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "golden" / "r2_tools.json"
+OUT = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "golden" / "r2_tools.json"
 
 
 def main() -> None:

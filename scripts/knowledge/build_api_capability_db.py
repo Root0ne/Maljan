@@ -18,7 +18,7 @@ borrowing, the bytes are not.
 
 Usage::
 
-    uv run python scripts/build_api_capability_db.py
+    uv run python scripts/knowledge/build_api_capability_db.py
     make prepare-api-db
 """
 
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parents[2]
 _BEHAVIOUR_OUT = _ROOT / "data" / "api_behaviour_map_v1.json"
 _ATTCK_OUT = _ROOT / "data" / "api_attck_map_v1.json"
 _VALID_IDS = _ROOT / "data" / "attck_valid_ids.json"
