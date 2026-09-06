@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import type { CatalogEntry, SettingValue } from "@/types/settings";
+import type {
+  AgentDefinitionEntry,
+  CatalogEntry,
+  McpServerEntry,
+  SettingValue,
+} from "@/types/settings";
 import ApplyBar from "./ApplyBar";
 import FieldRow from "./FieldRow";
 import GroupHeader from "./GroupHeader";
@@ -118,6 +123,24 @@ export default function ConfigurationTab() {
       return entry !== undefined && !isVisible(entry, s.values, s.pending);
     });
   }, [s.schema, s.pending, s.values]);
+
+  // What the agent-definitions editor's LLM section falls back to display
+  // when a field is left blank. Both leaves are looked up rather than
+  // assumed: `llm.provider` is a real `core_catalog()` leaf, `llm.model` is
+  // not (models live per-provider, e.g. `llm.openai.expert_model`) — so an
+  // absent entry here means "show the generic inherit text", not "render
+  // nothing".
+  const llmGlobal = useMemo(() => {
+    const providerEntry = s.entries.get("core.llm.provider");
+    const modelEntry = s.entries.get("core.llm.model");
+    const effective = (key: string) =>
+      key in s.pending ? s.pending[key] : s.values[key]?.value;
+    return {
+      providerChoices: providerEntry ? (providerEntry.choices ?? []) : null,
+      providerValue: providerEntry ? String(effective("core.llm.provider") ?? "") || null : null,
+      modelValue: modelEntry ? String(effective("core.llm.model") ?? "") || null : null,
+    };
+  }, [s.entries, s.pending, s.values]);
 
   if (s.loading) {
     return <div className="text-sm text-text-secondary">Loading configuration…</div>;
@@ -273,7 +296,31 @@ export default function ConfigurationTab() {
                           current={s.values[e.key]}
                           staged={s.pending[e.key]}
                           error={s.errors[e.key]}
+                          errors={s.errors}
                           models={e.probe === "llm" ? models : undefined}
+                          servers={
+                            (s.pending["core.mcp.servers"] ??
+                              s.values["core.mcp.servers"]?.value ??
+                              {}) as Record<string, McpServerEntry>
+                          }
+                          staticProviders={
+                            s.entries.get("core.static.provider")?.choices ?? []
+                          }
+                          llmAgentsCurrent={s.values["core.llm.agents"]}
+                          llmAgentsStaged={s.pending["core.llm.agents"]}
+                          llmGlobal={llmGlobal}
+                          onChangeLlmAgents={(v) => s.stage("core.llm.agents", v)}
+                          definitions={
+                            (s.pending["core.agents.definitions"] ??
+                              s.values["core.agents.definitions"]?.value ??
+                              {}) as Record<string, AgentDefinitionEntry>
+                          }
+                          activeProfile={
+                            (s.pending["core.agents.profile"] ??
+                              s.values["core.agents.profile"]?.value ??
+                              "default") as string
+                          }
+                          onSetActive={(name) => s.stage("core.agents.profile", name)}
                           onChange={(v) => s.stage(e.key, v)}
                           onUnstage={() => s.unstage(e.key)}
                           onReset={() => void s.reset(e.key)}

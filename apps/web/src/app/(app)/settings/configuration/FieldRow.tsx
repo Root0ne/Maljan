@@ -1,6 +1,16 @@
 "use client";
 
-import type { CatalogEntry, SettingValue } from "@/types/settings";
+import type {
+  AgentDefinitionEntry,
+  CatalogEntry,
+  McpServerEntry,
+  SettingValue,
+} from "@/types/settings";
+import AgentDefinitionsEditor, {
+  type AgentLLMOverride,
+  type LlmGlobalFallback,
+} from "./AgentDefinitionsEditor";
+import ProfilesEditor from "./ProfilesEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import { Widget } from "./widgets";
 
@@ -21,15 +31,48 @@ export default function FieldRow({
   onUnstage,
   onReset,
   models,
+  servers,
+  staticProviders,
+  llmAgentsCurrent,
+  llmAgentsStaged,
+  llmGlobal,
+  onChangeLlmAgents,
+  definitions,
+  activeProfile,
+  onSetActive,
+  errors,
 }: {
   entry: CatalogEntry;
   current?: SettingValue;
   staged: unknown;
   error?: string;
   models?: string[];
+  servers?: Record<string, McpServerEntry>;
+  staticProviders?: string[];
+  /** `core.llm.agents`'s own current/staged value, distinct from
+   *  `current`/`staged` above which are this row's own entry: the
+   *  agent-definitions editor stages that leaf as a whole, separately from
+   *  `core.agents.definitions`. */
+  llmAgentsCurrent?: SettingValue;
+  llmAgentsStaged?: unknown;
+  llmGlobal?: LlmGlobalFallback;
+  onChangeLlmAgents?: (value: Record<string, AgentLLMOverride>) => void;
+  /** `core.agents.definitions`'s effective value, read-only here — the
+   *  profiles editor only offers enabled, non-judge definitions. */
+  definitions?: Record<string, AgentDefinitionEntry>;
+  /** `core.agents.profile`'s effective value, for the "active" badge. */
+  activeProfile?: string;
+  /** Stages `core.agents.profile` — a "Set active" click, distinct from this
+   *  row's own `onChange` which stages `core.agents.profiles`. */
+  onSetActive?: (name: string) => void;
   onChange: (v: unknown) => void;
   onUnstage: () => void;
   onReset: () => void;
+  /** The full validation-error map, keyed by dotted path — not just this
+   *  row's own key — so the agent-definitions editor can find a nested
+   *  error like `core.agents.definitions.<key>.prompt` and land it on the
+   *  card that caused it rather than a leaf-wide banner. */
+  errors?: Record<string, string>;
 }) {
   const dirty = staged !== undefined;
   const source = current?.source ?? "default";
@@ -87,6 +130,30 @@ export default function FieldRow({
               current={current}
               staged={staged}
               onChange={onChange}
+            />
+          ) : entry.editor === "agent_definitions" ? (
+            <AgentDefinitionsEditor
+              entry={entry}
+              current={current}
+              staged={staged}
+              servers={servers ?? {}}
+              staticProviders={staticProviders ?? []}
+              llmAgentsCurrent={llmAgentsCurrent}
+              llmAgentsStaged={llmAgentsStaged}
+              llmGlobal={llmGlobal ?? { providerChoices: null, providerValue: null, modelValue: null }}
+              onChangeLlmAgents={onChangeLlmAgents ?? (() => undefined)}
+              errors={errors ?? {}}
+              onChange={onChange}
+            />
+          ) : entry.editor === "profiles" ? (
+            <ProfilesEditor
+              entry={entry}
+              current={current}
+              staged={staged}
+              definitions={definitions ?? {}}
+              activeProfile={activeProfile ?? "default"}
+              onChange={onChange}
+              onSetActive={onSetActive ?? (() => undefined)}
             />
           ) : (
             <Widget

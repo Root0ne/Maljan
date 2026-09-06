@@ -36,6 +36,11 @@ if TYPE_CHECKING:
 # The reason string a failed server contributes to ``degradation_reasons``.
 UNAVAILABLE_REASON = "mcp server '{name}' unavailable"
 
+# A server that answered but does not offer the tool a definition asked for by
+# name. Distinct from ``UNAVAILABLE_REASON``: the server is fine, the
+# *reference* is stale, and an operator fixes those two things differently.
+AGENT_TOOL_UNAVAILABLE_REASON = "agent tool '{server}.{name}' unavailable"
+
 # The teardown budgets, and why they are these numbers.
 #
 # Every one of them has to fit strictly inside the budget of whoever is
@@ -770,25 +775,53 @@ class ServerRegistry:
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
-    def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: set[str]) -> int:
-        """Append ``handle``'s tools to ``tools``, renaming any name collision.
+    def merge_tools(
+        self,
+        server: str,
+        incoming: list[BaseTool],
+        tools: list[BaseTool],
+        seen: dict[str, str],
+    ) -> int:
+        """Append ``incoming`` to ``tools`` under the collision rule.
+
+        ``seen`` maps a claimed tool name to the server that claimed it, which
+        is what lets the rule span an agent's whole tool set rather than one
+        ``tools_for`` call: a name another server already claimed is taken by
+        this server as ``<server>__<tool>``, while the *same* server's same
+        tool arriving twice — bound by ``agents`` and named again by a
+        ``ToolRef`` — collapses to one copy. Nothing is dropped for a
+        collision; only an exact repeat of one server's own tool is.
 
         Returns how many tools were renamed, so the caller can log it once
-        per handle instead of per tool.
+        per server instead of per tool.
         """
         renamed = 0
-        for tool in handle.tools():
+        for tool in incoming:
             name = str(getattr(tool, "name", ""))
-            if name in seen:
-                tool = tool.model_copy(update={"name": f"{handle.name}__{name}"})
-                name = str(tool.name)
+            owner = seen.get(name)
+            if owner == server:
+                continue
+            if owner is not None:
+                name = f"{server}__{name}"
+                if seen.get(name) == server:
+                    continue
+                tool = tool.model_copy(update={"name": name})
                 renamed += 1
-            seen.add(name)
+            seen[name] = server
             tools.append(tool)
         return renamed
 
+    def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: dict[str, str]) -> int:
+        return self.merge_tools(handle.name, handle.tools(), tools, seen)
+
     def tools_for(
-        self, role: str, job_id: str, *, exclude: str = "", **context: Any
+        self,
+        role: str,
+        job_id: str,
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """Open every server bound to ``role`` and concatenate their tools.
 
@@ -799,7 +832,7 @@ class ServerRegistry:
         """
         tools: list[BaseTool] = []
         reasons: list[str] = []
-        seen: set[str] = set()
+        seen = {} if seen is None else seen
         from maljan.agents.base_agent import _get_agent_loop
 
         # ``open`` hands ``initialize`` to the shared agent loop, so that is
@@ -832,7 +865,13 @@ class ServerRegistry:
         return tools, reasons
 
     async def atools_for(
-        self, role: str, job_id: str, *, exclude: str = "", **context: Any
+        self,
+        role: str,
+        job_id: str,
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for``, but ``await``ed on the caller's own loop.
 
@@ -843,7 +882,7 @@ class ServerRegistry:
         """
         tools: list[BaseTool] = []
         reasons: list[str] = []
-        seen: set[str] = set()
+        seen = {} if seen is None else seen
         loop = asyncio.get_running_loop()
         for bound in self.for_agent(role, exclude=exclude):
             handle = self._handle_for(bound, loop)
@@ -869,6 +908,104 @@ class ServerRegistry:
                     renamed,
                     handle.name,
                 )
+        return tools, reasons
+
+    def _ref_tools(self, handle: ServerHandle, ref: Any) -> tuple[list[BaseTool], list[str]]:
+        """The tools one open handle contributes for ``ref``, and any reason it did not.
+
+        ``ref.name is None`` is the whole allow-listed set — the same list
+        ``tools_for`` would have merged had the server been bound by ``agents``.
+        A name is one tool of it, matched after B's collision prefixing, so a
+        renamed tool is still findable under the name the model actually sees.
+        """
+        available = handle.tools()
+        if ref.name is None:
+            return list(available), []
+        wanted = str(ref.name)
+        picked = [
+            tool
+            for tool in available
+            if str(getattr(tool, "name", "")) in (wanted, f"{handle.name}__{wanted}")
+        ]
+        if not picked:
+            return [], [AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)]
+        return picked, []
+
+    def _record(self, reasons: list[str]) -> None:
+        for reason in reasons:
+            if reason not in self.degradation_reasons:
+                self.degradation_reasons.append(reason)
+
+    def tools_for_ref(
+        self, ref: Any, job_id: str, *, seen: dict[str, str] | None = None, **context: Any
+    ) -> tuple[list[BaseTool], list[str]]:
+        """One ``ToolRef(kind="mcp")``'s tools, opened on the shared agent loop.
+
+        The reference half of an agent's tool set. Never raises, for the same
+        reason ``tools_for`` never does: a definition that points at a server
+        which is down costs the agent depth, not the job.
+        """
+        from maljan.agents.base_agent import _get_agent_loop
+
+        try:
+            handle = self._handle_for(self.get(str(ref.server)), _get_agent_loop())
+        except ProviderConfigurationError:
+            reasons = [
+                AGENT_TOOL_UNAVAILABLE_REASON.format(server=ref.server, name=ref.name or "*")
+            ]
+            self._record(reasons)
+            return [], reasons
+        try:
+            handle.open(job_id, **context)
+        except Exception as exc:  # noqa: BLE001 — a referenced server always degrades
+            logger.warning("mcp server '%s' could not be attached: %s", handle.name, exc)
+            reasons = [UNAVAILABLE_REASON.format(name=handle.name)]
+            self._record(reasons)
+            return [], reasons
+        picked, reasons = self._ref_tools(handle, ref)
+        self._record(reasons)
+        tools: list[BaseTool] = []
+        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        if renamed:
+            logger.info(
+                "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
+                handle.name,
+                renamed,
+                handle.name,
+            )
+        return tools, reasons
+
+    async def atools_for_ref(
+        self, ref: Any, job_id: str, *, seen: dict[str, str] | None = None, **context: Any
+    ) -> tuple[list[BaseTool], list[str]]:
+        """``tools_for_ref``, awaited on the caller's own loop."""
+        loop = asyncio.get_running_loop()
+        try:
+            handle = self._handle_for(self.get(str(ref.server)), loop)
+        except ProviderConfigurationError:
+            reasons = [
+                AGENT_TOOL_UNAVAILABLE_REASON.format(server=ref.server, name=ref.name or "*")
+            ]
+            self._record(reasons)
+            return [], reasons
+        try:
+            await handle.aopen(job_id, **context)
+        except Exception as exc:  # noqa: BLE001 — a referenced server always degrades
+            logger.warning("mcp server '%s' could not be attached: %s", handle.name, exc)
+            reasons = [UNAVAILABLE_REASON.format(name=handle.name)]
+            self._record(reasons)
+            return [], reasons
+        picked, reasons = self._ref_tools(handle, ref)
+        self._record(reasons)
+        tools: list[BaseTool] = []
+        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        if renamed:
+            logger.info(
+                "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
+                handle.name,
+                renamed,
+                handle.name,
+            )
         return tools, reasons
 
     def still_open(self) -> list[ServerHandle]:

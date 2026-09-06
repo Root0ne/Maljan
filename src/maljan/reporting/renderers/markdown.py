@@ -121,6 +121,17 @@ class MarkdownRenderer:
                 "verdict, confidence and severity below should be treated as tentative "
                 f"and corroborated manually.  \n> Reasons: {reasons}"
             )
+        profile = (report.run_summary or {}).get("profile") or {}
+        # Live-verification L2: a reduced profile (fewer/different analysts than
+        # the default ensemble) changes what evidence backs the verdict, but
+        # nothing in the rendered report said so. Only surface the line when the
+        # profile deviates from "default" — an absent or default profile keeps
+        # today's output byte-identical.
+        if profile.get("name") and profile["name"] != "default":
+            analysts = profile.get("analysts") or []
+            custom = set(profile.get("custom") or [])
+            names = ", ".join(f"{a} (custom)" if a in custom else a for a in analysts)
+            header += f"\n\nProfile: {profile['name']} — analysts: {names}"
         return header
 
     def _section_identity(self, report: MalwareReport) -> str:

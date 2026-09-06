@@ -260,11 +260,12 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
 @app.command()
 def info() -> None:
     """Show current configuration and registered components."""
-    from maljan.agents.registry import AgentRegistry
+    from maljan.core.config import get_settings
+    from maljan.core.container import ServiceContainer
     from maljan.parsers.registry import ParserRegistry
 
-    config = Settings()
-    agent_reg = AgentRegistry()
+    config = get_settings()
+    container = ServiceContainer(config, mock=True)
     parser_reg = ParserRegistry()
 
     typer.echo("Maljan Configuration:")
@@ -273,7 +274,8 @@ def info() -> None:
     typer.echo(f"  Judge Model: {config.llm.judge_model}")
     typer.echo(f"  Max Iterations: {config.negotiation.max_iterations}")
     typer.echo(f"  Max Token Limit: {config.max_token_limit}")
-    typer.echo(f"\nRegistered Agents: {agent_reg.list_agents()}")
+    typer.echo(f"\nActive profile: {container.config.agents.profile}")
+    typer.echo(f"Analysts: {container.analyst_keys()}")
     typer.echo(f"Registered Parsers: {parser_reg.list_parsers()}")
 
 

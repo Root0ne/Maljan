@@ -299,28 +299,25 @@ class TestContainerGetAgentLLM:
 
 class TestContainerGetAgentUsesAgentLLM:
     def test_get_agent_calls_get_agent_llm_not_expert(self) -> None:
-        import threading
-
+        from maljan.agents.static_analyst import StaticAnalyst
         from maljan.core.container import ServiceContainer
 
-        container = ServiceContainer.__new__(ServiceContainer)
-        container._agent_cache = {}
-        container._lock = threading.Lock()
+        # ``mock=True`` at construction avoids building a real LLM registry;
+        # flipping it back off afterwards exercises ``resolve_agent``'s
+        # per-agent branch (``_agent_llm``) without needing real credentials.
+        container = ServiceContainer(Settings(_env_file=None), mock=True)
+        container.mock = False
 
         dedicated_llm = MagicMock()
         container.get_agent_llm = MagicMock(return_value=dedicated_llm)
         container.get_expert_llm = MagicMock()
 
-        mock_agent = MagicMock()
-        mock_registry = MagicMock()
-        mock_registry.create.return_value = mock_agent
-        container.agent_registry = mock_registry
-
-        container.get_agent("static")
+        agent = container.get_agent("static")
 
         container.get_agent_llm.assert_called_once_with("static")
         container.get_expert_llm.assert_not_called()
-        mock_registry.create.assert_called_once_with("static", dedicated_llm)
+        assert isinstance(agent, StaticAnalyst)
+        assert agent.llm is dedicated_llm
 
     def test_get_agent_cache_hit_does_not_rebuild_llm(self) -> None:
         import threading

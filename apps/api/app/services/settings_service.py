@@ -278,6 +278,7 @@ class SettingsService:
                     changes[SERVER_MAP_KEY], tokens = split_server_secrets(
                         changes[SERVER_MAP_KEY],
                         stored=stored_map if isinstance(stored_map, dict) else None,
+                        stored_settings=current,
                     )
                 except ServerMapError as exc:
                     raise SettingsValidationError(
@@ -296,6 +297,23 @@ class SettingsService:
                         }
                     )
                 server_map_kept = set(changes[SERVER_MAP_KEY])
+
+        from app.services.agent_map import (
+            AGENT_DEFINITIONS_KEY,
+            AGENT_PROFILE_KEY,
+            AGENT_PROFILES_KEY,
+            AgentMapError,
+            validate_agent_map,
+        )
+
+        if {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY} & set(changes):
+            # Per-key messages, so the two composite editors can put each error
+            # on the card that caused it — the same reason the server map has
+            # its own validation module.
+            try:
+                changes.update(validate_agent_map(changes, current))
+            except AgentMapError as exc:
+                raise SettingsValidationError(dict(exc.errors)) from exc
         merged = {**current}
         for key, value in changes.items():
             # ``null`` means "drop the override" for every key, secrets

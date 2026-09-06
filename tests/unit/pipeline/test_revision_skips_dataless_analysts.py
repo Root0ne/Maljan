@@ -58,6 +58,8 @@ def _container(chunks_by_agent: dict[str, list[_Chunk]]) -> MagicMock:
     container = MagicMock()
     container.is_mock = False
     container.agent_registry.list_agents.return_value = list(chunks_by_agent)
+    container.analyst_keys.return_value = list(chunks_by_agent)
+    container.agent_role.side_effect = lambda n: n
     container.config.llm.parallel_analysts = False
     agents = {name: _agent(name) for name in chunks_by_agent}
     container.get_agent.side_effect = lambda n: agents[n]

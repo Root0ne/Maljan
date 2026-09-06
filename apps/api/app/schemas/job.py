@@ -28,6 +28,11 @@ class _KnownJobConfig(BaseModel):
     sandbox_provider: Literal["mock", "cape2", "upload", "triage", "rest"] | None = None
     # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".
     sandbox_report_id: uuid.UUID | None = None
+    # The agent profile for this job. A free string rather than a Literal
+    # because the valid values are settings an operator writes, not a registry
+    # the code owns; the route checks it against the effective profile map at
+    # submit time, which is where "known" can actually be answered.
+    profile: str | None = None
 
     @model_validator(mode="after")
     def _mock_mode_cannot_consume_an_uploaded_report(self) -> "_KnownJobConfig":

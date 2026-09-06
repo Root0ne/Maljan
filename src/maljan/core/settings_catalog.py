@@ -22,8 +22,10 @@ from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER, group_for
 
 FieldType = Literal["bool", "int", "float", "str", "secret", "enum", "list", "dict", "json"]
 Applies = Literal["next_job", "live", "restart"]
-ChoicesFrom = Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles"]
-Editor = Literal["server_map", "rest_sandbox"]
+ChoicesFrom = Literal[
+    "static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"
+]
+Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "profiles"]
 
 # Field names that are secrets although typed as plain str.
 _SECRET_NAMES = {"auth_token", "api_key", "cape2_api_token"}

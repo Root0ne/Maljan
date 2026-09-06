@@ -22,9 +22,9 @@ class Annotation(TypedDict):
     applies_when: NotRequired[dict[str, list[str]]]  # key -> values that reveal this entry
     order: NotRequired[int]  # within the group; default 0
     choices_from: NotRequired[
-        Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles"]
+        Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"]
     ]
-    editor: NotRequired[Literal["server_map", "rest_sandbox"]]
+    editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "profiles"]]
 
 
 GROUP_ORDER: list[tuple[str, str]] = [
@@ -39,7 +39,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("negotiation", "Negotiation"),
     ("chunking", "Chunking"),
     ("reporting", "Reporting"),
-    ("agents", "Agent timeouts and budgets"),
+    ("agents", "Agents"),
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
     ("api", "API"),
@@ -1354,6 +1354,40 @@ ANNOTATIONS.update(
             ),
             "applies_when": _STATIC_GENERIC,
             "choices_from": "mcp_servers",
+        },
+        "agents.profile": {
+            "title": "Active profile",
+            "description": (
+                "Which profile a job runs unless it names one of its own. A "
+                "profile is an ordered set of analysts; 'default' is the "
+                "three-analyst architecture this project was measured on."
+            ),
+            "group": "agents",
+            "choices_from": "profiles",
+            "order": -1,
+        },
+        "agents.profiles": {
+            "title": "Profiles",
+            "description": (
+                "Named ensembles, each an ordered list of enabled analyst "
+                "definitions. The order is the order the analysts run in when "
+                "analysts run sequentially. 'default' is read-only; clone it."
+            ),
+            "group": "agents",
+            "editor": "profiles",
+            "order": -1,
+        },
+        "agents.definitions": {
+            "title": "Agent definitions",
+            "description": (
+                "Every agent Maljan can run, keyed by a short name: its role, "
+                "its prompt, the tool servers it receives and the static "
+                "provider it reads. The four built-ins are read-only apart from "
+                "their enabled switch; clone one to change it."
+            ),
+            "group": "agents",
+            "editor": "agent_definitions",
+            "order": -1,
         },
     }
 )

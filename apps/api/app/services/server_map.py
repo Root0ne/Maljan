@@ -20,14 +20,14 @@ rather than a token whose literal characters are ten asterisks.
 from __future__ import annotations
 
 import re
-from typing import Any, get_args
+from typing import Any
 
 from maljan.core.config import (
     BUILTIN_SERVER_KEYS,
     RESERVED_SERVER_KEYS,
     SERVER_KEY_PATTERN,
-    AgentRole,
     MCPServerConfig,
+    _builtin_definitions,
     _builtin_servers,
 )
 from pydantic import ValidationError
@@ -40,7 +40,22 @@ SERVER_MAP_KEY = "core.mcp.servers"
 TOKEN_MASK = "**********"
 
 _KEY_RE = re.compile(SERVER_KEY_PATTERN)
-_ROLES = set(get_args(AgentRole))
+
+
+def _definition_keys(stored: dict[str, Any] | None) -> set[str]:
+    """Every agent a server may be bound to, from the map the operator has.
+
+    A server's ``agents`` list used to be a Literal of four roles; it is now a
+    list of definition keys, so what is valid depends on settings the operator
+    can change in the same session. The stored ``core.agents.definitions``
+    override wins where it exists, and the built-in seeds supply the rest —
+    the same layering ``AgentsConfig`` itself does on load.
+    """
+    keys = set(_builtin_definitions())
+    definitions = (stored or {}).get("core.agents.definitions")
+    if isinstance(definitions, dict):
+        keys |= {str(k) for k in definitions}
+    return keys
 
 
 def server_token_key(server: str) -> str:
@@ -60,7 +75,12 @@ class ServerMapError(Exception):
         self.errors = errors
 
 
-def validate_server_map(value: Any, *, stored: dict[str, Any] | None = None) -> dict[str, Any]:
+def validate_server_map(
+    value: Any,
+    *,
+    stored: dict[str, Any] | None = None,
+    stored_settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return the map to store, or raise with one message per offending key."""
     errors: dict[str, str] = {}
     if not isinstance(value, dict):
@@ -81,10 +101,11 @@ def validate_server_map(value: Any, *, stored: dict[str, Any] | None = None) -> 
         if not isinstance(entry, dict):
             errors[key] = "a server entry must be an object"
             continue
+        roles = _definition_keys(stored_settings)
         for role in entry.get("agents") or []:
-            if role not in _ROLES:
+            if role not in roles:
                 errors[f"{key}.agents"] = (
-                    f"{role!r} is not an analyst; expected one of {', '.join(sorted(_ROLES))}"
+                    f"{role!r} is not a known agent; expected one of {', '.join(sorted(roles))}"
                 )
         try:
             # The token is validated and stored separately (``split_server_secrets``);
@@ -117,7 +138,10 @@ def validate_server_map(value: Any, *, stored: dict[str, Any] | None = None) -> 
 
 
 def split_server_secrets(
-    value: Any, *, stored: dict[str, Any] | None = None
+    value: Any,
+    *,
+    stored: dict[str, Any] | None = None,
+    stored_settings: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str | None]]:
     """Validate the map, and separate the tokens from what gets stored in it.
 
@@ -129,7 +153,7 @@ def split_server_secrets(
     That distinction is what lets the editor round-trip a masked value without
     overwriting the real one with ten asterisks.
     """
-    cleaned = validate_server_map(value, stored=stored)
+    cleaned = validate_server_map(value, stored=stored, stored_settings=stored_settings)
     tokens: dict[str, str | None] = {}
     for key, entry in (value or {}).items():
         if not isinstance(entry, dict) or "auth_token" not in entry:

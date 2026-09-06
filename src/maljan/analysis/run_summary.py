@@ -157,6 +157,23 @@ class CascadeMetrics:
     platform_filter_summary: dict[str, Any] | None = None
 
 
+def _attribution_layers() -> list[str]:
+    """The layer order the per-layer breakdown renders, profile first.
+
+    Was the literal ``("static", "dynamic", "network", "yara", "sigma")``,
+    which named three analysts that a custom profile may not run and missed
+    every analyst it does. The two rule layers stay appended: they are
+    deterministic passes, not analysts, and they run whatever the profile says.
+    """
+    from maljan.agents.composition import current_analyst_keys
+
+    try:
+        analysts = current_analyst_keys()
+    except Exception:  # noqa: BLE001 — a report renders even without settings
+        analysts = ["static", "dynamic", "network"]
+    return [*analysts, "yara", "sigma"]
+
+
 # ---------------------------------------------------------------------------
 # RunSummary
 # ---------------------------------------------------------------------------
@@ -192,6 +209,8 @@ class RunSummary:
                             0 dynamic = 11 total" attribution instead of the
                             opaque "11 techniques". Audit 2026-05-19
                             OBS-TTP-ATTRIBUTION-01.
+        profile:            which profile ran, the analysts it named, and
+                            which of them are not built in.
     """
 
     file_hash: str
@@ -210,6 +229,7 @@ class RunSummary:
     degradation_reasons: list[str] = field(default_factory=list)
     failed_analysts: list[str] = field(default_factory=list)
     techniques_by_layer: dict[str, int] = field(default_factory=dict)
+    profile: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Rendering
@@ -311,12 +331,13 @@ class RunSummary:
                 lines.append("**Per-layer attribution:**")
                 lines.append("")
                 # Stable order so the report is diffable run-to-run.
-                for layer in ("static", "dynamic", "network", "yara", "sigma"):
+                layers_in_order = _attribution_layers()
+                for layer in layers_in_order:
                     count = self.techniques_by_layer.get(layer, 0)
                     lines.append(f"- `{layer}`: {count}")
                 # Surface any other layers we didn't enumerate above.
                 for layer, count in sorted(self.techniques_by_layer.items()):
-                    if layer not in {"static", "dynamic", "network", "yara", "sigma"}:
+                    if layer not in set(layers_in_order):
                         lines.append(f"- `{layer}`: {count}")
                 lines.append("")
         else:
@@ -432,6 +453,7 @@ class RunSummary:
             "degradation_reasons": list(self.degradation_reasons),
             "failed_analysts": list(self.failed_analysts),
             "techniques_by_layer": dict(self.techniques_by_layer),
+            "profile": dict(self.profile) if self.profile else None,
         }
 
         if self.cascade:
@@ -521,6 +543,7 @@ class RunSummaryBuilder:
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
         self._truncation: TruncationMetrics | None = None
+        self._profile: dict[str, Any] | None = None
 
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
@@ -592,6 +615,20 @@ class RunSummaryBuilder:
         Audit 2026-05-19 OBS-ANALYST-ERRORS-METRIC-01.
         """
         self._failed_analysts = list(names)
+        return self
+
+    def set_profile(self, name: str, analysts: list[str], custom: list[str]) -> RunSummaryBuilder:
+        """Record which ensemble ran (spec §5).
+
+        ``custom`` is the subset of ``analysts`` that is not one of the four
+        built-in definitions — what the report and the pipeline panel badge, so
+        a reader can tell a measured run from an operator's own arrangement.
+        """
+        self._profile = {
+            "name": name,
+            "analysts": list(analysts),
+            "custom": list(custom),
+        }
         return self
 
     def set_sample(self, file_hash: str, file_name: str | None) -> RunSummaryBuilder:
@@ -802,6 +839,7 @@ class RunSummaryBuilder:
             degradation_reasons=self._degradation_reasons,
             failed_analysts=self._failed_analysts,
             techniques_by_layer=self._techniques_by_layer,
+            profile=self._profile,
         )
 
 

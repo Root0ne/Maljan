@@ -4,9 +4,10 @@ Two things could drift apart without a test noticing: a catalog leaf naming a
 ``probe`` id ``PROBES`` does not have (a broken "Test" button), and
 ``_INPUTS["rest"]`` falling behind the ``core.sandbox.rest.*`` leaves Task 13
 actually added (a probe that quietly ignores a staged field). ``mcp`` is the
-one probe id with no catalog leaf of its own -- the key it addresses comes
-from the ``?server=`` query parameter, not from a settings leaf -- so it, and
-its two back-compat aliases, are named explicitly rather than discovered.
+two probe ids with no catalog leaf of their own -- the key each addresses
+comes from a query parameter (``?server=``, ``?name=``), not from a settings
+leaf -- so they, and ``mcp``'s two back-compat aliases, are named explicitly
+rather than discovered.
 """
 
 from __future__ import annotations
@@ -17,9 +18,10 @@ from app.services.settings_probes import _INPUTS, PROBES
 # ``capa``/``cape`` are one release's back-compat aliases for
 # ``capa_yara``/``cape2`` (see ``PROBES``'s own comments); a stored annotation
 # may still name the older id. ``mcp`` addresses one key of ``core.mcp.servers``
-# rather than a catalog leaf, so no leaf's ``probe`` field ever names it.
+# and ``agent`` one key of ``core.agents.definitions``, neither a catalog leaf,
+# so no leaf's ``probe`` field ever names them.
 _ALIASES = {"capa": "capa_yara", "cape": "cape2"}
-_NO_CATALOG_LEAF = {"mcp"}
+_NO_CATALOG_LEAF = {"mcp", "agent"}
 
 
 def test_probes_cover_every_id_the_catalog_names_and_nothing_unnamed_but_the_known_extras():

@@ -77,6 +77,7 @@ class MaljanApp:
         file_name: str | None = None,
         sample_path: str | None = None,
         static_sample_path: str | None = None,
+        static_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline synchronously.
 
@@ -86,6 +87,9 @@ class MaljanApp:
             sample_path: Optional path to the original sample file for sandbox submission.
             static_sample_path: Optional container-visible path the static analyst's
                 Ghidra MCP server can read. See ``arun`` for full context.
+            static_sample_paths: One container-visible path per static provider
+                this job's profile uses, keyed by provider id; the globally
+                configured provider's entry is also ``static_sample_path``.
 
         Returns:
             The final state dict including:
@@ -94,7 +98,9 @@ class MaljanApp:
         """
         # Delegate to async implementation so sandbox submission and graph
         # execution share the same event loop (avoids nested asyncio.run).
-        return asyncio.run(self.arun(file_hash, file_name, sample_path, static_sample_path))
+        return asyncio.run(
+            self.arun(file_hash, file_name, sample_path, static_sample_path, static_sample_paths)
+        )
 
     def _infer_sample_platform(
         self,
@@ -256,6 +262,7 @@ class MaljanApp:
         file_name: str | None = None,
         sample_path: str | None = None,
         static_sample_path: str | None = None,
+        static_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -272,6 +279,9 @@ class MaljanApp:
                 static_sample_path)``. ``None`` falls back to the legacy
                 metadata-only prompt where the LLM had to guess the path
                 and timed out.
+            static_sample_paths: One container-visible path per static provider
+                this job's profile uses, keyed by provider id; the globally
+                configured provider's entry is also ``static_sample_path``.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
@@ -283,7 +293,7 @@ class MaljanApp:
         logger.info("=" * 60)
         logger.info("Sample: %s (%s)", file_hash, file_name or "unnamed")
         logger.info("Mode: %s", "MOCK" if self.container.is_mock else self.config.llm.provider)
-        logger.info("Registered agents: %s", self.container.agent_registry.list_agents())
+        logger.info("Analysts: %s", self.container.analyst_keys())
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
 
@@ -321,6 +331,7 @@ class MaljanApp:
             "file_name": file_name,
             "sample_path": sample_path,
             "static_sample_path": static_sample_path,
+            "static_sample_paths": dict(static_sample_paths or {}),
             "sandbox_report": sandbox_report,
             "file_type": file_type,
             "platform": platform,

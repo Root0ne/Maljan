@@ -33,7 +33,7 @@ from app.schemas.settings import (
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
-from app.services.settings_probes import PROBES, run_mcp_probe, run_probe
+from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -54,13 +54,22 @@ async def _effective_servers(db: AsyncSession) -> list[str]:
     return list(Settings().mcp.servers)
 
 
+async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
+    """Profile names and definition keys as they stand, for the catalog's choices."""
+    from app.services.agent_map import effective_definitions, effective_profiles
+
+    stored = await SettingsService(db).load_overrides()
+    return sorted(effective_profiles(stored)), sorted(effective_definitions(stored))
+
+
 @router.get("/schema", response_model=SchemaResponse)
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
     available = box.is_available()
+    profiles, agents = await _effective_agents(db)
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in resolved_catalog(await _effective_servers(db)):
+    for e in resolved_catalog(await _effective_servers(db), profiles=profiles, agents=agents):
         d = e.to_dict()
         if e.secret and e.editable and not available:
             d["editable"] = False
@@ -210,6 +219,24 @@ async def test_mcp_server(
     """
     stored = await SettingsService(db).load_overrides()
     result = await run_mcp_probe(server, body.values, stored)
+    return ProbeResponse(**vars(result))
+
+
+@router.post("/test/agent", response_model=ProbeResponse)
+async def test_agent(
+    body: ProbeRequest,
+    name: str = Query(..., description="key in agents.definitions"),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ProbeResponse:
+    """Resolve one agent definition and report what it would get.
+
+    Takes staged values so an operator can resolve a definition they have not
+    saved yet — the same contract every other probe has. No LLM call is made:
+    this reports the model that *would* be used, never a completion.
+    """
+    stored = await SettingsService(db).load_overrides()
+    result = await run_agent_probe(name, body.values, stored)
     return ProbeResponse(**vars(result))
 
 

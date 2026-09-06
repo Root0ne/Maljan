@@ -47,11 +47,27 @@ const SPEAKER_COLORS: Record<string, string> = {
   // It is an intervention, and it is the reason a round exists.
   "sycophancy detector": "#f0883e",
 };
-const FALLBACK_COLOR = "#8b949e";
+/**
+ * Colours for a speaker the table does not name.
+ *
+ * A profile can add analysts this file has never heard of, and drawing every
+ * one of them the same grey made a four-analyst transcript unreadable. The
+ * index comes from a hash of the name, so one agent keeps one colour across
+ * reloads, across runs and across users — the property the fixed table had.
+ */
+const FALLBACK_PALETTE = ["#8b949e", "#56d364", "#db61a2", "#6cb6ff", "#e3b341", "#f0883e"];
+
+function hashIndex(key: string, buckets: number): number {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % buckets;
+}
 
 function speakerColor(speaker: string): string {
   const key = speaker.toLowerCase().replace(/\s*analyst$/, "").trim();
-  return SPEAKER_COLORS[key] ?? FALLBACK_COLOR;
+  return SPEAKER_COLORS[key] ?? FALLBACK_PALETTE[hashIndex(key, FALLBACK_PALETTE.length)];
 }
 
 function speakerLabel(speaker: string): string {

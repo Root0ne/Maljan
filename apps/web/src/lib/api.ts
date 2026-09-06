@@ -515,6 +515,14 @@ class ApiClient {
     );
   }
 
+  /** Resolve one agent definition, staged values included. Spends no tokens. */
+  probeAgent(name: string, values: Record<string, unknown>) {
+    return this.request<ProbeResult>(
+      `/api/v1/settings/test/agent?name=${encodeURIComponent(name)}`,
+      { method: "POST", body: JSON.stringify({ values }) }
+    );
+  }
+
   /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */
   previewSandboxMapping(sample: unknown, mapping: Record<string, string>) {
     return this.request<MappingPreview>("/api/v1/settings/sandbox-rest/preview", {
@@ -565,6 +573,10 @@ class ApiClient {
     return data;
   }
 
+  /** Start a job. `config` accepts the known keys the API validates at submit
+   *  time — `llm_provider`, `max_iterations`, `static_provider`,
+   *  `sandbox_provider`, `sandbox_report_id` and `profile` — plus anything
+   *  else, which passes through untouched. */
   createJob(sampleId: string, config?: Record<string, unknown>) {
     return this.request<JobDTO>(
       "/api/v1/jobs",

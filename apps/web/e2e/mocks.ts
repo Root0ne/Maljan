@@ -299,6 +299,32 @@ export const MOCK_SETTINGS_SCHEMA = {
           choices_from: null,
           editor: null,
         },
+        // Task C14 fix: real `core_catalog()` leaves the agent-definitions
+        // editor's LLM section falls back to — `llm.provider` exists (an
+        // enum), `llm.model` does not (models are per-provider, e.g.
+        // `llm.openai.expert_model`), so only the provider entry is mocked.
+        {
+          key: "core.llm.provider", namespace: "core", path: "llm.provider",
+          type: "enum", default: "openai", nullable: false,
+          choices: ["openai", "anthropic", "ollama", "gemini"],
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
+        // `llm.agents` (`dict[str, AgentLLMConfig]`) is one JSON leaf, staged
+        // as a whole exactly like `core.mcp.servers` — the agent-definitions
+        // editor's LLM section reads and writes this map directly, one entry
+        // per agent key.
+        {
+          key: "core.llm.agents", namespace: "core", path: "llm.agents",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Per-agent LLM overrides",
+          description: "Per-agent LLM overrides for the heterogeneous model ensemble.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
       ],
     },
     // Task A21: `applies_when` drives conditional visibility; `order: -1`
@@ -439,6 +465,41 @@ export const MOCK_SETTINGS_SCHEMA = {
         },
       ],
     },
+    // Task C14/C15: named profiles and operator-defined analysts, both
+    // composite `json` leaves the way the server map is one.
+    {
+      key: "agents",
+      title: "Agents",
+      entries: [
+        {
+          key: "core.agents.profile", namespace: "core", path: "agents.profile",
+          type: "enum", default: "default", nullable: false,
+          choices: ["default", "lean"],
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Active profile", description: "Which analyst profile a new job runs.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "profiles", editor: null,
+        },
+        {
+          key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Agent definitions",
+          description: "Every analyst Maljan can run, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "agent_definitions",
+        },
+        {
+          key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Profiles",
+          description: "Named analyst line-ups a job can select.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "profiles",
+        },
+      ],
+    },
   ],
 };
 
@@ -473,6 +534,22 @@ export const MOCK_SETTINGS_VALUES = {
       is_set: true,
       hint: "1234",
       source: "env",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.provider": {
+      value: "openai",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.agents": {
+      value: {},
+      is_set: null,
+      hint: null,
+      source: "default",
       updated_at: null,
       updated_by: null,
     },
@@ -565,6 +642,15 @@ export const MOCK_SETTINGS_VALUES = {
           tool_selection: "dynamic", use_all_tools: false, tools: null,
           agents: ["judge"], label: "Threat intel MCP",
         },
+        // Task 16: a non-built-in server, so the agent-definitions editor has
+        // a server to reference from a generic analyst's tool list.
+        strings: {
+          enabled: true, transport: "stdio", command: "strings-mcp",
+          args: [], env: {}, cwd: "", env_allow: [], url: "",
+          auth_token: "", auth_token_source: "default",
+          tool_selection: "dynamic", use_all_tools: false,
+          tools: ["extract_strings"], agents: [], label: "Strings MCP",
+        },
       },
       is_set: null,
       hint: null,
@@ -574,6 +660,49 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.static.generic.server": {
       value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.profile": {
+      value: "default",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.definitions": {
+      value: {
+        static: {
+          role: "static", label: "Static analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        dynamic: {
+          role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        network: {
+          role: "network", label: "Network analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        judge: {
+          role: "judge", label: "Judge", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+      },
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.profiles": {
+      value: {
+        default: { label: "Default", analysts: ["static", "dynamic", "network"] },
+      },
       is_set: null,
       hint: null,
       source: "default",
@@ -763,12 +892,49 @@ export async function installApiMocks(
   );
   // Task B15: registered after the generic `test/*` handler above, so it
   // wins for the one probe route that carries a query string.
-  await page.route("**/api/v1/settings/test/mcp?**", (route) =>
-    json(route, {
-      ok: true, latency_ms: 12, detail: "3 tools: open_file, analyze, list_imports",
-      models: null, tools: ["open_file", "analyze", "list_imports"],
-    })
-  );
+  //
+  // Task 16: the `network` server's manifest matches its real tools
+  // (`extract_dns`, `read_pcap_summary`, see `network-mcp/server.py`) — the
+  // agent-definitions editor's "list tools then check one" flow depends on
+  // this list actually containing the tool it checks.
+  await page.route("**/api/v1/settings/test/mcp?**", (route) => {
+    const server = new URL(route.request().url()).searchParams.get("server");
+    const tools =
+      server === "network" ? ["extract_dns", "read_pcap_summary"] : ["open_file", "analyze", "list_imports"];
+    return json(route, {
+      ok: true, latency_ms: 12, detail: `${tools.length} tools: ${tools.join(", ")}`,
+      models: null, tools,
+    });
+  });
+  // Task C12: the agent probe, resolving a definition without an LLM call.
+  await page.route("**/api/v1/settings/test/agent?**", (route) => {
+    // Task C14 fix: the probe returns the full resolved prompt, not just its
+    // length — operator text, not a secret (spec §11) — so a built-in card
+    // can show it read-only and a clone can seed its copy from it. The tools
+    // in `detail`/`tools` below are the network analyst's real ones
+    // (`extract_dns`, `read_pcap_summary`), so this prompt describes that
+    // role too — used by the "network" card's Resolve button.
+    const prompt =
+      "You are the network analyst. Inspect captured traffic, DNS queries " +
+      "and contacted hosts for indicators of command-and-control, data " +
+      "exfiltration or malicious downloads, and report only findings the " +
+      "extracted network evidence actually backs, citing the specific " +
+      "packets, hosts or domains involved rather than speculating about " +
+      "traffic the capture does not show. Stay provisional about each " +
+      "claim it cannot confirm.";
+    return json(route, {
+      ok: true, latency_ms: 8, detail: "2 tools: extract_dns, read_pcap_summary",
+      models: null, tools: ["extract_dns", "read_pcap_summary"],
+      details: {
+        prompt_chars: prompt.length,
+        prompt_sha256: "a".repeat(64),
+        prompt,
+        llm: { provider: "openai", model: "" },
+        static_provider: "ghidra",
+        servers: [{ key: "network", tools: ["extract_dns"], status: "ok" }],
+      },
+    });
+  });
   // Task B18: what `RestSandboxEditor`'s "Preview mapping" button calls —
   // one channel with rows, one with none, one carrying a channel-local error.
   await page.route("**/api/v1/settings/sandbox-rest/preview", (route) =>

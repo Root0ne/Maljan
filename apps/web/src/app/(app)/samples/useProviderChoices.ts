@@ -18,10 +18,13 @@ import { api } from "@/lib/api";
 export function useProviderChoices(): {
   staticProviders: string[];
   sandboxProviders: string[];
+  profiles: string[];
 } {
-  const [choices, setChoices] = useState<{ staticProviders: string[]; sandboxProviders: string[] }>(
-    { staticProviders: [], sandboxProviders: [] }
-  );
+  const [choices, setChoices] = useState<{
+    staticProviders: string[];
+    sandboxProviders: string[];
+    profiles: string[];
+  }>({ staticProviders: [], sandboxProviders: [], profiles: [] });
 
   useEffect(() => {
     let cancelled = false;
@@ -29,12 +32,14 @@ export function useProviderChoices(): {
       try {
         const schema = await api.getSettingsSchema();
         const entries = schema.groups.flatMap((g) => g.entries);
-        const find = (key: string) =>
-          entries.find((e) => e.key === key)?.choices ?? [];
+        const find = (key: string) => entries.find((e) => e.key === key)?.choices ?? [];
         if (!cancelled) {
           setChoices({
             staticProviders: find("core.static.provider"),
             sandboxProviders: find("core.sandbox.provider"),
+            // Resolved server-side from the effective profile map, exactly as
+            // the two provider lists are resolved from their registries.
+            profiles: find("core.agents.profile"),
           });
         }
       } catch {
