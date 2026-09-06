@@ -40,6 +40,20 @@ class AgentMapError(Exception):
         self.errors = errors
 
 
+def _qualified(leaf: str, errors: dict[str, str]) -> dict[str, str]:
+    """Every error key rooted at the settings leaf it belongs to.
+
+    B2 (dev audit 2026-09-06): these came out relative -- ``uiaudit_gen.prompt``
+    where the server map returns ``core.mcp.servers.Bad Key`` -- so the editor,
+    which routes a nested error to a card by the ``core.agents.definitions.
+    <key>.<field>`` prefix, could not find the card the message belonged to and
+    fell back to a generic banner. The two maps now speak the same shape. The
+    empty key, which a map that is not an object at all reports under, becomes
+    the leaf itself: the whole setting is what is wrong.
+    """
+    return {f"{leaf}.{key}" if key else leaf: message for key, message in errors.items()}
+
+
 def effective_profiles(overrides: dict[str, Any]) -> dict[str, Any]:
     """The profile map as it stands: the stored one over the built-in seeds."""
     out = {name: p.model_dump(mode="json") for name, p in _builtin_profiles().items()}
@@ -85,7 +99,12 @@ def validate_definitions(
     from maljan.providers.registry import static_provider_ids
 
     if not isinstance(value, dict):
-        raise AgentMapError({"": "the definition map must be an object keyed by agent name"})
+        raise AgentMapError(
+            _qualified(
+                AGENT_DEFINITIONS_KEY,
+                {"": "the definition map must be an object keyed by agent name"},
+            )
+        )
 
     allow_lists = servers if servers is not None else {}
     provider_ids = set(static_provider_ids())
@@ -162,7 +181,7 @@ def validate_definitions(
         out[name] = dumped
 
     if errors:
-        raise AgentMapError(errors)
+        raise AgentMapError(_qualified(AGENT_DEFINITIONS_KEY, errors))
 
     # A built-in the body left out is re-seeded rather than removed, exactly as
     # the settings model would do on the next load.
@@ -184,7 +203,12 @@ def validate_profiles(
     harmless as long as ``default`` itself is not the profile that will run.
     """
     if not isinstance(value, dict):
-        raise AgentMapError({"": "the profile map must be an object keyed by profile name"})
+        raise AgentMapError(
+            _qualified(
+                AGENT_PROFILES_KEY,
+                {"": "the profile map must be an object keyed by profile name"},
+            )
+        )
 
     errors: dict[str, str] = {}
     out: dict[str, Any] = {}
@@ -234,7 +258,7 @@ def validate_profiles(
         out[name] = dumped
 
     if errors:
-        raise AgentMapError(errors)
+        raise AgentMapError(_qualified(AGENT_PROFILES_KEY, errors))
     for name, seed in seeds.items():
         out.setdefault(name, seed)
     return out
