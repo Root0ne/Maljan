@@ -66,6 +66,24 @@ def remove_for_sha(sha256: str) -> list[Path]:
 
 
 def sweep(max_age_s: float = 86_400.0, *, now: float | None = None) -> int:
+    """Remove mirrored sample copies older than ``max_age_s``.
+
+    API-2 (dev audit 2026-09-06): the cutoff is the whole of the coordination
+    there is, and it is deliberate. Several workers may share these directories
+    and run this sweep at once, with no lock between them; what makes that safe
+    is the age, not a lock. A file in flight for a live job was written when
+    that job started, so a 24 h cutoff only ever reaches copies whose job has
+    been over for a day -- a job that ran longer than the cutoff would have to
+    exist for a sweep to take a file out from under it, and the pipeline's own
+    budgets are an order of magnitude below it. Two sweeps racing on the same
+    stale file is not a problem either: the loser gets an OSError from a file
+    that is already gone and skips it.
+
+    So the assumption to keep in mind when changing either number: ``max_age_s``
+    must stay comfortably longer than the longest job a worker can run. Lower it
+    towards that and this needs real coordination (a lock, or a per-file owner)
+    rather than an age.
+    """
     cutoff = (now if now is not None else time.time()) - max_age_s
     count = 0
     for base in (temp_dir(), work_dir()):
