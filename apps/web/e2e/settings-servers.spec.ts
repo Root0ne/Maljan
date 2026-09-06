@@ -59,6 +59,32 @@ test.describe("tool servers and the REST sandbox", () => {
     expect(sent.agents).toEqual(["static"]);
   });
 
+  /* B6 (dev audit 2026-09-06): a probe result outlived the configuration it
+   * described — the green "3 tools: …" line stayed up while the command it had
+   * dialled was edited out from under it. */
+  test("editing what a probe dialled clears that card's result", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+
+    await page.getByLabel("new server name").fill("r2custom");
+    await page.getByRole("button", { name: "Add server" }).click();
+    const card = page.locator('[data-server="r2custom"]');
+    await card.getByLabel("r2custom command").fill("r2mcp");
+    await card.getByRole("button", { name: "Test" }).click();
+    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+
+    // The allow-list is rendered from that same result, so ticking a tool must
+    // not clear it.
+    await card.getByLabel("r2custom tool open_file").check();
+    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+
+    await card.getByLabel("r2custom command").fill("something-else");
+    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toHaveCount(0);
+  });
+
   test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {

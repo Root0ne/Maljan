@@ -231,6 +231,30 @@ test.describe("agent definitions and profiles", () => {
     expect(jobPosts).toHaveLength(0);
   });
 
+  /* B6 (dev audit 2026-09-06): a resolved prompt and tool list described the
+   * definition as it stood when Resolve was pressed, and stayed on screen
+   * while that definition was edited underneath it. */
+  test("editing what Resolve reads clears that card's result", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await page.getByLabel("new agent name").fill("strings");
+    await page.getByRole("button", { name: "Add agent" }).click();
+    const card = page.locator('[data-agent="strings"]');
+    await card.getByRole("button", { name: "Resolve" }).click();
+    await expect(card.getByText("prompt 412 chars")).toBeVisible();
+
+    // The label changes nothing resolution reads; the prompt does.
+    await card.getByLabel("strings label").fill("Strings reviewer");
+    await expect(card.getByText("prompt 412 chars")).toBeVisible();
+
+    await card.getByLabel("strings prompt").fill("Review the extracted strings.");
+    await expect(card.getByText("prompt 412 chars")).toHaveCount(0);
+  });
+
   test("a built-in definition offers only its enabled switch", async ({
     authenticatedPage: page,
   }) => {

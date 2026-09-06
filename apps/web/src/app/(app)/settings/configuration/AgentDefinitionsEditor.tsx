@@ -136,8 +136,29 @@ export default function AgentDefinitionsEditor({
    *  fall back to — see `putLlm` below. */
   const [llmErrors, setLlmErrors] = useState<Record<string, string>>({});
 
-  const put = (key: string, next: Partial<AgentDefinitionEntry>) =>
+  /* B6 (dev audit 2026-09-06): a resolved prompt and tool list describe the
+   * definition as it stood when Resolve was pressed. Editing what resolution
+   * reads — the prompt, the tool refs, the static provider, the role — leaves
+   * that status line describing something else, so it is dropped with the
+   * edit. The label and the enabled switch change nothing resolution reads. */
+  const RESOLVE_INPUTS = new Set<keyof AgentDefinitionEntry>([
+    "role", "prompt", "tools", "static_provider",
+  ]);
+
+  const clearProbe = (key: string) =>
+    setProbes((p) => {
+      if (!(key in p)) return p;
+      const n = { ...p };
+      delete n[key];
+      return n;
+    });
+
+  const put = (key: string, next: Partial<AgentDefinitionEntry>) => {
+    if (Object.keys(next).some((k) => RESOLVE_INPUTS.has(k as keyof AgentDefinitionEntry))) {
+      clearProbe(key);
+    }
     onChange(putEntry(value, key, next));
+  };
 
   const clearLlmError = (agentKey: string) =>
     setLlmErrors((e) => {
@@ -180,6 +201,7 @@ export default function AgentDefinitionsEditor({
       }
     }
     clearLlmError(agentKey);
+    clearProbe(agentKey);
     const stored: AgentLLMOverride = { provider, model: merged.model };
     if (merged.temperature !== null && merged.temperature !== undefined) {
       stored.temperature = merged.temperature;

@@ -81,8 +81,29 @@ export default function ServerMapEditor({
    *  accident and cannot be read back by looking at the form. */
   const [editingToken, setEditingToken] = useState<Record<string, boolean>>({});
 
-  const put = (key: string, next: Partial<McpServerEntry>) =>
+  /* B6 (dev audit 2026-09-06): a probe result describes the server as it was
+   * configured when the button was pressed. Editing what the probe dialled —
+   * the transport and its connection fields — leaves the green "3 tools: …"
+   * line describing a server that no longer exists, so the result is dropped
+   * with the edit. The allow-list, the agent bindings, the label and the
+   * enabled switch do not change what a probe would reach, and the tool tick
+   * boxes are rendered from the probe's own manifest, so they must not clear
+   * it. */
+  const PROBE_INPUTS = new Set<keyof McpServerEntry>([
+    "transport", "command", "args", "cwd", "env", "env_allow", "url", "auth_token",
+  ]);
+
+  const put = (key: string, next: Partial<McpServerEntry>) => {
+    if (Object.keys(next).some((k) => PROBE_INPUTS.has(k as keyof McpServerEntry))) {
+      setProbes((p) => {
+        if (!(key in p)) return p;
+        const n = { ...p };
+        delete n[key];
+        return n;
+      });
+    }
     onChange(putEntry(value, key, next));
+  };
 
   const add = () => {
     const key = newKey.trim();
