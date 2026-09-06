@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.base_agent import BaseAnalyst, strip_tool_call_scaffolding
 from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -963,6 +963,13 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
 
         if not (claim_match and evidence_match and confidence_match):
             continue
+        claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
+        if not claim_text:
+            # C1 (dev audit 2026-09-06): the whole claim was model tool-call
+            # scaffolding, which a live static_r2 run showed to an operator as
+            # a finding. An empty finding is worse than none: it reaches the
+            # Pipeline tab as a blank row.
+            continue
 
         try:
             confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
@@ -974,7 +981,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
 
         claims.append(
             ClaimEvidence(
-                claim=claim_match.group(1).strip()[:300],
+                claim=claim_text[:300],
                 evidence_ref=evidence_match.group(1).strip()[:200],
                 confidence=confidence,
                 technique_id=technique_id,

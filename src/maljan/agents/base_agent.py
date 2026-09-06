@@ -9,6 +9,7 @@ and exception translation so callers see a uniform ``AnalystError`` API.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import threading
 from abc import ABC, abstractmethod
@@ -220,6 +221,62 @@ _BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
 _BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
 
 
+# Model tool-call scaffolding, which is not prose and is never a finding
+# (C1, dev audit 2026-09-06). A local model that emits its tool calls into the
+# assistant channel -- rather than through the API's own tool-call field --
+# leaves these blocks in the text the ISR extraction reads, and a live
+# ``static_r2`` run put them in front of an operator as claims.
+#
+# Closing tags are optional on purpose: a generation cut off mid-call leaves an
+# opening tag and a half-written argument object, which is exactly the shape
+# most likely to survive into a claim.
+_SCAFFOLD_TAGS = ("tool_call", "function_call", "tool_use", "tool_response")
+_SCAFFOLD_BLOCK_RE = re.compile(
+    r"<(?P<tag>" + "|".join(_SCAFFOLD_TAGS) + r")\b[^>]*>.*?(?:</(?P=tag)\s*>|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+# A fenced block is stripped only when what it fences is a tool invocation: a
+# name plus its arguments. A model quoting real JSON evidence (an import list,
+# a config blob) is citing an artifact, and that has to survive.
+_FENCED_JSON_RE = re.compile(r"```(?:json|tool_code)?\s*(\{.*?\})\s*```", re.DOTALL)
+_INVOCATION_KEYS = ({"name", "arguments"}, {"name", "parameters"}, {"tool", "arguments"})
+
+
+def _is_tool_invocation(payload: str) -> bool:
+    try:
+        parsed = json.loads(payload)
+    except ValueError:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    keys = set(parsed)
+    return any(required <= keys for required in _INVOCATION_KEYS)
+
+
+def strip_tool_call_scaffolding(text: str) -> str:
+    """Remove tool-call scaffolding from model output, leaving the prose.
+
+    Applied before claims are derived, by both claim parsers and by the
+    free-text path, so no analyst can turn a tool call into a finding. Text
+    with no scaffolding in it comes back byte for byte.
+    """
+    if not text:
+        return text
+    cleaned = _SCAFFOLD_BLOCK_RE.sub("", text)
+    cleaned = _FENCED_JSON_RE.sub(
+        lambda m: "" if _is_tool_invocation(m.group(1)) else m.group(0), cleaned
+    )
+    if cleaned == text:
+        return text
+    # Only the blank lines the removals themselves left behind.
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def is_only_scaffolding(text: str) -> bool:
+    """True when nothing but tool-call scaffolding is left once it is removed."""
+    return not strip_tool_call_scaffolding(text).strip()
+
+
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
 
@@ -237,12 +294,21 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     instead.
     """
     claims: list[ClaimEvidence] = []
+    # Stripped per field rather than over the whole text: removing a block
+    # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
+    # marker with nothing after it, and the next line would slide up into the
+    # claim. A block whose claim is nothing but scaffolding is dropped below.
     for raw_block in _BLOCK_SPLIT_RE.split(text):
         block = raw_block.strip()
         if not block or "CLAIM:" not in block:
             continue
         claim_match = _BLOCK_CLAIM_RE.search(block)
         if not claim_match:
+            continue
+        claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
+        if not claim_text:
+            # C1: the whole claim was a tool call. An empty finding is worse
+            # than none at all -- it reaches the operator as a blank row.
             continue
 
         evidence_match = _BLOCK_EVIDENCE_RE.search(block)
@@ -264,7 +330,7 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
 
         claims.append(
             ClaimEvidence(
-                claim=claim_match.group(1).strip()[:300],
+                claim=claim_text[:300],
                 evidence_ref=(evidence_match.group(1).strip()[:200] if evidence_match else ""),
                 confidence=confidence,
                 technique_id=technique_id,
@@ -1880,6 +1946,16 @@ class BaseAnalyst(ABC):
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR."""
         domain = self._infer_domain()
+
+        # C1 (dev audit 2026-09-06): a model that writes its tool calls into
+        # the assistant channel leaves them here, and the sentence splitter
+        # below has no way to tell a call from prose -- a live static_r2 run
+        # put raw ``<tool_call>`` blocks in front of an operator as findings.
+        # Removed before anything reads the text, so no path derives a claim
+        # from scaffolding; a report that is nothing else yields no claims at
+        # all, which is what the meta-claim branch already does for the
+        # placeholder case.
+        text = strip_tool_call_scaffolding(text)
 
         # ANA-MARK-01: when the agent returned only the placeholder
         # ("No static data available for sample ..."), emit a *zero-claim*
