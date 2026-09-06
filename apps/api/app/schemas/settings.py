@@ -33,6 +33,8 @@ class CatalogEntryDTO(BaseModel):
     probe: str | None = None
     applies_when: dict[str, list[str]] | None = None
     order: int = 0
+    choices_from: str | None = None
+    editor: str | None = None
 
 
 class GroupDTO(BaseModel):
@@ -81,3 +83,24 @@ class ProbeResponse(BaseModel):
     latency_ms: int
     detail: str
     models: list[str] | None = None
+    # the server's whole manifest, so the editor can render it as tick boxes
+    tools: list[str] | None = None
+
+
+class MappingPreviewRequest(BaseModel):
+    sample: dict[str, Any]
+    mapping: dict[str, Any]
+
+
+class ChannelPreview(BaseModel):
+    matched: int
+    kept: int
+    dropped: int
+    truncated: bool = False
+    sample_rows: list[Any]
+    error: str | None = None
+
+
+class MappingPreviewResponse(BaseModel):
+    target_sha256: str
+    channels: dict[str, ChannelPreview]

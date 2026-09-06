@@ -211,6 +211,33 @@ class TestNoToolsFallbackTimeout:
         assert elapsed < 10, f"override timeout did not fire fast enough: {elapsed:.1f}s"
 
 
+class TestDegradationReasonsAreNotSharedAcrossInstances:
+    """Regression (F5): ``degradation_reasons`` used to default from a mutable
+    class attribute (``BaseAnalyst.degradation_reasons: list[str] = []``).
+    Today's code only ever rebinds it, so it never mutated in place -- but a
+    future ``.append()`` on that shared list would leak reasons across every
+    analyst instance in a long-lived worker. Pin the instance-attribute fix."""
+
+    def _make_agent(self):  # type: ignore[no-untyped-def]
+        from maljan.agents.base_agent import BaseAnalyst
+
+        class _BareAgent(BaseAnalyst):
+            def analyze(self, data: str) -> str:
+                return ""
+
+            def revise(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+                return ""
+
+        return _BareAgent(llm=object(), name="bare", tools=[])  # type: ignore[arg-type]
+
+    def test_each_instance_starts_with_its_own_empty_list(self) -> None:
+        first = self._make_agent()
+        second = self._make_agent()
+        first.degradation_reasons.append("server x unavailable")
+        assert second.degradation_reasons == []
+        assert first.degradation_reasons is not second.degradation_reasons
+
+
 class TestPerAgentMaxStepsOverride:
     """2026-06-23 live-UI audit: the static analyst's Ghidra ReAct loop needs
     more than the default 10 recursion steps. ``react_agent_max_steps_overrides``

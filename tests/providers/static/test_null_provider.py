@@ -41,6 +41,7 @@ def test_the_analyst_runs_toolless_and_says_so(caplog):
     analyst = StaticAnalyst(llm=MagicMock(), name="static")
     container = MagicMock()
     container.get_static_provider.return_value = get_static_provider(_cfg())
+    container.get_server_registry.return_value = None
     analyst._container = container
     with caplog.at_level("INFO"):
         analyst._initialize_mcp_client()

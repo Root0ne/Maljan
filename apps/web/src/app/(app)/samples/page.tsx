@@ -6,9 +6,7 @@ import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/report-utils";
-
-const STATIC_PROVIDERS = ["ghidra", "r2", "capa_yara", "generic_mcp", "none"] as const;
-const SANDBOX_PROVIDERS = ["mock", "cape2", "upload", "triage"] as const;
+import { useProviderChoices } from "./useProviderChoices";
 
 /* ── Display interface (maps from SampleDTO) ───────── */
 interface SampleRow {
@@ -36,6 +34,7 @@ function formatSize(bytes: number): string {
 }
 
 function SamplesPageContent() {
+  const { staticProviders, sandboxProviders } = useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -495,7 +494,7 @@ function SamplesPageContent() {
                   className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary"
                 >
                   <option value="">Inherit from settings</option>
-                  {STATIC_PROVIDERS.map((p) => (
+                  {staticProviders.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
@@ -513,7 +512,7 @@ function SamplesPageContent() {
                   className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary disabled:opacity-50"
                 >
                   <option value="">Inherit from settings</option>
-                  {SANDBOX_PROVIDERS.map((p) => (
+                  {sandboxProviders.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>

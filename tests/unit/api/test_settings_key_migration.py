@@ -34,6 +34,9 @@ def test_the_rename_table_covers_every_moved_key():
         if old in ("mcp.ghidra", "mcp.cape"):
             # Sub-tree aliases: the stored keys are leaves under them.
             assert any(k.startswith(f"core.{old}.") for k in mod.KEY_RENAMES), old
+        elif old.startswith("static.generic."):
+            # Folded into core.mcp.servers by 20260905000000, not a rename.
+            assert f"core.{old}" not in mod.KEY_RENAMES
         else:
             assert mod.KEY_RENAMES[f"core.{old}"] == f"core.{new}"
 

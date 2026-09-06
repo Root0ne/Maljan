@@ -6,6 +6,7 @@ import type {
 } from "@/types/malware-report";
 import { SettingsValidationError } from "@/types/settings";
 import type {
+  MappingPreview,
   PatchResult,
   ProbeResult,
   SettingsSchema,
@@ -503,6 +504,22 @@ class ApiClient {
     return this.request<ProbeResult>(`/api/v1/settings/test/${probe}`, {
       method: "POST",
       body: JSON.stringify({ values }),
+    });
+  }
+
+  /** Probe one entry of the tool-server map, staged values included. */
+  testMcpServer(server: string, values: Record<string, unknown>) {
+    return this.request<ProbeResult>(
+      `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}`,
+      { method: "POST", body: JSON.stringify({ values }) }
+    );
+  }
+
+  /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */
+  previewSandboxMapping(sample: unknown, mapping: Record<string, string>) {
+    return this.request<MappingPreview>("/api/v1/settings/sandbox-rest/preview", {
+      method: "POST",
+      body: JSON.stringify({ sample, mapping }),
     });
   }
 

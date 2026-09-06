@@ -75,6 +75,23 @@ def test_the_mirror_spec_has_no_container_prefix():
     assert spec is not None and spec.container_prefix == ""
 
 
+def test_use_all_tools_widens_the_tool_mode():
+    """Regression (F1): the handle config used to be rebuilt from four fields
+    of ``static.r2``, dropping ``use_all_tools``/``tool_selection`` on the
+    floor so an operator's widening of the r2 tool set was silently ignored."""
+    cfg = _cfg()
+    cfg.static.r2.use_all_tools = True
+    provider = R2StaticProvider.from_settings(cfg)
+    assert provider._tool_mode() == "all"
+    tools = [_T(n) for n in sorted(R2StaticProvider.R2_ALLOWED_TOOLS)] + [_T("not_an_r2_tool")]
+    assert {t.name for t in provider.select_tools(tools)} == {t.name for t in tools}
+
+
+def test_tool_selection_defaults_to_the_narrow_allow_list():
+    provider = R2StaticProvider.from_settings(_cfg())
+    assert provider._tool_mode() != "all"
+
+
 def test_opening_never_writes_the_resolved_command_back_into_the_config(monkeypatch):
     """Regression: ``open()`` must resolve ``binary_path`` into the launched
     command without mutating ``self._cfg`` — that object is the shared,

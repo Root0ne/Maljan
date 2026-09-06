@@ -22,8 +22,8 @@ def main() -> None:
     from maljan.providers.static.r2 import enumerate_r2_tools
 
     command = sys.argv[1] if len(sys.argv) > 1 else "r2mcp"
-    tools = asyncio.run(enumerate_r2_tools(command))
-    payload = [{"name": t.name, "description": (t.description or "").strip()[:200]} for t in tools]
+    names = asyncio.run(enumerate_r2_tools(command))
+    payload = [{"name": n} for n in names]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
         json.dumps(
@@ -40,7 +40,7 @@ def main() -> None:
         + "\n",
         encoding="utf-8",
     )
-    print(f"{len(tools)} tools -> {OUT}")
+    print(f"{len(names)} tools -> {OUT}")
 
 
 if __name__ == "__main__":

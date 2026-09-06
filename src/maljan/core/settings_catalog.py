@@ -22,6 +22,8 @@ from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER, group_for
 
 FieldType = Literal["bool", "int", "float", "str", "secret", "enum", "list", "dict", "json"]
 Applies = Literal["next_job", "live", "restart"]
+ChoicesFrom = Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles"]
+Editor = Literal["server_map", "rest_sandbox"]
 
 # Field names that are secrets although typed as plain str.
 _SECRET_NAMES = {"auth_token", "api_key", "cape2_api_token"}
@@ -61,6 +63,14 @@ class CatalogEntry:
     # Rank within the group; lower first, ties broken by path. Provider
     # selectors use -1 so the switch sits above the fields it governs.
     order: int = 0
+    # A choice list the API fills in when it serialises the catalog: registry
+    # ids, or the keys of ``mcp.servers`` as they currently stand. The core
+    # catalog cannot compute these — it is a pure function of the models and
+    # the effective settings are not in scope here — and the web must never
+    # compute them either, or two places decide what a valid provider is.
+    choices_from: ChoicesFrom | None = None
+    # A composite editor renders this leaf instead of the type's widget.
+    editor: Editor | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -185,6 +195,8 @@ def core_catalog() -> list[CatalogEntry]:
                 probe=ann.get("probe") if ann else None,
                 applies_when=(ann.get("applies_when") if ann else None),
                 order=(ann.get("order", 0) if ann else 0),
+                choices_from=(ann.get("choices_from") if ann else None),
+                editor=(ann.get("editor") if ann else None),
             )
         )
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}

@@ -17,6 +17,10 @@ export type FieldType =
 
 export type Applies = "next_job" | "live" | "restart";
 
+export type ChoicesFrom = "static_providers" | "sandbox_providers" | "mcp_servers" | "agent_roles";
+
+export type Editor = "server_map" | "rest_sandbox";
+
 export interface CatalogEntry {
   key: string;
   namespace: "core" | "api";
@@ -41,6 +45,45 @@ export interface CatalogEntry {
   applies_when: Record<string, string[]> | null;
   /** Rank inside the group; lower first. Provider selectors use -1. */
   order: number;
+  /** A choice list the API resolves as it serialises the catalog — registry
+   *  ids, or the current tool-server keys. When this is set, `choices` is
+   *  already filled in: the web never computes a choice list itself. */
+  choices_from: ChoicesFrom | null;
+  /** A composite editor renders this leaf instead of the type's widget. */
+  editor: Editor | null;
+}
+
+/**
+ * One entry of the `mcp.servers` map, keyed by a short server name.
+ *
+ * Mirrors `apps/api/app/services/settings_service.py`'s masking of the
+ * per-server token: `auth_token` carries the mask when a token is set, `""`
+ * when it is not, and never the value itself. The token is not a catalog
+ * entry of its own — there is no separate column on `CatalogEntry` for it —
+ * it rides inside this map value, and the API splits it back out into its
+ * own encrypted row on PATCH.
+ */
+export interface McpServerEntry {
+  enabled: boolean;
+  transport: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  env_allow: string[];
+  url: string;
+  /** The mask `"**********"` when a token is set, `""` when it is not — never
+   *  the value. Sending the mask back unchanged means "leave the stored token
+   *  alone"; sending a new string replaces it; sending `null` clears it. */
+  auth_token: string;
+  /** Where the effective token comes from, reported the way every other
+   *  row's `source` is: a UI-saved secret row, `.env`, or nothing set. */
+  auth_token_source: "ui" | "env" | "default";
+  tool_selection: string;
+  use_all_tools: boolean;
+  tools: string[] | null;
+  agents: string[];
+  label: string;
 }
 
 export interface SettingsGroup {
@@ -77,6 +120,22 @@ export interface ProbeResult {
   latency_ms: number;
   detail: string;
   models: string[] | null;
+  /** The probed server's whole manifest, for the allow-list tick boxes. */
+  tools: string[] | null;
+}
+
+export interface ChannelPreview {
+  matched: number;
+  kept: number;
+  dropped: number;
+  truncated: boolean;
+  sample_rows: unknown[];
+  error: string | null;
+}
+
+export interface MappingPreview {
+  target_sha256: string;
+  channels: Record<string, ChannelPreview>;
 }
 
 export class SettingsValidationError extends Error {

@@ -721,6 +721,13 @@ class BaseAnalyst(ABC):
         self.toolkit: Any = None
         self._all_ghidra_tools: list[Any] = []
         self._container: Any = None
+        # Reasons this agent's own tool-server attachment degraded, filled in
+        # by ``_attach_registry_tools``/subclasses. A per-instance list, not a
+        # mutable class attribute: the run summary reads
+        # ``container.server_degradation_reasons()`` instead (the registry is
+        # the source of truth across every agent in a job), so this exists
+        # only for an agent inspected directly (tests, scripts).
+        self.degradation_reasons: list[str] = []
 
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
@@ -822,6 +829,38 @@ class BaseAnalyst(ABC):
     def _static_capabilities(self) -> Any | None:
         """The provider's degrade policy, or None for an analyst without one."""
         return None
+
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this agent runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _job_key(self) -> str:
+        """A per-job identity for the handles' same-job short circuit."""
+        return str(getattr(self, "_job_id", "") or "job")
+
+    def _attach_registry_tools(self, role: str, *, exclude: str = "", **context: Any) -> list[Any]:
+        """Tools from every server bound to ``role``, minus one this agent owns.
+
+        ``exclude`` is the static provider's own server: a ``generic_mcp``
+        provider driving ``mcp.servers["mine"]`` and an ``agents: ["static"]``
+        binding on that same entry are two ways of saying the same thing, and
+        attaching it twice would show the model two copies of every tool.
+
+        A failure here never raises. Whether a *provider* failure degrades or
+        fails is the provider's capability flag; a registry server is always
+        an addition, so it always degrades, and the reason travels to the run
+        summary through ``degradation_reasons``.
+        """
+        registry = self._server_registry()
+        if registry is None:
+            return []
+        tools, reasons = registry.tools_for(role, self._job_key(), exclude=exclude, **context)
+        if reasons:
+            self.degradation_reasons = [*self.degradation_reasons, *reasons]
+        return list(tools)
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.

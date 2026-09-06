@@ -26,6 +26,7 @@ below it to return.
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -200,14 +201,371 @@ class TestTheJudgeCloseIsBounded:
     async def test_a_hanging_stdio_toolkit_is_abandoned(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import judge_agent as judge_mod
+        """The bound moved into ``ServerHandle.aclose`` (tool-server registry
+        refactor, Task 7): the judge no longer owns a single ``toolkit`` to
+        close, it closes every handle bound to its role through
+        ``JudgeAgent.aclose``, and each handle's own fixed 20s budget is what
+        stands between a hung child process and a stuck job. That budget is
+        ``servers.CLEANUP_TIMEOUT``, a module constant rather than a setting,
+        so this shortens only that specific call rather than every
+        ``wait_for`` in the test — and reads the constant rather than
+        repeating its value, which is how this test broke when the budgets
+        were made coherent with the container's.
+        """
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers import servers
+        from maljan.providers.servers import ServerHandle
 
-        monkeypatch.setattr(judge_mod, "CLOSE_TOOLS_TIMEOUT", 0.3)
+        real_wait_for = asyncio.wait_for
+        budget = servers.CLEANUP_TIMEOUT
 
-        judge = judge_mod.JudgeAgent(llm=MagicMock())
+        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
+            if timeout == budget:
+                timeout = 0.1
+            return await real_wait_for(coro, timeout=timeout)
+
+        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+
+        handle = ServerHandle("threatintel", MCPServerConfig(enabled=True))
         toolkit: Any = _NeverReturns()
-        judge.toolkit = toolkit
+        handle._toolkit = toolkit
+
+        await asyncio.wait_for(handle.aclose(), timeout=5)
+        assert toolkit.close_started
+        assert handle._toolkit is None
+
+    @pytest.mark.asyncio
+    async def test_judge_aclose_itself_is_bounded_by_a_hanging_handle(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The handle-level bound above is necessary but not sufficient: this
+        proves the judge-level property again, that ``JudgeAgent.aclose()``
+        itself returns quickly when one of its registry-bound handles hangs
+        on close, exactly as the single-``toolkit`` version of this test did
+        before the tool-server registry refactor (Task 7).
+        """
+        from maljan.agents.judge_agent import JudgeAgent
+        from maljan.core.config import Settings
+        from maljan.providers import servers
+        from maljan.providers.servers import ServerRegistry
+
+        real_wait_for = asyncio.wait_for
+        budget = servers.CLEANUP_TIMEOUT
+
+        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
+            if timeout == budget:
+                timeout = 0.1
+            return await real_wait_for(coro, timeout=timeout)
+
+        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+
+        registry = ServerRegistry(Settings(_env_file=None))
+        handle = registry.get("threatintel")
+        toolkit: Any = _NeverReturns()
+        handle._toolkit = toolkit
+        handle._job_id = "job"
+
+        judge = JudgeAgent(llm=MagicMock())
+        container = MagicMock()
+        container.get_server_registry.return_value = registry
+        judge._container = container
 
         await asyncio.wait_for(judge.aclose(), timeout=5)
         assert toolkit.close_started
-        assert judge.toolkit is None
+        assert handle._toolkit is None
+        assert judge.tools == []
+
+
+# ---------------------------------------------------------------------------
+# Fix wave 2: the bound above is worthless when the close is on the wrong loop.
+#
+# The three fences all assume the same thing: that a `wait_for` around the
+# close can end it. A live run on the tool-servers branch proved that
+# assumption false. The job finished at 05:58:44, logged `job:before_teardown`,
+# and ten minutes later still held `j_ongoing=1` with both stdio sidecars
+# running — the worker's 60s fence had fired and been discarded.
+#
+# The mediator judge attaches its tool servers from inside `run_on_agent_loop`
+# (`pipeline/nodes.py`), so `ServerHandle.aopen` runs on the *shared agent
+# loop* and the toolkit's exit stack — an anyio task group, a child process —
+# belongs there. `JudgeAgent.aclose` and `ServiceContainer.aclose` then await
+# `handle.aclose()` on the graph loop. That parks the teardown task on a Future
+# owned by the agent loop, and such a task can be woken by neither loop:
+# `wait_for`'s timeout raises `CancelledError` into a task nothing will
+# resume, so the timeout is silently lost and teardown never returns.
+#
+# `_opened_async` recorded *that* a handle was opened asynchronously; these
+# tests pin the thing that actually matters, *which loop* it was opened on,
+# and that the close is routed back to it.
+# ---------------------------------------------------------------------------
+
+
+def _run_isolated(coro_factory: Any, timeout: float) -> Any:
+    """Run an async scenario on its own loop in a thread, bounded by a watchdog.
+
+    The failure being tested for is a hang, and a hang inside `pytest-asyncio`
+    would take the whole suite with it. The scenario therefore gets its own
+    thread and its own loop; when the join times out the thread is left behind
+    as a daemon and the test fails with a message instead of the run stopping.
+    """
+    import threading
+
+    box: dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            box["result"] = asyncio.run(coro_factory())
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the main thread
+            box["error"] = exc
+
+    thread = threading.Thread(target=target, name="teardown-scenario", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        pytest.fail(f"the teardown scenario did not finish within {timeout}s — it hung")
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
+
+
+class _OwnerLoopBound:
+    """A toolkit whose close only works on the loop that opened it.
+
+    The two behaviours of an `mcp` stdio exit stack that matter here: it is
+    entered on one loop and its anyio cancel scope refuses to unwind anywhere
+    else, and it owns a child process that nothing else will reap. Closing it
+    from a foreign loop parks on a Future owned by the loop that opened it —
+    which is why the real one is uncancellable, and why this one is too.
+    """
+
+    def __init__(self) -> None:
+        self.owner_loop: asyncio.AbstractEventLoop | None = None
+        self.closed_on: asyncio.AbstractEventLoop | None = None
+        self.child_running = False
+
+    async def initialize(self) -> None:
+        self.owner_loop = asyncio.get_running_loop()
+        self.child_running = True
+
+    def get_tools(self) -> list[Any]:
+        return []
+
+    async def cleanup(self) -> None:
+        loop = asyncio.get_running_loop()
+        if loop is not self.owner_loop:
+            # What the live worker did. The wait belongs to the loop that
+            # entered the stack, so nothing on *this* loop completes it; and
+            # `MCPLangChainToolkit.cleanup` catches `BaseException`, so the
+            # cancellation the fence delivers is swallowed rather than ending
+            # the close. Both halves are needed: a fence that fires and a
+            # close that neither finishes nor dies.
+            parked = loop.create_future()
+            while True:
+                try:
+                    await parked
+                except asyncio.CancelledError:
+                    continue
+        self.closed_on = loop
+        self.child_running = False
+
+
+def _handle_with(toolkit: Any) -> Any:
+    """A handle whose toolkit factory yields ``toolkit``, nothing else patched."""
+    from maljan.core.config import MCPServerConfig
+    from maljan.providers.servers import ServerHandle
+
+    handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+    handle._build_toolkit = lambda *a, **kw: toolkit  # type: ignore[method-assign]
+    return handle
+
+
+class TestACrossLoopCloseIsRoutedBack:
+    def test_a_handle_opened_on_another_loop_still_closes(self) -> None:
+        """The live Critical: `aopen` on loop A, `aclose` on loop B.
+
+        Before the fix this never returned and no `wait_for` could end it —
+        exactly what the worker saw. The assertion is not just that `aclose`
+        returns: it is that the close ran on the loop that opened the handle.
+        """
+        import threading
+
+        owner = asyncio.new_event_loop()
+        running = threading.Event()
+
+        def serve() -> None:
+            asyncio.set_event_loop(owner)
+            owner.call_soon(running.set)
+            owner.run_forever()
+
+        thread = threading.Thread(target=serve, daemon=True, name="owner-loop")
+        thread.start()
+        # Waited for rather than assumed: under a loaded machine the thread can
+        # take seconds to reach `run_forever`, and a budget measured from
+        # before that is measuring the scheduler, not the close.
+        assert running.wait(60), "the owner loop never started"
+        toolkit = _OwnerLoopBound()
+        handle = _handle_with(toolkit)
+
+        try:
+            # The mediator's shape: the whole attach runs on the other loop.
+            asyncio.run_coroutine_threadsafe(handle.aopen("job-1"), owner).result(timeout=60)
+            assert handle._owner_loop is owner
+            assert toolkit.child_running
+
+            async def scenario() -> None:
+                await asyncio.wait_for(handle.aclose(), timeout=30)
+
+            _run_isolated(scenario, timeout=60)
+        finally:
+            owner.call_soon_threadsafe(owner.stop)
+            thread.join(timeout=30)
+
+        assert toolkit.closed_on is owner, "the close must run on the loop that opened it"
+        assert toolkit.child_running is False
+        assert handle._toolkit is None
+        assert handle._owner_loop is None
+
+
+# ---------------------------------------------------------------------------
+# Fix wave 2c: what happens when the close cannot be made to work.
+#
+# Wave 2 routes the close to the loop that opened the handle. Two cases sit
+# outside that: the owning loop is gone, and the caller's own budget expires
+# while the routed close is still stalled. Both used to end with a live child
+# and nobody left to kill it — the first by re-entering the unwind-on-the-
+# wrong-loop shape the fix exists to prevent, the second because the reap sat
+# after the `await` the outer fence cancelled.
+# ---------------------------------------------------------------------------
+
+
+class _StoppedOwnerToolkit:
+    """A toolkit whose cleanup must never be entered from a foreign loop."""
+
+    def __init__(self) -> None:
+        self.cleanup_entered = False
+
+    async def cleanup(self) -> None:
+        self.cleanup_entered = True
+        await asyncio.sleep(3600)
+
+
+class TestADeadOwningLoopIsNotUnwoundHere:
+    def test_the_cleanup_is_skipped_and_the_child_is_reaped(self) -> None:
+        """A handle whose loop has stopped is reaped, not unwound in place."""
+        import threading
+
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        owner = asyncio.new_event_loop()
+        running = threading.Event()
+
+        def serve() -> None:
+            asyncio.set_event_loop(owner)
+            owner.call_soon(running.set)
+            owner.run_forever()
+
+        thread = threading.Thread(target=serve, daemon=True, name="doomed-owner")
+        thread.start()
+        assert running.wait(60)
+        owner.call_soon_threadsafe(owner.stop)
+        thread.join(timeout=30)
+
+        toolkit = _StoppedOwnerToolkit()
+        handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+        handle._toolkit = toolkit
+        handle._owner_loop = owner
+        handle._opened_async = True
+
+        reaped: list[str] = []
+        handle._areap_children = lambda: _record(reaped, "reaped")  # type: ignore[method-assign]
+
+        async def scenario() -> None:
+            await asyncio.wait_for(handle.aclose(), timeout=10)
+
+        _run_isolated(scenario, timeout=60)
+
+        assert toolkit.cleanup_entered is False, "the stack must not be unwound on a foreign loop"
+        assert reaped == ["reaped"]
+        assert handle._toolkit is None
+        owner.close()
+
+
+async def _record(sink: list[str], what: str) -> None:
+    sink.append(what)
+
+
+class TestTheReapSurvivesTheCallersBudget:
+    @pytest.mark.asyncio
+    async def test_an_expiring_outer_fence_still_kills_the_child(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The container's fence must not cancel the handle's own reap.
+
+        `ServiceContainer.aclose` bounds every closer, and `run_analysis`
+        bounds the lot. A reap that sits after the `await` those fences cancel
+        is a reap that is skipped on exactly the runs that need it, which is
+        how a stalled cross-loop close used to orphan its sidecar.
+        """
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers import servers
+        from maljan.providers.servers import ServerHandle
+
+        monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 30.0)
+
+        handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
+        handle._toolkit = _NeverReturns()
+
+        reaped: list[str] = []
+        handle._areap_children = lambda: _record(reaped, "reaped")  # type: ignore[method-assign]
+
+        # The caller gives up long before the close does — the L2 shape.
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(handle.aclose(), timeout=0.3)
+
+        # The reap is shielded, so it lands on this loop even though the await
+        # on it was cancelled. One turn is enough for a scheduled shield.
+        for _ in range(5):
+            if reaped:
+                break
+            await asyncio.sleep(0.05)
+        assert reaped == ["reaped"], "the child must be reaped despite the cancellation"
+
+
+class TestTheSynchronousSweepCannotBlockTheFence:
+    @pytest.mark.asyncio
+    async def test_a_hanging_close_all_still_lets_wait_for_fire(self) -> None:
+        """`close_all` blocks its thread; it must not block the worker's loop.
+
+        Before this it ran on the loop thread, and a blocking call cannot be
+        interrupted by the fence above it — the last remaining way teardown
+        could outlast its 60s budget without the budget being able to fire.
+        """
+        import time
+
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(config=Settings(_env_file=None), mock=True)
+
+        class _BlockingRegistry:
+            def __init__(self) -> None:
+                self.entered = threading.Event()
+
+            def close_all(self) -> list:
+                self.entered.set()
+                time.sleep(5)
+                return []
+
+            def still_open(self) -> list:
+                return []
+
+        registry = _BlockingRegistry()
+        container._server_registry_cache = registry  # type: ignore[assignment]
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(container.aclose(), timeout=1.0)
+        assert registry.entered.wait(5), "the sweep should have started in a worker thread"
+        # The fence fired on time: the loop was free the whole way through.
+        assert time.monotonic() - started < 10

@@ -102,6 +102,24 @@ def test_a_retry_after_header_is_honoured():
     assert slept == [7.0]
 
 
+def test_a_zero_retry_after_header_does_not_spin_the_poll_loop():
+    """Regression (F10): inherited from ``rest.py`` -- ``Retry-After: 0``
+    must floor the wait at the current poll interval, not skip the sleep."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return httpx.Response(429, headers={"Retry-After": "0"}, json={})
+        return httpx.Response(200, json={"id": "s1", "status": "reported"})
+
+    slept: list[float] = []
+    provider = _provider(handler, poll_interval_seconds=2)
+    provider._sleep = slept.append
+    assert provider.wait_for_completion("s1", timeout_seconds=600) == "reported"
+    assert slept and all(s > 0 for s in slept)
+
+
 def test_a_float_retry_after_header_is_honoured():
     calls = {"n": 0}
 

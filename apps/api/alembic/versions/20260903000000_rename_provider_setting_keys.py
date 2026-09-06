@@ -47,6 +47,11 @@ _MCP_LEAVES = (
 def _build_renames() -> dict[str, str]:
     out: dict[str, str] = {}
     for old, new in SETTINGS_ALIASES:
+        if old.startswith("static.generic."):
+            # Sub-project B's fold of a static.generic block into the single
+            # core.mcp.servers JSON document is not a rename: it is handled
+            # by its own dedicated data migration, 20260905000000.
+            continue
         # The two legacy aliases rooted at ``mcp`` each moved a whole
         # MCPServerConfig block (a leaf's worth of settings), not a single
         # scalar, so the stored keys are one level deeper than the alias

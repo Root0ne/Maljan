@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -17,6 +19,8 @@ from app.runtime_config import runtime_config
 from app.schemas.settings import (
     CatalogEntryDTO,
     GroupDTO,
+    MappingPreviewRequest,
+    MappingPreviewResponse,
     PatchRequest,
     PatchResponse,
     ProbeRequest,
@@ -26,8 +30,10 @@ from app.schemas.settings import (
     ValueDTO,
     ValuesResponse,
 )
-from app.services.settings_catalog_api import catalog_index, full_catalog
-from app.services.settings_probes import PROBES, run_probe
+from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.server_map import SERVER_MAP_KEY
+from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
+from app.services.settings_probes import PROBES, run_mcp_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -37,11 +43,24 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+async def _effective_servers(db: AsyncSession) -> list[str]:
+    """Server keys as they stand: the stored map if there is one, else the defaults."""
+    stored = await SettingsService(db).load_overrides()
+    servers = stored.get("core.mcp.servers")
+    if isinstance(servers, dict) and servers:
+        return list(servers)
+    from maljan.core.config import Settings
+
+    return list(Settings().mcp.servers)
+
+
 @router.get("/schema", response_model=SchemaResponse)
-async def get_schema(_: User = Depends(require_admin)) -> SchemaResponse:
+async def get_schema(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> SchemaResponse:
     available = box.is_available()
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in full_catalog():
+    for e in resolved_catalog(await _effective_servers(db)):
         d = e.to_dict()
         if e.secret and e.editable and not available:
             d["editable"] = False
@@ -142,8 +161,56 @@ async def export_overrides(
             continue
         entry = index[key]
         env_name = entry.path.upper().replace(".", "__")
+        if key == SERVER_MAP_KEY:
+            lines.extend(_server_map_env_lines(env_name, dict(info.value or {})))
+            continue
         lines.append(f"{env_name}={_env_literal(entry.secret, info.value)}")
     return "\n".join(lines) + "\n"
+
+
+def _server_map_env_lines(env_name: str, servers: dict[str, Any]) -> list[str]:
+    """``core.mcp.servers`` as ``.env`` lines a plain re-import will not break.
+
+    ``values()`` masks every server's token to ten literal asterisks
+    (``TOKEN_MASK``) so the UI never echoes a real credential; embedding that
+    mask inside the exported ``MCP__SERVERS`` JSON would configure it as the
+    actual token on re-import, a silent auth failure rather than a visible
+    placeholder. The token (and the synthetic ``auth_token_source`` --  not
+    an ``MCPServerConfig`` field) is stripped from the map instead, and a
+    commented placeholder line stands in for it per server that has one, the
+    same visible-but-inert shape ``_env_literal(secret=True, ...)`` gives an
+    ordinary secret leaf.
+    """
+    sanitized: dict[str, Any] = {}
+    lines: list[str] = []
+    for name, entry in servers.items():
+        clean = dict(entry)
+        has_token = bool(clean.pop("auth_token_source", None)) or bool(clean.get("auth_token"))
+        clean.pop("auth_token", None)
+        sanitized[name] = clean
+        if has_token:
+            lines.append(f"# {env_name}__{name.upper()}__AUTH_TOKEN=***")
+    lines.insert(0, f"{env_name}={_env_literal(False, sanitized)}")
+    return lines
+
+
+@router.post("/test/mcp", response_model=ProbeResponse)
+async def test_mcp_server(
+    body: ProbeRequest,
+    server: str = Query(..., description="key in mcp.servers"),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ProbeResponse:
+    """Launch one configured MCP server and report the tools it offers.
+
+    Takes staged values so an operator can test a server they have not saved
+    yet — the same contract as every other probe, addressed to one key of one
+    setting rather than to a set of settings. Registered ahead of
+    ``/test/{probe}`` so the fixed path wins the match.
+    """
+    stored = await SettingsService(db).load_overrides()
+    result = await run_mcp_probe(server, body.values, stored)
+    return ProbeResponse(**vars(result))
 
 
 @router.post("/test/{probe}", response_model=ProbeResponse)
@@ -158,3 +225,54 @@ async def test_probe(
     stored = await SettingsService(db).load_overrides()
     result = await run_probe(probe, body.values, stored)
     return ProbeResponse(**vars(result))
+
+
+async def _capped_body(request: Request) -> dict[str, Any]:
+    """Read the request body, refusing anything over the preview cap before it is parsed.
+
+    ``Content-Length`` catches an honest client without reading a byte; the
+    streamed guard catches a body sent without one (chunked transfer) or a
+    header that understates the real size, so the cap holds either way. The
+    streamed read never buffers past ``PREVIEW_MAX_BYTES + 1`` — a chunk that
+    would cross the limit is sliced down to the bytes needed to prove it does,
+    not appended whole, so one oversized chunk cannot balloon memory use past
+    the cap it is here to enforce.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        with suppress(ValueError):
+            if int(content_length) > PREVIEW_MAX_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
+                )
+    limit = PREVIEW_MAX_BYTES + 1
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        if size >= limit:
+            break
+        piece = chunk[: limit - size]
+        chunks.append(piece)
+        size += len(piece)
+    if size > PREVIEW_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
+        )
+    try:
+        parsed: dict[str, Any] = json.loads(b"".join(chunks) or b"{}")
+        return parsed
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid JSON body: {exc}") from exc
+
+
+@router.post("/sandbox-rest/preview", response_model=MappingPreviewResponse)
+async def preview_sandbox_mapping(
+    request: Request,
+    _: User = Depends(require_admin),
+) -> MappingPreviewResponse:
+    """Run a mapping against a pasted response. Nothing is stored or submitted."""
+    payload = await _capped_body(request)
+    body = MappingPreviewRequest.model_validate(payload)
+    return MappingPreviewResponse(**preview_mapping(body.sample, body.mapping))

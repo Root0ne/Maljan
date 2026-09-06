@@ -7,6 +7,7 @@ import type { CatalogEntry, SettingValue } from "@/types/settings";
 import ApplyBar from "./ApplyBar";
 import FieldRow from "./FieldRow";
 import GroupHeader from "./GroupHeader";
+import RestSandboxEditor from "./RestSandboxEditor";
 import { useSettings } from "./useSettings";
 
 const APPLIES_LABEL: Record<string, string> = {
@@ -260,19 +261,38 @@ export default function ConfigurationTab() {
                   }}
                   onResetGroup={() => s.resetGroup(g.key)}
                 />
-                {g.entries.map((e) => (
-                  <FieldRow
-                    key={e.key}
-                    entry={e}
-                    current={s.values[e.key]}
-                    staged={s.pending[e.key]}
-                    error={s.errors[e.key]}
-                    models={e.probe === "llm" ? models : undefined}
-                    onChange={(v) => s.stage(e.key, v)}
-                    onUnstage={() => s.unstage(e.key)}
-                    onReset={() => void s.reset(e.key)}
-                  />
-                ))}
+                {(() => {
+                  const rest = g.entries.filter((e) => e.editor === "rest_sandbox");
+                  const others = g.entries.filter((e) => e.editor !== "rest_sandbox");
+                  return (
+                    <>
+                      {others.map((e) => (
+                        <FieldRow
+                          key={e.key}
+                          entry={e}
+                          current={s.values[e.key]}
+                          staged={s.pending[e.key]}
+                          error={s.errors[e.key]}
+                          models={e.probe === "llm" ? models : undefined}
+                          onChange={(v) => s.stage(e.key, v)}
+                          onUnstage={() => s.unstage(e.key)}
+                          onReset={() => void s.reset(e.key)}
+                        />
+                      ))}
+                      {rest.length > 0 && (
+                        <RestSandboxEditor
+                          entries={rest}
+                          values={s.values}
+                          pending={s.pending}
+                          errors={s.errors}
+                          onChange={s.stage}
+                          onUnstage={s.unstage}
+                          onReset={(k) => void s.reset(k)}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </section>
             );
           })}

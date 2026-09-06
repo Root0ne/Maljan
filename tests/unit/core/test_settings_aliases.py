@@ -121,6 +121,15 @@ def test_every_alias_names_a_real_new_path():
         "sandbox.cape2.api_token",
         "sandbox.cape2.timeout_seconds",
         "sandbox.cape2.poll_interval_seconds",
+        "mcp.servers.custom.enabled",
+        "mcp.servers.custom.transport",
+        "mcp.servers.custom.command",
+        "mcp.servers.custom.args",
+        "mcp.servers.custom.env",
+        "mcp.servers.custom.url",
+        "mcp.servers.custom.auth_token",
+        "mcp.servers.custom.tool_selection",
+        "mcp.servers.custom.use_all_tools",
     }
     assert {new for _old, new in SETTINGS_ALIASES} == flat
 

@@ -3,44 +3,43 @@
 Structurally this is ``GenericMCPStaticProvider`` with three r2-specific
 defaults: the command comes from ``static.r2.binary_path``, the allow-list is
 the pinned tool set below, and the prompt fragment describes an r2 workflow
-rather than a Ghidra one. ``enumerate_r2_tools`` is the one place that speaks
-raw MCP to a live r2mcp; both ``scripts/probe_r2_tools.py`` (which pins the
-allow-list's source fixture) and ``probe_r2`` in the settings API's connection
-test call it, so the two paths cannot drift apart.
+rather than a Ghidra one. ``enumerate_r2_tools`` delegates to ``ServerHandle``,
+the one stdio handshake a job itself uses: ``scripts/probe_r2_tools.py``
+(which pins the allow-list's source fixture) and ``probe_r2`` in the settings
+API's connection test both go through it, so none of the three can report a
+different tool set than the others.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from maljan.providers.base import MirrorSpec
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
 
 if TYPE_CHECKING:
-    from mcp.types import Tool
-
-    from maljan.core.config import Settings, StaticR2Config
+    from maljan.core.config import Settings
 
 
-async def enumerate_r2_tools(command: str) -> list[Tool]:
-    """List the tools an r2mcp at ``command`` offers, over a raw stdio MCP handshake.
+async def enumerate_r2_tools(command: str) -> list[str]:
+    """Names of the tools an r2mcp at ``command`` offers, over one stdio handshake.
 
     Used both to pin the golden fixture (``scripts/probe_r2_tools.py``) and to
-    answer the settings-page connection test (``probe_r2``): the same coroutine
-    either way, so the two cannot report different tool counts.
+    answer the settings-page connection test: the same ``ServerHandle`` either
+    way, which is now the same one a job uses, so none of the three can report
+    a different tool set than the others.
     """
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
+    from maljan.core.config import MCPServerConfig
+    from maljan.providers.servers import ServerHandle
 
-    from maljan.agents.subprocess_env import child_env
-
-    params = StdioServerParameters(command=command, args=[], env=child_env())
-    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
-        await session.initialize()
-        response = await session.list_tools()
-        return list(response.tools)
+    handle = ServerHandle("r2", MCPServerConfig(enabled=True, transport="stdio", command=command))
+    try:
+        await handle.aopen("probe-r2")
+        return handle.all_tool_names()
+    finally:
+        await handle.aclose()
 
 
 @register_static_provider("r2")
@@ -105,40 +104,29 @@ class R2StaticProvider(GenericMCPStaticProvider):
         "   summarising call over many narrow ones.\n"
     )
 
+    # ``StaticR2Config.mirror_dir``'s own default, kept here too: a provider
+    # built any way other than ``from_settings`` (there is none today, but the
+    # base class's constructor allows it) still gets a sane mirror spec.
+    _mirror_dir: str = "data/samples/.work"
+
     @classmethod
     def from_settings(cls, cfg: Settings) -> R2StaticProvider:
-        return cls(
-            cfg.static.r2,
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        r2 = cfg.static.r2
+        handle = ServerHandle(
+            "r2",
+            MCPServerConfig.model_validate({**r2.model_dump(), "command": r2.binary_path}),
+        )
+        provider = cls(
+            handle,
             label="radare2 MCP",
             allowed_tools=cls.R2_ALLOWED_TOOLS,
             prompt_fragment_text=cls.R2_PROMPT_FRAGMENT,
         )
-
-    @property
-    def _r2_cfg(self) -> StaticR2Config:
-        """``self._cfg`` narrowed back to ``StaticR2Config``.
-
-        The base class types its constructor parameter (and therefore the
-        stored attribute) as the plain ``MCPServerConfig`` every generic
-        server shares; ``from_settings`` always hands it the ``StaticR2Config``
-        subclass, so this is a type-only narrowing, not a runtime check.
-        """
-        return cast("StaticR2Config", self._cfg)
-
-    def server_command(self) -> str:
-        """The configured ``command``, falling back to ``binary_path``.
-
-        ``StaticR2Config`` carries the executable under its own
-        ``binary_path`` field rather than the base ``MCPServerConfig.command``
-        one (the r2-specific name reads better in the settings UI).
-        ``GenericMCPStaticProvider.open`` calls this method rather than
-        reading ``self._cfg.command`` directly, so no attribute of the
-        shared, user-editable config is ever written here — a config
-        mutation would show up as a phantom ``command`` value in the job's
-        persisted settings snapshot.
-        """
-        cfg = self._r2_cfg
-        return cfg.command or cfg.binary_path
+        provider._mirror_dir = r2.mirror_dir
+        return provider
 
     def mirror_spec(self) -> MirrorSpec:
-        return MirrorSpec(work_subdir=Path(self._r2_cfg.mirror_dir).name, container_prefix="")
+        return MirrorSpec(work_subdir=Path(self._mirror_dir).name, container_prefix="")

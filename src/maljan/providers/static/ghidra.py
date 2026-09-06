@@ -252,7 +252,7 @@ class GhidraStaticProvider(StaticProvider):
 
             client = GhidraHTTPClient(
                 base_url=self._cfg.url,
-                auth_token=self._cfg.auth_token,
+                auth_token=self._cfg.auth_token.get_secret_value(),
                 output_guardrail=output_guardrail,
                 max_output_chars=max_chars,
                 truncation_ledger=job.truncation_ledger,
@@ -450,7 +450,7 @@ class GhidraStaticProvider(StaticProvider):
             return []
         return fetch_bulk_function_hashes(
             base_url=self._cfg.url,
-            auth_token=self._cfg.auth_token,
+            auth_token=self._cfg.auth_token.get_secret_value(),
             file_path=job.mirror_sample_path,
             min_instructions=self._pre.function_hash_min_instructions,
         )
@@ -462,9 +462,8 @@ class GhidraStaticProvider(StaticProvider):
         import httpx
 
         t0 = time.perf_counter()
-        headers = (
-            {"Authorization": f"Bearer {self._cfg.auth_token}"} if self._cfg.auth_token else {}
-        )
+        token = self._cfg.auth_token.get_secret_value()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
         url = f"{self._cfg.url.rstrip('/')}/check_connection"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
