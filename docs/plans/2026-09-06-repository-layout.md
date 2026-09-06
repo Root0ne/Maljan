@@ -381,7 +381,7 @@ Expected: PASS, at the ledger's recorded count plus the tests this task adds.
 ### Task 2: One uv workspace
 
 **Files:**
-- Modify: `pyproject.toml` (add `[tool.uv.workspace]`, drop `[tool.pytest.ini_options].pythonpath`, drop `[tool.mypy].mypy_path`), `apps/api/pyproject.toml` (hatchling, workspace source, drop `pythonpath`), `apps/api/app/worker/analysis_worker.py:460-468`, `tests/conftest.py:1-15`, `Makefile:68,74,87`, `docker/Dockerfile.backend` (full rewrite), `docker/docker-compose.yml:172,264` (and the two volume lists at `:213-217`, `:328-332`), `uv.lock` (regenerated)
+- Modify: `pyproject.toml` (add `[tool.uv.workspace]`, drop `[tool.pytest.ini_options].pythonpath`, drop `[tool.mypy].mypy_path`), `apps/api/pyproject.toml` (hatchling, workspace source, drop `pythonpath`), `apps/api/app/worker/analysis_worker.py:460-468`, `tests/conftest.py:1-16`, `Makefile:68,74,87`, `docker/Dockerfile.backend` (full rewrite), `docker/docker-compose.yml:172,264` (and the two volume lists at `:213-217`, `:328-332`), `uv.lock` (regenerated)
 - Delete: `apps/api/uv.lock`
 - Test: `tests/unit/test_docker_manifest.py`, `tests/unit/test_package_layout.py`, `tests/unit/test_compose_config.py`, `tests/unit tests/api`
 
@@ -622,7 +622,7 @@ The two sidecar COPY lines keep their current paths in this task; Task 3 moves t
 
 - [ ] **Step 8: Compose**
 
-In `docker/docker-compose.yml`, delete the `PYTHONPATH` line and the comment above it from `backend-api` (lines 166-172):
+In `docker/docker-compose.yml`, delete the `PYTHONPATH` line and the comment above it from `backend-api` (lines 168-172):
 
 ```yaml
       # F1 (2026-07-05): make the ``maljan`` core package importable from the
@@ -699,7 +699,7 @@ Expected: PASS at the same count as Task 1.
 **Files:**
 - Move: `network-mcp/server.py` → `services/network-mcp/server.py`, `threatintel-mcp/server.py` → `services/threatintel-mcp/server.py`
 - Create: `services/network-mcp/README.md`, `services/threatintel-mcp/README.md`
-- Modify: `src/maljan/core/config.py:763,764,772,773`; `scripts/capture_builtin_tool_sets.py:28,29`; `services/threatintel-mcp/server.py:4`; `docker/Dockerfile.backend` (the two sidecar COPY lines); `Makefile:22,24,45`; `.github/workflows/ci.yml:62,64,67,86`; `docker/docker-compose.yml` (two volume lists); `README.md:232`; `.env.example:284-285`; `tests/unit/core/test_server_settings.py:27,28,36,37`; `tests/servers/test_builtin_tool_sets.py:3`; `tests/servers/test_teardown_on_the_owning_loop.py:5,6`; `apps/web/e2e/mocks.ts:632,639`; `apps/web/e2e/settings-servers.spec.ts:163`
+- Modify: `src/maljan/core/config.py:763,764,772,773`; `scripts/capture_builtin_tool_sets.py:28,29`; `services/threatintel-mcp/server.py:4`; `docker/Dockerfile.backend` (the two sidecar COPY lines); `Makefile:22,24,45`; `.github/workflows/ci.yml:62,64,67,86`; `docker/docker-compose.yml` (two volume lists); `README.md:232`; `.env.example:283-285`; `tests/unit/core/test_server_settings.py:27,28,36,37`; `tests/servers/test_builtin_tool_sets.py:3`; `tests/servers/test_teardown_on_the_owning_loop.py:5,6`; `apps/web/e2e/mocks.ts:632,639`; `apps/web/e2e/settings-servers.spec.ts:163`
 - Test: `tests/servers/test_builtin_tool_sets.py`, `tests/unit/core/test_server_settings.py`, `tests/unit/test_topology_sources.py`, `tests/unit/test_docker_manifest.py`
 
 **Interfaces:**
@@ -1672,7 +1672,7 @@ Expected: the file is gone and nothing is staged for it. `*.log` in `.gitignore`
 
 - [ ] **Step 3: The README's new section**
 
-Insert a "Repository layout" section immediately after the "Architecture" section's closing `---` (currently line 85), before "## Quick Start":
+Insert a "Repository layout" section immediately after the "Architecture" section's closing `---` (currently line 84), before "## Quick Start":
 
 ```markdown
 ## Repository layout
