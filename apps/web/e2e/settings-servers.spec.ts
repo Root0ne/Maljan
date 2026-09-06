@@ -59,6 +59,43 @@ test.describe("tool servers and the REST sandbox", () => {
     expect(sent.agents).toEqual(["static"]);
   });
 
+  /* WEB-2 (dev audit 2026-09-06): every server carries `tool_selection` and
+   * `use_all_tools`, the providers read both, and neither had a control on
+   * this screen — so a server added here kept whatever default it was given
+   * with no way to change it. */
+  test("a server's tool selection is editable and is sent", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+
+    const card = page.locator('[data-server="network"]');
+    await expect(card.getByLabel("network tool selection")).toHaveValue("dynamic");
+    await card.getByLabel("network tool selection").selectOption("curated");
+    await card.getByLabel("network force all tools").check();
+    // The back-compat flag overrides the selection, so the select says so.
+    await expect(card.getByLabel("network tool selection")).toBeDisabled();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, { tool_selection: string; use_all_tools: boolean }>>;
+    };
+    const sent = body.changes["core.mcp.servers"].network;
+    expect(sent.tool_selection).toBe("curated");
+    expect(sent.use_all_tools).toBe(true);
+  });
+
   /* B6 (dev audit 2026-09-06): a probe result outlived the configuration it
    * described — the green "3 tools: …" line stayed up while the command it had
    * dialled was edited out from under it. */

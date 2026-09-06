@@ -314,6 +314,38 @@ export default function ServerMapEditor({
               )}
             </div>
 
+            {/* WEB-2 (dev audit 2026-09-06): both of these are on every server
+                the editor creates, both are read by the providers that drive a
+                server (`providers/static/generic_mcp.py`, `ghidra.py`), and
+                neither had a control anywhere on this screen — a new server
+                kept whatever the default happened to be with no way to change
+                it. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
+              <label className="block">
+                <span className="text-text-muted">Tool selection</span>
+                <select
+                  className={input}
+                  aria-label={`${key} tool selection`}
+                  disabled={server.use_all_tools}
+                  value={server.tool_selection}
+                  onChange={(e) => put(key, { tool_selection: e.target.value })}
+                >
+                  {["curated", "dynamic", "all"].map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-text-secondary flex items-center gap-1 self-end pb-1.5">
+                <input
+                  type="checkbox"
+                  aria-label={`${key} force all tools`}
+                  checked={server.use_all_tools}
+                  onChange={(e) => put(key, { use_all_tools: e.target.checked })}
+                />
+                force every tool, whatever the selection says
+              </label>
+            </div>
+
             <fieldset className="mt-2">
               <legend className="text-xs text-text-muted">Agents</legend>
               <div className="flex gap-3 flex-wrap">
