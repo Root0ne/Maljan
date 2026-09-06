@@ -73,3 +73,8 @@ docker/
 # Build artifacts & logs
 *.log
 reports/
+
+# Never copied into any image: the documentation tree (including its images) and
+# the test suite, which the compose stack bind-mounts from the host instead.
+docs/
+tests/

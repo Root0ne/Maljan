@@ -1,118 +1,81 @@
-# Python-generated files
+# ── Python build and cache output ──────────────────────────────────────
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
-.venv
-**/.venv/
-
-# External MCP tool installations (not part of Maljan — install separately)
-external/
-
-# Runtime sample mirror — worker copies MinIO-downloaded samples into
-# data/samples/ so the Ghidra container can read them through its mount.
-# These are real binaries, not test fixtures, so never commit them.
-# Test fixtures under data/samples/{dynamic,network,static}/ stay tracked.
-data/samples/*.apk
-data/samples/*.exe
-data/samples/*.dll
-data/samples/*.elf
-data/samples/*.so
-data/samples/*.dex
-data/samples/*.jar
-data/samples/*.bin
-data/samples/*.dat
-data/samples/*.sys
-data/samples/*.macho
-
-# Runtime upload staging — the API streams uploads through
-# data/uploads/.tmp (Defender-excluded) before pushing to MinIO. Ephemeral.
-data/uploads/
-
-# Environment variables (never commit real secrets)
-# Tracked: .env.example, .env.template, apps/*/. env.example
-# Ignored: every real .env and any *.local override anywhere in the tree.
-.env
-.env.*.local
-.env.local
-**/.env
-!**/.env.example
-!**/.env.template
-**/.env.local
-**/.env.*.local
-
-# Real malware samples (must never be committed to a public repo)
-samples/
-# ...but not the web app's own samples route, which is source, not a payload drop.
-!apps/web/src/app/(app)/samples/
-
-# Local LLM model weights (large, downloaded separately)
-/models/
-*.gguf
-*.safetensors
-
-# Tool caches
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 
-# Frontend
+# ── Virtual environments ───────────────────────────────────────────────
+# A pattern without a slash matches at any depth, so this covers apps/api/.venv
+# and apps/web/.venv as well as the root one.
+.venv
+
+# ── Node and Next.js ───────────────────────────────────────────────────
 node_modules/
 apps/web/.next/
 apps/web/out/
+# Playwright run artefacts: screenshots, traces, error contexts from failures.
+apps/web/test-results/
+apps/web/playwright-report/
 
+# ── Secrets ────────────────────────────────────────────────────────────
+# Every real .env and any *.local override, at any depth. The example and
+# template files are the tracked ones, at any depth, and win over the rules
+# above them.
+.env
+.env.local
+.env.*.local
+!**/.env.example
+!**/.env.template
+
+# ── Real malware ───────────────────────────────────────────────────────
+# Any directory named samples/, which is the worker's mirror of MinIO-downloaded
+# binaries and the live-malware dataset copies beneath it. The fixtures under
+# data/samples/{dynamic,network,static}/ are already tracked and stay tracked.
+samples/
+# ...but not the web app's own samples route, which is source, not a payload drop.
+!apps/web/src/app/(app)/samples/
+# Runtime upload staging: the API streams uploads through data/uploads/.tmp
+# (Defender-excluded) before pushing to MinIO. Ephemeral.
+data/uploads/
+
+# ── Third-party corpora, fetched rather than vendored ──────────────────
+# scripts/dev/fetch_external.sh clones each at a pinned ref, licence file and all.
+external/
+data/sigma_rules/
+data/capa-rules/
+data/external/
+# CAPE analysis reports for the n=100 dynamic cohort: ~7 MB each, reproducible
+# from the committed task ledger (tests/evaluation/cape_task_ledger_n100.json)
+# plus the instance. The ledger is the artefact worth versioning.
+data/cape_reports/
+
+# ── Local model weights ────────────────────────────────────────────────
+/models/
+*.gguf
+*.safetensors
+
+# ── Machine-local output ───────────────────────────────────────────────
+# Logs at any depth, which is what keeps a root llama.log out of the index, and
+# the overnight watch directory.
 *.log
-
-.claude/settings.local.json
-# Wave 9 (2026-05-29): ephemeral cron lock — Claude /schedule writes
-# this per-session and should never have been tracked. Removed from
-# the repo in the same commit that added it here.
-.claude/scheduled_tasks.lock
-
-# Live-malware dataset mirrors (full download, 2026-06-08). data/samples is
-# Defender-excluded; these are real malware archives/binaries, never committed.
-data/samples/rat-collection/
-data/samples/dike/
-data/samples/extracted/
-
-# A/B eval transient checkpoints (regenerated per run)
+logs/
+# A/B eval transient checkpoints, regenerated per run.
 tests/evaluation/ab_off.jsonl
 tests/evaluation/ab_on.jsonl
 tests/evaluation/ab_off.partial.jsonl
 
-# Playwright run artefacts (screenshots, traces, error contexts from failed runs)
-apps/web/test-results/
-apps/web/playwright-report/
-
-# Overnight watch output (machine-local, not project history)
-logs/
-
-# External corpora — fetched by eval scripts, never vendored
-data/external/
-
-# CAPE analysis reports fetched for the n=100 dynamic cohort. ~7 MB each,
-# ~660 MB for the cohort, and reproducible from the committed task ledger
-# (tests/evaluation/cape_task_ledger_n100.json) plus the instance. The ledger
-# is the artifact worth versioning; these are its bulky output.
-data/cape_reports/
-
-# Everything that is deliberately not part of the repository lives here:
-# third-party threat reports, the journal's guide and class files, reference
+# ── Not part of this repository ────────────────────────────────────────
+# Third-party threat reports, the journal's guide and class files, reference
 # PDFs, drafts. One directory rather than a scatter of root-level entries, so
 # "is this ours" is answered by where a file sits.
 /other/
 
-# The Sigma corpus is SigmaHQ's, under the Detection Rule License, and was
-# committed here as 2,651 files carrying neither their licence nor their names.
-# scripts/fetch_external.sh clones it at a pinned release instead, licence file
-# and all.
-data/sigma_rules/
-
-# capa-rules is mandiant's, cloned by the operator for the capa_yara static
-# provider (git clone https://github.com/mandiant/capa-rules data/capa-rules),
-# not carried in this repository.
-data/capa-rules/
+# ── Tooling state ──────────────────────────────────────────────────────
+.claude/settings.local.json
+# Ephemeral cron lock, written per session by Claude /schedule.
+.claude/scheduled_tasks.lock
