@@ -21,7 +21,7 @@ from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
 from maljan.pipeline.builder import build_graph
 
-GOLDEN = Path(__file__).resolve().parents[1] / "fixtures" / "golden" / "graph_default.json"
+GOLDEN = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "graph_default.json"
 
 
 def compiled_shape(container: ServiceContainer) -> dict[str, Any]:

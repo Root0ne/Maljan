@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 
 FIXTURE = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "golden" / "rest_mapping" / "xyz_report.json"
+    Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "rest_mapping" / "xyz_report.json"
 )
 
 

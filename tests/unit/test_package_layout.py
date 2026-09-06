@@ -21,14 +21,14 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# The files that say "the default profile is what it was". Their paths change in
-# Task 5, when the four stray test folders merge into tests/unit/.
+# The files that say "the default profile is what it was". They live under
+# tests/unit/ with the rest of the suite.
 GOLDEN_MODULES: tuple[str, ...] = (
-    "tests/pipeline/test_graph_snapshot.py",
-    "tests/agents/test_prompt_byte_identity.py",
-    "tests/agents/test_revision_prompt_golden.py",
-    "tests/servers/test_builtin_tool_sets.py",
-    "tests/servers/test_agent_parity.py",
+    "tests/unit/pipeline/test_graph_snapshot.py",
+    "tests/unit/agents/test_prompt_byte_identity.py",
+    "tests/unit/agents/test_revision_prompt_golden.py",
+    "tests/unit/servers/test_builtin_tool_sets.py",
+    "tests/unit/servers/test_agent_parity.py",
     "tests/unit/test_topology_sources.py",
 )
 

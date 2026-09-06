@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 PROMPTS = FIXTURES / "prompts"
 GOLDEN = FIXTURES / "golden"
 

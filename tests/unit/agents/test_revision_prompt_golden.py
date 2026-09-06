@@ -16,7 +16,7 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, BaseMessage
 
 GOLDEN = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "golden" / "revision_prompt_network.json"
+    Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "revision_prompt_network.json"
 )
 
 

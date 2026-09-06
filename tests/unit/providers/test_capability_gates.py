@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 ALLOWED = {
     "src/maljan/core/config.py",  # the alias table
     "src/maljan/providers/static/ghidra.py",

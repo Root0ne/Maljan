@@ -19,7 +19,7 @@ from maljan.providers.sandbox.rest_mapping import (
     compile_mapping,
 )
 
-GOLDEN = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "rest_mapping"
+GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "rest_mapping"
 
 XYZ_MAPPING = RestMappingConfig(
     target_sha256="$.sample.hashes.sha256",

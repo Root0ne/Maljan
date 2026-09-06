@@ -99,7 +99,7 @@ async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(mo
     await asyncio.wait_for(judge._initialize_mcp_client(), timeout=20.0)
     try:
         golden_path = (
-            Path(__file__).resolve().parents[1]
+            Path(__file__).resolve().parents[2]
             / "fixtures"
             / "golden"
             / "mcp_tools"

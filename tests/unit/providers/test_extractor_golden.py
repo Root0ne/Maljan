@@ -27,7 +27,7 @@ import pytest
 from maljan.extractors.dynamic_extractor import build_dynamic_behavior
 from maljan.extractors.network_extractor import build_network_iocs
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "extractors"
 CAPE_GLOBS: tuple[str, ...] = ("data/cape_reports/*.json", "data/samples/dynamic/sample_1.json")
 

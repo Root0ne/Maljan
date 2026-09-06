@@ -17,7 +17,7 @@ from maljan.extractors.network_extractor import build_network_iocs
 from maljan.extractors.persistence_extractor import build_persistence_list
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
-from tests.providers.test_extractor_golden import cape_reports, dump
+from tests.unit.providers.test_extractor_golden import cape_reports, dump
 
 _REPORTS = cape_reports()
 _IDS = [n for n, _ in _REPORTS]

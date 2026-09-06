@@ -12,7 +12,7 @@ from maljan.core.config import Settings
 from maljan.providers.errors import ProviderError
 from maljan.providers.sandbox.triage import TriageSandboxProvider
 
-FIX = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
+FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 
 
 def _provider(handler, **over):

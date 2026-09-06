@@ -12,7 +12,7 @@ from maljan.core.config import Settings
 from maljan.providers.base import StaticJobContext
 from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS, GhidraStaticProvider
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 class _Tool:

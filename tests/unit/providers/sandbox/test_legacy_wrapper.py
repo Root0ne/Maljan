@@ -10,7 +10,7 @@ from maljan.loaders.sandbox_client import SandboxClient
 from maljan.providers.registry import get_sandbox_provider
 from maljan.providers.sandbox._legacy import as_sandbox_client
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_the_wrapper_satisfies_the_protocol():

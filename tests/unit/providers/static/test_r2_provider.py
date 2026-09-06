@@ -9,7 +9,7 @@ from maljan.core.config import Settings
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
 from maljan.providers.static.r2 import R2StaticProvider
 
-FIX = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "r2_tools.json"
+FIX = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "r2_tools.json"
 
 
 class _T:

@@ -224,7 +224,7 @@ def test_a_definition_cannot_widen_a_servers_exposure():
     import sys
     from pathlib import Path
 
-    _api = Path(__file__).resolve().parents[2] / "apps" / "api"
+    _api = Path(__file__).resolve().parents[3] / "apps" / "api"
     if str(_api) not in sys.path:
         sys.path.insert(0, str(_api))
     from app.services.agent_map import AGENT_DEFINITIONS_KEY, AgentMapError, validate_agent_map
@@ -270,7 +270,7 @@ def test_a_job_cannot_inline_an_agent_definition():
     import sys
     from pathlib import Path
 
-    _api = Path(__file__).resolve().parents[2] / "apps" / "api"
+    _api = Path(__file__).resolve().parents[3] / "apps" / "api"
     if str(_api) not in sys.path:
         sys.path.insert(0, str(_api))
     from app.schemas.job import _KnownJobConfig

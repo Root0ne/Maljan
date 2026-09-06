@@ -13,8 +13,8 @@ from maljan.core.config import RestMappingConfig, Settings
 from maljan.providers.errors import ProviderConfigurationError, ProviderError
 from maljan.providers.sandbox.rest import RestSandboxProvider
 
-FIX = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
-GOLDEN = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "rest_mapping"
+FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
+GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "rest_mapping"
 
 
 def _cfg(**over):
@@ -223,7 +223,7 @@ def test_a_cape_shaped_body_goes_through_the_cape_reader_untouched():
 
 def test_a_real_cape_fixture_goes_through_the_cape_reader_by_identity():
     """The committed/real CAPE fixture, not a hand-rolled minimal body."""
-    from tests.providers._cape_fixture import first_cape_report
+    from tests.unit.providers._cape_fixture import first_cape_report
 
     cfg = _cfg()
     cfg.sandbox.rest.report.format = "cape2"

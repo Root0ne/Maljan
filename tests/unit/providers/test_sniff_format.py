@@ -12,9 +12,9 @@ import json
 from pathlib import Path
 
 from maljan.providers.sandbox.formats import sniff_format
-from tests.providers._cape_fixture import FIXTURE_PATH, first_cape_report
+from tests.unit.providers._cape_fixture import FIXTURE_PATH, first_cape_report
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_a_real_cape_report_sniffs_as_cape2():
