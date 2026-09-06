@@ -69,14 +69,22 @@ export default function FieldRow({
   onUnstage: () => void;
   onReset: () => void;
   /** The full validation-error map, keyed by dotted path — not just this
-   *  row's own key — so the agent-definitions editor can find a nested
-   *  error like `core.agents.definitions.<key>.prompt` and land it on the
-   *  card that caused it rather than a leaf-wide banner. */
+   *  row's own key — so the agent-definitions and profiles editors can find a
+   *  qualified error like `core.agents.definitions.<key>.prompt` or
+   *  `core.agents.profiles.<key>` and land it on the card that caused it
+   *  rather than a leaf-wide banner. */
   errors?: Record<string, string>;
 }) {
   const dirty = staged !== undefined;
   const source = current?.source ?? "default";
   const labelId = `setting-label-${entry.key}`;
+  /* B7 (dev audit 2026-09-06): the controls on this tab carried neither an id
+   * nor a name, so nothing could associate the title with the input it names
+   * except the widget's own `aria-label`. A composite editor renders many
+   * controls and has no single one to point at, so it keeps the labelled
+   * group below and the title stays a span there. */
+  const inputId = `setting-input-${entry.key}`;
+  const single = entry.editor === null;
   return (
     <div
       id={`setting-${entry.key}`}
@@ -86,9 +94,15 @@ export default function FieldRow({
     >
       <div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span id={labelId} className="text-sm text-text-primary">
-            {entry.title}
-          </span>
+          {single ? (
+            <label id={labelId} htmlFor={inputId} className="text-sm text-text-primary">
+              {entry.title}
+            </label>
+          ) : (
+            <span id={labelId} className="text-sm text-text-primary">
+              {entry.title}
+            </span>
+          )}
           <span
             className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
               source === "ui"
@@ -152,6 +166,7 @@ export default function FieldRow({
               staged={staged}
               definitions={definitions ?? {}}
               activeProfile={activeProfile ?? "default"}
+              errors={errors ?? {}}
               onChange={onChange}
               onSetActive={onSetActive ?? (() => undefined)}
             />
@@ -163,6 +178,7 @@ export default function FieldRow({
               onChange={onChange}
               onUnstage={onUnstage}
               models={models}
+              inputId={inputId}
             />
           )}
         </div>

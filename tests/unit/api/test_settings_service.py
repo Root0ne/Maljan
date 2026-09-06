@@ -15,6 +15,7 @@ if str(_API) not in sys.path:
 
 from app import observability  # noqa: E402
 from app.models import AuditLog, RuntimeSetting  # noqa: E402
+from app.services import audit as audit_module  # noqa: E402
 from app.services import settings_service as svc  # noqa: E402
 from app.services.settings_catalog_api import catalog_index, full_catalog  # noqa: E402
 
@@ -185,7 +186,7 @@ class FakeAuditSession:
 @pytest.mark.asyncio
 async def test_save_writes_audit_log_with_masked_secrets(monkeypatch, key):
     session = FakeAuditSession()
-    monkeypatch.setattr(svc, "async_session_factory", lambda: session)
+    monkeypatch.setattr(audit_module, "async_session_factory", lambda: session)
     db = make_db([])
     s = svc.SettingsService(db)
     await s.save(
@@ -209,7 +210,7 @@ async def test_save_writes_audit_log_with_masked_secrets(monkeypatch, key):
 @pytest.mark.asyncio
 async def test_reset_writes_audit_log_with_keys(monkeypatch):
     session = FakeAuditSession()
-    monkeypatch.setattr(svc, "async_session_factory", lambda: session)
+    monkeypatch.setattr(audit_module, "async_session_factory", lambda: session)
     rows = [RuntimeSetting(key="api.enrichment_enabled", value=False, is_secret=False)]
     db = make_db(rows)
     s = svc.SettingsService(db)
@@ -225,7 +226,7 @@ async def test_reset_writes_audit_log_with_keys(monkeypatch):
 @pytest.mark.asyncio
 async def test_save_does_not_raise_when_audit_session_fails(monkeypatch, key):
     session = FakeAuditSession(fail=True)
-    monkeypatch.setattr(svc, "async_session_factory", lambda: session)
+    monkeypatch.setattr(audit_module, "async_session_factory", lambda: session)
     db = make_db([])
     s = svc.SettingsService(db)
     before = observability.counters.audit_write_failures

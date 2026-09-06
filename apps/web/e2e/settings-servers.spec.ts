@@ -59,6 +59,69 @@ test.describe("tool servers and the REST sandbox", () => {
     expect(sent.agents).toEqual(["static"]);
   });
 
+  /* WEB-2 (dev audit 2026-09-06): every server carries `tool_selection` and
+   * `use_all_tools`, the providers read both, and neither had a control on
+   * this screen — so a server added here kept whatever default it was given
+   * with no way to change it. */
+  test("a server's tool selection is editable and is sent", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+
+    const card = page.locator('[data-server="network"]');
+    await expect(card.getByLabel("network tool selection")).toHaveValue("dynamic");
+    await card.getByLabel("network tool selection").selectOption("curated");
+    await card.getByLabel("network force all tools").check();
+    // The back-compat flag overrides the selection, so the select says so.
+    await expect(card.getByLabel("network tool selection")).toBeDisabled();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, { tool_selection: string; use_all_tools: boolean }>>;
+    };
+    const sent = body.changes["core.mcp.servers"].network;
+    expect(sent.tool_selection).toBe("curated");
+    expect(sent.use_all_tools).toBe(true);
+  });
+
+  /* B6 (dev audit 2026-09-06): a probe result outlived the configuration it
+   * described — the green "3 tools: …" line stayed up while the command it had
+   * dialled was edited out from under it. */
+  test("editing what a probe dialled clears that card's result", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+
+    await page.getByLabel("new server name").fill("r2custom");
+    await page.getByRole("button", { name: "Add server" }).click();
+    const card = page.locator('[data-server="r2custom"]');
+    await card.getByLabel("r2custom command").fill("r2mcp");
+    await card.getByRole("button", { name: "Test" }).click();
+    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+
+    // The allow-list is rendered from that same result, so ticking a tool must
+    // not clear it.
+    await card.getByLabel("r2custom tool open_file").check();
+    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+
+    await card.getByLabel("r2custom command").fill("something-else");
+    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toHaveCount(0);
+  });
+
   test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {
@@ -156,7 +219,13 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("rest");
     const editor = page.getByTestId("rest-sandbox-editor");
     await expect(editor).toBeVisible();
-    await expect(editor.getByRole("button", { name: "Preview mapping" })).toBeDisabled();
+    /* B8 (dev audit 2026-09-06): the button used to stay disabled until the
+     * textarea had seen a keystroke, so a value that arrived any other way
+     * left it dead with nothing saying why. It is live from the start and
+     * names what is missing. */
+    await expect(editor.getByRole("button", { name: "Preview mapping" })).toBeEnabled();
+    await editor.getByRole("button", { name: "Preview mapping" }).click();
+    await expect(editor.getByText("paste a sample response first")).toBeVisible();
 
     await editor.getByLabel("Mapping: processes").fill("$.procs[*]");
     await page.getByLabel("Paste a sample response").fill('{"procs": [{"pid": 1}, {}]}');
@@ -171,7 +240,12 @@ test.describe("tool servers and the REST sandbox", () => {
       "JSONPath syntax error at position 3"
     );
     // The target hash row shows the hash the mocked preview matched against.
-    await expect(editor.locator('[data-channel="target_sha256"]')).toHaveText("ab");
+    // WEB-1: that column counts rows for every other channel, and this row
+    // does not select rows at all — the cell and the footnote both say so.
+    await expect(editor.locator('[data-channel="target_sha256"]')).toHaveText("hash: ab");
+    await expect(
+      editor.getByText(/the target_sha256 row selects a single value/)
+    ).toBeVisible();
     await expect(editor.getByText("sample hash: ab")).toBeVisible();
   });
 

@@ -27,7 +27,7 @@ test.describe("Jobs", () => {
   test("lists jobs by sample name", async ({ authenticatedPage: page }) => {
     await page.goto("/jobs");
 
-    // "Analysis Jobs — 1 results"; only rendered on success.
+    // "Analysis Jobs — 1 result"; only rendered on success.
     await expect(page.getByRole("heading", { name: /^Analysis Jobs/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Filters" })).toBeVisible();
     await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
@@ -109,6 +109,42 @@ test.describe("Settings", () => {
   });
 });
 
+/* A4 (dev audit 2026-09-06): every one of these headers hard-coded its plural,
+ * so a list holding exactly one row announced "1 RESULTS", "1 files" and
+ * "1 total entries". Each mocked list holds one row, which is the case that
+ * used to read wrong. */
+test.describe("Result counts", () => {
+  test("a single row is counted in the singular on every list", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/jobs");
+    await expect(page.getByRole("heading", { name: "Analysis Jobs — 1 result" })).toBeVisible();
+
+    await page.goto("/samples");
+    await expect(page.getByRole("heading", { name: "Samples — 1 file" })).toBeVisible();
+
+    await page.goto("/reports");
+    await expect(page.getByText("1 analysis report generated")).toBeVisible();
+
+    await page.goto("/audit");
+    await expect(page.getByText("1 total entry")).toBeVisible();
+  });
+});
+
+/* A5 (dev audit 2026-09-06): an unknown URL rendered Next's own 404 with no
+ * chrome and no way back into the app. */
+test.describe("404", () => {
+  test("an unknown route offers a way back into the app", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/nonexistent-route");
+
+    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+    await page.getByRole("link", { name: "Back to dashboard" }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+  });
+});
+
 test.describe("Audit log", () => {
   /* Reached by URL: the sidebar link is admin-only and the mocked session is an
    * analyst. The page itself does not gate — that is the backend's job — so
@@ -119,7 +155,7 @@ test.describe("Audit log", () => {
     await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
     await expect(page.getByText("job.create")).toBeVisible();
     await expect(page.getByText("10.0.0.5")).toBeVisible();
-    await expect(page.getByText(/1 total entries/)).toBeVisible();
+    await expect(page.getByText("1 total entry")).toBeVisible();
     await expectNoAlerts(page);
   });
 

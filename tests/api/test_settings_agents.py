@@ -56,20 +56,26 @@ def test_a_valid_definition_round_trips_with_the_built_ins_reseeded():
 def test_a_bad_key_is_reported_under_that_key():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(_defs(**{"Bad Name": {"role": "generic", "prompt": "p"}}), stored={})
-    assert "Bad Name" in exc.value.errors
-    assert "lowercase" in exc.value.errors["Bad Name"]
+    assert f"{AGENT_DEFINITIONS_KEY}.Bad Name" in exc.value.errors
+    assert "lowercase" in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.Bad Name"]
 
 
 def test_a_generic_agent_without_a_prompt_is_reported_on_its_prompt_field():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(_defs(strings={"role": "generic", "prompt": ""}), stored={})
-    assert exc.value.errors["strings.prompt"] == "a generic agent needs a prompt"
+    assert (
+        exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings.prompt"]
+        == "a generic agent needs a prompt"
+    )
 
 
 def test_an_edited_built_in_says_to_clone_it():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(_defs(static={**BUILTIN_STATIC, "prompt": "mine"}), stored={})
-    assert exc.value.errors["static"] == "'static' is built in; clone it to change it"
+    assert (
+        exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.static"]
+        == "'static' is built in; clone it to change it"
+    )
 
 
 def test_a_disabled_built_in_analyst_is_allowed():
@@ -89,7 +95,7 @@ def test_an_unknown_static_provider_is_reported_on_its_field():
         validate_agent_map(
             _defs(static_r2={"role": "static", "static_provider": "idapro"}), stored={}
         )
-    assert "idapro" in exc.value.errors["static_r2.static_provider"]
+    assert "idapro" in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.static_r2.static_provider"]
 
 
 def test_a_tool_reference_to_an_unknown_server_is_reported_on_its_field():
@@ -104,7 +110,7 @@ def test_a_tool_reference_to_an_unknown_server_is_reported_on_its_field():
             ),
             stored={},
         )
-    assert "ghost" in exc.value.errors["strings.tools"]
+    assert "ghost" in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings.tools"]
 
 
 def test_a_named_tool_outside_the_servers_allow_list_is_refused():
@@ -124,7 +130,10 @@ def test_a_named_tool_outside_the_servers_allow_list_is_refused():
             ),
             stored=stored,
         )
-    assert "'rm' is not allowed on server 'mine'" in exc.value.errors["strings.tools"]
+    assert (
+        "'rm' is not allowed on server 'mine'"
+        in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings.tools"]
+    )
 
 
 def test_a_provider_tool_reference_on_a_built_in_role_is_refused():
@@ -137,7 +146,7 @@ def test_a_provider_tool_reference_on_a_built_in_role_is_refused():
         validate_agent_map(
             _defs(strings={"role": "static", "tools": [{"kind": "provider"}]}), stored={}
         )
-    assert exc.value.errors["strings"] == (
+    assert exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings"] == (
         "'strings': provider tool references are only valid on generic "
         "definitions; built-in roles open their provider themselves"
     )
@@ -179,7 +188,7 @@ def test_a_disabled_built_in_profile_member_is_refused_once_that_profile_is_acti
             },
             stored={},
         )
-    assert "network" in exc.value.errors["default"]
+    assert "network" in exc.value.errors[f"{AGENT_PROFILES_KEY}.default"]
 
 
 def test_a_profile_naming_a_missing_analyst_is_reported_under_the_profile():
@@ -187,13 +196,16 @@ def test_a_profile_naming_a_missing_analyst_is_reported_under_the_profile():
         validate_agent_map(
             {AGENT_PROFILES_KEY: {"two": {"analysts": ["static", "ghost"]}}}, stored={}
         )
-    assert "ghost" in exc.value.errors["two"]
+    assert "ghost" in exc.value.errors[f"{AGENT_PROFILES_KEY}.two"]
 
 
 def test_the_default_profile_may_not_be_edited():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map({AGENT_PROFILES_KEY: {"default": {"analysts": ["network"]}}}, stored={})
-    assert exc.value.errors["default"] == "'default' is built in; clone it to change it"
+    assert (
+        exc.value.errors[f"{AGENT_PROFILES_KEY}.default"]
+        == "'default' is built in; clone it to change it"
+    )
 
 
 def test_the_active_profile_must_exist_in_the_map_being_saved():
@@ -237,7 +249,7 @@ def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
     }
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map({AGENT_DEFINITIONS_KEY: None}, stored=stored)
-    assert "strings" in exc.value.errors["wide"]
+    assert "strings" in exc.value.errors[f"{AGENT_PROFILES_KEY}.wide"]
 
 
 def test_the_effective_maps_layer_stored_over_seeded():
@@ -435,4 +447,7 @@ def test_the_api_layer_and_settings_agree_on_accept_or_reject(label, changes, st
 def test_a_cloned_judge_is_refused_with_the_rule_that_names_it():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(_defs(judge_2={"role": "judge", "prompt": "p"}), stored={})
-    assert exc.value.errors["judge_2"] == "'judge_2': only the built-in judge may have role judge"
+    assert (
+        exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.judge_2"]
+        == "'judge_2': only the built-in judge may have role judge"
+    )

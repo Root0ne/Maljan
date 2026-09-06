@@ -66,6 +66,14 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     agent_names = container.analyst_keys()
 
     if not agent_names:
+        # CORE-2 (dev audit 2026-09-06): unreachable through a validated
+        # ``Settings``. ``AgentsConfig`` refuses an empty profile outright
+        # ("profile 'x' needs at least one analyst"), and the API refuses one
+        # before it is ever stored, so a profile that reaches here has at
+        # least one member by construction (``tests/unit/test_agents_config.py``
+        # pins that refusal). Kept as the backstop it is: a
+        # graph with no analyst nodes would build cleanly and then produce a
+        # verdict out of nothing, which is far worse to debug than this line.
         raise RuntimeError(
             f"Profile {container.config.agents.profile!r} has no analysts. Cannot build pipeline."
         )

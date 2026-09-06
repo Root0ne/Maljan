@@ -1,0 +1,93 @@
+{
+  "agent_stats": [
+    {
+      "agent_id": null,
+      "claim_count": null,
+      "domain": null,
+      "has_dissent": null,
+      "mean_confidence": null,
+      "revision_round": null,
+      "technique_ids": [
+        null
+      ]
+    }
+  ],
+  "cascade": {
+    "consensus_count": null,
+    "corroborated_count": null,
+    "dropped_by_platform": [],
+    "platform_filter_summary": {
+      "sample_platform": null,
+      "sigma_dropped": null,
+      "yara_dropped": null
+    },
+    "top_techniques": [
+      {
+        "confidence": null,
+        "label": null,
+        "layers": [
+          null
+        ],
+        "technique_id": null
+      }
+    ],
+    "total_techniques": null
+  },
+  "degradation_reasons": [],
+  "degraded_mode": null,
+  "elapsed_seconds": null,
+  "failed_analysts": [],
+  "file_hash": null,
+  "file_name": null,
+  "final_decision": null,
+  "negotiation": {
+    "confidence_history": [
+      null
+    ],
+    "converged_early": null,
+    "final_confidence": null,
+    "max_rounds": null,
+    "rounds_completed": null,
+    "sycophancy_events": null,
+    "termination_reason": null
+  },
+  "profile": {
+    "analysts": [
+      null
+    ],
+    "custom": [],
+    "name": null
+  },
+  "stix_object_count": null,
+  "techniques_by_layer": "<data-keyed map>",
+  "timestamp": null,
+  "tokens": {
+    "estimated_calls": null,
+    "input_tokens": null,
+    "llm_calls": null,
+    "output_tokens": null,
+    "total_tokens": null
+  },
+  "truncation": {
+    "any_bound_hit": null,
+    "integrity_dropped": "<data-keyed map>",
+    "integrity_invocations": null,
+    "integrity_objects_removed": null,
+    "judge_invocations": null,
+    "judge_token_cap_hits": null,
+    "react_invocations": null,
+    "react_step_cap_hits": null,
+    "tool_output_calls": null,
+    "tool_output_chars_dropped": null,
+    "tool_output_hard_truncated": null,
+    "tool_output_over_limit": null,
+    "tool_output_summarised": null
+  },
+  "validation": {
+    "hallucination_rate": null,
+    "invalid_ids": null,
+    "low_alignment": null,
+    "total_claims": null,
+    "valid_ids": null
+  }
+}

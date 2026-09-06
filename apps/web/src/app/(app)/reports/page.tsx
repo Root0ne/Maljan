@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ReportSummaryDTO } from "@/lib/api";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
-import { formatDateTime } from "@/lib/report-utils";
+import { countLabel, formatDateTime } from "@/lib/report-utils";
 
 interface ReportRow {
   id: string;
@@ -100,7 +100,7 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-lg font-semibold text-text-primary">Reports</h1>
           <p className="text-xs text-text-secondary mt-0.5">
-            {reports.length} analysis reports generated
+            {countLabel(reports.length, "analysis report")} generated
           </p>
         </div>
       </div>

@@ -10,6 +10,7 @@ if str(_API) not in sys.path:
 
 from app import observability  # noqa: E402
 from app.api.v1 import auth as auth_module  # noqa: E402
+from app.services import audit as audit_module  # noqa: E402
 
 
 class _BrokenFactory:
@@ -25,9 +26,9 @@ class _BrokenFactory:
 
 @pytest.mark.asyncio
 async def test_auth_audit_failure_is_an_error_and_is_counted(monkeypatch, caplog):
-    monkeypatch.setattr(auth_module, "async_session_factory", _BrokenFactory())
+    monkeypatch.setattr(audit_module, "async_session_factory", _BrokenFactory())
     before = observability.counters.audit_write_failures
-    with caplog.at_level(logging.ERROR, logger="maljan.api.auth"):
+    with caplog.at_level(logging.ERROR, logger="maljan.api.audit"):
         await auth_module._audit(None, None, "auth.login.success", request=None)
     assert observability.counters.audit_write_failures == before + 1
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]

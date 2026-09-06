@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable
 from contextlib import suppress
 from typing import Any
 
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import require_admin
+from app.logging_config import get_logger
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.settings import (
@@ -35,6 +37,8 @@ from app.services.server_map import SERVER_MAP_KEY
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
+
+logger = get_logger("api.settings")
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -203,6 +207,25 @@ def _server_map_env_lines(env_name: str, servers: dict[str, Any]) -> list[str]:
     return lines
 
 
+async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:
+    """One probe's answer, as a 200 whatever happens.
+
+    B1 (dev audit 2026-09-06): a connection test that fails is an answer, not
+    an error -- an operator staging a command that turns out not to be an MCP
+    server needs to read why, and a 500 (or a cancelled handler that sends
+    nothing at all, which is what this endpoint did) reaches the browser as a
+    bare connection failure with no CORS headers on it. ``in_probe_loop``
+    already converts everything the probe itself can end with; this is the
+    outer fence around the resolution work that happens before it.
+    """
+    try:
+        result = await coro
+    except (Exception, BaseExceptionGroup) as exc:  # noqa: BLE001 - reported, never raised
+        logger.warning("probe failed before it ran: %s", type(exc).__name__)
+        return ProbeResponse(ok=False, latency_ms=0, detail=f"{type(exc).__name__}: {exc}")
+    return ProbeResponse(**vars(result))
+
+
 @router.post("/test/mcp", response_model=ProbeResponse)
 async def test_mcp_server(
     body: ProbeRequest,
@@ -218,8 +241,7 @@ async def test_mcp_server(
     ``/test/{probe}`` so the fixed path wins the match.
     """
     stored = await SettingsService(db).load_overrides()
-    result = await run_mcp_probe(server, body.values, stored)
-    return ProbeResponse(**vars(result))
+    return await _probe_response(run_mcp_probe(server, body.values, stored))
 
 
 @router.post("/test/agent", response_model=ProbeResponse)
@@ -236,8 +258,7 @@ async def test_agent(
     this reports the model that *would* be used, never a completion.
     """
     stored = await SettingsService(db).load_overrides()
-    result = await run_agent_probe(name, body.values, stored)
-    return ProbeResponse(**vars(result))
+    return await _probe_response(run_agent_probe(name, body.values, stored))
 
 
 @router.post("/test/{probe}", response_model=ProbeResponse)
@@ -250,8 +271,7 @@ async def test_probe(
     if probe not in PROBES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
-    result = await run_probe(probe, body.values, stored)
-    return ProbeResponse(**vars(result))
+    return await _probe_response(run_probe(probe, body.values, stored))
 
 
 async def _capped_body(request: Request) -> dict[str, Any]:

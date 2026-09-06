@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { JobDTO } from "@/lib/api";
-import { formatDuration, timeAgo } from "@/lib/report-utils";
+import { countLabel, formatDuration, timeAgo } from "@/lib/report-utils";
 
 interface DisplayJob {
   id: string;
@@ -232,7 +232,7 @@ export default function JobsPage() {
         <div className="flex-1 bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Analysis Jobs &mdash; {filtered.length} results
+              Analysis Jobs &mdash; {countLabel(filtered.length, "result")}
             </h2>
             {toast && (
               <span className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-0.5">

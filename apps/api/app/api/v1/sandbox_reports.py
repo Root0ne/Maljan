@@ -23,7 +23,7 @@ import zlib
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from maljan.core.config import get_settings
 from maljan.providers.sandbox.formats import sniff_format
 from pydantic import SecretStr
@@ -38,6 +38,7 @@ from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
 from app.schemas.job import SandboxReportListResponse, SandboxReportResponse
+from app.services import audit
 
 logger = get_logger("api.sandbox_reports")
 
@@ -231,6 +232,7 @@ async def _persist(db: AsyncSession, row: SandboxReportRow) -> SandboxReportRow:
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_sandbox_report(
+    request: Request,
     sample_id: uuid.UUID,
     file: UploadFile,
     user: User = Depends(require_active_user),
@@ -282,6 +284,19 @@ async def upload_sandbox_report(
             sample.id,
             extra={"sample_id": str(sample.id), "component": "sandbox-report"},
         )
+    await audit.record(
+        "sandbox_report.upload",
+        resource_type="sandbox_report",
+        resource_id=str(row.id),
+        user_id=user.id,
+        details={
+            "sample_id": str(sample.id),
+            "format": row.format,
+            "size_bytes": row.size_bytes,
+            "sample_sha256_match": matches,
+        },
+        request=request,
+    )
     return SandboxReportResponse(
         id=row.id,
         format=row.format,
@@ -328,6 +343,7 @@ async def list_sandbox_reports(
 
 @router.delete("/{sample_id}/sandbox-reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sandbox_report(
+    request: Request,
     sample_id: uuid.UUID,
     report_id: uuid.UUID,
     user: User = Depends(require_active_user),
@@ -348,3 +364,11 @@ async def delete_sandbox_report(
     except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
         logger.warning("Could not remove %s from storage: %s", row.storage_path, exc)
     await db.execute(delete(SandboxReportRow).where(SandboxReportRow.id == row.id))
+    await audit.record(
+        "sandbox_report.delete",
+        resource_type="sandbox_report",
+        resource_id=str(report_id),
+        user_id=user.id,
+        details={"sample_id": str(sample.id), "format": row.format},
+        request=request,
+    )

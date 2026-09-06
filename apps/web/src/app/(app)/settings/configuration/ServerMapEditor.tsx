@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
+import { mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -11,7 +12,6 @@ const input =
 /** Built-ins are re-seeded by the settings model, so they disable rather than delete. */
 const BUILTIN = new Set(["network", "threatintel"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
-const SLUG = /^[a-z][a-z0-9_-]{0,31}$/;
 /** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Two of these
  *  (`network`, `threatintel`) are also pre-populated built-ins and never reach
  *  `add()`; `ghidra` and `cape` are reserved but not pre-populated, so without
@@ -81,21 +81,35 @@ export default function ServerMapEditor({
    *  accident and cannot be read back by looking at the form. */
   const [editingToken, setEditingToken] = useState<Record<string, boolean>>({});
 
-  const put = (key: string, next: Partial<McpServerEntry>) =>
-    onChange({ ...value, [key]: { ...value[key], ...next } });
+  /* B6 (dev audit 2026-09-06): a probe result describes the server as it was
+   * configured when the button was pressed. Editing what the probe dialled —
+   * the transport and its connection fields — leaves the green "3 tools: …"
+   * line describing a server that no longer exists, so the result is dropped
+   * with the edit. The allow-list, the agent bindings, the label and the
+   * enabled switch do not change what a probe would reach, and the tool tick
+   * boxes are rendered from the probe's own manifest, so they must not clear
+   * it. */
+  const PROBE_INPUTS = new Set<keyof McpServerEntry>([
+    "transport", "command", "args", "cwd", "env", "env_allow", "url", "auth_token",
+  ]);
+
+  const put = (key: string, next: Partial<McpServerEntry>) => {
+    if (Object.keys(next).some((k) => PROBE_INPUTS.has(k as keyof McpServerEntry))) {
+      setProbes((p) => {
+        if (!(key in p)) return p;
+        const n = { ...p };
+        delete n[key];
+        return n;
+      });
+    }
+    onChange(putEntry(value, key, next));
+  };
 
   const add = () => {
     const key = newKey.trim();
-    if (!SLUG.test(key)) {
-      setKeyError("lowercase, starts with a letter, at most 32 of a-z 0-9 - _");
-      return;
-    }
-    if (key in value) {
-      setKeyError("a server with that name already exists");
-      return;
-    }
-    if (RESERVED_SERVER_KEYS.has(key)) {
-      setKeyError(`'${key}' is reserved for a provider-owned server.`);
+    const problem = mapKeyError(key, value, "server", RESERVED_SERVER_KEYS);
+    if (problem) {
+      setKeyError(problem);
       return;
     }
     setKeyError(null);
@@ -108,9 +122,7 @@ export default function ServerMapEditor({
       put(key, { enabled: false });
       return;
     }
-    const next = { ...value };
-    delete next[key];
-    onChange(next);
+    onChange(removeEntry(value, key));
   };
 
   const probe = async (key: string) => {
@@ -300,6 +312,38 @@ export default function ServerMapEditor({
                   </div>
                 </>
               )}
+            </div>
+
+            {/* WEB-2 (dev audit 2026-09-06): both of these are on every server
+                the editor creates, both are read by the providers that drive a
+                server (`providers/static/generic_mcp.py`, `ghidra.py`), and
+                neither had a control anywhere on this screen — a new server
+                kept whatever the default happened to be with no way to change
+                it. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
+              <label className="block">
+                <span className="text-text-muted">Tool selection</span>
+                <select
+                  className={input}
+                  aria-label={`${key} tool selection`}
+                  disabled={server.use_all_tools}
+                  value={server.tool_selection}
+                  onChange={(e) => put(key, { tool_selection: e.target.value })}
+                >
+                  {["curated", "dynamic", "all"].map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-text-secondary flex items-center gap-1 self-end pb-1.5">
+                <input
+                  type="checkbox"
+                  aria-label={`${key} force all tools`}
+                  checked={server.use_all_tools}
+                  onChange={(e) => put(key, { use_all_tools: e.target.checked })}
+                />
+                force every tool, whatever the selection says
+              </label>
             </div>
 
             <fieldset className="mt-2">

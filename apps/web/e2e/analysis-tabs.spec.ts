@@ -1,5 +1,5 @@
 import { alerts, test, expect } from "./fixtures";
-import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
+import { COMPLETED_JOB, JOB_ID, REPORT, REPORT_ID } from "./report-fixture";
 
 /**
  * Every analysis tab, loaded once against one complete report.
@@ -149,6 +149,126 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("T1055", { exact: true })).toBeVisible();
   });
 
+  /* C4 (dev audit 2026-09-06): the IOC, ATT&CK and timeline endpoints all
+   * worked and no button anywhere opened them, so the only route to an IOC
+   * list was the markdown report or a hand-written API call. */
+  test("the export row offers the IOC, ATT&CK and timeline endpoints", async ({
+    sessionPage: page,
+  }) => {
+    const asked: string[] = [];
+    page.on("request", (r) => {
+      const path = new URL(r.url()).pathname;
+      if (/\/reports\/[^/]+\/(iocs|mitre|timeline)$/.test(path)) asked.push(path);
+    });
+
+    await page.goto(`/analysis/${JOB_ID}`);
+
+    await page.getByRole("button", { name: "IOC list" }).click();
+    await page.getByRole("button", { name: "MITRE ATT&CK" }).click();
+    await page.getByRole("button", { name: "Timeline" }).click();
+
+    await expect
+      .poll(() => asked.length)
+      .toBeGreaterThanOrEqual(3);
+    expect(asked).toContain(`/api/v1/reports/${REPORT_ID}/iocs`);
+    expect(asked).toContain(`/api/v1/reports/${REPORT_ID}/mitre`);
+    expect(asked).toContain(`/api/v1/reports/${REPORT_ID}/timeline`);
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
+  /* C3 (dev audit 2026-09-06): nothing on the page said which analyst line-up
+   * produced the report, so a narrow profile read as a full run — the
+   * deterministic static layers appear either way. */
+  test("a non-default profile is named in the header, with its analysts", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          run_summary: {
+            ...REPORT.run_summary,
+            profile: { name: "lean", analysts: ["network"], custom: [] },
+          },
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}`);
+    const badge = page.getByText("Profile: lean");
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveAttribute("title", "Analysts: network");
+  });
+
+  test("the default profile and an old report show no profile badge", async ({
+    sessionPage: page,
+  }) => {
+    // The fixture's run_summary predates profiles entirely: no key at all.
+    await page.goto(`/analysis/${JOB_ID}`);
+    await expect(page.getByText(/^Profile:/)).toHaveCount(0);
+
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          run_summary: {
+            ...REPORT.run_summary,
+            profile: { name: "default", analysts: ["static", "dynamic", "network"], custom: [] },
+          },
+        }),
+      })
+    );
+    await page.goto(`/analysis/${JOB_ID}`);
+    await expect(page.getByText(/^Profile:/)).toHaveCount(0);
+  });
+
+  /* C2 (dev audit 2026-09-06): with no sandbox report this tab showed the
+   * "not detonated" notice and nothing else, even on runs where the dynamic
+   * analyst executed and reached a stated conclusion — a run that worked
+   * looked exactly like one that never started. */
+  test("/dynamic shows the analyst's claims alongside the sandbox notice", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          malware_report: { ...REPORT.malware_report, dynamic: null },
+          agent_findings: REPORT.agent_findings.map((f) =>
+            f.agent_name === "dynamic"
+              ? {
+                  ...f,
+                  status: "complete",
+                  claims: [
+                    {
+                      claim: "The sample very likely detected the sandbox and exited early.",
+                      evidence_ref: "no process activity recorded",
+                      confidence: 0.6,
+                    },
+                  ],
+                }
+              : f
+          ),
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/dynamic`);
+
+    await expect(page.getByText(/may not have been detonated/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Analyst findings" })).toBeVisible();
+    await expect(
+      page.getByText("The sample very likely detected the sandbox and exited early.")
+    ).toBeVisible();
+    await expect(page.getByText("no process activity recorded")).toBeVisible();
+  });
+
   test("/live renders the running view", async ({ sessionPage: page }) => {
     /* Not in the table above because it is the one tab that needs the opposite
      * job state: on a completed run it deliberately says there is nothing live
@@ -220,4 +340,61 @@ test.describe("Analysis tabs", () => {
       });
     });
   }
+});
+
+/**
+ * A1 (dev audit 2026-09-06): a job id that does not exist.
+ *
+ * The API answers a clean 404 and the page used to call that an outage — "Could
+ * not connect to the API. Please ensure the backend is running." — under a
+ * header reading "Pending analysis", while the socket kept retrying a job the
+ * REST call had already said does not exist. The socket is left unrouted here
+ * (`webSocket: null`) precisely so an attempt to open one would show up as a
+ * `websocket` event rather than being absorbed by the default handler.
+ */
+test.describe("Analysis page for an unknown job", () => {
+  test.use({ mockOptions: { webSocket: null } });
+
+  const MISSING = "00000000-0000-0000-0000-0000000000ff";
+
+  test("a 404 shows a job-not-found state, no live socket and no pending header", async ({
+    sessionPage: page,
+  }) => {
+    // `next dev` opens its own HMR socket on every page; only the analysis
+    // socket is this test's business.
+    const sockets: string[] = [];
+    page.on("websocket", (ws) => {
+      if (ws.url().includes("/ws/analysis/")) sockets.push(ws.url());
+    });
+
+    await page.route(`**/api/v1/jobs/${MISSING}`, (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Job not found" }),
+      })
+    );
+
+    await page.goto(`/analysis/${MISSING}`);
+
+    await expect(page.getByRole("heading", { name: "Job not found" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /back to jobs/i })).toBeVisible();
+    await expect(page.getByText(/Could not connect to the API/)).toHaveCount(0);
+    await expect(page.getByText("Pending analysis")).toHaveCount(0);
+    await expect(page.getByText(/Analysis in progress/)).toHaveCount(0);
+    expect(sockets).toEqual([]);
+  });
+
+  test("a network failure still shows the connectivity banner", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/jobs/${MISSING}`, (route) =>
+      route.abort("connectionrefused")
+    );
+
+    await page.goto(`/analysis/${MISSING}`);
+
+    await expect(page.getByText(/Could not connect to the API/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Job not found" })).toHaveCount(0);
+  });
 });

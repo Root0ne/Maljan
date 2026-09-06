@@ -117,3 +117,19 @@ export function truncateMiddle(value: string, max = 32): string {
   const tail = Math.floor((max - 1) / 2);
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
 }
+
+/**
+ * "1 result", "2 results" — a count and its noun, agreeing.
+ *
+ * A4 (dev audit 2026-09-06): every list header hard-coded the plural, so a
+ * filter that matched one job announced "1 RESULTS". The irregular plurals
+ * ("entry" -> "entries") are why the plural form is a parameter rather than an
+ * appended "s".
+ */
+export function countLabel(
+  count: number,
+  singular: string,
+  plural = `${singular}s`,
+): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
