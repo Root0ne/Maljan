@@ -21,7 +21,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import observability
 from app.auth.jwt import create_access_token, create_refresh_token, decode_token
 from app.auth.password import hash_password, verify_password
 from app.auth.throttle import (
@@ -33,10 +32,9 @@ from app.auth.throttle import (
     throttle_state,
 )
 from app.config import settings
-from app.database import async_session_factory, get_db
+from app.database import get_db
 from app.deps import get_current_user
 from app.logging_config import get_logger
-from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.auth import (
     TokenResponse,
@@ -45,6 +43,7 @@ from app.schemas.auth import (
     UserResponse,
     UserUpdateRequest,
 )
+from app.services import audit
 
 logger = get_logger("api.auth")
 
@@ -105,29 +104,21 @@ async def _audit(
     ``login.locked``, ``login.blocked_inactive``, ``refresh.invalid`` and
     ``refresh.reuse_detected`` (a token-theft indicator).
 
-    Writing on a separate session decouples the audit record from the request
-    transaction's fate, so it survives the rollback. Best-effort by design: an
-    audit failure must never turn a handled 401 into a 500, so every error is
-    logged at ERROR and counted for operator visibility. ``db`` is kept in the
-    signature for call-site compatibility and is deliberately unused.
+    Dev audit 2026-09-06 (A2): the independent-session write itself moved to
+    ``services.audit.record``, which the sample, job and sandbox-report
+    endpoints now share. What stays here is this endpoint's own shape of a
+    row. ``db`` is kept in the signature for call-site compatibility and is
+    deliberately unused.
     """
     del db  # audit rows must not share the request transaction (see docstring)
-    try:
-        async with async_session_factory() as audit_session:
-            audit_session.add(
-                AuditLog(
-                    user_id=user_id,
-                    action=action,
-                    resource_type="auth",
-                    resource_id=str(user_id) if user_id else None,
-                    details={"detail": detail} if detail else None,
-                    ip_address=_client_ip(request) or None,
-                )
-            )
-            await audit_session.commit()
-    except Exception as exc:  # noqa: BLE001 - audit is best effort, but never silent
-        observability.counters.audit_write_failures += 1
-        logger.error("Audit write failed (action=%s): %s", action, type(exc).__name__)
+    await audit.record(
+        action,
+        resource_type="auth",
+        resource_id=str(user_id) if user_id else None,
+        user_id=user_id,
+        details={"detail": detail} if detail else None,
+        request=request,
+    )
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

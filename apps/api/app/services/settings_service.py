@@ -21,11 +21,9 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import observability
 from app.config import APISettings
 from app.config import settings as api_settings
-from app.database import async_session_factory
-from app.models import AuditLog, RuntimeSetting
+from app.models import RuntimeSetting
 from app.services.server_map import (
     SERVER_MAP_KEY,
     TOKEN_MASK,
@@ -419,23 +417,14 @@ class SettingsService:
 async def _audit(
     user_id: uuid.UUID | None, action: str, details: dict[str, Any], ip: str | None
 ) -> None:
-    """Independent transaction, same reasoning as auth._audit; best effort."""
-    try:
-        async with async_session_factory() as s:
-            s.add(
-                AuditLog(
-                    user_id=user_id,
-                    action=action,
-                    resource_type="settings",
-                    resource_id=None,
-                    details=details,
-                    ip_address=ip or None,
-                )
-            )
-            await s.commit()
-    except Exception as exc:  # noqa: BLE001 - audit is best effort, but never silent
-        observability.counters.audit_write_failures += 1
-        logger.error("Audit write failed (action=%s): %s", action, type(exc).__name__)
+    """Independent transaction, same reasoning as auth._audit; best effort.
+
+    Dev audit 2026-09-06 (A2): the write itself is ``services.audit.record``,
+    shared with auth and with the sample, job and sandbox-report endpoints.
+    """
+    from app.services import audit
+
+    await audit.record(action, resource_type="settings", user_id=user_id, details=details, ip=ip)
 
 
 async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:

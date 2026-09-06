@@ -35,6 +35,7 @@ from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
+from app.services import audit
 
 logger = get_logger("api.samples")
 
@@ -378,6 +379,18 @@ async def upload_sample(
         logger.info(
             "Sample created: id=%s filename=%s", sample_row.id, sample_row.original_filename
         )
+        await audit.record(
+            "sample.upload",
+            resource_type="sample",
+            resource_id=str(sample_row.id),
+            user_id=user.id,
+            details={
+                "filename": sample_row.original_filename,
+                "sha256": sample_row.sha256,
+                "size_bytes": sample_row.file_size_bytes,
+            },
+            request=request,
+        )
         return sample_row
     finally:
         try:
@@ -435,6 +448,7 @@ async def get_sample(
 
 @router.delete("/{sample_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sample(
+    request: Request,
     sample_id: uuid.UUID,
     user: User = Depends(require_active_user),
     db: AsyncSession = Depends(get_db),
@@ -535,6 +549,14 @@ async def delete_sample(
         sample_id,
         sha256[:16],
         extra={"user_id": str(user.id), "sample_id": str(sample_id)},
+    )
+    await audit.record(
+        "sample.delete",
+        resource_type="sample",
+        resource_id=str(sample_id),
+        user_id=user.id,
+        details={"sha256": sha256, "reports_removed": len(sandbox_report_paths)},
+        request=request,
     )
 
 
