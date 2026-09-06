@@ -3,8 +3,91 @@
 import { useState } from "react";
 
 import { useReport } from "../layout";
+import type { AgentFindingDTO } from "@/lib/api";
 import type { ProcessNode } from "@/types/malware-report";
+import { confidenceClass } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
+
+/** One claim of an analyst's final ISR, as the pipeline records it. */
+interface AnalystClaim {
+  claim?: string;
+  description?: string;
+  confidence?: number;
+  evidence_ref?: string | string[];
+}
+
+/**
+ * What the dynamic analyst concluded, whether or not the sandbox produced
+ * anything.
+ *
+ * C2 (dev audit 2026-09-06): this tab rendered the "not detonated" notice and
+ * nothing else whenever the sandbox report was empty — including on runs where
+ * the dynamic analyst did execute and reasoned its way to a stated position
+ * (sandbox evasion, say). That reasoning was in the API's `agent_findings` all
+ * along and only the transcript ever showed it, so a run where the analyst
+ * worked looked exactly like one where it never started.
+ */
+function dynamicClaims(findings: AgentFindingDTO[] | undefined): {
+  agent: string;
+  claims: AnalystClaim[];
+}[] {
+  return (findings ?? [])
+    .filter(
+      (f) =>
+        f.domain?.toLowerCase() === "dynamic" ||
+        f.agent_name?.toLowerCase().includes("dynamic")
+    )
+    .map((f) => ({ agent: f.agent_name, claims: (f.claims ?? []) as AnalystClaim[] }))
+    .filter((f) => f.claims.length > 0);
+}
+
+function AnalystFindings({ findings }: { findings: ReturnType<typeof dynamicClaims> }) {
+  return (
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          Analyst findings
+        </h2>
+      </div>
+      <div className="p-4 space-y-3">
+        {findings.map((f) => (
+          <div key={f.agent}>
+            <p className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              {f.agent}
+            </p>
+            <ul className="space-y-2">
+              {f.claims.map((c, i) => {
+                const conf =
+                  typeof c.confidence === "number" ? Math.round(c.confidence * 100) : null;
+                const evidence = Array.isArray(c.evidence_ref)
+                  ? c.evidence_ref.join(", ")
+                  : c.evidence_ref;
+                return (
+                  <li key={i} className="border border-border-light rounded p-3">
+                    <p className="text-sm text-text-primary leading-relaxed">
+                      {c.claim || c.description || "(no text)"}
+                    </p>
+                    <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-text-muted">
+                      {conf !== null && (
+                        <span className={`font-mono ${confidenceClass(conf)}`}>{conf}%</span>
+                      )}
+                      {evidence && (
+                        <span>
+                          <span className="text-text-secondary">Evidence: </span>
+                          {evidence}
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function DynamicTab() {
   const { report, loading } = useReport();
@@ -13,11 +96,15 @@ export default function DynamicTab() {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
+  const analystFindings = dynamicClaims(report?.agent_findings);
   const dyn = report?.malware_report?.dynamic;
   if (!dyn) {
     return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        No dynamic-analysis data available — the sample may not have been detonated.
+      <div className="space-y-4">
+        <div className="p-8 text-center text-sm text-text-secondary">
+          No dynamic-analysis data available — the sample may not have been detonated.
+        </div>
+        {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
       </div>
     );
   }
@@ -39,6 +126,8 @@ export default function DynamicTab() {
 
   return (
     <div className="space-y-4">
+      {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
+
       {dyn.unavailable && dyn.unavailable.length > 0 && (
         <div className="text-xs text-text-muted border border-border rounded px-4 py-3 bg-bg-surface">
           Not provided by this sandbox: {dyn.unavailable.join(", ")}.

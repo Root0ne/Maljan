@@ -149,6 +149,49 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("T1055", { exact: true })).toBeVisible();
   });
 
+  /* C2 (dev audit 2026-09-06): with no sandbox report this tab showed the
+   * "not detonated" notice and nothing else, even on runs where the dynamic
+   * analyst executed and reached a stated conclusion — a run that worked
+   * looked exactly like one that never started. */
+  test("/dynamic shows the analyst's claims alongside the sandbox notice", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          malware_report: { ...REPORT.malware_report, dynamic: null },
+          agent_findings: REPORT.agent_findings.map((f) =>
+            f.agent_name === "dynamic"
+              ? {
+                  ...f,
+                  status: "complete",
+                  claims: [
+                    {
+                      claim: "The sample very likely detected the sandbox and exited early.",
+                      evidence_ref: "no process activity recorded",
+                      confidence: 0.6,
+                    },
+                  ],
+                }
+              : f
+          ),
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/dynamic`);
+
+    await expect(page.getByText(/may not have been detonated/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Analyst findings" })).toBeVisible();
+    await expect(
+      page.getByText("The sample very likely detected the sandbox and exited early.")
+    ).toBeVisible();
+    await expect(page.getByText("no process activity recorded")).toBeVisible();
+  });
+
   test("/live renders the running view", async ({ sessionPage: page }) => {
     /* Not in the table above because it is the one tab that needs the opposite
      * job state: on a completed run it deliberately says there is nothing live
