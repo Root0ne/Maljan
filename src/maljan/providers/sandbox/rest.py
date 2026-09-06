@@ -17,6 +17,7 @@ to what remains of the budget, and the interval backs off 1.5x to 60 s.
 
 from __future__ import annotations
 
+import json
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -28,6 +29,7 @@ from maljan.core.logger import logger
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
+from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
 from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
 from maljan.providers.sandbox.triage import (
     _BACKOFF_FACTOR,
@@ -253,11 +255,21 @@ class RestSandboxProvider(SandboxProvider):
             triage_overview_to_sandbox_report,
         )
 
-        response = self._get_http().get(
-            _fill_task_id(self._cfg.report.path, _safe_path_component(str(task_id)))
-        )
-        self._raise_for_status(response, "report fetch")
-        payload = response.json()
+        # Streamed rather than fetched whole (CORE-1): a report is the one
+        # body a sandbox legitimately sends by the hundreds of megabytes, and
+        # this is the only place the size of the answer is the remote end's
+        # choice alone.
+        with self._get_http().stream(
+            "GET", _fill_task_id(self._cfg.report.path, _safe_path_component(str(task_id)))
+        ) as response:
+            if response.status_code >= 400:
+                response.read()
+                self._raise_for_status(response, "report fetch")
+            body = read_capped(response, what="The sandbox report")
+        try:
+            payload = json.loads(body)
+        except ValueError as exc:
+            raise ProviderError("Sandbox report is not valid JSON.") from exc
         if not isinstance(payload, dict):
             raise ProviderError("Sandbox report is not a JSON object.")
 
@@ -296,9 +308,9 @@ class RestSandboxProvider(SandboxProvider):
             with self._get_http().stream("GET", url) as response:
                 if response.status_code >= 400:
                     return None
-                with open(out, "wb") as fh:
-                    for chunk in response.iter_bytes(65536):
-                        fh.write(chunk)
+                # CORE-1: a capture past the cap degrades this call the way
+                # every other pcap failure does, rather than filling the disk.
+                stream_to_file_capped(response, out, what="The sandbox capture")
         except Exception:  # noqa: BLE001 — never a hard failure, as for every sandbox
             return None
         # libpcap/pcapng global header is 24 bytes; anything smaller is empty.

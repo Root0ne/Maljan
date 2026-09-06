@@ -75,6 +75,7 @@ from maljan.core.logger import logger
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
+from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
 from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
 if TYPE_CHECKING:
@@ -313,25 +314,60 @@ class TriageSandboxProvider(SandboxProvider):
                 names.append(name)
         return names
 
+    def _json_capped(
+        self,
+        http: httpx.Client,
+        url: str,
+        headers: dict[str, str],
+        operation: str,
+        *,
+        skip_errors: bool = False,
+    ) -> Any:
+        """One JSON body, streamed and refused past the cap (CORE-1).
+
+        ``skip_errors`` is for the bodies a run can do without: a behavioural
+        task that never reached "reported" answers 4xx, and the overview alone
+        still yields a usable, if thinner, report.
+        """
+        with http.stream("GET", url, headers=headers) as response:
+            if response.status_code >= 400:
+                if skip_errors:
+                    return None
+                response.read()
+                self._raise_for_status(response, operation)
+            body = read_capped(response, what=f"The Triage {operation.split()[0]} body")
+        try:
+            return json.loads(body)
+        except ValueError as exc:
+            raise ProviderError(f"Triage {operation} did not return valid JSON.") from exc
+
     def fetch(self, task_id: str) -> SandboxRun:
         from maljan.schemas.sandbox_report import SandboxRun
 
         headers = self._auth_headers()
         http = self._get_http()
-        overview_response = http.get(OVERVIEW_PATH.format(sample_id=task_id), headers=headers)
-        self._raise_for_status(overview_response, "overview fetch")
-        overview = overview_response.json()
+        # Streamed and capped rather than fetched whole (CORE-1): an overview
+        # and its behavioural reports are the bodies Triage legitimately sends
+        # by the hundreds of megabytes, and their size is the remote end's
+        # choice alone.
+        overview = self._json_capped(
+            http, OVERVIEW_PATH.format(sample_id=task_id), headers, "overview fetch"
+        )
 
         task_reports: dict[str, dict[str, Any]] = {}
         for name in self._behavioral_task_names(overview):
-            response = http.get(
-                TASK_REPORT_PATH.format(sample_id=task_id, task=name), headers=headers
-            )
-            if response.status_code >= 400:
+            report = self._json_capped(
+                http,
+                TASK_REPORT_PATH.format(sample_id=task_id, task=name),
+                headers,
+                "task report fetch",
                 # A task that never reached "reported" has no report yet; the
                 # overview alone still yields a usable, if thinner, report.
+                skip_errors=True,
+            )
+            if report is None:
                 continue
-            task_reports[name] = response.json()
+            task_reports[name] = report
 
         report = triage_overview_to_sandbox_report(
             overview, provider="triage", task_reports=task_reports, task_id=str(task_id)
@@ -374,9 +410,9 @@ class TriageSandboxProvider(SandboxProvider):
             with http.stream("GET", url, headers=headers) as response:
                 if response.status_code >= 400:
                     return None
-                with open(out, "wb") as f:
-                    for chunk in response.iter_bytes(65536):
-                        f.write(chunk)
+                # CORE-1: a capture past the cap degrades this call the way
+                # every other pcap failure does, rather than filling the disk.
+                stream_to_file_capped(response, out, what="The Triage capture")
         except Exception:
             # Never a hard failure: the network analyst falls back to the
             # structured ``network`` block alone, exactly as CAPEv2Client's
