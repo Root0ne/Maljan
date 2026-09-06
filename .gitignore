@@ -34,8 +34,10 @@ apps/web/playwright-report/
 
 # ── Real malware ───────────────────────────────────────────────────────
 # Any directory named samples/, which is the worker's mirror of MinIO-downloaded
-# binaries and the live-malware dataset copies beneath it. The fixtures under
-# data/samples/{dynamic,network,static}/ are already tracked and stay tracked.
+# binaries and the live-malware dataset copies beneath it. The three
+# data/samples/{dynamic,network,static}/sample_1.json fixtures were added to
+# git before this rule and stay tracked; a new fixture under data/samples/
+# needs `git add -f`, this rule will not let it in on its own.
 samples/
 # ...but not the web app's own samples route, which is source, not a payload drop.
 !apps/web/src/app/(app)/samples/
