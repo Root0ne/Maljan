@@ -165,11 +165,6 @@ services:
       MINIO_ENDPOINT: minio:9000
       # Old name: MCP__GHIDRA__URL
       STATIC__GHIDRA__URL: http://ghidra-mcp:8089
-      # F1 (2026-07-05): make the ``maljan`` core package importable from the
-      # API process (the on-demand markdown re-render imports it). The worker
-      # inserts ``src`` into sys.path at runtime; the API had no such path, so
-      # /reports/{id}/markdown 500'd with ModuleNotFoundError: No module 'maljan'.
-      PYTHONPATH: /app/apps/api:/app/src
       # llama-server on Windows host reachable via host.docker.internal
       LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
       LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
@@ -259,9 +254,6 @@ services:
       # run. Measured far faster + less hallucination than "all". Options:
       # curated | dynamic | all. Old name: MCP__GHIDRA__TOOL_SELECTION.
       STATIC__GHIDRA__TOOL_SELECTION: "dynamic"
-      # F1 (2026-07-05): make ``maljan`` importable (parity with API); the
-      # worker also inserts src at runtime, this makes it explicit/robust.
-      PYTHONPATH: /app/apps/api:/app/src
       LLM__OPENAI__BASE_URL: ${LLM_OPENAI_BASE_URL:-http://host.docker.internal:8080/v1}
       LLM__OPENAI__API_KEY: ${LLM_OPENAI_API_KEY:-dummy_key_no_auth_needed}
       LLM__OLLAMA__BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}

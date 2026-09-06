@@ -34,7 +34,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --all-packages
 
       - name: Evaluation artefacts are untouched
         if: github.ref != 'refs/heads/main'
@@ -110,7 +110,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --all-packages
 
       - name: Run test suite
         run: uv run pytest tests/ -q --tb=short
@@ -154,7 +154,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --all-packages
 
       - name: Run Qdrant live tests
         env:

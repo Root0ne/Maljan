@@ -51,7 +51,7 @@ check: lint format-check typecheck test
 ci-check: lint format-check test
 
 setup:
-	uv sync
+	uv sync --all-extras --all-packages
 	uv run pre-commit install
 	bash scripts/fetch_external.sh
 
@@ -65,13 +65,13 @@ pre-commit-run:
 	uv run pre-commit run --all-files
 
 benchmark:
-	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite
+	uv run python -m tests.evaluation.benchmark_suite
 
 prepare-tram:
 	uv run python scripts/prepare_tram_dataset.py
 
 benchmark-tram:
-	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
+	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
 
 prepare-attck:
 	uv run python scripts/prepare_attck_malware_fixtures.py
@@ -84,7 +84,7 @@ prepare-api-db:
 	uv run python scripts/build_api_capability_db.py
 
 benchmark-attck:
-	PYTHONPATH=src uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
+	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
 
 # ── Docker Orchestration ───────────────────────────────────────────
 
