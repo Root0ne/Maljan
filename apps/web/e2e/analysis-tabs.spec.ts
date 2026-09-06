@@ -221,3 +221,60 @@ test.describe("Analysis tabs", () => {
     });
   }
 });
+
+/**
+ * A1 (dev audit 2026-09-06): a job id that does not exist.
+ *
+ * The API answers a clean 404 and the page used to call that an outage — "Could
+ * not connect to the API. Please ensure the backend is running." — under a
+ * header reading "Pending analysis", while the socket kept retrying a job the
+ * REST call had already said does not exist. The socket is left unrouted here
+ * (`webSocket: null`) precisely so an attempt to open one would show up as a
+ * `websocket` event rather than being absorbed by the default handler.
+ */
+test.describe("Analysis page for an unknown job", () => {
+  test.use({ mockOptions: { webSocket: null } });
+
+  const MISSING = "00000000-0000-0000-0000-0000000000ff";
+
+  test("a 404 shows a job-not-found state, no live socket and no pending header", async ({
+    sessionPage: page,
+  }) => {
+    // `next dev` opens its own HMR socket on every page; only the analysis
+    // socket is this test's business.
+    const sockets: string[] = [];
+    page.on("websocket", (ws) => {
+      if (ws.url().includes("/ws/analysis/")) sockets.push(ws.url());
+    });
+
+    await page.route(`**/api/v1/jobs/${MISSING}`, (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Job not found" }),
+      })
+    );
+
+    await page.goto(`/analysis/${MISSING}`);
+
+    await expect(page.getByRole("heading", { name: "Job not found" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /back to jobs/i })).toBeVisible();
+    await expect(page.getByText(/Could not connect to the API/)).toHaveCount(0);
+    await expect(page.getByText("Pending analysis")).toHaveCount(0);
+    await expect(page.getByText(/Analysis in progress/)).toHaveCount(0);
+    expect(sockets).toEqual([]);
+  });
+
+  test("a network failure still shows the connectivity banner", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/jobs/${MISSING}`, (route) =>
+      route.abort("connectionrefused")
+    );
+
+    await page.goto(`/analysis/${MISSING}`);
+
+    await expect(page.getByText(/Could not connect to the API/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Job not found" })).toHaveCount(0);
+  });
+});

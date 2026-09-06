@@ -4,6 +4,7 @@ import type {
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
+import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
   MappingPreview,
@@ -282,12 +283,12 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
 
     if (res.status === 204) return {} as T;
@@ -315,12 +316,12 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
 
     return res.text();
@@ -345,14 +346,14 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       // The error body is JSON even though the success body is not, so it has
       // to be read as JSON here rather than reusing the blob.
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
 
     return res.blob();
@@ -378,12 +379,12 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Upload failed: ${res.status}`);
+      throw new ApiError(body.detail || `Upload failed: ${res.status}`, res.status);
     }
     return res.json();
   }
@@ -481,7 +482,7 @@ class ApiClient {
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
     return res.json();
   }
