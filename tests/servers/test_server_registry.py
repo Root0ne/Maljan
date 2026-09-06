@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.core.config import MCPServerConfig, Settings
+from maljan.core.config import MCPServerConfig, Settings, ToolRef
 from maljan.providers.errors import ProviderConfigurationError
 from maljan.providers.servers import ServerHandle, ServerRegistry
 
@@ -278,6 +278,47 @@ def test_an_allow_listed_name_the_server_does_not_offer_logs_one_warning(patched
     matches = [r for r in warnings if "nope" in r.getMessage() and "also-missing" in r.getMessage()]
     assert len(matches) == 1, f"expected exactly one warning naming the misses, got {warnings}"
     assert "x" in matches[0].getMessage()
+
+
+# ---------------------------------------------------------------------------
+# ``tools_for_ref`` matches a manifest name, not a prefixed one. Collision
+# prefixing (``<server>__<tool>``) happens later, when ``merge_tools`` folds
+# the picked tools into an agent's combined set — the manifest ``handle.tools()``
+# returns here is always raw, so a reference can only ever be resolved by its
+# own name.
+# ---------------------------------------------------------------------------
+
+
+def test_a_reference_to_a_raw_manifest_name_resolves(patched):
+    cfg = Settings(_env_file=None)
+    cfg.mcp.servers["network"].agents = ["network"]
+    registry = ServerRegistry(cfg)
+    ref = ToolRef(kind="mcp", server="network", name="alpha")
+    tools, reasons = registry.tools_for_ref(ref, "job-1")
+    assert reasons == []
+    assert [t.name for t in tools] == ["alpha"]
+
+
+def test_a_prefixed_name_in_a_reference_does_not_match_a_raw_manifest_entry(patched):
+    cfg = Settings(_env_file=None)
+    cfg.mcp.servers["network"].agents = ["network"]
+    registry = ServerRegistry(cfg)
+    ref = ToolRef(kind="mcp", server="network", name="network__alpha")
+    tools, reasons = registry.tools_for_ref(ref, "job-1")
+    assert tools == []
+    assert reasons == ["agent tool 'network.network__alpha' unavailable"]
+
+
+def test_a_reference_matches_a_manifest_name_that_is_genuinely_prefixed(patched):
+    factory, _ = patched
+    factory.names = ["network__alpha"]
+    cfg = Settings(_env_file=None)
+    cfg.mcp.servers["network"].agents = ["network"]
+    registry = ServerRegistry(cfg)
+    ref = ToolRef(kind="mcp", server="network", name="network__alpha")
+    tools, reasons = registry.tools_for_ref(ref, "job-1")
+    assert reasons == []
+    assert [t.name for t in tools] == ["network__alpha"]
 
 
 def test_a_relative_cwd_inside_the_repository_resolves(tmp_path, monkeypatch):

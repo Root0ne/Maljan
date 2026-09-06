@@ -402,20 +402,24 @@ class TestACrossLoopCloseIsRoutedBack:
         # Waited for rather than assumed: under a loaded machine the thread can
         # take seconds to reach `run_forever`, and a budget measured from
         # before that is measuring the scheduler, not the close.
-        assert running.wait(60), "the owner loop never started"
+        assert running.wait(120), "the owner loop never started"
         toolkit = _OwnerLoopBound()
         handle = _handle_with(toolkit)
 
         try:
             # The mediator's shape: the whole attach runs on the other loop.
-            asyncio.run_coroutine_threadsafe(handle.aopen("job-1"), owner).result(timeout=60)
+            # These waits are generous on purpose: the assertion below is that
+            # the close completes and runs on the right loop, not how fast it
+            # gets there, and a full-suite run under a capped-clock CPU can
+            # starve this thread for well past what a solo run ever needs.
+            asyncio.run_coroutine_threadsafe(handle.aopen("job-1"), owner).result(timeout=120)
             assert handle._owner_loop is owner
             assert toolkit.child_running
 
             async def scenario() -> None:
-                await asyncio.wait_for(handle.aclose(), timeout=30)
+                await asyncio.wait_for(handle.aclose(), timeout=120)
 
-            _run_isolated(scenario, timeout=60)
+            _run_isolated(scenario, timeout=150)
         finally:
             owner.call_soon_threadsafe(owner.stop)
             thread.join(timeout=30)

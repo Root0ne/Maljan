@@ -131,6 +131,76 @@ def profile_static_providers(container: Any) -> list[str]:
     return ids
 
 
+def mirror_static_samples(
+    container: Any,
+    *,
+    temp_path: str,
+    sha256: str,
+    extension: str,
+    copy_fn: Callable[[Path, Path], None],
+    job_id: str = "",
+) -> tuple[list[Path], dict[str, str]]:
+    """Copy the sample once per distinct host path this job's providers need.
+
+    Two static providers (e.g. Ghidra and a co-located r2mcp) can answer the
+    same ``mirror_target_for(...)`` host path for the same sample — see
+    ``test_each_provider_gets_its_own_container_visible_path``. Looping over
+    ``profile_static_providers`` and copying on every hit copied that file
+    twice and left a duplicate entry in the returned mirror list, so a caller
+    that removes each entry on cleanup tried to remove the same path twice.
+    This copies and records each host path once, while still mapping every
+    provider id that reaches it to its own container-visible path.
+
+    Exceptions from ``copy_fn`` are caught and logged, matching the previous
+    inline behaviour: whatever mirrored before the failure is kept.
+    """
+    host_mirrors: list[Path] = []
+    static_sample_paths: dict[str, str] = {}
+    copied_host_paths: set[Path] = set()
+    mirror_target_path: Path | str = Path(temp_path)
+    try:
+        for provider_id in profile_static_providers(container):
+            target = mirror_target_for(
+                container.get_static_provider(provider_id),
+                sha256=sha256,
+                extension=extension,
+            )
+            if target is None:
+                logger.info(
+                    "Static provider '%s' needs no sample mirror; skipping the copy.",
+                    provider_id,
+                    extra={"job_id": job_id, "component": "sample-mirror"},
+                )
+                continue
+            host_mirror, container_path = target
+            mirror_target_path = host_mirror
+            if host_mirror not in copied_host_paths:
+                copy_fn(Path(temp_path), host_mirror)
+                host_mirrors.append(host_mirror)
+                copied_host_paths.add(host_mirror)
+            static_sample_paths[provider_id] = container_path
+            logger.info(
+                "Mirrored sample to %s for static provider '%s' (%s).",
+                host_mirror,
+                provider_id,
+                container_path,
+                extra={"job_id": job_id, "component": "sample-mirror"},
+            )
+    except Exception as mirror_exc:
+        # M2: this used to hard-code "for Ghidra" and log settings.samples_dir
+        # (the samples root, not the mirror target that actually failed) — a
+        # leftover from before the mirror step was generalised to any static
+        # provider.
+        logger.warning(
+            "Failed to mirror sample to %s for the static provider: %s. "
+            "Static analyst will fall back to metadata-only prompt.",
+            mirror_target_path,
+            mirror_exc,
+            extra={"job_id": job_id, "component": "sample-mirror"},
+        )
+    return host_mirrors, static_sample_paths
+
+
 def settings_snapshot(
     core_settings: _CoreSettings, overridden_keys: Iterable[str] | None = None
 ) -> dict[str, Any]:
@@ -671,45 +741,21 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # ``samples_dir`` — never the operator's own corpus directory
                 # itself — and is removed by the ``finally`` below when the
                 # job ends, whichever way it ends.
-                _mirror_target_path: Path | str = sample_files.work_dir()
-                try:
-                    for _provider_id in profile_static_providers(app.container):
-                        target = mirror_target_for(
-                            app.container.get_static_provider(_provider_id),
-                            sha256=sample.sha256,
-                            extension=_orig_ext,
-                        )
-                        if target is None:
-                            logger.info(
-                                "Static provider '%s' needs no sample mirror; skipping the copy.",
-                                _provider_id,
-                                extra={"job_id": job_id, "component": "sample-mirror"},
-                            )
-                            continue
-                        host_mirror, container_path = target
-                        _mirror_target_path = host_mirror
-                        sample_files.private_copy(Path(temp_path), host_mirror)
-                        host_mirrors.append(host_mirror)
-                        static_sample_paths[_provider_id] = container_path
-                        logger.info(
-                            "Mirrored sample to %s for static provider '%s' (%s).",
-                            host_mirror,
-                            _provider_id,
-                            container_path,
-                            extra={"job_id": job_id, "component": "sample-mirror"},
-                        )
-                except Exception as mirror_exc:
-                    # M2: this used to hard-code "for Ghidra" and log
-                    # settings.samples_dir (the samples root, not the mirror
-                    # target that actually failed) — a leftover from before
-                    # the mirror step was generalised to any static provider.
-                    logger.warning(
-                        "Failed to mirror sample to %s for the static provider: %s. "
-                        "Static analyst will fall back to metadata-only prompt.",
-                        _mirror_target_path,
-                        mirror_exc,
-                        extra={"job_id": job_id, "component": "sample-mirror"},
-                    )
+                # Task 9 mirrors once per distinct static provider host path;
+                # ``mirror_static_samples`` is the tested unit for that loop,
+                # including the dedup that keeps two providers sharing one
+                # host path (e.g. Ghidra and a co-located r2mcp) from copying
+                # the sample twice — see test_worker_profile_mirror.py.
+                new_mirrors, new_sample_paths = mirror_static_samples(
+                    app.container,
+                    temp_path=temp_path,
+                    sha256=sample.sha256,
+                    extension=_orig_ext,
+                    copy_fn=sample_files.private_copy,
+                    job_id=job_id,
+                )
+                host_mirrors.extend(new_mirrors)
+                static_sample_paths.update(new_sample_paths)
                 static_sample_path = global_mirror_path(
                     static_sample_paths, app.container.config.static
                 )

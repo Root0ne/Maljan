@@ -16,7 +16,11 @@ _API = Path(__file__).resolve().parents[2] / "apps" / "api"
 if str(_API) not in sys.path:
     sys.path.insert(0, str(_API))
 
-from app.worker.analysis_worker import mirror_target_for, profile_static_providers  # noqa: E402
+from app.worker.analysis_worker import (  # noqa: E402
+    mirror_static_samples,
+    mirror_target_for,
+    profile_static_providers,
+)
 
 from maljan.core.config import Settings  # noqa: E402
 from maljan.core.container import ServiceContainer  # noqa: E402
@@ -82,6 +86,44 @@ def test_the_state_carries_a_path_per_provider_and_keeps_the_global_key():
 
     assert "static_sample_paths" in AnalysisState.__annotations__
     assert "static_sample_path" in AnalysisState.__annotations__
+
+
+def test_two_providers_sharing_a_host_path_copy_the_sample_only_once():
+    """Ghidra and r2 answer the same host path for the same sample (see
+    ``test_each_provider_gets_its_own_container_visible_path``); the mirror
+    step must copy that file once, not once per provider that lands on it."""
+    container = _container(
+        definitions={"static_r2": {"role": "static", "static_provider": "r2"}},
+        profiles={"two": {"analysts": ["static", "static_r2"]}},
+        profile="two",
+    )
+    calls: list[tuple[Path, Path]] = []
+
+    def fake_copy(src: Path, dst: Path) -> None:
+        calls.append((src, dst))
+
+    host_mirrors, static_sample_paths = mirror_static_samples(
+        container,
+        temp_path="/tmp/does-not-matter.exe",
+        sha256="ab" * 32,
+        extension=".exe",
+        copy_fn=fake_copy,
+    )
+
+    assert profile_static_providers(container) == ["ghidra", "r2"]
+    assert len(calls) == 1, "one shared host path must be copied exactly once"
+    assert len(host_mirrors) == 1, "one cleanup entry, not one per provider"
+    assert set(static_sample_paths) == {"ghidra", "r2"}
+    ghidra_target = mirror_target_for(
+        container.get_static_provider("ghidra"), sha256="ab" * 32, extension=".exe"
+    )
+    r2_target = mirror_target_for(
+        container.get_static_provider("r2"), sha256="ab" * 32, extension=".exe"
+    )
+    assert ghidra_target is not None and r2_target is not None
+    assert static_sample_paths["ghidra"] == ghidra_target[1]
+    assert static_sample_paths["r2"] == r2_target[1]
+    assert host_mirrors[0] == ghidra_target[0] == r2_target[0]
 
 
 def test_the_frozen_key_is_the_global_providers_mirror_not_the_first_one_made():
