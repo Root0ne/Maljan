@@ -16,6 +16,29 @@ import type {
 export type Pending = Record<string, unknown>;
 
 /**
+ * Structural equality for setting values.
+ *
+ * A composite leaf (the server map, the agent definitions) stages a whole
+ * object, so "is this back where it started" is not a `===` question. Key
+ * order is not: two maps with the same entries written in a different order
+ * are the same setting.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => deepEqual(item, b[i]));
+  }
+  if (typeof a !== "object") return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((k) => k in right && deepEqual(left[k], right[k]));
+}
+
+/**
  * Loads the settings schema + current values, tracks in-flight edits, and
  * wraps the seven settings endpoints. Deliberately self-contained: the
  * Configuration tab renders nothing else while this is loading, so every
@@ -72,14 +95,40 @@ export function useSettings() {
     return m;
   }, [schema]);
 
-  const stage = useCallback((key: string, value: unknown) => {
-    setPending((p) => ({ ...p, [key]: value }));
-    setErrors((e) => {
-      const n = { ...e };
-      delete n[key];
-      return n;
-    });
-  }, []);
+  /**
+   * Stage an edit — unless it puts the key back where it started.
+   *
+   * B3 (dev audit 2026-09-06): this always wrote `pending[key]`, so setting a
+   * select to another value and back left the row marked MODIFIED and the
+   * apply bar counting a change that would send the stored value back
+   * unchanged. Only "Discard change" cleared it, which nobody looks for on a
+   * field they believe they never edited.
+   *
+   * A secret is exempt: its stored value is always `null` on the wire (the API
+   * never returns one), so "clear this secret" stages a value that deep-equals
+   * what is saved and would be swallowed by the rule.
+   */
+  const stage = useCallback(
+    (key: string, value: unknown) => {
+      const entry = entries.get(key);
+      const saved = key in values ? values[key].value : entry?.default;
+      const revert = !entry?.secret && deepEqual(value, saved);
+      setPending((p) => {
+        if (!revert) return { ...p, [key]: value };
+        if (!(key in p)) return p;
+        const n = { ...p };
+        delete n[key];
+        return n;
+      });
+      setErrors((e) => {
+        if (!(key in e)) return e;
+        const n = { ...e };
+        delete n[key];
+        return n;
+      });
+    },
+    [entries, values]
+  );
 
   const unstage = useCallback((key: string) => {
     setPending((p) => {

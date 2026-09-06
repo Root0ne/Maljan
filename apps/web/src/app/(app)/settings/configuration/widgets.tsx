@@ -221,7 +221,21 @@ export function ListWidget(p: WidgetProps) {
   useEffect(() => {
     const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
     const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
-    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+    /* B3 (dev audit 2026-09-06): staging now *un*-stages a key whose value is
+     * back where it started, so `staged -> undefined` no longer means "an
+     * external discard happened". Typing "a", Enter stages ["a"] both times,
+     * the second one un-stages, and this effect used to answer that by wiping
+     * the newline the user had just typed. The buffer is left alone when it
+     * already spells the effective value. */
+    const buffered = text.split("\n").map((s) => s.trim()).filter(Boolean);
+    const effective = (shown(p) as string[] | null) ?? [];
+    const alreadyShowing =
+      buffered.length === effective.length && buffered.every((v, i) => v === effective[i]);
+    if (
+      p.staged === undefined &&
+      (stagedJustCleared || currentValueChanged) &&
+      !alreadyShowing
+    ) {
       setText(formatList(p));
     }
     prevStagedRef.current = p.staged;
@@ -266,7 +280,19 @@ export function JsonWidget(p: WidgetProps) {
   useEffect(() => {
     const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
     const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
-    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+    // Same guard as ListWidget: an un-stage that happened because the value is
+    // back where it started must not reformat text the user is still editing.
+    let alreadyShowing = false;
+    try {
+      alreadyShowing = JSON.stringify(JSON.parse(text)) === JSON.stringify(shown(p) ?? null);
+    } catch {
+      alreadyShowing = false;
+    }
+    if (
+      p.staged === undefined &&
+      (stagedJustCleared || currentValueChanged) &&
+      !alreadyShowing
+    ) {
       setText(formatJson(p));
       setBad(null);
     }

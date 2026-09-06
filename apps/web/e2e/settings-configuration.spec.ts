@@ -408,6 +408,43 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(page.getByText("new value staged")).toBeVisible();
   });
 
+  /* B3 (dev audit 2026-09-06): `stage()` always wrote the key, so setting a
+   * select back to the value it started at left the row MODIFIED and the bar
+   * counting a change that would have been a no-op — clearable only by
+   * hunting for "Discard change". */
+  test("returning a field to its saved value clears the pending change", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Static provider", exact: true }).click();
+
+    const row = page.locator("#setting-core\\.static\\.provider");
+    await row.locator("select").selectOption("r2");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+    await expect(row.getByText("modified")).toBeVisible();
+
+    await row.locator("select").selectOption("ghidra");
+    await expect(page.getByText("1 change pending")).toHaveCount(0);
+    await expect(row.getByText("modified")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Discard change" })).toHaveCount(0);
+  });
+
+  test("a secret is still staged when it is cleared back to nothing", async ({
+    authenticatedPage: page,
+  }) => {
+    /* The saved value of a secret is `null` however it is set — the API never
+     * returns one — so "clear this secret" stages a value that deep-equals
+     * what is stored, and the rule above must not swallow it. */
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+
+    await page.getByRole("button", { name: "Clear" }).click();
+    await expect(page.getByText("will be cleared")).toBeVisible();
+    await expect(page.getByText("1 change pending")).toBeVisible();
+  });
+
   test("switching the sandbox provider reveals the Triage fields and hides the CAPE ones", async ({
     authenticatedPage: page,
   }) => {
