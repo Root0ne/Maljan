@@ -178,6 +178,69 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+def _failure_detail(exc: BaseException) -> str:
+    """One legible sentence for anything a probe can end with.
+
+    An exception group is unwrapped to its leaves, because the group's own
+    message ("unhandled errors in a TaskGroup") names nothing an operator can
+    act on. A cancellation has no message at all, so it is worded here.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        leaves = [_failure_detail(e) for e in exc.exceptions]
+        return "; ".join(dict.fromkeys(leaves)) or "the probe was cancelled before it answered"
+    if isinstance(exc, asyncio.CancelledError):
+        return "the probe was cancelled before it answered"
+    text = str(exc).strip()
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+def _probe_in_fresh_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeResult:
+    """Run one probe start to finish on an event loop of its own.
+
+    B1 (dev audit 2026-09-06): a staged stdio entry whose command was not an
+    MCP server answered HTTP 500. ``ServerHandle.aopen`` re-raises whatever
+    ended the handshake unchanged, and a child that dies inside the transport's
+    anyio task group ends it with a cancellation -- bare, or wrapped in the
+    group's ``BaseExceptionGroup``. Neither is an ``Exception``, so the
+    ``except Exception`` guards each probe already had let it through, and the
+    request task inherited the cancellation: the handler produced no response
+    at all and ``BaseHTTPMiddleware.call_next`` raised "No response returned."
+    The browser saw a bare connection failure with no CORS headers on it.
+
+    Running the probe on a loop of its own is what makes that structurally
+    impossible: a cancel scope can only reach tasks of the loop it belongs to,
+    and no task of the request's loop is on this one. The handle is opened and
+    closed on this same loop, which is the rule ``ServerHandle`` is built
+    around (a stack unwinds where it was wound). Whatever comes out --
+    exception, group, or cancellation -- becomes a ``ProbeResult`` here, so the
+    caller has nothing left to inherit.
+
+    Budgets are unchanged: ``PROBE_BUDGET_SECONDS`` and the agent probe's
+    per-server multiple are applied inside this loop exactly as before. So is
+    the child reaping -- ``aopen``'s own teardown runs here, and a cleanup
+    detached with ``_detach_cleanup`` is awaited by ``asyncio.run``'s shutdown
+    rather than dropped.
+    """
+
+    async def _runner() -> ProbeResult:
+        try:
+            return await factory()
+        except BaseException as exc:  # noqa: BLE001 - reported, never re-raised
+            logger.warning("probe failed: %s", _failure_detail(exc))
+            return ProbeResult(False, 0, _failure_detail(exc))
+
+    try:
+        return asyncio.run(_runner())
+    except BaseException as exc:  # noqa: BLE001 - a loop that could not even start
+        logger.warning("probe loop failed: %s", _failure_detail(exc))
+        return ProbeResult(False, 0, _failure_detail(exc))
+
+
+async def in_probe_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeResult:
+    """Await ``factory`` on a worker thread's own loop. Never raises."""
+    return await asyncio.to_thread(_probe_in_fresh_loop, factory)
+
+
 _PROBE_CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
 
 
@@ -340,7 +403,7 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
         entry = effective[server].model_dump(mode="json")
     else:
         entry = _merge_server_entry(stored_map.get(server) or {}, staged_map.get(server) or {})
-    return await probe_mcp({"name": server, "entry": entry})
+    return await in_probe_loop(lambda: probe_mcp({"name": server, "entry": entry}))
 
 
 async def probe_agent(v: dict[str, Any]) -> ProbeResult:
@@ -490,7 +553,7 @@ async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, A
         for key, value in layer.items():
             if key.startswith("core."):
                 merged[key[len("core.") :]] = value
-    return await probe_agent({"name": name, "settings": merged})
+    return await in_probe_loop(lambda: probe_agent({"name": name, "settings": merged}))
 
 
 async def probe_r2(v: dict[str, Any]) -> ProbeResult:
@@ -843,4 +906,4 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             resolved[short] = _unwrap(cursor)
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
-    return await probe(resolved)
+    return await in_probe_loop(lambda: probe(resolved))
