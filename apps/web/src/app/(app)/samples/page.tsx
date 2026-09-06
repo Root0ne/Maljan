@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import { formatDateTime } from "@/lib/report-utils";
+import { countLabel, formatDateTime } from "@/lib/report-utils";
 import { useProviderChoices } from "./useProviderChoices";
 
 /* ── Display interface (maps from SampleDTO) ───────── */
@@ -313,7 +313,7 @@ function SamplesPageContent() {
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Samples &mdash; {samples.length} files
+            Samples &mdash; {countLabel(samples.length, "file")}
           </h2>
         </div>
         {samples.length === 0 ? (

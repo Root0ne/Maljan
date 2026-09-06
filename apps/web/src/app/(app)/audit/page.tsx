@@ -4,7 +4,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { AuditLogDTO } from "@/lib/api";
-import { formatDateTime } from "@/lib/report-utils";
+import { countLabel, formatDateTime } from "@/lib/report-utils";
 
 export default function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLogDTO[]>([]);
@@ -43,7 +43,7 @@ export default function AuditLogsPage() {
           Audit Logs
         </h1>
         <span className="text-xs text-text-muted">
-          {total} total entries
+          {countLabel(total, "total entry", "total entries")}
         </span>
       </div>
 
