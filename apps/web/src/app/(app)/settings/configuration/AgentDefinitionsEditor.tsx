@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import {
+  ADD_BUTTON,
+  copyKey,
+  mapKeyError,
+  putEntry,
+  removeEntry,
+  type KeyError,
+} from "./mapEditorHelpers";
 import type {
   AgentDefinitionEntry,
   AgentProbeDetails,
@@ -18,7 +26,6 @@ const input =
 
 /** Re-seeded by the settings model, so they lock rather than delete. */
 export const BUILTIN_AGENT_KEYS = new Set(["static", "dynamic", "network", "judge"]);
-const SLUG = /^[a-z][a-z0-9_-]{0,31}$/;
 /** Roles that read a static provider; the others have nothing to point at. */
 const PROVIDER_ROLES = new Set(["static", "generic"]);
 
@@ -121,7 +128,8 @@ export default function AgentDefinitionsEditor({
     AgentLLMOverride
   >;
   const [newKey, setNewKey] = useState("");
-  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<KeyError | null>(null);
+  const newKeyRef = useRef<HTMLInputElement | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "running">>({});
   const [manifests, setManifests] = useState<Record<string, string[]>>({});
   /** Set only for a model-only edit with no effective global provider to
@@ -129,7 +137,7 @@ export default function AgentDefinitionsEditor({
   const [llmErrors, setLlmErrors] = useState<Record<string, string>>({});
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) =>
-    onChange({ ...value, [key]: { ...value[key], ...next } });
+    onChange(putEntry(value, key, next));
 
   const clearLlmError = (agentKey: string) =>
     setLlmErrors((e) => {
@@ -180,13 +188,15 @@ export default function AgentDefinitionsEditor({
   };
 
   const add = (from?: string) => {
-    const key = newKey.trim();
-    if (!SLUG.test(key)) {
-      setKeyError("lowercase, starts with a letter, at most 32 of a-z 0-9 - _");
-      return;
-    }
-    if (key in value) {
-      setKeyError("an agent with that name already exists");
+    const at = from ?? ADD_BUTTON;
+    // B5: an empty name box on a Clone means "name it after its source"; on
+    // Add it is still a name the operator has to supply.
+    const typed = newKey.trim();
+    const key = typed === "" && from ? copyKey(from, value) : typed;
+    const problem = mapKeyError(key, value, "agent");
+    if (problem) {
+      setKeyError({ at, message: problem });
+      newKeyRef.current?.focus();
       return;
     }
     setKeyError(null);
@@ -227,9 +237,7 @@ export default function AgentDefinitionsEditor({
       put(key, { enabled: false });
       return;
     }
-    const next = { ...value };
-    delete next[key];
-    onChange(next);
+    onChange(removeEntry(value, key));
   };
 
   const resolve = async (key: string) => {
@@ -550,6 +558,11 @@ export default function AgentDefinitionsEditor({
                 {details ? ` · prompt ${details.prompt_chars} chars` : ""}
               </p>
             )}
+            {keyError?.at === key && (
+              <p className="text-[11px] text-status-red mt-2 text-right" role="alert">
+                {keyError.message}
+              </p>
+            )}
             {cardError && (
               <p className="text-[11px] text-status-red mt-2" role="alert">
                 {cardError}
@@ -562,6 +575,7 @@ export default function AgentDefinitionsEditor({
       <div className="flex items-center gap-2">
         <input
           className={input}
+          ref={newKeyRef}
           placeholder="new agent name"
           aria-label="new agent name"
           value={newKey}
@@ -571,9 +585,9 @@ export default function AgentDefinitionsEditor({
           Add agent
         </button>
       </div>
-      {keyError && (
+      {keyError?.at === ADD_BUTTON && (
         <p className="text-[11px] text-status-red" role="alert">
-          {keyError}
+          {keyError.message}
         </p>
       )}
     </div>

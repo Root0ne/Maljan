@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
+import { mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -11,7 +12,6 @@ const input =
 /** Built-ins are re-seeded by the settings model, so they disable rather than delete. */
 const BUILTIN = new Set(["network", "threatintel"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
-const SLUG = /^[a-z][a-z0-9_-]{0,31}$/;
 /** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Two of these
  *  (`network`, `threatintel`) are also pre-populated built-ins and never reach
  *  `add()`; `ghidra` and `cape` are reserved but not pre-populated, so without
@@ -82,20 +82,13 @@ export default function ServerMapEditor({
   const [editingToken, setEditingToken] = useState<Record<string, boolean>>({});
 
   const put = (key: string, next: Partial<McpServerEntry>) =>
-    onChange({ ...value, [key]: { ...value[key], ...next } });
+    onChange(putEntry(value, key, next));
 
   const add = () => {
     const key = newKey.trim();
-    if (!SLUG.test(key)) {
-      setKeyError("lowercase, starts with a letter, at most 32 of a-z 0-9 - _");
-      return;
-    }
-    if (key in value) {
-      setKeyError("a server with that name already exists");
-      return;
-    }
-    if (RESERVED_SERVER_KEYS.has(key)) {
-      setKeyError(`'${key}' is reserved for a provider-owned server.`);
+    const problem = mapKeyError(key, value, "server", RESERVED_SERVER_KEYS);
+    if (problem) {
+      setKeyError(problem);
       return;
     }
     setKeyError(null);
@@ -108,9 +101,7 @@ export default function ServerMapEditor({
       put(key, { enabled: false });
       return;
     }
-    const next = { ...value };
-    delete next[key];
-    onChange(next);
+    onChange(removeEntry(value, key));
   };
 
   const probe = async (key: string) => {

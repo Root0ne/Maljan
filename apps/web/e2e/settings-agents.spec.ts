@@ -279,6 +279,52 @@ test.describe("agent definitions and profiles", () => {
     ).toHaveCount(1);
   });
 
+  /* B5 (dev audit 2026-09-06): Clone with an empty name box did nothing at all
+   * — no card, no message, no request — and an invalid name put its message
+   * beside the name box at the bottom of the editor, nowhere near the button
+   * that had just been pressed. */
+  test("Clone with an empty name box names the copy after its source", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    const source = page.locator('[data-agent="static"]');
+    await source.getByRole("button", { name: "Clone" }).click();
+    await expect(page.locator('[data-agent="static_copy"]')).toBeVisible();
+
+    // A second clone of the same source does not collide with the first.
+    await source.getByRole("button", { name: "Clone" }).click();
+    await expect(page.locator('[data-agent="static_copy2"]')).toBeVisible();
+
+    const profile = page.locator('[data-profile="default"]');
+    await profile.getByRole("button", { name: "Clone" }).click();
+    await expect(page.locator('[data-profile="default_copy"]')).toBeVisible();
+  });
+
+  test("an invalid name is reported at the button that was pressed", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+
+    await page.getByLabel("new agent name").fill("Bad Name!");
+    const source = page.locator('[data-agent="static"]');
+    await source.getByRole("button", { name: "Clone" }).click();
+
+    // On the card, not at the bottom of the editor.
+    await expect(source.getByRole("alert")).toContainText("lowercase, starts with a letter");
+    await expect(page.getByLabel("new agent name")).toBeFocused();
+    await expect(page.locator('[data-agent="Bad Name!"]')).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Add agent" }).click();
+    await expect(
+      page.locator('[data-testid="agent-definitions-editor"] > p[role="alert"]')
+    ).toContainText("lowercase, starts with a letter");
+  });
+
   test("a validation error lands on the card that caused it", async ({
     authenticatedPage: page,
   }) => {

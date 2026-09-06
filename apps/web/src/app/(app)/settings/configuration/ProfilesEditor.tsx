@@ -1,17 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   AgentDefinitionEntry,
   CatalogEntry,
   ProfileEntry,
   SettingValue,
 } from "@/types/settings";
+import {
+  ADD_BUTTON,
+  copyKey,
+  mapKeyError,
+  putEntry,
+  removeEntry,
+  type KeyError,
+} from "./mapEditorHelpers";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
-const SLUG = /^[a-z][a-z0-9_-]{0,31}$/;
 /** Seeded by the settings model, so it locks rather than deletes. */
 const BUILTIN_PROFILES = new Set(["default"]);
 
@@ -43,14 +50,15 @@ export default function ProfilesEditor({
 }) {
   const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<string, ProfileEntry>;
   const [newKey, setNewKey] = useState("");
-  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<KeyError | null>(null);
+  const newKeyRef = useRef<HTMLInputElement | null>(null);
 
   const candidates = Object.entries(definitions)
     .filter(([, d]) => d.enabled && d.role !== "judge")
     .map(([k]) => k);
 
   const put = (key: string, next: Partial<ProfileEntry>) =>
-    onChange({ ...value, [key]: { ...value[key], ...next } });
+    onChange(putEntry(value, key, next));
 
   const move = (key: string, index: number, by: number) => {
     const analysts = [...value[key].analysts];
@@ -61,13 +69,15 @@ export default function ProfilesEditor({
   };
 
   const add = (from?: string) => {
-    const key = newKey.trim();
-    if (!SLUG.test(key)) {
-      setKeyError("lowercase, starts with a letter, at most 32 of a-z 0-9 - _");
-      return;
-    }
-    if (key in value) {
-      setKeyError("a profile with that name already exists");
+    const at = from ?? ADD_BUTTON;
+    // B5: cloning with an empty name box names the copy after its source
+    // rather than silently doing nothing.
+    const typed = newKey.trim();
+    const key = typed === "" && from ? copyKey(from, value) : typed;
+    const problem = mapKeyError(key, value, "profile");
+    if (problem) {
+      setKeyError({ at, message: problem });
+      newKeyRef.current?.focus();
       return;
     }
     setKeyError(null);
@@ -121,11 +131,7 @@ export default function ProfilesEditor({
                   <button
                     type="button"
                     className="text-xs text-text-secondary"
-                    onClick={() => {
-                      const next = { ...value };
-                      delete next[key];
-                      onChange(next);
-                    }}
+                    onClick={() => onChange(removeEntry(value, key))}
                   >
                     Remove
                   </button>
@@ -188,6 +194,12 @@ export default function ProfilesEditor({
               )}
             </ol>
 
+            {keyError?.at === key && (
+              <p className="text-[11px] text-status-red mt-2 text-right" role="alert">
+                {keyError.message}
+              </p>
+            )}
+
             {!locked && unused.length > 0 && (
               <label className="block text-xs mt-2">
                 <span className="text-text-muted">Add analyst</span>
@@ -216,6 +228,7 @@ export default function ProfilesEditor({
       <div className="flex items-center gap-2">
         <input
           className={input}
+          ref={newKeyRef}
           placeholder="new profile name"
           aria-label="new profile name"
           value={newKey}
@@ -225,9 +238,9 @@ export default function ProfilesEditor({
           Add profile
         </button>
       </div>
-      {keyError && (
+      {keyError?.at === ADD_BUTTON && (
         <p className="text-[11px] text-status-red" role="alert">
-          {keyError}
+          {keyError.message}
         </p>
       )}
     </div>
