@@ -1,0 +1,688 @@
+{
+  "info": {
+    "version": "2.5",
+    "started": "2026-08-13 13:06:05",
+    "ended": "2026-08-13 13:09:06",
+    "duration": 181,
+    "id": 19159,
+    "category": "file",
+    "custom": "",
+    "machine": {
+      "id": 16080,
+      "status": "stopping",
+      "name": "win10",
+      "label": "win10",
+      "platform": "windows",
+      "manager": "KVM",
+      "started_on": "2026-08-13 13:06:05",
+      "shutdown_on": "2026-08-13 13:09:06"
+    },
+    "package": "exe",
+    "timeout": false,
+    "tlp": null,
+    "parent_sample": null,
+    "options": {},
+    "source_url": null,
+    "route": "",
+    "user_id": 0,
+    "CAPE_current_commit": "c06696cbb1254b2dd2f3f0ed3a5e726e81484345"
+  },
+  "target": {
+    "category": "file",
+    "file": {
+      "name": "000ac83fe38ca68495fc.exe",
+      "path": "/opt/CAPEv2/storage/binaries/000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c",
+      "size": 1459816,
+      "crc32": "390866A0",
+      "md5": "188e1dc92136a378a1c6dad95abc87c1",
+      "sha1": "94f851e2bac770cd574289aa1a2b5fc8fb331b49",
+      "sha256": "000ac83fe38ca68495fc023c4b449f86c9d71b9583e0a7b4713cdc246a67306c",
+      "sha512": "a1d6fd727b29974398757daf982c306924ed65ecaf943ab408113f9575a87e94d6a3fb31abc22656cb6a32c7673bffd8f660c537df72a92f4219ac3873bf9269",
+      "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
+    }
+  },
+  "behavior": {
+    "processes": [
+      {
+        "process_id": 4616,
+        "process_name": "000ac83fe38ca68495fc.exe",
+        "parent_id": 2508,
+        "module_path": "C:\\Users\\Admin\\AppData\\Local\\Temp\\000ac83fe38ca68495fc.exe",
+        "first_seen": "2026-08-13 20:08:27,020",
+        "calls": [
+          {
+            "timestamp": "2026-08-13 20:08:28,941",
+            "thread_id": "4056",
+            "caller": "0x004820ca",
+            "parentcaller": "0x00481eb3",
+            "category": "process",
+            "api": "NtAllocateVirtualMemory",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {
+                "name": "ProcessHandle",
+                "value": "0xffffffff"
+              },
+              {
+                "name": "BaseAddress",
+                "value": "0x044e0000"
+              },
+              {
+                "name": "RegionSize",
+                "value": "0x00030000"
+              },
+              {
+                "name": "Protection",
+                "value": "0x00000004",
+                "pretty_value": "PAGE_READWRITE"
+              },
+              {
+                "name": "StackPivoted",
+                "value": "no"
+              }
+            ],
+            "repeated": 0,
+            "id": 0
+          },
+          {
+            "timestamp": "2026-08-13 20:08:28,957",
+            "thread_id": "4056",
+            "caller": "0x00482144",
+            "parentcaller": "0x00481eb3",
+            "category": "process",
+            "api": "NtAllocateVirtualMemory",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {
+                "name": "ProcessHandle",
+                "value": "0xffffffff"
+              },
+              {
+                "name": "BaseAddress",
+                "value": "0x06b40000"
+              },
+              {
+                "name": "RegionSize",
+                "value": "0x00033000"
+              },
+              {
+                "name": "Protection",
+                "value": "0x00000040",
+                "pretty_value": "PAGE_EXECUTE_READWRITE"
+              },
+              {
+                "name": "StackPivoted",
+                "value": "no"
+              }
+            ],
+            "repeated": 0,
+            "id": 1
+          },
+          {
+            "timestamp": "2026-08-13 20:08:28,957",
+            "thread_id": "4056",
+            "caller": "0x004823d8",
+            "parentcaller": "0x00481eb3",
+            "category": "system",
+            "api": "LdrLoadDll",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {
+                "name": "Flags",
+                "value": "0x00000000"
+              },
+              {
+                "name": "FileName",
+                "value": "KERNEL32.dll"
+              },
+              {
+                "name": "BaseAddress",
+                "value": "0x757f0000"
+              }
+            ],
+            "repeated": 0,
+            "id": 2
+          },
+          {
+            "timestamp": "2026-08-13 20:08:28,957",
+            "thread_id": "4056",
+            "caller": "0x0048244e",
+            "parentcaller": "0x00481eb3",
+            "category": "system",
+            "api": "LdrGetProcedureAddressForCaller",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {
+                "name": "ModuleName",
+                "value": "KERNEL32.DLL"
+              },
+              {
+                "name": "ModuleHandle",
+                "value": "0x757f0000"
+              },
+              {
+                "name": "FunctionName",
+                "value": "GetCommandLineW"
+              },
+              {
+                "name": "Ordinal",
+                "value": "0"
+              },
+              {
+                "name": "FunctionAddress",
+                "value": "0x75812010"
+              }
+            ],
+            "repeated": 0,
+            "id": 3
+          },
+          {
+            "timestamp": "2026-08-13 20:08:28,957",
+            "thread_id": "4056",
+            "caller": "0x0048244e",
+            "parentcaller": "0x00481eb3",
+            "category": "system",
+            "api": "LdrGetProcedureAddressForCaller",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {
+                "name": "ModuleName",
+                "value": "KERNEL32.DLL"
+              },
+              {
+                "name": "ModuleHandle",
+                "value": "0x757f0000"
+              },
+              {
+                "name": "FunctionName",
+                "value": "GetCurrentThread"
+              },
+              {
+                "name": "Ordinal",
+                "value": "0"
+              },
+              {
+                "name": "FunctionAddress",
+                "value": "0x7580ea50"
+              }
+            ],
+            "repeated": 0,
+            "id": 4
+          }
+        ],
+        "threads": [
+          "4056"
+        ],
+        "environ": {
+          "UserName": "Admin",
+          "ComputerName": "DESKTOP-D7VMOBK",
+          "WindowsPath": "C:\\Windows",
+          "TempPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\",
+          "CommandLine": "\"C:\\Users\\Admin\\AppData\\Local\\Temp\\000ac83fe38ca68495fc.exe\" ",
+          "RegisteredOwner": "",
+          "RegisteredOrganization": "",
+          "ProductName": "",
+          "SystemVolumeSerialNumber": "b4c7-4cd8",
+          "SystemVolumeGUID": "f5be1900-0000-0000-0000-300300000000",
+          "MachineGUID": "",
+          "MainExeBase": "0x00400000",
+          "MainExeSize": "0x00169000",
+          "Bitness": "32-bit"
+        },
+        "file_activities": {
+          "read_files": [],
+          "write_files": [],
+          "delete_files": []
+        }
+      }
+    ],
+    "processtree": [
+      {
+        "name": "000ac83fe38ca68495fc.exe",
+        "pid": 4616,
+        "parent_id": 2508,
+        "module_path": "C:\\Users\\Admin\\AppData\\Local\\Temp\\000ac83fe38ca68495fc.exe",
+        "children": [],
+        "threads": [
+          "4056"
+        ],
+        "environ": {
+          "UserName": "Admin",
+          "ComputerName": "DESKTOP-D7VMOBK",
+          "WindowsPath": "C:\\Windows",
+          "TempPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\",
+          "CommandLine": "\"C:\\Users\\Admin\\AppData\\Local\\Temp\\000ac83fe38ca68495fc.exe\" ",
+          "RegisteredOwner": "",
+          "RegisteredOrganization": "",
+          "ProductName": "",
+          "SystemVolumeSerialNumber": "b4c7-4cd8",
+          "SystemVolumeGUID": "f5be1900-0000-0000-0000-300300000000",
+          "MachineGUID": "",
+          "MainExeBase": "0x00400000",
+          "MainExeSize": "0x00169000",
+          "Bitness": "32-bit"
+        }
+      }
+    ],
+    "apistats": {},
+    "summary": {
+      "files": [],
+      "read_files": [],
+      "write_files": [],
+      "delete_files": [],
+      "keys": [
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Codepage",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2593365098",
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CustomLocale",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\ExtendedLocale",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1004261230",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\5172",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1811438736",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1480763218",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1871388944",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2588",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\7897",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\5502",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2948535540",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\4107013592",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\3388378607",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\3431476283",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\4051608251",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\423328955",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\547536059",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2534784187",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2523511995",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2496249019",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2001321147",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2471083195",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\4081695931",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\8229",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\952262827",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2004615996",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\683631671"
+      ],
+      "read_keys": [
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2593365098",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1004261230",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\5172",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1811438736",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1480763218",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\1871388944",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2588",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\7897",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\5502",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2948535540",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\4107013592",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\3388378607",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\3431476283",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\4051608251",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\423328955",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\547536059",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2534784187",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2523511995",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2496249019",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2001321147",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2471083195",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\4081695931",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\8229",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\952262827",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\2004615996",
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CodePage\\683631671"
+      ],
+      "write_keys": [],
+      "delete_keys": [],
+      "executed_commands": [],
+      "resolved_apis": [],
+      "mutexes": [],
+      "created_services": [],
+      "started_services": []
+    }
+  },
+  "signatures": [
+    {
+      "name": "stealth_network",
+      "description": "Network activity detected but not expressed in monitor API logs",
+      "categories": [
+        "stealth"
+      ],
+      "severity": 1,
+      "weight": 1,
+      "confidence": 100,
+      "references": [],
+      "data": [
+        {
+          "ip": "119.29.29.29"
+        },
+        {
+          "ip": "223.6.6.6"
+        },
+        {
+          "ip": "223.5.5.5"
+        },
+        {
+          "ip": "98.66.133.185"
+        },
+        {
+          "ip": "172.217.16.142"
+        },
+        {
+          "ip": "8.211.55.206"
+        },
+        {
+          "ip": "23.58.222.96"
+        },
+        {
+          "domain": "global.wps.com"
+        },
+        {
+          "domain": "params.wps.com"
+        },
+        {
+          "domain": "ap-dw-collect.ksord.com"
+        },
+        {
+          "domain": "entry.wpscdn.com"
+        },
+        {
+          "domain": "www.ebay.com"
+        },
+        {
+          "domain": "www.python.org"
+        },
+        {
+          "domain": "www.dropbox.com"
+        },
+        {
+          "domain": "www.elastic.co"
+        },
+        {
+          "domain": "api.wps.com"
+        },
+        {
+          "domain": "365.kdocs.cn"
+        },
+        {
+          "domain": "account.wps.cn"
+        },
+        {
+          "domain": "api.wps.cn"
+        },
+        {
+          "domain": "avatar.qwps.cn"
+        },
+        {
+          "domain": "dl.vas.wpscdn.cn"
+        },
+        {
+          "domain": "docer-api.kdocs.cn"
+        },
+        {
+          "domain": "docer.kdocs.cn"
+        },
+        {
+          "domain": "docer.wps.cn"
+        },
+        {
+          "domain": "drive.wps.cn"
+        },
+        {
+          "domain": "geo.wps.cn"
+        },
+        {
+          "domain": "home.wps.cn"
+        },
+        {
+          "domain": "hwc-bj.ag.kdocs.cn"
+        },
+        {
+          "domain": "iaas.wps.cn"
+        },
+        {
+          "domain": "kdocs.cn"
+        },
+        {
+          "domain": "ksc-bj.ag.kdocs.cn"
+        },
+        {
+          "domain": "le.wps.cn"
+        },
+        {
+          "domain": "lucky.wps.cn"
+        },
+        {
+          "domain": "pay.wps.cn"
+        },
+        {
+          "domain": "qing.wps.cn"
+        },
+        {
+          "domain": "qr.wps.cn"
+        },
+        {
+          "domain": "roaming.wps.cn"
+        },
+        {
+          "domain": "sms.wps.cn"
+        },
+        {
+          "domain": "vas.wps.cn"
+        },
+        {
+          "domain": "vasapi.wps.cn"
+        },
+        {
+          "domain": "vip.wps.cn"
+        },
+        {
+          "domain": "vipapi.wps.cn"
+        },
+        {
+          "domain": "wdl1.cache.wps.cn"
+        },
+        {
+          "domain": "wdl1.file.cache.docer.com"
+        },
+        {
+          "domain": "wps-docer-property.file.docer.com"
+        },
+        {
+          "domain": "wps-docer-property.ks3-cn-beijing.ksyun.com"
+        },
+        {
+          "domain": "wps-docer-property.ks3-cn-beijing.ksyuncs.com"
+        },
+        {
+          "domain": "www.kdocs.cn"
+        },
+        {
+          "domain": "zj-roaming.wps.cn"
+        },
+        {
+          "domain": "zt.wps.cn"
+        },
+        {
+          "domain": "zw-roaming.wps.cn"
+        },
+        {
+          "domain": "www.msftconnecttest.com"
+        },
+        {
+          "domain": "soundcloud.com"
+        },
+        {
+          "domain": "scholar.google.com"
+        },
+        {
+          "domain": "www.mongodb.com"
+        },
+        {
+          "domain": "www.quora.com"
+        },
+        {
+          "domain": "www.amazon.com"
+        },
+        {
+          "domain": "code.visualstudio.com"
+        },
+        {
+          "domain": "disabled.invalid"
+        }
+      ],
+      "new_data": [],
+      "alert": false,
+      "families": []
+    },
+    {
+      "name": "network_country_distribution",
+      "description": "Communicates with IPs located across a large number of unique countries",
+      "categories": [
+        "network",
+        "c2"
+      ],
+      "severity": 1,
+      "weight": 1,
+      "confidence": 30,
+      "references": [],
+      "data": [
+        {
+          "country": "United States"
+        },
+        {
+          "country": "China"
+        },
+        {
+          "country": "France"
+        },
+        {
+          "country": "Italy"
+        },
+        {
+          "country": "Germany"
+        },
+        {
+          "country": "Turkey"
+        }
+      ],
+      "new_data": [],
+      "alert": false,
+      "families": []
+    },
+    {
+      "name": "static_pe_pdbpath",
+      "description": "The PE file contains a PDB path",
+      "categories": [
+        "static"
+      ],
+      "severity": 1,
+      "weight": 1,
+      "confidence": 80,
+      "references": [
+        "https://www.fireeye.com/blog/threat-research/2019/08/definitive-dossier-of-devilish-debug-details-part-one-pdb-paths-malware.html"
+      ],
+      "data": [
+        {
+          "pdbpath": "E:\\xml-data\\build-dir\\CODRU-CL23M-SOURCES\\bin\\Win32\\Release\\BdUserHost.pdb"
+        }
+      ],
+      "new_data": [],
+      "alert": false,
+      "families": []
+    }
+  ],
+  "network": {
+    "dns": [
+      {
+        "request": "global.wps.com",
+        "type": "A",
+        "answers": [],
+        "first_seen": 1786626390.458799
+      },
+      {
+        "request": "params.wps.com",
+        "type": "A",
+        "answers": [],
+        "first_seen": 1786626400.965046
+      }
+    ],
+    "tcp": [
+      {
+        "src": "192.168.122.89",
+        "sport": 49681,
+        "dst": "172.217.16.142",
+        "dport": 443,
+        "offset": 550,
+        "time": 1.1229240894317627
+      },
+      {
+        "src": "192.168.122.89",
+        "sport": 49682,
+        "dst": "8.211.55.206",
+        "dport": 443,
+        "offset": 1033,
+        "time": 1.162438154220581
+      }
+    ],
+    "udp": [
+      {
+        "src": "192.168.122.89",
+        "sport": 50340,
+        "dst": "192.168.122.1",
+        "dport": 53,
+        "offset": 10709,
+        "time": 1.4397900104522705
+      },
+      {
+        "src": "192.168.122.89",
+        "sport": 58075,
+        "dst": "192.168.122.1",
+        "dport": 53,
+        "offset": 15606,
+        "time": 1.5906169414520264
+      }
+    ],
+    "hosts": [
+      {
+        "ip": "119.29.29.29",
+        "country_name": "United States",
+        "asn": "AS132203",
+        "asn_name": "Shenzhen Tencent Computer Systems Company Limited",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "ip": "223.6.6.6",
+        "country_name": "China",
+        "asn": "AS37963",
+        "asn_name": "Hangzhou Alibaba Advertising Co.,Ltd.",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ports": [
+          53
+        ]
+      }
+    ],
+    "domains": [
+      {
+        "domain": "global.wps.com",
+        "ip": "190.92.199.178"
+      },
+      {
+        "domain": "params.wps.com",
+        "ip": "110.238.109.205"
+      }
+    ]
+  },
+  "CAPE": {}
+}

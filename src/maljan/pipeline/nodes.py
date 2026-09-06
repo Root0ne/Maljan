@@ -1514,26 +1514,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 from maljan.core.config import get_settings
 
                 _cfg = get_settings()
+                _provider = container.get_static_provider()
                 _static_path = state.get("static_sample_path")
                 if (
                     _cfg.preprocessing.use_function_hash_attribution
-                    and _cfg.mcp.ghidra.transport == "http"
+                    and _provider.capabilities.provides_function_hashes
                     and _cfg.memory.backend == "qdrant"
                     and _static_path
                 ):
                     from maljan.analysis.function_hash_attribution import (
                         aggregate_matches,
-                        fetch_bulk_function_hashes,
                         to_report_dicts,
                     )
                     from maljan.memory.function_hash_store import FunctionHashStore
+                    from maljan.providers.base import StaticJobContext
 
                     _sample_id = state.get("file_hash", "") or ""
-                    _funcs = fetch_bulk_function_hashes(
-                        base_url=_cfg.mcp.ghidra.url,
-                        auth_token=_cfg.mcp.ghidra.auth_token,
-                        file_path=_static_path,
-                        min_instructions=_cfg.preprocessing.function_hash_min_instructions,
+                    _funcs = _provider.function_hashes(
+                        StaticJobContext(mirror_sample_path=str(_static_path))
                     )
                     if _funcs:
                         _fh_store = FunctionHashStore(
@@ -1845,6 +1843,26 @@ def make_report_node(container: ServiceContainer) -> Any:
             for arg in (state.get("discussion_history") or [])
         ]
 
+        # Evidence-only static providers (capa_yara) have no ISR and no tool
+        # loop: the report is the only place their findings reach, so the
+        # bundle is collected once here and threaded through the builder
+        # (into ``report.static``) and into ``tool_evidence`` (into
+        # ``report.technical_evidence``) below. Best-effort — a provider
+        # failure here must never fail the report.
+        _static_bundle = None
+        try:
+            _static_provider = container.get_static_provider()
+            _sample_for_evidence = state.get("sample_path")
+            if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
+                _static_bundle = _static_provider.collect_evidence(str(_sample_for_evidence))
+        except Exception as exc:  # noqa: BLE001 - evidence must never fail a report
+            logger.warning(
+                "report_node: static evidence collection failed (%s: %s); continuing without it.",
+                type(exc).__name__,
+                exc,
+            )
+            _static_bundle = None
+
         try:
             builder = MalwareReportBuilder(
                 file_hash=state.get("file_hash"),
@@ -1867,6 +1885,7 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # Platform-gate persistence scanners (no Windows registry
                 # persistence on a Linux sample, and vice versa).
                 sample_platform=state.get("platform"),
+                static_evidence=_static_bundle,
             )
             report = builder.build_deterministic()
             # Thread the judge node's exact opcode-hash family overlap into the
@@ -1899,7 +1918,27 @@ def make_report_node(container: ServiceContainer) -> Any:
             # Report-reshaping Phase 1: attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.
-            _tool_ev = cast("dict[str, list[dict[str, Any]]]", state.get("tool_evidence") or {})
+            _tool_ev = cast(
+                "dict[str, list[dict[str, Any]]]", dict(state.get("tool_evidence") or {})
+            )
+            # capa/YARA text has no ReAct tool call behind it, so it is wrapped
+            # in the same ``CapturedToolOutput`` row shape (schemas.tool_evidence)
+            # the analyst node emits, under its own agent id, and appended
+            # rather than replacing anything already captured for that id.
+            if _static_bundle is not None and _static_bundle.technical_evidence:
+                for _agent, _text in _static_bundle.technical_evidence.items():
+                    _rows = list(_tool_ev.get(_agent) or [])
+                    _rows.append(
+                        {
+                            "agent_id": _agent,
+                            "tool_name": _agent,
+                            "args": {},
+                            "symbol": None,
+                            "output": _text,
+                            "seq": 0,
+                        }
+                    )
+                    _tool_ev[_agent] = _rows
             if _tool_ev:
                 report.technical_evidence = _tool_ev
         except Exception as exc:  # noqa: BLE001

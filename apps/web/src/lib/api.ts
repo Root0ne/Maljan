@@ -49,6 +49,16 @@ export interface JobDTO {
   error_message: string | null;
 }
 
+export interface SandboxReportDTO {
+  id: string;
+  format: string;
+  task_id: string | null;
+  size_bytes: number;
+  sample_sha256_match: boolean;
+  warning: string | null;
+  uploaded_at: string;
+}
+
 export interface ReportSummaryDTO {
   id: string;
   job_id: string;
@@ -548,6 +558,29 @@ class ApiClient {
   cancelJob(jobId: string) {
     return this.request<void>(
       `/api/v1/jobs/${jobId}`,
+      { method: "DELETE" }
+    );
+  }
+
+  /* ── Sandbox reports ───────────────────────────────── */
+  uploadSandboxReport(sampleId: string, file: File) {
+    const fd = new FormData();
+    fd.append("file", file);
+    return this.uploadRequest<SandboxReportDTO>(
+      `/api/v1/samples/${sampleId}/sandbox-reports`,
+      fd
+    );
+  }
+
+  getSandboxReports(sampleId: string) {
+    return this.request<{ items: SandboxReportDTO[]; total: number }>(
+      `/api/v1/samples/${sampleId}/sandbox-reports`
+    );
+  }
+
+  deleteSandboxReport(sampleId: string, reportId: string) {
+    return this.request<void>(
+      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}`,
       { method: "DELETE" }
     );
   }

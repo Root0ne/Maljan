@@ -84,9 +84,12 @@ def _no_api_keys(env: dict) -> bool:
 
 
 class TestStaticAnalystEnv:
-    def test_ghidra_sidecar_env_carries_no_api_key(
-        self, mock_llm: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_ghidra_sidecar_env_carries_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The child-environment filtering moved into ``GhidraStaticProvider.open()``
+        (provider-layer refactor, Task 10): the analyst no longer builds
+        ``StdioServerParameters`` itself, so this exercises the provider directly
+        rather than ``StaticAnalyst._initialize_mcp_client`` (now a thin ask-the-
+        provider call with nothing left to patch ``get_settings()`` into)."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-not-for-the-sidecar")
 
         class _Ghidra:
@@ -98,27 +101,16 @@ class TestStaticAnalystEnv:
             use_all_tools = False
             tool_selection = "curated"
 
-        class _Preprocessing:
-            use_function_summarizer = False
-            max_tool_output_chars = 6000
-
-        class _MCP:
-            ghidra = _Ghidra()
-
-        class _Settings:
-            mcp = _MCP()
-            preprocessing = _Preprocessing()
-
-        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _Settings())
-
         recorder = MagicMock()
         monkeypatch.setattr("mcp.StdioServerParameters", recorder)
         monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
 
-        from maljan.agents.static_analyst import StaticAnalyst
+        from maljan.core.config import MemoryConfig, PreprocessingConfig
+        from maljan.providers.base import StaticJobContext
+        from maljan.providers.static.ghidra import GhidraStaticProvider
 
-        agent = StaticAnalyst(llm=mock_llm, name="StaticAnalyst")
-        agent._initialize_mcp_client()
+        provider = GhidraStaticProvider(_Ghidra(), PreprocessingConfig(), MemoryConfig())
+        provider.open(StaticJobContext())
 
         assert recorder.called, "StdioServerParameters was never constructed"
         env = recorder.call_args.kwargs["env"]
@@ -127,34 +119,28 @@ class TestStaticAnalystEnv:
 
 
 class TestDynamicAnalystEnv:
-    def test_cape_sidecar_env_carries_no_api_key(
-        self, mock_llm: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_cape_sidecar_env_carries_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The child-environment filtering moved into
+        ``CAPE2SandboxProvider.dynamic_tools()`` (provider-layer refactor, Task
+        11): the analyst no longer builds ``StdioServerParameters`` itself, so
+        this exercises the provider directly rather than
+        ``DynamicAnalyst._initialize_mcp_client`` (now a thin ask-the-provider
+        call with nothing left to patch ``get_settings()`` into)."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-not-for-the-sidecar")
-
-        class _Cape:
-            enabled = True
-            transport = "stdio"
-            command = "python"
-            args: list[str] = []
-            env: dict[str, str] = {}
-
-        class _MCP:
-            cape = _Cape()
-
-        class _Settings:
-            mcp = _MCP()
-
-        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _Settings())
 
         recorder = MagicMock()
         monkeypatch.setattr("mcp.StdioServerParameters", recorder)
         monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
 
-        from maljan.agents.dynamic_analyst import DynamicAnalyst
+        from maljan.core.config import Settings
+        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 
-        agent = DynamicAnalyst(llm=mock_llm, name="DynamicAnalyst")
-        agent._initialize_mcp_client()
+        cfg = Settings(_env_file=None)
+        cfg.sandbox.cape2.mcp.enabled = True
+        cfg.sandbox.cape2.mcp.transport = "stdio"
+        cfg.sandbox.cape2.mcp.command = "python"
+        provider = CAPE2SandboxProvider.from_settings(cfg)
+        provider.dynamic_tools()
 
         assert recorder.called, "StdioServerParameters was never constructed"
         env = recorder.call_args.kwargs["env"]

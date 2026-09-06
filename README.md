@@ -177,17 +177,42 @@ make external     # or: make setup, which runs it for you
 | [ghidra-mcp](https://github.com/bethington/ghidra-mcp) | `v5.6.0` | `docker compose` builds the headless disassembly image from this checkout, so the tree has to be on disk before the stack comes up. |
 | [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) | `eb570eb9` | The inference engine. This is the commit the evaluation pins, so fetching it here is what makes that pin reproducible rather than merely recorded. |
 
-### The sandbox is not ours to install
+### Static and sandbox providers are a choice, not a requirement
 
-CAPE is somebody else's platform and nothing here installs, builds or packages
-it. It wants a Linux host of its own with KVM and its own Windows guest images
-registered as analysis machines, which is a deployment rather than a dependency.
+The static analyst attaches to one of `ghidra`, `r2`, `capa_yara`, `generic_mcp`
+or `none`; the dynamic path pulls its evidence from one of `mock`, `cape2`,
+`upload` or `triage`. Pick either pair from Settings → Static analysis
+provider / Sandbox provider in the web UI, per job at submit time, or with
+`STATIC__PROVIDER` / `SANDBOX__PROVIDER` in `.env`. Ghidra plus CAPEv2 is the
+profile this project's evaluation was measured on and stays the default for
+both, but neither is required to run Maljan: `STATIC__PROVIDER=capa_yara`
+with `SANDBOX__PROVIDER=upload` needs no external service at all, and
+`SANDBOX__PROVIDER=mock` needs none either.
 
-What this project does is talk to one over its REST API. Point it at yours:
+What each optional tool costs to turn on:
+
+- **radare2 (`r2`)** — install radare2 itself, then its MCP plugin:
+  `r2pm -ci r2mcp`.
+- **capa + YARA (`capa_yara`)** — no external service. Pull in the optional
+  dependency (`uv sync --extra capa`) and a rule checkout:
+  `git clone https://github.com/mandiant/capa-rules data/capa-rules`.
+- **Hatching Triage (`triage`)** — a Triage API key; no host of your own.
+- **Uploaded report (`upload`)** — nothing to install: an operator attaches
+  a report from any supported sandbox when submitting a sample.
+- **generic_mcp** — any MCP server you already run. There is no tool
+  allow-list on this path until sub-project B: the connected server's entire
+  tool manifest is handed to the model as-is, so connect only a server you
+  control.
+
+CAPE itself is somebody else's platform and nothing here installs, builds or
+packages it. It wants a Linux host of its own with KVM and its own Windows
+guest images registered as analysis machines, which is a deployment rather
+than a dependency. What this project does is talk to one over its REST API.
+Point it at yours:
 
 ```bash
-SANDBOX__CAPE2_BASE_URL=http://<your-cape-host>:8000
-SANDBOX__CAPE2_API_TOKEN=<token from that instance>
+SANDBOX__CAPE2__BASE_URL=http://<your-cape-host>:8000
+SANDBOX__CAPE2__API_TOKEN=<token from that instance>
 ```
 
 With no sandbox reachable the pipeline degrades rather than fails: the dynamic
@@ -303,6 +328,13 @@ live under `data/uploads/.tmp` (download staging) and `<SAMPLES_DIR>/.work`
 (the Ghidra bind-mount mirror), both created `0o700` with files `0o600`.
 Every worker startup sweeps both directories for copies left behind by a
 process that was killed mid-job.
+
+**Uploaded sandbox reports outlive the submit dialog.** A report attached
+under the `upload` sandbox provider is kept until the sample itself is
+deleted, listed under that sample regardless of whether the analysis it was
+attached for ever ran. Attach a report in the submit dialog and abandon the
+submission, and the report stays listed under the sample anyway; nothing
+today cleans that up automatically (follow-up in sub-project B).
 
 **Trusted proxies.** `TRUSTED_PROXY_IPS` takes CIDR networks (e.g.
 `10.0.0.0/8`), not just bare IPs — only requests arriving through one of
@@ -475,7 +507,12 @@ saved secret is never read back, the API returns whether it is set and a
 short hint. "Test connection" checks the LLM endpoint (OpenAI, Anthropic,
 Ollama or Gemini, whichever is selected), Ghidra MCP, the CAPEv2 sandbox,
 Qdrant, Redis, VirusTotal and AbuseIPDB against the values you are about to
-save, before you save them. Exporting the current UI overrides produces a
+save, before you save them. The `capa_yara` probe is neither of those
+services: it counts rule files locally. The indicator reports ok when capa
+itself imports and its rules directory holds rules; the YARA half is checked
+too, but only ever named in the detail text — a missing or empty YARA rules
+directory does not flip the indicator, since capa evidence alone is enough
+for the provider to run. Exporting the current UI overrides produces a
 `.env`-formatted file with secret values masked as `***`. Every analysis
 records the settings that were actually in effect, and which of them came
 from a UI override, in its run summary.

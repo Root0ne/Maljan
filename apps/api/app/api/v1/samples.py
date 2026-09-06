@@ -31,6 +31,7 @@ from app.deps import get_current_user, require_active_user
 from app.logging_config import get_logger
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
+from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
@@ -473,10 +474,40 @@ async def delete_sample(
     storage_path = sample.storage_path
     sha256 = sample.sha256
 
+    # Every sandbox report's bytes live at a path unique to that one row — unlike
+    # the sample's own bytes, no other user's row can point at it — so gather
+    # those paths now, before the cascade delete below removes the rows that
+    # name them. They routinely run to tens of megabytes and carry extracted
+    # strings, C2 endpoints and network detail, so they don't get to linger in
+    # storage just because the row that could locate them is gone.
+    sandbox_report_paths = (
+        (
+            await db.execute(
+                select(SandboxReportRow.storage_path).where(SandboxReportRow.sample_id == sample.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     # Jobs (and their reports, via the report->job cascade) go with the sample.
     await db.execute(delete(AnalysisJob).where(AnalysisJob.sample_id == sample.id))
     await db.delete(sample)
     await db.flush()
+
+    if sandbox_report_paths:
+        client = _minio_client()
+        for report_path in sandbox_report_paths:
+            try:
+                await asyncio.to_thread(client.remove_object, settings.minio_bucket, report_path)
+            except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
+                logger.warning(
+                    "Sample %s row deleted but sandbox-report object %s could not be removed: %s",
+                    sample_id,
+                    report_path,
+                    exc,
+                    extra={"user_id": str(user.id), "component": "minio"},
+                )
 
     others = await db.execute(
         select(func.count()).select_from(Sample).where(Sample.sha256 == sha256)

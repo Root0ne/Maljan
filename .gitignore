@@ -109,3 +109,8 @@ data/cape_reports/
 # scripts/fetch_external.sh clones it at a pinned release instead, licence file
 # and all.
 data/sigma_rules/
+
+# capa-rules is mandiant's, cloned by the operator for the capa_yara static
+# provider (git clone https://github.com/mandiant/capa-rules data/capa-rules),
+# not carried in this repository.
+data/capa-rules/

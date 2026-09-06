@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "dev"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "dev"]
 
 # The workflow reads the repository and nothing else; it references no secrets.
 permissions:
@@ -35,6 +35,27 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen
+
+      - name: Evaluation artefacts are untouched
+        if: github.ref != 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          # Sub-project A is a refactor: the measured numbers in the paper come
+          # from tests/evaluation/, and nothing on this branch may change them.
+          # actions/checkout@v4 defaults to a depth-1 clone of this ref, which
+          # shares no history with a depth-50 fetch of dev's tip, so unshallow
+          # this ref first to give origin/dev a usable merge base. A plain
+          # `git fetch origin dev` would land under the checkout's own
+          # single-branch refspec instead of creating origin/dev, so fetch it
+          # with an explicit refspec.
+          git fetch --no-tags --unshallow origin || git fetch --no-tags --depth=200 origin "$(git rev-parse HEAD)"
+          git fetch --no-tags --depth=50 origin +refs/heads/dev:refs/remotes/origin/dev
+          changed="$(git diff --name-only origin/dev... -- tests/evaluation/)"
+          if [ -n "$changed" ]; then
+            echo "tests/evaluation/ must not change on this branch:"
+            echo "$changed"
+            exit 1
+          fi
 
       # The same set the Makefile's PY_SOURCES names: the FastAPI app, the arq
       # worker, the two MCP sidecars and scripts/ were outside this gate.

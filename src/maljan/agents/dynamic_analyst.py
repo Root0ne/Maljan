@@ -7,14 +7,22 @@ chains, and persistence mechanisms observable from sandbox JSON output.
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
+from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.schemas.isr_models import AgentISR
 
-_ISR_SYSTEM = (
+# The provider-independent head of the dynamic system prompt: it names the
+# sandbox report shape (CAPEv2/Cuckoo JSON) this analyst was measured on, but
+# no tool — the tool-usage workflow is the sandbox provider's fragment,
+# appended below. A golden test pins the assembled result byte for byte
+# against the prompt this project measured its evaluation on.
+_DYN_HEAD = (
     "You are an expert Dynamic Malware Analyst with deep knowledge of sandbox behavior. "
     "Analyze API call sequences, registry operations, process injection chains, "
     "and persistence mechanisms from CAPEv2/Cuckoo JSON reports. "
@@ -22,19 +30,20 @@ _ISR_SYSTEM = (
     "'Registry key: HKLM\\...\\Run', 'Process spawned: cmd.exe PID 1234'. "
     "Focus on MITRE ATT&CK: T1547 (Autostart), T1055 (Process Injection), "
     "T1059 (Command Execution), T1112 (Registry Modification).\n\n"
-    "=== TOOL USAGE WORKFLOW ===\n"
-    "Follow this sequence when given a file path or hash:\n"
-    "1. Call `get_cuckoo_status` to verify the sandbox is online.\n"
-    "2. Call `search_task(hash_value=<sha256>)` to check if this sample was already analyzed.\n"
-    "3. If no existing task: call `submit_file(file_path=<path>)` to submit for analysis.\n"
-    "4. After submission, POLL with `get_task_status(task_id=<id>)` until status is 'reported'.\n"
-    "5. Once reported: call `get_task_report(task_id=<id>, format='lean')` for a summarized report.\n"
-    "6. Call `get_task_iocs(task_id=<id>)` for IOCs (domains, IPs, mutexes).\n"
-    "7. Optionally call `get_task_config(task_id=<id>)` for extracted malware configs.\n\n"
-    "IMPORTANT: Always use format='lean' for reports to avoid context overflow. "
-    "The lean format filters 50MB reports down to key findings.\n"
-    "If given a Task ID directly, skip to step 5."
 )
+
+# Empty today. Declared because the assembly order is the contract sub-projects
+# B and C build agent prompts from, and an implicit empty tail is a trap.
+_DYN_TAIL = ""
+
+# Back-compat: several modules and tests import this name. It is the default
+# evaluation profile's assembled prompt — CAPEv2, the sandbox this project has
+# always measured the dynamic analyst against — not whatever ``sandbox.provider``
+# happens to be configured on a given box (that one field defaults to "mock").
+# Every run's actual tool attachment goes through the *configured* provider
+# instead (see ``_sandbox_provider`` below); only this frozen constant is
+# pinned to CAPE2, exactly as the literal it replaces always was.
+_ISR_SYSTEM = _DYN_HEAD + CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT + _DYN_TAIL
 
 
 @register_agent("dynamic")
@@ -45,103 +54,30 @@ class DynamicAnalyst(BaseAnalyst):
     # MCP Tool Interface
     # ------------------------------------------------------------------
 
+    def _sandbox_provider(self) -> Any:
+        container = getattr(self, "_container", None)
+        if container is not None:
+            return container.get_sandbox_provider()
+        from maljan.core.config import get_settings
+        from maljan.providers.registry import get_sandbox_provider
+
+        return get_sandbox_provider(get_settings())
+
+    def _static_capabilities(self) -> Any:
+        # Read by BaseAnalyst._try_initialize_mcp. Every sandbox degrades: the
+        # report JSON in ``data`` is evidence on its own, so an unreachable
+        # tool server costs depth, not the analyst.
+        return self._sandbox_provider().capabilities
+
     def _initialize_mcp_client(self) -> None:
         if getattr(self, "tools", None):
             return
-
-        from mcp import StdioServerParameters
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.core.config import get_settings
-
-        cfg = get_settings()
-
-        if not cfg.mcp.cape.enabled:
-            self.logger.info("CAPEv2 MCP is disabled in config.")
+        provider = self._sandbox_provider()
+        if not provider.capabilities.provides_tools:
+            self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)
             return
-
-        transport = (getattr(cfg.mcp.cape, "transport", "stdio") or "stdio").lower()
-
-        if transport in ("http", "streamable-http", "sse"):
-            # Remote CAPE MCP server (e.g. cape_mcp_wrapper.py running on a
-            # separate Ubuntu VM with --transport streamable-http). There is no
-            # local subprocess to launch; connect over HTTP.
-            url = cfg.mcp.cape.url
-            if not url:
-                self.logger.warning(
-                    "CAPE MCP transport=%s but mcp.cape.url is empty; skipping MCP init.",
-                    transport,
-                )
-                return
-            headers: dict[str, str] = {}
-            token = getattr(cfg.mcp.cape, "auth_token", "")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            self.logger.info("Initializing CAPEv2 MCP over %s: %s", transport, url)
-            toolkit = MCPLangChainToolkit(transport=transport, http_url=url, http_headers=headers)
-        else:
-            command = cfg.mcp.cape.command
-            args = cfg.mcp.cape.args
-
-            from maljan.agents.subprocess_env import child_env
-
-            env = child_env(cfg.mcp.cape.env)
-
-            from maljan.core.paths import get_project_root, resolve_mcp_args
-
-            project_root = str(get_project_root())
-            args = resolve_mcp_args(args)
-            server_params = StdioServerParameters(
-                command=command, args=args, env=env, cwd=project_root
-            )
-
-            toolkit = MCPLangChainToolkit(server_params)
-
-        # Init the MCP toolkit on the shared agent loop so its session/transport
-        # is bound to the SAME loop the ReAct tool calls later run on. Running it
-        # on a throwaway ``new_event_loop()`` (LangGraph runs sync nodes in a
-        # worker thread with no running loop) bound the toolkit to a different
-        # loop, so the first CAPE MCP tool call raised "<Event> is bound to a
-        # different event loop" (see static_analyst._run_async for the full
-        # rationale). Always called from the sync analyze path, never from within
-        # the agent loop, so blocking on the result cannot deadlock.
-        from maljan.agents.base_agent import _run_coro_blocking
-
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
-
-        self.toolkit = toolkit
-        # Essential CAPE tool list is config-driven: agents do not need to be
-        # rebuilt when the operator adds/removes a tool name. ``cape.tools`` is
-        # a list of allow-listed tool names; an empty list means "use the
-        # built-in default essentials".
-        configured = list(getattr(cfg.mcp.cape, "tools", []) or [])
-        essential_set: set[str] = (
-            set(configured)
-            if configured
-            else {
-                "get_cuckoo_status",
-                "search_task",
-                "extended_search",
-                "submit_file",
-                "submit_static",
-                "get_task_status",
-                "get_task_report",
-                "get_task_iocs",
-                "get_task_config",
-                "list_tasks",
-                "view_task",
-                "get_latest_tasks",
-                "verify_auth",
-            }
-        )
-        all_tools = toolkit.get_tools()
-        self.tools = [t for t in all_tools if t.name in essential_set]
-        self.logger.info(
-            "Initialized CAPEv2 MCP tools: %d/%d (essential only): %s",
-            len(self.tools),
-            len(all_tools),
-            [t.name for t in self.tools],
-        )
+        self.tools = provider.dynamic_tools()
+        self.toolkit = getattr(provider, "_toolkit", None)
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

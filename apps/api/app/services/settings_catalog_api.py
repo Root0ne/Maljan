@@ -234,6 +234,8 @@ def api_catalog() -> list[CatalogEntry]:
                 editable=True,
                 reason=None,
                 probe=ann.get("probe"),
+                applies_when=None,
+                order=0,
             )
         )
     for name, ann in API_READONLY.items():
@@ -258,6 +260,8 @@ def api_catalog() -> list[CatalogEntry]:
                 editable=False,
                 reason="set in .env; restart required",
                 probe=ann.get("probe"),
+                applies_when=None,
+                order=0,
             )
         )
     return entries
@@ -265,7 +269,7 @@ def api_catalog() -> list[CatalogEntry]:
 
 def full_catalog() -> list[CatalogEntry]:
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}
-    return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.path))
+    return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.order, e.path))
 
 
 @lru_cache(maxsize=1)

@@ -148,6 +148,18 @@ class MaljanApp:
 
         try:
             client = self.container.get_sandbox_client()
+            provider = self.container.get_sandbox_provider()
+            caps = provider.capabilities
+            if not caps.can_submit and caps.accepts_uploaded_report:
+                # No detonation: the evidence is already here.
+                try:
+                    run = provider.fetch("uploaded")
+                except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
+                    logger.error("Attached sandbox report unusable: %s", exc)
+                    return None
+                from maljan.providers.cape_view import to_cape_shaped_dict
+
+                return to_cape_shaped_dict(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
             # ``submit_and_wait`` is an optional convenience method some
@@ -166,8 +178,8 @@ class MaljanApp:
                 # to static-only. All SandboxClient impls share this signature.
                 status = client.wait_for_completion(
                     task_id,
-                    timeout_seconds=self.config.sandbox.cape2_timeout_seconds,
-                    poll_interval_seconds=self.config.sandbox.cape2_poll_interval_seconds,
+                    timeout_seconds=self.config.sandbox.cape2.timeout_seconds,
+                    poll_interval_seconds=self.config.sandbox.cape2.poll_interval_seconds,
                 )
                 if status == "reported":
                     result = client.fetch_report(task_id)

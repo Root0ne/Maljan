@@ -4,27 +4,26 @@ Job 60df48cb: on a fresh sample whose chunk lacked ``analysis_file_path``
 the LLM hallucinated ``/home/user/data/bin.<sha>`` for ``load_program`` and
 the static report claimed "file was not found on the server filesystem" even
 though the mirror to ``/data/samples/`` had succeeded. The wrapper installed
-by ``StaticAnalyst._pin_load_program_path`` deterministically overrides a
-model-supplied ``file`` argument with the known container path.
+by ``GhidraStaticProvider._pin_load_program_path`` deterministically
+overrides a model-supplied ``file`` argument with the known container path.
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import create_model
 
-from maljan.agents.static_analyst import StaticAnalyst
+from maljan.providers.base import StaticJobContext
+from maljan.providers.static.ghidra import GhidraStaticProvider
 
 
-def _agent(pinned: str | None) -> StaticAnalyst:
-    agent = StaticAnalyst.__new__(StaticAnalyst)
-    agent.logger = logging.getLogger("test.load_program_pinning")
-    agent._analysis_file_path = pinned
-    return agent
+def _agent(pinned: str | None) -> GhidraStaticProvider:
+    provider = GhidraStaticProvider.__new__(GhidraStaticProvider)
+    provider._job = StaticJobContext(mirror_sample_path=pinned)
+    return provider
 
 
 def _fake_load_program(calls: list[dict[str, Any]]) -> StructuredTool:
@@ -70,7 +69,7 @@ class TestLoadProgramPinning:
         calls: list[dict[str, Any]] = []
         agent = _agent(None)
         [wrapped] = agent._pin_load_program_path([_fake_load_program(calls)])
-        agent._analysis_file_path = "/data/samples/late.exe"
+        agent._job = StaticJobContext(mirror_sample_path="/data/samples/late.exe")
         asyncio.run(wrapped.coroutine(file="/hallucinated.bin"))
         assert calls == [{"file": "/data/samples/late.exe"}]
 

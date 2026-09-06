@@ -133,6 +133,16 @@ export const MOCK_SAMPLE = {
   uploaded_at: "2026-07-26T10:00:00Z",
 };
 
+export const MOCK_SANDBOX_REPORT = {
+  id: "sandbox-report-1",
+  format: "cape2",
+  task_id: "1000",
+  size_bytes: 512,
+  sample_sha256_match: true,
+  warning: null,
+  uploaded_at: "2026-07-26T10:05:00Z",
+};
+
 export const MOCK_REPORT_SUMMARY = {
   id: "report-1",
   job_id: "job-1",
@@ -171,13 +181,14 @@ export const MOCK_API_KEY = {
 
 /**
  * Matches `apps/api/app/schemas/settings.py::SchemaResponse` /
- * `apps/web/src/types/settings.ts::SettingsSchema`. Two groups, three field
+ * `apps/web/src/types/settings.ts::SettingsSchema`. Three groups: three field
  * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
  * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
  * — shown only for a `"ui"`-sourced value — has something to contrast
  * against the `"default"`/`"env"` rows that must not show it, and a `list`
- * field defaulting to `[]` for `ListWidget` coverage) plus one secret in
- * "providers".
+ * field defaulting to `[]` for `ListWidget` coverage), one secret in
+ * "providers", and "sandbox" — a provider selector (`order: -1`) plus two
+ * `applies_when`-gated fields, covering conditional visibility.
  */
 export const MOCK_SETTINGS_SCHEMA = {
   secrets_available: true,
@@ -204,6 +215,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: null,
+          applies_when: null,
+          order: 0,
         },
         {
           key: "core.negotiation.retry_delay",
@@ -223,6 +236,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: null,
+          applies_when: null,
+          order: 0,
         },
         {
           key: "core.negotiation.blocked_hosts",
@@ -242,6 +257,8 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: null,
+          applies_when: null,
+          order: 0,
         },
       ],
     },
@@ -267,6 +284,41 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: "llm",
+          applies_when: null,
+          order: 0,
+        },
+      ],
+    },
+    // Task A21: `applies_when` drives conditional visibility; `order: -1`
+    // puts the selector first.
+    {
+      key: "sandbox",
+      title: "Sandbox provider",
+      entries: [
+        {
+          key: "core.sandbox.provider", namespace: "core", path: "sandbox.provider",
+          type: "enum", default: "mock", nullable: false,
+          choices: ["mock", "cape2", "upload", "triage"],
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1,
+        },
+        {
+          key: "core.sandbox.cape2.base_url", namespace: "core", path: "sandbox.cape2.base_url",
+          type: "str", default: "http://localhost:8000", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "CAPEv2 base URL", description: "Base URL of the CAPEv2 REST API.",
+          applies: "next_job", editable: true, reason: null, probe: "cape2",
+          applies_when: { "core.sandbox.provider": ["cape2"] }, order: 0,
+        },
+        {
+          key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
+          type: "str", default: "https://tria.ge/api/v0", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Triage API base URL", description: "Hatching Triage cloud API root.",
+          applies: "next_job", editable: true, reason: null, probe: "triage",
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
         },
       ],
     },
@@ -304,6 +356,30 @@ export const MOCK_SETTINGS_VALUES = {
       is_set: true,
       hint: "1234",
       source: "env",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.provider": {
+      value: "cape2",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.cape2.base_url": {
+      value: "http://localhost:8000",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.triage.base_url": {
+      value: "https://tria.ge/api/v0",
+      is_set: null,
+      hint: null,
+      source: "default",
       updated_at: null,
       updated_by: null,
     },
@@ -445,6 +521,18 @@ export async function installApiMocks(
   await page.route("**/api/v1/samples/*", (route) => json(route, MOCK_SAMPLE));
   // After `samples/*`, which also matches this path — last registration wins.
   await page.route("**/api/v1/samples/upload", (route) => json(route, MOCK_SAMPLE));
+  // A single `*` never crosses a slash, so `samples/*` above cannot match this
+  // extra segment — order does not matter here, but it is grouped with the
+  // other samples routes for readability. POST uploads a report; GET lists
+  // the ones already attached to the sample (empty by default).
+  await page.route("**/api/v1/samples/*/sandbox-reports", (route) =>
+    route.request().method() === "POST"
+      ? json(route, MOCK_SANDBOX_REPORT, 201)
+      : json(route, { items: [], total: 0 })
+  );
+  await page.route("**/api/v1/samples/*/sandbox-reports/*", (route) =>
+    route.fulfill({ status: 204, body: "" })
+  );
 
   /* ── Runtime settings (admin) ─────────────────────────
    * Route precedence matters here more than elsewhere: `/settings/schema`,

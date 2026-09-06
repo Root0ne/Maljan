@@ -1,5 +1,7 @@
 """Tests for the ServiceContainer DI system."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from maljan.core.config import Settings
@@ -60,3 +62,40 @@ class TestServiceContainer:
         network_chunks = container.load_sandbox_data_for_agent("network", report)
         assert len(network_chunks) >= 1
         assert "evil.com" in network_chunks[0].content
+
+
+class TestAcloseNeverBuildsAProviderJustToCloseIt:
+    """M6 (final review): both teardown calls used to go through the
+    ``get_*_provider()`` builders, so a job that never touched a provider
+    built one at shutdown anyway — and a misconfigured ``provider`` id
+    turned a harmless teardown into a ``ProviderConfigurationError`` landing
+    in the aclose warning handler instead of just doing nothing."""
+
+    @pytest.mark.asyncio
+    async def test_a_job_that_never_touched_a_provider_builds_none_at_teardown(self) -> None:
+        container = ServiceContainer(config=Settings(), mock=True)
+        # A misconfigured id: if aclose() called get_static_provider() or
+        # get_sandbox_provider() (which build-on-demand and cache), this
+        # would raise ProviderConfigurationError from inside the registry.
+        container.config.static.provider = "not-a-real-provider"  # type: ignore[assignment]
+        container.config.sandbox.provider = "also-not-real"  # type: ignore[assignment]
+        assert container._static_provider_cache is None
+        assert container._sandbox_provider_cache is None
+
+        await container.aclose()  # must not raise
+
+        assert container._static_provider_cache is None
+        assert container._sandbox_provider_cache is None
+
+    @pytest.mark.asyncio
+    async def test_a_provider_that_was_built_is_still_closed(self) -> None:
+        container = ServiceContainer(config=Settings(), mock=True)
+        static_provider = MagicMock()
+        sandbox_provider = MagicMock()
+        container._static_provider_cache = static_provider
+        container._sandbox_provider_cache = sandbox_provider
+
+        await container.aclose()
+
+        static_provider.close.assert_called_once()
+        sandbox_provider.close.assert_called_once()

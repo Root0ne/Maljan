@@ -182,20 +182,31 @@ class TestStaticStillFailsLoudly:
         ):
             agent.analyze("/samples/sample.exe")
 
-    def test_static_does_not_route_through_the_degrading_helper(self) -> None:
-        """Structural, because the failure mode is a plausible-looking edit.
+    def test_ghidras_own_capability_flag_is_what_keeps_it_loud(self) -> None:
+        """I2 correction: the asymmetry lives in the capability flag, not the call site.
 
-        Swapping static's bare call for ``_try_initialize_mcp`` is a two-word
-        change that makes the analysts look pleasingly uniform and silently
-        converts every Ghidra outage into a confident report about a PE header.
+        This test used to assert, structurally, that ``StaticAnalyst`` never
+        calls ``_try_initialize_mcp`` at all — on the theory that doing so
+        would silently convert every Ghidra outage into a confident report
+        about a PE header. That reasoning proved too strong: it also kept
+        ``degrade_on_failure`` dead code for every *other* static provider
+        (r2, generic_mcp), whose own declared contract says an unreachable
+        server should degrade the analyst, not abort it (see final-review.md
+        I2). ``_try_initialize_mcp`` already reads the provider's own
+        ``_static_capabilities()`` before deciding, so both call sites in
+        ``StaticAnalyst`` now go through it — Ghidra stays loud because its
+        capabilities set ``degrade_on_failure=False``, not because the call
+        site is special-cased. The two tests above already prove Ghidra keeps
+        raising through that helper; this one just says calling it is fine.
         """
         import inspect
 
         from maljan.agents import static_analyst
 
         source = inspect.getsource(static_analyst.StaticAnalyst)
-        assert "_try_initialize_mcp" not in source, (
-            "static must keep failing loudly; see the module docstring above"
+        assert "_try_initialize_mcp" in source, (
+            "static must route through the shared degrade seam so a "
+            "degrading provider's own capabilities are honoured"
         )
 
 
