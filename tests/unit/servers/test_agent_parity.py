@@ -1,4 +1,4 @@
-# tests/servers/test_agent_parity.py
+# tests/unit/servers/test_agent_parity.py
 """The four ways "which agents exist" is answered must give one answer.
 
 Spec §8 item 4. The class registry, the seeded definitions, the catalog's

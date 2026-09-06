@@ -42,7 +42,7 @@ def test_the_job_choices_equal_the_registry_ids():
 
 
 def test_the_job_choices_equal_the_settings_literals():
-    """Registry parity for Settings itself is Task 5's job (tests/providers/test_registry.py);
+    """Registry parity for Settings itself is Task 5's job (tests/unit/providers/test_registry.py);
     this only adds the job-schema leg so all three stay in step.
     """
     from maljan.core.config import SandboxConfig, StaticConfig

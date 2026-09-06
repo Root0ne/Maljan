@@ -1,4 +1,4 @@
-# tests/servers/test_server_security.py
+# tests/unit/servers/test_server_security.py
 """What a tool server may see, and what may never leave the process.
 
 The set of guarantees the trust-boundary paragraph in the README makes. Each

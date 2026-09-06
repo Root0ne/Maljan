@@ -41,7 +41,7 @@ _IDS = [n for n, _ in _REPORTS]
 # ``behavior.notable_apis`` / ``dynamic.notable_apis`` stays unmodeled here —
 # Task 7 resolved that carried finding by showing neither provider it built
 # ever takes this full-render path with a real report (see
-# tests/providers/sandbox/test_cape2_provider.py and the task report), so
+# tests/unit/providers/sandbox/test_cape2_provider.py and the task report), so
 # this file's own scope — the render used when ``raw`` is empty — is
 # unchanged by that resolution.
 CONSUMER_KEYS: tuple[tuple[str, str], ...] = (
