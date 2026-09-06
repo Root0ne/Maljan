@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 
 /* audit 2026-07-26 (§5 "7 orphan rota"): this route had zero links anywhere in
  * the tab bar and rendered a bare, unlabelled panel when opened directly. The
- * panel itself now lives in ./TimelinePanel and is composed into the PROCESS tab;
+ * panel itself now lives in @/components/analysis/TimelinePanel and is composed into the PROCESS tab;
  * this file exists only so bookmarked/stale URLs land somewhere coherent
  * instead of on a headless panel. Mirrors the ttps/ redirect. */
 export default function TimelineRedirect() {

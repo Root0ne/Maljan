@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useReport } from "../layout";
+import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import type { AgentFinding } from "@/types";
 
 interface ClaimRecord {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useReport } from "../layout";
+import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { useState } from "react";
 import { confidenceBarColor, confidenceClass } from "@/lib/report-utils";
 import { verdictLabel } from "@/lib/verdict";

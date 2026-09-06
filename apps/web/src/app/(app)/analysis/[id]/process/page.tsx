@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 
-import AgentsPanel from "../agents/AgentsPanel";
-import PipelinePanel from "../pipeline/PipelinePanel";
-import TimelinePanel from "../timeline/TimelinePanel";
+import AgentsPanel from "@/components/analysis/AgentsPanel";
+import PipelinePanel from "@/components/analysis/PipelinePanel";
+import TimelinePanel from "@/components/analysis/TimelinePanel";
 import TranscriptView from "./TranscriptView";
 
 /**

@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { copyToClipboard, downloadBlob } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
-import { useReport } from "../layout";
+import { useReport } from "@/app/(app)/analysis/[id]/layout";
 
 function JsonNode({
   data,

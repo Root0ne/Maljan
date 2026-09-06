@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { useReport } from "../layout";
+import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { api } from "@/lib/api";
 import { copyToClipboard, downloadBlob } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";

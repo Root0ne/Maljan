@@ -1,6 +1,6 @@
 "use client";
 
-import { useReport } from "../layout";
+import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import type { AgentFindingStatus } from "@/types";
 
 /* Per-agent confidence tier. IMPORTANT: ``final_confidence`` is each agent's

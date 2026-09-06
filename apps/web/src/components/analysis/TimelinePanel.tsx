@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import { useReport } from "../layout";
+import { useReport } from "@/app/(app)/analysis/[id]/layout";
 
 interface DebateEntry {
   round: number;
