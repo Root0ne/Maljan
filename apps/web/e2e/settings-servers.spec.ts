@@ -182,7 +182,13 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("rest");
     const editor = page.getByTestId("rest-sandbox-editor");
     await expect(editor).toBeVisible();
-    await expect(editor.getByRole("button", { name: "Preview mapping" })).toBeDisabled();
+    /* B8 (dev audit 2026-09-06): the button used to stay disabled until the
+     * textarea had seen a keystroke, so a value that arrived any other way
+     * left it dead with nothing saying why. It is live from the start and
+     * names what is missing. */
+    await expect(editor.getByRole("button", { name: "Preview mapping" })).toBeEnabled();
+    await editor.getByRole("button", { name: "Preview mapping" }).click();
+    await expect(editor.getByText("paste a sample response first")).toBeVisible();
 
     await editor.getByLabel("Mapping: processes").fill("$.procs[*]");
     await page.getByLabel("Paste a sample response").fill('{"procs": [{"pid": 1}, {}]}');
@@ -197,7 +203,12 @@ test.describe("tool servers and the REST sandbox", () => {
       "JSONPath syntax error at position 3"
     );
     // The target hash row shows the hash the mocked preview matched against.
-    await expect(editor.locator('[data-channel="target_sha256"]')).toHaveText("ab");
+    // WEB-1: that column counts rows for every other channel, and this row
+    // does not select rows at all — the cell and the footnote both say so.
+    await expect(editor.locator('[data-channel="target_sha256"]')).toHaveText("hash: ab");
+    await expect(
+      editor.getByText(/the target_sha256 row selects a single value/)
+    ).toBeVisible();
     await expect(editor.getByText("sample hash: ab")).toBeVisible();
   });
 

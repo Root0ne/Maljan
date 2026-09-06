@@ -74,6 +74,16 @@ export default function RestSandboxEditor({
     key in pending ? pending[key] : values[key]?.value;
 
   const runPreview = async () => {
+    /* B8 (dev audit 2026-09-06): the button used to disable itself until the
+     * textarea held something, and the textarea only fills from a real input
+     * event — so any non-keystroke path that set its value left the button
+     * dead with nothing on screen saying why. It is always live now and says
+     * what is missing instead. */
+    if (sample.trim() === "") {
+      setPreview(null);
+      setPreviewError("paste a sample response first");
+      return;
+    }
     setRunning(true);
     setPreviewError(null);
     try {
@@ -139,7 +149,10 @@ export default function RestSandboxEditor({
               <tr className="border-b border-border text-text-muted">
                 <th className="text-left font-normal py-1">Channel</th>
                 <th className="text-left font-normal py-1">JSONPath</th>
-                <th className="text-left font-normal py-1 w-40">Matched / kept / dropped</th>
+                <th className="text-left font-normal py-1 w-40">
+                  Matched / kept / dropped
+                  <span className="text-text-muted">*</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -196,7 +209,7 @@ export default function RestSandboxEditor({
                     <td className="py-1 text-text-muted" data-channel={name}>
                       {isTarget
                         ? preview
-                          ? preview.target_sha256 || "not matched"
+                          ? `hash: ${preview.target_sha256 || "not matched"}`
                           : "—"
                         : stats
                           ? stats.error
@@ -211,6 +224,15 @@ export default function RestSandboxEditor({
               })}
             </tbody>
           </table>
+
+          {/* WEB-1 (dev audit 2026-09-06): `target_sha256` selects one value,
+              not a set of rows, so its cell under the counts column shows the
+              hash the mapping extracted. The column heading spoke for twelve
+              rows and misdescribed the thirteenth. */}
+          <p className="text-[11px] text-text-muted mt-1">
+            * the target_sha256 row selects a single value, so it reports the hash
+            it extracted rather than a row count.
+          </p>
 
           {fieldNamesEntry && (
             <div className="mt-2">{row(fieldNamesEntry)}</div>
@@ -230,7 +252,7 @@ export default function RestSandboxEditor({
             <button
               type="button"
               className="text-xs text-accent-strong disabled:opacity-50"
-              disabled={running || sample.trim() === ""}
+              disabled={running}
               onClick={() => void runPreview()}
             >
               Preview mapping
