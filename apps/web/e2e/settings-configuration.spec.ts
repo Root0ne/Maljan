@@ -445,6 +445,26 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(page.getByText("1 change pending")).toBeVisible();
   });
 
+  /* B7 (dev audit 2026-09-06): ~1050 controls on this tab had neither an `id`
+   * nor a `name`, so the title beside each one was associated with it only by
+   * the widget's own aria-label — nothing autofill or id-targeting tooling can
+   * follow. */
+  test("a field's title is a label for a control that has an id and a name", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    const field = page.locator("#setting-core\\.negotiation\\.max_iterations input[type=number]");
+    await expect(field).toHaveAttribute("id", "setting-input-core.negotiation.max_iterations");
+    await expect(field).toHaveAttribute("name", "core.negotiation.max_iterations");
+
+    // Clicking the title focuses the control, which is what the association is
+    // for and what an aria-label alone never gave.
+    await page.locator("#setting-label-core\\.negotiation\\.max_iterations").click();
+    await expect(field).toBeFocused();
+  });
+
   test("switching the sandbox provider reveals the Triage fields and hides the CAPE ones", async ({
     authenticatedPage: page,
   }) => {

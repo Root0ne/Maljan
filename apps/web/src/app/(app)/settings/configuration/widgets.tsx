@@ -18,6 +18,12 @@ export interface WidgetProps {
   onUnstage?: () => void;
   /** Filled in by the LLM probe result so a model field renders a datalist. */
   models?: string[];
+  /** The DOM id this widget's control takes, so `FieldRow`'s title can be a
+   *  real `<label htmlFor>` — B7 (dev audit 2026-09-06): every one of the
+   *  ~1050 controls on this tab had neither an `id` nor a `name`, which
+   *  browser autofill heuristics and any tooling that targets them by name
+   *  need. The `name` is the setting key itself. */
+  inputId?: string;
 }
 
 /** The value actually shown: the staged edit, else the live value, else the default. */
@@ -31,6 +37,8 @@ export function BoolWidget(p: WidgetProps) {
     <button
       type="button"
       role="switch"
+      id={p.inputId}
+      name={p.entry.key}
       aria-checked={v}
       aria-label={p.entry.title}
       disabled={!p.entry.editable}
@@ -99,6 +107,8 @@ export function NumberWidget(p: WidgetProps) {
     <div>
       <input
         type="number"
+        id={p.inputId}
+        name={p.entry.key}
         aria-label={p.entry.title}
         aria-describedby={requiredHint ? hintId : undefined}
         aria-invalid={requiredHint || undefined}
@@ -153,6 +163,8 @@ export function TextWidget(p: WidgetProps) {
     <>
       <input
         type="text"
+        id={p.inputId}
+        name={p.entry.key}
         aria-label={p.entry.title}
         className={input}
         disabled={!p.entry.editable}
@@ -177,6 +189,8 @@ export function EnumWidget(p: WidgetProps) {
   const v = shown(p);
   return (
     <select
+      id={p.inputId}
+      name={p.entry.key}
       aria-label={p.entry.title}
       className={input}
       disabled={!p.entry.editable}
@@ -247,6 +261,8 @@ export function ListWidget(p: WidgetProps) {
 
   return (
     <textarea
+      id={p.inputId}
+      name={p.entry.key}
       aria-label={p.entry.title}
       className={`${input} font-mono`}
       rows={Math.min(6, Math.max(2, text.split("\n").length))}
@@ -304,6 +320,8 @@ export function JsonWidget(p: WidgetProps) {
   return (
     <div>
       <textarea
+        id={p.inputId}
+        name={p.entry.key}
         aria-label={p.entry.title}
         aria-invalid={bad ? true : undefined}
         className={`${input} font-mono`}
@@ -353,11 +371,12 @@ export function SecretWidget(p: WidgetProps) {
     <div className="flex items-center gap-2 flex-wrap">
       {editing ? (
         <>
-          <label className="sr-only" htmlFor={`secret-${p.entry.key}`}>
+          <label className="sr-only" htmlFor={p.inputId ?? `secret-${p.entry.key}`}>
             New value for {p.entry.title}
           </label>
           <input
-            id={`secret-${p.entry.key}`}
+            id={p.inputId ?? `secret-${p.entry.key}`}
+            name={p.entry.key}
             type="password"
             autoComplete="new-password"
             className={input}
