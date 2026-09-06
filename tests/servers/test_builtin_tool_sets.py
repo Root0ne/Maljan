@@ -48,7 +48,7 @@ def test_the_live_sidecar_still_offers_exactly_the_pinned_tools(name: str) -> No
     ``tools/list``, so a slow or absent network is not a reason to skip: a
     failure here is a real signal that the pinned tool set moved.
     """
-    from scripts.capture_builtin_tool_sets import SIDECARS, enumerate_stdio_tools
+    from scripts.goldens.capture_builtin_tool_sets import SIDECARS, enumerate_stdio_tools
 
     from maljan.agents.subprocess_env import child_env
 
