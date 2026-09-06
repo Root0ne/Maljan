@@ -72,7 +72,7 @@ Filled in by the step named in the last column, and read back by the step named 
 
 | Fact | Value | Recorded by |
 | :-- | :-- | :-- |
-| Collected test count on the branch point | _(written by Task 1 Step 1)_ | Task 1 Step 1 |
+| Collected test count on the branch point | 4056 | Task 1 Step 1 |
 | Collected test count after the test move | _(written by Task 5 Step 6)_ | Task 5 Step 6, equal to the row above |
 | Collected test count at the final gate | _(written by Task 8 Step 2)_ | Task 8 Step 2, equal to both rows above |
 | `npm run lint` warning count on the branch point | _(written by Task 6 Step 1)_ | Task 6 Step 1 |
