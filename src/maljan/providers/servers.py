@@ -915,18 +915,15 @@ class ServerRegistry:
 
         ``ref.name is None`` is the whole allow-listed set — the same list
         ``tools_for`` would have merged had the server been bound by ``agents``.
-        A name is one tool of it, matched after B's collision prefixing, so a
-        renamed tool is still findable under the name the model actually sees.
+        A name is one tool of it, matched against the server's own manifest —
+        collision prefixing happens later, in ``merge_tools``, so a manifest
+        name reaching here is always raw.
         """
         available = handle.tools()
         if ref.name is None:
             return list(available), []
         wanted = str(ref.name)
-        picked = [
-            tool
-            for tool in available
-            if str(getattr(tool, "name", "")) in (wanted, f"{handle.name}__{wanted}")
-        ]
+        picked = [tool for tool in available if str(getattr(tool, "name", "")) == wanted]
         if not picked:
             return [], [AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)]
         return picked, []
