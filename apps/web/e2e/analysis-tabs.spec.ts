@@ -1,5 +1,5 @@
 import { alerts, test, expect } from "./fixtures";
-import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
+import { COMPLETED_JOB, JOB_ID, REPORT, REPORT_ID } from "./report-fixture";
 
 /**
  * Every analysis tab, loaded once against one complete report.
@@ -147,6 +147,33 @@ test.describe("Analysis tabs", () => {
       page.getByRole("heading", { name: /ATT&CK Case Priors/i })
     ).toBeVisible();
     await expect(page.getByText("T1055", { exact: true })).toBeVisible();
+  });
+
+  /* C4 (dev audit 2026-09-06): the IOC, ATT&CK and timeline endpoints all
+   * worked and no button anywhere opened them, so the only route to an IOC
+   * list was the markdown report or a hand-written API call. */
+  test("the export row offers the IOC, ATT&CK and timeline endpoints", async ({
+    sessionPage: page,
+  }) => {
+    const asked: string[] = [];
+    page.on("request", (r) => {
+      const path = new URL(r.url()).pathname;
+      if (/\/reports\/[^/]+\/(iocs|mitre|timeline)$/.test(path)) asked.push(path);
+    });
+
+    await page.goto(`/analysis/${JOB_ID}`);
+
+    await page.getByRole("button", { name: "IOC list" }).click();
+    await page.getByRole("button", { name: "MITRE ATT&CK" }).click();
+    await page.getByRole("button", { name: "Timeline" }).click();
+
+    await expect
+      .poll(() => asked.length)
+      .toBeGreaterThanOrEqual(3);
+    expect(asked).toContain(`/api/v1/reports/${REPORT_ID}/iocs`);
+    expect(asked).toContain(`/api/v1/reports/${REPORT_ID}/mitre`);
+    expect(asked).toContain(`/api/v1/reports/${REPORT_ID}/timeline`);
+    await expect(alerts(page)).toHaveCount(0);
   });
 
   /* C3 (dev audit 2026-09-06): nothing on the page said which analyst line-up

@@ -556,6 +556,30 @@ function DownloadBar({
     }
   };
 
+  /* C4 (dev audit 2026-09-06): the IOC, ATT&CK and timeline endpoints all
+   * worked and nothing in the UI reached any of them — the only way to an IOC
+   * list was to read the markdown report or call the API by hand. Each fetches
+   * its own endpoint and saves the answer; a failure says so in the same
+   * banner the document exports use. */
+  const downloadJson = (kind: "iocs" | "mitre" | "timeline") => async () => {
+    if (!reportId) return;
+    setBusy(kind);
+    setError(null);
+    try {
+      const body =
+        kind === "iocs"
+          ? await api.getReportIOCs(reportId)
+          : kind === "mitre"
+            ? await api.getReportMitre(reportId)
+            : await api.getReportTimeline(reportId);
+      downloadBlob(JSON.stringify(body, null, 2), `${safeName}-${kind}.json`, "application/json");
+    } catch (err) {
+      setError(`Could not download the ${kind} export: ${getErrorMessage(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const downloadStix = () => {
     const body = JSON.stringify(mr.stix_bundle_extended, null, 2);
     downloadBlob(body, `${safeName}-stix.json`, "application/json");
@@ -601,6 +625,30 @@ function DownloadBar({
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
       >
         ↓ STIX 2.1 bundle
+      </button>
+      <button
+        onClick={downloadJson("iocs")}
+        disabled={!reportId || busy === "iocs"}
+        title="Every indicator the report holds, as JSON"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "iocs" ? "fetching..." : "\u2193 IOC list"}
+      </button>
+      <button
+        onClick={downloadJson("mitre")}
+        disabled={!reportId || busy === "mitre"}
+        title="The ATT&CK techniques this report mapped, as JSON"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "mitre" ? "fetching..." : "\u2193 MITRE ATT&CK"}
+      </button>
+      <button
+        onClick={downloadJson("timeline")}
+        disabled={!reportId || busy === "timeline"}
+        title="The negotiation timeline, round by round, as JSON"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy === "timeline" ? "fetching..." : "\u2193 Timeline"}
       </button>
       <button
         onClick={downloadMisp}

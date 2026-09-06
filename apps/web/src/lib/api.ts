@@ -653,6 +653,14 @@ class ApiClient {
     );
   }
 
+  /** Every IOC the report holds, flat. C4 (dev audit 2026-09-06): the endpoint
+   *  existed and nothing in the UI reached it. */
+  getReportIOCs(reportId: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/v1/reports/${reportId}/iocs`
+    );
+  }
+
   getReportMitre(reportId: string) {
     return this.request<{ techniques: unknown[] }>(
       `/api/v1/reports/${reportId}/mitre`

@@ -829,6 +829,10 @@ export async function installApiMocks(
   await page.route("**/api/v1/reports/*/mitre", (route) =>
     json(route, { techniques: [] })
   );
+  // C4: the IOC export, reachable from the summary tab's export row.
+  await page.route("**/api/v1/reports/*/iocs**", (route) =>
+    json(route, { items: [], total: 0 })
+  );
   await page.route("**/api/v1/reports/*/signatures/*", (route) =>
     route.fulfill({
       status: 200,
