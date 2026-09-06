@@ -73,3 +73,22 @@ def test_job_create_request_rejects_bad_config_at_submit_time():
         JobCreateRequest(sample_id=uuid.uuid4(), config={"max_iterations": None})
     # a null in a row written another way is "absent", not "zero"
     assert build_job_settings({}, {"max_iterations": None}).negotiation.max_iterations == 5
+
+
+def test_the_job_config_can_choose_providers():
+    s = build_job_settings({}, {"static_provider": "capa_yara", "sandbox_provider": "triage"})
+    assert s.static.provider == "capa_yara"
+    assert s.sandbox.provider == "triage"
+
+
+def test_a_sandbox_report_id_forces_the_upload_provider():
+    s = build_job_settings(
+        {"sandbox.provider": "cape2"},
+        {"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"},
+    )
+    assert s.sandbox.provider == "upload"
+
+
+def test_an_explicit_provider_still_loses_to_an_attached_report():
+    s = build_job_settings({}, {"sandbox_provider": "cape2", "sandbox_report_id": "x"})
+    assert s.sandbox.provider == "upload"

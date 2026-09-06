@@ -34,6 +34,9 @@ class GhidraHTTPClient:
         truncation_ledger: Any | None = None,
     ):
         self.base_url = base_url.rstrip("/")
+        # Callers pass a plain string (``SecretStr.get_secret_value()`` already
+        # unwrapped at the config boundary); stored plain here too, since this
+        # client builds the header string itself.
         self.auth_token = auth_token
         self._tools: list[BaseTool] = []
         self._schema: list[dict[str, Any]] = []

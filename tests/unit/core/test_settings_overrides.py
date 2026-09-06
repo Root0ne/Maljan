@@ -62,3 +62,30 @@ def test_flatten_leaves_reads_only_requested_keys():
     out = ov.flatten_leaves(s, ["llm.provider", "negotiation.max_iterations"])
     assert set(out) == {"llm.provider", "negotiation.max_iterations"}
     assert isinstance(out["negotiation.max_iterations"], int)
+
+
+def test_public_snapshot_keeps_server_env_names_and_hides_their_values():
+    """SEC-1 (dev audit 2026-09-06): defence in depth for an open-ended dict.
+
+    ``mcp.servers.<key>.env`` is a plain mapping an admin fills in, and it is
+    where a server's own credential naturally goes -- an API token a sidecar
+    reads from its environment. The snapshot travels to the job owner through
+    ``run_summary.settings_snapshot``, and unlike every other credential in
+    the settings model these values are not typed as secrets, so nothing
+    masked them. The variable names stay (an operator debugging a server needs
+    to see what it was given); the values do not.
+    """
+    from maljan.core.config import MCPServerConfig
+
+    settings = Settings()
+    settings.mcp.servers["probe_srv"] = MCPServerConfig(
+        enabled=True,
+        transport="stdio",
+        command="/bin/true",
+        env={"UPSTREAM_API_TOKEN": "sk-not-a-real-token", "LOG_LEVEL": "debug"},
+    )
+    snap = ov.public_snapshot(settings, secret_keys=[])
+    assert "mcp.servers.probe_srv.env.UPSTREAM_API_TOKEN" in snap
+    assert snap["mcp.servers.probe_srv.env.UPSTREAM_API_TOKEN"] == "***"
+    assert snap["mcp.servers.probe_srv.env.LOG_LEVEL"] == "***"
+    assert "sk-not-a-real-token" not in str(snap)

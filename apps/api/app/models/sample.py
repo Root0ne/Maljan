@@ -44,6 +44,12 @@ class Sample(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Relationships
     uploaded_by_user = relationship("User", back_populates="samples")
     jobs = relationship("AnalysisJob", back_populates="sample", lazy="selectin")
+    sandbox_reports = relationship(
+        "SandboxReportRow",
+        back_populates="sample",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     @property
     def uploaded_at(self) -> datetime:

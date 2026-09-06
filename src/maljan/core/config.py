@@ -19,10 +19,15 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
-from typing import Annotated, Any, Literal
+import copy
+import json
+import re
+import sys
+from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, PrivateAttr, SecretStr, model_validator
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -391,34 +396,6 @@ class MemoryConfig(BaseModel):
     qdrant_api_key: SecretStr | None = None
 
 
-class SandboxConfig(BaseModel):
-    """Sandbox backend configuration.
-
-    Controls which backend is used for dynamic sample analysis. The sandbox
-    client is exposed via ServiceContainer.get_sandbox_client() and can be
-    passed to FileDataLoader.load_from_sandbox().
-
-    backend:
-        "mock"  (default) — MockSandboxClient loads fixture JSON files from
-                the samples directory. Requires no network access or external
-                services. Safe for CI, tests, and local development.
-        "cape2" — CAPEv2Client submits samples to a live CAPEv2 instance via
-                its REST API. Requires httpx and a running CAPEv2 server.
-                Recommended for production / private samples.
-
-    cape2_base_url, cape2_api_token, cape2_timeout_seconds,
-    cape2_poll_interval_seconds:
-        CAPEv2 endpoint, optional bearer token, completion timeout and poll
-        interval. Token can be empty for unauthenticated local instances.
-    """
-
-    backend: Literal["mock", "cape2"] = "mock"
-    cape2_base_url: str = "http://localhost:8000"
-    cape2_api_token: SecretStr = SecretStr("")
-    cape2_timeout_seconds: int = 300
-    cape2_poll_interval_seconds: int = 10
-
-
 class AnalysisConfig(BaseModel):
     """Analysis layer configuration.
 
@@ -701,6 +678,25 @@ class PreprocessingConfig(BaseModel):
 # MCP (Model Context Protocol) Integration
 # ---------------------------------------------------------------------------
 
+# The role a definition plays in the fixed skeleton. ``generic`` is the one
+# role with no class of its own: it runs as ``ConfigurableAnalyst``.
+AnalystRole = Literal["static", "dynamic", "network", "judge", "generic"]
+
+# Deprecated since sub-project C. ``MCPServerConfig.agents`` used to be a
+# Literal of the four built-in roles; an operator can now bind a server to any
+# definition key, so the field is a plain ``str`` validated against the
+# definition map in ``Settings``. The name stays because sub-project B's
+# modules import it, and it stays a type so an annotation using it still
+# type-checks.
+AgentRole = str
+
+# A server key is a slug: lowercase, starts with a letter, at most 32 chars.
+# It is a path segment in the probe URL and a prefix in a renamed tool name,
+# so it is validated in the model rather than only in the API.
+SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
+BUILTIN_SERVER_KEYS: tuple[str, ...] = ("network", "threatintel")
+RESERVED_SERVER_KEYS: tuple[str, ...] = ("network", "threatintel", "ghidra", "cape")
+
 
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection.
@@ -718,7 +714,7 @@ class MCPServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     # http transport settings
     url: str = ""
-    auth_token: str = ""
+    auth_token: SecretStr = SecretStr("")
     # 2026-07 round 3: how many Ghidra MCP tools the static analyst exposes to the
     # model (MCP__GHIDRA__TOOL_SELECTION):
     #   "curated" — fixed ~20-tool allowlist (fastest, narrowest).
@@ -730,13 +726,758 @@ class MCPServerConfig(BaseModel):
     tool_selection: Literal["curated", "dynamic", "all"] = "dynamic"
     # Back-compat: MCP__GHIDRA__USE_ALL_TOOLS=true still forces "all".
     use_all_tools: bool = False
+    # New in sub-project B.
+    # Working directory for the stdio child; empty means the repository root.
+    cwd: str = ""
+    # Names copied out of the API process's own environment into the child.
+    # The only way a credential reaches a sidecar: ``env`` below is a visible
+    # setting, so a token written there would be readable in the UI.
+    env_allow: list[str] = Field(default_factory=list)
+    # Allow-list. ``None`` exposes every tool the server advertises (what the
+    # built-ins do today); ``[]`` exposes nothing, which is what a freshly
+    # added custom server does until the operator ticks tools from its probe.
+    tools: list[str] | None = None
+    # Which agents receive this server's tools. Definition keys since
+    # sub-project C — the four built-in roles are simply the four built-in
+    # keys — validated against ``agents.definitions`` in ``Settings``.
+    agents: list[str] = Field(default_factory=list)
+    # Display name; empty means "use the key".
+    label: str = ""
+
+
+def _builtin_servers() -> dict[str, MCPServerConfig]:
+    """The two sidecars every run depends on, as settings rather than constants.
+
+    Byte-for-byte the launch parameters ``NetworkAnalyst._initialize_mcp_client``
+    and ``JudgeAgent._initialize_mcp_client`` used before sub-project B:
+    ``sys.executable`` running ``<dir>/server.py`` with ``<dir>`` as cwd, the
+    threat-intel one alone allowed to see the two intel keys. ``tools=None``
+    keeps the whole manifest, which is what those agents did, and what
+    ``tests/fixtures/golden/mcp_tools/*.json`` pins.
+    """
+    return {
+        "network": MCPServerConfig(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["network-mcp/server.py"],
+            cwd="network-mcp",
+            agents=["network"],
+            label="Network MCP",
+        ),
+        "threatintel": MCPServerConfig(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["threatintel-mcp/server.py"],
+            cwd="threatintel-mcp",
+            env_allow=["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"],
+            agents=["judge"],
+            label="Threat intel MCP",
+        ),
+    }
 
 
 class MCPConfig(BaseModel):
-    """MCP integration configurations for external tools."""
+    """The operator-visible registry of tool servers, and a compatibility view.
 
+    ``ghidra`` and ``cape`` used to live here as a transitional mirror of
+    ``static.ghidra`` / ``sandbox.cape2.mcp`` for readers that had not yet
+    moved onto the provider layer; Task 12 moved the last of them, so the
+    mirror was gone until this task filled ``servers`` back in with a real
+    ``dict[str, MCPServerConfig]`` for operator-configured MCP tools that are
+    not one of the built-in providers.
+
+    ``ghidra`` and ``cape`` below are a **deprecated read-only compatibility
+    view**, for ``tests/evaluation/``'s reproduction scripts alone (final
+    review I5) — that harness predates the provider layer and reads
+    ``cfg.mcp.ghidra`` / ``cfg.mcp.cape`` directly, and the plan-wide
+    constraint forbids editing it. ``Settings.model_validator(mode="after")``
+    populates the two private attributes with the *same objects* as
+    ``settings.static.ghidra`` / ``settings.sandbox.cape2.mcp`` (not copies),
+    so a mutation through either name is visible through the other. Nothing
+    in ``src/`` or ``apps/`` reads these properties, and they are not
+    ``Settings`` fields — the catalog and every new caller belong on the
+    provider-layer paths instead.
+    """
+
+    _ghidra_view: MCPServerConfig | None = PrivateAttr(default=None)
+    _cape_view: MCPServerConfig | None = PrivateAttr(default=None)
+
+    # The operator-visible registry of tool servers, keyed by slug. Built-in
+    # entries are re-seeded on load, so "delete" in the UI means enabled=False
+    # for them and a real removal for a custom key.
+    servers: dict[str, MCPServerConfig] = Field(default_factory=_builtin_servers)
+
+    @model_validator(mode="after")
+    def _reseed_builtins(self) -> "MCPConfig":
+        """A built-in key that is absent comes back; one that is present is kept.
+
+        An operator who disables ``threatintel`` stores ``enabled=False`` and
+        keeps every other field they set. An override written before a built-in
+        existed simply gains it. Neither can end with a run silently missing a
+        sidecar the pipeline assumes.
+        """
+        for key, default in _builtin_servers().items():
+            self.servers.setdefault(key, default)
+        return self
+
+    @property
+    def ghidra(self) -> MCPServerConfig:
+        """Deprecated: the same object as ``settings.static.ghidra``."""
+        if self._ghidra_view is None:
+            # Only reachable for an ``MCPConfig`` built outside a validated
+            # ``Settings`` (e.g. constructed bare in a test); a real
+            # ``Settings`` always populates this in its after-validator.
+            self._ghidra_view = MCPServerConfig()
+        return self._ghidra_view
+
+    @property
+    def cape(self) -> MCPServerConfig:
+        """Deprecated: the same object as ``settings.sandbox.cape2.mcp``."""
+        if self._cape_view is None:
+            self._cape_view = MCPServerConfig()
+        return self._cape_view
+
+
+# ---------------------------------------------------------------------------
+# Agent composition (sub-project C)
+# ---------------------------------------------------------------------------
+
+# A definition key is a slug, exactly like a server key: it names a graph node
+# (``f"{key}_analyst"``), a path segment in the probe URL, and a key in
+# ``llm.agents``. Sharing the pattern rather than re-declaring it keeps the two
+# maps' rules from drifting apart.
+AGENT_KEY_PATTERN = SERVER_KEY_PATTERN
+BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge")
+BUILTIN_PROFILES: tuple[str, ...] = ("default",)
+
+_AGENT_KEY_RE = re.compile(AGENT_KEY_PATTERN)
+_KEY_RULE = (
+    "an agent name is lowercase, starts with a letter, and is at most 32 "
+    "characters of letters, digits, '-' or '_'"
+)
+
+
+class ToolRef(BaseModel):
+    """One tool source an agent definition asks for by name.
+
+    ``kind="mcp"`` names an entry of ``mcp.servers``; ``name=None`` means that
+    server's whole allow-listed set, and a name means one tool of it.
+    ``kind="provider"`` means "the tools of this agent's static provider" and
+    carries nothing else — the provider is already chosen by
+    ``AgentDefinition.static_provider``, so naming it twice could disagree.
+
+    ``builtin`` is deliberately not a kind: no in-process tool exists in this
+    project, every tool comes from an MCP server or a provider, and the literal
+    grows on the day one does.
+    """
+
+    kind: Literal["mcp", "provider"]
+    server: str | None = None
+    name: str | None = None
+
+    @model_validator(mode="after")
+    def _shape_matches_the_kind(self) -> "ToolRef":
+        if self.kind == "mcp":
+            if not self.server:
+                raise ValueError("an mcp tool reference needs a server")
+        elif self.server is not None or self.name is not None:
+            raise ValueError("a provider tool reference names no server and no tool")
+        return self
+
+
+class AgentDefinition(BaseModel):
+    """One agent, as configuration rather than as a class.
+
+    ``prompt=None`` on a built-in role means the built-in prompt assembled from
+    the agent's own providers (see ``agents.composition.builtin_prompt``), which
+    is what keeps a clone honest: change the provider, keep the prompt null,
+    and the middle of the prompt changes with it.
+
+    The LLM is *not* here. It lives at ``llm.agents.<key>.*``, the location
+    sub-project A froze; two copies of one setting drift.
+    """
+
+    role: AnalystRole
+    label: str = ""
+    prompt: str | None = None
+    tools: list[ToolRef] = Field(default_factory=list)
+    static_provider: str | None = None
+    enabled: bool = True
+
+
+class ProfileDefinition(BaseModel):
+    """An ordered set of analyst keys. The order is the sequential run order."""
+
+    label: str = ""
+    analysts: list[str]
+
+
+def _builtin_definitions() -> dict[str, AgentDefinition]:
+    """The four agents the pipeline has always had, as settings.
+
+    Every field is the neutral value, because "the built-in behaviour" is what
+    a null prompt, an empty tool list and a null static provider *mean*. The
+    judge is here so that its LLM and its tool servers have the same editing
+    surface as the analysts; it can never appear in a profile.
+    """
+    return {
+        "static": AgentDefinition(role="static", label="Static analyst"),
+        "dynamic": AgentDefinition(role="dynamic", label="Dynamic analyst"),
+        "network": AgentDefinition(role="network", label="Network analyst"),
+        "judge": AgentDefinition(role="judge", label="Judge"),
+    }
+
+
+def _builtin_profiles() -> dict[str, ProfileDefinition]:
+    """The paper's architecture, named. The order is the order the graph ran in."""
+    return {
+        "default": ProfileDefinition(label="Default", analysts=["static", "dynamic", "network"]),
+    }
+
+
+class AgentsConfig(BaseModel):
+    """The agent definitions, the profiles, and which profile is active."""
+
+    profile: str = "default"
+    profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
+    definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_builtin_definition_defaults(cls, data: Any) -> Any:
+        """Fill in the seed's values for whatever a built-in override left out.
+
+        An operator overriding ``network`` to flip ``enabled`` writes
+        ``{"role": "network", "enabled": False}``, not a full copy of the
+        seed. Without this, the fields they did not mention would take
+        ``AgentDefinition``'s own bare defaults (``label=""`` and so on)
+        instead of the seed's, and the identity check below — which must
+        compare every field but ``enabled`` — would see a mismatch on
+        ``label`` alone and refuse an edit the operator never made. Merging
+        here, before typed validation, is what lets that check compare
+        without also having to guess which fields were "really" sent.
+        """
+        if not isinstance(data, dict):
+            return data
+        definitions = data.get("definitions")
+        if not isinstance(definitions, dict):
+            return data
+        seeds = _builtin_definitions()
+        merged = {}
+        for key, entry in definitions.items():
+            seed = seeds.get(key)
+            if seed is not None and isinstance(entry, dict):
+                merged[key] = {**seed.model_dump(), **entry}
+            else:
+                merged[key] = entry
+        return {**data, "definitions": merged}
+
+    @model_validator(mode="after")
+    def _seed_and_check(self) -> "AgentsConfig":
+        """Re-seed the built-ins, then apply every rule that needs only this model.
+
+        Seeding is ``MCPConfig._reseed_builtins`` again: a stored map holds only
+        what the operator added or disabled, so a missing built-in comes back
+        and a present one is kept. What "kept" may differ by is the next rule.
+        """
+        for key, default_definition in _builtin_definitions().items():
+            self.definitions.setdefault(key, default_definition)
+        for key, default_profile in _builtin_profiles().items():
+            self.profiles.setdefault(key, default_profile)
+
+        for key in self.definitions:
+            if not _AGENT_KEY_RE.match(str(key)):
+                raise ValueError(f"{key!r}: {_KEY_RULE}")
+        for key in self.profiles:
+            if not _AGENT_KEY_RE.match(str(key)):
+                raise ValueError(f"{key!r}: {_KEY_RULE}")
+
+        # A built-in is compared field by field against its seed. ``enabled``
+        # is the one field excluded, and only for an analyst — that is the
+        # operator's one lever — not for the judge, which the skeleton always
+        # runs. Every other field, ``label`` included, must match the seed
+        # exactly; a field the operator did not mention already reads as the
+        # seed's own value, courtesy of ``_merge_builtin_definition_defaults``.
+        for key, seed in _builtin_definitions().items():
+            current = self.definitions[key].model_dump()
+            expected = seed.model_dump()
+            if key != "judge":
+                current.pop("enabled", None)
+                expected.pop("enabled", None)
+            if current != expected:
+                raise ValueError(f"{key!r} is built in; clone it to change it")
+        for key, profile_seed in _builtin_profiles().items():
+            if self.profiles[key].model_dump() != profile_seed.model_dump():
+                raise ValueError(f"{key!r} is built in; clone it to change it")
+
+        for key, definition in self.definitions.items():
+            # Spec §3.1: one judge, and it cannot be cloned. A second judge
+            # definition is inert — no profile may name it — so the operator
+            # would get a card that can never run anything.
+            if definition.role == "judge" and key != "judge":
+                raise ValueError(f"{key!r}: only the built-in judge may have role judge")
+            if definition.role == "generic" and not (definition.prompt or "").strip():
+                raise ValueError(f"{key!r}: a generic agent needs a prompt")
+            has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)
+            if has_provider_ref and definition.role != "generic":
+                raise ValueError(
+                    f"{key!r}: provider tool references are only valid on generic "
+                    "definitions; built-in roles open their provider themselves"
+                )
+
+        for name, profile in self.profiles.items():
+            if not profile.analysts:
+                raise ValueError(f"profile {name!r} needs at least one analyst")
+            seen: set[str] = set()
+            for analyst in profile.analysts:
+                if analyst in seen:
+                    raise ValueError(f"profile {name!r} lists {analyst!r} twice")
+                seen.add(analyst)
+                member = self.definitions.get(analyst)
+                if member is None:
+                    raise ValueError(f"profile {name!r} lists unknown analyst {analyst!r}")
+                if member.role == "judge":
+                    raise ValueError(
+                        f"profile {name!r} lists {analyst!r}: the judge cannot be an analyst"
+                    )
+                # A built-in profile is exempt from this check only while it
+                # is not the active profile: disabling a member of ``default``
+                # is harmless as long as some other profile is actually
+                # running, but the moment ``default`` itself is selected the
+                # disabled member would be asked to run. A custom profile has
+                # no such exemption — its author chose every member, active
+                # or not.
+                exempt = name in BUILTIN_PROFILES and name != self.profile
+                if not exempt and not member.enabled:
+                    raise ValueError(f"profile {name!r} lists disabled analyst {analyst!r}")
+
+        if self.profile not in self.profiles:
+            available = ", ".join(sorted(self.profiles))
+            raise ValueError(f"unknown profile {self.profile!r}. Available: {available}")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Static-analysis provider settings
+# ---------------------------------------------------------------------------
+
+
+class StaticR2Config(MCPServerConfig):
+    """radare2 MCP server, plus where the sample has to be for r2 to read it.
+
+    ``mirror_dir`` is **advisory only** (M1, final review): the worker's
+    private per-job mirror always lives under the security-hardened (0o700,
+    per-file 0o600) ``.work`` subdirectory of ``samples_dir`` — see
+    ``apps/api/app/worker/sample_files.work_dir()`` — regardless of this
+    value, because that is also where the H3 hardening removes the copy from
+    when the job ends. With r2's own ``container_prefix=""`` (a co-located
+    r2mcp reads the host path directly, with no separate container mount to
+    translate into), this setting changes nothing an operator can observe
+    today. It is kept, rather than removed, as the documented seam a future
+    provider that genuinely needs a distinct host mirror directory would
+    read.
+    """
+
+    binary_path: str = "r2mcp"
+    mirror_dir: str = "data/samples/.work"
+
+
+class StaticCapaConfig(BaseModel):
+    """flare-capa rule sources and its execution budget."""
+
+    rules_dir: str = "data/capa-rules"
+    signatures_dir: str = "data/capa-signatures"
+    timeout_seconds: Annotated[int, Field(ge=1)] = 300
+    backend: Literal["auto", "vivisect", "pefile", "binja"] = "auto"
+
+
+class StaticYaraConfig(BaseModel):
+    """Rule directory for the evidence-only YARA pass of the capa_yara provider.
+
+    The deterministic YARA *layer* (``analysis/yara_layer.py``) keeps its own
+    vendored corpus; this is the operator's own rule directory, scanned only by
+    the capa_yara static provider.
+    """
+
+    rules_dir: str = "data/yara_rules"
+    timeout_seconds: Annotated[int, Field(ge=1)] = 60
+
+
+class StaticGenericConfig(BaseModel):
+    """Which entry of ``mcp.servers`` the ``generic_mcp`` static provider drives.
+
+    Sub-project A gave this provider its own copy of an ``MCPServerConfig``.
+    One server can now serve several analysts, so the configuration lives in
+    ``mcp.servers`` and this is only the name of the one the static provider
+    owns. Empty means the provider has nothing to attach, and its probe says
+    exactly that rather than failing obscurely.
+    """
+
+    server: str = ""
+
+
+class StaticConfig(BaseModel):
+    """Which static-analysis tool the static analyst attaches, and its settings.
+
+    ``provider`` is the single switch; every block below is the configuration of
+    one provider and is inert unless that provider is selected. ``ghidra`` is
+    the default and is byte-for-byte the configuration that used to live at
+    ``mcp.ghidra``.
+    """
+
+    provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
     ghidra: MCPServerConfig = Field(default_factory=MCPServerConfig)
-    cape: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    r2: StaticR2Config = Field(default_factory=StaticR2Config)
+    capa: StaticCapaConfig = Field(default_factory=StaticCapaConfig)
+    yara: StaticYaraConfig = Field(default_factory=StaticYaraConfig)
+    generic: StaticGenericConfig = Field(default_factory=StaticGenericConfig)
+
+
+# ---------------------------------------------------------------------------
+# Sandbox provider settings
+# ---------------------------------------------------------------------------
+
+
+class SandboxCape2Config(BaseModel):
+    """CAPEv2 REST endpoint plus the optional CAPE MCP server beside it."""
+
+    base_url: str = "http://localhost:8000"
+    api_token: SecretStr = SecretStr("")
+    timeout_seconds: Annotated[int, Field(ge=1)] = 300
+    poll_interval_seconds: Annotated[int, Field(ge=1)] = 10
+    mcp: MCPServerConfig = Field(default_factory=MCPServerConfig)
+
+
+class SandboxTriageConfig(BaseModel):
+    """Hatching Triage cloud API.
+
+    ``profile`` names a Triage VM profile; empty means the account default.
+    ``timeout_seconds`` is generous because a Triage run queues behind other
+    tenants' work.
+    """
+
+    base_url: str = "https://tria.ge/api/v0"
+    api_token: SecretStr = SecretStr("")
+    profile: str = ""
+    timeout_seconds: Annotated[int, Field(ge=1)] = 900
+    poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
+    fetch_pcap: bool = True
+
+
+class SandboxUploadConfig(BaseModel):
+    """Limits for operator-uploaded sandbox reports (no detonation of our own)."""
+
+    max_report_bytes: Annotated[int, Field(ge=1)] = 67_108_864  # 64 MiB
+    allowed_formats: list[str] = Field(default_factory=lambda: ["cape2", "cuckoo", "triage"])
+
+
+class RestAuthConfig(BaseModel):
+    """How the credential is presented to the sandbox's API."""
+
+    header: str = "Authorization"
+    scheme: str = "Bearer"  # empty sends the token as the raw header value
+    token: SecretStr = SecretStr("")
+
+
+class RestSubmitConfig(BaseModel):
+    """The multipart submission and where the task id is read from its answer."""
+
+    method: Literal["POST", "PUT"] = "POST"
+    path: str = "/samples"
+    file_field: str = "file"
+    extra_fields: dict[str, str] = Field(default_factory=dict)
+    task_id_path: str = "$.id"
+
+
+class RestStatusConfig(BaseModel):
+    """The poll endpoint and the two terminal state sets."""
+
+    path: str = "/samples/{task_id}"
+    state_path: str = "$.status"
+    done_values: list[str] = Field(default_factory=lambda: ["reported", "completed", "finished"])
+    failed_values: list[str] = Field(default_factory=lambda: ["failed", "error"])
+
+
+class RestReportConfig(BaseModel):
+    """Where the report is, what shape it is in, and the optional capture."""
+
+    path: str = "/samples/{task_id}/report"
+    format: Literal["cape2", "cuckoo", "triage", "generic"] = "generic"
+    pcap_path: str = ""
+
+
+class RestMappingConfig(BaseModel):
+    """RFC 9535 JSONPaths selecting each consumer channel out of a report.
+
+    Read only when ``report.format`` is ``generic``. An empty path is not a
+    mistake: it says the sandbox does not publish that channel, and the
+    provider lists it in ``SandboxReport.unavailable`` so a rendered report
+    never reads like a clean sample by omission.
+    """
+
+    target_sha256: str = "$.target.sha256"
+    processes: str = ""  # each match: {pid, ppid, name, command_line}
+    calls: str = ""  # each match: {pid, api, args, timestamp}
+    signatures: str = ""  # each match: {name, description, severity, ttps}
+    dns: str = ""  # each match: {request, type, answers[]}
+    http: str = ""
+    tcp: str = ""  # each match: {dst, dport}
+    udp: str = ""
+    hosts: str = ""  # each match: a string
+    domains: str = ""
+    dropped_files: str = ""  # each match: {name, sha256, size}
+    registry: str = ""  # each match: a string
+    # "<channel>.<consumer field>" -> the field name this sandbox uses,
+    # e.g. {"processes.command_line": "cmdline"}.
+    field_names: dict[str, str] = Field(default_factory=dict)
+
+
+class SandboxRestConfig(BaseModel):
+    """Any HTTP sandbox, described rather than coded."""
+
+    base_url: str = ""
+    auth: RestAuthConfig = Field(default_factory=RestAuthConfig)
+    submit: RestSubmitConfig = Field(default_factory=RestSubmitConfig)
+    status: RestStatusConfig = Field(default_factory=RestStatusConfig)
+    report: RestReportConfig = Field(default_factory=RestReportConfig)
+    mapping: RestMappingConfig = Field(default_factory=RestMappingConfig)
+    timeout_seconds: Annotated[int, Field(ge=1)] = 900
+    poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
+    verify_tls: bool = True
+
+
+class SandboxConfig(BaseModel):
+    """Which sandbox produces the dynamic evidence, and how to reach it.
+
+    provider:
+        "mock"   (default) — fixture JSON from the samples directory, no network.
+        "cape2"  — a live CAPEv2 instance over its REST API.
+        "upload" — no detonation: an operator-uploaded report is attached to the job.
+        "triage" — Hatching Triage cloud sandbox.
+        "rest"   — any HTTP sandbox, described by sandbox.rest.*
+
+    The legacy flat names (``SANDBOX__BACKEND``, ``SANDBOX__CAPE2_BASE_URL``, …)
+    keep working through the alias table on ``Settings``.
+    """
+
+    provider: Literal["mock", "cape2", "upload", "triage", "rest"] = "mock"
+    cape2: SandboxCape2Config = Field(default_factory=SandboxCape2Config)
+    triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
+    upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)
+    rest: SandboxRestConfig = Field(default_factory=SandboxRestConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _alias_flat_keys(cls, data: Any) -> Any:
+        """Accept ``SandboxConfig(backend=..., cape2_base_url=...)`` directly.
+
+        The table on ``Settings`` covers values arriving through the environment;
+        this covers direct construction, which tests and the container do.
+        """
+        if not isinstance(data, dict):
+            return data
+        out, _used = _alias_within(data, _SANDBOX_LOCAL_ALIASES)
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Legacy key aliases
+# ---------------------------------------------------------------------------
+#
+# The provider layer moved four groups of settings. Every legacy name keeps
+# working: the table below is applied to the assembled input before validation,
+# and only where the new key is absent, so a `.env` written for the old shape
+# and one written for the new shape both produce the same Settings. One warning
+# per process names the file to edit; nothing is removed in this release.
+
+# Where a sub-project A ``static.generic.*`` block lands in the registry.
+GENERIC_SERVER_KEY = "custom"
+
+SETTINGS_ALIASES: tuple[tuple[str, str], ...] = (
+    ("mcp.ghidra", "static.ghidra"),
+    ("mcp.cape", "sandbox.cape2.mcp"),
+    ("sandbox.backend", "sandbox.provider"),
+    ("sandbox.cape2_base_url", "sandbox.cape2.base_url"),
+    ("sandbox.cape2_api_token", "sandbox.cape2.api_token"),
+    ("sandbox.cape2_timeout_seconds", "sandbox.cape2.timeout_seconds"),
+    ("sandbox.cape2_poll_interval_seconds", "sandbox.cape2.poll_interval_seconds"),
+    ("static.generic.enabled", f"mcp.servers.{GENERIC_SERVER_KEY}.enabled"),
+    ("static.generic.transport", f"mcp.servers.{GENERIC_SERVER_KEY}.transport"),
+    ("static.generic.command", f"mcp.servers.{GENERIC_SERVER_KEY}.command"),
+    ("static.generic.args", f"mcp.servers.{GENERIC_SERVER_KEY}.args"),
+    ("static.generic.env", f"mcp.servers.{GENERIC_SERVER_KEY}.env"),
+    ("static.generic.url", f"mcp.servers.{GENERIC_SERVER_KEY}.url"),
+    ("static.generic.auth_token", f"mcp.servers.{GENERIC_SERVER_KEY}.auth_token"),
+    ("static.generic.tool_selection", f"mcp.servers.{GENERIC_SERVER_KEY}.tool_selection"),
+    ("static.generic.use_all_tools", f"mcp.servers.{GENERIC_SERVER_KEY}.use_all_tools"),
+)
+
+# The subset that a bare ``SandboxConfig(...)`` can carry (paths relative to it).
+_SANDBOX_LOCAL_ALIASES: tuple[tuple[str, str], ...] = (
+    ("backend", "provider"),
+    ("cape2_base_url", "cape2.base_url"),
+    ("cape2_api_token", "cape2.api_token"),
+    ("cape2_timeout_seconds", "cape2.timeout_seconds"),
+    ("cape2_poll_interval_seconds", "cape2.poll_interval_seconds"),
+)
+
+_ALIAS_WARNED = False
+
+
+def _dig(data: dict[str, Any], path: str) -> tuple[dict[str, Any] | None, str]:
+    """Return (owning mapping, last segment) for ``path``, or (None, ...) if absent."""
+    cursor: Any = data
+    parts = path.split(".")
+    for part in parts[:-1]:
+        if not isinstance(cursor, dict) or part not in cursor:
+            return None, parts[-1]
+        cursor = cursor[part]
+    return (cursor if isinstance(cursor, dict) else None), parts[-1]
+
+
+def _ensure(data: dict[str, Any], path: str) -> tuple[dict[str, Any], str]:
+    """Return (owning mapping, last segment) for ``path``, creating dicts as needed."""
+    cursor = data
+    parts = path.split(".")
+    for part in parts[:-1]:
+        nxt = cursor.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cursor[part] = nxt
+        cursor = nxt
+    return cursor, parts[-1]
+
+
+def _alias_within(
+    data: dict[str, Any], table: tuple[tuple[str, str], ...]
+) -> tuple[dict[str, Any], list[str]]:
+    """Move every legacy path in ``table`` onto its new path, new key wins.
+
+    Sub-mappings are merged key by key (``mcp.ghidra`` -> ``static.ghidra``
+    keeps a ``static.ghidra.url`` that was set explicitly), scalars are moved
+    only when the target is absent. The legacy key is removed either way so the
+    model never sees an unknown field.
+
+    ``data`` is deep-copied before anything is popped from it: a shallow copy
+    would still share the nested per-key dicts with the caller, so popping a
+    legacy leaf out of one of them (e.g. ``sandbox.backend``) would mutate the
+    caller's own mapping too — this is the plain-dict-in, plain-dict-out
+    contract ``apply_settings_aliases`` documents.
+    """
+    out = copy.deepcopy(data)
+    used: list[str] = []
+    for old, new in table:
+        src_owner, src_key = _dig(out, old)
+        if src_owner is None or src_key not in src_owner:
+            continue
+        value = src_owner.pop(src_key)
+        used.append(old)
+        dst_owner, dst_key = _ensure(out, new)
+        if isinstance(value, dict):
+            target = dst_owner.get(dst_key)
+            merged = dict(value)
+            if isinstance(target, dict):
+                merged.update(target)  # explicit new keys win
+            dst_owner[dst_key] = merged
+        elif dst_key not in dst_owner:
+            dst_owner[dst_key] = value
+    if used:
+        _warn_once(used)
+    return out, used
+
+
+def _warn_once(paths: list[str]) -> None:
+    global _ALIAS_WARNED
+    if _ALIAS_WARNED:
+        return
+    _ALIAS_WARNED = True
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "Reading legacy setting name(s) %s; they now live under static.* / sandbox.* "
+        "(MCP__GHIDRA__* -> STATIC__GHIDRA__*, MCP__CAPE__* -> SANDBOX__CAPE2__MCP__*, "
+        "SANDBOX__BACKEND -> SANDBOX__PROVIDER, SANDBOX__CAPE2_* -> SANDBOX__CAPE2__*). "
+        "The old names keep working; update .env when convenient.",
+        ", ".join(sorted(paths)),
+    )
+
+
+_MCP_ALIAS_JSON_LEAVES = ("args", "env")  # the only list-/dict-typed MCPServerConfig fields
+
+
+def _redecode_json_leaves_stranded_by_an_alias(data: dict[str, Any]) -> None:
+    """JSON-decode an ``args``/``env`` an alias left as raw text.
+
+    pydantic-settings' nested-env decoder resolves ``MCP__GHIDRA__ARGS``
+    against whatever type it finds along that path. When the legacy path no
+    longer has a type — ``MCPConfig`` has no ``ghidra`` field, and
+    ``StaticGenericConfig`` has no ``args`` — it hands back the raw JSON text
+    under the *new* path instead, one validation error away from a silently
+    broken ``.env``. A value that already decoded correctly (set under the new
+    name, where the schema is real) is a list or dict and is left alone.
+    Mutates ``data`` in place.
+    """
+    for old, new in SETTINGS_ALIASES:
+        head, _, _tail = old.partition(".")
+        last = old.rsplit(".", 1)[-1]
+        if head == "mcp":
+            # A whole-block alias: the JSON leaves hang one level below it.
+            paths = [f"{new}.{leaf}" for leaf in _MCP_ALIAS_JSON_LEAVES]
+        elif old.startswith("static.generic.") and last in _MCP_ALIAS_JSON_LEAVES:
+            # A per-leaf alias: the new path already names the leaf.
+            paths = [new]
+        else:
+            continue
+        for path in paths:
+            owner, key = _dig(data, path)
+            if owner is None:
+                continue
+            value = owner.get(key)
+            if isinstance(value, str):
+                try:
+                    owner[key] = json.loads(value)
+                except ValueError:
+                    pass  # let ordinary model validation raise on the bad value
+
+
+def _finish_generic_server_move(data: dict[str, Any], moved: list[str]) -> None:
+    """Point ``static.generic.server`` at the migrated block and bind it to static.
+
+    The alias table can move a value; it cannot say that moving it also means
+    "and this is the server the static provider drives, and its tools go to
+    the static analyst". A legacy ``.env`` set neither, because neither
+    existed — so both are filled in here, and only when the move actually
+    happened (``moved`` names at least one ``static.generic.*`` alias this
+    pass fired) and the new keys are not already set explicitly.
+
+    Regression (F3): checking only that ``mcp.servers.custom`` exists as a
+    dict fired on *any* server an operator happened to name ``custom`` —
+    added through the UI or a plain ``MCP__SERVERS__CUSTOM__*`` env var, with
+    no ``static.generic`` alias involved — silently pointing
+    ``static.generic.server`` at it.
+    """
+    if not any(path.startswith("static.generic.") for path in moved):
+        return
+    servers = data.get("mcp", {}).get("servers")
+    if not isinstance(servers, dict):
+        return
+    entry = servers.get(GENERIC_SERVER_KEY)
+    if not isinstance(entry, dict):
+        return
+    entry.setdefault("agents", ["static"])
+    generic = data.setdefault("static", {}).setdefault("generic", {})
+    if isinstance(generic, dict):
+        generic.setdefault("server", GENERIC_SERVER_KEY)
+
+
+def apply_settings_aliases(data: dict[str, Any]) -> dict[str, Any]:
+    """Public, pure form of the alias pass — used by the validator and by tests."""
+    out, used = _alias_within(data, SETTINGS_ALIASES)
+    _redecode_json_leaves_stranded_by_an_alias(out)
+    _finish_generic_server_move(out, used)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -825,11 +1566,84 @@ class Settings(BaseSettings):
     negotiation: NegotiationConfig = Field(default_factory=NegotiationConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    static: StaticConfig = Field(default_factory=StaticConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    # Empty until sub-project B (see ``MCPConfig``'s own docstring); the
+    # transitional ``static.ghidra`` / ``sandbox.cape2.mcp`` mirror that used
+    # to live here for not-yet-migrated readers is gone as of Task 12.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+    # Which analysts exist, in what order, and what each one gets. The
+    # ``default`` profile is the architecture this project measured itself on.
+    agents: AgentsConfig = Field(default_factory=AgentsConfig)
+
+    @classmethod
+    def _alias_legacy_keys(cls, data: Any) -> Any:
+        """Translate the pre-provider setting names before validation.
+
+        Called from ``settings_customise_sources`` against each assembled
+        source in turn (init kwargs, environment nested by the ``__``
+        delimiter, dotenv, file secrets) — the probe test in
+        ``tests/unit/core/test_settings_aliases.py`` proved that a
+        ``model_validator(mode="before")`` here is compiled into the
+        pydantic-core schema by reference at class-definition time, so a
+        test that monkeypatches this classmethod afterwards never observes
+        the call; the source pre-pass calls ``cls._alias_legacy_keys``
+        through ordinary attribute lookup on every construction instead,
+        which a monkeypatch does reach.
+
+        Used to also mirror the translated value back onto the deprecated
+        ``mcp.ghidra`` / ``mcp.cape`` paths for readers that had not yet moved
+        onto the provider layer; Task 12 moved the last of them, so the
+        mirror-back is gone and this is a straight translation now.
+        """
+        if not isinstance(data, dict):
+            return data
+        return apply_settings_aliases(data)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Alias legacy names inside each source, before they are merged.
+
+        The merge is a deep dict update, so aliasing per source is equivalent to
+        aliasing the merged mapping as long as a source never contributes half
+        of an aliased sub-mapping — and a source is one file or one environment,
+        so it cannot.
+        """
+
+        class _Aliased(PydanticBaseSettingsSource):
+            def __init__(self, inner: PydanticBaseSettingsSource) -> None:
+                super().__init__(settings_cls)
+                self._inner = inner
+
+            def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+                return self._inner.get_field_value(field, field_name)
+
+            def __call__(self) -> dict[str, Any]:
+                data = self._inner()
+                # An empty source has nothing to alias; skip the call so the
+                # (harmless) no-op does not show up as a call on a source that
+                # never carried a legacy name — e.g. init kwargs when the
+                # settings are built from the environment alone.
+                if not data:
+                    return data
+                return cast("dict[str, Any]", cls._alias_legacy_keys(data))
+
+        return (
+            _Aliased(init_settings),
+            _Aliased(env_settings),
+            _Aliased(dotenv_settings),
+            _Aliased(file_secret_settings),
+        )
 
     # Token overflow protection (128K is conservative for Gemini 1M+ context)
     max_token_limit: Annotated[int, Field(ge=1)] = 128_000
@@ -961,6 +1775,71 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
+
+    @model_validator(mode="after")
+    def _populate_deprecated_mcp_view(self) -> "Settings":
+        """Wire ``mcp.ghidra`` / ``mcp.cape`` to the real provider-layer objects.
+
+        See ``MCPConfig``'s docstring (final review I5): this is a read-only
+        compatibility view for ``tests/evaluation/``'s scripts, which predate
+        the provider layer and cannot be edited under the plan-wide
+        constraint. The views share the *same* ``MCPServerConfig`` instances
+        as ``static.ghidra`` and ``sandbox.cape2.mcp`` — never copies — so
+        this must run after those sub-configs exist, which an "after"
+        validator guarantees.
+        """
+        self.mcp._ghidra_view = self.static.ghidra
+        self.mcp._cape_view = self.sandbox.cape2.mcp
+        return self
+
+    @model_validator(mode="after")
+    def _validate_agent_composition(self) -> "Settings":
+        """The agent rules that need more than ``AgentsConfig`` to check.
+
+        Three references leave the model that owns them: a ``ToolRef`` names a
+        server in ``mcp.servers``, a definition may name a static provider in
+        the provider registry, and a server names the agents it is bound to.
+        Checking them here rather than in ``AgentsConfig`` is what lets a single
+        PATCH that adds a server *and* an agent that uses it validate as one
+        unit instead of failing on whichever half pydantic built first.
+        """
+        from maljan.providers.registry import static_provider_ids
+
+        provider_ids = set(static_provider_ids())
+        for key, definition in self.agents.definitions.items():
+            if definition.static_provider is not None:
+                if definition.static_provider not in provider_ids:
+                    available = ", ".join(sorted(provider_ids))
+                    raise ValueError(
+                        f"{key!r}: unknown static provider "
+                        f"{definition.static_provider!r}. Available: {available}"
+                    )
+            for ref in definition.tools:
+                if ref.kind != "mcp":
+                    continue
+                server = self.mcp.servers.get(str(ref.server))
+                if server is None:
+                    raise ValueError(f"{key!r} references unknown mcp server {ref.server!r}")
+                # ``tools=None`` is "every tool this server advertises", which
+                # is only knowable from a live handshake. A name against such a
+                # server is checked at resolution and a miss degrades there;
+                # refusing it here would make a built-in sidecar unreferenceable.
+                if ref.name is not None and server.tools is not None:
+                    if ref.name not in server.tools:
+                        raise ValueError(
+                            f"{key!r}: {ref.name!r} is not allowed on server {ref.server!r}"
+                        )
+
+        known = set(self.agents.definitions)
+        for name, server in self.mcp.servers.items():
+            for agent in server.agents:
+                if agent not in known:
+                    available = ", ".join(sorted(known))
+                    raise ValueError(
+                        f"server {name!r} is bound to unknown agent {agent!r}. "
+                        f"Available: {available}"
+                    )
+        return self
 
 
 # ---------------------------------------------------------------------------

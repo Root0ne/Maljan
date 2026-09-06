@@ -280,3 +280,323 @@ async def test_qdrant_probe_omits_the_header_when_no_api_key(monkeypatch):
     )
     r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c"})
     assert r.ok
+
+
+def test_the_cape_probe_is_registered_under_both_names():
+    assert probes.PROBES["cape2"] is probes.probe_cape2
+    assert probes.PROBES["cape"] is probes.probe_cape2
+
+
+@pytest.mark.asyncio
+async def test_triage_probe_reports_ok(monkeypatch):
+    def handler(req: httpx.Request):
+        assert req.url.path.endswith("/resources")
+        assert req.headers["authorization"] == "Bearer tok"
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    r = await probes.probe_triage({"base_url": "https://tria.ge/api/v0", "api_token": "tok"})
+    assert r.ok is True
+
+
+@pytest.mark.asyncio
+async def test_triage_probe_reports_401_without_the_token_value(monkeypatch):
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda: httpx.AsyncClient(transport=transport(lambda r: httpx.Response(401)), timeout=10),
+    )
+    r = await probes.probe_triage(
+        {"base_url": "https://tria.ge/api/v0", "api_token": "super-secret-triage-token"}
+    )
+    assert r.ok is False
+    assert "401" in r.detail
+    assert "super-secret-triage-token" not in r.detail
+
+
+@pytest.mark.asyncio
+async def test_triage_probe_with_a_missing_token_makes_no_request(monkeypatch):
+    def must_not_be_called():
+        raise AssertionError("no HTTP client should be built without a token")
+
+    monkeypatch.setattr(probes, "_client", must_not_be_called)
+    r = await probes.probe_triage({"base_url": "https://tria.ge/api/v0", "api_token": ""})
+    assert r.ok is False
+    assert "no API token configured" in r.detail
+
+
+def test_probe_inputs_name_only_existing_settings_keys():
+    from app.services.settings_catalog_api import catalog_index
+
+    index = catalog_index()
+    for name, inputs in probes._INPUTS.items():
+        for key in inputs:
+            assert key in index, f"probe {name!r} reads unknown setting {key}"
+
+
+@pytest.mark.asyncio
+async def test_ghidra_probe_reads_the_static_block(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake(v):
+        seen.update(v)
+        return probes.ProbeResult(True, 1, "HTTP 200")
+
+    monkeypatch.setitem(probes.PROBES, "ghidra", fake)
+    await probes.run_probe("ghidra", {"core.static.ghidra.url": "http://ghidra.example:8089"}, {})
+    assert seen["url"] == "http://ghidra.example:8089"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["cape2", "cape"])
+async def test_cape_probe_resolves_from_the_live_settings_object_with_nothing_staged(
+    monkeypatch, name
+):
+    """Regression: with no candidate value and no stored override, every
+    ``_INPUTS[name]`` key is resolved by walking attributes off the live
+    ``Settings`` object (``run_probe``'s fallback branch, exercised by neither
+    of the two tests above). A flat ``cape2_base_url``/``cape2_api_token``
+    here raised ``AttributeError`` against the nested ``SandboxConfig.cape2``
+    block the provider rename introduced -- the actual failure mode behind
+    the settings UI's "Test CAPE connection" button returning a 500.
+    """
+    from maljan.core.config import Settings
+
+    seen: dict[str, object] = {}
+
+    async def fake(v):
+        seen.update(v)
+        return probes.ProbeResult(True, 1, "HTTP 200")
+
+    monkeypatch.setitem(probes.PROBES, name, fake)
+    result = await probes.run_probe(name, {}, {})
+
+    assert result.ok is True
+    live = Settings()
+    assert seen["base_url"] == live.sandbox.cape2.base_url
+    assert isinstance(seen["api_token"], str)
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reports_a_missing_binary_by_name():
+    r = await probes.probe_r2({"binary_path": "definitely-not-a-real-r2mcp-binary-xyz"})
+    assert r.ok is False
+    assert "definitely-not-a-real-r2mcp-binary-xyz" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
+    import asyncio
+
+    closed: list[bool] = []
+
+    class _HangingHandle:
+        def __init__(self, name, config):
+            self.name = name
+            self.config = config
+
+        async def aopen(self, job_id, **kw):
+            await asyncio.sleep(100)
+
+        async def aclose(self):
+            closed.append(True)
+
+    monkeypatch.setattr(probes, "ServerHandle", _HangingHandle)
+    monkeypatch.setattr(probes, "PROBE_BUDGET_SECONDS", 0.05)
+    r = await probes.probe_r2({"binary_path": "r2mcp"})
+    assert r.ok is False
+    assert "no MCP handshake" in r.detail
+    assert closed == [True], "the hung handshake must be closed, not left running"
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reports_the_tool_count_on_success(monkeypatch):
+    class _Handle:
+        def __init__(self, name, config):
+            self.name = name
+            self.config = config
+
+        async def aopen(self, job_id, **kw):
+            return None
+
+        async def aclose(self):
+            return None
+
+        def all_tool_names(self):
+            return ["open_file", "analyze"]
+
+    monkeypatch.setattr(probes, "ServerHandle", _Handle)
+    r = await probes.probe_r2({"binary_path": "r2mcp"})
+    assert r.ok is True
+    assert "2 tools offered by 'r2mcp'" in r.detail
+    assert r.tools == ["open_file", "analyze"]
+
+
+def test_the_r2_probe_is_registered():
+    assert probes.PROBES["r2"] is probes.probe_r2
+    assert probes._INPUTS["r2"] == {"core.static.r2.binary_path": "binary_path"}
+
+
+@pytest.mark.asyncio
+async def test_r2_probe_reads_the_static_block(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake(v):
+        seen.update(v)
+        return probes.ProbeResult(True, 1, "32 tools")
+
+    monkeypatch.setitem(probes.PROBES, "r2", fake)
+    await probes.run_probe("r2", {"core.static.r2.binary_path": "/opt/r2/bin/r2mcp"}, {})
+    assert seen["binary_path"] == "/opt/r2/bin/r2mcp"
+
+
+@pytest.mark.asyncio
+async def test_probe_mcp_closes_a_real_handle_that_hangs_mid_handshake(monkeypatch):
+    """End-to-end through the real ``ServerHandle`` — not the fake used by
+    ``test_mcp_probe.py`` — a toolkit whose ``initialize`` never returns must
+    still be torn down when the probe's budget expires, and the probe must
+    report the timeout rather than hanging itself."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    cleaned: list[MagicMock] = []
+
+    def hanging_factory(*args, **kwargs):
+        instance = MagicMock()
+
+        async def hang() -> None:
+            await asyncio.sleep(100)
+
+        instance.initialize = hang
+        instance.get_tools = MagicMock(return_value=[])
+        instance.cleanup = AsyncMock(return_value=None)
+        cleaned.append(instance)
+        return instance
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", hanging_factory)
+    monkeypatch.setattr(probes, "PROBE_BUDGET_SECONDS", 0.05)
+    result = await probes.probe_mcp({"name": "x", "entry": {"enabled": True, "command": "mcp"}})
+    assert result.ok is False
+    assert "no MCP handshake" in result.detail
+    cleaned[0].cleanup.assert_called_once()
+
+
+def _fake_rest_async_client(handler):
+    """A drop-in ``httpx.AsyncClient`` factory whose requests never leave the
+    process, patched onto the ``rest`` module the same way Task 11/12's own
+    ``TriageSandboxProvider`` probe test patches ``triage.httpx.AsyncClient``."""
+    real_async_client = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        return real_async_client(transport=httpx.MockTransport(handler), timeout=10)
+
+    return factory
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_ok_on_200_and_carries_the_staged_auth(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["auth"] = request.headers.get("x-api-key")
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(rest_module.httpx, "AsyncClient", _fake_rest_async_client(handler))
+    r = await probes.probe_rest(
+        {
+            "base_url": "https://xyz.example/api",
+            "auth_header": "X-API-Key",
+            "auth_scheme": "",
+            "token": "s3cr3t",
+        }
+    )
+    assert r.ok is True
+    assert seen["path"] == "/api/samples/probe"
+    assert seen["auth"] == "s3cr3t"  # empty scheme: the raw token, unprefixed
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_ok_on_a_404_for_the_fake_task(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    monkeypatch.setattr(
+        rest_module.httpx,
+        "AsyncClient",
+        _fake_rest_async_client(lambda r: httpx.Response(404)),
+    )
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api"})
+    assert r.ok is True
+    assert r.detail == "reachable, status endpoint answered 404 for a fake task"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_rest_probe_reports_the_credential_was_refused(monkeypatch, status):
+    import maljan.providers.sandbox.rest as rest_module
+
+    monkeypatch.setattr(
+        rest_module.httpx,
+        "AsyncClient",
+        _fake_rest_async_client(lambda r: httpx.Response(status)),
+    )
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api", "token": "s3cr3t-token"})
+    assert r.ok is False
+    assert str(status) in r.detail
+    assert "s3cr3t-token" not in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_a_connection_error_legibly(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    monkeypatch.setattr(rest_module.httpx, "AsyncClient", _fake_rest_async_client(handler))
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api"})
+    assert r.ok is False
+    assert "ConnectError" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_reports_a_bad_mapping_path_naming_the_channel():
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api", "mapping_dns": "$[["})
+    assert r.ok is False
+    assert "dns" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_notes_tls_verification_is_off(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    monkeypatch.setattr(
+        rest_module.httpx,
+        "AsyncClient",
+        _fake_rest_async_client(lambda r: httpx.Response(200)),
+    )
+    r = await probes.probe_rest({"base_url": "https://xyz.example/api", "verify_tls": False})
+    assert r.ok is True
+    assert "TLS verification is off" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_rest_probe_never_puts_the_token_in_the_url_or_detail(monkeypatch):
+    import maljan.providers.sandbox.rest as rest_module
+
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(rest_module.httpx, "AsyncClient", _fake_rest_async_client(handler))
+    r = await probes.probe_rest(
+        {"base_url": "https://xyz.example/api", "token": "super-secret-rest-token"}
+    )
+    assert "super-secret-rest-token" not in r.detail
+    assert "super-secret-rest-token" not in str(seen["url"])

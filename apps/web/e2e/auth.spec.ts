@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { alerts, test, expect } from "./fixtures";
 
 /*
  * These import `test` from ./fixtures, not from @playwright/test. Importing the
@@ -88,6 +88,59 @@ test.describe("Authentication", () => {
 
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
     expect(await page.evaluate(() => localStorage.getItem("access_token"))).toBeNull();
+  });
+
+  /* A3/A7 (dev audit 2026-09-06): the form used to print the client's own
+   * `"Unauthorized"` — an HTTP status word — as the whole explanation of a
+   * wrong password, and the password box carried no autocomplete hint, which
+   * Chrome reports as a DOM advisory on every load. */
+  test("a rejected password is explained in words, not as a status", async ({ page }) => {
+    await page.route("**/api/v1/auth/login", (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Incorrect email or password" }),
+      })
+    );
+
+    await expect(async () => {
+      await page.goto("/login");
+      await page.getByLabel(/email/i).fill("a@b.c");
+      await page.getByLabel(/password/i).fill("wrong-password");
+      await page.getByRole("button", { name: /sign in/i }).click();
+      await expect(alerts(page)).toContainText("Invalid email or password", {
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 30_000 });
+
+    await expect(page.getByText("Unauthorized")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("an unreachable server is named as one", async ({ page }) => {
+    await page.route("**/api/v1/auth/login", (route) => route.abort("connectionrefused"));
+
+    await expect(async () => {
+      await page.goto("/login");
+      await page.getByLabel(/email/i).fill("a@b.c");
+      await page.getByLabel(/password/i).fill("pw");
+      await page.getByRole("button", { name: /sign in/i }).click();
+      await expect(alerts(page)).toContainText("Could not reach the server", {
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 30_000 });
+  });
+
+  test("the login fields carry their autocomplete hints", async ({ page }) => {
+    await page.goto("/login");
+    await expect(page.locator('input[type="email"]')).toHaveAttribute(
+      "autocomplete",
+      "username"
+    );
+    await expect(page.locator('input[type="password"]')).toHaveAttribute(
+      "autocomplete",
+      "current-password"
+    );
   });
 
   test("the register page renders its form", async ({ page }) => {

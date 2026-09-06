@@ -8,11 +8,13 @@ in APISettings that is in neither list is not shown at all.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
 from maljan.core.settings_annotations import GROUP_ORDER
-from maljan.core.settings_catalog import CatalogEntry, FieldType, core_catalog
+from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
 from pydantic import SecretStr
 
@@ -215,6 +217,11 @@ def api_catalog() -> list[CatalogEntry]:
     for name, ann in API_EDITABLE.items():
         default = fields[name].default
         ftype, secret = _type_of(name, fields[name].annotation, default)
+        # B4 (dev audit 2026-09-06): the bounds a numeric leaf now carries are
+        # read off the field itself, the same way the core catalog reads them,
+        # so the editor can show the range it will be held to rather than
+        # discovering it from a 422.
+        lo, hi = _bounds(fields[name])
         entries.append(
             CatalogEntry(
                 key=f"api.{name}",
@@ -224,8 +231,8 @@ def api_catalog() -> list[CatalogEntry]:
                 default=None if secret else default,
                 nullable=False,
                 choices=None,
-                minimum=None,
-                maximum=None,
+                minimum=lo,
+                maximum=hi,
                 secret=secret,
                 group=ann["group"],
                 title=ann["title"],
@@ -234,11 +241,16 @@ def api_catalog() -> list[CatalogEntry]:
                 editable=True,
                 reason=None,
                 probe=ann.get("probe"),
+                applies_when=None,
+                order=0,
+                choices_from=None,
+                editor=None,
             )
         )
     for name, ann in API_READONLY.items():
         default = fields[name].default
         ftype, secret = _type_of(name, fields[name].annotation, default)
+        lo, hi = _bounds(fields[name])
         entries.append(
             CatalogEntry(
                 key=f"api.{name}",
@@ -248,8 +260,8 @@ def api_catalog() -> list[CatalogEntry]:
                 default=None if secret else _masked(name, default),
                 nullable=False,
                 choices=None,
-                minimum=None,
-                maximum=None,
+                minimum=lo,
+                maximum=hi,
                 secret=secret,
                 group="system",
                 title=ann["title"],
@@ -258,6 +270,10 @@ def api_catalog() -> list[CatalogEntry]:
                 editable=False,
                 reason="set in .env; restart required",
                 probe=ann.get("probe"),
+                applies_when=None,
+                order=0,
+                choices_from=None,
+                editor=None,
             )
         )
     return entries
@@ -265,9 +281,59 @@ def api_catalog() -> list[CatalogEntry]:
 
 def full_catalog() -> list[CatalogEntry]:
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}
-    return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.path))
+    return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.order, e.path))
 
 
 @lru_cache(maxsize=1)
 def catalog_index() -> dict[str, CatalogEntry]:
     return {e.key: e for e in full_catalog()}
+
+
+def _choice_sources(
+    servers: Iterable[str], profiles: Iterable[str], agents: Iterable[str]
+) -> dict[str, list[str]]:
+    """Every ``choices_from`` source, resolved once on the way out.
+
+    The core catalog is a pure function of the models and cannot know which
+    servers, profiles or agents exist right now; the web must not decide
+    either, or "what is a valid profile" has two answers.
+    """
+    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+
+    return {
+        # Declared for completeness and for sub-project C's agent definitions.
+        # Neither provider selector uses them today: those two are enum leaves
+        # whose choices already come from the settings Literal, in its own
+        # order, and re-deriving them here would only re-sort the dropdown.
+        "static_providers": static_provider_ids(),
+        "sandbox_providers": sandbox_provider_ids(),
+        # The empty string is a real choice: it is how an operator says the
+        # generic provider has no server yet.
+        "mcp_servers": ["", *sorted(servers)],
+        # Definition keys, not the four fixed roles: a server can be bound to
+        # any agent an operator has defined (spec §2, role vocabulary).
+        "agent_roles": list(agents),
+        "profiles": list(profiles),
+    }
+
+
+def resolved_catalog(
+    servers: Iterable[str],
+    *,
+    profiles: Iterable[str] = ("default",),
+    agents: Iterable[str] = ("static", "dynamic", "network", "judge"),
+) -> list[CatalogEntry]:
+    """``full_catalog`` with every ``choices_from`` turned into real ``choices``.
+
+    The core catalog is a pure function of the models and cannot know which
+    servers, profiles or agents exist right now; the web must not decide
+    either, or "what is a valid provider" has two answers. So it happens
+    exactly here, once, on the way out.
+    """
+    sources = _choice_sources(servers, profiles, agents)
+    out: list[CatalogEntry] = []
+    for entry in full_catalog():
+        if entry.choices_from and entry.choices_from in sources:
+            entry = replace(entry, choices=sources[entry.choices_from])
+        out.append(entry)
+    return out

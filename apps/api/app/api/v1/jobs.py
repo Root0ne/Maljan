@@ -6,7 +6,7 @@ Uses AnalysisService for business logic separation.
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -14,7 +14,9 @@ from app.deps import get_current_user
 from app.logging_config import get_logger
 from app.models.user import User
 from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse
+from app.services import audit
 from app.services.analysis_service import AnalysisService
+from app.services.settings_service import SettingsService
 
 logger = get_logger("api.jobs")
 
@@ -25,17 +27,83 @@ def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:
     return AnalysisService(db)
 
 
+async def _known_profiles(db: AsyncSession) -> set[str]:
+    """Every profile name a job may pick, stored map layered over the seeds."""
+    from app.services.agent_map import effective_profiles
+
+    return set(effective_profiles(await SettingsService(db).load_overrides()))
+
+
+async def _disabled_analyst_in(db: AsyncSession, profile: str) -> str | None:
+    """The first disabled analyst ``profile`` lists, or ``None`` if it lists none.
+
+    A built-in profile may sit inactive with a disabled member — the settings
+    model exempts it for exactly as long as it stays inactive (see
+    ``AgentsConfig._seed_and_check``). Naming it here is what makes it active,
+    so that exemption no longer applies: this refuses the job rather than
+    letting the worker discover the conflict when the run actually starts.
+    """
+    from app.services.agent_map import effective_definitions, effective_profiles
+
+    overrides = await SettingsService(db).load_overrides()
+    definitions = effective_definitions(overrides)
+    analysts = effective_profiles(overrides).get(profile, {}).get("analysts", [])
+    for analyst in analysts:
+        member = definitions.get(analyst, {})
+        if not member.get("enabled", True):
+            return str(analyst)
+    return None
+
+
+# The config keys an audit row may carry. A job config is operator-supplied and
+# open-ended, so it is never copied wholesale: only these are named, and a
+# credential someone put in it has no way through.
+_AUDITED_CONFIG_KEYS = (
+    "profile",
+    "llm_provider",
+    "static_provider",
+    "sandbox_provider",
+    "sandbox_report_id",
+    "mock_mode",
+)
+
+
+def _job_details(sample_id: Any, config: dict[str, Any] | None) -> dict[str, Any]:
+    details: dict[str, Any] = {"sample_id": str(sample_id)}
+    for key in _AUDITED_CONFIG_KEYS:
+        value = (config or {}).get(key)
+        if value is not None:
+            details[key] = str(value) if not isinstance(value, bool) else value
+    return details
+
+
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
+    request: Request,
     body: JobCreateRequest,
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Start a new analysis job for an uploaded sample."""
     logger.info(
         f"Creating analysis job for sample={body.sample_id}",
         extra={"sample_id": str(body.sample_id), "user_id": str(user.id)},
     )
+    profile = (body.config or {}).get("profile")
+    if profile is not None:
+        known = await _known_profiles(db)
+        if str(profile) not in known:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"unknown profile {str(profile)!r}. Available: {', '.join(sorted(known))}",
+            )
+        disabled = await _disabled_analyst_in(db, str(profile))
+        if disabled is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"profile {str(profile)!r} lists disabled analyst {disabled!r}",
+            )
     try:
         job = await svc.create_job(
             sample_id=body.sample_id,
@@ -45,6 +113,14 @@ async def create_job(
         logger.info(
             f"Job created: id={job.id} status={job.status}",
             extra={"job_id": str(job.id), "user_id": str(user.id)},
+        )
+        await audit.record(
+            "job.submit",
+            resource_type="job",
+            resource_id=str(job.id),
+            user_id=user.id,
+            details=_job_details(body.sample_id, body.config),
+            request=request,
         )
         return job
     except ValueError as exc:
@@ -159,6 +235,7 @@ async def get_job_events(
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_job(
+    request: Request,
     job_id: uuid.UUID,
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
@@ -169,6 +246,13 @@ async def cancel_job(
         logger.info(
             f"Job cancelled: {job_id}",
             extra={"job_id": str(job_id), "user_id": str(user.id)},
+        )
+        await audit.record(
+            "job.cancel",
+            resource_type="job",
+            resource_id=str(job_id),
+            user_id=user.id,
+            request=request,
         )
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found") from None

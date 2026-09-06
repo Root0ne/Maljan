@@ -79,9 +79,16 @@ class APISettings(BaseSettings):
 
     # ── Database ─────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://maljan:maljan_dev@127.0.0.1:5433/maljan"
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
-    db_pool_recycle_seconds: int = 1800
+    # Bounds, here and on every numeric leaf below (B4, dev audit 2026-09-06):
+    # each of these is a size, a count or a period, and a value at or below
+    # zero does not mean "unlimited" for any of them -- it means a pool that
+    # cannot serve, a token already expired, or a Redis expiry that deletes
+    # the key it was meant to set. The editable ones are PATCHable, so an
+    # out-of-range value comes back as a 422 under its own key instead of
+    # being applied.
+    db_pool_size: int = Field(default=5, ge=1)
+    db_max_overflow: int = Field(default=10, ge=0)
+    db_pool_recycle_seconds: int = Field(default=1800, ge=1)
     # When True, the application calls Alembic upgrade on startup. Production
     # deployments should run migrations as a separate deploy step instead.
     run_migrations_on_startup: bool = False
@@ -109,8 +116,8 @@ class APISettings(BaseSettings):
     # ── JWT Auth ─────────────────────────────────────────────────
     jwt_secret_key: SecretStr = SecretStr("")
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
+    jwt_access_token_expire_minutes: int = Field(default=30, ge=1)
+    jwt_refresh_token_expire_days: int = Field(default=7, ge=1)
     jwt_issuer: str = "maljan-api"
     jwt_audience: str = "maljan-clients"
 
@@ -135,8 +142,10 @@ class APISettings(BaseSettings):
     )
 
     # Login throttle (per-account)
-    login_max_attempts: int = 10
-    login_lockout_seconds: int = 300
+    login_max_attempts: int = Field(default=10, ge=1)
+    # A negative lockout is a Redis expiry that deletes the lockout key, so a
+    # negative value here disables the brute-force lockout outright.
+    login_lockout_seconds: int = Field(default=300, ge=1)
 
     # ── Auth bypass (local development only) ─────────────────────
     # When True, the API skips all JWT decoding and pretends every
@@ -159,17 +168,19 @@ class APISettings(BaseSettings):
     # corresponding provider and leaves reputation fields as ``null``.
     virustotal_api_key: SecretStr = SecretStr("")
     abuseipdb_api_key: SecretStr = SecretStr("")
-    enrichment_max_lookups: int = 25
+    enrichment_max_lookups: int = Field(default=25, ge=1)
     enrichment_enabled: bool = True
 
     # ── Rate Limiting ────────────────────────────────────────────
     rate_limit_enabled: bool = Field(default=True)
-    rate_limit_requests: int = Field(default=100)
-    rate_limit_window_seconds: int = Field(default=60)
+    rate_limit_requests: int = Field(default=100, ge=1)
+    rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default=["/health"])
 
     # ── File upload ──────────────────────────────────────────────
-    upload_max_bytes: int = Field(default=100 * 1024 * 1024)  # 100 MB
+    # 1 KiB floor rather than 1 byte: a limit below one block rejects every
+    # upload there is, which is a broken deployment rather than a policy.
+    upload_max_bytes: int = Field(default=100 * 1024 * 1024, ge=1024)  # 100 MB
     upload_allowed_mime_types: list[str] = Field(
         # The list mirrors every analyzer package shipped by CAPEv2 under
         # ``external/CAPEv2/analyzer/{windows,linux}/modules/packages/`` so

@@ -26,10 +26,10 @@ if str(_API_PATH) not in sys.path:
     sys.path.insert(0, str(_API_PATH))
 
 
-from app.api.v1 import auth as auth_module  # noqa: E402
 from app.api.v1.auth import update_me  # noqa: E402
 from app.auth.password import verify_password  # noqa: E402
 from app.schemas.auth import UserUpdateRequest  # noqa: E402
+from app.services import audit as audit_module  # noqa: E402
 
 
 class _FakeAuditSession:
@@ -52,14 +52,14 @@ class _FakeAuditSession:
 
 @pytest.fixture(autouse=True)
 def mock_audit_session_factory(monkeypatch):
-    """Mock async_session_factory in auth module to avoid real database dependency.
+    """Mock the audit writer's session factory to avoid a real database.
 
-    The _audit function uses async_session_factory to write audit rows. In unit
-    tests, we don't have a real database, so we mock it with FakeAuditSession
-    which provides a working async context manager.
+    ``_audit`` writes its row through ``services.audit.record``, which opens a
+    session of its own; in unit tests there is no database, so it gets
+    _FakeAuditSession's working async context manager instead.
     """
     session = _FakeAuditSession()
-    monkeypatch.setattr(auth_module, "async_session_factory", lambda: session)
+    monkeypatch.setattr(audit_module, "async_session_factory", lambda: session)
 
 
 def _fake_request() -> Any:

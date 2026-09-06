@@ -20,8 +20,10 @@ LangSmith Observability:
     sets the env vars LangChain reads automatically.
 
 Sandbox Backend:
-    ``get_sandbox_client()`` returns the configured sandbox client (mock,
-    cape2) and caches it for the lifetime of the container.
+    ``get_sandbox_provider()`` builds the configured ``SandboxProvider`` from
+    the registry (``mock`` when the container's own ``mock`` flag is set);
+    ``get_sandbox_client()`` wraps it as the legacy client. Both are cached
+    for the lifetime of the container.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -52,12 +54,26 @@ if TYPE_CHECKING:
     from maljan.loaders.sandbox_client import SandboxClient
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
+    from maljan.providers.base import SandboxProvider, StaticProvider
+    from maljan.providers.servers import ServerRegistry
 
 
 # Per-closer budget in ``aclose``. Each toolkit is already bounded internally;
 # this is the second fence, because a teardown that hangs holds the whole job
 # open and — with ``max_jobs = 1`` — every job after it.
+#
+# It has to be strictly larger than what a single handle's close can take, or
+# this fence cancels the handle's own abandonment handling mid-flight and the
+# child is never reaped: ``ServerHandle`` spends at most 14s routing the close
+# and 4s reaping, and the numbers are kept coherent there (see the budget
+# table at the top of ``providers/servers.py``).
 _ACLOSE_BUDGET = 20.0
+
+# The synchronous sweep's budget. Larger than ``_ACLOSE_BUDGET`` because it
+# closes every synchronously-opened handle in one call, each with its own
+# 20s bound — and because it runs in an executor, so the time it spends is a
+# worker thread's, not the event loop's.
+_CLOSE_ALL_BUDGET = 45.0
 
 
 class ServiceContainer:
@@ -106,6 +122,9 @@ class ServiceContainer:
         self._data_cache: dict[tuple[str, str], str] = {}
         self._memory_store_cache: MemoryStore | None = None
         self._sandbox_client_cache: SandboxClient | None = None
+        self._sandbox_provider_cache: SandboxProvider | None = None
+        self._static_provider_cache: dict[str, StaticProvider] = {}
+        self._server_registry_cache: ServerRegistry | None = None
         self._yara_layer_cache: YaraLayer | None = None
         self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
@@ -122,10 +141,13 @@ class ServiceContainer:
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
 
+        from maljan.agents.composition import analyst_keys
+
         logger.info(
-            "ServiceContainer initialized (mock=%s, agents=%s, parsers=%s)",
+            "ServiceContainer initialized (mock=%s, profile=%s, analysts=%s, parsers=%s)",
             mock,
-            self.agent_registry.list_agents(),
+            config.agents.profile,
+            analyst_keys(config),
             self.parser_registry.list_parsers(),
         )
 
@@ -221,41 +243,94 @@ class ServiceContainer:
                     logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
             return self._memory_store_cache
 
-    def get_sandbox_client(self) -> SandboxClient:
+    def get_sandbox_provider(self) -> SandboxProvider:
+        """The configured sandbox adapter, or the mock one in mock mode.
+
+        ``mock=True`` is the container's own switch (the CLI's ``--mock``, the
+        API's mock jobs) and outranks the setting, exactly as it did when this
+        method built clients directly.
+        """
         with self._lock:
-            if self._sandbox_client_cache is not None:
-                return self._sandbox_client_cache
+            if self._sandbox_provider_cache is not None:
+                return self._sandbox_provider_cache
+            from maljan.providers.registry import get_sandbox_provider as build
 
-            if self.mock:
-                from maljan.loaders.mock_sandbox_client import MockSandboxClient
+            cfg = self.config
+            if self.mock and cfg.sandbox.provider != "mock":
+                cfg = cfg.model_copy(deep=True)
+                cfg.sandbox.provider = "mock"
+            provider = build(cfg)
+            fixtures = getattr(provider, "fixtures_dir", None)
+            if fixtures is not None:
+                provider.fixtures_dir = self._samples_dir  # type: ignore[attr-defined]
+            logger.info("Sandbox provider: %s.", provider.id)
+            self._sandbox_provider_cache = provider
+            return provider
 
-                self._sandbox_client_cache = MockSandboxClient(fixtures_dir=self._samples_dir)
+    def get_static_provider(self, provider_id: str | None = None) -> StaticProvider:
+        """The static provider for ``provider_id``, or the globally configured one.
+
+        Cached per id rather than once, because a profile may hold two static
+        analysts on two providers and each needs its own object: the providers
+        are stateful (an open decompiler session, a loaded program), and
+        sharing one between two analysts would have them fighting over which
+        binary is loaded. ``get_static_provider()`` with no argument is the
+        pre-existing call and returns exactly what it always did.
+        """
+        wanted = str(provider_id or self.config.static.provider)
+        with self._lock:
+            cached = self._static_provider_cache.get(wanted)
+            if cached is None:
+                from maljan.providers.registry import get_static_provider as build
+
+                cfg = self.config
+                if wanted != str(cfg.static.provider):
+                    # The registry builds from ``cfg.static.provider``; a
+                    # per-agent provider is that same construction against a
+                    # copy, so no provider needs to learn a second entry point.
+                    cfg = cfg.model_copy(deep=True)
+                    cfg.static.provider = wanted  # type: ignore[assignment]
+                cached = build(cfg)
+                logger.info("Static provider: %s.", cached.id)
+                self._static_provider_cache[wanted] = cached
+            return cached
+
+    def get_server_registry(self) -> ServerRegistry:
+        """The tool servers this job may attach, built from the job's settings.
+
+        One registry per container, and the container is per job, so a stdio
+        server's subprocess lives for exactly one analysis and is closed by
+        ``aclose`` at the end of it — the same lifetime the static and sandbox
+        providers already have.
+        """
+        with self._lock:
+            if self._server_registry_cache is None:
+                from maljan.providers.servers import ServerRegistry
+
+                self._server_registry_cache = ServerRegistry(self.config)
                 logger.info(
-                    "Sandbox backend: MockSandboxClient (mock=True, fixtures_dir=%s).",
-                    self._samples_dir,
+                    "Tool servers: %s.",
+                    ", ".join(sorted(self.config.mcp.servers)) or "(none)",
                 )
-                return self._sandbox_client_cache
+            return self._server_registry_cache
 
-            backend = self.config.sandbox.backend
-            if backend == "cape2":
-                from maljan.loaders.cape2_client import CAPEv2Client
+    def server_degradation_reasons(self) -> list[str]:
+        """Tool servers that could not be attached this job, or an empty list.
 
-                self._sandbox_client_cache = CAPEv2Client(
-                    base_url=self.config.sandbox.cape2_base_url,
-                    api_token=self.config.sandbox.cape2_api_token,
-                )
-                logger.info(
-                    "Sandbox backend: CAPEv2Client (url=%s).",
-                    self.config.sandbox.cape2_base_url,
-                )
-            else:
-                from maljan.loaders.mock_sandbox_client import MockSandboxClient
+        Reads the *cached* registry only: a job that never attached a tool
+        server has nothing to report and must not build a registry here to
+        discover that.
+        """
+        registry = self._server_registry_cache
+        return list(registry.degradation_reasons) if registry is not None else []
 
-                self._sandbox_client_cache = MockSandboxClient(fixtures_dir=self._samples_dir)
-                logger.info(
-                    "Sandbox backend: MockSandboxClient (fixtures_dir=%s).",
-                    self._samples_dir,
-                )
+    def get_sandbox_client(self) -> SandboxClient:
+        """The provider, dressed as the client the pipeline already speaks."""
+        with self._lock:
+            if self._sandbox_client_cache is None:
+                from maljan.providers.sandbox._legacy import as_sandbox_client
+
+                self._sandbox_client_cache = as_sandbox_client(self.get_sandbox_provider())
             return self._sandbox_client_cache
 
     def get_token_ledger(self) -> TokenLedger:
@@ -266,21 +341,87 @@ class ServiceContainer:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
 
+    # ------------------------------------------------------------------
+    # Composition accessors
+    # ------------------------------------------------------------------
+
+    def active_profile(self) -> Any:
+        """The ``ProfileDefinition`` this job runs."""
+        from maljan.agents.composition import active_profile
+
+        return active_profile(self.config)
+
+    def analyst_keys(self) -> list[str]:
+        """The ordered analyst keys of the active profile.
+
+        The topology source for the builder, the negotiation and revision
+        nodes, the judge node and the worker's roster announcement — all of
+        them read the profile through this one call, because a profile that
+        half the pipeline believes in is worse than no profile.
+        """
+        from maljan.agents.composition import analyst_keys
+
+        return analyst_keys(self.config)
+
+    def agent_role(self, key: str) -> str:
+        """The role definition ``key`` plays: what the code may branch on.
+
+        A clone of the static analyst runs under its own key, so ``key ==
+        "static"`` stopped being the question anything should ask; this is the
+        question they meant.
+        """
+        definition = self.config.agents.definitions.get(key)
+        if definition is None:
+            available = ", ".join(sorted(self.config.agents.definitions)) or "(none)"
+            raise KeyError(f"No agent definition named {key!r}. Available: {available}")
+        return str(definition.role)
+
     def get_agent(self, name: str) -> BaseAnalyst:
+        """The agent definition ``name`` names, instantiated and wired.
+
+        A built-in role runs its own class under the definition's key — a clone
+        ``static_r2`` is a ``StaticAnalyst`` named ``static_r2`` — because
+        those classes carry the provider-specific ISR extraction the goldens
+        pin. A ``generic`` role runs ``ConfigurableAnalyst``. Both get the
+        per-run ledgers, a way back to this container, and their
+        ``ResolvedAgent``, so nothing below re-derives a prompt or a tool set.
+        """
         with self._lock:
             cached = self._agent_cache.get(name)
-            if cached is None:
-                cached = self.agent_registry.create(name, self.get_agent_llm(name))
-                # Wire the per-run token ledger so the agent's LLM calls are tallied.
-                cached.token_ledger = getattr(self, "_token_ledger", None)
-                cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
-                # Hand the agent a way back to this container. The static
-                # analyst used to construct a *whole new* ServiceContainer on
-                # every failed MCP init — per chunk, so up to ten of them per
-                # run, each rebuilding the Sigma and YARA layers.
-                cached._container = self
-                self._agent_cache[name] = cached
-            return cached
+            if cached is not None:
+                return cached
+
+            from maljan.agents.composition import resolve_agent
+            from maljan.agents.configurable_analyst import ConfigurableAnalyst
+
+            role = self.agent_role(name)
+            resolved = resolve_agent(name, self)
+            llm = cast(BaseChatModel, resolved.llm)
+            if role == "generic":
+                agent: BaseAnalyst = ConfigurableAnalyst(name, resolved, llm)
+            else:
+                agent = self.agent_registry.create(role, llm)
+                # The class is chosen by role; the *identity* is the key. Every
+                # per-agent lookup downstream — timeout overrides, LLM
+                # overrides, ISR agent_id, the graph node name — reads
+                # ``agent.name``, so this one assignment is what makes a clone
+                # a separate participant rather than a second copy of its source.
+                agent.name = name
+                # The base class already childed the logger with the role's
+                # own name at construction time; re-child only when the key
+                # differs from the role, or a default-profile agent would log
+                # as ``...static.static`` instead of ``...static``.
+                if name != role:
+                    agent.logger = agent.logger.getChild(name.lower())
+            agent.token_ledger = getattr(self, "_token_ledger", None)
+            agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
+            # Hand the agent a way back to this container. The static analyst
+            # used to construct a *whole new* ServiceContainer on every failed
+            # MCP init — per chunk, so up to ten of them per run.
+            agent._container = self
+            agent._resolved = resolved
+            self._agent_cache[name] = agent
+            return agent
 
     def get_judge_agent(self, role: str = "judge") -> Any:
         with self._lock:
@@ -299,6 +440,13 @@ class ServiceContainer:
                 )
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
+                # Hand the judge a way back to this container, the same way
+                # ``get_agent`` does above. Without this, ``_server_registry()``
+                # always read ``None`` and the judge ran with zero threat-intel
+                # tools in production, silently — the guard on the caller is
+                # ``if self.tools: return``, so a degraded judge looked exactly
+                # like a healthy one that had already attached.
+                cached._container = self
                 self._judge_agent_cache[role] = cached
             return cached
 
@@ -346,6 +494,75 @@ class ServiceContainer:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Closing judge tools failed (non-fatal): %s", exc)
 
+        # The static/sandbox providers may hold a subprocess or an HTTP pool of
+        # their own (a CAPE REST client, an MCP stdio child); release them here
+        # too, alongside the agents' and judges' toolkits above.
+        #
+        # M6 (final review): close the *cached* provider, never
+        # ``get_static_provider()``/``get_sandbox_provider()`` — those build
+        # one on demand, so a job that never touched a provider built one
+        # here for the sole purpose of closing it, and a misconfigured
+        # ``provider`` id turned a harmless teardown into a
+        # ``ProviderConfigurationError`` landing in this warning handler.
+        for provider in list(self._static_provider_cache.values()):
+            try:
+                provider.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never raises
+                logger.warning("Static provider '%s' did not close cleanly: %s", provider.id, exc)
+
+        if self._sandbox_provider_cache is not None:
+            try:
+                self._sandbox_provider_cache.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
+
+        # Same rule as the providers above: close the *cached* registry, never
+        # ``get_server_registry()`` — a job that never attached a tool server
+        # must not build one here for the sole purpose of closing it.
+        if self._server_registry_cache is not None:
+            registry = self._server_registry_cache
+            # ``close_all`` is synchronous and blocks its thread: each handle
+            # it closes hands the toolkit's exit stack to the agent loop and
+            # waits for it. Run on the loop thread, that blocks the loop — and
+            # a blocked loop cannot fire the worker's 60s fence, which is
+            # precisely the way a teardown outlasts a budget nobody can
+            # enforce. In an executor it costs a worker thread instead, and
+            # every fence above stays live.
+            loop = asyncio.get_running_loop()
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, registry.close_all), timeout=_CLOSE_ALL_BUDGET
+                )
+            except TimeoutError:
+                logger.warning(
+                    "The synchronous tool-server sweep exceeded %.0fs; leaving it to "
+                    "finish in its thread and closing whatever is still attached.",
+                    _CLOSE_ALL_BUDGET,
+                )
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing the tool-server registry failed (non-fatal): %s", exc)
+            # F6: a handle ``aopen`` attached is unwound on the loop that
+            # opened it (``ServerHandle.aclose`` routes it there) rather than
+            # through the synchronous sweep, which skips it. Read from the
+            # registry rather than from the sweep's return value, so a sweep
+            # that was abandoned above still leaves nothing attached. Normally
+            # a no-op: ``JudgeAgent.aclose`` has closed these already, and this
+            # only fires when the judge raised before reaching its own aclose.
+            for handle in registry.still_open():
+                try:
+                    await asyncio.wait_for(handle.aclose(), timeout=_ACLOSE_BUDGET)
+                except TimeoutError:
+                    logger.warning(
+                        "Closing async-opened mcp server '%s' timed out; abandoning.",
+                        handle.name,
+                    )
+                except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                    logger.warning(
+                        "Closing async-opened mcp server '%s' failed (non-fatal): %s",
+                        handle.name,
+                        exc,
+                    )
+
         # The sample's parsed text and the per-job analysis layers. Not a leak
         # on their own — the container dies with the job — but dropping them
         # here means a worker that is *not* recycled starts the next job with a
@@ -357,6 +574,7 @@ class ServiceContainer:
             self._function_summarizer_cache = None
             self._narrative_agent_cache = None
             self._report_composer_cache = None
+            self._server_registry_cache = None
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
@@ -432,20 +650,29 @@ class ServiceContainer:
     def load_sandbox_data_for_agent(
         self, agent_name: str, sandbox_report: dict[str, Any]
     ) -> list[TextChunk]:
-        """Parse and chunk sandbox report data for a specific agent."""
+        """Parse and chunk sandbox report data for a specific agent.
+
+        The slice an agent gets follows its *role*, not its key: a clone of the
+        static analyst runs ``StaticAnalyst``, which is written against the
+        report's ``target`` block, so it must be handed that block under
+        whatever key the operator gave it. The chunker still keys on the agent's
+        own name, which is what the loader's ``data_type`` means.
+        """
         import json
 
-        if agent_name == "static":
+        role = self.agent_role(agent_name)
+
+        if role == "static":
             target = sandbox_report.get("target", {})
             text = json.dumps(target, indent=2, default=str)
-        elif agent_name == "network":
+        elif role == "network":
             network = sandbox_report.get("network", {})
             try:
                 parser = self.parser_registry.create("network")
                 text = parser.parse(network)
             except KeyError:
                 text = json.dumps(network, indent=2, default=str)
-        elif agent_name == "dynamic":
+        elif role == "dynamic":
             try:
                 parser = self.parser_registry.create("dynamic")
                 text = parser.parse(sandbox_report)

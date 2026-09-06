@@ -28,7 +28,7 @@ from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
 from pydantic import ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -40,6 +40,22 @@ logger = get_logger("worker")
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 
 
+def attached_report_stmt(report_id: uuid.UUID, sample_id: uuid.UUID) -> Select[Any]:
+    """The one attached sandbox report a job may read: its own sample's.
+
+    API-1 (dev audit 2026-09-06): this used to select by report id alone and
+    compare ``row.sample_id`` afterwards. Asking the ownership question in SQL
+    keeps the two from ever drifting apart, and a report belonging to another
+    sample is not read out of the database on the way to being refused.
+    """
+    from app.models.sandbox_report import SandboxReportRow
+
+    return select(SandboxReportRow).where(
+        SandboxReportRow.id == report_id,
+        SandboxReportRow.sample_id == sample_id,
+    )
+
+
 def build_job_settings(
     overrides: dict[str, Any], job_config: dict[str, Any] | None
 ) -> _CoreSettings:
@@ -47,7 +63,9 @@ def build_job_settings(
 
     The job's values are folded into the override dict rather than assigned
     afterwards, so the model's Literal choices and bounds apply to them too
-    (``Settings`` does not validate on assignment).
+    (``Settings`` does not validate on assignment). Which provider ids are
+    legal here stays in step with the registry and ``Settings`` themselves via
+    ``test_job_provider_overrides.py::test_the_ids_agree_exactly_in_all_three_places``.
     """
     merged = dict(overrides)
     if job_config:
@@ -55,7 +73,148 @@ def build_job_settings(
             merged["negotiation.max_iterations"] = job_config["max_iterations"]
         if job_config.get("llm_provider") is not None:
             merged["llm.provider"] = job_config["llm_provider"]
+        if job_config.get("static_provider") is not None:
+            merged["static.provider"] = job_config["static_provider"]
+        if job_config.get("sandbox_provider") is not None:
+            merged["sandbox.provider"] = job_config["sandbox_provider"]
+        if job_config.get("sandbox_report_id") is not None:
+            # An attached report is the strongest statement of intent there is:
+            # it names the evidence, so it also names the provider that reads it.
+            merged["sandbox.provider"] = "upload"
+        if job_config.get("profile") is not None:
+            merged["agents.profile"] = job_config["profile"]
     return build_settings(merged)
+
+
+def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Path, str] | None:
+    """Where this sample has to be copied for the static provider to read it.
+
+    Returns (host path, container-visible path), or None when the provider does
+    not need a copy at all — a capa/YARA or radare2 run that reads the bytes in
+    place, and every future provider that does the same. The host directory and
+    its 0o700/0o600 handling stay in ``sample_files``; only the decision moved.
+    """
+    from app.worker import sample_files
+
+    if not provider.capabilities.needs_sample_mirror:
+        return None
+    spec = provider.mirror_spec()
+    if spec is None:
+        return None
+    host = sample_files.work_dir() / f"{sha256}{extension}"
+    if not spec.container_prefix:
+        # An empty prefix means the analyst-facing tool is co-located with the
+        # worker (e.g. a stdio r2mcp) and opens the sample by its host path
+        # directly — there is no separate container mount to translate into.
+        return host, str(host)
+    prefix = settings.ghidra_container_samples_path.rstrip("/")
+    container = f"{prefix}/{spec.work_subdir}/{sha256}{extension}"
+    return host, container
+
+
+def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
+    """``state["static_sample_path"]``: the globally configured provider's mirror.
+
+    Sub-project A froze that key as *the* static sample path and every
+    single-provider reader still means the global provider by it, so it is
+    ``None`` when that provider needed no copy — even if a clone on another
+    provider mirrored. Taking whichever provider happened to mirror first
+    handed the clone's path to readers that mean the global one.
+    """
+    return paths.get(str(static_settings.provider))
+
+
+def profile_static_providers(container: Any) -> list[str]:
+    """The distinct static provider ids this job needs, the global one first.
+
+    Order matters for the mirror log and for ``global_mirror_path``, which
+    reads the global provider's entry back out of the per-provider map to fill
+    ``state["static_sample_path"]`` — the key sub-project A froze and every
+    single-provider reader still uses. The globally configured provider is
+    always in the list even when no analyst names it, because that provider is
+    the one that key means.
+    """
+    from maljan.agents.composition import static_provider_id_for
+
+    settings = container.config
+    ids = [str(settings.static.provider)]
+    for key in container.analyst_keys():
+        if container.agent_role(key) != "static":
+            continue
+        provider_id = static_provider_id_for(settings, key)
+        if provider_id not in ids:
+            ids.append(provider_id)
+    return ids
+
+
+def mirror_static_samples(
+    container: Any,
+    *,
+    temp_path: str,
+    sha256: str,
+    extension: str,
+    copy_fn: Callable[[Path, Path], None],
+    job_id: str = "",
+) -> tuple[list[Path], dict[str, str]]:
+    """Copy the sample once per distinct host path this job's providers need.
+
+    Two static providers (e.g. Ghidra and a co-located r2mcp) can answer the
+    same ``mirror_target_for(...)`` host path for the same sample — see
+    ``test_each_provider_gets_its_own_container_visible_path``. Looping over
+    ``profile_static_providers`` and copying on every hit copied that file
+    twice and left a duplicate entry in the returned mirror list, so a caller
+    that removes each entry on cleanup tried to remove the same path twice.
+    This copies and records each host path once, while still mapping every
+    provider id that reaches it to its own container-visible path.
+
+    Exceptions from ``copy_fn`` are caught and logged, matching the previous
+    inline behaviour: whatever mirrored before the failure is kept.
+    """
+    host_mirrors: list[Path] = []
+    static_sample_paths: dict[str, str] = {}
+    copied_host_paths: set[Path] = set()
+    mirror_target_path: Path | str = Path(temp_path)
+    try:
+        for provider_id in profile_static_providers(container):
+            target = mirror_target_for(
+                container.get_static_provider(provider_id),
+                sha256=sha256,
+                extension=extension,
+            )
+            if target is None:
+                logger.info(
+                    "Static provider '%s' needs no sample mirror; skipping the copy.",
+                    provider_id,
+                    extra={"job_id": job_id, "component": "sample-mirror"},
+                )
+                continue
+            host_mirror, container_path = target
+            mirror_target_path = host_mirror
+            if host_mirror not in copied_host_paths:
+                copy_fn(Path(temp_path), host_mirror)
+                host_mirrors.append(host_mirror)
+                copied_host_paths.add(host_mirror)
+            static_sample_paths[provider_id] = container_path
+            logger.info(
+                "Mirrored sample to %s for static provider '%s' (%s).",
+                host_mirror,
+                provider_id,
+                container_path,
+                extra={"job_id": job_id, "component": "sample-mirror"},
+            )
+    except Exception as mirror_exc:
+        # M2: this used to hard-code "for Ghidra" and log settings.samples_dir
+        # (the samples root, not the mirror target that actually failed) — a
+        # leftover from before the mirror step was generalised to any static
+        # provider.
+        logger.warning(
+            "Failed to mirror sample to %s for the static provider: %s. "
+            "Static analyst will fall back to metadata-only prompt.",
+            mirror_target_path,
+            mirror_exc,
+            extra={"job_id": job_id, "component": "sample-mirror"},
+        )
+    return host_mirrors, static_sample_paths
 
 
 def settings_snapshot(
@@ -229,7 +388,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # cancelled) — those paths never reach the download but still run
         # this function's one ``finally``, which references both names.
         temp_path: str | None = None
-        host_mirror: Path | None = None
+        # One entry per provider actually mirrored (Task 9: a profile with two
+        # static analysts on two providers mirrors twice); the ``finally``
+        # below removes every one of them, symmetric with today's single-path
+        # cleanup.
+        host_mirrors: list[Path] = []
+        # L2 (live-run finding): set below when an attached sandbox report's
+        # own claimed hash disagreed with the sample at upload time, so the
+        # degradation makes it into both run_summary and the report banner
+        # even though nothing in the pipeline itself reads the stored flag.
+        _report_hash_mismatch_reason: str | None = None
         try:
             # ── 1. Load job ──────────────────────────────────────
             from app.models.job import AnalysisJob
@@ -427,8 +595,61 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 ),
             )
 
-            # Announce which agents are about to run so the frontend can show them
-            registered_agents = app.container.agent_registry.list_agents()
+            # A job that names an attached report hands its bytes to the
+            # sandbox provider before anything else runs: build_job_settings
+            # already forced sandbox.provider="upload" above, so the provider
+            # this container builds is the one that reads what the operator
+            # brought instead of detonating anything. The ownership is part of
+            # the query (``attached_report_stmt``), so a report attached to
+            # somebody else's sample is never read at all -- guessing a UUID
+            # returns nothing rather than a row this then refuses.
+            report_id = (job.config or {}).get("sandbox_report_id")
+            if report_id:
+                from app.api.v1.sandbox_reports import get_object
+
+                row = (
+                    await db.execute(attached_report_stmt(uuid.UUID(str(report_id)), sample.id))
+                ).scalar_one_or_none()
+                if row is None:
+                    raise ValueError("The attached sandbox report does not belong to this sample.")
+                # L2: the upload endpoint's mismatch warning promises "The
+                # analysis will still run and will say so in its findings" —
+                # nothing threaded the stored flag into the run until now.
+                if row.sample_sha256_match is False:
+                    _report_hash_mismatch_reason = (
+                        "uploaded sandbox report's target hash differs from the sample"
+                    )
+                    logger.warning(
+                        "Attached sandbox report %s claims a target hash that does not "
+                        "match sample %s; recording it as a run degradation.",
+                        row.id,
+                        sample.sha256[:12],
+                        extra={"job_id": job_id},
+                    )
+                sandbox_provider = app.container.get_sandbox_provider()
+                # A mock-mode job still resolves sandbox.provider="upload" through
+                # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
+                # own mock override runs after that and wins, so the object here
+                # can be a MockSandboxProvider with no set_pending_blob at all.
+                # Checked by capability, not by provider id, the same way every
+                # other branch in this layer is: an attribute error escaping to
+                # job.error_message would show the user a raw internal exception
+                # instead of saying what actually happened.
+                if not sandbox_provider.capabilities.accepts_uploaded_report:
+                    raise ValueError(
+                        "A sandbox report is attached to this job, but the configured "
+                        f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
+                        "uploaded report."
+                    )
+                sandbox_provider.set_pending_blob(
+                    await asyncio.to_thread(get_object, row.storage_path),
+                    filename=f"{row.id}.json",
+                )
+
+            # Announce which analysts are about to run so the frontend can show
+            # them. The active profile, not the class registry: a job that runs
+            # four analysts must not announce three.
+            registered_agents = app.container.analyst_keys()
             await _publish_event(
                 redis_conn,
                 job_id,
@@ -452,9 +673,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
 
             # Download sample from MinIO for sandbox submission
-            # (temp_path / host_mirror are declared above, before the early
+            # (temp_path / host_mirrors are declared above, before the early
             # returns, so the outer finally can always find them)
             static_sample_path: str | None = None
+            static_sample_paths: dict[str, str] = {}
             try:
                 from minio import Minio
                 from pydantic import SecretStr as _SecretStr
@@ -515,44 +737,40 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id, "component": "minio"},
                 )
 
-                # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): mirror the binary
-                # into ``<samples_dir>/.work/<sha256><ext>`` (relative to the
-                # project root by default). That directory is bind-mounted
-                # into the Ghidra MCP container at
-                # ``ghidra_container_samples_path``, so the static analyst can
-                # call ``load_program(file=<container_path>/.work/<sha256><ext>)``
-                # and actually get a hit. Previously the file only lived in the
-                # host's tempdir, invisible to the container, so every static
-                # analysis ran without ever loading the sample.
+                # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01) mirrored every
+                # sample into ``<samples_dir>/.work/<sha256><ext>`` for the
+                # Ghidra container unconditionally. Task 12 (provider
+                # capabilities) turned that into a capability read: a
+                # capa/YARA or radare2 provider reads the bytes in place and
+                # needs no copy at all, so ``mirror_target_for`` asks the
+                # configured static provider first and returns None when it
+                # has nothing to mirror. When it does, the container-visible
+                # path still mirrors the bind mount in
+                # docker/docker-compose.yml (``../data/samples:/data/samples``).
                 #
-                # Wave 10 (security hardening, H3): the mirror is now a
-                # private 0o600 copy under a 0o700 ``.work`` subdirectory of
+                # Wave 10 (security hardening, H3): the mirror is a private
+                # 0o600 copy under a 0o700 ``.work`` subdirectory of
                 # ``samples_dir`` — never the operator's own corpus directory
                 # itself — and is removed by the ``finally`` below when the
                 # job ends, whichever way it ends.
-                try:
-                    host_mirror = sample_files.work_dir() / f"{sample.sha256}{_orig_ext}"
-                    sample_files.private_copy(Path(temp_path), host_mirror)
-                    # Container path mirrors the bind mount in
-                    # docker/docker-compose.yml (``../data/samples:/data/samples``).
-                    static_sample_path = (
-                        f"{settings.ghidra_container_samples_path.rstrip('/')}/"
-                        f"{sample_files.WORK_SUBDIR}/{sample.sha256}{_orig_ext}"
-                    )
-                    logger.info(
-                        "Mirrored sample to %s for Ghidra container (%s).",
-                        host_mirror,
-                        static_sample_path,
-                        extra={"job_id": job_id, "component": "ghidra-mirror"},
-                    )
-                except Exception as mirror_exc:
-                    logger.warning(
-                        "Failed to mirror sample to %s for Ghidra: %s. "
-                        "Static analyst will fall back to metadata-only prompt.",
-                        settings.samples_dir,
-                        mirror_exc,
-                        extra={"job_id": job_id, "component": "ghidra-mirror"},
-                    )
+                # Task 9 mirrors once per distinct static provider host path;
+                # ``mirror_static_samples`` is the tested unit for that loop,
+                # including the dedup that keeps two providers sharing one
+                # host path (e.g. Ghidra and a co-located r2mcp) from copying
+                # the sample twice — see test_worker_profile_mirror.py.
+                new_mirrors, new_sample_paths = mirror_static_samples(
+                    app.container,
+                    temp_path=temp_path,
+                    sha256=sample.sha256,
+                    extension=_orig_ext,
+                    copy_fn=sample_files.private_copy,
+                    job_id=job_id,
+                )
+                host_mirrors.extend(new_mirrors)
+                static_sample_paths.update(new_sample_paths)
+                static_sample_path = global_mirror_path(
+                    static_sample_paths, app.container.config.static
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to download sample from MinIO: %s. Sandbox submission skipped.",
@@ -619,6 +837,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         file_name=sample.original_filename,
                         sample_path=temp_path,
                         static_sample_path=static_sample_path,
+                        static_sample_paths=static_sample_paths,
                     )
                 )
                 pipeline_result = await pipeline_task
@@ -693,6 +912,24 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             _run_summary = pipeline_result.get("run_summary")
             _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
             _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
+            if _report_hash_mismatch_reason:
+                # Threaded in here rather than through the pipeline state:
+                # the mismatch is known before the graph runs (it is on the
+                # stored row, checked at upload time), and both the run
+                # summary and the report banner read a plain list of
+                # strings, so appending to each is the whole fix.
+                _existing_reasons = _run_summary.get("degradation_reasons")
+                _run_summary["degradation_reasons"] = [
+                    *(_existing_reasons if isinstance(_existing_reasons, list) else []),
+                    _report_hash_mismatch_reason,
+                ]
+                _malware_report = pipeline_result.get("malware_report")
+                if isinstance(_malware_report, dict):
+                    _report_reasons = _malware_report.get("degradation_reasons")
+                    _malware_report["degradation_reasons"] = [
+                        *(_report_reasons if isinstance(_report_reasons, list) else []),
+                        _report_hash_mismatch_reason,
+                    ]
 
             # A pipeline that produced no report is a failed run, not a
             # completed one with nothing in it (L15, security hardening):
@@ -1040,7 +1277,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             from app.worker import sample_files
 
             sample_files.remove_quietly(temp_path, job_id=job_id)
-            sample_files.remove_quietly(host_mirror, job_id=job_id)
+            for _host_mirror in host_mirrors:
+                sample_files.remove_quietly(_host_mirror, job_id=job_id)
 
             # Release the agents' MCP toolkits, their stdio subprocesses and the
             # per-job caches. A ``finally`` rather than ``async with`` because

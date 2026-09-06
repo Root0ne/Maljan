@@ -82,11 +82,26 @@ def effective_source(*, overridden: bool, env_value: Any, default_value: Any) ->
     return "env" if env_value != default_value else "default"
 
 
+# ``mcp.servers.<key>.env.<VAR>`` after flattening: an open-ended mapping an
+# admin fills in, and the natural place for a server's own credential (a token
+# a sidecar reads from its environment).
+_SERVER_ENV_VALUE = re.compile(r"^mcp\.servers\.[^.]+\.env\.")
+
+
 def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str, Any]:
+    """The settings as they ran, with nothing in them a reader may not see.
+
+    ``secret_keys`` names the leaves typed as secrets. SEC-1 (dev audit
+    2026-09-06) adds the one place a credential can live without being typed
+    as one: a server's ``env`` map. This snapshot reaches the job owner
+    through ``run_summary.settings_snapshot``, so every value under such a map
+    is masked. The variable names stay -- an operator debugging a server needs
+    to see what it was handed -- and only the values go.
+    """
     secrets = set(secret_keys)
     snap = flatten(settings.model_dump(mode="json"))
     for key in list(snap):
-        if key in secrets:
+        if key in secrets or _SERVER_ENV_VALUE.match(key):
             snap[key] = "***" if snap[key] else None
     return snap
 

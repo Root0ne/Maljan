@@ -4,6 +4,25 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { ApiError, getErrorMessage, isNetworkFailure } from "@/lib/errors";
+
+/**
+ * What to tell someone whose sign-in did not work.
+ *
+ * A3 (dev audit 2026-09-06): the form printed `err.message`, so a wrong
+ * password read as the single word "Unauthorized" — the client's own name for
+ * a 401, not an explanation. A rejected credential and an unreachable server
+ * are different problems and now say so; anything else the server explains in
+ * its own words is passed through rather than flattened.
+ */
+function loginErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) return "Invalid email or password";
+    return err.message || "Sign-in failed. Please try again.";
+  }
+  if (isNetworkFailure(err)) return "Could not reach the server";
+  return getErrorMessage(err) || "Sign-in failed. Please try again.";
+}
 
 const AUTH_DISABLED =
   process.env.NEXT_PUBLIC_AUTH_DISABLED === "true" ||
@@ -29,7 +48,7 @@ export default function LoginPage() {
       localStorage.setItem("access_token", tokens.access_token);
       router.push("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -51,7 +70,10 @@ export default function LoginPage() {
         <h1 className="text-sm font-medium text-text-primary mb-4">Sign in to your account</h1>
 
         {error && (
-          <div className="mb-4 p-2.5 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded">
+          <div
+            role="alert"
+            className="mb-4 p-2.5 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded"
+          >
             {error}
           </div>
         )}
@@ -62,6 +84,7 @@ export default function LoginPage() {
             <input
               id="login-email"
               type="email"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -74,6 +97,7 @@ export default function LoginPage() {
             <input
               id="login-password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

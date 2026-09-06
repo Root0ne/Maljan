@@ -46,8 +46,15 @@ def _validate_sample_id(sample_id: str) -> str:
 
 
 def _validate_data_type(data_type: str) -> str:
-    """Restrict data_type to a conservative identifier shape."""
-    if not data_type or not re.match(r"^[A-Za-z0-9_]{1,32}$", data_type):
+    """Restrict data_type to a conservative identifier shape.
+
+    ``data_type`` is an agent key on the no-sandbox path, and an agent key may
+    carry a hyphen, so the rule accepts one: the check exists to keep the value
+    a single path segment (no separator, no dot, so no traversal) and a hyphen
+    is as path-safe as an underscore. The resolved path is still checked
+    against the samples directory in ``_resolve_sample_path``.
+    """
+    if not data_type or not re.match(r"^[A-Za-z0-9_-]{1,32}$", data_type):
         raise UnsafePathError(f"Unsafe data_type rejected: {data_type!r}")
     return data_type
 

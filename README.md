@@ -177,17 +177,156 @@ make external     # or: make setup, which runs it for you
 | [ghidra-mcp](https://github.com/bethington/ghidra-mcp) | `v5.6.0` | `docker compose` builds the headless disassembly image from this checkout, so the tree has to be on disk before the stack comes up. |
 | [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) | `eb570eb9` | The inference engine. This is the commit the evaluation pins, so fetching it here is what makes that pin reproducible rather than merely recorded. |
 
-### The sandbox is not ours to install
+### Static and sandbox providers are a choice, not a requirement
 
-CAPE is somebody else's platform and nothing here installs, builds or packages
-it. It wants a Linux host of its own with KVM and its own Windows guest images
-registered as analysis machines, which is a deployment rather than a dependency.
+The static analyst attaches to one of `ghidra`, `r2`, `capa_yara`, `generic_mcp`
+or `none`; the dynamic path pulls its evidence from one of `mock`, `cape2`,
+`upload`, `triage` or `rest`. Pick either pair from Settings → Static analysis
+provider / Sandbox provider in the web UI, per job at submit time, or with
+`STATIC__PROVIDER` / `SANDBOX__PROVIDER` in `.env`. Ghidra plus CAPEv2 is the
+profile this project's evaluation was measured on and stays the default for
+both, but neither is required to run Maljan: `STATIC__PROVIDER=capa_yara`
+with `SANDBOX__PROVIDER=upload` needs no external service at all, and
+`SANDBOX__PROVIDER=mock` needs none either.
 
-What this project does is talk to one over its REST API. Point it at yours:
+What each optional tool costs to turn on:
+
+- **radare2 (`r2`)** — install radare2 itself, then its MCP plugin:
+  `r2pm -ci r2mcp`.
+- **capa + YARA (`capa_yara`)** — no external service. Pull in the optional
+  dependency (`uv sync --extra capa`) and a rule checkout:
+  `git clone https://github.com/mandiant/capa-rules data/capa-rules`.
+- **Hatching Triage (`triage`)** — a Triage API key; no host of your own.
+- **Uploaded report (`upload`)** — nothing to install: an operator attaches
+  a report from any supported sandbox when submitting a sample.
+- **generic_mcp** — any MCP server you already run. A custom server exposes
+  nothing until you tick tools from its probe's manifest in Settings → Tool
+  servers, and even so the model can call whatever is ticked, so connect only
+  a server you control.
+
+### Connecting your own tool servers
+
+Every MCP server Maljan can attach lives in one place, `mcp.servers`, keyed by
+a short name you choose. Two entries are there by default — `network` and
+`threatintel`, the two sidecars that ship with the project — and you add your
+own from Settings → Tool servers: a name, how to reach the server (a command
+for stdio, a URL for HTTP), which analysts it serves, and which of its tools
+the model may call.
+
+**A server you add exposes nothing until you say what it may run.** That is
+the trust boundary, and it is worth being exact about where it sits. Pressing
+"Test" performs one MCP handshake and lists the tools the server advertises;
+nothing is called. Ticking a tool adds its name to that entry's allow-list, and
+only allow-listed tools are ever handed to the model. An entry with an empty
+allow-list is connected and inert. The two built-in sidecars carry no
+allow-list at all, which means "every tool they offer" — they are in this
+repository, their tool sets are pinned by a test, and narrowing them would
+change the profile the evaluation was measured on. Both built-ins can be
+disabled from the same screen but not deleted; a run resumes seeing their
+full manifest the moment they are re-enabled.
+
+What a tool server's process can see is equally explicit. It is started with an
+argument list, never through a shell. Its environment is a fixed base set
+(`PATH`, `HOME`, locale, `TMPDIR`, `JAVA_HOME`, and a handful more) plus
+exactly the variable names you list under "Environment names passed through" —
+so `threatintel-mcp` sees `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` and
+nothing else, and no server sees the database URL, the settings encryption key
+or any LLM credential. Listing a name under `env_allow` is the only way a
+credential from the process's own environment reaches a tool server; a value
+you type into the server's own `env` field is an ordinary, UI-readable
+setting, not a secret. A working directory, if you set one, has to resolve
+inside the repository or to an absolute directory that already exists — it is
+never created for you. A bearer token for an HTTP server is typed once and
+stored the way every other secret in Maljan is stored: encrypted with
+`SETTINGS_ENCRYPTION_KEY`, in a row of its own (`core.mcp.servers.<key>.auth_token`)
+rather than in the server list's JSON, never returned by the API and never
+written into a run summary. Without that key set, the UI refuses a token the
+same way it refuses every other secret, and `MCP__SERVERS__<KEY>__AUTH_TOKEN`
+in `.env` stays the way to supply one from the environment instead. A server
+bound to the static or dynamic analyst degrades rather than failing a job: if
+it cannot be reached, the run says so in its degradation reasons and
+continues on the evidence it has.
+
+### Agents and profiles
+
+The three analysts and the judge are configuration, not code. Settings →
+Agents holds two maps:
+
+**Agent definitions** — every agent Maljan can run, keyed by a short name.
+Each carries a role (`static`, `dynamic`, `network`, `judge` or `generic`), a
+prompt, the tool servers it receives and, for the static-flavoured roles, the
+static provider it reads. The three built-in analysts (`static`, `dynamic`,
+`network`) can be disabled through their enabled switch and are otherwise
+read-only; the judge is read-only in full, always runs and cannot be cloned.
+To change an analyst, clone it. A clone keeps its source's class and its ISR
+extraction, so a `static` clone pointed at radare2 is a real static analyst reading r2 — the
+prompt is reassembled with radare2's fragment in the middle and nothing else
+moves. A `generic` definition runs a plain ReAct
+analyst with the prompt you write and the tools you tick; a probe of it
+returns the resolved prompt along with the tool names and the model id, so you
+can read exactly what the model will see before a job spends a token on it.
+
+**Profiles** — named, ordered sets of analysts. The order is the order they
+run in on a single-slot local model. `default` is the three-analyst
+architecture this project was measured on and is read-only; clone it to build
+your own. A job may name a profile at submit time; without one it uses the
+profile in the settings. A profile naming a disabled analyst is refused at
+submit, not partway through the run.
+
+Two things to know before you build one. An agent's model is set through
+`core.llm.agents`, a map keyed by agent name with a provider and a model per
+entry — not on the definition — so the definition and the model it runs on
+cannot drift out of sync with each other. And a definition can only narrow
+what a tool server exposes: a tool outside that server's allow-list is
+refused when you save, so adding an agent never widens the trust boundary the
+server section above describes. A `ToolRef` of kind `provider` — "give this
+agent its static provider's own tools" — is only valid on a `generic`
+definition; a built-in role already opens its provider itself.
+
+The **Resolve** button on a definition card shows exactly what that agent
+would get — the assembled prompt's size and hash, the resolved tool names, the
+model id and the static provider — without running a job or spending a token.
+
+### A sandbox Maljan has never heard of
+
+`SANDBOX__PROVIDER=rest` drives an HTTP sandbox you describe rather than one
+this project has an adapter for. You give it a base URL, the path a sample is
+POSTed to, where the task id is in the reply, where to poll and which state
+values are terminal, and where the finished report is. If that report is
+CAPE-, Cuckoo- or Triage-shaped, say so and it goes through the same reader the
+matching adapter uses; a dedicated Triage sandbox provider still exists
+separately for the Triage cloud service itself; the REST provider's own
+`triage` report format only maps a single report body shaped like one, and
+does not replace it as the path for Triage. If the report is in its own
+shape, describe where each channel lives with an
+[RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) JSONPath. Paste one
+real response into the settings editor and press "Preview mapping" to see, in
+one pass over that response, per channel how many rows each path selected and
+how many survived — before a sample is ever detonated. A channel you leave
+empty is reported as unavailable in the finished report, so a sandbox that
+publishes no DNS log never reads as a sample that made no DNS requests. A
+`verify_tls=false` setting is flagged as a warning, not refused, since some
+operator-run sandboxes sit behind a self-signed certificate on a network you
+already trust.
+
+**Known limits.** Every job still uses whichever server `mcp.servers` says
+serves its analyst — there is no per-job server selection yet. And
+`resolve_mcp_args` roots a *relative* argument containing a `/` under the
+repository — a flag (anything starting with `-`) and an already-absolute path
+are both left untouched — so the residual is a non-path value that happens to
+contain a slash and is passed positionally (e.g. `https://x/y`), which is
+rewritten when it should not be; both are open follow-ups for a later
+sub-project.
+
+CAPE itself is somebody else's platform and nothing here installs, builds or
+packages it. It wants a Linux host of its own with KVM and its own Windows
+guest images registered as analysis machines, which is a deployment rather
+than a dependency. What this project does is talk to one over its REST API.
+Point it at yours:
 
 ```bash
-SANDBOX__CAPE2_BASE_URL=http://<your-cape-host>:8000
-SANDBOX__CAPE2_API_TOKEN=<token from that instance>
+SANDBOX__CAPE2__BASE_URL=http://<your-cape-host>:8000
+SANDBOX__CAPE2__API_TOKEN=<token from that instance>
 ```
 
 With no sandbox reachable the pipeline degrades rather than fails: the dynamic
@@ -303,6 +442,13 @@ live under `data/uploads/.tmp` (download staging) and `<SAMPLES_DIR>/.work`
 (the Ghidra bind-mount mirror), both created `0o700` with files `0o600`.
 Every worker startup sweeps both directories for copies left behind by a
 process that was killed mid-job.
+
+**Uploaded sandbox reports outlive the submit dialog.** A report attached
+under the `upload` sandbox provider is kept until the sample itself is
+deleted, listed under that sample regardless of whether the analysis it was
+attached for ever ran. Attach a report in the submit dialog and abandon the
+submission, and the report stays listed under the sample anyway; nothing
+today cleans that up automatically (follow-up in sub-project B).
 
 **Trusted proxies.** `TRUSTED_PROXY_IPS` takes CIDR networks (e.g.
 `10.0.0.0/8`), not just bare IPs — only requests arriving through one of
@@ -475,7 +621,16 @@ saved secret is never read back, the API returns whether it is set and a
 short hint. "Test connection" checks the LLM endpoint (OpenAI, Anthropic,
 Ollama or Gemini, whichever is selected), Ghidra MCP, the CAPEv2 sandbox,
 Qdrant, Redis, VirusTotal and AbuseIPDB against the values you are about to
-save, before you save them. Exporting the current UI overrides produces a
+save, before you save them. The `capa_yara` probe is neither of those
+services: it counts rule files locally. The indicator reports ok when capa
+itself imports and its rules directory holds rules; the YARA half is checked
+too, but only ever named in the detail text — a missing or empty YARA rules
+directory does not flip the indicator, since capa evidence alone is enough
+for the provider to run. "Test MCP server" launches one configured tool
+server and lists what it offers; "Test sandbox API" asks a REST sandbox's
+status endpoint about a task that does not exist, so any answer other than a
+refused credential means the endpoint and the token are right. Exporting the
+current UI overrides produces a
 `.env`-formatted file with secret values masked as `***`. Every analysis
 records the settings that were actually in effect, and which of them came
 from a UI override, in its run summary.

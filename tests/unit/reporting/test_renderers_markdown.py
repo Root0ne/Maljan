@@ -119,6 +119,58 @@ class TestHonestySignals:
         assert "**Family**: unknown" not in md
 
 
+class TestProfileLine:
+    """Non-default analyst profiles surface a header line naming the ensemble."""
+
+    def test_default_profile_is_byte_identical(self) -> None:
+        report = _build()
+        report = MalwareReportBuilder.apply_fallback_narrative(report)
+
+        report_no_profile = _build(
+            run_summary={
+                "elapsed_seconds": 12.3,
+                "final_decision": "Malware",
+                "negotiation": {
+                    "rounds_completed": 1,
+                    "termination_reason": "consensus",
+                    "final_confidence": 0.85,
+                },
+            }
+        )
+        report_no_profile = MalwareReportBuilder.apply_fallback_narrative(report_no_profile)
+        # Pin the one field that legitimately varies between two builds
+        # (wall-clock generation time) so this is a true byte-identical
+        # comparison of the rendered content itself.
+        report_no_profile.generated_at = report.generated_at
+
+        with_default = MarkdownRenderer().render(report)
+        without_profile = MarkdownRenderer().render(report_no_profile)
+
+        assert with_default == without_profile
+        assert "Profile:" not in with_default
+
+    def test_absent_profile_has_no_line(self) -> None:
+        report = _build()
+        md = MarkdownRenderer().render(report)
+        assert "Profile:" not in md
+
+    def test_non_default_profile_line_rendered_once_in_order_with_custom_marked(self) -> None:
+        report = _build(
+            run_summary={
+                "elapsed_seconds": 1.0,
+                "final_decision": "Malware",
+                "profile": {
+                    "name": "lean",
+                    "analysts": ["network", "strings"],
+                    "custom": ["strings"],
+                },
+            }
+        )
+        md = MarkdownRenderer().render(report)
+        assert md.count("Profile:") == 1
+        assert "Profile: lean — analysts: network, strings (custom)" in md
+
+
 class TestRansomwareReport:
     @pytest.fixture
     def report(self) -> MalwareReport:

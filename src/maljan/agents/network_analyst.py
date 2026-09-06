@@ -25,7 +25,7 @@ import re
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages, revision_messages
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.schemas.isr_models import AgentISR
@@ -38,6 +38,18 @@ _ISR_SYSTEM = (
     "'PCAP frame 42: src=10.0.0.5 dst=185.220.x.x:443', 'TLS SNI: suspicious.tld'. "
     "Focus on MITRE ATT&CK: T1071 (Application Layer Protocol), T1571 (Non-Standard Port), "
     "T1048 (Exfiltration), T1568 (Dynamic Resolution)."
+)
+
+# The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
+# suffix — it is a different prompt, and it was inline in ``revise`` until the
+# revision framing moved to ``BaseAnalyst``. Byte-for-byte unchanged.
+_NETWORK_REVISE_SYSTEM = (
+    "You are an expert Network Analyst participating in a collaborative "
+    "multi-agent malware analysis. The mediator has identified contradictions "
+    "between your report and other experts. Review the peer reports and mediator "
+    "feedback, then revise your analysis. Correlate network traffic with any "
+    "hardcoded C2 URLs or HTTP API calls raised by peers. "
+    "Focus on MITRE ATT&CK: T1071, T1571."
 )
 
 # Regex to detect PCAP file paths in the input data.
@@ -71,44 +83,23 @@ class NetworkAnalyst(BaseAnalyst):
     # ------------------------------------------------------------------
 
     def _initialize_mcp_client(self) -> None:
+        """Attach every tool server bound to the ``network`` role.
+
+        With default settings that is exactly ``mcp.servers["network"]`` — the
+        same ``network-mcp`` sidecar, the same command, cwd and environment
+        this method used to spell out inline — so the tool names are
+        unchanged, and ``tests/servers/test_builtin_tool_sets.py`` says so.
+        An operator who adds a second network server gets both.
+        """
         if getattr(self, "tools", None):
             return
-
-        import sys
-
-        from mcp import StdioServerParameters
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.paths import get_project_root
-
-        project_root = get_project_root()
-        server_script = str(project_root / "network-mcp" / "server.py")
-
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=[server_script],
-            env=child_env(),
-            cwd=str(project_root / "network-mcp"),
-        )
-
-        toolkit = MCPLangChainToolkit(server_params)
-
-        # Init the MCP toolkit on the shared agent loop so its session/transport
-        # is bound to the SAME loop the ReAct tool calls later run on. Running it
-        # on a throwaway ``new_event_loop()`` (LangGraph runs sync nodes in a
-        # worker thread with no running loop) bound the toolkit to a different
-        # loop, so the first PCAP MCP tool call raised "<Event> is bound to a
-        # different event loop" (see static_analyst._run_async for the full
-        # rationale). Always called from the sync analyze path, never from within
-        # the agent loop, so blocking on the result cannot deadlock.
-        from maljan.agents.base_agent import _run_coro_blocking
-
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="network-mcp-init")
-
-        self.toolkit = toolkit
-        self.tools = toolkit.get_tools()
-        self.logger.info("Initialized Network MCP toolkit with %d tools", len(self.tools))
+        registry = self._server_registry()
+        if registry is None:
+            return
+        tools, reasons = registry.tools_for("network", self._job_key())
+        self.tools = tools
+        self.degradation_reasons = reasons
+        self.logger.info("Network tool servers: %d tools attached.", len(self.tools))
 
     # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``
     # unchanged in behaviour and name, because the dynamic analyst needed the
@@ -185,45 +176,27 @@ class NetworkAnalyst(BaseAnalyst):
         peer_reports: dict[str, str],
         mediator_feedback: str,
     ) -> str:
-        """Revise network analysis based on peer findings and mediator feedback."""
+        """Revise network analysis based on peer findings and mediator feedback.
+
+        The framing moved to ``BaseAnalyst.revision_messages`` so a custom
+        analyst sends the same one. The messages that reach the model are
+        identical, which is what ``tests/agents/test_revision_prompt_golden.py``
+        compares against a fixture captured before the move; the
+        ``ChatPromptTemplate`` round trip is gone with it, because the template
+        only ever substituted these same four values and could not survive a
+        brace inside one of them.
+        """
         self.logger.info("Revising network analysis based on peer feedback...")
 
-        peer_section = (
-            "\n\n".join(
-                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
-            )
-            or "No peer reports available."
+        messages = revision_messages(
+            _NETWORK_REVISE_SYSTEM,
+            original_data,
+            own_report,
+            peer_reports,
+            mediator_feedback,
+            isr=False,
         )
-
-        prompt_messages = [
-            (
-                "system",
-                "You are an expert Network Analyst participating in a collaborative "
-                "multi-agent malware analysis. The mediator has identified contradictions "
-                "between your report and other experts. Review the peer reports and mediator "
-                "feedback, then revise your analysis. Correlate network traffic with any "
-                "hardcoded C2 URLs or HTTP API calls raised by peers. "
-                "Focus on MITRE ATT&CK: T1071, T1571.",
-            ),
-            (
-                "human",
-                "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                "PEER ANALYST REPORTS:\n{peer_section}\n\n"
-                "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
-                "ORIGINAL RAW DATA:\n{data}\n\n"
-                "Revise your analysis addressing the contradictions above.",
-            ),
-        ]
-
-        prompt = ChatPromptTemplate.from_messages(prompt_messages)
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_section,
-                "mediator_feedback": mediator_feedback,
-                "data": original_data,
-            }
-        )
+        response = self.llm.invoke(prompt_to_messages(messages))
         return str(response.content)
 
     # ------------------------------------------------------------------
@@ -345,46 +318,16 @@ class NetworkAnalyst(BaseAnalyst):
         """Return (revised_text, AgentISR) with dissent_items populated."""
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
-        peer_isr_summaries = (
-            "\n\n".join(
-                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
-            )
-            or "No peer reports available."
+        messages = revision_messages(
+            _ISR_SYSTEM,
+            original_data,
+            own_report,
+            peer_reports,
+            mediator_feedback,
+            isr=True,
+            revision_round=revision_round,
         )
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    _ISR_SYSTEM + "\n\n"
-                    "You are in a negotiation round. You MUST:\n"
-                    "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
-                    "2. Revise your own claims based on new evidence.\n"
-                    "3. If you have NO disputes, write 'DISPUTES: NONE' to signal convergence.",
-                ),
-                (
-                    "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
-                    "RAW DATA:\n{data}\n\n"
-                    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
-                    "followed by a DISPUTES section listing peer claims you reject.\n"
-                    "Example:\n"
-                    "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
-                    "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n",
-                ),
-            ]
-        )
-
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_isr_summaries,
-                "mediator_feedback": mediator_feedback,
-                "data": original_data,
-            }
-        )
+        response = self.llm.invoke(prompt_to_messages(messages))
         content = str(response.content)
 
         claims = _parse_claim_blocks(content)

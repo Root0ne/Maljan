@@ -6,7 +6,12 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^tests/fixtures/prompts/
       - id: end-of-file-fixer
+        # The prompt goldens are byte-identical captures of live system-prompt
+        # constants (tests/agents/test_prompt_byte_identity.py) — neither
+        # constant ends in a newline, so this hook must leave them alone.
+        exclude: ^tests/fixtures/prompts/
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict

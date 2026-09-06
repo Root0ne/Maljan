@@ -14,7 +14,7 @@ after this deterministic phase.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
@@ -31,8 +31,12 @@ from maljan.reporting.models import (
     MalwareReport,
     ReportFrontMatter,
     SeverityAssessment,
+    StaticAnalysis,
     VersionHistoryEntry,
 )
+
+if TYPE_CHECKING:
+    from maljan.providers.base import StaticEvidenceBundle
 
 
 class MalwareReportBuilder:
@@ -67,6 +71,7 @@ class MalwareReportBuilder:
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
         sample_platform: str | None = None,
+        static_evidence: StaticEvidenceBundle | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -84,6 +89,11 @@ class MalwareReportBuilder:
         self.degraded_mode = degraded_mode
         self.degradation_reasons = degradation_reasons or []
         self.sample_platform = sample_platform
+        # Evidence-only static providers (capa_yara) have no ISR and no tool
+        # loop to thread findings through; report_node collects this once,
+        # before the builder is constructed, and it is folded into
+        # ``static`` right after the PE extractor runs, below.
+        self.static_evidence = static_evidence
 
     # ------------------------------------------------------------------
     # Deterministic build
@@ -98,6 +108,16 @@ class MalwareReportBuilder:
             file_name=self.file_name,
         )
         static = build_static_analysis(sample_path=self.sample_path)
+        if self.static_evidence is not None:
+            from maljan.providers.static.capa_yara import merge_static_evidence
+
+            # M5 (final review): a non-PE sample, or one pefile could not
+            # parse, made ``build_static_analysis`` return None — and this
+            # used to drop the capa/YARA bundle on the floor right there,
+            # precisely when capa is the *only* static evidence there is.
+            # An empty ``StaticAnalysis`` (every field defaults) is the same
+            # shell the merge would otherwise start folding evidence into.
+            static = merge_static_evidence(static or StaticAnalysis(), self.static_evidence)
         dynamic = build_dynamic_behavior(self.sandbox_report)
         network = build_network_iocs(self.sandbox_report)
         persistence = build_persistence_list(self.sandbox_report, self.sample_platform)

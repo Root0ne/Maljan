@@ -77,6 +77,7 @@ class MaljanApp:
         file_name: str | None = None,
         sample_path: str | None = None,
         static_sample_path: str | None = None,
+        static_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline synchronously.
 
@@ -86,6 +87,9 @@ class MaljanApp:
             sample_path: Optional path to the original sample file for sandbox submission.
             static_sample_path: Optional container-visible path the static analyst's
                 Ghidra MCP server can read. See ``arun`` for full context.
+            static_sample_paths: One container-visible path per static provider
+                this job's profile uses, keyed by provider id; the globally
+                configured provider's entry is also ``static_sample_path``.
 
         Returns:
             The final state dict including:
@@ -94,7 +98,9 @@ class MaljanApp:
         """
         # Delegate to async implementation so sandbox submission and graph
         # execution share the same event loop (avoids nested asyncio.run).
-        return asyncio.run(self.arun(file_hash, file_name, sample_path, static_sample_path))
+        return asyncio.run(
+            self.arun(file_hash, file_name, sample_path, static_sample_path, static_sample_paths)
+        )
 
     def _infer_sample_platform(
         self,
@@ -133,6 +139,25 @@ class MaljanApp:
         platform = _infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
+    def _poll_budget(self, provider: Any) -> tuple[int, int]:
+        """How long to wait for this provider, and how often to ask.
+
+        Sub-project A threaded ``sandbox.cape2.*`` into every provider's poll
+        loop, which was harmless while every provider that polled was CAPE.
+        A provider with its own configured budget reads it; everything else
+        keeps CAPE's values, so the cape2, mock, upload and triage paths are
+        byte-for-byte what they were.
+        """
+        block = getattr(self.config.sandbox, str(provider.id), None)
+        timeout = getattr(block, "timeout_seconds", None)
+        interval = getattr(block, "poll_interval_seconds", None)
+        if timeout is None or interval is None:
+            return (
+                self.config.sandbox.cape2.timeout_seconds,
+                self.config.sandbox.cape2.poll_interval_seconds,
+            )
+        return int(timeout), int(interval)
+
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return normalized report.
 
@@ -148,6 +173,18 @@ class MaljanApp:
 
         try:
             client = self.container.get_sandbox_client()
+            provider = self.container.get_sandbox_provider()
+            caps = provider.capabilities
+            if not caps.can_submit and caps.accepts_uploaded_report:
+                # No detonation: the evidence is already here.
+                try:
+                    run = provider.fetch("uploaded")
+                except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
+                    logger.error("Attached sandbox report unusable: %s", exc)
+                    return None
+                from maljan.providers.cape_view import to_cape_shaped_dict
+
+                return to_cape_shaped_dict(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
             # ``submit_and_wait`` is an optional convenience method some
@@ -157,17 +194,19 @@ class MaljanApp:
                 result = await client.submit_and_wait(path)
             else:
                 task_id = client.submit(sample_path)
-                # Thread the configured completion timeout + poll interval
-                # (SANDBOX__CAPE2_TIMEOUT_SECONDS / _POLL_INTERVAL_SECONDS)
-                # into the poll loop. Without this the client's 300s default
-                # was used regardless of config, and a real CAPE detonation
+                # Thread the active provider's own completion timeout + poll
+                # interval into the poll loop (see ``_poll_budget``). Without
+                # this the client's 300s default — or another provider's
+                # config read from the wrong block — was used regardless of
+                # which sandbox was configured, and a real CAPE detonation
                 # (win10 guest run alone is ~280s + processing) timed out
                 # before the report was ready — silently degrading every run
                 # to static-only. All SandboxClient impls share this signature.
+                timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
                 status = client.wait_for_completion(
                     task_id,
-                    timeout_seconds=self.config.sandbox.cape2_timeout_seconds,
-                    poll_interval_seconds=self.config.sandbox.cape2_poll_interval_seconds,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
                 )
                 if status == "reported":
                     result = client.fetch_report(task_id)
@@ -223,6 +262,7 @@ class MaljanApp:
         file_name: str | None = None,
         sample_path: str | None = None,
         static_sample_path: str | None = None,
+        static_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -239,6 +279,9 @@ class MaljanApp:
                 static_sample_path)``. ``None`` falls back to the legacy
                 metadata-only prompt where the LLM had to guess the path
                 and timed out.
+            static_sample_paths: One container-visible path per static provider
+                this job's profile uses, keyed by provider id; the globally
+                configured provider's entry is also ``static_sample_path``.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
@@ -250,7 +293,7 @@ class MaljanApp:
         logger.info("=" * 60)
         logger.info("Sample: %s (%s)", file_hash, file_name or "unnamed")
         logger.info("Mode: %s", "MOCK" if self.container.is_mock else self.config.llm.provider)
-        logger.info("Registered agents: %s", self.container.agent_registry.list_agents())
+        logger.info("Analysts: %s", self.container.analyst_keys())
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
 
@@ -288,6 +331,7 @@ class MaljanApp:
             "file_name": file_name,
             "sample_path": sample_path,
             "static_sample_path": static_sample_path,
+            "static_sample_paths": dict(static_sample_paths or {}),
             "sandbox_report": sandbox_report,
             "file_type": file_type,
             "platform": platform,

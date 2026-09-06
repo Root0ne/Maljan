@@ -289,11 +289,22 @@ class CAPEv2Client:
         self._raise_for_status(response, "fetch_report")
         report: dict[str, Any] = response.json()
 
+        # A real CAPEv2 report nests sample identity under target.file.* —
+        # target itself carries only "category" and "file" (empirically
+        # confirmed against all 97 reports under data/cape_reports/ on
+        # 2026-09-04: none has a flat target.sha256 or target.name, all 97
+        # have target.file.sha256 and target.file.name). Reading only the flat
+        # shape silently produced an empty sample_sha256/sample_name for every
+        # real report — a wrong sha256 here is a wrong sample identity, not a
+        # cosmetic gap. The flat read stays as a fallback for a report that
+        # genuinely carries it flat (e.g. the simplified fixtures under
+        # data/samples/dynamic/).
         target = report.get("target", {})
+        file_block = target.get("file") if isinstance(target.get("file"), dict) else {}
         return SubmissionResult(
             task_id=task_id,
-            sample_sha256=target.get("sha256", ""),
-            sample_name=target.get("name", ""),
+            sample_sha256=file_block.get("sha256") or target.get("sha256", ""),
+            sample_name=file_block.get("name") or target.get("name", ""),
             status="reported",
             report=report,
         )

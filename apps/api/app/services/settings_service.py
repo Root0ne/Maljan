@@ -21,11 +21,17 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import observability
 from app.config import APISettings
 from app.config import settings as api_settings
-from app.database import async_session_factory
-from app.models import AuditLog, RuntimeSetting
+from app.models import RuntimeSetting
+from app.services.server_map import (
+    SERVER_MAP_KEY,
+    TOKEN_MASK,
+    ServerMapError,
+    merge_server_secrets,
+    server_token_key,
+    split_server_secrets,
+)
 from app.services.settings_catalog_api import _masked, catalog_index
 
 logger = logging.getLogger(__name__)
@@ -67,7 +73,14 @@ class SettingsService:
         return list(res.scalars().all())
 
     async def load_overrides(self) -> dict[str, Any]:
-        """Full keys -> plain values; secrets decrypted, or dropped if they cannot be."""
+        """Full keys -> plain values; secrets decrypted, or dropped if they cannot be.
+
+        The per-server MCP tokens are stored as their own ``is_secret`` rows
+        (see ``server_map``); they are merged back into the ``core.mcp.servers``
+        map here, so every caller downstream — the worker's ``Settings``, the
+        probes, ``runtime_config`` — sees one map with the tokens in place and
+        never has to know the storage was split.
+        """
         out: dict[str, Any] = {}
         for row in await self._rows():
             if row.is_secret:
@@ -82,7 +95,7 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return out
+        return merge_server_secrets(out)
 
     async def values(self) -> dict[str, ValueInfo]:
         index = catalog_index()
@@ -98,6 +111,25 @@ class SettingsService:
             else:
                 raw = getattr(api_settings, entry.path)
                 env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
+            if entry.key == SERVER_MAP_KEY:
+                stored_map: Any = row.value if row is not None else env_value
+                shown = self._masked_server_map(dict(stored_map or {}), env_core.mcp.servers, rows)
+                src = (
+                    "ui"
+                    if row is not None
+                    else effective_source(
+                        overridden=False, env_value=env_value, default_value=entry.default
+                    )
+                )
+                out[key] = ValueInfo(
+                    shown,
+                    None,
+                    None,
+                    src,
+                    row.updated_at if row is not None else None,
+                    row.updated_by if row is not None else None,
+                )
+                continue
             if entry.secret:
                 if row is not None:
                     # A row exists: the secret is set, full stop -- even if it
@@ -162,6 +194,31 @@ class SettingsService:
                 out[key] = ValueInfo(shown, None, None, src)
         return out
 
+    def _masked_server_map(
+        self, stored_map: dict[str, Any], env_servers: dict[str, Any], rows: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The map as the UI may see it: every token a mask, never a value.
+
+        ``auth_token_source`` rides along beside it for the same reason every
+        other row carries ``source``: "set in .env" and "set from the UI" are
+        different facts, and an operator deciding whether to type a new token
+        needs to know which one they are looking at. The editor sends the mask
+        straight back for an unchanged field, and ``split_server_secrets``
+        reads that as "leave the row alone".
+        """
+        out: dict[str, Any] = {}
+        for name, entry in stored_map.items():
+            shown = dict(entry)
+            if server_token_key(name) in rows:
+                shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
+            else:
+                env_entry = env_servers.get(name)
+                from_env = bool(env_entry is not None and env_entry.auth_token.get_secret_value())
+                shown["auth_token"] = TOKEN_MASK if from_env else ""
+                shown["auth_token_source"] = "env" if from_env else "default"
+            out[name] = shown
+        return out
+
     # ---- validation ----------------------------------------------------
     def check_keys(self, changes: dict[str, Any]) -> None:
         index = catalog_index()
@@ -199,6 +256,62 @@ class SettingsService:
         self.check_keys(changes)
         index = catalog_index()
         current = await self.load_overrides()
+        changes = dict(changes)
+        tokens: dict[str, str | None] = {}
+        server_map_kept: set[str] | None = None
+        if SERVER_MAP_KEY in changes:
+            if changes[SERVER_MAP_KEY] is None:
+                # An explicit null drops the override like every other key
+                # (handled below); every per-server token row goes with it --
+                # ``split_server_secrets`` never runs, there is no map left to
+                # validate against.
+                server_map_kept = set()
+            else:
+                # The map is one non-secret row and the tokens are not in it. Split
+                # first so neither validation nor the audit trail ever sees one.
+                # A malformed map is reported here, before the generic pydantic
+                # validation below, with one message per offending key.
+                stored_map = current.get(SERVER_MAP_KEY)
+                try:
+                    changes[SERVER_MAP_KEY], tokens = split_server_secrets(
+                        changes[SERVER_MAP_KEY],
+                        stored=stored_map if isinstance(stored_map, dict) else None,
+                        stored_settings=current,
+                    )
+                except ServerMapError as exc:
+                    raise SettingsValidationError(
+                        {f"{SERVER_MAP_KEY}.{k}": v for k, v in exc.errors.items()}
+                    ) from exc
+                unstorable = [
+                    server_token_key(name)
+                    for name, token in tokens.items()
+                    if token and not box.is_available()
+                ]
+                if unstorable:
+                    raise SettingsValidationError(
+                        {
+                            key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                            for key in unstorable
+                        }
+                    )
+                server_map_kept = set(changes[SERVER_MAP_KEY])
+
+        from app.services.agent_map import (
+            AGENT_DEFINITIONS_KEY,
+            AGENT_PROFILE_KEY,
+            AGENT_PROFILES_KEY,
+            AgentMapError,
+            validate_agent_map,
+        )
+
+        if {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY} & set(changes):
+            # Per-key messages, so the two composite editors can put each error
+            # on the card that caused it — the same reason the server map has
+            # its own validation module.
+            try:
+                changes.update(validate_agent_map(changes, current))
+            except AgentMapError as exc:
+                raise SettingsValidationError(dict(exc.errors)) from exc
         merged = {**current}
         for key, value in changes.items():
             # ``null`` means "drop the override" for every key, secrets
@@ -243,10 +356,48 @@ class SettingsService:
                 after[key] = "set" if entry.secret else value
             result.applied.append(key)
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
+        if server_map_kept is not None:
+            await self._save_server_tokens(tokens, server_map_kept)
         await self.db.commit()
         details = {"changed": list(changes), "before": before, "after": after}
         await _audit(user_id, "settings.update", details, ip)
         return result
+
+    async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
+        """One encrypted row per server that has a token, and none for one that does not.
+
+        Runtime-keyed rows: the catalog is a static list and cannot hold a name
+        an operator invents, so these are written here rather than through the
+        catalog-driven path in ``save``. They are otherwise ordinary secret
+        rows — same Fernet box, same ``is_secret`` flag, same decrypt-or-drop
+        behaviour in ``load_overrides`` — so a rotated key degrades them the
+        same way it degrades every other secret.
+
+        ``kept`` is the set of servers the new map still holds; a token row for
+        a server that is gone is deleted with it, so a re-created server never
+        inherits a predecessor's credential.
+        """
+        rows = {r.key: r for r in await self._rows()}
+        prefix = f"{SERVER_MAP_KEY}."
+        for key, row in rows.items():
+            if not (key.startswith(prefix) and key.endswith(".auth_token")):
+                continue
+            name = key[len(prefix) : -len(".auth_token")]
+            if name not in kept:
+                await self.db.delete(row)
+        for name, token in tokens.items():
+            key = server_token_key(name)
+            existing = rows.get(key)
+            if not token:
+                if existing is not None:
+                    await self.db.delete(existing)
+                continue
+            stored = box.encrypt(token)
+            if existing is None:
+                self.db.add(RuntimeSetting(key=key, value=stored, is_secret=True))
+            else:
+                existing.value = stored
+                existing.is_secret = True
 
     async def reset(
         self, keys: list[str], *, user_id: uuid.UUID | None, ip: str | None
@@ -266,23 +417,14 @@ class SettingsService:
 async def _audit(
     user_id: uuid.UUID | None, action: str, details: dict[str, Any], ip: str | None
 ) -> None:
-    """Independent transaction, same reasoning as auth._audit; best effort."""
-    try:
-        async with async_session_factory() as s:
-            s.add(
-                AuditLog(
-                    user_id=user_id,
-                    action=action,
-                    resource_type="settings",
-                    resource_id=None,
-                    details=details,
-                    ip_address=ip or None,
-                )
-            )
-            await s.commit()
-    except Exception as exc:  # noqa: BLE001 - audit is best effort, but never silent
-        observability.counters.audit_write_failures += 1
-        logger.error("Audit write failed (action=%s): %s", action, type(exc).__name__)
+    """Independent transaction, same reasoning as auth._audit; best effort.
+
+    Dev audit 2026-09-06 (A2): the write itself is ``services.audit.record``,
+    shared with auth and with the sample, job and sandbox-report endpoints.
+    """
+    from app.services import audit
+
+    await audit.record(action, resource_type="settings", user_id=user_id, details=details, ip=ip)
 
 
 async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:

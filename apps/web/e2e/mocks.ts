@@ -133,6 +133,16 @@ export const MOCK_SAMPLE = {
   uploaded_at: "2026-07-26T10:00:00Z",
 };
 
+export const MOCK_SANDBOX_REPORT = {
+  id: "sandbox-report-1",
+  format: "cape2",
+  task_id: "1000",
+  size_bytes: 512,
+  sample_sha256_match: true,
+  warning: null,
+  uploaded_at: "2026-07-26T10:05:00Z",
+};
+
 export const MOCK_REPORT_SUMMARY = {
   id: "report-1",
   job_id: "job-1",
@@ -171,13 +181,18 @@ export const MOCK_API_KEY = {
 
 /**
  * Matches `apps/api/app/schemas/settings.py::SchemaResponse` /
- * `apps/web/src/types/settings.ts::SettingsSchema`. Two groups, three field
+ * `apps/web/src/types/settings.ts::SettingsSchema`. Five groups: three field
  * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
  * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
  * — shown only for a `"ui"`-sourced value — has something to contrast
  * against the `"default"`/`"env"` rows that must not show it, and a `list`
- * field defaulting to `[]` for `ListWidget` coverage) plus one secret in
- * "providers".
+ * field defaulting to `[]` for `ListWidget` coverage), one secret in
+ * "providers", "sandbox" and "static" — a provider selector each
+ * (`order: -1`, `choices_from` naming the registry it was resolved from),
+ * "sandbox" also carrying two `applies_when`-gated fields for conditional
+ * visibility, and "mcp" — the server-map leaf (`editor: "server_map"`) plus
+ * the `generic_mcp` static provider's server picker (`choices_from:
+ * "mcp_servers"`).
  */
 export const MOCK_SETTINGS_SCHEMA = {
   secrets_available: true,
@@ -204,6 +219,10 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: null,
+          applies_when: null,
+          order: 0,
+          choices_from: null,
+          editor: null,
         },
         {
           key: "core.negotiation.retry_delay",
@@ -223,6 +242,10 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: null,
+          applies_when: null,
+          order: 0,
+          choices_from: null,
+          editor: null,
         },
         {
           key: "core.negotiation.blocked_hosts",
@@ -242,6 +265,10 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: null,
+          applies_when: null,
+          order: 0,
+          choices_from: null,
+          editor: null,
         },
       ],
     },
@@ -267,6 +294,209 @@ export const MOCK_SETTINGS_SCHEMA = {
           editable: true,
           reason: null,
           probe: "llm",
+          applies_when: null,
+          order: 0,
+          choices_from: null,
+          editor: null,
+        },
+        // Task C14 fix: real `core_catalog()` leaves the agent-definitions
+        // editor's LLM section falls back to — `llm.provider` exists (an
+        // enum), `llm.model` does not (models are per-provider, e.g.
+        // `llm.openai.expert_model`), so only the provider entry is mocked.
+        {
+          key: "core.llm.provider", namespace: "core", path: "llm.provider",
+          type: "enum", default: "openai", nullable: false,
+          choices: ["openai", "anthropic", "ollama", "gemini"],
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
+        // `llm.agents` (`dict[str, AgentLLMConfig]`) is one JSON leaf, staged
+        // as a whole exactly like `core.mcp.servers` — the agent-definitions
+        // editor's LLM section reads and writes this map directly, one entry
+        // per agent key.
+        {
+          key: "core.llm.agents", namespace: "core", path: "llm.agents",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Per-agent LLM overrides",
+          description: "Per-agent LLM overrides for the heterogeneous model ensemble.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
+      ],
+    },
+    // Task A21: `applies_when` drives conditional visibility; `order: -1`
+    // puts the selector first.
+    {
+      key: "sandbox",
+      title: "Sandbox provider",
+      entries: [
+        {
+          key: "core.sandbox.provider", namespace: "core", path: "sandbox.provider",
+          type: "enum", default: "mock", nullable: false,
+          choices: ["mock", "cape2", "upload", "triage", "rest"],
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null,
+        },
+        {
+          key: "core.sandbox.cape2.base_url", namespace: "core", path: "sandbox.cape2.base_url",
+          type: "str", default: "http://localhost:8000", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "CAPEv2 base URL", description: "Base URL of the CAPEv2 REST API.",
+          applies: "next_job", editable: true, reason: null, probe: "cape2",
+          applies_when: { "core.sandbox.provider": ["cape2"] }, order: 0,
+          choices_from: null, editor: null,
+        },
+        {
+          key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
+          type: "str", default: "https://tria.ge/api/v0", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Triage API base URL", description: "Hatching Triage cloud API root.",
+          applies: "next_job", editable: true, reason: null, probe: "triage",
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null,
+        },
+        // Task B17/B18: the REST sandbox's own fields, grouped and rendered by
+        // `RestSandboxEditor` — `editor: "rest_sandbox"` is what routes them
+        // there instead of the plain `FieldRow` the entries above use. The two
+        // mapping rows are additionally gated on the report format: a
+        // structured `cape2`/`triage` report has nothing to map.
+        {
+          key: "core.sandbox.rest.base_url", namespace: "core", path: "sandbox.rest.base_url",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "REST sandbox base URL", description: "Base URL of the REST-flavoured sandbox.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.report.format", namespace: "core", path: "sandbox.rest.report.format",
+          type: "enum", default: "generic", nullable: false, choices: ["generic", "cape2"],
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Report format", description: "Whether the report needs the mapping below.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.mapping.processes", namespace: "core", path: "sandbox.rest.mapping.processes",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Mapping: processes", description: "JSONPath selecting the process rows.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: {
+            "core.sandbox.provider": ["rest"],
+            "core.sandbox.rest.report.format": ["generic"],
+          }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.mapping.dns", namespace: "core", path: "sandbox.rest.mapping.dns",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Mapping: dns", description: "JSONPath selecting the DNS rows.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: {
+            "core.sandbox.provider": ["rest"],
+            "core.sandbox.rest.report.format": ["generic"],
+          }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+        {
+          key: "core.sandbox.rest.mapping.target_sha256", namespace: "core",
+          path: "sandbox.rest.mapping.target_sha256",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Mapping: target sha256", description: "JSONPath selecting the sample's hash.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: {
+            "core.sandbox.provider": ["rest"],
+            "core.sandbox.rest.report.format": ["generic"],
+          }, order: 0,
+          choices_from: null, editor: "rest_sandbox",
+        },
+      ],
+    },
+    // Task B15: the static provider selector, mirroring the sandbox one
+    // above — `choices_from` names where the API resolved the list from.
+    {
+      key: "static",
+      title: "Static provider",
+      entries: [
+        {
+          key: "core.static.provider", namespace: "core", path: "static.provider",
+          type: "enum", default: "ghidra", nullable: false,
+          choices: ["ghidra", "r2", "capa_yara", "generic_mcp", "none"],
+          minimum: null, maximum: null, secret: false, group: "static",
+          title: "Static provider", description: "Which tool the static analyst attaches.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "static_providers", editor: null,
+        },
+      ],
+    },
+    // Task B15/B16: the server map is one leaf with its own editor; its
+    // choices come resolved from the API.
+    {
+      key: "mcp",
+      title: "Tool servers (MCP)",
+      entries: [
+        {
+          key: "core.mcp.servers", namespace: "core", path: "mcp.servers",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "mcp",
+          title: "Tool servers",
+          description: "Every MCP server Maljan can attach, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "server_map",
+        },
+        {
+          key: "core.static.generic.server", namespace: "core", path: "static.generic.server",
+          type: "str", default: "", nullable: false, choices: ["", "network", "threatintel"],
+          minimum: null, maximum: null, secret: false, group: "mcp",
+          title: "Custom MCP server",
+          description: "Which registry entry the generic_mcp static provider drives.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: "mcp_servers", editor: null,
+        },
+      ],
+    },
+    // Task C14/C15: named profiles and operator-defined analysts, both
+    // composite `json` leaves the way the server map is one.
+    {
+      key: "agents",
+      title: "Agents",
+      entries: [
+        {
+          key: "core.agents.profile", namespace: "core", path: "agents.profile",
+          type: "enum", default: "default", nullable: false,
+          choices: ["default", "lean"],
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Active profile", description: "Which analyst profile a new job runs.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "profiles", editor: null,
+        },
+        {
+          key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Agent definitions",
+          description: "Every analyst Maljan can run, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "agent_definitions",
+        },
+        {
+          key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Profiles",
+          description: "Named analyst line-ups a job can select.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "profiles",
         },
       ],
     },
@@ -304,6 +534,178 @@ export const MOCK_SETTINGS_VALUES = {
       is_set: true,
       hint: "1234",
       source: "env",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.provider": {
+      value: "openai",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.agents": {
+      value: {},
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.provider": {
+      value: "cape2",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.cape2.base_url": {
+      value: "http://localhost:8000",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.triage.base_url": {
+      value: "https://tria.ge/api/v0",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.static.provider": {
+      value: "ghidra",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.base_url": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.report.format": {
+      value: "generic",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.mapping.processes": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.mapping.dns": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.sandbox.rest.mapping.target_sha256": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.mcp.servers": {
+      value: {
+        network: {
+          enabled: true, transport: "stdio", command: "python",
+          args: ["network-mcp/server.py"], env: {}, cwd: "network-mcp",
+          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          tool_selection: "dynamic", use_all_tools: false, tools: null,
+          agents: ["network"], label: "Network MCP",
+        },
+        threatintel: {
+          enabled: true, transport: "stdio", command: "python",
+          args: ["threatintel-mcp/server.py"], env: {}, cwd: "threatintel-mcp",
+          env_allow: ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"], url: "",
+          auth_token: "**********", auth_token_source: "env",
+          tool_selection: "dynamic", use_all_tools: false, tools: null,
+          agents: ["judge"], label: "Threat intel MCP",
+        },
+        // Task 16: a non-built-in server, so the agent-definitions editor has
+        // a server to reference from a generic analyst's tool list.
+        strings: {
+          enabled: true, transport: "stdio", command: "strings-mcp",
+          args: [], env: {}, cwd: "", env_allow: [], url: "",
+          auth_token: "", auth_token_source: "default",
+          tool_selection: "dynamic", use_all_tools: false,
+          tools: ["extract_strings"], agents: [], label: "Strings MCP",
+        },
+      },
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.static.generic.server": {
+      value: "",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.profile": {
+      value: "default",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.definitions": {
+      value: {
+        static: {
+          role: "static", label: "Static analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        dynamic: {
+          role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        network: {
+          role: "network", label: "Network analyst", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+        judge: {
+          role: "judge", label: "Judge", prompt: null, tools: [],
+          static_provider: null, enabled: true,
+        },
+      },
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.agents.profiles": {
+      value: {
+        default: { label: "Default", analysts: ["static", "dynamic", "network"] },
+      },
+      is_set: null,
+      hint: null,
+      source: "default",
       updated_at: null,
       updated_by: null,
     },
@@ -427,6 +829,10 @@ export async function installApiMocks(
   await page.route("**/api/v1/reports/*/mitre", (route) =>
     json(route, { techniques: [] })
   );
+  // C4: the IOC export, reachable from the summary tab's export row.
+  await page.route("**/api/v1/reports/*/iocs**", (route) =>
+    json(route, { items: [], total: 0 })
+  );
   await page.route("**/api/v1/reports/*/signatures/*", (route) =>
     route.fulfill({
       status: 200,
@@ -445,6 +851,18 @@ export async function installApiMocks(
   await page.route("**/api/v1/samples/*", (route) => json(route, MOCK_SAMPLE));
   // After `samples/*`, which also matches this path — last registration wins.
   await page.route("**/api/v1/samples/upload", (route) => json(route, MOCK_SAMPLE));
+  // A single `*` never crosses a slash, so `samples/*` above cannot match this
+  // extra segment — order does not matter here, but it is grouped with the
+  // other samples routes for readability. POST uploads a report; GET lists
+  // the ones already attached to the sample (empty by default).
+  await page.route("**/api/v1/samples/*/sandbox-reports", (route) =>
+    route.request().method() === "POST"
+      ? json(route, MOCK_SANDBOX_REPORT, 201)
+      : json(route, { items: [], total: 0 })
+  );
+  await page.route("**/api/v1/samples/*/sandbox-reports/*", (route) =>
+    route.fulfill({ status: 204, body: "" })
+  );
 
   /* ── Runtime settings (admin) ─────────────────────────
    * Route precedence matters here more than elsewhere: `/settings/schema`,
@@ -474,7 +892,69 @@ export async function installApiMocks(
     })
   );
   await page.route("**/api/v1/settings/test/*", (route) =>
-    json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null })
+    json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null, tools: null })
+  );
+  // Task B15: registered after the generic `test/*` handler above, so it
+  // wins for the one probe route that carries a query string.
+  //
+  // Task 16: the `network` server's manifest matches its real tools
+  // (`extract_dns`, `read_pcap_summary`, see `network-mcp/server.py`) — the
+  // agent-definitions editor's "list tools then check one" flow depends on
+  // this list actually containing the tool it checks.
+  await page.route("**/api/v1/settings/test/mcp?**", (route) => {
+    const server = new URL(route.request().url()).searchParams.get("server");
+    const tools =
+      server === "network" ? ["extract_dns", "read_pcap_summary"] : ["open_file", "analyze", "list_imports"];
+    return json(route, {
+      ok: true, latency_ms: 12, detail: `${tools.length} tools: ${tools.join(", ")}`,
+      models: null, tools,
+    });
+  });
+  // Task C12: the agent probe, resolving a definition without an LLM call.
+  await page.route("**/api/v1/settings/test/agent?**", (route) => {
+    // Task C14 fix: the probe returns the full resolved prompt, not just its
+    // length — operator text, not a secret (spec §11) — so a built-in card
+    // can show it read-only and a clone can seed its copy from it. The tools
+    // in `detail`/`tools` below are the network analyst's real ones
+    // (`extract_dns`, `read_pcap_summary`), so this prompt describes that
+    // role too — used by the "network" card's Resolve button.
+    const prompt =
+      "You are the network analyst. Inspect captured traffic, DNS queries " +
+      "and contacted hosts for indicators of command-and-control, data " +
+      "exfiltration or malicious downloads, and report only findings the " +
+      "extracted network evidence actually backs, citing the specific " +
+      "packets, hosts or domains involved rather than speculating about " +
+      "traffic the capture does not show. Stay provisional about each " +
+      "claim it cannot confirm.";
+    return json(route, {
+      ok: true, latency_ms: 8, detail: "2 tools: extract_dns, read_pcap_summary",
+      models: null, tools: ["extract_dns", "read_pcap_summary"],
+      details: {
+        prompt_chars: prompt.length,
+        prompt_sha256: "a".repeat(64),
+        prompt,
+        llm: { provider: "openai", model: "" },
+        static_provider: "ghidra",
+        servers: [{ key: "network", tools: ["extract_dns"], status: "ok" }],
+      },
+    });
+  });
+  // Task B18: what `RestSandboxEditor`'s "Preview mapping" button calls —
+  // one channel with rows, one with none, one carrying a channel-local error.
+  await page.route("**/api/v1/settings/sandbox-rest/preview", (route) =>
+    json(route, {
+      target_sha256: "ab",
+      channels: {
+        processes: {
+          matched: 2, kept: 1, dropped: 1, truncated: true,
+          sample_rows: [{ pid: 1 }], error: null,
+        },
+        dns: {
+          matched: 0, kept: 0, dropped: 0, truncated: false, sample_rows: [],
+          error: "JSONPath syntax error at position 3",
+        },
+      },
+    })
   );
   await page.route("**/api/v1/settings", (route) =>
     route.request().method() === "PATCH"

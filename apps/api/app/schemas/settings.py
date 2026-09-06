@@ -31,6 +31,10 @@ class CatalogEntryDTO(BaseModel):
     editable: bool
     reason: str | None = None
     probe: str | None = None
+    applies_when: dict[str, list[str]] | None = None
+    order: int = 0
+    choices_from: str | None = None
+    editor: str | None = None
 
 
 class GroupDTO(BaseModel):
@@ -79,3 +83,28 @@ class ProbeResponse(BaseModel):
     latency_ms: int
     detail: str
     models: list[str] | None = None
+    # the server's whole manifest, so the editor can render it as tick boxes
+    tools: list[str] | None = None
+    # Structured, probe-specific facts the generic renderer ignores and a
+    # dedicated editor reads. The agent probe is the first user: a prompt hash
+    # and a per-server status do not fit in a sentence.
+    details: dict[str, Any] | None = None
+
+
+class MappingPreviewRequest(BaseModel):
+    sample: dict[str, Any]
+    mapping: dict[str, Any]
+
+
+class ChannelPreview(BaseModel):
+    matched: int
+    kept: int
+    dropped: int
+    truncated: bool = False
+    sample_rows: list[Any]
+    error: str | None = None
+
+
+class MappingPreviewResponse(BaseModel):
+    target_sha256: str
+    channels: dict[str, ChannelPreview]

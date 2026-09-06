@@ -16,6 +16,7 @@ from maljan.analysis.lolbin_layer import build_lolbin_isr
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.analysis.schema_pruner import infer_malware_category
 from maljan.analysis.ttp_cascade import TTPCascadeEngine
+from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -74,7 +75,7 @@ _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGN
 _MAX_SYNTH_CHUNK_CHARS = 40_000
 
 
-def _is_placeholder_only(chunks: list, agent_name: str = "") -> bool:
+def _is_placeholder_only(chunks: list, role: str = "") -> bool:
     """True when the loader produced nothing but its "no data" sentence.
 
     The graceful no-data path below was unreachable, and had been since it was
@@ -98,8 +99,16 @@ def _is_placeholder_only(chunks: list, agent_name: str = "") -> bool:
       intended degraded path, not an absence of data. Skipping it here would
       silently delete the primary analyst on exactly the runs that most need
       whatever it can still say.
+    * **Never for generic either**, live-fix L1 (2026-09-06). A ``generic``
+      agent's input is now built the same way (see ``make_analyst_node``'s
+      generic branch): the static sample context — file path plus
+      sample-profile text — always exists because the sample itself always
+      does, even on the runs where the sandbox carries no report at all. That
+      context can still be the bare placeholder when the sample could not be
+      mirrored for a provider, which is the same degraded-but-intentional
+      path static falls back to, not an absence of data.
     """
-    if agent_name == "static" or len(chunks) != 1:
+    if role in ("static", "generic") or len(chunks) != 1:
         return False
     content = getattr(chunks[0], "content", "") or ""
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
@@ -151,7 +160,9 @@ def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
 def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
+    *,
     static: StaticAnalysis | None = None,
+    provider_id: str | None = None,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -180,7 +191,14 @@ def _augment_static_chunks_with_path(
     """
     import json
 
-    static_path = state.get("static_sample_path")
+    # ``provider_id`` is the agent's own static provider: with two static
+    # analysts on two providers each is shown the mirror its own tools point
+    # at, not the global provider's. The global key stays the fallback, which
+    # is what a single-provider run has always had.
+    paths = state.get("static_sample_paths") or {}
+    static_path = paths.get(provider_id) if provider_id else None
+    if not static_path:
+        static_path = state.get("static_sample_path")
     if not static_path or not chunks:
         return chunks
 
@@ -315,9 +333,57 @@ def make_analyst_node(
 
         try:
             agent = container.get_agent(agent_name)
+            role = container.agent_role(agent_name)
 
             sandbox_report = state.get("sandbox_report")
-            if sandbox_report:
+            if role == "generic":
+                # Live fix L1 (2026-09-06): a generic agent's data surface was
+                # a sandbox slice or nothing — with the mock sandbox carrying
+                # no report for most samples, that slice was routinely the
+                # loader's own "no data available" placeholder for a data
+                # type the file loader has no fixture for, and the "no data"
+                # guards below then skipped the agent outright (round 0 and
+                # every revision round), as observed live: 'strings' ended
+                # no_data with zero claims. A generic agent gets the same
+                # sample context the static role gets — sample path plus
+                # sample-profile text, built through the same helper and the
+                # same per-provider mirror path lookup the static branch
+                # uses below — because the sample itself always exists, then
+                # the sandbox slice on top of it when one exists.
+                _st_generic: StaticAnalysis | None = None
+                try:
+                    from maljan.extractors.pe_extractor import build_static_analysis
+
+                    _sp_generic = state.get("sample_path")
+                    if _sp_generic:
+                        _st_generic = build_static_analysis(sample_path=str(_sp_generic))
+                except Exception as _e:  # noqa: BLE001
+                    logger.debug(
+                        "generic agent '%s': static summary extraction skipped: %s",
+                        agent_name,
+                        _e,
+                    )
+
+                static_context_chunks = _augment_static_chunks_with_path(
+                    container.load_chunked(state["file_hash"], agent_name),
+                    state,
+                    static=_st_generic,
+                    provider_id=agent._resolved.static_provider_id,
+                )
+                sandbox_chunks: list = []
+                if sandbox_report:
+                    sandbox_chunks = container.load_sandbox_data_for_agent(
+                        agent_name, sandbox_report
+                    )
+                    logger.info(
+                        "Agent '%s': using sandbox report data (%d chunks) "
+                        "alongside the static sample context (%d chunks).",
+                        agent_name,
+                        len(sandbox_chunks),
+                        len(static_context_chunks),
+                    )
+                chunks = [*static_context_chunks, *sandbox_chunks]
+            elif sandbox_report:
                 chunks = container.load_sandbox_data_for_agent(agent_name, sandbox_report)
                 logger.info(
                     "Agent '%s': using sandbox report data (%d chunks).",
@@ -332,7 +398,7 @@ def make_analyst_node(
             # ``load_program(file=...)``. Inject it into the chunk's JSON
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
-            if agent_name == "static":
+            if role == "static":
                 # Ghidra-path fix (2026-07-12): compute the deterministic PE
                 # summary ONCE and reuse it for both the synthesized head
                 # chunk and the dynamic-tool-selection categories below.
@@ -346,14 +412,27 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(chunks, state, static=_st)
+                chunks = _augment_static_chunks_with_path(
+                    chunks,
+                    state,
+                    static=_st,
+                    provider_id=agent._resolved.static_provider_id,
+                )
 
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
-                # a stale path from the previous sample must be cleared.
+                # a stale path from the previous sample must be cleared. The
+                # mirror is looked up by this agent's own static provider id
+                # so two static analysts on two providers each get their own
+                # mirror path (Task 9 fills in the per-provider dict; until
+                # then the fallback below is the only entry).
                 agent._analysis_file_path = (  # type: ignore[attr-defined]
-                    state.get("static_sample_path") or None
+                    (state.get("static_sample_paths") or {}).get(  # type: ignore[attr-defined]
+                        agent._resolved.static_provider_id
+                    )
+                    or state.get("static_sample_path")
+                    or None
                 )
 
                 # 2026-07 round 3: hand the static analyst the sample's capability
@@ -369,7 +448,7 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static category hint skipped: %s", _e)
 
-            if not chunks or _is_placeholder_only(chunks, agent_name):
+            if not chunks or _is_placeholder_only(chunks, role):
                 # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
                 # found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
@@ -434,7 +513,7 @@ def make_analyst_node(
                 # for large static binaries, feed only the behavior-relevant
                 # function chunks instead of every chunk. Default top_k=0 keeps
                 # the full linear path (zero behaviour change).
-                if agent_name == "static":
+                if role == "static":
                     _rag_k = int(
                         getattr(container.config.preprocessing, "static_function_rag_top_k", 0) or 0
                     )
@@ -586,7 +665,7 @@ def _revision_input_is_absent(
             exc,
         )
         return False
-    return not chunks or _is_placeholder_only(chunks, agent_name)
+    return not chunks or _is_placeholder_only(chunks, container.agent_role(agent_name))
 
 
 def _build_revision_context(
@@ -653,7 +732,7 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         iteration = state.get("iteration_count", 0)
-        agent_names = container.agent_registry.list_agents()
+        agent_names = container.analyst_keys()
 
         revised = state.get("revised_reports") or {}
         original = state.get("reports") or {}
@@ -800,7 +879,7 @@ def make_revision_node(container: ServiceContainer) -> Any:
     """Factory: creates the revision node where all agents revise concurrently."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
-        agent_names = container.agent_registry.list_agents()
+        agent_names = container.analyst_keys()
         iteration = state.get("iteration_count", 0)
 
         history = state.get("discussion_history") or []
@@ -956,7 +1035,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             original = state.get("reports") or {}
             reports = {
                 name: revised.get(name) or original.get(name, "")
-                for name in container.agent_registry.list_agents()
+                for name in container.analyst_keys()
             }
 
             attck_validator = None
@@ -1319,10 +1398,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # presented at full confidence. (A benign sample still yields at
             # least one observational claim, so a truly empty ISR is a
             # failure signal, not a clean result.)
-            _ANALYST_AGENTS = ("static", "dynamic", "network")
+            _analyst_keys = container.analyst_keys()
             _empty_analysts = [
                 name
-                for name in _ANALYST_AGENTS
+                for name in _analyst_keys
                 if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
             ]
             # D10: surface anti-emulation / anti-VM / sandbox-detection
@@ -1391,6 +1470,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     _degradation_reasons.append(_container_reason)
             except Exception as _e:  # noqa: BLE001
                 logger.debug("container-format check skipped (%s)", _e)
+            # A tool server an operator added is never the evidence a verdict
+            # rests on, so it degrades rather than failing — but the reader of
+            # the report is entitled to know the judge ran without its
+            # threat-intel lookups.
+            _degradation_reasons.extend(container.server_degradation_reasons())
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             if _empty_analysts:
@@ -1436,6 +1520,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     )
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
+                    .set_profile(
+                        container.config.agents.profile,
+                        _analyst_keys,
+                        [k for k in _analyst_keys if k not in BUILTIN_AGENTS],
+                    )
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_truncation(container.get_truncation_ledger().snapshot())
                     .build()
@@ -1514,26 +1603,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 from maljan.core.config import get_settings
 
                 _cfg = get_settings()
+                _provider = container.get_static_provider()
                 _static_path = state.get("static_sample_path")
                 if (
                     _cfg.preprocessing.use_function_hash_attribution
-                    and _cfg.mcp.ghidra.transport == "http"
+                    and _provider.capabilities.provides_function_hashes
                     and _cfg.memory.backend == "qdrant"
                     and _static_path
                 ):
                     from maljan.analysis.function_hash_attribution import (
                         aggregate_matches,
-                        fetch_bulk_function_hashes,
                         to_report_dicts,
                     )
                     from maljan.memory.function_hash_store import FunctionHashStore
+                    from maljan.providers.base import StaticJobContext
 
                     _sample_id = state.get("file_hash", "") or ""
-                    _funcs = fetch_bulk_function_hashes(
-                        base_url=_cfg.mcp.ghidra.url,
-                        auth_token=_cfg.mcp.ghidra.auth_token,
-                        file_path=_static_path,
-                        min_instructions=_cfg.preprocessing.function_hash_min_instructions,
+                    _funcs = _provider.function_hashes(
+                        StaticJobContext(mirror_sample_path=str(_static_path))
                     )
                     if _funcs:
                         _fh_store = FunctionHashStore(
@@ -1845,6 +1932,26 @@ def make_report_node(container: ServiceContainer) -> Any:
             for arg in (state.get("discussion_history") or [])
         ]
 
+        # Evidence-only static providers (capa_yara) have no ISR and no tool
+        # loop: the report is the only place their findings reach, so the
+        # bundle is collected once here and threaded through the builder
+        # (into ``report.static``) and into ``tool_evidence`` (into
+        # ``report.technical_evidence``) below. Best-effort — a provider
+        # failure here must never fail the report.
+        _static_bundle = None
+        try:
+            _static_provider = container.get_static_provider()
+            _sample_for_evidence = state.get("sample_path")
+            if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
+                _static_bundle = _static_provider.collect_evidence(str(_sample_for_evidence))
+        except Exception as exc:  # noqa: BLE001 - evidence must never fail a report
+            logger.warning(
+                "report_node: static evidence collection failed (%s: %s); continuing without it.",
+                type(exc).__name__,
+                exc,
+            )
+            _static_bundle = None
+
         try:
             builder = MalwareReportBuilder(
                 file_hash=state.get("file_hash"),
@@ -1867,6 +1974,7 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # Platform-gate persistence scanners (no Windows registry
                 # persistence on a Linux sample, and vice versa).
                 sample_platform=state.get("platform"),
+                static_evidence=_static_bundle,
             )
             report = builder.build_deterministic()
             # Thread the judge node's exact opcode-hash family overlap into the
@@ -1899,7 +2007,27 @@ def make_report_node(container: ServiceContainer) -> Any:
             # Report-reshaping Phase 1: attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.
-            _tool_ev = cast("dict[str, list[dict[str, Any]]]", state.get("tool_evidence") or {})
+            _tool_ev = cast(
+                "dict[str, list[dict[str, Any]]]", dict(state.get("tool_evidence") or {})
+            )
+            # capa/YARA text has no ReAct tool call behind it, so it is wrapped
+            # in the same ``CapturedToolOutput`` row shape (schemas.tool_evidence)
+            # the analyst node emits, under its own agent id, and appended
+            # rather than replacing anything already captured for that id.
+            if _static_bundle is not None and _static_bundle.technical_evidence:
+                for _agent, _text in _static_bundle.technical_evidence.items():
+                    _rows = list(_tool_ev.get(_agent) or [])
+                    _rows.append(
+                        {
+                            "agent_id": _agent,
+                            "tool_name": _agent,
+                            "args": {},
+                            "symbol": None,
+                            "output": _text,
+                            "seq": 0,
+                        }
+                    )
+                    _tool_ev[_agent] = _rows
             if _tool_ev:
                 report.technical_evidence = _tool_ev
         except Exception as exc:  # noqa: BLE001

@@ -18,6 +18,12 @@ export interface WidgetProps {
   onUnstage?: () => void;
   /** Filled in by the LLM probe result so a model field renders a datalist. */
   models?: string[];
+  /** The DOM id this widget's control takes, so `FieldRow`'s title can be a
+   *  real `<label htmlFor>` — B7 (dev audit 2026-09-06): every one of the
+   *  ~1050 controls on this tab had neither an `id` nor a `name`, which
+   *  browser autofill heuristics and any tooling that targets them by name
+   *  need. The `name` is the setting key itself. */
+  inputId?: string;
 }
 
 /** The value actually shown: the staged edit, else the live value, else the default. */
@@ -31,6 +37,8 @@ export function BoolWidget(p: WidgetProps) {
     <button
       type="button"
       role="switch"
+      id={p.inputId}
+      name={p.entry.key}
       aria-checked={v}
       aria-label={p.entry.title}
       disabled={!p.entry.editable}
@@ -99,6 +107,8 @@ export function NumberWidget(p: WidgetProps) {
     <div>
       <input
         type="number"
+        id={p.inputId}
+        name={p.entry.key}
         aria-label={p.entry.title}
         aria-describedby={requiredHint ? hintId : undefined}
         aria-invalid={requiredHint || undefined}
@@ -153,6 +163,8 @@ export function TextWidget(p: WidgetProps) {
     <>
       <input
         type="text"
+        id={p.inputId}
+        name={p.entry.key}
         aria-label={p.entry.title}
         className={input}
         disabled={!p.entry.editable}
@@ -177,6 +189,8 @@ export function EnumWidget(p: WidgetProps) {
   const v = shown(p);
   return (
     <select
+      id={p.inputId}
+      name={p.entry.key}
       aria-label={p.entry.title}
       className={input}
       disabled={!p.entry.editable}
@@ -221,7 +235,21 @@ export function ListWidget(p: WidgetProps) {
   useEffect(() => {
     const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
     const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
-    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+    /* B3 (dev audit 2026-09-06): staging now *un*-stages a key whose value is
+     * back where it started, so `staged -> undefined` no longer means "an
+     * external discard happened". Typing "a", Enter stages ["a"] both times,
+     * the second one un-stages, and this effect used to answer that by wiping
+     * the newline the user had just typed. The buffer is left alone when it
+     * already spells the effective value. */
+    const buffered = text.split("\n").map((s) => s.trim()).filter(Boolean);
+    const effective = (shown(p) as string[] | null) ?? [];
+    const alreadyShowing =
+      buffered.length === effective.length && buffered.every((v, i) => v === effective[i]);
+    if (
+      p.staged === undefined &&
+      (stagedJustCleared || currentValueChanged) &&
+      !alreadyShowing
+    ) {
       setText(formatList(p));
     }
     prevStagedRef.current = p.staged;
@@ -233,6 +261,8 @@ export function ListWidget(p: WidgetProps) {
 
   return (
     <textarea
+      id={p.inputId}
+      name={p.entry.key}
       aria-label={p.entry.title}
       className={`${input} font-mono`}
       rows={Math.min(6, Math.max(2, text.split("\n").length))}
@@ -266,7 +296,19 @@ export function JsonWidget(p: WidgetProps) {
   useEffect(() => {
     const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
     const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
-    if (p.staged === undefined && (stagedJustCleared || currentValueChanged)) {
+    // Same guard as ListWidget: an un-stage that happened because the value is
+    // back where it started must not reformat text the user is still editing.
+    let alreadyShowing = false;
+    try {
+      alreadyShowing = JSON.stringify(JSON.parse(text)) === JSON.stringify(shown(p) ?? null);
+    } catch {
+      alreadyShowing = false;
+    }
+    if (
+      p.staged === undefined &&
+      (stagedJustCleared || currentValueChanged) &&
+      !alreadyShowing
+    ) {
       setText(formatJson(p));
       setBad(null);
     }
@@ -278,6 +320,8 @@ export function JsonWidget(p: WidgetProps) {
   return (
     <div>
       <textarea
+        id={p.inputId}
+        name={p.entry.key}
         aria-label={p.entry.title}
         aria-invalid={bad ? true : undefined}
         className={`${input} font-mono`}
@@ -327,11 +371,12 @@ export function SecretWidget(p: WidgetProps) {
     <div className="flex items-center gap-2 flex-wrap">
       {editing ? (
         <>
-          <label className="sr-only" htmlFor={`secret-${p.entry.key}`}>
+          <label className="sr-only" htmlFor={p.inputId ?? `secret-${p.entry.key}`}>
             New value for {p.entry.title}
           </label>
           <input
-            id={`secret-${p.entry.key}`}
+            id={p.inputId ?? `secret-${p.entry.key}`}
+            name={p.entry.key}
             type="password"
             autoComplete="new-password"
             className={input}

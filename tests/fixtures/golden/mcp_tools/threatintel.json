@@ -1,0 +1,10 @@
+{
+  "server": "threatintel",
+  "source": "live handshake",
+  "tools": [
+    "check_domain_reputation",
+    "check_hash",
+    "check_ip_reputation",
+    "get_threatintel_status"
+  ]
+}

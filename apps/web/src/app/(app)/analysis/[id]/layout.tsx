@@ -8,7 +8,7 @@ import type { ReportDetailDTO, JobDTO } from "@/lib/api";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, isApiStatus } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
 import type { WSEvent } from "@/types";
 
@@ -114,6 +114,10 @@ export default function AnalysisLayout({
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  /* A1 (dev audit 2026-09-06): a 404 from `GET /jobs/{id}` is an answer, not
+   * an outage. Kept apart from `apiError` so the page can say the job does not
+   * exist instead of blaming the backend for a reply the backend gave. */
+  const [notFound, setNotFound] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [enrichmentToast, setEnrichmentToast] = useState<string | null>(null);
   const refetchRef = useRef<(() => Promise<void>) | null>(null);
@@ -164,7 +168,8 @@ export default function AnalysisLayout({
         // audit 2026-07-26: report *why* the API call failed instead of only
         // the generic "could not connect" banner.
         if (!cancelled) {
-          setApiError(getErrorMessage(err) || "Unknown error");
+          if (isApiStatus(err, 404)) setNotFound(true);
+          else setApiError(getErrorMessage(err) || "Unknown error");
           setLoading(false);
         }
       }
@@ -176,7 +181,11 @@ export default function AnalysisLayout({
 
   /* WS listener — react to enrichment_complete (and late completed) without
    * waiting for polling to come back. */
-  const { events } = useWebSocket(id);
+  /* No socket for a job the API has already said does not exist: the page used
+   * to retry the handshake five times against a confirmed 404. The socket also
+   * waits for that first answer rather than dialling on mount, which is the
+   * only way "the job exists" can be known before the dial. */
+  const { events } = useWebSocket(loading || notFound ? null : id);
   const lastWsCursor = useRef(0);
   useEffect(() => {
     if (events.length <= lastWsCursor.current) return;
@@ -225,6 +234,33 @@ export default function AnalysisLayout({
   const family = report?.malware_report?.attribution?.family;
   const headerSubtitle = family || category || "";
 
+  /* C3 (dev audit 2026-09-06): nothing on this page said which analyst
+   * line-up produced the report, so a `lean` run — network only — read as a
+   * full one, the deterministic static layers being present either way. A
+   * report written before profiles existed has no such key and shows nothing,
+   * and neither does the default line-up, which is what "no badge" has always
+   * meant. */
+  const profile = (report?.run_summary as {
+    profile?: { name?: string; analysts?: string[] } | null;
+  } | null)?.profile;
+  const profileName = profile?.name;
+  const profileBadge = profileName && profileName !== "default" ? profileName : null;
+  const profileAnalysts = profile?.analysts ?? [];
+
+  if (notFound) {
+    return (
+      <div className="bg-bg-surface border border-border rounded p-8 text-center">
+        <h1 className="text-lg font-semibold text-text-primary mb-1">Job not found</h1>
+        <p className="text-sm text-text-secondary mb-4">
+          No analysis job exists with the id <code className="font-mono">{id}</code>.
+        </p>
+        <Link href="/jobs" className="text-sm text-accent-strong hover:underline">
+          Back to jobs
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <ReportContext.Provider value={{ report, job, loading, events }}>
       <div>
@@ -272,6 +308,18 @@ export default function AnalysisLayout({
                 {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
                     {headerSubtitle}
+                  </span>
+                )}
+                {profileBadge && (
+                  <span
+                    className="text-xs text-accent-strong bg-accent/10 px-2 py-0.5 rounded"
+                    title={
+                      profileAnalysts.length > 0
+                        ? `Analysts: ${profileAnalysts.join(", ")}`
+                        : undefined
+                    }
+                  >
+                    Profile: {profileBadge}
                   </span>
                 )}
                 {job && (

@@ -15,7 +15,7 @@ Topology (Wave 7, 2026-05-28, THROUGHPUT-01):
     itself for its full per-agent timeout budget. With a single
     physical slot, "parallel" execution just produced N×N queue
     contention — every analyst spent its budget waiting for the slot
-    instead of actually decoding. The chain is built in registry order;
+    instead of actually decoding. The chain is built in profile order;
     ``negotiation`` still consumes a merged state from every analyst.
 
 The parallel topology is preserved verbatim so this is a pure runtime
@@ -59,11 +59,24 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     """
     builder = StateGraph(AnalysisState)
 
-    # 1. Discover all registered expert agents
-    agent_names = container.agent_registry.list_agents()
+    # 1. The analysts of the active profile, in the order it lists them. The
+    #    class registry is still what turns a role into a class; it stopped
+    #    being what decides which agents exist (spec §5), because that answer
+    #    now has to survive a per-job override.
+    agent_names = container.analyst_keys()
 
     if not agent_names:
-        raise RuntimeError("No agents registered. Cannot build pipeline.")
+        # CORE-2 (dev audit 2026-09-06): unreachable through a validated
+        # ``Settings``. ``AgentsConfig`` refuses an empty profile outright
+        # ("profile 'x' needs at least one analyst"), and the API refuses one
+        # before it is ever stored, so a profile that reaches here has at
+        # least one member by construction (``tests/unit/test_agents_config.py``
+        # pins that refusal). Kept as the backstop it is: a
+        # graph with no analyst nodes would build cleanly and then produce a
+        # verdict out of nothing, which is far worse to debug than this line.
+        raise RuntimeError(
+            f"Profile {container.config.agents.profile!r} has no analysts. Cannot build pipeline."
+        )
 
     # 2. Create and add analyst nodes dynamically.
     #    Every node is wrapped in ``instrument_node`` so resident memory is

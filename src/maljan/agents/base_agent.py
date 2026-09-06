@@ -9,16 +9,20 @@ and exception translation so callers see a uniform ``AnalystError`` API.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
+
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
 
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
@@ -217,6 +221,62 @@ _BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
 _BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
 
 
+# Model tool-call scaffolding, which is not prose and is never a finding
+# (C1, dev audit 2026-09-06). A local model that emits its tool calls into the
+# assistant channel -- rather than through the API's own tool-call field --
+# leaves these blocks in the text the ISR extraction reads, and a live
+# ``static_r2`` run put them in front of an operator as claims.
+#
+# Closing tags are optional on purpose: a generation cut off mid-call leaves an
+# opening tag and a half-written argument object, which is exactly the shape
+# most likely to survive into a claim.
+_SCAFFOLD_TAGS = ("tool_call", "function_call", "tool_use", "tool_response")
+_SCAFFOLD_BLOCK_RE = re.compile(
+    r"<(?P<tag>" + "|".join(_SCAFFOLD_TAGS) + r")\b[^>]*>.*?(?:</(?P=tag)\s*>|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+# A fenced block is stripped only when what it fences is a tool invocation: a
+# name plus its arguments. A model quoting real JSON evidence (an import list,
+# a config blob) is citing an artifact, and that has to survive.
+_FENCED_JSON_RE = re.compile(r"```(?:json|tool_code)?\s*(\{.*?\})\s*```", re.DOTALL)
+_INVOCATION_KEYS = ({"name", "arguments"}, {"name", "parameters"}, {"tool", "arguments"})
+
+
+def _is_tool_invocation(payload: str) -> bool:
+    try:
+        parsed = json.loads(payload)
+    except ValueError:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    keys = set(parsed)
+    return any(required <= keys for required in _INVOCATION_KEYS)
+
+
+def strip_tool_call_scaffolding(text: str) -> str:
+    """Remove tool-call scaffolding from model output, leaving the prose.
+
+    Applied before claims are derived, by both claim parsers and by the
+    free-text path, so no analyst can turn a tool call into a finding. Text
+    with no scaffolding in it comes back byte for byte.
+    """
+    if not text:
+        return text
+    cleaned = _SCAFFOLD_BLOCK_RE.sub("", text)
+    cleaned = _FENCED_JSON_RE.sub(
+        lambda m: "" if _is_tool_invocation(m.group(1)) else m.group(0), cleaned
+    )
+    if cleaned == text:
+        return text
+    # Only the blank lines the removals themselves left behind.
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def is_only_scaffolding(text: str) -> bool:
+    """True when nothing but tool-call scaffolding is left once it is removed."""
+    return not strip_tool_call_scaffolding(text).strip()
+
+
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
 
@@ -234,6 +294,10 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     instead.
     """
     claims: list[ClaimEvidence] = []
+    # Stripped per field rather than over the whole text: removing a block
+    # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
+    # marker with nothing after it, and the next line would slide up into the
+    # claim. A block whose claim is nothing but scaffolding is dropped below.
     for raw_block in _BLOCK_SPLIT_RE.split(text):
         block = raw_block.strip()
         if not block or "CLAIM:" not in block:
@@ -241,8 +305,21 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         claim_match = _BLOCK_CLAIM_RE.search(block)
         if not claim_match:
             continue
+        claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
+        if not claim_text:
+            # C1: the whole claim was a tool call. An empty finding is worse
+            # than none at all -- it reaches the operator as a blank row.
+            continue
 
+        # The citation is model output too, and a model that writes a tool
+        # call while it is naming an artifact puts the block here rather than
+        # in the claim. Cleaned to nothing it means what a missing EVIDENCE
+        # line already means to this lenient parser: a finding worth keeping,
+        # recorded as unsourced.
         evidence_match = _BLOCK_EVIDENCE_RE.search(block)
+        evidence_text = (
+            strip_tool_call_scaffolding(evidence_match.group(1)).strip() if evidence_match else ""
+        )
         confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
         technique_match = _BLOCK_TECHNIQUE_RE.search(block)
 
@@ -261,8 +338,8 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
 
         claims.append(
             ClaimEvidence(
-                claim=claim_match.group(1).strip()[:300],
-                evidence_ref=(evidence_match.group(1).strip()[:200] if evidence_match else ""),
+                claim=claim_text[:300],
+                evidence_ref=evidence_text[:200],
                 confidence=confidence,
                 technique_id=technique_id,
             )
@@ -693,6 +770,111 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
         ) from exc
 
 
+# The negotiation-round instructions the ISR revision path appends to whatever
+# system prompt its agent carries. Lifted verbatim out of
+# ``NetworkAnalyst.revise_isr``; ``tests/agents/test_revision_prompt_golden.py``
+# holds it to the byte.
+_REVISION_ISR_FRAMING = (
+    "You are in a negotiation round. You MUST:\n"
+    "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
+    "2. Revise your own claims based on new evidence.\n"
+    "3. If you have NO disputes, write 'DISPUTES: NONE' to signal convergence."
+)
+
+
+def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessage]:
+    """``(role, text)`` pairs as LangChain messages, with no templating step.
+
+    The same construction ``execute_tool_loop`` does inline, and for the same
+    reason: a ``ChatPromptTemplate`` would read a literal ``{...}`` inside a
+    report — JSON, a decompiled struct — as an f-string variable and raise on
+    content the pipeline routinely produces. An unknown role is dropped rather
+    than guessed at.
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    built: list[BaseMessage] = []
+    for role, content in prompt_messages:
+        if role == "system":
+            built.append(SystemMessage(content=content))
+        elif role == "human":
+            built.append(HumanMessage(content=content))
+    return built
+
+
+def revision_messages(
+    system_prompt: str,
+    original_data: str,
+    own_report: str,
+    peer_reports: dict[str, str],
+    mediator_feedback: str,
+    *,
+    isr: bool = False,
+    revision_round: int = 1,
+) -> list[tuple[str, str]]:
+    """The revision prompt every analyst sends, as ``(role, text)`` pairs.
+
+    Extracted from ``NetworkAnalyst`` so the configurable analyst sends the
+    same framing rather than a second copy of it that drifts. The two paths it
+    covers are the two that exist: ``isr=False`` is the plain text revision,
+    which passes ``system_prompt`` through untouched; ``isr=True`` is the
+    negotiation round, which appends ``_REVISION_ISR_FRAMING`` and asks for the
+    CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE plus DISPUTES shape the ISR parsers
+    read. Everything here — the labels, the order of the blocks, the closing
+    sentence — is byte-for-byte what the network analyst sent before.
+
+    ``revision_round`` is not interpolated into the prompt (it never was); it
+    is carried so a caller's log line and the returned ISR agree about which
+    round produced which text.
+    """
+    logger.debug(
+        "Building revision prompt (isr=%s, round=%d, peers=%d).",
+        isr,
+        revision_round,
+        len(peer_reports),
+    )
+    if isr:
+        peer_section = (
+            "\n\n".join(
+                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+            )
+            or "No peer reports available."
+        )
+        return [
+            ("system", system_prompt + "\n\n" + _REVISION_ISR_FRAMING),
+            (
+                "human",
+                f"YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+                f"PEER REPORTS:\n{peer_section}\n\n"
+                f"MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
+                f"RAW DATA:\n{original_data}\n\n"
+                "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+                "followed by a DISPUTES section listing peer claims you reject.\n"
+                "Example:\n"
+                "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
+                "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n",
+            ),
+        ]
+
+    peer_section = (
+        "\n\n".join(
+            f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
+        )
+        or "No peer reports available."
+    )
+    return [
+        ("system", system_prompt),
+        (
+            "human",
+            f"YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+            f"PEER ANALYST REPORTS:\n{peer_section}\n\n"
+            f"MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
+            f"ORIGINAL RAW DATA:\n{original_data}\n\n"
+            "Revise your analysis addressing the contradictions above.",
+        ),
+    ]
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
@@ -721,6 +903,17 @@ class BaseAnalyst(ABC):
         self.toolkit: Any = None
         self._all_ghidra_tools: list[Any] = []
         self._container: Any = None
+        # The ``ResolvedAgent`` the container built this agent from — its own
+        # prompt, tools and static provider id, so a clone never has to
+        # re-derive what it already knows about itself.
+        self._resolved: Any = None
+        # Reasons this agent's own tool-server attachment degraded, filled in
+        # by ``_attach_registry_tools``/subclasses. A per-instance list, not a
+        # mutable class attribute: the run summary reads
+        # ``container.server_degradation_reasons()`` instead (the registry is
+        # the source of truth across every agent in a job), so this exists
+        # only for an agent inspected directly (tests, scripts).
+        self.degradation_reasons: list[str] = []
 
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
@@ -758,9 +951,12 @@ class BaseAnalyst(ABC):
         from finishing.
         """
         # ``toolkit`` is an MCPLangChainToolkit (``cleanup``) for the stdio and
-        # streamable-http analysts, and a GhidraHTTPClient (``aclose``) when the
-        # static analyst talks to Ghidra over plain HTTP. Both leak; accept
-        # either.
+        # streamable-http analysts, or a client exposing ``aclose`` directly.
+        # The static analyst no longer sets ``self.toolkit`` at all: its
+        # provider owns the client/subprocess and closes it itself
+        # (``ServiceContainer.aclose`` calls ``get_static_provider().close()``
+        # alongside this loop), so this being a no-op for it is by design, not
+        # a gap. Both closer shapes can leak on a hang; accept either name.
         toolkit = getattr(self, "toolkit", None)
         closers: list[Any] = []
         for closer_name in ("cleanup", "aclose"):
@@ -795,23 +991,62 @@ class BaseAnalyst(ABC):
         half-dead, an unreachable toolkit aborted the whole analyst on every
         single run rather than falling back to the evidence it already had.
 
-        Whether degrading is *right* is a per-analyst judgement, not a default.
-        It is right for dynamic and network, which each hold a second source of
-        evidence. It is wrong for static, where Ghidra IS the evidence and a
-        toolless run would produce a confident-looking report grounded in
-        nothing — so static keeps calling ``_initialize_mcp_client()`` bare and
-        keeps failing loudly.
+        Whether degrading is *right* is a per-analyst judgement, not a
+        default — ``_static_capabilities()`` is where an analyst with a
+        provider says so; one without a provider keeps the old universal
+        degrade-and-continue behaviour.
         """
+        capabilities = self._static_capabilities()
         try:
             self._initialize_mcp_client()
             return bool(self.tools)
         except Exception as exc:
+            if capabilities is not None and not capabilities.degrade_on_failure:
+                # Ghidra IS the static evidence: a toolless run would produce a
+                # confident-looking report grounded in nothing. Fail loudly.
+                raise
             self.logger.warning(
                 "%s MCP initialization failed (graceful degradation, continuing without tools): %s",
                 self.name,
                 describe_exception(exc),
             )
             return False
+
+    def _static_capabilities(self) -> Any | None:
+        """The provider's degrade policy, or None for an analyst without one."""
+        return None
+
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this agent runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _job_key(self) -> str:
+        """A per-job identity for the handles' same-job short circuit."""
+        return str(getattr(self, "_job_id", "") or "job")
+
+    def _attach_registry_tools(self, role: str, *, exclude: str = "", **context: Any) -> list[Any]:
+        """Tools from every server bound to ``role``, minus one this agent owns.
+
+        ``exclude`` is the static provider's own server: a ``generic_mcp``
+        provider driving ``mcp.servers["mine"]`` and an ``agents: ["static"]``
+        binding on that same entry are two ways of saying the same thing, and
+        attaching it twice would show the model two copies of every tool.
+
+        A failure here never raises. Whether a *provider* failure degrades or
+        fails is the provider's capability flag; a registry server is always
+        an addition, so it always degrades, and the reason travels to the run
+        summary through ``degradation_reasons``.
+        """
+        registry = self._server_registry()
+        if registry is None:
+            return []
+        tools, reasons = registry.tools_for(role, self._job_key(), exclude=exclude, **context)
+        if reasons:
+            self.degradation_reasons = [*self.degradation_reasons, *reasons]
+        return list(tools)
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -842,7 +1077,7 @@ class BaseAnalyst(ABC):
         analyst is killed at the configured ``react_agent_timeout`` budget
         regardless of which path it takes.
         """
-        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
 
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
@@ -1720,6 +1955,16 @@ class BaseAnalyst(ABC):
         """Convert a free-text report into a minimal AgentISR."""
         domain = self._infer_domain()
 
+        # C1 (dev audit 2026-09-06): a model that writes its tool calls into
+        # the assistant channel leaves them here, and the sentence splitter
+        # below has no way to tell a call from prose -- a live static_r2 run
+        # put raw ``<tool_call>`` blocks in front of an operator as findings.
+        # Removed before anything reads the text, so no path derives a claim
+        # from scaffolding; a report that is nothing else yields no claims at
+        # all, which is what the meta-claim branch already does for the
+        # placeholder case.
+        text = strip_tool_call_scaffolding(text)
+
         # ANA-MARK-01: when the agent returned only the placeholder
         # ("No static data available for sample ..."), emit a *zero-claim*
         # ISR rather than one with a meta-sentence. Downstream cascade +
@@ -1790,13 +2035,17 @@ class BaseAnalyst(ABC):
         "network": "network",
     }
 
-    def _infer_domain(self) -> Literal["static", "dynamic", "network"]:
+    def _infer_domain(self) -> str:
         """Infer the ISR domain from the agent's registered name.
 
         Falls back to a clearly-marked default and emits a warning rather than
         silently mislabelling unknown agents. The previous behaviour silently
         mapped *any* unrecognised name to "network", which broke cascade
         weighting for new agent kinds.
+
+        Returns ``str`` rather than the three-way Literal since sub-project C:
+        a custom analyst's domain is its own definition key, and ``AgentISR``
+        has always accepted a free string there.
         """
         name_lower = self.name.lower()
         for keyword, domain in self._DOMAIN_KEYWORDS.items():

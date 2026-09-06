@@ -4,8 +4,10 @@ import type {
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
+import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
+  MappingPreview,
   PatchResult,
   ProbeResult,
   SettingsSchema,
@@ -47,6 +49,16 @@ export interface JobDTO {
   completed_at: string | null;
   duration_seconds: number | null;
   error_message: string | null;
+}
+
+export interface SandboxReportDTO {
+  id: string;
+  format: string;
+  task_id: string | null;
+  size_bytes: number;
+  sample_sha256_match: boolean;
+  warning: string | null;
+  uploaded_at: string;
 }
 
 export interface ReportSummaryDTO {
@@ -271,12 +283,12 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
 
     if (res.status === 204) return {} as T;
@@ -304,12 +316,12 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
 
     return res.text();
@@ -334,14 +346,14 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       // The error body is JSON even though the success body is not, so it has
       // to be read as JSON here rather than reusing the blob.
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
 
     return res.blob();
@@ -367,12 +379,12 @@ class ApiClient {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
       }
-      throw new Error("Unauthorized");
+      throw new ApiError("Unauthorized", res.status);
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Upload failed: ${res.status}`);
+      throw new ApiError(body.detail || `Upload failed: ${res.status}`, res.status);
     }
     return res.json();
   }
@@ -470,7 +482,7 @@ class ApiClient {
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
     }
     return res.json();
   }
@@ -493,6 +505,30 @@ class ApiClient {
     return this.request<ProbeResult>(`/api/v1/settings/test/${probe}`, {
       method: "POST",
       body: JSON.stringify({ values }),
+    });
+  }
+
+  /** Probe one entry of the tool-server map, staged values included. */
+  testMcpServer(server: string, values: Record<string, unknown>) {
+    return this.request<ProbeResult>(
+      `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}`,
+      { method: "POST", body: JSON.stringify({ values }) }
+    );
+  }
+
+  /** Resolve one agent definition, staged values included. Spends no tokens. */
+  probeAgent(name: string, values: Record<string, unknown>) {
+    return this.request<ProbeResult>(
+      `/api/v1/settings/test/agent?name=${encodeURIComponent(name)}`,
+      { method: "POST", body: JSON.stringify({ values }) }
+    );
+  }
+
+  /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */
+  previewSandboxMapping(sample: unknown, mapping: Record<string, string>) {
+    return this.request<MappingPreview>("/api/v1/settings/sandbox-rest/preview", {
+      method: "POST",
+      body: JSON.stringify({ sample, mapping }),
     });
   }
 
@@ -538,6 +574,10 @@ class ApiClient {
     return data;
   }
 
+  /** Start a job. `config` accepts the known keys the API validates at submit
+   *  time — `llm_provider`, `max_iterations`, `static_provider`,
+   *  `sandbox_provider`, `sandbox_report_id` and `profile` — plus anything
+   *  else, which passes through untouched. */
   createJob(sampleId: string, config?: Record<string, unknown>) {
     return this.request<JobDTO>(
       "/api/v1/jobs",
@@ -548,6 +588,29 @@ class ApiClient {
   cancelJob(jobId: string) {
     return this.request<void>(
       `/api/v1/jobs/${jobId}`,
+      { method: "DELETE" }
+    );
+  }
+
+  /* ── Sandbox reports ───────────────────────────────── */
+  uploadSandboxReport(sampleId: string, file: File) {
+    const fd = new FormData();
+    fd.append("file", file);
+    return this.uploadRequest<SandboxReportDTO>(
+      `/api/v1/samples/${sampleId}/sandbox-reports`,
+      fd
+    );
+  }
+
+  getSandboxReports(sampleId: string) {
+    return this.request<{ items: SandboxReportDTO[]; total: number }>(
+      `/api/v1/samples/${sampleId}/sandbox-reports`
+    );
+  }
+
+  deleteSandboxReport(sampleId: string, reportId: string) {
+    return this.request<void>(
+      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}`,
       { method: "DELETE" }
     );
   }
@@ -587,6 +650,14 @@ class ApiClient {
   getReportStix(reportId: string) {
     return this.request<Record<string, unknown>>(
       `/api/v1/reports/${reportId}/stix`
+    );
+  }
+
+  /** Every IOC the report holds, flat. C4 (dev audit 2026-09-06): the endpoint
+   *  existed and nothing in the UI reached it. */
+  getReportIOCs(reportId: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/v1/reports/${reportId}/iocs`
     );
   }
 

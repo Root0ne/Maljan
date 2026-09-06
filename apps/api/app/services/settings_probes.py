@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
+from maljan.core.config import MCPServerConfig
+from maljan.core.logger import logger
+from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
-from pydantic import ValidationError
+from maljan.providers.errors import ProviderConfigurationError
+from maljan.providers.sandbox.rest_mapping import compile_mapping
+from maljan.providers.servers import ServerHandle
+from pydantic import SecretStr, ValidationError
 from redis.asyncio import Redis
 
 from app.config import settings as api_settings
+from app.services.server_map import TOKEN_MASK as _TOKEN_MASK
 
 TIMEOUT = 10.0
+
+# A connection test is a person waiting at a button. Five seconds is long
+# enough for a local stdio server to answer tools/list and short enough that a
+# wedged one is reported rather than endured.
+PROBE_BUDGET_SECONDS = 5.0
 
 
 @dataclass
@@ -23,6 +38,11 @@ class ProbeResult:
     latency_ms: int
     detail: str
     models: list[str] | None = None
+    tools: list[str] | None = None
+    # Structured, probe-specific facts the generic renderer ignores and a
+    # dedicated editor reads. The agent probe is the first user: a prompt hash
+    # and a per-server status do not fit in a sentence.
+    details: dict[str, Any] | None = None
 
 
 def _client() -> httpx.AsyncClient:
@@ -158,12 +178,461 @@ async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
-async def probe_cape(v: dict[str, Any]) -> ProbeResult:
+def _failure_detail(exc: BaseException) -> str:
+    """One legible sentence for anything a probe can end with.
+
+    An exception group is unwrapped to its leaves, because the group's own
+    message ("unhandled errors in a TaskGroup") names nothing an operator can
+    act on. A cancellation has no message at all, so it is worded here.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        leaves = [_failure_detail(e) for e in exc.exceptions]
+        return "; ".join(dict.fromkeys(leaves)) or "the probe was cancelled before it answered"
+    if isinstance(exc, asyncio.CancelledError):
+        return "the probe was cancelled before it answered"
+    text = str(exc).strip()
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+def _probe_in_fresh_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeResult:
+    """Run one probe start to finish on an event loop of its own.
+
+    B1 (dev audit 2026-09-06): a staged stdio entry whose command was not an
+    MCP server answered HTTP 500. ``ServerHandle.aopen`` re-raises whatever
+    ended the handshake unchanged, and a child that dies inside the transport's
+    anyio task group ends it with a cancellation -- bare, or wrapped in the
+    group's ``BaseExceptionGroup``. Neither is an ``Exception``, so the
+    ``except Exception`` guards each probe already had let it through, and the
+    request task inherited the cancellation: the handler produced no response
+    at all and ``BaseHTTPMiddleware.call_next`` raised "No response returned."
+    The browser saw a bare connection failure with no CORS headers on it.
+
+    Running the probe on a loop of its own is what makes that structurally
+    impossible: a cancel scope can only reach tasks of the loop it belongs to,
+    and no task of the request's loop is on this one. The handle is opened and
+    closed on this same loop, which is the rule ``ServerHandle`` is built
+    around (a stack unwinds where it was wound). Whatever comes out --
+    exception, group, or cancellation -- becomes a ``ProbeResult`` here, so the
+    caller has nothing left to inherit.
+
+    Budgets are unchanged: ``PROBE_BUDGET_SECONDS`` and the agent probe's
+    per-server multiple are applied inside this loop exactly as before. So is
+    the child reaping -- ``aopen``'s own teardown runs here, and a cleanup
+    detached with ``_detach_cleanup`` is awaited by ``asyncio.run``'s shutdown
+    rather than dropped.
+    """
+
+    async def _runner() -> ProbeResult:
+        try:
+            return await factory()
+        except BaseException as exc:  # noqa: BLE001 - reported, never re-raised
+            logger.warning("probe failed: %s", _failure_detail(exc))
+            return ProbeResult(False, 0, _failure_detail(exc))
+
+    try:
+        return asyncio.run(_runner())
+    except BaseException as exc:  # noqa: BLE001 - a loop that could not even start
+        logger.warning("probe loop failed: %s", _failure_detail(exc))
+        return ProbeResult(False, 0, _failure_detail(exc))
+
+
+async def in_probe_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeResult:
+    """Await ``factory`` on a worker thread's own loop. Never raises."""
+    return await asyncio.to_thread(_probe_in_fresh_loop, factory)
+
+
+_PROBE_CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _detach_cleanup(coro: Any, label: str) -> None:
+    """Run ``coro`` to completion without making the caller wait for it.
+
+    ``handle.aclose()`` is already internally bounded (``_acleanup``'s own
+    20 s timeout); awaiting it here on top of a failed/timed-out ``aopen``
+    re-adds that whole budget to a probe the operator's own click is
+    documented at 5 s (F9). A strong reference is kept in
+    ``_PROBE_CLEANUP_TASKS`` until it finishes so the task is not garbage
+    collected mid-flight.
+    """
+    task = asyncio.ensure_future(coro)
+    _PROBE_CLEANUP_TASKS.add(task)
+
+    def _done(t: asyncio.Task[Any]) -> None:
+        _PROBE_CLEANUP_TASKS.discard(t)
+        if not t.cancelled() and (exc := t.exception()) is not None:
+            logger.warning("probe cleanup for '%s' failed (non-fatal): %s", label, exc)
+
+    task.add_done_callback(_done)
+
+
+async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
+    """Attach ``config`` long enough to read its manifest, then let go.
+
+    The only stdio handshake in the project besides a job's own: it is
+    ``ServerHandle``, so a server that answers here answers the same way in a
+    run. Whatever happens, the handle is eventually closed — a probe that
+    leaves a child process behind turns a mis-typed command into a slow leak
+    of subprocesses, which is exactly what a person clicking "Test" twice
+    would produce.
+
+    Regression (F9): a plain ``asyncio.wait_for(handle.aopen(...), 5.0)``
+    does not give up after 5 s when ``aopen`` is wedged. ``wait_for`` cancels
+    the inner coroutine and then *waits for the cancellation to finish* before
+    raising ``TimeoutError`` — and ``aopen``'s own cancellation handler awaits
+    ``_acleanup``, itself bounded at 20 s, so the operator's "Test" click can
+    take ~25 s instead of the documented 5. ``asyncio.wait`` never cancels the
+    handshake: past the budget this simply stops waiting on it and lets it
+    (and its own cleanup) finish in the background, closing the handle once
+    it does.
+    """
+    handle = ServerHandle(name, config)
+
+    async def _run() -> list[str]:
+        await handle.aopen(f"probe-{name}")
+        return handle.all_tool_names()
+
+    task: asyncio.Task[list[str]] = asyncio.ensure_future(_run())
+    done, _pending = await asyncio.wait({task}, timeout=PROBE_BUDGET_SECONDS)
+    if task not in done:
+        # Ask it to stop, but do not wait for that to finish here — that wait
+        # is exactly the ~20 s ``_acleanup`` budget this fix avoids blocking
+        # on. A short, fixed grace period still lets the common case (a
+        # cancellation that responds immediately) close the handle before
+        # this returns; a genuinely wedged server closes later, from the
+        # callback, once its own cancellation finally unwinds.
+        task.cancel()
+        done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
+        if task in done2:
+            await handle.aclose()
+        else:
+            task.add_done_callback(lambda _t: _detach_cleanup(handle.aclose(), f"probe-{name}"))
+        raise TimeoutError(f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    try:
+        return task.result()
+    finally:
+        await handle.aclose()
+
+
+def _probe_config(entry: dict[str, Any]) -> MCPServerConfig:
+    """The entry as configured, forced on and un-narrowed.
+
+    A probe answers "what does this server offer"; a disabled entry or an
+    empty allow-list are answers to a different question ("what may the model
+    call"), and applying them here would make the manifest unreadable exactly
+    when the operator needs it to pick from.
+    """
+    config = MCPServerConfig.model_validate(entry)
+    return config.model_copy(update={"enabled": True, "tools": None})
+
+
+async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
+    """Launch one configured MCP server and list the tools it offers."""
+    t0 = time.perf_counter()
+    name = str(v.get("name") or "server")
+    try:
+        config = _probe_config(dict(v.get("entry") or {}))
+    except ValidationError as exc:
+        fields = "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+        return ProbeResult(False, _ms(t0), f"invalid server settings: {fields}")
+    try:
+        names = await handshake_tools(config, name)
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    except FileNotFoundError as exc:
+        return ProbeResult(False, _ms(t0), f"{exc} not found on PATH")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    listed = ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools: {listed}", None, names)
+
+
+# settings_service.py's mask for a stored secret the editor never receives in
+# the clear (pydantic's own ``SecretStr`` JSON dump: ten literal asterisks,
+# regardless of the real value's length). Defined once, in ``server_map``
+# (the per-server registry needed a name for it too); kept under this old
+# name here so the one place that needs to recognise it, rather than echo it
+# back as a real token, does not change.
+_MASKED_SECRET = _TOKEN_MASK
+
+
+def _merge_server_entry(
+    stored_entry: dict[str, Any], staged_entry: dict[str, Any]
+) -> dict[str, Any]:
+    """Layer a staged edit over the stored entry, field by field.
+
+    A staged edit carries only the fields the editor's form touched; replacing
+    the whole entry (rather than merging into it) would drop every field the
+    operator left alone — most commonly ``args``/``env`` when only ``command``
+    was edited. ``auth_token`` gets one more rule: the editor never receives a
+    stored secret in the clear, so a staged value that is the settings
+    service's mask — or empty, the value an untouched password field posts —
+    means "left alone," not "cleared." Either way the stored token, already in
+    ``merged`` from the copy below, is what reaches the handshake.
+    """
+    merged = dict(stored_entry)
+    for key, value in staged_entry.items():
+        if key == "auth_token" and value in (_MASKED_SECRET, ""):
+            continue
+        merged[key] = value
+    return merged
+
+
+async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
+    """Probe one entry of the server map, staged fields winning over stored ones.
+
+    Separate from ``run_probe`` because this probe is addressed to a *key*
+    inside one setting rather than to a set of settings: ``_INPUTS`` maps
+    catalog keys to short names, and there is no catalog key for "the r2custom
+    entry".
+    """
+    stored_candidate = stored.get("core.mcp.servers")
+    staged_candidate = values.get("core.mcp.servers")
+    stored_map = stored_candidate if isinstance(stored_candidate, dict) else {}
+    staged_map = staged_candidate if isinstance(staged_candidate, dict) else {}
+    if server not in stored_map and server not in staged_map:
+        # Fall back to the effective settings: a built-in the operator has
+        # never edited has no stored row at all.
+        from maljan.core.config import Settings
+
+        effective = Settings().mcp.servers
+        if server not in effective:
+            available = (
+                ", ".join(sorted(set(stored_map) | set(staged_map) | set(effective))) or "(none)"
+            )
+            return ProbeResult(False, 0, f"unknown server: {server!r}. Available: {available}")
+        entry = effective[server].model_dump(mode="json")
+    else:
+        entry = _merge_server_entry(stored_map.get(server) or {}, staged_map.get(server) or {})
+    return await in_probe_loop(lambda: probe_mcp({"name": server, "entry": entry}))
+
+
+async def probe_agent(v: dict[str, Any]) -> ProbeResult:
+    """Resolve one agent definition against the given settings, without running it.
+
+    A dry resolution: the prompt is assembled, the tool servers are opened on
+    the ordinary probe budget and their manifests read, and the LLM is
+    *named* rather than built — the whole point of a probe is that an operator
+    can see what an agent would get before paying for a job. ``aresolve_agent``
+    is the same function a run calls, so what this reports is what that run
+    receives.
+    """
+    import hashlib
+
+    t0 = time.perf_counter()
+    name = str(v.get("name") or "")
+    try:
+        core = dict(v.get("settings") or {})
+        settings = build_settings(core)
+    except ValidationError as exc:
+        fields = "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+        return ProbeResult(False, _ms(t0), f"invalid agent settings: {fields}")
+    if name not in settings.agents.definitions:
+        available = ", ".join(sorted(settings.agents.definitions)) or "(none)"
+        return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
+
+    from maljan.agents.composition import aresolve_agent
+    from maljan.core.config import ToolRef
+    from maljan.core.container import ServiceContainer
+
+    definition = settings.agents.definitions[name]
+    bound = [
+        key
+        for key, server in settings.mcp.servers.items()
+        if server.enabled and name in server.agents
+    ]
+    bound += [
+        str(ref.server)
+        for ref in definition.tools
+        if ref.kind == "mcp" and str(ref.server) not in bound
+    ]
+    bound = list(dict.fromkeys(bound))
+
+    # One server's own open, at B's budget; the whole resolution gets that
+    # budget once per server bound to the agent, never a fixed multiple —
+    # an agent with five servers legitimately needs five times as long as
+    # one with one, and an agent with none should not wait for one either.
+    budget = PROBE_BUDGET_SECONDS * max(1, len(bound))
+    job_key = f"probe-{name}"
+
+    # ``mock=True`` is what makes this cheap and safe: the container builds no
+    # LLM registry at all, so ``get_agent_llm`` would raise rather than reach a
+    # provider. The model is reported from the settings instead, below.
+    container = ServiceContainer(settings, mock=True)
+
+    # F9's own fix, reused rather than re-derived: ``asyncio.wait_for`` waits
+    # for the cancelled coroutine's own cleanup before raising, and a wedged
+    # server open's cleanup is exactly the wait a 5 s-per-server probe budget
+    # cannot afford. ``asyncio.wait`` stops waiting at the budget and lets a
+    # still-running attach (and the container's own teardown) finish in the
+    # background instead — see ``handshake_tools`` for the same shape.
+    task: asyncio.Task[Any] = asyncio.ensure_future(
+        aresolve_agent(name, container, job_key=job_key)
+    )
+    done, _pending = await asyncio.wait({task}, timeout=budget)
+    if task not in done:
+        task.cancel()
+        done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
+        if task in done2:
+            await container.aclose()
+        else:
+            task.add_done_callback(lambda _t: _detach_cleanup(container.aclose(), job_key))
+        return ProbeResult(
+            False, _ms(t0), f"the agent's servers did not answer within {budget:.0f} s"
+        )
+    try:
+        resolved = task.result()
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        await container.aclose()
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+
+    # From here on, the container is open and must close on every exit —
+    # a successful report, an unexpected failure while assembling one, or a
+    # single server's listing blowing up. ``finally`` is what makes that true
+    # regardless of which of those three happens; a bare ``await
+    # container.aclose()`` after the loop, as before, skipped entirely on an
+    # exception and leaked every server the resolve above had just opened.
+    try:
+        tools = [str(getattr(t, "name", "")) for t in resolved.tools]
+        reasons = set(resolved.degradation_reasons)
+        registry = container.get_server_registry()
+        servers = []
+        for key in bound:
+            try:
+                server_tools, _server_reasons = await registry.atools_for_ref(
+                    ToolRef(kind="mcp", server=key), job_key
+                )
+            except Exception as exc:  # noqa: BLE001 — degrades this server, not the probe
+                servers.append({"key": key, "tools": [], "status": f"{type(exc).__name__}: {exc}"})
+                continue
+            servers.append(
+                {
+                    "key": key,
+                    "tools": [str(getattr(t, "name", "")) for t in server_tools],
+                    "status": next((r for r in reasons if f"'{key}" in r), "ok"),
+                }
+            )
+        agent_llm = settings.llm.agents.get(name)
+        listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
+        return ProbeResult(
+            True,
+            _ms(t0),
+            f"{len(tools)} tools: {listed}" if tools else "resolved; no tools",
+            None,
+            tools,
+            {
+                "prompt_chars": len(resolved.prompt),
+                "prompt_sha256": hashlib.sha256(resolved.prompt.encode("utf-8")).hexdigest(),
+                # Prompts are operator-authored text, not secrets (spec §11),
+                # so the probe returns it in full: the settings UI shows a
+                # built-in's resolved prompt read-only, and a clone seeds its
+                # copy from this text rather than guessing it.
+                "prompt": resolved.prompt,
+                "llm": {
+                    "provider": agent_llm.provider if agent_llm else settings.llm.provider,
+                    "model": agent_llm.model if agent_llm else "",
+                },
+                "static_provider": resolved.static_provider_id,
+                "servers": servers,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    finally:
+        await container.aclose()
+
+
+async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
+    """Probe one agent definition, staged values winning over stored ones.
+
+    Separate from ``run_probe`` for the reason ``run_mcp_probe`` is: the probe
+    is addressed to a *key* inside a setting, and ``_INPUTS`` maps catalog keys
+    to short names with no entry for "the strings definition".
+    """
+    merged: dict[str, Any] = {}
+    for layer in (stored, values):
+        for key, value in layer.items():
+            if key.startswith("core."):
+                merged[key[len("core.") :]] = value
+    return await in_probe_loop(lambda: probe_agent({"name": name, "settings": merged}))
+
+
+async def probe_r2(v: dict[str, Any]) -> ProbeResult:
+    """Launch the configured r2mcp and count the tools it offers, in 5 seconds.
+
+    A stdio handshake is the only honest test of a subprocess-backed server: a
+    binary that exists but cannot serve MCP is exactly the failure an operator
+    needs named before a job fails on it.
+    """
+    t0 = time.perf_counter()
+    command = str(v.get("binary_path") or "r2mcp")
+    config = MCPServerConfig(enabled=True, transport="stdio", command=command)
+    try:
+        names = await handshake_tools(config, "r2")
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    except FileNotFoundError:
+        return ProbeResult(False, _ms(t0), f"{command!r} not found on PATH")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools offered by {command!r}", None, names)
+
+
+async def probe_capa(v: dict[str, Any]) -> ProbeResult:
+    """Count capa + YARA rule files without touching a sample.
+
+    No live handshake exists for either — both are local libraries reading
+    local rule directories — so the connection test is the same check the
+    provider itself makes before a run: is the library importable, and does
+    each configured directory hold rule files. Naming which of the two is
+    missing here is exactly what stops an operator from discovering an empty
+    ``provides_evidence=False`` run only after a job finishes.
+    """
+    t0 = time.perf_counter()
+    parts: list[str] = []
+    capa_ok = False
+    if importlib.util.find_spec("capa") is None:
+        parts.append("capa library is not installed (uv sync --extra capa)")
+    else:
+        capa_dir = Path(resolve_data(str(v.get("capa_rules_dir") or "")))
+        capa_rules = list(capa_dir.rglob("*.yml")) if capa_dir.is_dir() else []
+        if not capa_dir.is_dir():
+            parts.append(f"capa rules directory {capa_dir} does not exist")
+        elif not capa_rules:
+            parts.append(f"capa rules directory {capa_dir} has no *.yml rules")
+        else:
+            capa_ok = True
+            parts.append(f"{len(capa_rules)} rules under {capa_dir}")
+
+    yara_dir = Path(resolve_data(str(v.get("yara_rules_dir") or "")))
+    yara_files = [*yara_dir.glob("*.yml"), *yara_dir.glob("*.yaml")] if yara_dir.is_dir() else []
+    if not yara_dir.is_dir():
+        parts.append(f"YARA rules directory {yara_dir} does not exist")
+    elif not yara_files:
+        parts.append(f"YARA rules directory {yara_dir} has no rule file")
+    else:
+        parts.append(f"{len(yara_files)} YARA rule file(s) under {yara_dir}")
+
+    return ProbeResult(capa_ok, _ms(t0), "; ".join(parts))
+
+
+async def probe_cape2(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     headers = {"Authorization": f"Token {v['api_token']}"} if v.get("api_token") else None
     ok, detail, _ = await _get(
         f"{str(v.get('base_url') or '').rstrip('/')}/apiv2/tasks/view/1/", headers
     )
+    return ProbeResult(ok, _ms(t0), detail)
+
+
+async def probe_triage(v: dict[str, Any]) -> ProbeResult:
+    token = v.get("api_token")
+    if not token:
+        # No point building a client for a call the token would refuse: a
+        # missing key is reported for what it is, without touching the network.
+        return ProbeResult(False, 0, "no API token configured")
+    t0 = time.perf_counter()
+    headers = {"Authorization": f"Bearer {token}"}
+    ok, detail, _ = await _get(f"{str(v.get('base_url') or '').rstrip('/')}/resources", headers)
     return ProbeResult(ok, _ms(t0), detail)
 
 
@@ -215,14 +684,103 @@ async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(ok, _ms(t0), detail)
 
 
+def _str(v: dict[str, Any], key: str, default: str) -> str:
+    """``v[key]`` as a string, or ``default`` when the key is absent.
+
+    Not ``v.get(key) or default``: an operator-set empty string is a real
+    value for several of these fields (an empty auth scheme sends the token
+    raw; an empty mapping path means "this channel is not published"), and
+    coercing it to the default would silently discard that choice.
+    """
+    value = v.get(key)
+    return str(value) if value is not None else default
+
+
+async def probe_rest(v: dict[str, Any]) -> ProbeResult:
+    """Ask the configured sandbox's status endpoint about a task that does not exist.
+
+    Every leaf ``_INPUTS["rest"]`` reads is folded into the ``SandboxRestConfig``
+    handed to the provider — not just the four the HTTP call itself touches —
+    so a staged auth header/scheme or mapping edit is what "Test" actually
+    exercises, the same as saving and running a job would use.
+    """
+    t0 = time.perf_counter()
+    from maljan.core.config import (
+        RestAuthConfig,
+        RestMappingConfig,
+        RestReportConfig,
+        RestStatusConfig,
+        SandboxRestConfig,
+    )
+    from maljan.providers.sandbox.rest import RestSandboxProvider
+
+    field_names = v.get("mapping_field_names")
+    try:
+        rest = SandboxRestConfig(
+            base_url=_str(v, "base_url", ""),
+            auth=RestAuthConfig(
+                header=_str(v, "auth_header", "Authorization"),
+                scheme=_str(v, "auth_scheme", "Bearer"),
+                token=SecretStr(_str(v, "token", "")),
+            ),
+            status=RestStatusConfig(
+                path=_str(v, "status_path", "/samples/{task_id}"),
+                state_path=_str(v, "status_state_path", "$.status"),
+            ),
+            report=RestReportConfig(
+                path=_str(v, "report_path", "/samples/{task_id}/report"),
+                format=_str(v, "report_format", "generic"),  # type: ignore[arg-type]
+            ),
+            mapping=RestMappingConfig(
+                target_sha256=_str(v, "mapping_target_sha256", "$.target.sha256"),
+                processes=_str(v, "mapping_processes", ""),
+                calls=_str(v, "mapping_calls", ""),
+                signatures=_str(v, "mapping_signatures", ""),
+                dns=_str(v, "mapping_dns", ""),
+                http=_str(v, "mapping_http", ""),
+                tcp=_str(v, "mapping_tcp", ""),
+                udp=_str(v, "mapping_udp", ""),
+                hosts=_str(v, "mapping_hosts", ""),
+                domains=_str(v, "mapping_domains", ""),
+                dropped_files=_str(v, "mapping_dropped_files", ""),
+                registry=_str(v, "mapping_registry", ""),
+                field_names=field_names if isinstance(field_names, dict) else {},
+            ),
+            timeout_seconds=int(v.get("timeout_seconds") or 900),
+            poll_interval_seconds=int(v.get("poll_interval_seconds") or 15),
+            verify_tls=bool(v.get("verify_tls", True)),
+        )
+        provider = RestSandboxProvider(rest, compile_mapping(rest.mapping))
+    except (ProviderConfigurationError, ValidationError) as exc:
+        fields = (
+            "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+            if isinstance(exc, ValidationError)
+            else str(exc)
+        )
+        return ProbeResult(False, _ms(t0), fields)
+    result = await provider.probe()
+    return ProbeResult(result.ok, result.latency_ms or _ms(t0), result.detail)
+
+
 PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
     "llm": probe_llm,
     "ghidra": probe_ghidra,
-    "cape": probe_cape,
+    "r2": probe_r2,
+    "mcp": probe_mcp,
+    "capa_yara": probe_capa,
+    # "capa" aliases "capa_yara" the way "cape" aliases "cape2": an older
+    # stored annotation may still name the tool rather than the provider id.
+    "capa": probe_capa,
+    "cape2": probe_cape2,
+    # "cape" is kept for one release: a stored annotation may still name it.
+    "cape": probe_cape2,
+    "triage": probe_triage,
     "qdrant": probe_qdrant,
     "redis": probe_redis,
     "virustotal": probe_virustotal,
     "abuseipdb": probe_abuseipdb,
+    "rest": probe_rest,
+    "agent": probe_agent,
 }
 
 # Which settings each probe reads, and the short name it gets them under.
@@ -243,10 +801,33 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",
     },
-    "ghidra": {"core.mcp.ghidra.url": "url", "core.mcp.ghidra.auth_token": "auth_token"},
+    "ghidra": {
+        "core.static.ghidra.url": "url",
+        "core.static.ghidra.auth_token": "auth_token",
+    },
+    "r2": {
+        "core.static.r2.binary_path": "binary_path",
+    },
+    "mcp": {},
+    "capa_yara": {
+        "core.static.capa.rules_dir": "capa_rules_dir",
+        "core.static.yara.rules_dir": "yara_rules_dir",
+    },
+    "capa": {
+        "core.static.capa.rules_dir": "capa_rules_dir",
+        "core.static.yara.rules_dir": "yara_rules_dir",
+    },
+    "cape2": {
+        "core.sandbox.cape2.base_url": "base_url",
+        "core.sandbox.cape2.api_token": "api_token",
+    },
     "cape": {
-        "core.sandbox.cape2_base_url": "base_url",
-        "core.sandbox.cape2_api_token": "api_token",
+        "core.sandbox.cape2.base_url": "base_url",
+        "core.sandbox.cape2.api_token": "api_token",
+    },
+    "triage": {
+        "core.sandbox.triage.base_url": "base_url",
+        "core.sandbox.triage.api_token": "api_token",
     },
     "qdrant": {
         "core.memory.qdrant_url": "url",
@@ -256,6 +837,33 @@ _INPUTS: dict[str, dict[str, str]] = {
     "redis": {},
     "virustotal": {"api.virustotal_api_key": "api_key"},
     "abuseipdb": {"api.abuseipdb_api_key": "api_key"},
+    "rest": {
+        "core.sandbox.rest.base_url": "base_url",
+        "core.sandbox.rest.auth.header": "auth_header",
+        "core.sandbox.rest.auth.scheme": "auth_scheme",
+        "core.sandbox.rest.auth.token": "token",
+        "core.sandbox.rest.status.path": "status_path",
+        "core.sandbox.rest.status.state_path": "status_state_path",
+        "core.sandbox.rest.report.path": "report_path",
+        "core.sandbox.rest.report.format": "report_format",
+        "core.sandbox.rest.verify_tls": "verify_tls",
+        "core.sandbox.rest.timeout_seconds": "timeout_seconds",
+        "core.sandbox.rest.poll_interval_seconds": "poll_interval_seconds",
+        "core.sandbox.rest.mapping.target_sha256": "mapping_target_sha256",
+        "core.sandbox.rest.mapping.processes": "mapping_processes",
+        "core.sandbox.rest.mapping.calls": "mapping_calls",
+        "core.sandbox.rest.mapping.signatures": "mapping_signatures",
+        "core.sandbox.rest.mapping.dns": "mapping_dns",
+        "core.sandbox.rest.mapping.http": "mapping_http",
+        "core.sandbox.rest.mapping.tcp": "mapping_tcp",
+        "core.sandbox.rest.mapping.udp": "mapping_udp",
+        "core.sandbox.rest.mapping.hosts": "mapping_hosts",
+        "core.sandbox.rest.mapping.domains": "mapping_domains",
+        "core.sandbox.rest.mapping.dropped_files": "mapping_dropped_files",
+        "core.sandbox.rest.mapping.registry": "mapping_registry",
+        "core.sandbox.rest.mapping.field_names": "mapping_field_names",
+    },
+    "agent": {},
 }
 
 
@@ -298,4 +906,4 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             resolved[short] = _unwrap(cursor)
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
-    return await probe(resolved)
+    return await in_probe_loop(lambda: probe(resolved))

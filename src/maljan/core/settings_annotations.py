@@ -19,20 +19,27 @@ class Annotation(TypedDict):
     applies: NotRequired[Literal["next_job", "live", "restart"]]
     probe: NotRequired[str]
     group: NotRequired[str]
+    applies_when: NotRequired[dict[str, list[str]]]  # key -> values that reveal this entry
+    order: NotRequired[int]  # within the group; default 0
+    choices_from: NotRequired[
+        Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"]
+    ]
+    editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "profiles"]]
 
 
 GROUP_ORDER: list[tuple[str, str]] = [
     ("llm", "LLM & model"),
     ("providers", "Providers"),
     ("frontier", "Frontier arms"),
-    ("sandbox", "Sandbox (CAPE)"),
-    ("mcp", "MCP servers (Ghidra, CAPE)"),
+    ("static", "Static analysis provider"),
+    ("sandbox", "Sandbox provider"),
+    ("mcp", "Tool servers (MCP)"),
     ("memory", "Memory / LTM (Qdrant)"),
     ("analysis", "Analysis layers"),
     ("negotiation", "Negotiation"),
     ("chunking", "Chunking"),
     ("reporting", "Reporting"),
-    ("agents", "Agent timeouts and budgets"),
+    ("agents", "Agents"),
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
     ("api", "API"),
@@ -52,6 +59,7 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("sandbox", "sandbox"),
     ("analysis", "analysis"),
     ("preprocessing", "analysis"),
+    ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
     ("react_agent", "agents"),
@@ -446,136 +454,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Global token-count ceiling used to truncate prompts before they overflow "
             "the LLM's context window. Conservative by default for smaller-context "
             "models; raise it when running on a large-context model such as Gemini."
-        ),
-    },
-    "mcp.cape.args": {
-        "title": "CAPE MCP args",
-        "description": (
-            "Command-line arguments passed to the CAPEv2 MCP wrapper subprocess when "
-            "transport is stdio, e.g. the wrapper script path and --cape-root."
-        ),
-    },
-    "mcp.cape.auth_token": {
-        "title": "CAPE MCP auth token",
-        "description": (
-            "Bearer token for the CAPEv2 MCP server's HTTP transport, only needed if "
-            "that server enforces one."
-        ),
-    },
-    "mcp.cape.command": {
-        "title": "CAPE MCP command",
-        "description": (
-            "Subprocess command used to launch the CAPEv2 MCP wrapper when transport is "
-            "stdio, e.g. python."
-        ),
-    },
-    "mcp.cape.enabled": {
-        "title": "CAPE MCP enabled",
-        "description": (
-            "Turns on the CAPEv2 MCP server integration, giving the dynamic analyst "
-            "interactive tools (search_task, get_task_iocs, get_task_config, ...) on "
-            "top of the one-shot sandbox report fetched via sandbox.backend=cape2."
-        ),
-    },
-    "mcp.cape.env": {
-        "title": "CAPE MCP environment",
-        "description": (
-            "Extra environment variables passed to the CAPEv2 MCP wrapper subprocess "
-            "when transport is stdio."
-        ),
-    },
-    "mcp.cape.tool_selection": {
-        "title": "CAPE MCP tool selection",
-        "description": (
-            "How many CAPEv2 MCP tools are exposed to the dynamic analyst per run, "
-            "mirroring mcp.ghidra.tool_selection's curated/dynamic/all tiers."
-        ),
-    },
-    "mcp.cape.transport": {
-        "title": "CAPE MCP transport",
-        "description": (
-            "Transport used to reach the CAPEv2 MCP server: stdio for CAPE running on "
-            "this machine; http for a wrapper running on a separate CAPE VM."
-        ),
-    },
-    "mcp.cape.url": {
-        "title": "CAPE MCP URL",
-        "description": (
-            "URL of the remote CAPEv2 MCP server when transport is http, e.g. "
-            "http://<CAPE_VM_IP>:9004/mcp/."
-        ),
-    },
-    "mcp.cape.use_all_tools": {
-        "title": "CAPE MCP force all tools",
-        "description": (
-            "Back-compat flag: when true, forces the CAPEv2 MCP tool_selection to all "
-            "regardless of its own value."
-        ),
-    },
-    "mcp.ghidra.args": {
-        "title": "Ghidra MCP args",
-        "description": (
-            "Command-line arguments passed to the Ghidra MCP server subprocess when "
-            "transport is stdio."
-        ),
-    },
-    "mcp.ghidra.auth_token": {
-        "title": "Ghidra MCP auth token",
-        "description": ("Bearer token for the Ghidra MCP server's HTTP transport."),
-        "probe": "ghidra",
-    },
-    "mcp.ghidra.command": {
-        "title": "Ghidra MCP command",
-        "description": (
-            "Subprocess command used to launch the Ghidra MCP server when transport is stdio."
-        ),
-    },
-    "mcp.ghidra.enabled": {
-        "title": "Ghidra MCP enabled",
-        "description": (
-            "Turns on the Ghidra MCP server integration, exposing static-analysis tools "
-            "(decompile, list functions, xrefs, ...) to the static analyst's ReAct "
-            "loop."
-        ),
-        "probe": "ghidra",
-    },
-    "mcp.ghidra.env": {
-        "title": "Ghidra MCP environment",
-        "description": (
-            "Extra environment variables passed to the Ghidra MCP server subprocess "
-            "when transport is stdio."
-        ),
-    },
-    "mcp.ghidra.tool_selection": {
-        "title": "Ghidra MCP tool selection",
-        "description": (
-            "How many Ghidra MCP tools are exposed to the static analyst per run: "
-            "curated is a fixed ~20-tool allowlist (fastest, narrowest); dynamic (the "
-            "recommended default) shows a core triage set plus tools relevant to the "
-            "sample's inferred capabilities (~30-40 tools); all exposes every tool "
-            "(~165), measured 5-6x slower and noisier locally."
-        ),
-    },
-    "mcp.ghidra.transport": {
-        "title": "Ghidra MCP transport",
-        "description": (
-            "Transport used to reach the Ghidra MCP server: stdio launches a local "
-            "subprocess (command/args/env); http connects to a remote REST endpoint "
-            "(url/auth_token)."
-        ),
-    },
-    "mcp.ghidra.url": {
-        "title": "Ghidra MCP URL",
-        "description": (
-            "URL of the remote Ghidra MCP server when transport is http, e.g. the "
-            "ghidra-mcp docker-compose service."
-        ),
-        "probe": "ghidra",
-    },
-    "mcp.ghidra.use_all_tools": {
-        "title": "Ghidra MCP force all tools",
-        "description": (
-            "Back-compat flag: when true, forces tool_selection to all regardless of its own value."
         ),
     },
     "memory.backend": {
@@ -1076,44 +954,598 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Prefix used when generating the report's reference number, e.g. MJN-2026-0001."
         ),
     },
-    "sandbox.backend": {
-        "title": "Sandbox backend",
-        "description": (
-            "Dynamic-analysis backend. mock loads fixture JSON reports from the samples "
-            "directory with no network access — safe for CI and local dev. cape2 "
-            "submits samples to a live CAPEv2 sandbox over its REST API."
-        ),
-    },
-    "sandbox.cape2_api_token": {
-        "title": "CAPEv2 API token",
-        "description": (
-            "Bearer token for the CAPEv2 REST API. Can be left empty for an "
-            "unauthenticated local instance."
-        ),
-        "probe": "cape",
-    },
-    "sandbox.cape2_base_url": {
-        "title": "CAPEv2 base URL",
-        "description": (
-            "Base URL of the CAPEv2 REST API used when sandbox.backend is cape2. CAPEv2 "
-            "itself is not part of this repository — it runs on its own Linux host with "
-            "KVM and registered guest images; point this at that host's apiv2 address."
-        ),
-        "probe": "cape",
-    },
-    "sandbox.cape2_poll_interval_seconds": {
-        "title": "CAPEv2 poll interval (s)",
-        "description": (
-            "Seconds between polling the CAPEv2 API for task completion while waiting "
-            "for a submitted sample's report."
-        ),
-    },
-    "sandbox.cape2_timeout_seconds": {
-        "title": "CAPEv2 timeout (s)",
-        "description": (
-            "Maximum seconds to wait for a CAPEv2 detonation and report to complete "
-            "before giving up. Real detonation takes minutes, so the default is set "
-            "well above the poll interval."
-        ),
-    },
 }
+
+
+def mcp_server_annotations(
+    prefix: str,
+    label: str,
+    *,
+    probe: str | None = None,
+    applies_when: dict[str, list[str]] | None = None,
+    order: int = 0,
+    provider_owned: bool = False,
+) -> dict[str, Annotation]:
+    """The fourteen leaves of an ``MCPServerConfig`` block, described for ``label``.
+
+    Every MCP server in the settings has the same nine transport/tool-selection
+    knobs, plus five sub-project-B fields (``cwd``, ``env_allow``, ``tools``,
+    ``agents``, ``label``); writing them out six times invites drift between
+    blocks that must behave identically. The per-field wording is fixed, the
+    server's name is the only variable.
+
+    ``provider_owned`` marks a block whose ``tools``/``agents``/``label`` a
+    static or sandbox provider (Ghidra, radare2, the CAPE MCP sidecar)
+    computes for itself and ignores if set: those three leaves get
+    ``applies_when`` pinned to the block's own governing key with an empty
+    allowed list, which the settings tab can never satisfy, so they are never
+    shown. ``cwd`` and ``env_allow`` stay visible under the block's ordinary
+    ``applies_when`` — a stdio launch of that server still reads them.
+    """
+    common: Annotation = {"title": "", "description": ""}
+    del common  # documented shape; each entry below is built explicitly
+
+    def ann(title: str, description: str, *, with_probe: bool = False) -> Annotation:
+        a: Annotation = {"title": title, "description": description, "order": order}
+        if applies_when is not None:
+            a["applies_when"] = applies_when
+        if with_probe and probe:
+            a["probe"] = probe
+        return a
+
+    never_shown: dict[str, list[str]] = {key: [] for key in (applies_when or {})}
+
+    def owned_ann(title: str, description: str) -> Annotation:
+        a: Annotation = {"title": title, "description": description, "order": order}
+        if never_shown:
+            a["applies_when"] = never_shown
+        return a
+
+    entries: dict[str, Annotation] = {
+        f"{prefix}.enabled": ann(
+            f"{label} enabled",
+            f"Turns on the {label} integration. When off the analyst runs on the "
+            "evidence it already has and exposes no tools from this server.",
+            with_probe=True,
+        ),
+        f"{prefix}.transport": ann(
+            f"{label} transport",
+            "How the server is reached: stdio launches a local subprocess "
+            "(command/args/env); http, streamable-http and sse connect to a "
+            "running server (url/auth_token).",
+        ),
+        f"{prefix}.command": ann(
+            f"{label} command",
+            "Executable launched for the stdio transport, e.g. python or r2mcp.",
+        ),
+        f"{prefix}.args": ann(
+            f"{label} args",
+            "Command-line arguments for the stdio subprocess. Relative paths are "
+            "resolved against the project root.",
+        ),
+        f"{prefix}.env": ann(
+            f"{label} environment",
+            "Extra environment variables for the stdio subprocess. The child gets "
+            "these plus a fixed base set, and no credentials of its own.",
+        ),
+        f"{prefix}.url": ann(
+            f"{label} URL",
+            "Address of the server for the http transports, e.g. http://localhost:8089.",
+            with_probe=True,
+        ),
+        f"{prefix}.auth_token": ann(
+            f"{label} auth token",
+            "Bearer token sent to the server over the http transports. Leave "
+            "empty when the server does not enforce one.",
+            with_probe=True,
+        ),
+        f"{prefix}.tool_selection": ann(
+            f"{label} tool selection",
+            "How many of the server's tools the analyst sees per run: curated is "
+            "a fixed allow-list (fastest, narrowest); dynamic shows a core triage "
+            "set plus the tools relevant to the sample's inferred capabilities; "
+            "all exposes every tool, which is measurably slower and noisier.",
+        ),
+        f"{prefix}.use_all_tools": ann(
+            f"{label} force all tools",
+            "Back-compat flag: when true, forces tool selection to all regardless "
+            "of its own value.",
+        ),
+        f"{prefix}.cwd": ann(
+            f"{label} working directory",
+            "Working directory for the stdio subprocess; empty means the repository root.",
+        ),
+        f"{prefix}.env_allow": ann(
+            f"{label} inherited environment names",
+            "Names copied out of the API process's own environment into the "
+            "stdio subprocess — the only way a credential reaches this sidecar, "
+            "since the environment field above is visible in the UI.",
+        ),
+    }
+
+    if provider_owned:
+        entries[f"{prefix}.tools"] = owned_ann(
+            f"{label} tool allow-list",
+            f"Ignored: {label} is a provider-owned server and computes its own tool exposure.",
+        )
+        entries[f"{prefix}.agents"] = owned_ann(
+            f"{label} receiving analysts",
+            f"Ignored: {label} is a provider-owned server and routes to its "
+            "provider's own analyst, not a configurable list.",
+        )
+        entries[f"{prefix}.label"] = owned_ann(
+            f"{label} display name",
+            f"Ignored: {label} is a provider-owned server; its display name "
+            "comes from the provider, not this field.",
+        )
+    else:
+        entries[f"{prefix}.tools"] = ann(
+            f"{label} tool allow-list",
+            "Allow-list of tool names exposed to the model. Empty exposes "
+            "nothing until tools are ticked from the server's probe; null "
+            "exposes every tool the server advertises.",
+        )
+        entries[f"{prefix}.agents"] = ann(
+            f"{label} receiving analysts",
+            "Which analysts (static, dynamic, network, judge) receive this "
+            "server's tools. Empty means none.",
+        )
+        entries[f"{prefix}.label"] = ann(
+            f"{label} display name",
+            "Display name shown in the tool-server registry; empty uses the server's key.",
+        )
+
+    return entries
+
+
+_STATIC_GHIDRA = {"core.static.provider": ["ghidra"]}
+_STATIC_R2 = {"core.static.provider": ["r2"]}
+_STATIC_CAPA_YARA = {"core.static.provider": ["capa_yara"]}
+_STATIC_GENERIC = {"core.static.provider": ["generic_mcp"]}
+_SANDBOX_CAPE2 = {"core.sandbox.provider": ["cape2"]}
+_SANDBOX_TRIAGE = {"core.sandbox.provider": ["triage"]}
+_SANDBOX_UPLOAD = {"core.sandbox.provider": ["upload"]}
+_SANDBOX_REST = {"core.sandbox.provider": ["rest"]}
+_SANDBOX_REST_GENERIC = {
+    "core.sandbox.provider": ["rest"],
+    "core.sandbox.rest.report.format": ["generic"],
+}
+
+
+ANNOTATIONS.update(
+    {
+        "static.provider": {
+            "title": "Static analysis provider",
+            "description": (
+                "Which tool produces the static evidence. ghidra runs the Ghidra MCP "
+                "server (today's default and the profile the evaluation was measured "
+                "on); r2 runs radare2 over its MCP server; capa_yara runs capa and "
+                "YARA with no tool server and hands the analyst evidence rather than "
+                "tools; generic_mcp attaches any MCP server you configure; none "
+                "leaves the static analyst with no tools at all."
+            ),
+            "order": -1,
+            "choices_from": "static_providers",
+        },
+        "sandbox.provider": {
+            "title": "Sandbox provider",
+            "description": (
+                "Which sandbox produces the dynamic evidence. mock loads fixture "
+                "reports from the samples directory with no network access; cape2 "
+                "submits to a live CAPEv2 instance; upload runs no detonation and "
+                "uses the report attached to the job; triage submits to the Hatching "
+                "Triage cloud sandbox; rest drives any HTTP sandbox from the "
+                "endpoints and JSONPaths you describe."
+            ),
+            "order": -1,
+            "choices_from": "sandbox_providers",
+        },
+        "static.r2.binary_path": {
+            "title": "radare2 MCP binary",
+            "description": (
+                "Executable that serves the radare2 MCP tools, looked up on PATH "
+                "when it is a bare name. The provider's connection test reports "
+                "clearly when it is missing."
+            ),
+            "applies_when": _STATIC_R2,
+            "probe": "r2",
+        },
+        "static.r2.mirror_dir": {
+            "title": "radare2 sample directory",
+            "description": (
+                "Host directory the sample is copied into so radare2 can open it by "
+                "path. Defaults to the same private .work directory the Ghidra "
+                "mirror uses."
+            ),
+            "applies_when": _STATIC_R2,
+        },
+        "static.capa.rules_dir": {
+            "title": "capa rules directory",
+            "description": (
+                "Directory of flare-capa rules. Missing or empty lowers the "
+                "provider to no evidence with a warning rather than failing a run."
+            ),
+            "applies_when": _STATIC_CAPA_YARA,
+            "probe": "capa_yara",
+        },
+        "static.capa.signatures_dir": {
+            "title": "capa signatures directory",
+            "description": (
+                "Directory of capa's library-identification signatures, used to keep "
+                "statically linked library code out of the results."
+            ),
+            "applies_when": _STATIC_CAPA_YARA,
+            "probe": "capa_yara",
+        },
+        "static.capa.timeout_seconds": {
+            "title": "capa timeout (s)",
+            "description": (
+                "Wall-clock budget for one capa run. A sample that exceeds it "
+                "contributes no capa evidence and the run continues."
+            ),
+            "applies_when": _STATIC_CAPA_YARA,
+        },
+        "static.capa.backend": {
+            "title": "capa backend",
+            "description": (
+                "Analysis engine capa uses: auto picks per file type, vivisect is "
+                "the portable default, pefile is header-only and fast, binja needs a "
+                "local Binary Ninja installation."
+            ),
+            "applies_when": _STATIC_CAPA_YARA,
+        },
+        "static.yara.rules_dir": {
+            "title": "YARA rules directory (static provider)",
+            "description": (
+                "Your own YARA rules, scanned by the capa_yara static provider. The "
+                "deterministic YARA detection layer keeps its own vendored corpus "
+                "and is unaffected by this."
+            ),
+            "applies_when": _STATIC_CAPA_YARA,
+            "probe": "capa_yara",
+        },
+        "static.yara.timeout_seconds": {
+            "title": "YARA timeout (s)",
+            "description": "Wall-clock budget for one YARA scan of the sample.",
+            "applies_when": _STATIC_CAPA_YARA,
+        },
+        "sandbox.cape2.base_url": {
+            "title": "CAPEv2 base URL",
+            "description": (
+                "Base URL of the CAPEv2 REST API. CAPEv2 is not part of this "
+                "repository — it runs on its own Linux host with KVM and registered "
+                "guest images; point this at that host's apiv2 address."
+            ),
+            "applies_when": _SANDBOX_CAPE2,
+            "probe": "cape2",
+        },
+        "sandbox.cape2.api_token": {
+            "title": "CAPEv2 API token",
+            "description": (
+                "Bearer token for the CAPEv2 REST API. Can be left empty for an "
+                "unauthenticated local instance."
+            ),
+            "applies_when": _SANDBOX_CAPE2,
+            "probe": "cape2",
+        },
+        "sandbox.cape2.timeout_seconds": {
+            "title": "CAPEv2 timeout (s)",
+            "description": (
+                "Maximum seconds to wait for a CAPEv2 detonation and report before "
+                "giving up. Real detonation takes minutes, so the default is set "
+                "well above the poll interval."
+            ),
+            "applies_when": _SANDBOX_CAPE2,
+        },
+        "sandbox.cape2.poll_interval_seconds": {
+            "title": "CAPEv2 poll interval (s)",
+            "description": "Seconds between polls of the CAPEv2 API while a task runs.",
+            "applies_when": _SANDBOX_CAPE2,
+        },
+        "sandbox.triage.base_url": {
+            "title": "Triage API base URL",
+            "description": (
+                "Hatching Triage cloud API root. Use https://private.tria.ge/api/v0 "
+                "for a private instance."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+            "probe": "triage",
+        },
+        "sandbox.triage.api_token": {
+            "title": "Triage API token",
+            "description": (
+                "Bearer token from your Triage account. Samples leave this host when "
+                "this provider is selected."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+            "probe": "triage",
+        },
+        "sandbox.triage.profile": {
+            "title": "Triage VM profile",
+            "description": (
+                "Name of the Triage analysis profile to request. Empty means the "
+                "account's default profile."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.timeout_seconds": {
+            "title": "Triage timeout (s)",
+            "description": (
+                "Maximum seconds to wait for a Triage analysis to reach the reported "
+                "state, queueing behind other tenants included."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.poll_interval_seconds": {
+            "title": "Triage poll interval (s)",
+            "description": (
+                "Initial seconds between status polls. The provider backs off by "
+                "1.5x up to a minute and honours a Retry-After header."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.fetch_pcap": {
+            "title": "Fetch the Triage capture",
+            "description": (
+                "Download each task's PCAP so the network analyst can inspect the "
+                "packets rather than only the structured indicators."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.upload.max_report_bytes": {
+            "title": "Uploaded report size limit (bytes)",
+            "description": (
+                "Reports larger than this are rejected while streaming, before "
+                "anything is stored. A gzipped upload is checked again after "
+                "inflation."
+            ),
+            "applies_when": _SANDBOX_UPLOAD,
+        },
+        "sandbox.upload.allowed_formats": {
+            "title": "Accepted report formats",
+            "description": (
+                "Formats the sniffer may accept for an uploaded report: cape2, "
+                "cuckoo, triage. A file that sniffs as anything else is refused."
+            ),
+            "applies_when": _SANDBOX_UPLOAD,
+        },
+    }
+)
+
+ANNOTATIONS.update(
+    mcp_server_annotations(
+        "static.ghidra",
+        "Ghidra MCP",
+        probe="ghidra",
+        applies_when=_STATIC_GHIDRA,
+        provider_owned=True,
+    )
+)
+ANNOTATIONS.update(
+    mcp_server_annotations(
+        "static.r2", "radare2 MCP", probe="r2", applies_when=_STATIC_R2, provider_owned=True
+    )
+)
+ANNOTATIONS.update(
+    mcp_server_annotations(
+        "sandbox.cape2.mcp", "CAPE MCP", applies_when=_SANDBOX_CAPE2, provider_owned=True
+    )
+)
+
+ANNOTATIONS.update(
+    {
+        "mcp.servers": {
+            "title": "Tool servers",
+            "description": (
+                "Every MCP server Maljan can attach, keyed by a short name. Each "
+                "entry says how to reach the server, which of its tools the model "
+                "may call, and which analysts receive them. A newly added server "
+                "exposes nothing until its tools are ticked."
+            ),
+            "group": "mcp",
+            "editor": "server_map",
+            "order": -1,
+        },
+        "static.generic.server": {
+            "title": "Custom MCP server",
+            "description": (
+                "Which entry of the tool-server registry the generic_mcp static "
+                "provider drives. Empty leaves that provider with nothing to attach."
+            ),
+            "applies_when": _STATIC_GENERIC,
+            "choices_from": "mcp_servers",
+        },
+        "agents.profile": {
+            "title": "Active profile",
+            "description": (
+                "Which profile a job runs unless it names one of its own. A "
+                "profile is an ordered set of analysts; 'default' is the "
+                "three-analyst architecture this project was measured on."
+            ),
+            "group": "agents",
+            "choices_from": "profiles",
+            "order": -1,
+        },
+        "agents.profiles": {
+            "title": "Profiles",
+            "description": (
+                "Named ensembles, each an ordered list of enabled analyst "
+                "definitions. The order is the order the analysts run in when "
+                "analysts run sequentially. 'default' is read-only; clone it."
+            ),
+            "group": "agents",
+            "editor": "profiles",
+            "order": -1,
+        },
+        "agents.definitions": {
+            "title": "Agent definitions",
+            "description": (
+                "Every agent Maljan can run, keyed by a short name: its role, "
+                "its prompt, the tool servers it receives and the static "
+                "provider it reads. The four built-ins are read-only apart from "
+                "their enabled switch; clone one to change it."
+            ),
+            "group": "agents",
+            "editor": "agent_definitions",
+            "order": -1,
+        },
+    }
+)
+
+
+def _rest(
+    title: str, description: str, *, generic_only: bool = False, probe: str | None = None
+) -> Annotation:
+    """One ``sandbox.rest.*`` leaf: gated on the provider, drawn by one editor.
+
+    ``generic_only`` adds the second gate the mapping leaves need — the
+    catalog's ``applies_when`` is a conjunction of key/value sets, so two keys
+    in one dict is exactly "the REST provider AND the generic report format".
+    ``probe`` names the connection test the group header's button runs; only
+    one leaf per group needs it.
+    """
+    annotation: Annotation = {
+        "title": title,
+        "description": description,
+        "applies_when": _SANDBOX_REST_GENERIC if generic_only else _SANDBOX_REST,
+        "editor": "rest_sandbox",
+    }
+    if probe is not None:
+        annotation["probe"] = probe
+    return annotation
+
+
+ANNOTATIONS.update(
+    {
+        "sandbox.rest.base_url": _rest(
+            "Sandbox API base URL",
+            "Root of the sandbox's HTTP API; every path below is appended to it.",
+            probe="rest",
+        ),
+        "sandbox.rest.auth.header": _rest(
+            "Auth header", "Header carrying the credential, e.g. Authorization or X-API-Key."
+        ),
+        "sandbox.rest.auth.scheme": _rest(
+            "Auth scheme",
+            "Prefix written before the token, e.g. Bearer. Empty sends the token alone.",
+        ),
+        "sandbox.rest.auth.token": _rest(
+            "Sandbox API token", "Credential sent in the configured header. Stored encrypted."
+        ),
+        "sandbox.rest.submit.method": _rest(
+            "Submit method", "HTTP method for the submission, POST or PUT."
+        ),
+        "sandbox.rest.submit.path": _rest(
+            "Submit path", "Path the sample is uploaded to, appended to the base URL."
+        ),
+        "sandbox.rest.submit.file_field": _rest(
+            "Submit file field", "Name of the multipart field carrying the sample bytes."
+        ),
+        "sandbox.rest.submit.extra_fields": _rest(
+            "Submit extra fields",
+            "Additional multipart fields sent with the sample, as name/value pairs.",
+        ),
+        "sandbox.rest.submit.task_id_path": _rest(
+            "Task id path",
+            "JSONPath selecting the task identifier out of the submit response, e.g. $.id.",
+        ),
+        "sandbox.rest.status.path": _rest(
+            "Status path", "Poll path; {task_id} is replaced by the submitted task's id."
+        ),
+        "sandbox.rest.status.state_path": _rest(
+            "Status field path", "JSONPath selecting the state value out of the status response."
+        ),
+        "sandbox.rest.status.done_values": _rest(
+            "Completed states",
+            "State values that mean the run finished, compared case-insensitively.",
+        ),
+        "sandbox.rest.status.failed_values": _rest(
+            "Failed states", "State values that mean the run failed and must not be polled further."
+        ),
+        "sandbox.rest.report.path": _rest(
+            "Report path", "Path the finished report is fetched from; {task_id} is substituted."
+        ),
+        "sandbox.rest.report.format": _rest(
+            "Report format",
+            "Shape of the fetched report. cape2, cuckoo and triage reuse the mappers the "
+            "report-upload provider already uses; generic maps the response with the "
+            "JSONPaths below.",
+        ),
+        "sandbox.rest.report.pcap_path": _rest(
+            "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
+        ),
+        "sandbox.rest.mapping.target_sha256": _rest(
+            "Mapping: sample hash", "JSONPath to the detonated sample's SHA-256.", generic_only=True
+        ),
+        "sandbox.rest.mapping.processes": _rest(
+            "Mapping: processes",
+            "JSONPath to the process rows; each match supplies pid, ppid, name and command_line.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.calls": _rest(
+            "Mapping: API calls",
+            "JSONPath to the API-call rows; each match supplies pid, api, args and timestamp.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.signatures": _rest(
+            "Mapping: signatures",
+            "JSONPath to the signature hits; each match supplies name, description, "
+            "severity and ttps.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.dns": _rest(
+            "Mapping: DNS",
+            "JSONPath to the DNS rows; each match supplies request, type and answers.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.http": _rest(
+            "Mapping: HTTP", "JSONPath to the HTTP request rows.", generic_only=True
+        ),
+        "sandbox.rest.mapping.tcp": _rest(
+            "Mapping: TCP",
+            "JSONPath to the TCP flows; each match supplies dst and dport.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.udp": _rest(
+            "Mapping: UDP",
+            "JSONPath to the UDP flows; each match supplies dst and dport.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.hosts": _rest(
+            "Mapping: hosts",
+            "JSONPath to the contacted hosts, one string per match.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.domains": _rest(
+            "Mapping: domains",
+            "JSONPath to the resolved domains, one string per match.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.dropped_files": _rest(
+            "Mapping: dropped files",
+            "JSONPath to the dropped files; each match supplies name, sha256 and size.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.registry": _rest(
+            "Mapping: registry",
+            "JSONPath to the touched registry paths, one string per match.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.field_names": _rest(
+            "Mapping: field renames",
+            "Per-row field renames, keyed 'channel.field', e.g. processes.command_line -> cmdline.",
+            generic_only=True,
+        ),
+        "sandbox.rest.timeout_seconds": _rest(
+            "Sandbox timeout (s)", "How long a detonation may take before the run is abandoned."
+        ),
+        "sandbox.rest.poll_interval_seconds": _rest(
+            "Poll interval (s)", "Delay between status checks; backs off to 60 s under pressure."
+        ),
+        "sandbox.rest.verify_tls": _rest(
+            "Verify TLS",
+            "Check the sandbox's certificate. Turning this off is reported in the "
+            "connection test's detail.",
+        ),
+    }
+)

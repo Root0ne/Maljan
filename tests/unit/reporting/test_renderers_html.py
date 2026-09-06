@@ -106,6 +106,26 @@ class TestDocumentShape:
         assert "[DEGRADED RUN]" in html
         assert "no sandbox report" in html
 
+    def test_non_default_profile_line_rendered_and_escaped(self) -> None:
+        report = _report(
+            run_summary={
+                "profile": {
+                    "name": "lean",
+                    "analysts": ["network", "<b>strings</b>"],
+                    "custom": ["<b>strings</b>"],
+                }
+            }
+        )
+        html = HtmlRenderer().render(report)
+        assert html.count("Profile:") == 1
+        assert "<b>strings</b>" not in html
+        assert "&lt;b&gt;strings&lt;/b&gt; (custom)" in html
+
+    def test_default_profile_produces_no_profile_line(self) -> None:
+        report = _report(run_summary={"profile": {"name": "default", "analysts": [], "custom": []}})
+        html = HtmlRenderer().render(report)
+        assert "Profile:" not in html
+
 
 class TestTableOfContents:
     def test_entry_per_section_and_ids_resolve(self) -> None:

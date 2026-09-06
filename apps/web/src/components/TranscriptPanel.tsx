@@ -47,11 +47,27 @@ const SPEAKER_COLORS: Record<string, string> = {
   // It is an intervention, and it is the reason a round exists.
   "sycophancy detector": "#f0883e",
 };
-const FALLBACK_COLOR = "#8b949e";
+/**
+ * Colours for a speaker the table does not name.
+ *
+ * A profile can add analysts this file has never heard of, and drawing every
+ * one of them the same grey made a four-analyst transcript unreadable. The
+ * index comes from a hash of the name, so one agent keeps one colour across
+ * reloads, across runs and across users — the property the fixed table had.
+ */
+const FALLBACK_PALETTE = ["#8b949e", "#56d364", "#db61a2", "#6cb6ff", "#e3b341", "#f0883e"];
+
+function hashIndex(key: string, buckets: number): number {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % buckets;
+}
 
 function speakerColor(speaker: string): string {
   const key = speaker.toLowerCase().replace(/\s*analyst$/, "").trim();
-  return SPEAKER_COLORS[key] ?? FALLBACK_COLOR;
+  return SPEAKER_COLORS[key] ?? FALLBACK_PALETTE[hashIndex(key, FALLBACK_PALETTE.length)];
 }
 
 function speakerLabel(speaker: string): string {
@@ -61,6 +77,38 @@ function speakerLabel(speaker: string): string {
   // title-cased ("Static Analyst"). Normalise so the same agent does not appear
   // under two names in one transcript.
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+/**
+ * Two letters that tell one speaker from another *in this run*.
+ *
+ * C5 (dev audit 2026-09-06): the avatar took the first two characters of the
+ * name, so a wide profile running `static`, `static_r2` and `strings` drew
+ * three identical "St" circles, distinguishable only by colour. The first
+ * choice is still those two characters; a name that would collide takes its
+ * first letter plus the first later character that has not been claimed —
+ * preferring the one just after a separator, which is where a variant's name
+ * usually differs (`static_r2` -> "Sr"). Assigned over the sorted speaker list
+ * so one run always produces the same initials.
+ */
+export function speakerInitials(speakers: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  const taken = new Set<string>();
+  for (const speaker of [...new Set(speakers)].sort()) {
+    const label = speakerLabel(speaker);
+    const head = label.charAt(0).toUpperCase();
+    const rest = label.slice(1);
+    const candidates = [label.slice(0, 2)];
+    for (let i = 0; i < rest.length; i += 1) {
+      if (/[^a-z0-9]/i.test(rest[i]) && rest[i + 1]) candidates.push(head + rest[i + 1]);
+    }
+    for (const ch of rest) if (/[a-z0-9]/i.test(ch)) candidates.push(head + ch);
+    for (let n = 2; n <= 9; n += 1) candidates.push(head + String(n));
+    const pick = candidates.find((c) => c.length === 2 && !taken.has(c)) ?? head;
+    taken.add(pick);
+    out[speaker] = pick;
+  }
+  return out;
 }
 
 const STATUS_BADGE: Record<TranscriptStatus, { label: string; cls: string } | null> = {
@@ -152,6 +200,17 @@ export default function TranscriptPanel({
 
   const claimTotal = messages.reduce((sum, m) => sum + m.claims.length, 0);
 
+  // Over every speaker in the run, not just the visible ones: a filter must
+  // not change the letters an agent wears.
+  const initials = useMemo(
+    () =>
+      speakerInitials([
+        ...messages.map((m) => m.speaker),
+        ...(activeSpeaker ? [activeSpeaker] : []),
+      ]),
+    [messages, activeSpeaker]
+  );
+
   return (
     <div className="bg-bg-surface border border-border rounded flex flex-col">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
@@ -226,6 +285,7 @@ export default function TranscriptPanel({
                   <Bubble
                     message={message}
                     grouped={grouped}
+                    initials={initials[message.speaker]}
                     claimsOpen={openClaims.has(message.id)}
                     reportOpen={openReports.has(message.id)}
                     onToggleClaims={() => toggleClaims(message.id)}
@@ -235,7 +295,9 @@ export default function TranscriptPanel({
               </div>
             );
           })}
-          {live && activeSpeaker && <TypingRow speaker={activeSpeaker} />}
+          {live && activeSpeaker && (
+            <TypingRow speaker={activeSpeaker} initials={initials[activeSpeaker]} />
+          )}
           <div ref={endRef} />
         </div>
       )}
@@ -276,23 +338,26 @@ function SystemNotice({ message }: { message: TranscriptMessage }) {
   );
 }
 
-function Avatar({ speaker }: { speaker: string }) {
+function Avatar({ speaker, initials }: { speaker: string; initials?: string }) {
   const color = speakerColor(speaker);
   return (
     <div
       className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-medium border"
       style={{ color, borderColor: `${color}55`, backgroundColor: `${color}15` }}
+      // The full name is a keystroke away for anyone the initials still leave
+      // guessing; it is also written beside every ungrouped bubble.
+      title={speakerLabel(speaker)}
       aria-hidden="true"
     >
-      {speakerLabel(speaker).slice(0, 2)}
+      {initials ?? speakerLabel(speaker).slice(0, 2)}
     </div>
   );
 }
 
-function TypingRow({ speaker }: { speaker: string }) {
+function TypingRow({ speaker, initials }: { speaker: string; initials?: string }) {
   return (
     <div className="flex gap-2 items-end pt-1">
-      <Avatar speaker={speaker} />
+      <Avatar speaker={speaker} initials={initials} />
       <div className="px-3 py-2 rounded-2xl rounded-bl-sm bg-bg-surface border border-border flex items-center gap-2">
         <span className="text-xs" style={{ color: speakerColor(speaker) }}>
           {speakerLabel(speaker)}
@@ -325,6 +390,7 @@ function asBullets(text: string): string {
 function Bubble({
   message,
   grouped,
+  initials,
   claimsOpen,
   reportOpen,
   onToggleClaims,
@@ -332,6 +398,8 @@ function Bubble({
 }: {
   message: TranscriptMessage;
   grouped: boolean;
+  /** The two letters this speaker wears in this run — see `speakerInitials`. */
+  initials?: string;
   claimsOpen: boolean;
   reportOpen: boolean;
   onToggleClaims: () => void;
@@ -348,7 +416,7 @@ function Bubble({
       {grouped ? (
         <div className="shrink-0 w-7" aria-hidden="true" />
       ) : (
-        <Avatar speaker={message.speaker} />
+        <Avatar speaker={message.speaker} initials={initials} />
       )}
 
       <div

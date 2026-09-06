@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import CLOSE_TOOLS_TIMEOUT, retry_on_connection_error
+from maljan.agents.base_agent import retry_on_connection_error
 from maljan.analysis.schema_pruner import get_pruned_schema_hint
 from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
@@ -96,6 +96,31 @@ _AGREEMENT_RE = re.compile(
 )
 
 
+# The judge's system prompt. A module constant since sub-project C so that
+# ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
+# about what the judge is told; the text is unchanged from the inline literal
+# it replaces, and ``tests/agents/test_prompt_byte_identity.py`` says so.
+JUDGE_VERDICT_SYSTEM = (
+    "You are the Chief Malware Judge. Based on the expert reports below, "
+    "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
+    "RULES:\n"
+    "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
+    "- Omit technique ID if unsure.\n"
+    "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
+    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
+    "and x_maljan_contributing_agents list.\n"
+    "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
+    "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
+    "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
+    "- DO NOT emit Indicator objects whose pattern values are inferred, "
+    "hypothetical, or example. Every Indicator's pattern value MUST "
+    "appear verbatim in the deterministic evidence (static strings, "
+    "sandbox observations, or network IOCs). When in doubt, emit zero "
+    "Indicators — the deterministic renderer will fill them in.\n"
+    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
+)
+
+
 class JudgeAgent:
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
@@ -127,69 +152,70 @@ class JudgeAgent:
         # where ``judge_max_tokens`` binds and where the STIX integrity pass
         # runs, so this is the most load-bearing attachment point of the three.
         self.truncation_ledger: TruncationLedger | None = None
+        # Hand the judge a way back to its container, the same way
+        # ``BaseAnalyst`` does — read by ``_server_registry`` below. None for
+        # standalone use (tests, scripts).
+        self._container: Any = None
+        # Reasons the run summary should carry, filled in by
+        # ``_initialize_mcp_client``. Empty when it attached everything, or
+        # never ran.
+        self.tools: list[Any] = []
+        self.degradation_reasons: list[Any] = []
+
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _job_key(self) -> str:
+        """A per-job identity for the handles' same-job short circuit."""
+        return str(getattr(self, "_job_id", "") or "job")
 
     async def _initialize_mcp_client(self) -> None:
+        """Attach every tool server bound to the ``judge`` role, on this loop.
+
+        Awaited rather than handed to the shared agent loop, for the reason
+        ``aclose`` below spells out: whichever loop enters the toolkit's exit
+        stack has to be the one that unwinds it.
+        """
         if getattr(self, "tools", None):
             return
-
-        import sys
-
-        from mcp import StdioServerParameters
-
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.paths import get_project_root
-
-        project_root = get_project_root()
-        server_script = str(project_root / "threatintel-mcp" / "server.py")
-
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=[server_script],
-            env=child_env(allow=("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")),
-            cwd=str(project_root / "threatintel-mcp"),
-        )
-
-        toolkit = MCPLangChainToolkit(server_params)
-        await toolkit.initialize()
-
-        self.toolkit = toolkit
-        self.tools = toolkit.get_tools()
-        self.logger.info("Initialized ThreatIntel MCP tools: %s", [t.name for t in self.tools])
+        registry = self._server_registry()
+        if registry is None:
+            return
+        tools, reasons = await registry.atools_for("judge", self._job_key())
+        self.tools = tools
+        self.degradation_reasons = reasons
+        self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
 
     async def aclose(self) -> None:
-        """Release the ThreatIntel toolkit and its stdio subprocess.
+        """Release every judge-bound tool server and its stdio subprocess.
 
         Deliberately *not* routed through the shared agent loop, unlike the
-        analysts'. The judge enters its toolkit with a plain ``await`` on
-        whichever loop the graph node is running — see ``_initialize_mcp_client``
-        above — so that is the loop that owns the exit stack, and handing the
-        close to a different one is exactly how anyio's "cancel scope in a
-        different task" error is produced.
+        analysts'. The judge enters its toolkits with a plain ``await`` on
+        whichever loop the graph node is running — see
+        ``_initialize_mcp_client`` above — so that is the loop that owns the
+        exit stacks, and handing the close to a different one is exactly how
+        anyio's "cancel scope in a different task" error is produced.
 
         Without this, every mediation round that failed to initialise left
-        another ``threatintel-mcp`` subprocess running: the guard on the caller
-        is ``if self.tools: return``, and a failed init never sets ``tools``.
+        another ``threatintel-mcp`` subprocess running: the guard on the
+        caller is ``if self.tools: return``, and a failed init never sets
+        ``tools``. ``ServerHandle.aclose`` carries the bound this used to
+        apply itself.
         """
-        toolkit: Any = getattr(self, "toolkit", None)
-        self.toolkit = None  # type: ignore[assignment]
         self.tools = []
-        if toolkit is None:
+        registry = self._server_registry()
+        if registry is None:
             return
-        try:
-            # Bounded. This is a *stdio* transport, so its exit stack waits on
-            # the ``threatintel-mcp`` child process, and a child that does not
-            # exit waits forever — observed live as a job that finished its
-            # analysis and then sat in teardown for 42 minutes until SIGTERM.
-            await asyncio.wait_for(toolkit.cleanup(), timeout=CLOSE_TOOLS_TIMEOUT)
-        except TimeoutError:
-            self.logger.warning(
-                "Judge tool cleanup did not finish in %.0fs; abandoning it. The "
-                "MCP subprocess may outlive this job.",
-                CLOSE_TOOLS_TIMEOUT,
-            )
-        except Exception as exc:  # noqa: BLE001 — teardown never propagates
-            self.logger.warning("Judge tool cleanup failed (non-fatal): %s", exc)
+        # ``handles_for`` rather than ``for_agent``: a server the registry
+        # attached on a second loop has a handle of its own, and this judge
+        # cannot tell which of them is the one it was handed. Each closes on
+        # the loop that opened it, so it does not need to.
+        for handle in registry.handles_for("judge"):
+            await handle.aclose()
 
     async def execute_tool_loop(self, prompt_messages: list) -> str:
         """Execute a tool-calling ReAct loop for the agent."""
@@ -530,25 +556,7 @@ class JudgeAgent:
         if memory_block:
             reports_text = f"{reports_text}\n\n{memory_block}"
 
-        verdict_system = (
-            "You are the Chief Malware Judge. Based on the expert reports below, "
-            "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
-            "RULES:\n"
-            "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
-            "- Omit technique ID if unsure.\n"
-            "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
-            "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
-            "and x_maljan_contributing_agents list.\n"
-            "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
-            "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
-            "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
-            "- DO NOT emit Indicator objects whose pattern values are inferred, "
-            "hypothetical, or example. Every Indicator's pattern value MUST "
-            "appear verbatim in the deterministic evidence (static strings, "
-            "sandbox observations, or network IOCs). When in doubt, emit zero "
-            "Indicators — the deterministic renderer will fill them in.\n"
-            "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
-        )
+        verdict_system = JUDGE_VERDICT_SYSTEM
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -998,6 +1006,10 @@ class JudgeAgent:
             if not top:
                 return ""
 
+            from maljan.agents.composition import current_analyst_keys
+
+            analysts = set(current_analyst_keys())
+
             lines = [
                 "CONFIDENCE REFERENCE TABLE (use these values for x_maljan_confidence):",
                 "Technique ID | Weighted Confidence | Layers | Evidence Basis",
@@ -1006,7 +1018,7 @@ class JudgeAgent:
             for r in top:
                 layers = r.contributing_layers
                 # Map layer set → evidence_basis controlled vocab
-                if set(layers) == {"static", "dynamic", "network"}:
+                if analysts and set(layers) == analysts:
                     basis = "all"
                 elif len(layers) == 2:  # noqa: PLR2004
                     basis = "+".join(sorted(layers))

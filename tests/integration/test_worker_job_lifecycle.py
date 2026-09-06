@@ -389,6 +389,219 @@ async def test_pipeline_failure_sets_failed_status(
     assert job.error_message is not None
 
 
+@pytest.mark.asyncio
+async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A job carrying both ``mock_mode`` and ``sandbox_report_id`` must not
+    surface a raw ``AttributeError``.
+
+    ``build_job_settings`` forces ``sandbox.provider="upload"`` because a
+    report is attached, but ``ServiceContainer.get_sandbox_provider()``'s own
+    mock override runs after that and wins whenever the container's ``mock``
+    flag is set, handing back a ``MockSandboxProvider`` — which has no
+    ``set_pending_blob``. The worker must check
+    ``capabilities.accepts_uploaded_report`` before calling it and fail with a
+    legible, worded message instead of letting the attribute error escape to
+    ``job.error_message`` where the user would see it. Task 20 (per-job
+    override validation) is the real fix for the underlying combination; this
+    is the defence in depth underneath it.
+    """
+    job = _make_job(
+        config={
+            "sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000",
+            "mock_mode": True,
+        }
+    )
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    report_result = MagicMock()
+    report_result.scalar_one_or_none.return_value = report_row
+
+    # Job, then sample, then the ``started_at`` UPDATE every job fires right
+    # after, then ``load_core_overrides``'s own settings-table read (both
+    # unused — a plain MagicMock's default empty ``__iter__`` is enough for
+    # ``list(res.scalars().all())`` to come back ``[]``, same as every other
+    # test in this file relies on for that call), then the sandbox-report row
+    # lookup this task's own attach-path added.
+    exec_results = [
+        _make_result(job),
+        _make_result(sample),
+        MagicMock(),
+        MagicMock(),
+        report_result,
+    ]
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.dict("os.environ", {"MOCK_MODE_ALLOWED": "true"}, clear=False),
+        # Never actually reached once the capability guard fires first — mocked
+        # anyway so a wrong fix ordering fails loudly instead of hitting MinIO.
+        patch("app.api.v1.sandbox_reports.get_object", return_value=b"{}"),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    assert "AttributeError" not in result["error"]
+    assert "cannot accept an uploaded report" in result["error"]
+    assert job.status == "failed"
+    assert job.error_message is not None
+    assert "AttributeError" not in job.error_message
+    assert "cannot accept an uploaded report" in job.error_message
+
+
+# ---------------------------------------------------------------------------
+# L2 (live-run finding): an attached sandbox report whose own claimed hash
+# disagreed with the sample at upload time must show up as a degradation —
+# the upload endpoint's warning promises "The analysis will still run and
+# will say so in its findings", but nothing threaded the stored
+# ``sample_sha256_match`` flag into the run until this fix.
+# ---------------------------------------------------------------------------
+
+
+def _attached_report_exec_results(
+    job: MagicMock, sample: MagicMock, report_row: MagicMock
+) -> list[MagicMock]:
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    report_result = MagicMock()
+    report_result.scalar_one_or_none.return_value = report_row
+    # Same sequence as test_mock_mode_with_an_attached_report_fails_with_a_
+    # worded_message: job, sample, the started_at UPDATE, load_core_overrides'
+    # own settings-table read, then this task's sandbox-report row lookup.
+    # Anything after falls back to a bare MagicMock() in _fake_execute below.
+    return [_make_result(job), _make_result(sample), MagicMock(), MagicMock(), report_result]
+
+
+async def _run_with_attached_report(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    job: MagicMock,
+    sample: MagicMock,
+    report_row: MagicMock,
+) -> dict[str, Any]:
+    exec_results = _attached_report_exec_results(job, sample, report_row)
+    call_count = 0
+
+    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        if call_count >= len(exec_results):
+            return MagicMock()
+        res = exec_results[call_count]
+        call_count += 1
+        return res
+
+    mock_db_session.execute = _fake_execute
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        # Real (non-mock) mode: mock mode's own container override always
+        # hands back a MockSandboxProvider with no set_pending_blob, so an
+        # attached-report job can only succeed off mock mode (see the
+        # capability-guard test above). MaljanApp.arun is patched anyway, so
+        # this never reaches a real LLM or sandbox call.
+        patch.dict("os.environ", {}, clear=False),
+        patch("app.api.v1.sandbox_reports.get_object", return_value=b"{}"),
+        patch("minio.Minio", return_value=_FakeMinioClient()),
+        patch(
+            "maljan.app.MaljanApp.arun",
+            new=AsyncMock(
+                return_value={
+                    "final_decision": "Suspicious",
+                    "malware_report": {"degradation_reasons": []},
+                }
+            ),
+        ),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+    return result
+
+
+@pytest.mark.asyncio
+async def test_a_hash_mismatch_on_the_attached_report_is_recorded_as_a_degradation(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.sample_sha256_match = False
+
+    result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "completed", result
+    saved_report = mock_db_session.add.call_args[0][0]
+    reason = "uploaded sandbox report's target hash differs from the sample"
+    assert reason in saved_report.run_summary["degradation_reasons"]
+    assert reason in saved_report.malware_report["degradation_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_a_matching_attached_report_records_no_such_degradation(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.sample_sha256_match = True
+
+    result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "completed", result
+    saved_report = mock_db_session.add.call_args[0][0]
+    reason = "uploaded sandbox report's target hash differs from the sample"
+    assert reason not in (saved_report.run_summary.get("degradation_reasons") or [])
+    assert reason not in (saved_report.malware_report.get("degradation_reasons") or [])
+
+
 # ---------------------------------------------------------------------------
 # H3 (security hardening): the worker's private sample copies (download +
 # Ghidra mirror) are removed when the job ends, success or failure alike.

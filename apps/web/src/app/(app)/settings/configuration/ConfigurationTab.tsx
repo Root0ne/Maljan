@@ -3,9 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import type {
+  AgentDefinitionEntry,
+  CatalogEntry,
+  McpServerEntry,
+  SettingValue,
+} from "@/types/settings";
 import ApplyBar from "./ApplyBar";
 import FieldRow from "./FieldRow";
 import GroupHeader from "./GroupHeader";
+import RestSandboxEditor from "./RestSandboxEditor";
 import { useSettings } from "./useSettings";
 
 const APPLIES_LABEL: Record<string, string> = {
@@ -13,6 +20,28 @@ const APPLIES_LABEL: Record<string, string> = {
   live: "immediately",
   restart: "after a restart",
 };
+
+/** The value a dependency currently holds: what the user staged, else what the
+ *  server reports. Staged wins so the form reacts to the switch immediately,
+ *  before anything is applied. */
+function effectiveValue(
+  key: string,
+  values: Record<string, SettingValue>,
+  pending: Record<string, unknown>
+): unknown {
+  return key in pending ? pending[key] : values[key]?.value;
+}
+
+function isVisible(
+  entry: CatalogEntry,
+  values: Record<string, SettingValue>,
+  pending: Record<string, unknown>
+): boolean {
+  if (!entry.applies_when) return true;
+  return Object.entries(entry.applies_when).every(([key, allowed]) =>
+    allowed.includes(String(effectiveValue(key, values, pending) ?? ""))
+  );
+}
 
 /** Triggers a browser download of `text` as `filename` — no server round trip
  * beyond the fetch already made; the viewer never sees a bare data: link. */
@@ -58,14 +87,60 @@ export default function ConfigurationTab() {
     return s.schema.groups
       .map((g) => ({
         ...g,
-        entries: q
-          ? g.entries.filter((e) =>
-              [e.key, e.title, e.description].some((t) => t.toLowerCase().includes(q))
-            )
-          : g.entries,
+        entries: g.entries
+          .filter((e) =>
+            q
+              ? [e.key, e.title, e.description].some((t) => t.toLowerCase().includes(q))
+              : true
+          )
+          .filter((e) => isVisible(e, s.values, s.pending))
+          .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key)),
       }))
       .filter((g) => g.entries.length > 0 && (q || !active || g.key === active));
-  }, [s.schema, query, active]);
+  }, [s.schema, query, active, s.values, s.pending]);
+
+  // Whether a group has a ui-sourced override anywhere in its *full* entry
+  // list, independent of the search/visibility filter above — a group whose
+  // only override sits on a currently hidden entry (e.g. the CAPE URL while
+  // the sandbox provider is set to Triage) must still offer "Reset group to
+  // env", the same way its rail dirty-dot survives filtering.
+  const hasUiOverride = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    s.schema?.groups.forEach((g) => {
+      m[g.key] = g.entries.some((e) => s.values[e.key]?.source === "ui");
+    });
+    return m;
+  }, [s.schema, s.values]);
+
+  // Staged keys whose owning entry is currently hidden by a governing
+  // selector elsewhere in the group — still sent on Apply, just not visible
+  // to point at, so the apply bar names them instead of silently dropping them.
+  const hiddenKeys = useMemo(() => {
+    if (!s.schema) return [];
+    const allEntries = s.schema.groups.flatMap((g) => g.entries);
+    return Object.keys(s.pending).filter((k) => {
+      const entry = allEntries.find((e) => e.key === k);
+      return entry !== undefined && !isVisible(entry, s.values, s.pending);
+    });
+  }, [s.schema, s.pending, s.values]);
+
+  // What the agent-definitions editor's LLM section falls back to display
+  // when a field is left blank. Both leaves are looked up rather than
+  // assumed: `llm.provider` is a real `core_catalog()` leaf, `llm.model` is
+  // not (models live per-provider, e.g. `llm.openai.expert_model`) — so an
+  // absent entry here means "show the generic inherit text", not "render
+  // nothing".
+  const llmGlobal = useMemo(() => {
+    const providerEntry = s.entries.get("core.llm.provider");
+    const modelEntry = s.entries.get("core.llm.model");
+    const effective = (key: string) =>
+      key in s.pending ? s.pending[key] : s.values[key]?.value;
+    return {
+      providerChoices: providerEntry ? (providerEntry.choices ?? []) : null,
+      providerValue: providerEntry ? String(effective("core.llm.provider") ?? "") || null : null,
+      modelValue: modelEntry ? String(effective("core.llm.model") ?? "") || null : null,
+    };
+  }, [s.entries, s.pending, s.values]);
 
   if (s.loading) {
     return <div className="text-sm text-text-secondary">Loading configuration…</div>;
@@ -199,8 +274,8 @@ export default function ConfigurationTab() {
               <section key={g.key} className="mb-8">
                 <GroupHeader
                   group={g}
-                  values={s.values}
                   probes={probes}
+                  overridden={hasUiOverride[g.key] ?? false}
                   onProbe={async (name) => {
                     const keys = g.entries.filter((e) => e.probe === name).map((e) => e.key);
                     const r = await s.probe(name, keys);
@@ -209,19 +284,62 @@ export default function ConfigurationTab() {
                   }}
                   onResetGroup={() => s.resetGroup(g.key)}
                 />
-                {g.entries.map((e) => (
-                  <FieldRow
-                    key={e.key}
-                    entry={e}
-                    current={s.values[e.key]}
-                    staged={s.pending[e.key]}
-                    error={s.errors[e.key]}
-                    models={e.probe === "llm" ? models : undefined}
-                    onChange={(v) => s.stage(e.key, v)}
-                    onUnstage={() => s.unstage(e.key)}
-                    onReset={() => void s.reset(e.key)}
-                  />
-                ))}
+                {(() => {
+                  const rest = g.entries.filter((e) => e.editor === "rest_sandbox");
+                  const others = g.entries.filter((e) => e.editor !== "rest_sandbox");
+                  return (
+                    <>
+                      {others.map((e) => (
+                        <FieldRow
+                          key={e.key}
+                          entry={e}
+                          current={s.values[e.key]}
+                          staged={s.pending[e.key]}
+                          error={s.errors[e.key]}
+                          errors={s.errors}
+                          models={e.probe === "llm" ? models : undefined}
+                          servers={
+                            (s.pending["core.mcp.servers"] ??
+                              s.values["core.mcp.servers"]?.value ??
+                              {}) as Record<string, McpServerEntry>
+                          }
+                          staticProviders={
+                            s.entries.get("core.static.provider")?.choices ?? []
+                          }
+                          llmAgentsCurrent={s.values["core.llm.agents"]}
+                          llmAgentsStaged={s.pending["core.llm.agents"]}
+                          llmGlobal={llmGlobal}
+                          onChangeLlmAgents={(v) => s.stage("core.llm.agents", v)}
+                          definitions={
+                            (s.pending["core.agents.definitions"] ??
+                              s.values["core.agents.definitions"]?.value ??
+                              {}) as Record<string, AgentDefinitionEntry>
+                          }
+                          activeProfile={
+                            (s.pending["core.agents.profile"] ??
+                              s.values["core.agents.profile"]?.value ??
+                              "default") as string
+                          }
+                          onSetActive={(name) => s.stage("core.agents.profile", name)}
+                          onChange={(v) => s.stage(e.key, v)}
+                          onUnstage={() => s.unstage(e.key)}
+                          onReset={() => void s.reset(e.key)}
+                        />
+                      ))}
+                      {rest.length > 0 && (
+                        <RestSandboxEditor
+                          entries={rest}
+                          values={s.values}
+                          pending={s.pending}
+                          errors={s.errors}
+                          onChange={s.stage}
+                          onUnstage={s.unstage}
+                          onReset={(k) => void s.reset(k)}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </section>
             );
           })}
@@ -230,6 +348,7 @@ export default function ConfigurationTab() {
       <ApplyBar
         pending={s.pending}
         entries={s.entries}
+        hiddenKeys={hiddenKeys}
         saving={s.saving}
         confirming={confirming}
         setConfirming={setConfirming}

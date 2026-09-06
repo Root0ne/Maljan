@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from maljan.schemas.sandbox_report import SandboxReport
+
 # ---------------------------------------------------------------------------
 # SubmissionResult
 # ---------------------------------------------------------------------------
@@ -49,6 +51,16 @@ class SubmissionResult:
                          report["signatures"]-> behavioral signature matches
         error:         Error message when status != "reported". Empty string
                        on success.
+        normalized:    The provider's neutral ``SandboxReport`` view of this
+                       same run, when the backend producing this result has
+                       one. ``None`` for every caller that predates the
+                       provider layer — a legacy ``SandboxClient`` still
+                       returns a ``SubmissionResult`` with this unset, and
+                       every existing reader of ``report`` keeps working
+                       untouched. Populated by
+                       ``maljan.providers.sandbox._legacy.as_sandbox_client``
+                       so a caller that wants the neutral shape no longer has
+                       to re-derive it from ``report``.
     """
 
     task_id: str
@@ -57,6 +69,7 @@ class SubmissionResult:
     status: str = "reported"
     report: dict[str, Any] = field(default_factory=dict)
     error: str = ""
+    normalized: SandboxReport | None = None
 
     @property
     def succeeded(self) -> bool:

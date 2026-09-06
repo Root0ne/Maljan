@@ -407,6 +407,121 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.getByRole("button", { name: /^Providers/ }).click();
     await expect(page.getByText("new value staged")).toBeVisible();
   });
+
+  /* B3 (dev audit 2026-09-06): `stage()` always wrote the key, so setting a
+   * select back to the value it started at left the row MODIFIED and the bar
+   * counting a change that would have been a no-op — clearable only by
+   * hunting for "Discard change". */
+  test("returning a field to its saved value clears the pending change", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Static provider", exact: true }).click();
+
+    const row = page.locator("#setting-core\\.static\\.provider");
+    await row.locator("select").selectOption("r2");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+    await expect(row.getByText("modified")).toBeVisible();
+
+    await row.locator("select").selectOption("ghidra");
+    await expect(page.getByText("1 change pending")).toHaveCount(0);
+    await expect(row.getByText("modified")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Discard change" })).toHaveCount(0);
+  });
+
+  test("a secret is still staged when it is cleared back to nothing", async ({
+    authenticatedPage: page,
+  }) => {
+    /* The saved value of a secret is `null` however it is set — the API never
+     * returns one — so "clear this secret" stages a value that deep-equals
+     * what is stored, and the rule above must not swallow it. */
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+
+    await page.getByRole("button", { name: "Clear" }).click();
+    await expect(page.getByText("will be cleared")).toBeVisible();
+    await expect(page.getByText("1 change pending")).toBeVisible();
+  });
+
+  /* B7 (dev audit 2026-09-06): ~1050 controls on this tab had neither an `id`
+   * nor a `name`, so the title beside each one was associated with it only by
+   * the widget's own aria-label — nothing autofill or id-targeting tooling can
+   * follow. */
+  test("a field's title is a label for a control that has an id and a name", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    const field = page.locator("#setting-core\\.negotiation\\.max_iterations input[type=number]");
+    await expect(field).toHaveAttribute("id", "setting-input-core.negotiation.max_iterations");
+    await expect(field).toHaveAttribute("name", "core.negotiation.max_iterations");
+
+    // Clicking the title focuses the control, which is what the association is
+    // for and what an aria-label alone never gave.
+    await page.locator("#setting-label-core\\.negotiation\\.max_iterations").click();
+    await expect(field).toBeFocused();
+  });
+
+  test("switching the sandbox provider reveals the Triage fields and hides the CAPE ones", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
+
+    await expect(page.getByText("core.sandbox.cape2.base_url")).toBeVisible();
+    await expect(page.getByText("core.sandbox.triage.base_url")).toHaveCount(0);
+
+    await page
+      .locator("#setting-core\\.sandbox\\.provider select")
+      .selectOption("triage");
+
+    await expect(page.getByText("core.sandbox.triage.base_url")).toBeVisible();
+    await expect(page.getByText("core.sandbox.cape2.base_url")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Test Triage connection" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Test CAPE connection" })).toHaveCount(0);
+  });
+
+  test("an edit that a provider switch hides is still staged and is counted", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
+
+    await page
+      .locator("#setting-core\\.sandbox\\.cape2\\.base_url input[type=text]")
+      .fill("http://cape.example:8000");
+    await expect(page.getByText("1 change pending")).toBeVisible();
+
+    await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("triage");
+
+    await expect(page.getByText("core.sandbox.cape2.base_url")).toHaveCount(0);
+    await expect(page.getByText("2 changes pending")).toBeVisible();
+    await expect(page.getByText("1 hidden field")).toBeVisible();
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: [], applies: { next_job: 2 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+    expect(patches).toEqual([
+      {
+        changes: {
+          "core.sandbox.cape2.base_url": "http://cape.example:8000",
+          "core.sandbox.provider": "triage",
+        },
+      },
+    ]);
+  });
 });
 
 test.describe("Settings → Configuration (stale stored override)", () => {

@@ -202,6 +202,33 @@ test.describe("Agent transcript", () => {
     await expect(page.getByText(/recorded no agent findings/)).toHaveCount(0);
   });
 
+  /* C5 (dev audit 2026-09-06): the avatar took the first two characters of the
+   * speaker's name, so a wide run of `static`, `static_r2` and `strings` drew
+   * three identical "St" circles that only their colour told apart. */
+  test("similarly named analysts wear different initials", async ({
+    authenticatedPage: page,
+  }) => {
+    const wide = REPORT.transcript!.map((row, i) =>
+      i === 1 ? { ...row, speaker: "static_r2" } : i === 2 ? { ...row, speaker: "strings" } : row
+    );
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...REPORT, transcript: wide }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/process`);
+    await expect(page.getByText("Static_r2", { exact: true }).first()).toBeVisible();
+
+    // One pair of letters per speaker, and no two the same. The full name is
+    // on the avatar's title for anyone the letters still leave guessing.
+    await expect(page.locator('[title="Static"]').first()).toHaveText("St");
+    await expect(page.locator('[title="Static_r2"]').first()).toHaveText("Sr");
+    await expect(page.locator('[title="Strings"]').first()).toHaveText("Si");
+  });
+
   test("the stages filter hides the domain analysts", async ({
     authenticatedPage: page,
   }) => {
