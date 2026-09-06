@@ -207,6 +207,41 @@ def _sanitise_filename(raw: str | None) -> str:
     return name
 
 
+async def _audit_upload(
+    request: Request,
+    user: User,
+    sample: Sample,
+    *,
+    deduplicated: bool,
+    shared_storage: bool,
+) -> None:
+    """Record one accepted upload, whichever of the three ways it was accepted.
+
+    A2 re-verification (dev audit 2026-09-06): the audit call used to sit at
+    the end of the route, and two of its three successful exits return before
+    reaching it -- the per-user dedup path and the shared-storage path both
+    answered 201 and wrote nothing. Those are the two worth having: a
+    re-upload is how a sample re-enters an investigation, and the
+    shared-storage path is one user reaching bytes another user stored. The
+    flags say which path it was, so the trail distinguishes "stored these
+    bytes" from "already had them".
+    """
+    await audit.record(
+        "sample.upload",
+        resource_type="sample",
+        resource_id=str(sample.id),
+        user_id=user.id,
+        details={
+            "filename": sample.original_filename,
+            "sha256": sample.sha256,
+            "size_bytes": sample.file_size_bytes,
+            "deduplicated": deduplicated,
+            "shared_storage": shared_storage,
+        },
+        request=request,
+    )
+
+
 @router.post("/upload", response_model=SampleResponse, status_code=status.HTTP_201_CREATED)
 async def upload_sample(
     request: Request,
@@ -298,6 +333,7 @@ async def upload_sample(
             )
             sample = existing.scalar_one()
             logger.info("Duplicate sample reused: %s", sample.id)
+            await _audit_upload(request, user, sample, deduplicated=True, shared_storage=False)
             return sample
 
         if bytes_already_stored:
@@ -311,6 +347,7 @@ async def upload_sample(
                 sample_row.id,
                 sha256[:12],
             )
+            await _audit_upload(request, user, sample_row, deduplicated=False, shared_storage=True)
             return sample_row
 
         # Stream to MinIO from the temp file (no extra RAM copy).
@@ -379,18 +416,7 @@ async def upload_sample(
         logger.info(
             "Sample created: id=%s filename=%s", sample_row.id, sample_row.original_filename
         )
-        await audit.record(
-            "sample.upload",
-            resource_type="sample",
-            resource_id=str(sample_row.id),
-            user_id=user.id,
-            details={
-                "filename": sample_row.original_filename,
-                "sha256": sample_row.sha256,
-                "size_bytes": sample_row.file_size_bytes,
-            },
-            request=request,
-        )
+        await _audit_upload(request, user, sample_row, deduplicated=False, shared_storage=False)
         return sample_row
     finally:
         try:
