@@ -29,7 +29,7 @@ environment in one command, and where the design record is kept.
 ## One-command setup
 
 ```bash
-uv sync --all-extras     # installs maljan and maljan-api into one environment
+uv sync --all-extras --all-packages     # installs maljan and maljan-api into one environment
 make setup               # the above, plus pre-commit and the third-party trees
 ```
 

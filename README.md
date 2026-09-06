@@ -112,7 +112,7 @@ maljan/
 └── pyproject.toml uv.lock   one uv workspace: maljan plus apps/api
 ```
 
-One `uv sync --all-extras` at the root installs both Python packages. There is no
+One `uv sync --all-extras --all-packages` at the root installs both Python packages. There is no
 `PYTHONPATH` anywhere: `maljan` and `app` are installed, in the venv, in the
 image and in CI alike.
 
