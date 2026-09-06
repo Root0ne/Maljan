@@ -56,6 +56,7 @@ data/sigma_rules/
 models/
 logs/
 other/
+.superpowers/
 external/
 
 # Git & IDE
