@@ -318,3 +318,12 @@ async def test_a_rejected_definition_reports_why_not_only_which_field():
     assert result.ok is False
     assert "needs a prompt" in result.detail
     assert "nameless" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_an_inheriting_agent_reports_the_resolved_global_expert_model():
+    """An agent with no per-agent override still names the model it would get."""
+    staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen3.5:9b"}
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is True
+    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3.5:9b"}

@@ -545,7 +545,11 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 "prompt": resolved.prompt,
                 "llm": {
                     "provider": agent_llm.provider if agent_llm else settings.llm.provider,
-                    "model": agent_llm.model if agent_llm else "",
+                    # No per-agent override means the agent inherits the global
+                    # expert model; reporting "" left the operator to work out
+                    # which provider block that came from. ``expert_model``
+                    # already picks the leaf the selected provider uses.
+                    "model": agent_llm.model if agent_llm else settings.llm.expert_model,
                 },
                 "static_provider": resolved.static_provider_id,
                 "servers": servers,
