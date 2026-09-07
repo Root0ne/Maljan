@@ -4,7 +4,7 @@ Structurally this is ``GenericMCPStaticProvider`` with three r2-specific
 defaults: the command comes from ``static.r2.binary_path``, the allow-list is
 the pinned tool set below, and the prompt fragment describes an r2 workflow
 rather than a Ghidra one. ``enumerate_r2_tools`` delegates to ``ServerHandle``,
-the one stdio handshake a job itself uses: ``scripts/probe_r2_tools.py``
+the one stdio handshake a job itself uses: ``scripts/goldens/probe_r2_tools.py``
 (which pins the allow-list's source fixture) and ``probe_r2`` in the settings
 API's connection test both go through it, so none of the three can report a
 different tool set than the others.
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 async def enumerate_r2_tools(command: str) -> list[str]:
     """Names of the tools an r2mcp at ``command`` offers, over one stdio handshake.
 
-    Used both to pin the golden fixture (``scripts/probe_r2_tools.py``) and to
+    Used both to pin the golden fixture (``scripts/goldens/probe_r2_tools.py``) and to
     answer the settings-page connection test: the same ``ServerHandle`` either
     way, which is now the same one a job uses, so none of the three can report
     a different tool set than the others.
@@ -50,7 +50,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
     command comes from ``static.r2.binary_path``, the allow-list is the pinned
     tool set below, and the prompt fragment describes an r2 workflow rather than
     a Ghidra one. The tool names were enumerated from a running r2mcp with
-    ``scripts/probe_r2_tools.py`` and pinned in
+    ``scripts/goldens/probe_r2_tools.py`` and pinned in
     ``tests/fixtures/golden/r2_tools.json``; if a future r2mcp renames one, this
     constant changes and nothing else does.
 

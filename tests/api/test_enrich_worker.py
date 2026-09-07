@@ -7,19 +7,11 @@ during deployment.
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-_API_PATH = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API_PATH) not in sys.path:
-    sys.path.insert(0, str(_API_PATH))
-
-
 from app.services.report_service import EnrichmentEnqueueError, ReportService  # noqa: E402
 from app.worker.enrich_worker import enrich_threat_intel  # noqa: E402
 

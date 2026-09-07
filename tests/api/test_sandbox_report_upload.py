@@ -5,21 +5,14 @@ from __future__ import annotations
 import gzip
 import io
 import json
-import sys
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app.api.v1 import sandbox_reports as module  # noqa: E402
 from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.api.v1 import sandbox_reports as module  # noqa: E402
 
 SHA = "a" * 64
 

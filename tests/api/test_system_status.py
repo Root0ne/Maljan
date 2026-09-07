@@ -9,20 +9,12 @@ Covers two new contracts:
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-_API_PATH = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API_PATH) not in sys.path:
-    sys.path.insert(0, str(_API_PATH))
-
-
 from app.api.v1.system import router as system_router  # noqa: E402
 from app.deps import optional_current_user, require_admin  # noqa: E402
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture

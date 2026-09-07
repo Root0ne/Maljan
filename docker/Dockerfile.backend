@@ -18,27 +18,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
 
-# Copy project files
-COPY pyproject.toml uv.lock ./
-COPY src/ src/
-COPY apps/ apps/
-COPY data/ data/
-COPY threatintel-mcp/ threatintel-mcp/
-COPY network-mcp/ network-mcp/
+# Manifests first, sources second: the dependency layer stays cached across
+# every source edit. Both workspace members' manifests are needed, because the
+# root lockfile resolves them together. README.md rides along because the root
+# [project] declares it as its readme, and hatchling refuses to build a wheel
+# whose declared readme is absent.
+COPY pyproject.toml uv.lock README.md ./
+COPY apps/api/pyproject.toml apps/api/pyproject.toml
 
-# Install dependencies.
+# Install the workspace.
+# ``--all-packages`` is what installs the maljan-api member: a plain `uv sync`
+# at a workspace root resolves every member but installs only the root project,
+# so without it `import app` would fail exactly where PYTHONPATH used to cover.
 # 2026-07 round 2: include the ``yara`` extra so yara-python is available in the
 # backend image — otherwise detection_signatures._validate_yara reports
 # "yara-python not installed; rule body not validated" for every generated rule.
 # The manylinux wheel bundles libyara, so no system package is required.
-RUN uv sync --frozen --no-dev --extra yara
+RUN uv sync --frozen --no-dev --all-packages --extra yara --no-install-workspace
 
-# Set PYTHONPATH so `app.*` (apps/api) AND `maljan.*` (src) both resolve.
-# F1 (2026-07-05): adding /app/src makes the core ``maljan`` package
-# importable from the API process too — the on-demand markdown re-render
-# (report_service.get_malware_report_markdown) imports it, and without src
-# on the path /reports/{id}/markdown 500'd with ModuleNotFoundError.
-ENV PYTHONPATH="/app/apps/api:/app/src:${PYTHONPATH}"
+# Sources. Both members are installed editable from here, so `maljan` and `app`
+# import with no PYTHONPATH: the ENV that used to set it is gone, and so is the
+# sys.path.insert the worker carried.
+COPY src/ src/
+COPY apps/ apps/
+COPY data/ data/
+COPY services/ services/
+
+RUN uv sync --frozen --no-dev --all-packages --extra yara
+
+# The workspace venv is the image's interpreter. Without this, a bare `python`
+# is the system one, which sees neither the dependencies nor the two editable
+# members — the old image papered over half of that with ENV PYTHONPATH, which
+# reached the sources but never the dependencies. compose still starts both
+# services through `uv run`; this only makes a plain `python` agree with it.
+ENV PATH="/app/.venv/bin:${PATH}"
 
 # Expose API port
 EXPOSE 8000

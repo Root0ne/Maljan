@@ -88,7 +88,7 @@ class NetworkAnalyst(BaseAnalyst):
         With default settings that is exactly ``mcp.servers["network"]`` — the
         same ``network-mcp`` sidecar, the same command, cwd and environment
         this method used to spell out inline — so the tool names are
-        unchanged, and ``tests/servers/test_builtin_tool_sets.py`` says so.
+        unchanged, and ``tests/unit/servers/test_builtin_tool_sets.py`` says so.
         An operator who adds a second network server gets both.
         """
         if getattr(self, "tools", None):
@@ -180,7 +180,7 @@ class NetworkAnalyst(BaseAnalyst):
 
         The framing moved to ``BaseAnalyst.revision_messages`` so a custom
         analyst sends the same one. The messages that reach the model are
-        identical, which is what ``tests/agents/test_revision_prompt_golden.py``
+        identical, which is what ``tests/unit/agents/test_revision_prompt_golden.py``
         compares against a fixture captured before the move; the
         ``ChatPromptTemplate`` round trip is gone with it, because the template
         only ever substituted these same four values and could not survive a

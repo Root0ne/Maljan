@@ -36,12 +36,14 @@ dev = [
     "ruff>=0.15.9",
 ]
 
+# hatchling, matching the root project. setuptools' packages.find needed a
+# separate include pattern to see `app`; hatchling names the package directly.
 [build-system]
-requires = ["setuptools>=75.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-include = ["app*"]
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [tool.ruff]
 line-length = 100
@@ -60,7 +62,9 @@ select = ["E", "F", "I", "W", "UP", "B"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-pythonpath = ["."]
 
+# The core package comes from the workspace root, not from a relative path. uv
+# installs both members editable into one environment, so `import maljan` works
+# in the API process, the worker process and the test session alike.
 [tool.uv.sources]
-maljan = { path = "../../", editable = true }
+maljan = { workspace = true }

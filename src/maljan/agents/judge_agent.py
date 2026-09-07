@@ -99,7 +99,7 @@ _AGREEMENT_RE = re.compile(
 # The judge's system prompt. A module constant since sub-project C so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
 # about what the judge is told; the text is unchanged from the inline literal
-# it replaces, and ``tests/agents/test_prompt_byte_identity.py`` says so.
+# it replaces, and ``tests/unit/agents/test_prompt_byte_identity.py`` says so.
 JUDGE_VERDICT_SYSTEM = (
     "You are the Chief Malware Judge. Based on the expert reports below, "
     "provide a final verdict: Malware, Benign, or Suspicious.\n\n"

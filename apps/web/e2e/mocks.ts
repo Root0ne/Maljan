@@ -629,14 +629,14 @@ export const MOCK_SETTINGS_VALUES = {
       value: {
         network: {
           enabled: true, transport: "stdio", command: "python",
-          args: ["network-mcp/server.py"], env: {}, cwd: "network-mcp",
+          args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
           env_allow: [], url: "", auth_token: "", auth_token_source: "default",
           tool_selection: "dynamic", use_all_tools: false, tools: null,
           agents: ["network"], label: "Network MCP",
         },
         threatintel: {
           enabled: true, transport: "stdio", command: "python",
-          args: ["threatintel-mcp/server.py"], env: {}, cwd: "threatintel-mcp",
+          args: ["services/threatintel-mcp/server.py"], env: {}, cwd: "services/threatintel-mcp",
           env_allow: ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"], url: "",
           auth_token: "**********", auth_token_source: "env",
           tool_selection: "dynamic", use_all_tools: false, tools: null,
@@ -898,7 +898,7 @@ export async function installApiMocks(
   // wins for the one probe route that carries a query string.
   //
   // Task 16: the `network` server's manifest matches its real tools
-  // (`extract_dns`, `read_pcap_summary`, see `network-mcp/server.py`) — the
+  // (`extract_dns`, `read_pcap_summary`, see `services/network-mcp/server.py`) — the
   // agent-definitions editor's "list tools then check one" flow depends on
   // this list actually containing the tool it checks.
   await page.route("**/api/v1/settings/test/mcp?**", (route) => {

@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = _ROOT / "scripts" / "llm_server.sh"
+_SCRIPT = _ROOT / "scripts" / "dev" / "llm_server.sh"
 
 pytestmark = pytest.mark.skipif(
     not Path("/proc/self/cmdline").exists(), reason="pid_of reads /proc"
@@ -119,7 +119,7 @@ def test_a_model_load_is_declared_to_the_memory_guard() -> None:
 
 def test_the_scripts_parse() -> None:
     for script in ("llm_server.sh", "run_with_restarts.sh"):
-        path = _ROOT / "scripts" / script
+        path = _ROOT / "scripts" / "dev" / script
         result = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
         assert result.returncode == 0, f"{script} does not parse:\n{result.stderr}"
         assert os.access(path, os.X_OK), f"{script} is not executable"

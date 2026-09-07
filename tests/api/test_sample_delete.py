@@ -12,21 +12,14 @@ scope here.
 
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
 
 from app.api.v1 import samples as module  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import require_active_user  # noqa: E402
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 def _client(db: MagicMock, user: MagicMock) -> TestClient:

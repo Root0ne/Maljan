@@ -62,7 +62,7 @@ def test_the_allow_list_names_no_file_that_stopped_calling_it():
     calling = {
         _rel(p) for p in _python_files() if _LIST_AGENTS.search(p.read_text(encoding="utf-8"))
     }
-    stale = sorted(TOPOLOGY_SOURCES - calling - {"tests/servers/test_agent_parity.py"})
+    stale = sorted(TOPOLOGY_SOURCES - calling - {"tests/unit/servers/test_agent_parity.py"})
     assert stale == [], f"remove these from TOPOLOGY_SOURCES: {stale}"
 
 

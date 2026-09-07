@@ -1,11 +1,3 @@
-import sys
-from pathlib import Path
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-
 def test_docs_routes_exist_only_in_debug(monkeypatch):
     from app import config as api_config
     from app.main import create_app

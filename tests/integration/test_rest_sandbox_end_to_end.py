@@ -13,7 +13,7 @@ import google.genai  # noqa: F401
 import pytest
 
 from maljan.core.config import Settings
-from tests.servers.rest_stub import StubState, build_stub_app
+from tests.unit.servers.rest_stub import StubState, build_stub_app
 
 
 def _settings() -> Settings:

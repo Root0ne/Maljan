@@ -24,8 +24,8 @@ def test_the_two_sidecars_are_seeded_with_todays_launch_parameters():
     network = cfg.mcp.servers["network"]
     assert network.enabled is True
     assert network.command == sys.executable
-    assert network.args == ["network-mcp/server.py"]
-    assert network.cwd == "network-mcp"
+    assert network.args == ["services/network-mcp/server.py"]
+    assert network.cwd == "services/network-mcp"
     assert network.env_allow == []
     assert network.agents == ["network"]
     assert network.tools is None, "None means every tool, which is today's behaviour"
@@ -33,8 +33,8 @@ def test_the_two_sidecars_are_seeded_with_todays_launch_parameters():
     intel = cfg.mcp.servers["threatintel"]
     assert intel.enabled is True
     assert intel.command == sys.executable
-    assert intel.args == ["threatintel-mcp/server.py"]
-    assert intel.cwd == "threatintel-mcp"
+    assert intel.args == ["services/threatintel-mcp/server.py"]
+    assert intel.cwd == "services/threatintel-mcp"
     assert intel.env_allow == ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"]
     assert intel.agents == ["judge"]
     assert intel.tools is None

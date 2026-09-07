@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "knowledge"))
 
 from expand_yara_rules import (
     _classify_token,

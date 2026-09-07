@@ -772,7 +772,7 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
 
 # The negotiation-round instructions the ISR revision path appends to whatever
 # system prompt its agent carries. Lifted verbatim out of
-# ``NetworkAnalyst.revise_isr``; ``tests/agents/test_revision_prompt_golden.py``
+# ``NetworkAnalyst.revise_isr``; ``tests/unit/agents/test_revision_prompt_golden.py``
 # holds it to the byte.
 _REVISION_ISR_FRAMING = (
     "You are in a negotiation round. You MUST:\n"

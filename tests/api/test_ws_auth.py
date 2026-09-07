@@ -19,20 +19,13 @@ assertions below call ``ws.receive_text()`` inside the block rather than
 relying on ``pytest.raises`` around the ``with`` statement itself.
 """
 
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
+from app.api import ws as ws_module  # noqa: E402
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocket, WebSocketDisconnect
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.api import ws as ws_module  # noqa: E402
 
 
 class _FakeJob:

@@ -1,7 +1,7 @@
 """In-memory semantic index over malware-family static-feature fingerprints.
 
 The LLM-centric half of the family-feature RAG (findings-log §4 U3). An offline
-builder (``scripts/build_family_feature_kb.py``) distils a reference dataset
+builder (``scripts/knowledge/build_family_feature_kb.py``) distils a reference dataset
 (MABEL and/or a folder-per-family raw-binary corpus) into one short *fingerprint
 description* per family — a natural-language summary of that family's typical
 static-feature profile (dominant import capabilities, packer, entropy/section

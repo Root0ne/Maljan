@@ -8,18 +8,7 @@ layer produces, exactly as ``server_map.py`` does for servers.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-from pydantic import ValidationError
-
-from maljan.core.config import Settings
-
-_API = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 from app.services.agent_map import (  # noqa: E402
     AGENT_DEFINITIONS_KEY,
     AGENT_PROFILE_KEY,
@@ -29,6 +18,9 @@ from app.services.agent_map import (  # noqa: E402
     effective_profiles,
     validate_agent_map,
 )
+from pydantic import ValidationError
+
+from maljan.core.config import Settings
 
 BUILTIN_STATIC = {
     "role": "static",

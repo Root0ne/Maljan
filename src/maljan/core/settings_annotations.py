@@ -1,7 +1,7 @@
 """What each setting means, in words a person can act on.
 
 Titles and descriptions were seeded from the comments in ``.env.example`` by
-``scripts/seed_settings_annotations.py`` and then edited. Groups come from
+``scripts/settings/seed_settings_annotations.py`` and then edited. Groups come from
 the key prefix (``group_for``); an entry may override its group. ``applies``
 defaults to ``next_job`` for every core setting. ``probe`` names the
 connection test in apps/api/app/services/settings_probes.py that exercises
@@ -537,7 +537,7 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "API behaviour map path",
         "description": (
             "Path to the API-behaviour-map catalog JSON used when use_api_behaviour_map "
-            "is enabled. Build it with scripts/build_api_capability_db.py."
+            "is enabled. Build it with scripts/knowledge/build_api_capability_db.py."
         ),
     },
     "preprocessing.attck_autocorrect_min_alignment": {
@@ -569,7 +569,7 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "ATT&CK case corpus path",
         "description": (
             "Path to the ATT&CK case-prior corpus JSON used when use_attck_case_rag is "
-            "enabled. Build it with scripts/build_attck_case_kb.py against a populated "
+            "enabled. Build it with scripts/knowledge/build_attck_case_kb.py against a populated "
             "Qdrant long-term-memory store."
         ),
     },
@@ -617,7 +617,7 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "Path to the vendored family-fingerprint catalog used by family-feature "
             "RAG. Different catalogs trade off size against disjointness from the eval "
-            "set; build one with scripts/build_family_feature_kb.py."
+            "set; build one with scripts/knowledge/build_family_feature_kb.py."
         ),
     },
     "preprocessing.family_rag_min_score": {
