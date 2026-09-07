@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from app.services.report_service import EnrichmentEnqueueError, ReportService  # noqa: E402
 from app.worker.enrich_worker import enrich_threat_intel  # noqa: E402
 

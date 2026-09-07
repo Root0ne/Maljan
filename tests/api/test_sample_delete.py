@@ -15,11 +15,12 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1 import samples as module  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import require_active_user  # noqa: E402
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 
 def _client(db: MagicMock, user: MagicMock) -> TestClient:

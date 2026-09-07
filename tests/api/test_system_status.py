@@ -12,9 +12,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
+
 from app.api.v1.system import router as system_router  # noqa: E402
 from app.deps import optional_current_user, require_admin  # noqa: E402
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture

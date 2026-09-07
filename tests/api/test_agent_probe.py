@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 import pytest
+
 from app.services import settings_probes  # noqa: E402
 from app.services.settings_probes import PROBES, probe_agent, run_agent_probe  # noqa: E402
 
@@ -270,12 +271,13 @@ def test_the_probe_is_registered_under_its_own_name():
 def test_the_route_is_admin_only_and_passes_the_name_through(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock, patch
 
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
     from app.api.v1.settings import router
     from app.database import get_db
     from app.deps import require_admin
     from app.services.settings_probes import ProbeResult
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")

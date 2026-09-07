@@ -117,8 +117,9 @@ class TestApiKeyAuthentication:
 
     @pytest.mark.asyncio
     async def test_unknown_key_is_rejected(self) -> None:
-        from app.deps import _user_from_api_key
         from fastapi import HTTPException
+
+        from app.deps import _user_from_api_key
 
         with pytest.raises(HTTPException) as exc:
             await _user_from_api_key("mk_nope", _FakeDB(None))  # type: ignore[arg-type]
@@ -126,8 +127,9 @@ class TestApiKeyAuthentication:
 
     @pytest.mark.asyncio
     async def test_revoked_key_is_rejected(self) -> None:
-        from app.deps import _user_from_api_key
         from fastapi import HTTPException
+
+        from app.deps import _user_from_api_key
 
         key = _Key(is_active=False)
         with pytest.raises(HTTPException) as exc:
@@ -136,8 +138,9 @@ class TestApiKeyAuthentication:
 
     @pytest.mark.asyncio
     async def test_expired_key_is_rejected(self) -> None:
-        from app.deps import _user_from_api_key
         from fastapi import HTTPException
+
+        from app.deps import _user_from_api_key
 
         key = _Key(expires_at=datetime.now(UTC) - timedelta(seconds=1))
         with pytest.raises(HTTPException) as exc:
@@ -146,8 +149,9 @@ class TestApiKeyAuthentication:
 
     @pytest.mark.asyncio
     async def test_deactivated_owner_is_forbidden(self) -> None:
-        from app.deps import _user_from_api_key
         from fastapi import HTTPException
+
+        from app.deps import _user_from_api_key
 
         user = _User(is_active=False)
         key = _Key(user_id=user.id)

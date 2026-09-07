@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from app.worker.analysis_worker import _supersede_previous_report
 
 

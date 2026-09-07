@@ -118,7 +118,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-src = ["src"]
+src = ["src", "apps/api"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

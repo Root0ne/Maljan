@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+
 from app.worker.analysis_worker import WorkerSettings, run_analysis
 
 
@@ -34,7 +35,6 @@ def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     next test.
     """
     from app import runtime_config as rc
-
     from maljan.core.config import reset_settings_cache
 
     async def _no_overrides() -> dict[str, Any]:

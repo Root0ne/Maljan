@@ -20,12 +20,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1 import samples as module  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import get_current_user  # noqa: E402
 from app.services import audit as audit_module  # noqa: E402
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 SHA256 = "e" * 64
 

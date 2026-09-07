@@ -5,9 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from app.middleware.rate_limit_middleware import RateLimitMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+
+from app.middleware.rate_limit_middleware import RateLimitMiddleware
 
 pytestmark = pytest.mark.asyncio
 
