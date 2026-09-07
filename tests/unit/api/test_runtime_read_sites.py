@@ -2,19 +2,12 @@
 ``runtime_config``: a UI override must win over the static setting."""
 
 import io
-import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app.api.v1 import samples
+from app.auth import throttle
 from fastapi import HTTPException
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.api.v1 import samples  # noqa: E402
-from app.auth import throttle  # noqa: E402
 
 
 def _override(monkeypatch, module, values: dict[str, object]) -> None:

@@ -1,14 +1,6 @@
-import sys
-from pathlib import Path
-
 import pytest
+from app.config import APISettings
 from pydantic import ValidationError
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.config import APISettings  # noqa: E402
 
 
 def test_trusted_proxy_entries_must_be_addresses_or_networks(monkeypatch):

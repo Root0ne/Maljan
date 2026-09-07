@@ -1,15 +1,8 @@
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.runtime_config import RuntimeConfig  # noqa: E402
+from app.runtime_config import RuntimeConfig
 
 
 def factory_returning(overrides: dict):

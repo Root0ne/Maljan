@@ -28,9 +28,6 @@ Run:
         --out data/family_fingerprints_v1.json --min-per-family 3
 """
 
-# Bootstraps sys.path before first-party imports (E402 is intentional here).
-# ruff: noqa: E402
-
 from __future__ import annotations
 
 import argparse
@@ -39,11 +36,6 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
 from maljan.analysis.family_feature_rag import (
     build_family_fingerprint_text,
