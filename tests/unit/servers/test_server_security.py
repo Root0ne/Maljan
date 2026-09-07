@@ -221,12 +221,6 @@ def test_a_server_token_never_lands_in_the_map_row_it_arrived_in():
 
 def test_a_definition_cannot_widen_a_servers_exposure():
     """A ``ToolRef.name`` outside the allow-list is refused at save (spec §11)."""
-    import sys
-    from pathlib import Path
-
-    _api = Path(__file__).resolve().parents[3] / "apps" / "api"
-    if str(_api) not in sys.path:
-        sys.path.insert(0, str(_api))
     from app.services.agent_map import AGENT_DEFINITIONS_KEY, AgentMapError, validate_agent_map
 
     stored = {
@@ -267,12 +261,6 @@ def test_a_prompt_is_operator_text_and_reaches_the_snapshot_unmasked():
 
 def test_a_job_cannot_inline_an_agent_definition():
     """Per-job selection picks among operator-defined profiles only (spec §11)."""
-    import sys
-    from pathlib import Path
-
-    _api = Path(__file__).resolve().parents[3] / "apps" / "api"
-    if str(_api) not in sys.path:
-        sys.path.insert(0, str(_api))
     from app.schemas.job import _KnownJobConfig
 
     assert "profile" in _KnownJobConfig.model_fields

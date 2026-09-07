@@ -9,15 +9,8 @@ a job that fails minutes after it was accepted.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from maljan.agents.registry import AgentRegistry  # noqa: E402
-from maljan.core.config import BUILTIN_AGENTS, BUILTIN_PROFILES, Settings  # noqa: E402
+from maljan.agents.registry import AgentRegistry
+from maljan.core.config import BUILTIN_AGENTS, BUILTIN_PROFILES, Settings
 
 
 def test_the_built_in_definitions_are_the_registered_classes_plus_the_judge():

@@ -1,23 +1,16 @@
 import logging
-import sys
 import uuid
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app import observability
+from app.models import AuditLog, RuntimeSetting
+from app.services import audit as audit_module
+from app.services import settings_service as svc
+from app.services.settings_catalog_api import catalog_index, full_catalog
 from cryptography.fernet import Fernet
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app import observability  # noqa: E402
-from app.models import AuditLog, RuntimeSetting  # noqa: E402
-from app.services import audit as audit_module  # noqa: E402
-from app.services import settings_service as svc  # noqa: E402
-from app.services.settings_catalog_api import catalog_index, full_catalog  # noqa: E402
 
 
 class FakeResult:

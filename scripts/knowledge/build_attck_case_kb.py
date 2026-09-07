@@ -24,9 +24,6 @@ Run:
         --out data/attck_case_corpus_v1.json --min-techniques 1
 """
 
-# Bootstraps sys.path before first-party imports (E402 is intentional here).
-# ruff: noqa: E402
-
 from __future__ import annotations
 
 import argparse
@@ -35,11 +32,6 @@ import json
 import re
 import sys
 from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
 _CORPUS_SCHEMA = "maljan-attck-case-corpus/v1"
 _EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # what the runtime index embeds the text with

@@ -1,16 +1,10 @@
 import os
 import stat
-import sys
 import time
 from pathlib import Path
 
 import pytest
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.worker import sample_files as sf  # noqa: E402
+from app.worker import sample_files as sf
 
 
 @pytest.fixture

@@ -1,16 +1,8 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import httpx
 import pytest
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.services import settings_probes as probes  # noqa: E402
+from app.services import settings_probes as probes
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:

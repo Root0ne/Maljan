@@ -6,17 +6,10 @@ carries ``sample_sha256`` / ``sample_filename`` (populated from the eager-loaded
 ``sample`` relationship). These tests pin the schema contract without a DB.
 """
 
-import sys
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 
-# The API package lives under apps/api (its own import root).
-_API_ROOT = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API_ROOT) not in sys.path:
-    sys.path.insert(0, str(_API_ROOT))
-
-from app.schemas.job import JobResponse  # noqa: E402
+from app.schemas.job import JobResponse
 
 
 class _FakeJob:

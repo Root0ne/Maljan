@@ -1,26 +1,19 @@
 """Regression tests for the final whole-branch review of the runtime-settings work."""
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from app.api.v1.settings import _env_literal, router
+from app.database import get_db
+from app.deps import require_admin
+from app.models.user import UserRole
+from app.services import settings_catalog_api as cat
+from app.services import settings_probes as probes
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from maljan.core.settings_overrides import redact_url
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.api.v1.settings import _env_literal, router  # noqa: E402
-from app.database import get_db  # noqa: E402
-from app.deps import require_admin  # noqa: E402
-from app.models.user import UserRole  # noqa: E402
-from app.services import settings_catalog_api as cat  # noqa: E402
-from app.services import settings_probes as probes  # noqa: E402
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:

@@ -1,11 +1,4 @@
-import sys
-from pathlib import Path
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app.worker.analysis_worker import build_job_settings  # noqa: E402
+from app.worker.analysis_worker import build_job_settings
 
 
 def test_override_applies_and_job_config_still_wins():

@@ -12,16 +12,12 @@ through ``MigrationContext`` and resolve the module's ``op`` calls through
 from __future__ import annotations
 
 import importlib.util
-import sys
 import uuid
 from pathlib import Path
 
 import sqlalchemy as sa
 
 _API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
 _REV = _API / "alembic" / "versions" / "20260904000000_add_sandbox_reports.py"
 
 
