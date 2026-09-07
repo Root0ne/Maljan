@@ -59,6 +59,7 @@ field names.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -87,6 +88,7 @@ if TYPE_CHECKING:
 # on 2026-09-04 (see the module docstring for exactly what was reachable and
 # how each constant was confirmed).
 SUBMIT_PATH = "/samples"  # POST, multipart: file + _json
+OWNED_SAMPLES_PATH = "/samples"  # GET ?subset=owned, the caller's own submissions
 STATUS_PATH = "/samples/{sample_id}"  # GET, status "reported" is terminal
 OVERVIEW_PATH = "/samples/{sample_id}/overview.json"  # GET
 TASK_REPORT_PATH = "/samples/{sample_id}/{task}/report_triage.json"  # GET
@@ -101,6 +103,12 @@ RESOURCES_PATH = "/resources"
 
 _BACKOFF_FACTOR = 1.5
 _MAX_INTERVAL_SECONDS = 60.0
+
+# A submission whose response never arrived is reconciled against the
+# caller's own recent samples before anything is posted a second time.
+_RECONCILE_LIMIT = 20
+_RECONCILE_WINDOW_SECONDS = 600.0
+_SUBMIT_RETRY_DELAY_SECONDS = 2.0
 
 _SAFE_PATH_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -172,6 +180,7 @@ class TriageSandboxProvider(SandboxProvider):
         # clock and the sleeps without patching the stdlib.
         self._sleep = time.sleep
         self._now = time.monotonic
+        self._now_utc = lambda: datetime.now(UTC)
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> TriageSandboxProvider:
@@ -216,17 +225,12 @@ class TriageSandboxProvider(SandboxProvider):
                 f"Triage {operation} failed (HTTP {response.status_code}): {response.text[:200]}"
             )
 
-    def submit(self, sample_path: str | Path) -> str:
-        # Checked before the file is opened or any request is built: a
-        # missing token is a configuration error, not something worth
-        # burning a filesystem check or a connection on first.
-        headers = self._auth_headers()
-        path = Path(sample_path)
+    def _post_sample(self, path: Path, headers: dict[str, str]) -> httpx.Response:
         payload: dict[str, Any] = {"kind": "file", "interactive": False}
         if self._cfg.profile:
             payload["profiles"] = [{"profile": self._cfg.profile, "pick": "default"}]
         with open(path, "rb") as fh:
-            response = self._get_http().post(
+            return self._get_http().post(
                 SUBMIT_PATH,
                 files={
                     "file": (path.name, fh, "application/octet-stream"),
@@ -234,6 +238,94 @@ class TriageSandboxProvider(SandboxProvider):
                 },
                 headers=headers,
             )
+
+    @staticmethod
+    def _sha256_of(path: Path) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _submitted_at(entry: dict[str, Any]) -> datetime | None:
+        """Parse a sample's own timestamp, whichever of the two fields carries it."""
+        raw = str(entry.get("submitted") or entry.get("created") or "")
+        if not raw:
+            return None
+        try:
+            when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+    def _find_recent_owned_sample(self, sha256: str, headers: dict[str, str]) -> str | None:
+        """The id of this operator's own newest sample with ``sha256``, if it is fresh.
+
+        Answers ``None`` for anything uncertain — an unreachable listing, an
+        error status, a body in another shape, a match older than the
+        reconcile window — because a wrong id here would attach a run to
+        somebody else's detonation of the same file.
+        """
+        try:
+            response = self._get_http().get(
+                OWNED_SAMPLES_PATH,
+                params={"subset": "owned", "limit": _RECONCILE_LIMIT},
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("Triage: could not list owned samples to reconcile: %s", exc)
+            return None
+        if response.status_code >= 400:
+            return None
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        rows = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            return None
+        now = self._now_utc()
+        candidates: list[tuple[datetime, str]] = []
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            if str(row.get("sha256") or "").lower() != sha256.lower():
+                continue
+            when = self._submitted_at(row)
+            if when is None or (now - when).total_seconds() > _RECONCILE_WINDOW_SECONDS:
+                continue
+            candidates.append((when, str(row["id"])))
+        if not candidates:
+            return None
+        return max(candidates)[1]
+
+    def submit(self, sample_path: str | Path) -> str:
+        # Checked before the file is opened or any request is built: a
+        # missing token is a configuration error, not something worth
+        # burning a filesystem check or a connection on first.
+        headers = self._auth_headers()
+        path = Path(sample_path)
+        try:
+            response = self._post_sample(path, headers)
+        except httpx.TransportError as exc:
+            # The upload can have been accepted in full and only the response
+            # dropped — live run S6: the sample was on Triage, reported,
+            # while the run treated the submission as failed and lost its
+            # sandbox data. Look for it before posting the same file again,
+            # so a reconciled submission leaves no orphan behind. An HTTP
+            # status is a different matter and is never retried: a 401 or a
+            # 400 means the request itself was refused.
+            logger.warning("Triage: submit response was dropped (%s); reconciling.", exc)
+            existing = self._find_recent_owned_sample(self._sha256_of(path), headers)
+            if existing:
+                logger.info("Triage: the dropped submission is sample %s; reusing it.", existing)
+                return existing
+            self._sleep(_SUBMIT_RETRY_DELAY_SECONDS)
+            try:
+                response = self._post_sample(path, headers)
+            except httpx.TransportError:
+                raise ProviderError(f"Triage submit failed: {exc}") from exc
         self._raise_for_status(response, "submit")
         data = response.json()
         sample_id = data.get("id")
