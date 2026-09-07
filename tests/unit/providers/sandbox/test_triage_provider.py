@@ -714,3 +714,23 @@ def test_an_authentication_failure_is_not_retried(tmp_path):
         provider.submit(path)
     assert "401" in str(exc.value)
     assert seen == ["POST /api/v0/samples"]
+
+
+def test_a_non_transport_failure_on_the_retry_propagates_unchanged(tmp_path):
+    """Only a dropped transport is the retry's business (review M5)."""
+    path, _sha = _sample_file(tmp_path)
+    posts: list[int] = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(1)
+            if len(posts) == 1:
+                raise httpx.RemoteProtocolError("dropped", request=request)
+            raise RuntimeError("something else entirely")
+        return httpx.Response(200, json={"data": []})
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    with pytest.raises(RuntimeError, match="something else entirely"):
+        provider.submit(path)
+    assert len(posts) == 2

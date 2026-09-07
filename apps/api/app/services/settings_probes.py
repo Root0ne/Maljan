@@ -148,11 +148,18 @@ def _ollama_agent_models(v: dict[str, Any]) -> dict[str, str]:
     global ``llm.provider``. Entries are dicts when they arrive staged from
     the UI and ``AgentLLMConfig`` objects when they come from the effective
     settings, so both are read here.
+
+    ``run_probe`` always resolves ``core.llm.provider`` into the inputs, so the
+    fallback below is only reached by a direct call; it reads the field's own
+    default rather than naming a provider here, so an inheriting entry cannot
+    be skipped because two places disagree about what the default is.
     """
+    from maljan.core.config import LLMConfig
+
     raw = v.get("agents")
     if not isinstance(raw, dict):
         return {}
-    global_provider = str(v.get("provider") or "openai")
+    global_provider = str(v.get("provider") or LLMConfig.model_fields["provider"].default)
     out: dict[str, str] = {}
     for name, entry in raw.items():
         if isinstance(entry, dict):

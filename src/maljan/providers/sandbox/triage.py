@@ -326,6 +326,9 @@ class TriageSandboxProvider(SandboxProvider):
                 response = self._post_sample(path, headers)
             except httpx.TransportError:
                 raise ProviderError(f"Triage submit failed: {exc}") from exc
+            # Anything else the retry raises is left exactly as it is: only a
+            # dropped transport is this path's business, and rewriting an
+            # unrelated failure into "Triage submit failed" would hide it.
         self._raise_for_status(response, "submit")
         data = response.json()
         sample_id = data.get("id")
