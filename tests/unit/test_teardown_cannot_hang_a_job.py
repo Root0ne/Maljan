@@ -573,3 +573,89 @@ class TestTheSynchronousSweepCannotBlockTheFence:
         assert registry.entered.wait(5), "the sweep should have started in a worker thread"
         # The fence fired on time: the loop was free the whole way through.
         assert time.monotonic() - started < 10
+
+
+class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
+    """BUG 7 (live run S6): the worker spun at 100 % CPU for 80 minutes.
+
+    py-spy caught the "maljan-agent-loop" thread in anyio's
+    ``CancelScope._deliver_cancellation`` -> ``select(timeout=0)``: a task had
+    been cancelled after a hard timeout, could not receive the cancellation
+    (anyio was delivering it into a shielded wait on a child process that never
+    exited), and anyio re-armed the delivery with ``call_soon`` on every
+    iteration. The worker's own thread was starved of the GIL, the job's
+    heartbeat stopped, and only SIGKILL ended it.
+
+    Cancelling is a request, so the fix cannot be "cancel harder": it is to
+    notice that the request was never honoured and retire the loop instead of
+    letting it burn.
+    """
+
+    @staticmethod
+    def _wedged_coro(started: threading.Event):
+        async def _ignores_cancellation() -> None:
+            started.set()
+            while True:
+                try:
+                    await asyncio.sleep(0.01)
+                except asyncio.CancelledError:
+                    # Exactly what a shielded teardown looks like from the
+                    # outside: the cancellation arrives and changes nothing.
+                    continue
+
+        return _ignores_cancellation()
+
+    @staticmethod
+    def _wait_until(predicate, seconds: float = 5.0) -> bool:
+        import time
+
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.05)
+        return predicate()
+
+    def test_a_task_that_ignores_cancellation_retires_the_agent_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        started = threading.Event()
+
+        with pytest.raises(TimeoutError):
+            base_agent._run_coro_blocking(
+                self._wedged_coro(started), hard_timeout=0.5, label="wedged-teardown"
+            )
+        assert started.is_set()
+        assert self._wait_until(lambda: not loop.is_running()), (
+            "the loop carrying an undeliverable cancellation must be stopped, "
+            "not left spinning for the life of the process"
+        )
+
+        fresh = base_agent._get_agent_loop()
+        assert fresh is not loop
+        assert self._wait_until(lambda: fresh.is_running())
+
+    def test_a_task_that_ends_on_cancellation_keeps_the_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ordinary timeout: one slow call must not cost the whole loop."""
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+
+        async def _sleeps() -> None:
+            await asyncio.sleep(30)
+
+        with pytest.raises(TimeoutError):
+            base_agent._run_coro_blocking(_sleeps(), hard_timeout=0.2, label="slow-call")
+
+        import time
+
+        time.sleep(0.6)
+        assert loop.is_running()
+        assert base_agent._get_agent_loop() is loop

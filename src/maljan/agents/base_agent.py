@@ -9,12 +9,15 @@ and exception translation so callers see a uniform ``AnalystError`` API.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from concurrent.futures import CancelledError as _FuturesCancelled
+from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -670,11 +673,26 @@ _AGENT_LOOP: asyncio.AbstractEventLoop | None = None
 _AGENT_LOOP_LOCK = threading.Lock()
 
 
+# How long a cancelled agent coroutine has to actually end before the loop it
+# runs on is treated as wedged. Cancelling is a request: a task that never
+# awaits again — anyio delivering into a shielded child-process wait is the
+# case seen live — never receives it, and anyio re-arms the delivery with
+# ``call_soon`` on every iteration, which turns the loop thread into a 100 %
+# CPU spin that nothing ends. Ten seconds is far longer than any teardown that
+# is going to succeed and far shorter than the 80 minutes that spin ran for.
+CANCEL_DELIVERY_GRACE = 10.0
+
+
 def _get_agent_loop() -> asyncio.AbstractEventLoop:
     """Return the process-wide agent event loop, starting it on first use."""
     global _AGENT_LOOP
     with _AGENT_LOOP_LOCK:
         loop = _AGENT_LOOP
+        # ``is_running()`` is deliberately not consulted: a loop whose thread
+        # has been started but has not yet entered ``run_forever`` would look
+        # dead to a second caller and get replaced, orphaning the first. A
+        # retired loop is signalled by ``_retire_wedged_loop`` clearing this
+        # global instead.
         if loop is None or loop.is_closed():
             loop = asyncio.new_event_loop()
             thread = threading.Thread(
@@ -685,6 +703,87 @@ def _get_agent_loop() -> asyncio.AbstractEventLoop:
             thread.start()
             _AGENT_LOOP = loop
         return loop
+
+
+def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
+    """Stop ``loop`` and let the next caller start a fresh one.
+
+    Only ever reached from the watchdog below, and only for a loop that is
+    already unusable: it carries a task that refused a cancellation, so
+    everything queued behind it is starved anyway. Stopping ``run_forever``
+    ends the spin and the daemon thread with it; the loop is deliberately not
+    closed, because closing one that still holds a live task raises. Handles
+    that were opened on it read ``is_running()`` and reap their child directly
+    (``ServerHandle._close_on_owner``), which is the outcome a wedged loop
+    could not give them.
+    """
+    global _AGENT_LOOP
+    with _AGENT_LOOP_LOCK:
+        if _AGENT_LOOP is loop:
+            _AGENT_LOOP = None
+    logger.error(
+        "%s ignored its cancellation for %.0fs; the agent loop is being retired and "
+        "a fresh one will be started for the next call.",
+        what,
+        CANCEL_DELIVERY_GRACE,
+    )
+    with contextlib.suppress(RuntimeError):
+        loop.call_soon_threadsafe(loop.stop)
+
+
+def _submit_to_agent_loop(
+    coro: Any, loop: asyncio.AbstractEventLoop
+) -> tuple[_ConcurrentFuture[Any], list[asyncio.Task[Any]]]:
+    """Schedule ``coro`` on ``loop``, keeping the task it actually runs as.
+
+    ``run_coroutine_threadsafe`` hands back a ``concurrent.futures.Future``
+    that is marked cancelled the moment ``cancel()`` is called, whether or not
+    the asyncio task ever ends — so the future says nothing about whether a
+    cancellation was delivered. The task does, and this is the only way to
+    hold one: the wrapper records itself before awaiting.
+    """
+    running: list[asyncio.Task[Any]] = []
+
+    async def _tracked() -> Any:
+        task = asyncio.current_task()
+        if task is not None:
+            running.append(task)
+        return await coro
+
+    return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
+
+
+def _cancel_and_watch(
+    loop: asyncio.AbstractEventLoop,
+    future: _ConcurrentFuture[Any],
+    running: list[asyncio.Task[Any]],
+    what: str,
+) -> None:
+    """Cancel ``future`` and make sure the cancellation is actually delivered.
+
+    ``future.cancel()`` on its own is fire-and-forget: the live hang of
+    2026-09-07 was a teardown whose cancellation could not be delivered, after
+    which the loop thread spun at 100 % CPU for 80 minutes, starved the
+    worker's own thread of the GIL and stopped the job's heartbeat. The
+    watchdog is a daemon thread rather than a wait here, so no caller is
+    delayed by a task that is going to end normally.
+    """
+    future.cancel()
+
+    def _watch() -> None:
+        deadline = time.monotonic() + CANCEL_DELIVERY_GRACE
+        while time.monotonic() < deadline:
+            if not running:
+                # Cancelled before it ever started: there is nothing running
+                # on the loop to have ignored anything.
+                return
+            if running[0].done():
+                return
+            time.sleep(0.05)
+        if running and not running[0].done():
+            _retire_wedged_loop(loop, what)
+
+    threading.Thread(target=_watch, name="maljan-agent-loop-watchdog", daemon=True).start()
 
 
 def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
@@ -705,13 +804,15 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     database came to say ``CancelledError`` and nothing else.
     """
     loop = _get_agent_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future, running = _submit_to_agent_loop(coro, loop)
     what = label or "agent coroutine"
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
-        # We cancelled it: it ran out of wall clock.
-        future.cancel()  # schedule cancellation of the asyncio task on the loop
+        # We cancelled it: it ran out of wall clock. Whether that cancellation
+        # is ever *delivered* is a separate question, and one the watchdog
+        # answers rather than assuming.
+        _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
     except _FuturesCancelled as exc:
         # It cancelled itself. ``concurrent.futures.CancelledError`` is an
@@ -751,12 +852,12 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
     ``asyncio.to_thread``, which binds no loop at all.
     """
     loop = _get_agent_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future, running = _submit_to_agent_loop(coro, loop)
     what = label or "agent coroutine"
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
-        future.cancel()
+        _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # Same distinction as ``_run_coro_blocking``, and here the old code was
