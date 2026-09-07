@@ -163,6 +163,7 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "Bearer credential for the Anthropic API. Required whenever llm.provider is anthropic."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.expert_model": {
         "title": "Anthropic expert model",
@@ -170,10 +171,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Model used for analyst LLM calls when llm.provider is anthropic, e.g. "
             "claude-sonnet-4-20250514."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.judge_model": {
         "title": "Anthropic judge model",
         "description": ("Model used for the judge verdict call when llm.provider is anthropic."),
+        "probe": "llm",
     },
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",
@@ -306,14 +309,17 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Bearer credential (Google AI API key) for Gemini. Required whenever "
             "llm.provider is gemini."
         ),
+        "probe": "llm",
     },
     "llm.gemini.expert_model": {
         "title": "Gemini expert model",
         "description": ("Gemini model used for analyst LLM calls, e.g. gemini-2.5-pro."),
+        "probe": "llm",
     },
     "llm.gemini.judge_model": {
         "title": "Gemini judge model",
         "description": ("Gemini model used for the judge verdict call."),
+        "probe": "llm",
     },
     "llm.judge_max_tokens": {
         "title": "Judge max output tokens",
@@ -330,14 +336,17 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Base URL of the local Ollama server used when llm.provider is ollama, e.g. "
             "http://localhost:11434."
         ),
+        "probe": "llm",
     },
     "llm.ollama.expert_model": {
         "title": "Ollama expert model",
         "description": ("Ollama model tag used for analyst LLM calls, e.g. qwen3.5:9b."),
+        "probe": "llm",
     },
     "llm.ollama.judge_model": {
         "title": "Ollama judge model",
         "description": ("Ollama model tag used for the judge verdict call."),
+        "probe": "llm",
     },
     "llm.ollama.keep_alive": {
         "title": "Ollama keep-alive",

@@ -224,6 +224,36 @@ test.describe("Settings → Configuration (admin)", () => {
     expect(probeUrl).toContain("/api/v1/settings/test/llm");
   });
 
+  test("the probe body carries every staged input it reads, including another group's", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+
+    // Stage the Ollama base URL in the "LLM & model" group...
+    await page.getByRole("button", { name: "LLM & model", exact: true }).click();
+    await page.getByLabel("Ollama base URL").fill("http://10.0.0.9:11434");
+
+    // ...then run the probe from the *Providers* group, where the staged
+    // provider lives. A group-local key list would drop the base URL and the
+    // backend would silently probe the stored one.
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.getByLabel("Provider").selectOption("ollama");
+
+    let body: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/settings/test/*", (r) => {
+      body = r.request().postDataJSON();
+      return r.fulfill({ json: { ok: true, latency_ms: 5, detail: "ok", models: [] } });
+    });
+
+    await page.getByRole("button", { name: "Test connection & fetch models" }).click();
+    await expect.poll(() => body).not.toBeNull();
+    expect(body).toEqual({
+      "core.llm.provider": "ollama",
+      "core.llm.ollama.base_url": "http://10.0.0.9:11434",
+    });
+  });
+
   test("export calls the export endpoint (no download assertion)", async ({
     authenticatedPage: page,
   }) => {
