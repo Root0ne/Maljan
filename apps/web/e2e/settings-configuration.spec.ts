@@ -230,15 +230,21 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Configuration" }).click();
 
-    // Stage the Ollama base URL in the "LLM & model" group...
+    // Stage the Ollama base URL in the "LLM & model" group. `getByLabel` is
+    // ambiguous on this tab: `FieldRow` points the title at the input with
+    // `htmlFor` *and* names the widget's wrapper with `aria-labelledby`, so
+    // the accessible name matches the control and its group. Address the
+    // control by role, the way the rest of this spec does.
     await page.getByRole("button", { name: "LLM & model", exact: true }).click();
-    await page.getByLabel("Ollama base URL").fill("http://10.0.0.9:11434");
+    await page
+      .getByRole("textbox", { name: "Ollama base URL" })
+      .fill("http://10.0.0.9:11434");
 
     // ...then run the probe from the *Providers* group, where the staged
     // provider lives. A group-local key list would drop the base URL and the
     // backend would silently probe the stored one.
     await page.getByRole("button", { name: "Providers", exact: true }).click();
-    await page.getByLabel("Provider").selectOption("ollama");
+    await page.getByRole("combobox", { name: "Provider" }).selectOption("ollama");
 
     let body: Record<string, unknown> | null = null;
     await page.route("**/api/v1/settings/test/*", (r) => {
@@ -248,9 +254,12 @@ test.describe("Settings → Configuration (admin)", () => {
 
     await page.getByRole("button", { name: "Test connection & fetch models" }).click();
     await expect.poll(() => body).not.toBeNull();
+    // The route wraps the staged keys in `{ values }` (see `testSettingsProbe`).
     expect(body).toEqual({
-      "core.llm.provider": "ollama",
-      "core.llm.ollama.base_url": "http://10.0.0.9:11434",
+      values: {
+        "core.llm.provider": "ollama",
+        "core.llm.ollama.base_url": "http://10.0.0.9:11434",
+      },
     });
   });
 
