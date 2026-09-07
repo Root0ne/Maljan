@@ -51,3 +51,19 @@ def test_a_cuckoo_report_sniffs_as_cuckoo():
 def test_anything_else_is_unknown():
     assert sniff_format({"hello": "world"}) == "unknown"
     assert sniff_format({}) == "unknown"
+
+
+def test_a_live_overview_with_dict_shaped_tasks_sniffs_as_triage():
+    """Live tria.ge answers with ``tasks`` keyed by task id, not a list."""
+    payload = json.loads(
+        (ROOT / "tests" / "fixtures" / "sandbox" / "triage_overview_dict_tasks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert isinstance(payload["tasks"], dict)
+    assert sniff_format(payload) == "triage"
+
+
+def test_an_empty_tasks_container_is_not_enough_to_call_it_triage():
+    for empty in ([], {}):
+        assert sniff_format({"analysis": {"score": 1}, "tasks": empty}) == "unknown"

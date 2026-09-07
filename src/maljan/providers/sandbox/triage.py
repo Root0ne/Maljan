@@ -303,10 +303,20 @@ class TriageSandboxProvider(SandboxProvider):
         first one's capture) — so a sample whose first task isn't literally
         named ``"behavioral1"``, or that ran several, is handled the same way
         in both places instead of one of them guessing.
+
+        The live API returns ``tasks`` as a dict keyed by task id while the
+        documented shape is a list; both are read here, keeping the order the
+        overview listed them in.
         """
         tasks = overview.get("tasks")
+        if isinstance(tasks, dict):
+            listed: list[Any] = list(tasks.values())
+        elif isinstance(tasks, list):
+            listed = list(tasks)
+        else:
+            listed = []
         names: list[str] = []
-        for one_task in tasks if isinstance(tasks, list) else []:
+        for one_task in listed:
             if not isinstance(one_task, dict) or one_task.get("kind") != "behavioral":
                 continue
             name = str(one_task.get("name") or "")

@@ -1,0 +1,87 @@
+{
+  "analysis": {
+    "score": 3
+  },
+  "build": "2101dba7c",
+  "sample": {
+    "completed": "2026-09-07T15:16:02Z",
+    "created": "2026-09-07T15:13:26Z",
+    "id": "260907-slyq5axxbt",
+    "md5": "32066ff6369a7bd794f03bdb77c399f3",
+    "score": 3,
+    "sha1": "eb6d37eb6380196c2cec25c1f4c1facd3fb789de",
+    "sha256": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa",
+    "sha512": "d65bf1dc5321a65ef8a169854825633c176281f3842594f7bdd808ae7efc1a4e4be4fd4b358705ba043466022f5602827b42b1b5266cc446b4ed3de2ac3dbab8",
+    "size": 4486656,
+    "ssdeep": "49152:8m/G+jc43x206oI4wmVNghL+Wt/S1XKuVXSu95d/aclpPq/z:R/G+jc43D6FV+Wt/SpZXSkT2",
+    "target": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa.exe",
+    "tlsh": "T134269E0166C6D779D1684A70C866827363F8F6803B304BD732B4A7692D2BEE49D7372D"
+  },
+  "signatures": [
+    {
+      "desc": "Checks for missing Authenticode signature.",
+      "label": "unsigned_pe",
+      "name": "Unsigned PE",
+      "score": 3
+    }
+  ],
+  "targets": [
+    {
+      "iocs": {
+        "domains": [
+          "c.pki.goog"
+        ],
+        "ips": [
+          "8.8.8.8",
+          "142.251.29.94"
+        ]
+      },
+      "md5": "32066ff6369a7bd794f03bdb77c399f3",
+      "score": 1,
+      "sha1": "eb6d37eb6380196c2cec25c1f4c1facd3fb789de",
+      "sha256": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa",
+      "sha512": "d65bf1dc5321a65ef8a169854825633c176281f3842594f7bdd808ae7efc1a4e4be4fd4b358705ba043466022f5602827b42b1b5266cc446b4ed3de2ac3dbab8",
+      "signatures": [],
+      "size": 4486656,
+      "ssdeep": "49152:8m/G+jc43x206oI4wmVNghL+Wt/S1XKuVXSu95d/aclpPq/z:R/G+jc43D6FV+Wt/SpZXSkT2",
+      "target": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa.exe",
+      "tasks": [
+        "behavioral1",
+        "behavioral2"
+      ],
+      "tlsh": "T134269E0166C6D779D1684A70C866827363F8F6803B304BD732B4A7692D2BEE49D7372D"
+    }
+  ],
+  "tasks": {
+    "260907-slyq5axxbt-behavioral1": {
+      "backend": "sbx4m74",
+      "kind": "behavioral",
+      "name": "behavioral1",
+      "os": "windows10-2004-x64",
+      "resource": "win10v2004-20260513-en",
+      "score": 1,
+      "status": "reported",
+      "target": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa.dll",
+      "timeout": 150
+    },
+    "260907-slyq5axxbt-behavioral2": {
+      "backend": "sbx4m173",
+      "kind": "behavioral",
+      "name": "behavioral2",
+      "os": "windows11-ltsc_2024-x64",
+      "resource": "win11ltsc2024-20260709-en",
+      "score": 1,
+      "status": "reported",
+      "target": "0001b8219a77f8e206efe2b71ecf3892aed755c26fb2dc5e4b7b42a226b72eaa.dll",
+      "timeout": 150
+    },
+    "260907-slyq5axxbt-static1": {
+      "kind": "static",
+      "name": "static1",
+      "score": 3,
+      "sigs": 1,
+      "status": "reported"
+    }
+  },
+  "version": "0.3.1"
+}

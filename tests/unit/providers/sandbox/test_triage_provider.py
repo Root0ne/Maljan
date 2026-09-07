@@ -522,3 +522,61 @@ async def test_probe_without_a_token_reports_clearly_without_a_request():
     result = await provider.probe()
     assert result.ok is False
     assert "sandbox.triage.api_token" in result.detail
+
+
+OVERVIEW_FIXTURES = ["triage_overview.json", "triage_overview_dict_tasks.json"]
+
+
+@pytest.mark.parametrize("fixture", OVERVIEW_FIXTURES)
+def test_a_behavioural_report_is_fetched_whatever_shape_tasks_has(fixture):
+    """BUG 6: live tria.ge keys ``tasks`` by task id; the fixture used a list.
+
+    Both shapes must yield the same behavioural task names, so both reach the
+    per-task report the mapper needs.
+    """
+    overview = json.loads((FIX / fixture).read_text(encoding="utf-8"))
+    task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
+    seen: list[str] = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if request.url.path.endswith("report_triage.json"):
+            return httpx.Response(200, json=task)
+        return httpx.Response(200, json={"id": "s1", "status": "reported"})
+
+    run = _provider(handler).fetch(str(overview["sample"]["id"]))
+    assert run.report.source_format == "triage"
+    assert run.report.target.sha256 == overview["sample"]["sha256"]
+    assert any(p.endswith("/behavioral1/report_triage.json") for p in seen), seen
+    assert run.report.processes
+
+
+def test_dict_shaped_tasks_keep_the_listed_order_and_skip_static_tasks():
+    overview = json.loads((FIX / "triage_overview_dict_tasks.json").read_text(encoding="utf-8"))
+    assert isinstance(overview["tasks"], dict)
+    names = TriageSandboxProvider._behavioral_task_names(overview)
+    assert names == ["behavioral1", "behavioral2"]
+
+
+def test_the_pcap_is_fetched_from_a_dict_shaped_overview(tmp_path):
+    overview = {
+        "tasks": {
+            "s1-static1": {"name": "static1", "kind": "static"},
+            "s1-behavioral7": {"name": "behavioral7", "kind": "behavioral"},
+        }
+    }
+    seen_paths: list[str] = []
+
+    def handler(request):
+        seen_paths.append(request.url.path)
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if request.url.path.endswith("dump.pcap"):
+            return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+        return httpx.Response(404, json={})
+
+    path = _provider(handler).fetch_pcap("s1", tmp_path)
+    assert path is not None
+    assert any(p.endswith("/behavioral7/dump.pcap") for p in seen_paths), seen_paths
