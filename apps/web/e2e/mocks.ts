@@ -327,6 +327,25 @@ export const MOCK_SETTINGS_SCHEMA = {
         },
       ],
     },
+    // A second group whose leaf declares the same `"llm"` probe. The real
+    // catalog files `llm.provider` and the per-provider base URL/model leaves
+    // in different groups, and the probe reads all of them, so the button in
+    // either group has to send the other group's staged values too.
+    {
+      key: "llm",
+      title: "LLM & model",
+      entries: [
+        {
+          key: "core.llm.ollama.base_url", namespace: "core", path: "llm.ollama.base_url",
+          type: "str", default: "http://localhost:11434", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "llm",
+          title: "Ollama base URL",
+          description: "Base URL of the local Ollama server.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null,
+        },
+      ],
+    },
     // Task A21: `applies_when` drives conditional visibility; `order: -1`
     // puts the selector first.
     {
@@ -539,6 +558,14 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.llm.provider": {
       value: "openai",
+      is_set: null,
+      hint: null,
+      source: "default",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.llm.ollama.base_url": {
+      value: "http://localhost:11434",
       is_set: null,
       hint: null,
       source: "default",

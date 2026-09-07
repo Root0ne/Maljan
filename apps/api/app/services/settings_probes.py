@@ -53,6 +53,22 @@ def _ms(t0: float) -> int:
     return int((time.perf_counter() - t0) * 1000)
 
 
+def _validation_detail(exc: ValidationError) -> str:
+    """Render a pydantic ValidationError as ``field: reason`` per error.
+
+    Naming only the field ("agents") tells the operator nothing about what is
+    wrong with it; the message ("'x': a generic agent needs a prompt") is the
+    whole diagnosis. Pydantic's "Value error, " prefix on a custom validator's
+    message adds nothing, so it is dropped.
+    """
+    parts = []
+    for e in exc.errors():
+        loc = ".".join(str(x) for x in e["loc"])
+        msg = str(e.get("msg") or "").removeprefix("Value error, ")
+        parts.append(f"{loc}: {msg}" if msg else loc)
+    return "; ".join(parts)
+
+
 async def _get(
     url: str, headers: dict[str, str] | None = None
 ) -> tuple[bool, str, httpx.Response | None]:
@@ -332,7 +348,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     try:
         config = _probe_config(dict(v.get("entry") or {}))
     except ValidationError as exc:
-        fields = "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+        fields = _validation_detail(exc)
         return ProbeResult(False, _ms(t0), f"invalid server settings: {fields}")
     try:
         names = await handshake_tools(config, name)
@@ -424,7 +440,7 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         core = dict(v.get("settings") or {})
         settings = build_settings(core)
     except ValidationError as exc:
-        fields = "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
+        fields = _validation_detail(exc)
         return ProbeResult(False, _ms(t0), f"invalid agent settings: {fields}")
     if name not in settings.agents.definitions:
         available = ", ".join(sorted(settings.agents.definitions)) or "(none)"
@@ -529,7 +545,11 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 "prompt": resolved.prompt,
                 "llm": {
                     "provider": agent_llm.provider if agent_llm else settings.llm.provider,
-                    "model": agent_llm.model if agent_llm else "",
+                    # No per-agent override means the agent inherits the global
+                    # expert model; reporting "" left the operator to work out
+                    # which provider block that came from. ``expert_model``
+                    # already picks the leaf the selected provider uses.
+                    "model": agent_llm.model if agent_llm else settings.llm.expert_model,
                 },
                 "static_provider": resolved.static_provider_id,
                 "servers": servers,
@@ -752,11 +772,7 @@ async def probe_rest(v: dict[str, Any]) -> ProbeResult:
         )
         provider = RestSandboxProvider(rest, compile_mapping(rest.mapping))
     except (ProviderConfigurationError, ValidationError) as exc:
-        fields = (
-            "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
-            if isinstance(exc, ValidationError)
-            else str(exc)
-        )
+        fields = _validation_detail(exc) if isinstance(exc, ValidationError) else str(exc)
         return ProbeResult(False, _ms(t0), fields)
     result = await provider.probe()
     return ProbeResult(result.ok, result.latency_ms or _ms(t0), result.detail)
@@ -885,12 +901,9 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
         core = build_settings(core_layer)
     except (ValueError, ValidationError) as exc:
         # A malformed key or a staged value the model rejects is an operator
-        # error, not a route error. Name the fields, never echo the values.
-        fields = (
-            "; ".join(".".join(str(x) for x in e["loc"]) for e in exc.errors())
-            if isinstance(exc, ValidationError)
-            else type(exc).__name__
-        )
+        # error, not a route error. Name the fields and why they were
+        # rejected, never echo the values.
+        fields = _validation_detail(exc) if isinstance(exc, ValidationError) else type(exc).__name__
         return ProbeResult(False, 0, f"invalid candidate values: {fields}")
     resolved: dict[str, Any] = {}
     for key, short in _INPUTS[name].items():

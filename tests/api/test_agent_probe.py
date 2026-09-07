@@ -299,3 +299,31 @@ def test_the_route_is_admin_only_and_passes_the_name_through(monkeypatch):
     assert response.status_code == 200
     assert seen == ["strings"]
     assert response.json()["details"] == {"prompt_chars": 3}
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_definition_reports_why_not_only_which_field():
+    """A generic agent with no prompt is a legible sentence, not "agents".
+
+    ``build_settings`` raises a ValidationError whose ``loc`` is the useless
+    part ("agents") and whose ``msg`` is the whole diagnosis. Reporting only
+    the field left the operator with nothing to act on.
+    """
+    staged = {
+        "agents.definitions": {"nameless": {"role": "generic"}},
+        "agents.profiles": {"one": {"analysts": ["nameless"]}},
+        "agents.profile": "one",
+    }
+    result = await probe_agent({"name": "nameless", "settings": staged})
+    assert result.ok is False
+    assert "needs a prompt" in result.detail
+    assert "nameless" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_an_inheriting_agent_reports_the_resolved_global_expert_model():
+    """An agent with no per-agent override still names the model it would get."""
+    staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen3.5:9b"}
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is True
+    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3.5:9b"}
