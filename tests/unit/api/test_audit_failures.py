@@ -1,16 +1,9 @@
 import logging
-import sys
-from pathlib import Path
 
 import pytest
-
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-from app import observability  # noqa: E402
-from app.api.v1 import auth as auth_module  # noqa: E402
-from app.services import audit as audit_module  # noqa: E402
+from app import observability
+from app.api.v1 import auth as auth_module
+from app.services import audit as audit_module
 
 
 class _BrokenFactory:

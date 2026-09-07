@@ -12,16 +12,10 @@ from __future__ import annotations
 
 import io
 import json
-import sys
-from pathlib import Path
 
-_API = Path(__file__).resolve().parents[3] / "apps" / "api"
-if str(_API) not in sys.path:
-    sys.path.insert(0, str(_API))
-
-import pytest  # noqa: E402
-from app.api.v1 import sandbox_reports as module  # noqa: E402
-from fastapi import HTTPException, UploadFile  # noqa: E402
+import pytest
+from app.api.v1 import sandbox_reports as module
+from fastapi import HTTPException, UploadFile
 
 
 def _upload(data: bytes, filename: str) -> UploadFile:

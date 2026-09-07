@@ -20,11 +20,10 @@ disagree about the same report, even if both surfaces are internally fine.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any
 
 import pytest
+from app.worker.analysis_worker import _extract_confidence
 
 from maljan.pipeline.nodes import DEGRADED_CONFIDENCE_CAP
 from maljan.reporting.detection_signatures import build_detection_rules
@@ -46,12 +45,6 @@ from maljan.reporting.renderers import (
     MarkdownRenderer,
     PdfRenderer,
 )
-
-_API_PATH = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(_API_PATH) not in sys.path:
-    sys.path.insert(0, str(_API_PATH))
-
-from app.worker.analysis_worker import _extract_confidence  # noqa: E402
 
 
 def _report(*, degraded: bool = False, confidence: float = 0.91) -> MalwareReport:
