@@ -157,6 +157,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "instead of sharing one global expert LLM. Empty by default, meaning every "
             "agent uses the global expert LLM."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.api_key": {
         "title": "Anthropic API key",
