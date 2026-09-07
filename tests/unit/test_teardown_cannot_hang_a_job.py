@@ -606,6 +606,11 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         return _ignores_cancellation()
 
     @staticmethod
+    def _thread_alive(name: str) -> bool:
+        """Whether the named loop-serving thread is still running, spin included."""
+        return any(t.name == name and t.is_alive() for t in threading.enumerate())
+
+    @staticmethod
     def _wait_until(predicate, seconds: float = 5.0) -> bool:
         import time
 
@@ -623,6 +628,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         loop = base_agent._get_agent_loop()
+        serving = base_agent._LOOP_THREADS[id(loop)].name
         started = threading.Event()
 
         with pytest.raises(TimeoutError):
@@ -638,6 +644,15 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         fresh = base_agent._get_agent_loop()
         assert fresh is not loop
         assert self._wait_until(lambda: fresh.is_running())
+
+        # Stopped, not merely replaced: the retired loop closes itself once
+        # ``run_forever`` returns, so its selector and self-pipe go with it and
+        # nothing is left turning callbacks over.
+        assert self._wait_until(loop.is_closed), "a retired loop that stopped must be closed"
+        assert self._wait_until(lambda: not self._thread_alive(serving)), (
+            f"the retired loop's thread {serving} is still running: stopping it is the "
+            "whole point, an abandoned thread would keep the spin going"
+        )
 
     def test_a_task_that_ends_on_cancellation_keeps_the_loop(
         self, monkeypatch: pytest.MonkeyPatch
@@ -659,3 +674,147 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         time.sleep(0.6)
         assert loop.is_running()
         assert base_agent._get_agent_loop() is loop
+
+    def test_a_coroutine_blocked_in_synchronous_code_is_reported_as_abandoned(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The other half of the hypothesis: a task that never yields at all.
+
+        ``task._fut_waiter is None`` literally means the coroutine is running
+        synchronous code, so it never reaches the end-of-iteration check where
+        ``loop.stop()`` is honoured. The loop cannot be stopped, and saying it
+        was retired would be a lie — the global is cleared either way, but the
+        abandonment has to be logged rather than pretended away.
+
+        The blocking coroutine is released at the end so the test itself does
+        not leave a thread spinning for the rest of the session.
+        """
+        import time
+
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        release = threading.Event()
+        started = threading.Event()
+
+        async def _blocks_the_loop() -> None:
+            started.set()
+            while not release.is_set():
+                time.sleep(0.02)  # synchronous on purpose: the loop cannot run
+
+        try:
+            with caplog.at_level("ERROR"):
+                with pytest.raises(TimeoutError):
+                    base_agent._run_coro_blocking(
+                        _blocks_the_loop(), hard_timeout=0.5, label="blocked-teardown"
+                    )
+                assert started.wait(5)
+                assert self._wait_until(lambda: base_agent._AGENT_LOOP is not loop), (
+                    "a loop that cannot be stopped must still be taken out of service"
+                )
+                assert self._wait_until(
+                    lambda: any("did not stop" in r.message for r in caplog.records)
+                ), [r.message for r in caplog.records]
+
+            assert loop.is_running(), "the blocked loop is abandoned, not stopped"
+            fresh = base_agent._get_agent_loop()
+            assert fresh is not loop
+            assert self._wait_until(lambda: fresh.is_running())
+        finally:
+            release.set()
+        assert self._wait_until(lambda: not loop.is_running())
+
+    def test_a_task_that_never_starts_on_a_wedged_loop_retires_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F1: the second caller onto an already-wedged loop.
+
+        Its coroutine never gets a turn, so there is no task to watch — the
+        state the watchdog used to treat as "nothing to do". The loop is not
+        servicing callbacks either, and that is what tells the two apart.
+        """
+        import time
+
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        release = threading.Event()
+        started = threading.Event()
+
+        async def _blocks_the_loop() -> None:
+            started.set()
+            while not release.is_set():
+                time.sleep(0.02)
+
+        try:
+            asyncio.run_coroutine_threadsafe(_blocks_the_loop(), loop)
+            assert started.wait(5)
+
+            async def _never_gets_a_turn() -> None:
+                return None
+
+            with pytest.raises(TimeoutError):
+                base_agent._run_coro_blocking(
+                    _never_gets_a_turn(), hard_timeout=0.2, label="queued-behind-a-wedge"
+                )
+            assert self._wait_until(lambda: base_agent._AGENT_LOOP is not loop), (
+                "a loop that never started the work handed to it must be retired"
+            )
+        finally:
+            release.set()
+
+    def test_a_cancel_that_lands_before_the_task_starts_keeps_a_healthy_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other reading of an empty task list, which must not retire anything."""
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        future: object = _DoneFuture()
+
+        base_agent._cancel_and_watch(loop, future, [], "cancelled-before-it-started")
+
+        import time
+
+        time.sleep(0.8)
+        assert loop.is_running()
+        assert base_agent._get_agent_loop() is loop
+
+    def test_a_retirement_drops_the_state_bound_to_that_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F2: cached clients and handles must not outlive their loop."""
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        seen: list[object] = []
+        base_agent.on_agent_loop_retired(seen.append)
+        loop = base_agent._get_agent_loop()
+        started = threading.Event()
+
+        with pytest.raises(TimeoutError):
+            base_agent._run_coro_blocking(
+                self._wedged_coro(started), hard_timeout=0.5, label="wedged-teardown"
+            )
+        assert self._wait_until(lambda: loop in seen), seen
+
+
+class _DoneFuture:
+    """A future that is already resolved: ``cancel`` is a no-op, ``done`` is True.
+
+    Stands in for the ``concurrent.futures.Future`` of a coroutine whose cancel
+    landed before the loop gave it a turn, which is the benign half of an empty
+    task list in ``_cancel_and_watch``.
+    """
+
+    def cancel(self) -> bool:
+        return False
+
+    def done(self) -> bool:
+        return True
+
+    def cancelled(self) -> bool:
+        return True

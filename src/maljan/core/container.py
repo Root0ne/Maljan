@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+import weakref
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -74,6 +75,45 @@ _ACLOSE_BUDGET = 20.0
 # 20s bound — and because it runs in an executor, so the time it spends is a
 # worker thread's, not the event loop's.
 _CLOSE_ALL_BUDGET = 45.0
+
+
+# Every container that still exists, so a retired agent loop can invalidate the
+# clients that were built on it. Weak, so a finished job's container is gone.
+_LIVE_CONTAINERS: weakref.WeakSet[ServiceContainer] = weakref.WeakSet()
+_RETIREMENT_HOOK_REGISTERED = threading.Event()
+
+
+def _drop_llm_caches_on_retirement(loop: object) -> None:
+    """Forget every cached chat model when an agent loop is retired.
+
+    A LangChain chat model lazily builds an httpx async pool bound to the loop
+    that first awaits it — the single-loop invariant ``base_agent`` documents.
+    After a retirement those pools belong to a loop nothing will run again, and
+    reusing one on the fresh loop parks on a future that can never complete, so
+    the caches are emptied and the next call rebuilds. Which loop a given model
+    was bound to is not knowable from here, so all of them go: rebuilding is
+    cheap and a stale one is a hang.
+
+    Deliberately narrow: agents, providers and server handles are *not* dropped
+    here. Handles are handled at their own site (``providers.servers``), and an
+    agent holds only a reference to the model it was built with, which its next
+    call refreshes through ``get_agent_llm``.
+    """
+    for container in list(_LIVE_CONTAINERS):
+        with container._lock:
+            container._expert_llm_cache = None
+            container._judge_llm_cache = None
+            container._agent_llm_cache.clear()
+
+
+def _register_retirement_hook() -> None:
+    """Subscribe once to agent-loop retirements. Imported late to avoid a cycle."""
+    if _RETIREMENT_HOOK_REGISTERED.is_set():
+        return
+    from maljan.agents.base_agent import on_agent_loop_retired
+
+    on_agent_loop_retired(_drop_llm_caches_on_retirement)
+    _RETIREMENT_HOOK_REGISTERED.set()
 
 
 class ServiceContainer:
@@ -141,6 +181,9 @@ class ServiceContainer:
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
 
+        _LIVE_CONTAINERS.add(self)
+        _register_retirement_hook()
+
         from maljan.agents.composition import analyst_keys
 
         logger.info(
@@ -196,7 +239,11 @@ class ServiceContainer:
                 # Through the per-agent path so a configured
                 # ``llm.agents.judge`` decides provider/model/temperature the
                 # same way it does for an analyst; with no such entry the
-                # judge role picks the model exactly as before.
+                # judge role picks the model exactly as before. An entry that
+                # sets provider and model but no temperature therefore runs at
+                # the per-agent default of 0.1 rather than the role's 0.0 —
+                # deliberate (the entry is an analyst-shaped override and is
+                # read as one), and said out loud in the setting's help text.
                 self._judge_llm_cache = self._llm_registry.build_model_for_agent(
                     "judge", fallback_role="judge", **extra
                 )
