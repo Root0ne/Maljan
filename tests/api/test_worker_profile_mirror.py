@@ -16,7 +16,6 @@ from app.worker.analysis_worker import (  # noqa: E402
     mirror_target_for,
     profile_static_providers,
 )
-
 from maljan.core.config import Settings  # noqa: E402
 from maljan.core.container import ServiceContainer  # noqa: E402
 

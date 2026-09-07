@@ -30,8 +30,9 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
-from app.api.ws import ws_analysis  # noqa: I001
 from fastapi import WebSocket, WebSocketDisconnect
+
+from app.api.ws import ws_analysis  # noqa: I001
 
 
 def _subprotocol_headers(token: str) -> dict[str, str]:

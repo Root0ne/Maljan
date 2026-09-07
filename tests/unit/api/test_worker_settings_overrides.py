@@ -53,8 +53,9 @@ def test_job_create_request_rejects_bad_config_at_submit_time():
     import uuid
 
     import pytest
-    from app.schemas.job import JobCreateRequest
     from pydantic import ValidationError
+
+    from app.schemas.job import JobCreateRequest
 
     ok = JobCreateRequest(sample_id=uuid.uuid4(), config={"max_iterations": 2, "extra": 1})
     assert ok.config == {"max_iterations": 2, "extra": 1}

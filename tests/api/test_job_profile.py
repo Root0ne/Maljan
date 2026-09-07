@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1.jobs import router  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import get_current_user  # noqa: E402
 from app.schemas.job import JobCreateRequest, _KnownJobConfig  # noqa: E402
 from app.worker.analysis_worker import build_job_settings  # noqa: E402
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 
 def test_the_field_is_a_free_string_not_a_literal():

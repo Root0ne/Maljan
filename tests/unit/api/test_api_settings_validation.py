@@ -1,6 +1,7 @@
 import pytest
-from app.config import APISettings
 from pydantic import ValidationError
+
+from app.config import APISettings
 
 
 def test_trusted_proxy_entries_must_be_addresses_or_networks(monkeypatch):

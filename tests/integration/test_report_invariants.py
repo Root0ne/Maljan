@@ -23,8 +23,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from app.worker.analysis_worker import _extract_confidence
 
+from app.worker.analysis_worker import _extract_confidence
 from maljan.pipeline.nodes import DEGRADED_CONFIDENCE_CAP
 from maljan.reporting.detection_signatures import build_detection_rules
 from maljan.reporting.figures import build_figures

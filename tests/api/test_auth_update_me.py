@@ -15,11 +15,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
+
 from app.api.v1.auth import update_me  # noqa: E402
 from app.auth.password import verify_password  # noqa: E402
 from app.schemas.auth import UserUpdateRequest  # noqa: E402
 from app.services import audit as audit_module  # noqa: E402
-from pydantic import ValidationError
 
 
 class _FakeAuditSession:

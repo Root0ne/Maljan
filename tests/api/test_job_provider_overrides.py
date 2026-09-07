@@ -6,8 +6,9 @@ import uuid
 from typing import Any, get_args
 
 import pytest
-from app.schemas.job import JobCreateRequest, _KnownJobConfig  # noqa: E402
 from pydantic import ValidationError
+
+from app.schemas.job import JobCreateRequest, _KnownJobConfig  # noqa: E402
 
 
 def _literal_choices(annotation: Any) -> tuple[Any, ...]:

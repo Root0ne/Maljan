@@ -21,12 +21,13 @@ import shutil
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1.settings import router  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import require_admin  # noqa: E402
 from app.middleware.logging_middleware import RequestLoggingMiddleware  # noqa: E402
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 _TRUE = shutil.which("true") or "/bin/true"
 _ECHO = shutil.which("echo") or "/bin/echo"
