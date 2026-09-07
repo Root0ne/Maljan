@@ -5,12 +5,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from cryptography.fernet import Fernet
+
 from app import observability
 from app.models import AuditLog, RuntimeSetting
 from app.services import audit as audit_module
 from app.services import settings_service as svc
 from app.services.settings_catalog_api import catalog_index, full_catalog
-from cryptography.fernet import Fernet
 
 
 class FakeResult:

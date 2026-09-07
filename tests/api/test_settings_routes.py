@@ -4,6 +4,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1.settings import router  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import require_admin  # noqa: E402
@@ -12,8 +15,6 @@ from app.services.settings_service import (  # noqa: E402
     SettingsValidationError,
     ValueInfo,
 )
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -225,9 +226,10 @@ def test_the_preview_route_counts_rows_per_channel(client):
 
 def test_the_preview_route_is_admin_only():
     """Without the ``require_admin`` override the real dependency runs and refuses."""
-    from app.api.v1.settings import router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
+    from app.api.v1.settings import router
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")

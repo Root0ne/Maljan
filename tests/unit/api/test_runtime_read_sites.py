@@ -5,9 +5,10 @@ import io
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
+
 from app.api.v1 import samples
 from app.auth import throttle
-from fastapi import HTTPException
 
 
 def _override(monkeypatch, module, values: dict[str, object]) -> None:

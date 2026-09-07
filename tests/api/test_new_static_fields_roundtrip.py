@@ -25,8 +25,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from app.services.report_service import ReportService  # noqa: E402
 
+from app.services.report_service import ReportService  # noqa: E402
 from maljan.reporting.models import MalwareReport  # noqa: E402
 
 

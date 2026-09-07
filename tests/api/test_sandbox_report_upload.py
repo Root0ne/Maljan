@@ -10,9 +10,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from app.api.v1 import sandbox_reports as module  # noqa: E402
 from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
+
+from app.api.v1 import sandbox_reports as module  # noqa: E402
 
 SHA = "a" * 64
 

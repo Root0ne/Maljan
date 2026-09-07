@@ -21,6 +21,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from app.worker import analysis_worker
 
 

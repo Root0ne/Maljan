@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from app import observability
 from app.auth import throttle
-
 from maljan.app import MaljanApp
 
 

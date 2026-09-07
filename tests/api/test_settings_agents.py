@@ -9,6 +9,8 @@ layer produces, exactly as ``server_map.py`` does for servers.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
+
 from app.services.agent_map import (  # noqa: E402
     AGENT_DEFINITIONS_KEY,
     AGENT_PROFILE_KEY,
@@ -18,8 +20,6 @@ from app.services.agent_map import (  # noqa: E402
     effective_profiles,
     validate_agent_map,
 )
-from pydantic import ValidationError
-
 from maljan.core.config import Settings
 
 BUILTIN_STATIC = {

@@ -23,7 +23,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from app.worker.analysis_worker import _make_event_sink, _parse_event_ts
-
 from maljan.pipeline.events import AGENT_MESSAGE, emit_agent_message
 
 

@@ -8,7 +8,6 @@
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-2%2C707%20passed-brightgreen)](tests/)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
 Maljan maps evidence about a Windows PE sample to MITRE ATT&CK technique

@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+
 from app import observability
 from app.api.v1 import auth as auth_module
 from app.services import audit as audit_module

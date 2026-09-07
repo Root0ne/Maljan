@@ -41,6 +41,7 @@ work from any directory, in the venv, in the backend image and in CI.
 make test        # the whole suite
 make check       # lint, format check, type check, tests
 make semgrep     # the security rulesets CI runs
+make migrate     # apply the API's Alembic migrations; run it after a pull that adds a revision
 ```
 
 ## The design record

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 
 import pytest
+
 from app.runtime_config import RuntimeConfig
 
 

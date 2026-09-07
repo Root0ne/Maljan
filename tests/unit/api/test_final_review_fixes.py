@@ -4,15 +4,15 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1.settings import _env_literal, router
 from app.database import get_db
 from app.deps import require_admin
 from app.models.user import UserRole
 from app.services import settings_catalog_api as cat
 from app.services import settings_probes as probes
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from maljan.core.settings_overrides import redact_url
 
 
@@ -105,8 +105,9 @@ def test_non_admin_user_gets_403_not_401():
 
 
 def test_patch_body_is_bounded():
-    from app.schemas.settings import PatchRequest
     from pydantic import ValidationError
+
+    from app.schemas.settings import PatchRequest
 
     with pytest.raises(ValidationError):
         PatchRequest(changes={f"core.k{i}": i for i in range(501)})

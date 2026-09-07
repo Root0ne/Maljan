@@ -14,8 +14,9 @@ import io
 import json
 
 import pytest
-from app.api.v1 import sandbox_reports as module
 from fastapi import HTTPException, UploadFile
+
+from app.api.v1 import sandbox_reports as module
 
 
 def _upload(data: bytes, filename: str) -> UploadFile:

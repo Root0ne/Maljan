@@ -22,10 +22,11 @@ relying on ``pytest.raises`` around the ``with`` statement itself.
 import uuid
 
 import pytest
-from app.api import ws as ws_module  # noqa: E402
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocket, WebSocketDisconnect
+
+from app.api import ws as ws_module  # noqa: E402
 
 
 class _FakeJob:

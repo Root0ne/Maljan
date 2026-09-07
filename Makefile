@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external semgrep
+.PHONY: test lint typecheck format setup migrate check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external semgrep
 
 test:
 	uv run pytest tests/ -q
@@ -54,6 +54,12 @@ setup:
 	uv sync --all-extras --all-packages
 	uv run pre-commit install
 	bash scripts/dev/fetch_external.sh
+
+# Applies the API's Alembic migrations to the configured database. The API
+# does not run them on startup unless RUN_MIGRATIONS_ON_STARTUP is set, so
+# run this after every pull that adds a revision under apps/api/alembic/.
+migrate:
+	uv run --directory apps/api alembic upgrade head
 
 # The third-party trees, at the refs this project was built and measured
 # against. external/ is not in version control: none of it is ours to
