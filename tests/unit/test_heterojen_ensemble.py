@@ -170,6 +170,23 @@ class TestBuildModelForAgent:
         assert call_kwargs.kwargs.get("model") == "claude-3-5-sonnet"
         assert result is mock_model
 
+    def test_the_fallback_role_is_configurable_and_defaults_to_expert(self) -> None:
+        """BUG 9: the judge reuses this path, so an unconfigured judge must
+        fall back to the judge role rather than to the expert model."""
+        registry = self._make_registry_patched()
+        with patch.object(registry, "build_model") as mock_build:
+            mock_build.return_value = MagicMock()
+            registry.build_model_for_agent("judge", fallback_role="judge")
+            mock_build.assert_called_once_with(role="judge")
+
+    def test_an_unknown_agent_provider_falls_back_to_the_given_role(self) -> None:
+        agents = {"judge": AgentLLMConfig(provider="no-such-provider", model="x")}
+        registry = self._make_registry_patched(agents=agents)
+        with patch.object(registry, "build_model") as mock_build:
+            mock_build.return_value = MagicMock()
+            registry.build_model_for_agent("judge", fallback_role="judge")
+            mock_build.assert_called_once_with(role="judge")
+
     def test_override_uses_agent_temperature(self) -> None:
         agents = {"network": AgentLLMConfig(provider="openai", model="gpt-4o", temperature=0.3)}
         registry = self._make_registry_patched(agents=agents)

@@ -161,7 +161,7 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
-    def _expert_token_cap(self) -> dict[str, int]:
+    def _expert_token_cap(self) -> dict[str, Any]:
         """``max_tokens`` kwargs for analyst-role models, or ``{}`` when unset.
 
         Audit 2026-07-26 (Ö3): the analyst path was the only unbounded LLM call
@@ -189,11 +189,17 @@ class ServiceContainer:
             if self._judge_llm_cache is None:
                 # Bound the verdict generation so a degenerate decode can't
                 # consume the full wall-clock timeout (see LLMConfig.judge_max_tokens).
-                extra: dict[str, int] = {}
+                extra: dict[str, Any] = {}
                 cap = self.config.llm.judge_max_tokens
                 if cap and cap > 0:
                     extra["max_tokens"] = cap
-                self._judge_llm_cache = self._llm_registry.build_model(role="judge", **extra)
+                # Through the per-agent path so a configured
+                # ``llm.agents.judge`` decides provider/model/temperature the
+                # same way it does for an analyst; with no such entry the
+                # judge role picks the model exactly as before.
+                self._judge_llm_cache = self._llm_registry.build_model_for_agent(
+                    "judge", fallback_role="judge", **extra
+                )
             return self._judge_llm_cache
 
     def get_agent_llm(self, agent_name: str) -> BaseChatModel:
