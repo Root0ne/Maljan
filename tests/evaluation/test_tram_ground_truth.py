@@ -34,11 +34,14 @@ def tram_fixtures() -> list[GroundTruth]:
     """Load all TRAM fixtures once for the module."""
     if not TRAM_FIXTURES_DIR.exists():
         pytest.skip(
-            "TRAM fixture directory not found. Run: uv run python scripts/prepare_tram_dataset.py"
+            "TRAM fixture directory not found. "
+            "Run: uv run python scripts/knowledge/prepare_tram_dataset.py"
         )
     fixtures = load_fixture_suite(TRAM_FIXTURES_DIR)
     if not fixtures:
-        pytest.skip("No TRAM fixtures found. Run: uv run python scripts/prepare_tram_dataset.py")
+        pytest.skip(
+            "No TRAM fixtures found. Run: uv run python scripts/knowledge/prepare_tram_dataset.py"
+        )
     return fixtures
 
 
@@ -47,7 +50,7 @@ class TestTramFixtureCount:
         assert len(tram_fixtures) >= _MIN_EXPECTED_FIXTURES, (
             f"Expected at least {_MIN_EXPECTED_FIXTURES} fixtures, "
             f"found {len(tram_fixtures)}. "
-            "Re-run scripts/prepare_tram_dataset.py."
+            "Re-run scripts/knowledge/prepare_tram_dataset.py."
         )
 
 
