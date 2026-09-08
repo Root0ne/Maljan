@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import type { CatalogEntry, SettingValue } from "@/types/settings";
 import { useSettings } from "./useSettings";
 
@@ -44,8 +45,18 @@ export type SettingsContextValue = ReturnType<typeof useSettings> & {
 
 const SettingsCtx = createContext<SettingsContextValue | null>(null);
 
+/** Where the admin schema is what the page is *about*: the settings console
+ *  and the setup guides. Everywhere else under `/settings` (the profile page,
+ *  the API keys page) the provider still loads the schema for whoever may
+ *  read it, but a slow load, a 403 or a load failure must not blank a page
+ *  that does not need it. */
+function gatesOnSchema(pathname: string): boolean {
+  return pathname.startsWith("/settings/setup") || pathname.startsWith("/settings/configuration");
+}
+
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const s = useSettings();
+  const pathname = usePathname() ?? "";
   const [models, setModels] = useState<string[]>([]);
   const [onlyChanged, setOnlyChanged] = useState(false);
 
@@ -103,24 +114,26 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     [s, models, hiddenKeys, effectiveValue, isVisible, probeValues, onlyChanged]
   );
 
-  if (s.loading) {
+  const gated = gatesOnSchema(pathname);
+
+  if (gated && s.loading) {
     return <div className="text-sm text-text-secondary">Loading configuration…</div>;
   }
-  if (s.forbidden) {
+  if (gated && s.forbidden) {
     return (
       <div className="text-sm text-text-secondary" role="alert">
         Configuration is available to administrators only (admin role required).
       </div>
     );
   }
-  if (s.loadError) {
+  if (gated && s.loadError) {
     return (
       <div className="text-sm text-status-red" role="alert">
         {s.loadError}
       </div>
     );
   }
-  if (!s.schema) return null;
+  if (gated && !s.schema) return null;
 
   return <SettingsCtx.Provider value={value}>{children}</SettingsCtx.Provider>;
 }

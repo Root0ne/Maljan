@@ -4,18 +4,41 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { SettingsProvider } from "./configuration/SettingsContext";
 
 const NAV_ITEMS = [
   { href: "/settings/profile", label: "Profile", adminOnly: false },
   { href: "/settings/api-keys", label: "API keys", adminOnly: false },
-  // The setup-guide hub does not exist yet; Task 16 restores this entry.
+  { href: "/settings/setup", label: "Setup guides", adminOnly: true },
   { href: "/settings/configuration", label: "Configuration", adminOnly: true },
 ];
 
+/** The two admin areas: the guide hub and the settings console. They share
+ *  one `SettingsProvider` so a value staged in a guide is the same staged
+ *  value the console and the changes bar show. */
+function isAdminArea(pathname: string): boolean {
+  return pathname.startsWith("/settings/setup") || pathname.startsWith("/settings/configuration");
+}
+
 export default function SettingsLayout({ children }: { children: ReactNode }) {
-  const { user: authUser } = useAuth();
+  const { user: authUser, loading } = useAuth();
   const isAdmin = authUser?.role === "admin";
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
+
+  let body: ReactNode = children;
+  if (isAdmin) {
+    // Only an admin mounts the provider at all: a non-admin would spend two
+    // requests on a schema the API refuses them, on every settings page.
+    body = <SettingsProvider>{children}</SettingsProvider>;
+  } else if (isAdminArea(pathname)) {
+    body = loading ? (
+      <div className="text-sm text-text-secondary">Loading…</div>
+    ) : (
+      <div className="text-sm text-text-secondary" role="alert">
+        Configuration is available to administrators only (admin role required).
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -27,7 +50,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
       <nav aria-label="Settings sections" className="flex border-b border-border mb-6">
         {NAV_ITEMS.map((item) => {
           const disabled = item.adminOnly && !isAdmin;
-          const active = pathname?.startsWith(item.href) ?? false;
+          const active = pathname.startsWith(item.href);
 
           if (disabled) {
             return (
@@ -59,7 +82,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
         })}
       </nav>
 
-      {children}
+      {body}
     </div>
   );
 }

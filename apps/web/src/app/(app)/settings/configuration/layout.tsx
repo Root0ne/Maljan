@@ -4,10 +4,11 @@ import { Suspense } from "react";
 import type { ReactNode } from "react";
 import ChangesBar from "./ChangesBar";
 import SectionRail from "./SectionRail";
-import { SettingsProvider } from "./SettingsContext";
 import Toolbar from "./Toolbar";
 
-function ConfigurationLayoutBody({ children }: { children: ReactNode }) {
+/** `SettingsProvider` lives in `settings/layout.tsx` (one provider for the
+ *  console and the guides alike), so this layout only lays the console out. */
+export default function ConfigurationLayout({ children }: { children: ReactNode }) {
   return (
     <div>
       <Suspense fallback={null}>
@@ -19,13 +20,5 @@ function ConfigurationLayoutBody({ children }: { children: ReactNode }) {
       </div>
       <ChangesBar />
     </div>
-  );
-}
-
-export default function ConfigurationLayout({ children }: { children: ReactNode }) {
-  return (
-    <SettingsProvider>
-      <ConfigurationLayoutBody>{children}</ConfigurationLayoutBody>
-    </SettingsProvider>
   );
 }

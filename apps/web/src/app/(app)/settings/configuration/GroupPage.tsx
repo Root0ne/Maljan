@@ -8,6 +8,26 @@ import GroupHeader from "./GroupHeader";
 import RestSandboxEditor from "./RestSandboxEditor";
 import { resolveGroup } from "./sections";
 import { useSettingsContext, type SettingsContextValue } from "./SettingsContext";
+import { guideById, type GuideId } from "../setup/guides";
+
+/** The setup guide that covers a backend group's keys, if one does. A guide
+ *  that is not defined yet simply has no link: `guideById` decides, so this
+ *  map can name all seven from the start. */
+const GUIDE_FOR_GROUP: Record<string, GuideId> = {
+  llm: "llm",
+  providers: "llm",
+  static: "static",
+  sandbox: "sandbox",
+  mcp: "tool-server",
+  agents: "agent",
+  memory: "memory",
+  enrichment: "enrichment",
+};
+
+function guideHrefForGroup(group: string): string | undefined {
+  const id = GUIDE_FOR_GROUP[group];
+  return id && guideById(id) ? `/settings/setup/${id}` : undefined;
+}
 
 /** Groups whose first row picks a provider and whose remaining rows belong to
  *  whichever provider that is. */
@@ -202,6 +222,7 @@ export default function GroupPage({ section, group }: { section: string; group: 
       overriddenCount={overriddenKeys.length}
       onProbe={onProbe}
       onResetGroup={() => ctx.resetGroup(resolved.backendGroup)}
+      guideHref={guideHrefForGroup(resolved.backendGroup)}
       probeInputsStaged={probeInputsStaged}
     />
   );
