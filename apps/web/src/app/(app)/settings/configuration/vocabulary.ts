@@ -14,6 +14,15 @@ export const APPLIES_SENTENCE: Record<Applies, string> = {
 
 const APPLIES_ORDER: Applies[] = ["next_job", "live", "restart"];
 
+/** Per-bucket count suffix — distinct from `APPLIES_LABEL` because
+ *  `next_job` needs the "on the" connector here and doesn't in the rail
+ *  label ("next analysis" vs. "2 on the next analysis"). */
+const APPLIES_COUNT_SUFFIX: Record<Applies, string> = {
+  next_job: "on the next analysis",
+  live: "immediately",
+  restart: "after a restart",
+};
+
 /** "Applied 3 settings · 2 on the next analysis · 1 immediately" */
 export function appliesSummary(
   counts: Partial<Record<Applies, number>>,
@@ -22,7 +31,7 @@ export function appliesSummary(
   const parts = [`Applied ${total} setting${total === 1 ? "" : "s"}`];
   for (const key of APPLIES_ORDER) {
     const n = counts[key];
-    if (n) parts.push(`${n} ${APPLIES_LABEL[key]}`);
+    if (n) parts.push(`${n} ${APPLIES_COUNT_SUFFIX[key]}`);
   }
   return parts.join(" · ");
 }

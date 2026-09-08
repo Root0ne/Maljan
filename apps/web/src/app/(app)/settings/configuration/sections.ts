@@ -45,8 +45,9 @@ function railPath(section: SectionDef["key"], group: string): string {
 
 /** Every backend group key `SECTIONS`/`VIRTUAL_GROUPS` accounts for, so an
  *  unlisted schema group can be told apart from one that legitimately has no
- *  entries yet. */
-function knownBackendGroups(): Set<string> {
+ *  entries yet. Shared by `groupsBySection` (who falls into "platform") and
+ *  `resolveGroup` (whether "platform" may claim a given group key). */
+export function knownBackendGroups(): Set<string> {
   const known = new Set<string>();
   for (const section of SECTIONS) {
     for (const groupKey of section.groups) {
@@ -112,11 +113,16 @@ export function resolveGroup(
   group: string
 ): { title: string; description: string; entries: CatalogEntry[]; backendGroup: string } | null {
   const sectionDef = SECTIONS.find((s) => s.key === section);
+  if (!sectionDef) return null;
   const belongsToSection =
-    sectionDef?.groups.includes(group) ??
+    sectionDef.groups.includes(group) ||
     // Unknown backend groups fall through to "platform" without being listed
-    // in SECTIONS.groups; accept them there.
-    (section === "platform" && schema.groups.some((g) => g.key === group));
+    // in SECTIONS.groups; accept them there — but only if no other section
+    // has already claimed the group, so "platform" can't leak a group (e.g.
+    // "llm") that actually belongs to "models".
+    (section === "platform" &&
+      !knownBackendGroups().has(group) &&
+      schema.groups.some((g) => g.key === group));
   if (!belongsToSection) return null;
 
   const virtual = VIRTUAL_GROUPS[group];
