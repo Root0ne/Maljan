@@ -146,3 +146,21 @@ def test_the_rest_sandbox_leaves_are_gated_and_the_mapping_twice_over():
 def test_the_sandbox_selector_offers_rest():
     by_path = {e.path: e for e in cat.core_catalog()}
     assert by_path["sandbox.provider"].choices == ["mock", "cape2", "upload", "triage", "rest"]
+
+
+def test_every_group_has_a_description() -> None:
+    from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+
+    for key, _title in GROUP_ORDER:
+        assert GROUP_DESCRIPTIONS.get(key), f"group {key!r} has no description"
+
+
+def test_subgroup_and_advanced_default_off_and_are_typed() -> None:
+    from maljan.core.settings_catalog import core_catalog
+
+    entries = {e.key: e for e in core_catalog()}
+    assert entries["core.negotiation.max_iterations"].subgroup is None
+    assert entries["core.negotiation.max_iterations"].advanced is False
+    for e in entries.values():
+        assert e.subgroup is None or isinstance(e.subgroup, str)
+        assert isinstance(e.advanced, bool)

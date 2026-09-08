@@ -25,6 +25,8 @@ class Annotation(TypedDict):
         Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"]
     ]
     editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "profiles"]]
+    subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
+    advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
 
 
 GROUP_ORDER: list[tuple[str, str]] = [
@@ -45,6 +47,40 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("api", "API"),
     ("system", "System (read-only)"),
 ]
+
+GROUP_DESCRIPTIONS: dict[str, str] = {
+    "llm": "Which language model backend the analysts and the judge call, and the per-call limits.",
+    "providers": (
+        "Credentials, endpoints and model names for each LLM vendor; only the selected "
+        "provider is used."
+    ),
+    "frontier": (
+        "Evaluation-only comparison endpoints and their cost accounting; nothing in the "
+        "analysis pipeline reads them."
+    ),
+    "static": "The static analysis provider behind the static analyst and its connection details.",
+    "sandbox": "Where samples are detonated, or which uploaded report stands in for a detonation.",
+    "mcp": "Tool servers the agents may call, with the tools each one is allowed to expose.",
+    "memory": (
+        "Long-term memory of past analyses: the backend, the collections and how many "
+        "neighbours are recalled."
+    ),
+    "analysis": (
+        "Deterministic pre-analysis layers: feature switches, reference data files and "
+        "their thresholds."
+    ),
+    "negotiation": "How many rounds the analysts negotiate and when consensus is reached.",
+    "chunking": "How large inputs are split before they reach a model.",
+    "reporting": "What the final report contains and the metadata stamped on it.",
+    "agents": "The analysts Maljan can run, the profile that selects them, and the ReAct limits.",
+    "tracing": "LangSmith tracing of every model call.",
+    "enrichment": "Threat-intelligence lookups for the indicators a report names.",
+    "api": "Request limits and login protection of the HTTP API; changes take effect immediately.",
+    "system": (
+        "Deployment values read from the environment at start; shown for reference and "
+        "changed by restarting."
+    ),
+}
 
 _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("llm.frontier", "frontier"),
