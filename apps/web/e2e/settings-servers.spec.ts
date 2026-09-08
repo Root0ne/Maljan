@@ -110,7 +110,7 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.getByRole("button", { name: "Add server" }).click();
     const card = page.locator('[data-server="qu1cksc0pe"]');
     await card.getByLabel("qu1cksc0pe command").fill("qu1cksc0pe.py");
-    await card.getByLabel("qu1cksc0pe env").fill('{"SC0PE_MCP_TRANSPORT": "stdio"}');
+    await card.getByLabel("qu1cksc0pe env", { exact: true }).fill('{"SC0PE_MCP_TRANSPORT": "stdio"}');
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
