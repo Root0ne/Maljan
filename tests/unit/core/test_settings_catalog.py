@@ -164,3 +164,36 @@ def test_subgroup_and_advanced_default_off_and_are_typed() -> None:
     for e in entries.values():
         assert e.subgroup is None or isinstance(e.subgroup, str)
         assert isinstance(e.advanced, bool)
+
+
+def test_subgroup_and_advanced_assignments_follow_the_design() -> None:
+    from maljan.core.settings_catalog import core_catalog
+
+    e = {x.key: x for x in core_catalog()}
+    assert e["core.openai_api_key"].advanced and e["core.anthropic_api_key"].advanced
+    assert e["core.google_api_key"].advanced
+    assert e["core.llm.openai.api_key"].subgroup == "OpenAI"
+    assert e["core.llm.ollama.base_url"].subgroup == "Ollama"
+    assert e["core.llm.ollama.keep_alive"].advanced
+    assert e["core.llm.agents"].advanced
+    assert e["core.llm.view_decomposition_mode"].subgroup == "View decomposition"
+    assert e["core.static.r2.binary_path"].subgroup == "Connection"
+    assert e["core.static.r2.tool_selection"].subgroup == "Tool selection"
+    assert e["core.static.r2.env"].advanced and e["core.static.ghidra.env_allow"].advanced
+    assert e["core.static.capa.rules_dir"].subgroup == "Rules"
+    assert e["core.sandbox.cape2.mcp.transport"].subgroup == "Connection"
+    assert e["core.preprocessing.use_packer_signatures"].subgroup == "Feature switches"
+    assert e["core.preprocessing.packer_signatures_path"].subgroup == "Reference data"
+    assert e["core.analysis.sigma_rules_dir"].subgroup == "Reference data"
+    assert e["core.preprocessing.max_tool_output_chars"].subgroup == "Thresholds and limits"
+    assert e["core.preprocessing.attck_case_rag_min_score"].advanced
+    assert e["core.preprocessing.summarizer_model"].subgroup == "Function summarizer"
+    assert e["core.react_agent_max_steps_overrides"].advanced
+    assert e["core.react_agent_timeout"].subgroup == "Limits"
+    assert e["core.reporting.default_tlp"].subgroup == "Document metadata"
+    assert e["core.reporting.composer_enabled"].subgroup == "Report content"
+    assert e["core.llm.frontier.input_usd_per_mtok"].advanced
+    # An entry hidden for good must not also be folded away as advanced.
+    for x in e.values():
+        if x.applies_when and any(v == [] for v in x.applies_when.values()):
+            assert not x.advanced, x.key

@@ -122,6 +122,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "deterministic Sigma detection layer. Pointing this at a non-existent path "
             "disables the layer gracefully instead of failing."
         ),
+        "subgroup": "Reference data",
     },
     "anthropic_api_key": {
         "title": "Anthropic API key (shortcut)",
@@ -130,6 +131,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "into llm.anthropic.api_key on startup if that nested field is not already "
             "set."
         ),
+        "advanced": True,
     },
     "chunking.max_tokens_per_chunk": {
         "title": "Max tokens per chunk",
@@ -161,6 +163,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "into llm.gemini.api_key on startup if that nested field is not already "
             "set."
         ),
+        "advanced": True,
     },
     "langchain_api_key": {
         "title": "LangSmith API key",
@@ -194,9 +197,11 @@ ANNOTATIONS: dict[str, Annotation] = {
             "agent uses the global expert LLM. The judge reads this map too; an entry "
             "that sets only provider and model runs at the per-agent default "
             "temperature of 0.1, not the judge role's 0.0, so set temperature "
-            "explicitly to keep the verdict call deterministic."
+            "explicitly to keep the verdict call deterministic. Ordinarily edited from "
+            "the Agents page; this raw view is for bulk edits."
         ),
         "probe": "llm",
+        "advanced": True,
     },
     "llm.anthropic.api_key": {
         "title": "Anthropic API key",
@@ -204,6 +209,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Bearer credential for the Anthropic API. Required whenever llm.provider is anthropic."
         ),
         "probe": "llm",
+        "subgroup": "Anthropic",
     },
     "llm.anthropic.expert_model": {
         "title": "Anthropic expert model",
@@ -212,11 +218,13 @@ ANNOTATIONS: dict[str, Annotation] = {
             "claude-sonnet-4-20250514."
         ),
         "probe": "llm",
+        "subgroup": "Anthropic",
     },
     "llm.anthropic.judge_model": {
         "title": "Anthropic judge model",
         "description": ("Model used for the judge verdict call when llm.provider is anthropic."),
         "probe": "llm",
+        "subgroup": "Anthropic",
     },
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",
@@ -233,6 +241,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "this frontier arm, recorded for the same parameter-size analysis as "
             "total_params_b."
         ),
+        "advanced": True,
     },
     "llm.frontier.api_key": {
         "title": "Frontier API key",
@@ -266,6 +275,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "arms fair. Some providers do not actually suppress reasoning generation "
             "when this is off, so leaving it on is recommended."
         ),
+        "advanced": True,
     },
     "llm.frontier.enabled": {
         "title": "Frontier arms enabled",
@@ -281,6 +291,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "(e.g. an OpenRouter :free model), so zero pricing does not disable it. "
             "Token counts are still recorded regardless."
         ),
+        "advanced": True,
     },
     "llm.frontier.input_usd_per_mtok": {
         "title": "Frontier input price (USD/Mtok)",
@@ -289,6 +300,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "max_spend_usd. Leaving this at zero disables the arm rather than making it "
             "free, unless free_tier is explicitly set."
         ),
+        "advanced": True,
     },
     "llm.frontier.max_retries": {
         "title": "Frontier max retries",
@@ -327,6 +339,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "max_spend_usd. Leaving this at zero disables the arm rather than making it "
             "free, unless free_tier is explicitly set."
         ),
+        "advanced": True,
     },
     "llm.frontier.quantisation": {
         "title": "Frontier quantisation",
@@ -334,6 +347,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Free-text quantisation label for the model behind this frontier arm (e.g. "
             "Q4_K_M), recorded as provenance for the parameter-size analysis."
         ),
+        "advanced": True,
     },
     "llm.frontier.total_params_b": {
         "title": "Frontier total parameters (B)",
@@ -342,6 +356,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "recorded for the parameter-size-vs-F1 correlation analysis in the paper. "
             "Purely descriptive metadata — does not affect behaviour."
         ),
+        "advanced": True,
     },
     "llm.gemini.api_key": {
         "title": "Gemini API key",
@@ -350,16 +365,19 @@ ANNOTATIONS: dict[str, Annotation] = {
             "llm.provider is gemini."
         ),
         "probe": "llm",
+        "subgroup": "Google Gemini",
     },
     "llm.gemini.expert_model": {
         "title": "Gemini expert model",
         "description": ("Gemini model used for analyst LLM calls, e.g. gemini-2.5-pro."),
         "probe": "llm",
+        "subgroup": "Google Gemini",
     },
     "llm.gemini.judge_model": {
         "title": "Gemini judge model",
         "description": ("Gemini model used for the judge verdict call."),
         "probe": "llm",
+        "subgroup": "Google Gemini",
     },
     "llm.judge_max_tokens": {
         "title": "Judge max output tokens",
@@ -377,16 +395,19 @@ ANNOTATIONS: dict[str, Annotation] = {
             "http://localhost:11434."
         ),
         "probe": "llm",
+        "subgroup": "Ollama",
     },
     "llm.ollama.expert_model": {
         "title": "Ollama expert model",
         "description": ("Ollama model tag used for analyst LLM calls, e.g. qwen3.5:9b."),
         "probe": "llm",
+        "subgroup": "Ollama",
     },
     "llm.ollama.judge_model": {
         "title": "Ollama judge model",
         "description": ("Ollama model tag used for the judge verdict call."),
         "probe": "llm",
+        "subgroup": "Ollama",
     },
     "llm.ollama.keep_alive": {
         "title": "Ollama keep-alive",
@@ -395,6 +416,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "(an Ollama duration string, e.g. 30m). Longer values avoid reload latency "
             "between calls at the cost of holding GPU/RAM."
         ),
+        "subgroup": "Ollama",
+        "advanced": True,
     },
     "llm.ollama.num_ctx": {
         "title": "Ollama context size",
@@ -403,6 +426,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "large enough for the chunked prompt plus generation budget, or the server "
             "silently truncates the oldest context."
         ),
+        "subgroup": "Ollama",
     },
     "llm.openai.api_key": {
         "title": "OpenAI API key",
@@ -412,6 +436,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "enforces auth."
         ),
         "probe": "llm",
+        "subgroup": "OpenAI",
     },
     "llm.openai.base_url": {
         "title": "OpenAI base URL",
@@ -422,6 +447,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "endpoint."
         ),
         "probe": "llm",
+        "subgroup": "OpenAI",
     },
     "llm.openai.disable_thinking": {
         "title": "OpenAI disable thinking",
@@ -432,6 +458,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "constrained local hosts, where thinking otherwise consumes the whole "
             "output budget; has no effect on vanilla OpenAI."
         ),
+        "subgroup": "OpenAI",
+        "advanced": True,
     },
     "llm.openai.expert_model": {
         "title": "OpenAI expert model",
@@ -440,6 +468,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "openai, e.g. gpt-4o-mini or a local model name served behind base_url."
         ),
         "probe": "llm",
+        "subgroup": "OpenAI",
     },
     "llm.openai.judge_model": {
         "title": "OpenAI judge model",
@@ -449,6 +478,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "the verdict."
         ),
         "probe": "llm",
+        "subgroup": "OpenAI",
     },
     "llm.openai.repetition_penalty": {
         "title": "OpenAI repetition penalty",
@@ -458,6 +488,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "against api.openai.com. 1.0 is a no-op — values around 1.15 stop a small "
             "local reasoning model from looping on ATT&CK ID recall."
         ),
+        "subgroup": "OpenAI",
+        "advanced": True,
     },
     "llm.parallel_analysts": {
         "title": "Run analysts in parallel",
@@ -487,6 +519,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "facts -> behaviour -> ATT&CK-semantics pipeline where each tier consumes "
             "the previous tier's findings."
         ),
+        "subgroup": "View decomposition",
     },
     "llm.view_decomposition_views": {
         "title": "View-decomposition views",
@@ -496,6 +529,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "single monolithic analyst call). Text path only; the Ghidra/CAPE "
             "tool-using ReAct loop is unaffected."
         ),
+        "subgroup": "View decomposition",
     },
     "max_token_limit": {
         "title": "Max token limit",
@@ -504,6 +538,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "the LLM's context window. Conservative by default for smaller-context "
             "models; raise it when running on a large-context model such as Gemini."
         ),
+        "subgroup": "Limits",
     },
     "memory.backend": {
         "title": "Memory backend",
@@ -575,12 +610,14 @@ ANNOTATIONS: dict[str, Annotation] = {
             "llm.openai.api_key on startup if that nested field is not already set, so "
             "existing setups using the flat env var keep working."
         ),
+        "advanced": True,
     },
     "preprocessing.api_attck_map_path": {
         "title": "API-to-ATT&CK map path",
         "description": (
             "Path to the API-to-ATT&CK mapping catalog JSON used when use_api_attck_map is enabled."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.api_behaviour_map_path": {
         "title": "API behaviour map path",
@@ -588,6 +625,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Path to the API-behaviour-map catalog JSON used when use_api_behaviour_map "
             "is enabled. Build it with scripts/knowledge/build_api_capability_db.py."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.attck_autocorrect_min_alignment": {
         "title": "ATT&CK autocorrect min alignment",
@@ -595,6 +633,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Minimum alignment score required before the ATT&CK autocorrect pass "
             "accepts a suggested technique-ID replacement (TF-IDF backend gate)."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.attck_autocorrect_min_alignment_semantic": {
         "title": "ATT&CK autocorrect min alignment (semantic)",
@@ -604,6 +644,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "absolute semantic scores do not separate correct from wrong matches; "
             "invalid-ID fixes and relative swaps still apply without it."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.attck_autocorrect_swap_valid": {
         "title": "ATT&CK autocorrect swap valid IDs",
@@ -613,6 +655,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "damages about 38% of already-correct IDs while recovering only about 21% "
             "of wrong ones."
         ),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.attck_case_corpus_path": {
         "title": "ATT&CK case corpus path",
@@ -621,12 +664,14 @@ ANNOTATIONS: dict[str, Annotation] = {
             "enabled. Build it with scripts/knowledge/build_attck_case_kb.py against a populated "
             "Qdrant long-term-memory store."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.attck_case_rag_max_techniques": {
         "title": "ATT&CK case-RAG max techniques",
         "description": (
             "Maximum number of technique IDs surfaced in the ATT&CK case-prior candidate list."
         ),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.attck_case_rag_min_score": {
         "title": "ATT&CK case-RAG min score",
@@ -636,10 +681,13 @@ ANNOTATIONS: dict[str, Annotation] = {
             "regardless of content, so nothing is filtered — but kept rather than "
             "raised to a value that would appear to work."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.attck_case_rag_top_k": {
         "title": "ATT&CK case-RAG top-K",
         "description": ("Number of prior cases retrieved per query for ATT&CK case-prior RAG."),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.attck_index_backend": {
         "title": "ATT&CK index backend",
@@ -650,6 +698,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "with a TF-IDF gate — the default and best-performing option in "
             "evaluation)."
         ),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.category_inference_backend": {
         "title": "Category-inference backend",
@@ -660,6 +709,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "a semantic classifier to recover some of keyword's abstentions at a small "
             "accuracy gain."
         ),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.family_fingerprint_catalog_path": {
         "title": "Family-fingerprint catalog path",
@@ -668,6 +718,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "RAG. Different catalogs trade off size against disjointness from the eval "
             "set; build one with scripts/knowledge/build_family_feature_kb.py."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.family_rag_min_score": {
         "title": "Family-RAG min score",
@@ -675,18 +726,23 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Minimum similarity score for a family-feature RAG match to be surfaced as "
             "candidate evidence."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.family_rag_top_k": {
         "title": "Family-RAG top-K",
         "description": (
             "Number of nearest families surfaced as candidate evidence by family-feature RAG."
         ),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.function_hash_max_matches": {
         "title": "Function-hash max matches",
         "description": (
             "Maximum number of matching past samples surfaced by function-hash attribution."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.function_hash_min_instructions": {
         "title": "Function-hash min instructions",
@@ -695,6 +751,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "attribution. Smaller functions (thunks/stubs) are ignored because they "
             "collide across unrelated binaries and would produce false family links."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.language_signatures_path": {
         "title": "Language signatures catalog path",
@@ -702,6 +760,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Path to the compiler/language fingerprint catalog JSON used when "
             "use_language_signatures is enabled."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.max_tool_output_chars": {
         "title": "Max tool output characters",
@@ -711,6 +770,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "enabled) or truncated; raising it risks pushing the accumulated ReAct "
             "context past the model's window."
         ),
+        "subgroup": "Thresholds and limits",
     },
     "preprocessing.packer_signatures_path": {
         "title": "Packer signatures catalog path",
@@ -718,12 +778,15 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Path to the packer/protector signature catalog JSON used when "
             "use_packer_signatures is enabled."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.sink_reachability_max_funcs": {
         "title": "Sink-reachability max functions",
         "description": (
             "Maximum number of priority functions surfaced by the sink-reachability hint."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.static_function_rag_min_chunks": {
         "title": "Static function-RAG min chunks",
@@ -731,6 +794,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Minimum static chunk count before function-level retrieval engages; "
             "binaries with fewer chunks always take the full linear-chunking path."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.static_function_rag_top_k": {
         "title": "Static function-RAG top-K",
@@ -740,6 +805,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "and feeds every chunk linearly). Focuses the static analyst on the "
             "malicious core instead of the whole binary."
         ),
+        "subgroup": "Thresholds and limits",
+        "advanced": True,
     },
     "preprocessing.summarizer_max_words": {
         "title": "Summarizer max words",
@@ -747,10 +814,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Maximum words allowed in each chunk's generated summary when the function "
             "summarizer is enabled."
         ),
+        "subgroup": "Function summarizer",
     },
     "preprocessing.summarizer_model": {
         "title": "Summarizer model",
         "description": ("Model identifier for the summarizer LLM, e.g. a small Ollama model tag."),
+        "subgroup": "Function summarizer",
     },
     "preprocessing.summarizer_provider": {
         "title": "Summarizer provider",
@@ -759,6 +828,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "is enabled. Prefer a small, cheap local model since this runs as a "
             "pre-pass, not the main analysis."
         ),
+        "subgroup": "Function summarizer",
     },
     "preprocessing.tool_artifacts_path": {
         "title": "Tool-artifacts catalog path",
@@ -766,6 +836,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Path to the offensive-tool/commodity-RAT marker catalog JSON used when "
             "use_tool_artifacts is enabled."
         ),
+        "subgroup": "Reference data",
     },
     "preprocessing.use_api_attck_map": {
         "title": "Use API-to-ATT&CK map",
@@ -775,6 +846,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "sandbox-unreachable run. On by default; each claim is capped below the "
             "YARA floor so it corroborates other layers without solo-driving a verdict."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_api_behaviour_map": {
         "title": "Use API behaviour map",
@@ -784,6 +856,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "suspicious-imports table. On by default and fail-safe: a missing or "
             "malformed catalog falls back to the built-in table."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_attck_autocorrect": {
         "title": "Use ATT&CK autocorrect",
@@ -794,6 +867,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "claims are skipped since their IDs are already authoritative. On by "
             "default."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_attck_case_rag": {
         "title": "Use ATT&CK case-prior RAG",
@@ -806,6 +880,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "0.111 vs a 0.123 frequency-prior baseline), so enabling it would look like "
             "corroboration without being one."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_claim_consistency_gate": {
         "title": "Use claim-consistency gate",
@@ -815,6 +890,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "catching hallucinated claims at parse time. Off by default; any gate error "
             "leaves the ISR untouched."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_family_feature_rag": {
         "title": "Use family-feature RAG",
@@ -826,6 +902,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "found no measurable gain (f1 +0.003, n=19), and it degrades to a no-op if "
             "the catalog file is missing."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_function_hash_attribution": {
         "title": "Use function-hash attribution",
@@ -835,6 +912,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "function-hash store, injecting a high-precision family-attribution hint. "
             "The judge also writes the current sample's hashes back to grow the corpus."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_function_summarizer": {
         "title": "Use function summarizer",
@@ -843,6 +921,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "or decompiled blocks before they reach the expensive expert LLM. Off by "
             "default — it adds latency and only pays off on huge inputs."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_language_signatures": {
         "title": "Use language signatures",
@@ -851,6 +930,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "inference for otherwise-unknown binaries and the static analyst's prompt "
             "with what the sample was written in. On by default."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_packer_signatures": {
         "title": "Use packer signatures",
@@ -859,6 +939,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "entry-point placement, strings) in place of four hardcoded section-name "
             "checks. On by default."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_sink_reachability": {
         "title": "Use sink-reachability triage",
@@ -868,6 +949,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "functions' hint, focusing the static analyst's decompilation on the likely "
             "malicious core. Fails safe to no hint on error or a stripped binary."
         ),
+        "subgroup": "Feature switches",
     },
     "preprocessing.use_tool_artifacts": {
         "title": "Use tool-artifact markers",
@@ -878,6 +960,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "requires two distinct markers to fire, so a single coincidental string "
             "cannot trigger it."
         ),
+        "subgroup": "Feature switches",
     },
     "react_agent_max_steps": {
         "title": "ReAct agent default max steps",
@@ -886,6 +969,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "for the network/dynamic analysts' small tool-call count. Per-agent "
             "overrides live in react_agent_max_steps_overrides."
         ),
+        "subgroup": "Limits",
     },
     "react_agent_max_steps_overrides": {
         "title": "ReAct agent max-steps overrides",
@@ -896,6 +980,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "pass, while network is capped low to keep an optional PCAP tool loop from "
             "starving synthesis."
         ),
+        "subgroup": "Limits",
+        "advanced": True,
     },
     "react_agent_timeout": {
         "title": "ReAct agent default timeout (s)",
@@ -904,6 +990,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "judge) before it is forced to stop, tuned for the network/dynamic "
             "analysts. Per-agent overrides live in react_agent_timeout_overrides."
         ),
+        "subgroup": "Limits",
     },
     "react_agent_timeout_overrides": {
         "title": "ReAct agent timeout overrides",
@@ -913,6 +1000,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "agents whose workload needs a different budget — the static analyst's "
             "Ghidra ReAct loop in particular needs far more time than the default."
         ),
+        "subgroup": "Limits",
+        "advanced": True,
     },
     "react_agent_tool_call_budget": {
         "title": "ReAct agent tool-call budget",
@@ -921,10 +1010,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "warning rather than stopping the agent, as an early signal that it is "
             "spinning unproductively."
         ),
+        "subgroup": "Limits",
     },
     "reporting.author_team": {
         "title": "Author team",
         "description": ("Author/team name shown on the report cover."),
+        "subgroup": "Document metadata",
     },
     "reporting.auto_generate_detection_rules": {
         "title": "Auto-generate detection rules",
@@ -932,6 +1023,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Enables template-based YARA/Sigma/Suricata detection-rule generation as "
             "part of the report."
         ),
+        "subgroup": "Report content",
     },
     "reporting.composer_enabled": {
         "title": "Report composer enabled",
@@ -941,6 +1033,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "NarrativeAgent. Bounded prompts and a per-section timeout keep a slow "
             "local model from stalling the whole report."
         ),
+        "subgroup": "Report content",
     },
     "reporting.composer_per_section_timeout": {
         "title": "Composer per-section timeout (s)",
@@ -948,10 +1041,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Wall-clock timeout in seconds for each report section's LLM call when "
             "composer_enabled is true."
         ),
+        "subgroup": "Report content",
     },
     "reporting.composer_section_max_tokens": {
         "title": "Composer section max tokens",
         "description": ("Output-token cap per report section when composer_enabled is true."),
+        "subgroup": "Report content",
     },
     "reporting.default_tlp": {
         "title": "Default TLP marking",
@@ -959,6 +1054,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Default Traffic Light Protocol marking shown on the report cover and TLP "
             "banner, controlling how the report may be shared onward."
         ),
+        "subgroup": "Document metadata",
     },
     "reporting.enabled": {
         "title": "Reporting enabled",
@@ -967,10 +1063,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "report generation entirely; downstream consumers only get judge_report and "
             "stix_output."
         ),
+        "subgroup": "Report content",
     },
     "reporting.html_export_enabled": {
         "title": "HTML export enabled",
         "description": ("Enables server-side HTML-to-PDF export of the generated report."),
+        "subgroup": "Report content",
     },
     "reporting.include_extended_stix": {
         "title": "Include extended STIX bundle",
@@ -979,6 +1077,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "minimal judge bundle. Disable to roughly halve serialization cost when "
             "consumers only need the minimal bundle."
         ),
+        "subgroup": "Report content",
     },
     "reporting.narrative_max_tokens": {
         "title": "Narrative max tokens",
@@ -986,22 +1085,26 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Hard output-token cap for the NarrativeAgent's LLM round, keeping "
             "report-generation tail latency predictable."
         ),
+        "subgroup": "Report content",
     },
     "reporting.product_type": {
         "title": "Product type",
         "description": (
             "Product-type label shown on the report cover, e.g. 'Malware Analysis Report'."
         ),
+        "subgroup": "Document metadata",
     },
     "reporting.publisher": {
         "title": "Publisher",
         "description": ("Publisher name shown on the report cover / front matter."),
+        "subgroup": "Document metadata",
     },
     "reporting.report_number_prefix": {
         "title": "Report number prefix",
         "description": (
             "Prefix used when generating the report's reference number, e.g. MJN-2026-0001."
         ),
+        "subgroup": "Document metadata",
     },
 }
 
@@ -1034,12 +1137,23 @@ def mcp_server_annotations(
     common: Annotation = {"title": "", "description": ""}
     del common  # documented shape; each entry below is built explicitly
 
-    def ann(title: str, description: str, *, with_probe: bool = False) -> Annotation:
+    def ann(
+        title: str,
+        description: str,
+        *,
+        with_probe: bool = False,
+        subgroup: str | None = None,
+        advanced: bool = False,
+    ) -> Annotation:
         a: Annotation = {"title": title, "description": description, "order": order}
         if applies_when is not None:
             a["applies_when"] = applies_when
         if with_probe and probe:
             a["probe"] = probe
+        if subgroup is not None:
+            a["subgroup"] = subgroup
+        if advanced:
+            a["advanced"] = True
         return a
 
     never_shown: dict[str, list[str]] = {key: [] for key in (applies_when or {})}
@@ -1056,37 +1170,44 @@ def mcp_server_annotations(
             f"Turns on the {label} integration. When off the analyst runs on the "
             "evidence it already has and exposes no tools from this server.",
             with_probe=True,
+            subgroup="Connection",
         ),
         f"{prefix}.transport": ann(
             f"{label} transport",
             "How the server is reached: stdio launches a local subprocess "
             "(command/args/env); http, streamable-http and sse connect to a "
             "running server (url/auth_token).",
+            subgroup="Connection",
         ),
         f"{prefix}.command": ann(
             f"{label} command",
             "Executable launched for the stdio transport, e.g. python or r2mcp.",
+            subgroup="Connection",
         ),
         f"{prefix}.args": ann(
             f"{label} args",
             "Command-line arguments for the stdio subprocess. Relative paths are "
             "resolved against the project root.",
+            subgroup="Connection",
         ),
         f"{prefix}.env": ann(
             f"{label} environment",
             "Extra environment variables for the stdio subprocess. The child gets "
             "these plus a fixed base set, and no credentials of its own.",
+            advanced=True,
         ),
         f"{prefix}.url": ann(
             f"{label} URL",
             "Address of the server for the http transports, e.g. http://localhost:8089.",
             with_probe=True,
+            subgroup="Connection",
         ),
         f"{prefix}.auth_token": ann(
             f"{label} auth token",
             "Bearer token sent to the server over the http transports. Leave "
             "empty when the server does not enforce one.",
             with_probe=True,
+            subgroup="Connection",
         ),
         f"{prefix}.tool_selection": ann(
             f"{label} tool selection",
@@ -1094,21 +1215,25 @@ def mcp_server_annotations(
             "a fixed allow-list (fastest, narrowest); dynamic shows a core triage "
             "set plus the tools relevant to the sample's inferred capabilities; "
             "all exposes every tool, which is measurably slower and noisier.",
+            subgroup="Tool selection",
         ),
         f"{prefix}.use_all_tools": ann(
             f"{label} force all tools",
             "Back-compat flag: when true, forces tool selection to all regardless "
             "of its own value.",
+            subgroup="Tool selection",
         ),
         f"{prefix}.cwd": ann(
             f"{label} working directory",
             "Working directory for the stdio subprocess; empty means the repository root.",
+            subgroup="Connection",
         ),
         f"{prefix}.env_allow": ann(
             f"{label} inherited environment names",
             "Names copied out of the API process's own environment into the "
             "stdio subprocess — the only way a credential reaches this sidecar, "
             "since the environment field above is visible in the UI.",
+            advanced=True,
         ),
     }
 
@@ -1198,6 +1323,7 @@ ANNOTATIONS.update(
             ),
             "applies_when": _STATIC_R2,
             "probe": "r2",
+            "subgroup": "Connection",
         },
         "static.r2.mirror_dir": {
             "title": "radare2 sample directory",
@@ -1209,6 +1335,7 @@ ANNOTATIONS.update(
                 "'Failed to open file.'"
             ),
             "applies_when": _STATIC_R2,
+            "subgroup": "Connection",
         },
         "static.capa.rules_dir": {
             "title": "capa rules directory",
@@ -1218,6 +1345,7 @@ ANNOTATIONS.update(
             ),
             "applies_when": _STATIC_CAPA_YARA,
             "probe": "capa_yara",
+            "subgroup": "Rules",
         },
         "static.capa.signatures_dir": {
             "title": "capa signatures directory",
@@ -1227,6 +1355,7 @@ ANNOTATIONS.update(
             ),
             "applies_when": _STATIC_CAPA_YARA,
             "probe": "capa_yara",
+            "subgroup": "Rules",
         },
         "static.capa.timeout_seconds": {
             "title": "capa timeout (s)",
@@ -1235,6 +1364,7 @@ ANNOTATIONS.update(
                 "contributes no capa evidence and the run continues."
             ),
             "applies_when": _STATIC_CAPA_YARA,
+            "subgroup": "Rules",
         },
         "static.capa.backend": {
             "title": "capa backend",
@@ -1244,6 +1374,7 @@ ANNOTATIONS.update(
                 "local Binary Ninja installation."
             ),
             "applies_when": _STATIC_CAPA_YARA,
+            "subgroup": "Rules",
         },
         "static.yara.rules_dir": {
             "title": "YARA rules directory (static provider)",
@@ -1254,11 +1385,13 @@ ANNOTATIONS.update(
             ),
             "applies_when": _STATIC_CAPA_YARA,
             "probe": "capa_yara",
+            "subgroup": "Rules",
         },
         "static.yara.timeout_seconds": {
             "title": "YARA timeout (s)",
             "description": "Wall-clock budget for one YARA scan of the sample.",
             "applies_when": _STATIC_CAPA_YARA,
+            "subgroup": "Rules",
         },
         "sandbox.cape2.base_url": {
             "title": "CAPEv2 base URL",
